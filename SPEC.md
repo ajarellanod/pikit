@@ -143,7 +143,15 @@ export default defineComponent({
 
 `setup` runs once per harness instance. On the server target that is once per process. On
 Cloudflare it is once per Durable Object instantiation (which may happen many times; setup
-must be cheap and idempotent).
+must be cheap and idempotent). It may be async.
+
+`provide` is checked against the manifest both ways: providing an undeclared capability is
+an error, and a declared capability that `setup` did not provide is an error. The manifest
+is what orders setup, so it must be truthful.
+
+`defineHarness(...)` validates the composition synchronously and returns a definition;
+`await definition.create()` runs every `setup` in dependency order and returns the harness
+(`start()`, `stop()`, `describe()`, `context()`). `pikit doctor` is `create()` + `describe()`.
 
 ### 4.3 Events
 
@@ -246,7 +254,11 @@ const store = pikit.require("sessions.store"); // anywhere
     sessions.store: postgres
   ```
 - `require` of a missing capability is a startup error listing components that provide it.
-- Capability contracts are TypeScript interfaces exported from `@pikit/core/contracts`.
+  Unsatisfied `requires` and ambiguous providers fail in `defineHarness`, before any setup.
+- `has(name)` answers whether `require` would succeed, for optional capabilities
+  (`outbound.queue`). Setup order only covers declared `requires`, so `has` is meaningful
+  after `create()`, not inside another component's `setup`.
+- Capability contracts are TypeScript interfaces exported from `@pikit/core`.
 
 Core-defined capability contracts (interfaces only; no implementations in core):
 
@@ -265,8 +277,8 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
 | `approvals` | `ApprovalStore` | Decision lifecycle persistence. |
 | `secrets` | `SecretStore` | Read secrets by name. `.env`, Worker bindings, external vault. |
-| `clock` | `Clock` | `now()`, `sleep()`. Injectable for tests and for DO alarms. |
-| `logger` | `Logger` | Structured logging. |
+| `clock` | `Clock` | `now()`, `sleep()`. Injectable for tests and for DO alarms. M0: a `defineHarness` option, not a capability (the harness needs it before any component runs). |
+| `logger` | `Logger` | Structured logging. M0: a `defineHarness` option, same reason. |
 
 ### 4.6 Lifecycle
 
@@ -298,12 +310,19 @@ interface HarnessContext {
   target: "server" | "cloudflare";
   config: ResolvedConfig;
   require<K extends CapabilityName>(name: K): Capability<K>;
+  has(name: string): boolean;
+  emit(event, payload): Promise<void>;   // propagates this same ctx to listeners
+  run(pipeline, input): Promise<Value | Halt>;
   logger: Logger;
   clock: Clock;
   signal?: AbortSignal;              // present during an agent run
-  conversation?: ConversationRef;    // present once resolved
+  conversation?: ConversationRef;    // present once resolved (added with the slice)
 }
 ```
+
+`emit`/`run` live on the context so a handler that emits from inside a run forwards the
+run's `signal` without threading it by hand. `harness.context({ signal })` derives a run
+context from the base one.
 
 ---
 
