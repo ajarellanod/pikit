@@ -105,13 +105,17 @@ import auditLog from "./src/extensions/audit-log";
 
 export default defineHarness({
   components: [telegram, router, sessions, pi],
-  extensions: [auditLog],
-  config: "./config/pikit.yaml",
+  extensions: [auditLog],                 // sugar: components without `provides`
+  config,                                 // a plain object; loading YAML is the target's job
 });
 ```
 
 The composition root is explicit. There is no auto-discovery of components in production.
 (The CLI edits this file when running `add` / `remove`.)
+
+`config` is always a value, never a path: the core is runtime-neutral and cannot read files
+(§16). Config keys are namespaced by component name (`config["channel-http"]`), with core
+keys (`capabilities`) at the same level.
 
 ### 4.2 Component definition
 
@@ -985,6 +989,19 @@ And the runtime proof:
   `channel.transport` optional `edit()` + a `stream-to-edit` component, or core support.
 - Multi-tenant isolation guarantees: routing is not isolation. Document clearly; consider a
   `tenant-isolation` component that maps tenants to separate DO namespaces / DB files.
+
+Resolved while building M0 `[decision]`:
+
+- `defineHarness({ config })` takes an object; the core never reads files (rule: runtime
+  neutrality). The CLI/target loads YAML and passes the value.
+- Config is namespaced by component name (`config[component.name]`); core keys live at the
+  same level. Merge is mechanical; no `configKey` in the manifest until a collision exists.
+- `setup` order is topological over `provides`/`requires`; cycles and unsatisfied `requires`
+  fail in `defineHarness`, not at runtime, so `require` inside `setup` is always safe.
+- An extension is a component without `provides`; `extensions: [...]` is sugar concatenated
+  to `components`. One `define*` fewer to keep stable.
+- Events are typed by declaration merging on `HarnessEvents` (as Pi's `CustomAgentMessages`);
+  no runtime registration for typing.
 
 ---
 
