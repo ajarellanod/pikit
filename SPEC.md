@@ -207,22 +207,29 @@ const normalized = await pikit.run("inbound.normalize", raw);
 ```
 
 Ordering is deterministic: by `priority` (descending), then registration order. Stages have
-ids so `pikit doctor` can print the resolved chain and so a project extension can insert
-`before: "trim"` / `after: "mentions"`.
+ids (default `stage-<n>`) so `pikit doctor` can print the resolved chain and so a project
+extension can insert `before: "trim"` / `after: "mentions"`. An anchored stage sits next to
+its anchor regardless of priority; stages sharing an anchor keep registration order.
 
-Core-owned pipelines:
+Every pipeline has **one value type**: stages are `Value → Value`. A pipeline that produces
+something carries it as a field of the value, so later stages see both the input and what
+earlier stages decided. `[decision]` — this is Pi's patch model and makes §6.2b trivial.
+
+Core-owned pipelines (value types defined with the components that first run them):
 
 ```
-inbound.authenticate   raw request     → authenticated | rejected
-inbound.normalize      raw message     → InboundMessage
-route.resolve          InboundMessage  → RouteDecision
-conversation.resolve   RouteDecision   → ConversationRef
-agent.prepare          AgentRequest    → AgentRequest   (system prompt, tools, context)
-outbound.prepare       OutboundMessage → OutboundMessage
+inbound.authenticate   { request, verdict?: authenticated | rejected }
+inbound.normalize      InboundMessage
+route.resolve          { message: InboundMessage, decision?: RouteDecision }
+conversation.resolve   { decision: RouteDecision, conversation?: ConversationRef }
+agent.prepare          AgentRequest                 (system prompt, tools, context)
+outbound.prepare       OutboundMessage
 ```
 
-A stage may short-circuit by returning `pikit.halt(reason)`; the pipeline stops and
-`pipeline.halted` is emitted.
+A stage may short-circuit by returning `pikit.halt(reason)`; the pipeline stops, `run`
+returns the `Halt` (with the stage id) and `pipeline.halted { pipeline, stage, reason }` is
+emitted. A stage that throws rejects the run (a failed transformation has no valid output);
+a stage that returns `undefined` is an error (a forgotten `return`), not "unchanged".
 
 ### 4.5 Capabilities
 
@@ -1001,7 +1008,9 @@ Resolved while building M0 `[decision]`:
 - An extension is a component without `provides`; `extensions: [...]` is sugar concatenated
   to `components`. One `define*` fewer to keep stable.
 - Events are typed by declaration merging on `HarnessEvents` (as Pi's `CustomAgentMessages`);
-  no runtime registration for typing.
+  no runtime registration for typing. Pipelines likewise on `HarnessPipelines`.
+- Pipelines are `Value → Value` (§4.4). Stage errors propagate; `undefined` from a stage is an
+  error, not "unchanged".
 
 ---
 
