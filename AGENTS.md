@@ -76,6 +76,10 @@ pikit-shaped types. When Pi's experimental APIs change, the adapter changes; com
 Import `pi-ai` providers by subpath (`@earendil-works/pi-ai/providers/anthropic`), never the
 barrel, because of the Cloudflare bundle limit.
 
+Explicit requirement: existing Pi extensions that do not touch the TUI must run in pikit
+unmodified (SPEC §6.2b, scenario 7). The compat layer lives in the adapter; do not bend core
+event names or semantics to Pi's `snake_case` surface to make it easier.
+
 ### 6. Source ownership is real
 Components are copied into the user's `src/pikit/`. Therefore:
 - Component code must be readable by someone who did not write it: small files, explicit

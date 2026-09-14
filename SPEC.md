@@ -439,6 +439,30 @@ src/agents/assistant/
 └── context/            files copied into the workspace before a run
 ```
 
+### 6.2b Running Pi extensions unchanged `[planned]`
+
+A Pi extension is `export default function (pi: ExtensionAPI) { ... }`. The adapter exposes a
+compat object implementing the non-UI subset of `ExtensionAPI` over `AgentHarness` and pikit
+capabilities, so existing extensions run without modification. They are imported statically
+(`runtime-pi` config `extensions: [...]`), never discovered or loaded dynamically. The compat
+layer reports `mode: "rpc"`, `hasUI: false` — the case Pi already documents and requires
+extensions to guard for.
+
+Support tiers (`pikit doctor` lists what an extension uses and at which tier):
+
+| Tier | Surface | Mapping |
+|---|---|---|
+| A — works as-is | `on(tool_call \| tool_result \| before_agent_start \| context \| before_provider_request \| after_provider_response \| agent_* \| turn_* \| message_* \| tool_execution_* \| session_start \| session_shutdown)`, `registerTool`, `registerProvider`, `set/getModel`, `set/getActiveTools`, `sendMessage`, `sendUserMessage`, `appendEntry`, `abort`, `isIdle`, `waitForIdle`, `exec`, `getSystemPrompt`, `getContextUsage`, `compact` | The §6.2 hook table read in reverse: Pi handlers return a patch (`undefined` = no change); a pikit stage returns the next value. Wrapper: `v => ({ ...v, ...(await handler(v)) })`. `tool_call { block }` = `halt`. |
+| B — later, chat-meaningful | `registerCommand` (slash commands from a channel), `ui.notify/select/confirm/input` (routed to the channel, awaiting a reply — overlaps with `approvals`) | Component-level; not in the first adapter cut. |
+| C — no-op with a `doctor` warning | `registerShortcut`, `register*Renderer`, `registerMarkdownTransformer`, `addAutocompleteProvider`, `ui.setWidget/setStatus/setTitle/setFooter/setHeader/theme/editor*`, `navigateTree`, `switchSession`, `fork` | TUI-only or session-tree UI. |
+
+Known facts (pi-coding-agent 0.85.1): `AgentSession` still drives the legacy `Agent` class
+(`agent.beforeToolCall`), not `AgentHarness`; the compat layer translates Pi's *semantic*
+extension events, not its classes, so Pi's migration lands in the adapter only. Typing the
+compat object against Pi's own `ExtensionAPI` would make `pi-coding-agent` a types-only
+devDependency (19 MB); the alternative is vendoring the subset (~200 lines, attributed in
+`NOTICE`). `[open]` — decide in the adapter step.
+
 ### 6.2a Dynamic agents without hooks
 
 Static agent definitions break down for real work: which tools, instructions, model and
@@ -940,6 +964,10 @@ And the runtime proof:
 6. **Edge**: same agents + `deployment-cloudflare + sessions-cloudflare-do + workspace-virtual
    + execution-fetch` → deploys, answers, survives DO eviction mid-run (`resume()` completes
    the run), and the DO session backend passes Pi's conformance suite.
+
+7. **Pi compat**: an existing Pi extension that uses only tier A of §6.2b (e.g. a
+   `tool_call` policy + one `registerTool`) is added to `runtime-pi` unmodified and its
+   handlers fire during scenario 1.
 
 ---
 
