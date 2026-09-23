@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
-import type { HarnessContext } from "../harness.ts";
-import { defineComponent } from "../harness.ts";
+import type { AppContext } from "../app.ts";
+import { defineComponent } from "../app.ts";
 import { createLifecycleConformance, type LifecycleFixture } from "./index.ts";
 
 /** Resolves after `ms`, or rejects as soon as `signal` aborts when `cooperative`. */
-function wait(ms: number, ctx: HarnessContext, cooperative: boolean): Promise<void> {
+function wait(ms: number, ctx: AppContext, cooperative: boolean): Promise<void> {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(resolve, ms);
     if (!cooperative) return;

@@ -2,30 +2,30 @@ import { expect, test } from "bun:test";
 import Type from "typebox";
 import { BACKGROUND_CONTEXT, createContextKey, withAbortSignal, withContextValue } from "./context.ts";
 import { silentLogger } from "./contracts/logger.ts";
-import { defineComponent, defineHarness, type HarnessOptions, type Pikit } from "./harness.ts";
+import { defineComponent, defineApp, type AppOptions, type Pikit } from "./app.ts";
 import { Halt } from "./pipeline.ts";
 
 declare module "./capabilities.ts" {
-  interface HarnessCapabilities {
+  interface AppCapabilities {
     "test.store": { name: string };
     "test.queue": { name: string };
   }
-  interface HarnessKeyedCapabilities {
+  interface AppKeyedCapabilities {
     "test.transport": { channel: string };
   }
 }
 declare module "./events.ts" {
-  interface HarnessEvents {
-    "test.harness.ping": { via: string };
+  interface AppEvents {
+    "test.app.ping": { via: string };
   }
 }
 declare module "./pipeline.ts" {
-  interface HarnessPipelines {
-    "test.harness.text": { text: string };
+  interface AppPipelines {
+    "test.app.text": { text: string };
   }
 }
 
-const quiet = (options: HarnessOptions): HarnessOptions => ({ logger: silentLogger, ...options });
+const quiet = (options: AppOptions): AppOptions => ({ logger: silentLogger, ...options });
 
 test("start runs providers before consumers regardless of list order; handles resolve after setup", async () => {
   const order: string[] = [];
@@ -54,10 +54,10 @@ test("start runs providers before consumers regardless of list order; handles re
     },
   });
 
-  const harness = await defineHarness(quiet({ components: [consumer, store] })).create();
-  await harness.start();
+  const app = await defineApp(quiet({ components: [consumer, store] })).create();
+  await app.start();
   expect(order).toEqual(["setup consumer", "setup store", "start store", "start consumer(mem)"]);
-  expect(harness.describe().components).toEqual([
+  expect(app.describe().components).toEqual([
     { name: "store", provides: ["test.store"], requires: [], optional: [] },
     { name: "consumer", provides: [], requires: ["test.store"], optional: [] },
   ]);
@@ -76,12 +76,12 @@ test("runtime.* events fire in order on start/stop", async () => {
     },
   });
 
-  const harness = await defineHarness(quiet({ components: [audit] })).create();
-  await harness.start();
-  await expect(harness.start()).rejects.toThrow("already started");
-  await harness.stop();
-  await harness.stop(); // idempotent
-  await expect(harness.start()).rejects.toThrow("single-use; create() a new one");
+  const app = await defineApp(quiet({ components: [audit] })).create();
+  await app.start();
+  await expect(app.start()).rejects.toThrow("already started");
+  await app.stop();
+  await app.stop(); // idempotent
+  await expect(app.start()).rejects.toThrow("single-use; create() a new one");
 
   expect(seen).toEqual(["runtime.starting", "runtime.ready", "runtime.stopping", "runtime.stopped"]);
 });
@@ -101,7 +101,7 @@ test("composition errors fail in create(), after every setup and before any star
         };
       },
     });
-  const create = (options: HarnessOptions) => defineHarness(quiet(options)).create();
+  const create = (options: AppOptions) => defineApp(quiet(options)).create();
 
   await expect(create({ components: [mk("a", { uses: ["test.store"] })] })).rejects.toThrow(
     'component "a" uses "test.store" but no installed component provides it',
@@ -127,10 +127,10 @@ test("composition errors fail in create(), after every setup and before any star
   ).rejects.toThrow("dependency cycle: a → b → a");
   expect(started).toEqual([]);
 
-  // Names, selection targets and config fail even earlier, in defineHarness.
-  expect(() => defineHarness(quiet({ components: [mk("a"), mk("a")] }))).toThrow('component "a" is listed twice');
+  // Names, selection targets and config fail even earlier, in defineApp.
+  expect(() => defineApp(quiet({ components: [mk("a"), mk("a")] }))).toThrow('component "a" is listed twice');
   expect(() =>
-    defineHarness(quiet({ components: [mk("s1")], config: { capabilities: { "test.store": "nope" } } })),
+    defineApp(quiet({ components: [mk("s1")], config: { capabilities: { "test.store": "nope" } } })),
   ).toThrow('selects "nope", which is not an installed component');
   expect(() => defineComponent({ name: "Not_Kebab", setup() {} })).toThrow("must be kebab-case");
   expect(() => defineComponent({ name: "capabilities", setup() {} })).toThrow("reserved");
@@ -146,13 +146,13 @@ test("an unselected provider does not create a false dependency cycle", async ()
       },
     });
   // store-b needs thing-c; thing-c needs test.store, which is store-a (selected), not store-b.
-  const harness = await defineHarness(
+  const app = await defineApp(
     quiet({
       config: { capabilities: { "test.store": "store-a" } },
       components: [mk("store-a", ["test.store"], []), mk("store-b", ["test.store"], ["test.queue"]), mk("thing-c", ["test.queue"], ["test.store"])],
     }),
   ).create();
-  expect(harness.describe().components.map((c) => c.name)).toEqual(["store-a", "thing-c", "store-b"]);
+  expect(app.describe().components.map((c) => c.name)).toEqual(["store-a", "thing-c", "store-b"]);
 });
 
 test("lifecycle: start in dependency order, stop in reverse, events around the hooks", async () => {
@@ -185,11 +185,11 @@ test("lifecycle: start in dependency order, stop in reverse, events around the h
     },
   });
 
-  const harness = await defineHarness(
+  const app = await defineApp(
     quiet({ components: [events, mk("consumer", [], ["test.store"]), mk("store", ["test.store"])] }),
   ).create();
-  await harness.start();
-  await harness.stop();
+  await app.start();
+  await app.stop();
 
   expect(seen).toEqual([
     "runtime.starting",
@@ -237,16 +237,16 @@ test("a failed start rolls back what started, never emits ready, and can be retr
     },
   });
 
-  const definition = defineHarness(quiet({ components: [db, server] }));
-  const harness = await definition.create();
-  const failure = await harness.start().catch((error: Error) => error);
+  const definition = defineApp(quiet({ components: [db, server] }));
+  const app = await definition.create();
+  const failure = await app.start().catch((error: Error) => error);
   expect(failure).toBeInstanceOf(Error);
   expect((failure as Error).message).toBe('component "server-http" failed to start');
   expect(((failure as Error).cause as Error).message).toBe("EADDRINUSE");
   expect(seen).toEqual(["db open", "db close", "runtime.stopped"]);
 
-  // A failed start is final for that harness; retrying is a fresh create().
-  await expect(harness.start()).rejects.toThrow("single-use");
+  // A failed start is final for that app; retrying is a fresh create().
+  await expect(app.start()).rejects.toThrow("single-use");
   portBusy = false;
   seen.length = 0;
   await (await definition.create()).start();
@@ -265,17 +265,17 @@ test("stop runs every stop hook and reports all failures together", async () => 
         },
       }),
     });
-  const harness = await defineHarness(quiet({ components: [mk("a", true), mk("b", false), mk("c", true)] })).create();
-  await harness.start();
+  const app = await defineApp(quiet({ components: [mk("a", true), mk("b", false), mk("c", true)] })).create();
+  await app.start();
 
-  const failure = await harness.stop().catch((error: AggregateError) => error);
+  const failure = await app.stop().catch((error: AggregateError) => error);
   expect(stopped).toEqual(["c", "b", "a"]);
   expect(failure).toBeInstanceOf(AggregateError);
   expect((failure as AggregateError).errors.map((e: Error) => e.message)).toEqual([
     'component "c" failed to stop',
     'component "a" failed to stop',
   ]);
-  await harness.stop(); // already stopped: no-op
+  await app.stop(); // already stopped: no-op
 });
 
 test("useOptional: absent is undefined; present is ordered first like any dependency", async () => {
@@ -303,17 +303,17 @@ test("useOptional: absent is undefined; present is ordered first like any depend
     },
   });
 
-  const alone = await defineHarness(quiet({ components: [channel] })).create();
+  const alone = await defineApp(quiet({ components: [channel] })).create();
   await alone.start();
   expect(alone.describe().components).toEqual([{ name: "channel", provides: [], requires: [], optional: ["test.queue"] }]);
 
-  const both = await defineHarness(quiet({ components: [channel, outbox] })).create();
+  const both = await defineApp(quiet({ components: [channel, outbox] })).create();
   await both.start();
   expect(seen).toEqual(["channel sees no queue", "outbox started", "channel sees outbox"]);
 
   // Optional is not "anything goes": several providers still need a selection.
   const second = defineComponent({ name: "outbox-2", setup: (pikit) => pikit.provide("test.queue", { name: "2" }) });
-  await expect(defineHarness(quiet({ components: [channel, outbox, second] })).create()).rejects.toThrow(
+  await expect(defineApp(quiet({ components: [channel, outbox, second] })).create()).rejects.toThrow(
     "several providers (outbox, outbox-2)",
   );
 
@@ -325,7 +325,7 @@ test("useOptional: absent is undefined; present is ordered first like any depend
       pikit.use("test.queue");
     },
   });
-  await expect(defineHarness(quiet({ components: [both2] })).create()).rejects.toThrow(
+  await expect(defineApp(quiet({ components: [both2] })).create()).rejects.toThrow(
     'component "both" uses "test.queue" but no installed component provides it',
   );
 
@@ -363,24 +363,24 @@ test("keyed capabilities: every provider contributes keys; consumers start after
     },
   });
 
-  const harness = await defineHarness(
+  const app = await defineApp(
     quiet({ components: [outbox, channel("channel-http", "http"), channel("channel-telegram", "telegram")] }),
   ).create();
-  await harness.start();
+  await app.start();
 
   expect(seen).toEqual([
     "start channel-http",
     "start channel-telegram",
     "outbox sees http,telegram; http=http; sms=undefined",
   ]);
-  expect(harness.describe().capabilities["test.transport"]).toEqual({
+  expect(app.describe().capabilities["test.transport"]).toEqual({
     providers: ["channel-http", "channel-telegram"],
     keys: { http: "channel-http", telegram: "channel-telegram" },
   });
 });
 
 test("keyed and single modes cannot be mixed, keys are unique, and keyed ignores selection", async () => {
-  const create = (options: HarnessOptions) => defineHarness(quiet(options)).create();
+  const create = (options: AppOptions) => defineApp(quiet(options)).create();
   const keyed = (name: string, key: string) =>
     defineComponent({ name, setup: (pikit) => pikit.provideKeyed("test.transport", key, { channel: key }) });
 
@@ -425,10 +425,10 @@ test("keyed and single modes cannot be mixed, keys are unique, and keyed ignores
       };
     },
   });
-  const harness = await create({ components: [relaxed] });
-  await harness.start();
+  const app = await create({ components: [relaxed] });
+  await app.start();
   expect(keys).toEqual([]);
-  expect(harness.describe().components).toEqual([
+  expect(app.describe().components).toEqual([
     { name: "relaxed", provides: [], requires: [], optional: ["test.transport"] },
   ]);
 });
@@ -441,7 +441,7 @@ test("registration is sealed when setup returns", async () => {
       saved = pikit;
     },
   });
-  const harness = await defineHarness(quiet({ components: [sneaky] })).create();
+  const app = await defineApp(quiet({ components: [sneaky] })).create();
   const late = saved as Pikit;
 
   expect(() => late.provide("test.store", { name: "late" })).toThrow(
@@ -451,8 +451,8 @@ test("registration is sealed when setup returns", async () => {
   expect(() => late.use("test.store")).toThrow('use("test.store") is only allowed during setup');
   expect(() => late.useKeyed("test.transport")).toThrow("only allowed during setup");
   expect(() => late.on("runtime.ready", () => {})).toThrow('on("runtime.ready") is only allowed during setup');
-  expect(() => late.pipeline("test.harness.text", (v) => v)).toThrow("only allowed during setup");
-  expect(harness.describe().capabilities).toEqual({});
+  expect(() => late.pipeline("test.app.text", (v) => v)).toThrow("only allowed during setup");
+  expect(app.describe().capabilities).toEqual({});
 });
 
 test("stop() during start() cancels it; the rollback is bounded by stop's deadline; concurrent stops share one shutdown", async () => {
@@ -479,7 +479,7 @@ test("stop() during start() cancels it; the rollback is bounded by stop's deadli
   const slow = defineComponent({
     name: "slow",
     setup: () => ({
-      // Cooperative: gives up when the harness cancels the start.
+      // Cooperative: gives up when the app cancels the start.
       start: (ctx) =>
         blockStart
           ? new Promise<void>((_, reject) => {
@@ -491,23 +491,23 @@ test("stop() during start() cancels it; the rollback is bounded by stop's deadli
           : undefined,
     }),
   });
-  const harness = await defineHarness(quiet({ components: [fast, slow] })).create();
+  const app = await defineApp(quiet({ components: [fast, slow] })).create();
 
-  const starting = harness.start();
+  const starting = app.start();
   await new Promise((resolve) => setTimeout(resolve, 5)); // fast is up, slow is still starting
-  const first = harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT));
-  const second = harness.stop();
+  const first = app.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT));
+  const second = app.stop();
   expect(second).toBe(first);
-  await expect(harness.start()).rejects.toThrow("single-use");
+  await expect(app.start()).rejects.toThrow("single-use");
   await first;
   const error = await starting.catch((e: Error) => e);
   expect(error).toBeInstanceOf(Error);
   expect((error as Error).message).toBe('component "slow" failed to start');
-  expect(((error as Error).cause as Error).message).toBe("harness is stopping");
+  expect(((error as Error).cause as Error).message).toBe("app is stopping");
   expect(log).toEqual(["fast started", "slow start aborted", "fast stop called"]);
 
-  // The abandoned stop still runs and shares fast's closure; that harness never starts again.
-  await expect(harness.start()).rejects.toThrow("single-use");
+  // The abandoned stop still runs and shares fast's closure; that app never starts again.
+  await expect(app.start()).rejects.toThrow("single-use");
   releaseFast();
 });
 
@@ -528,12 +528,12 @@ test("start(ctx): a start that outlives its deadline is abandoned and rolled bac
   });
   const hung = defineComponent({
     name: "hung",
-    // Ignores cancellation entirely: the harness must not wait for it.
+    // Ignores cancellation entirely: the app must not wait for it.
     setup: () => ({ start: () => new Promise<void>(() => {}) }),
   });
-  const harness = await defineHarness(quiet({ components: [first, hung] })).create();
+  const app = await defineApp(quiet({ components: [first, hung] })).create();
 
-  const error = await harness.start(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT)).catch((e: Error) => e);
+  const error = await app.start(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT)).catch((e: Error) => e);
   expect((error as Error).message).toBe('component "hung" failed to start');
   expect(((error as Error).cause as DOMException).name).toBe("TimeoutError");
   expect(log).toEqual(["first started", "first stopped"]);
@@ -563,10 +563,10 @@ test("stop(ctx): a stop that outlives its deadline is abandoned and reported; th
       return { stop: () => new Promise<void>(() => {}) };
     },
   });
-  const harness = await defineHarness(quiet({ components: [hung, store] })).create();
-  await harness.start();
+  const app = await defineApp(quiet({ components: [hung, store] })).create();
+  await app.start();
 
-  const error = await harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT)).catch((e: Error) => e);
+  const error = await app.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT)).catch((e: Error) => e);
   expect(error).toBeInstanceOf(AggregateError);
   const [abandoned] = (error as AggregateError).errors as Error[];
   expect(abandoned?.message).toBe('component "hung" failed to stop');
@@ -589,13 +589,13 @@ test("runtime.* listeners share the lifecycle deadline: a hung one is abandoned,
       };
     },
   });
-  const harness = await defineHarness(quiet({ components: [watcher] })).create();
-  await harness.start();
-  await harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT));
+  const app = await defineApp(quiet({ components: [watcher] })).create();
+  await app.start();
+  await app.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT));
   expect(log).toEqual(["watcher stopped", "runtime.stopped"]);
 });
 
-test("abandoned work is logged; a restart is a fresh harness that shares nothing with it", async () => {
+test("abandoned work is logged; a restart is a fresh app that shares nothing with it", async () => {
   const logs: string[] = [];
   const logger = {
     ...silentLogger,
@@ -614,15 +614,15 @@ test("abandoned work is logged; a restart is a fresh harness that shares nothing
       },
     }),
   });
-  const definition = defineHarness({ components: [lagging], logger });
-  const harness = await definition.create();
-  await harness.start();
-  await expect(harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT))).rejects.toThrow(
-    "harness stopped with errors",
+  const definition = defineApp({ components: [lagging], logger });
+  const app = await definition.create();
+  await app.start();
+  await expect(app.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT))).rejects.toThrow(
+    "app stopped with errors",
   );
   expect(logs).toEqual(["warn lagging.stop"]);
 
-  // The late stop still runs in the old harness's closure; the new one has its own setup.
+  // The late stop still runs in the old app's closure; the new one has its own setup.
   hang = false;
   const fresh = await definition.create();
   await fresh.start();
@@ -643,7 +643,7 @@ test("setup is synchronous and handles cannot be resolved during it", async () =
       pikit.provide("test.store", { name: "mem" });
     },
   });
-  await expect(defineHarness(quiet({ components: [store, eager] })).create()).rejects.toThrow(
+  await expect(defineApp(quiet({ components: [store, eager] })).create()).rejects.toThrow(
     'component "eager": "test.store" is not available during setup; call get() in start or later',
   );
   const eagerKeyed = defineComponent({
@@ -652,16 +652,16 @@ test("setup is synchronous and handles cannot be resolved during it", async () =
       pikit.useKeyed("test.transport").keys();
     },
   });
-  await expect(defineHarness(quiet({ components: [eagerKeyed] })).create()).rejects.toThrow(
+  await expect(defineApp(quiet({ components: [eagerKeyed] })).create()).rejects.toThrow(
     'component "eager-keyed": "test.transport" is not available during setup',
   );
 
   const asyncSetup = defineComponent({
     name: "async-setup",
-    // @ts-expect-error: setup must be synchronous; the type rejects it and so does the harness.
+    // @ts-expect-error: setup must be synchronous; the type rejects it and so does the app.
     async setup() {},
   });
-  await expect(defineHarness(quiet({ components: [asyncSetup] })).create()).rejects.toThrow(
+  await expect(defineApp(quiet({ components: [asyncSetup] })).create()).rejects.toThrow(
     'component "async-setup": setup must be synchronous; acquire resources in start',
   );
 });
@@ -674,7 +674,7 @@ test("setup only registers: pikit has no emit, run, derive or invocation context
       keys = Object.keys(pikit);
     },
   });
-  await defineHarness(quiet({ components: [probe] })).create();
+  await defineApp(quiet({ components: [probe] })).create();
   expect(keys.sort()).toEqual(
     ["target", "config", "logger", "clock", "on", "pipeline", "provide", "provideKeyed", "use", "useOptional", "useKeyed", "halt"].sort(),
   );
@@ -682,9 +682,9 @@ test("setup only registers: pikit has no emit, run, derive or invocation context
   // Type level too: doing work in setup does not compile.
   const work = (pikit: Pikit) => {
     // @ts-expect-error: emitting is work; emit from start or a handler's ctx
-    void pikit.emit("test.harness.ping", { via: "setup" });
+    void pikit.emit("test.app.ping", { via: "setup" });
     // @ts-expect-error: running a pipeline is work
-    void pikit.run("test.harness.text", { text: "" });
+    void pikit.run("test.app.text", { text: "" });
     // @ts-expect-error: setup has no invocation context to derive from
     void pikit.derive((c: never) => c);
     // @ts-expect-error: setup has no cancellation
@@ -706,7 +706,7 @@ test("config is validated and defaulted per component; typos and bad values are 
   });
 
   const raw = { "channel-http": { path: "/hook" } };
-  const def = defineHarness(quiet({ components: [http], config: raw }));
+  const def = defineApp(quiet({ components: [http], config: raw }));
   expect(def.config).toEqual({ "channel-http": { port: 8080, path: "/hook" } });
   await def.create();
   expect(received).toEqual({ port: 8080, path: "/hook" });
@@ -719,10 +719,10 @@ test("config is validated and defaulted per component; typos and bad values are 
   expect(raw).toEqual({ "channel-http": { path: "/hook" } });
   expect(Object.isFrozen(raw["channel-http"])).toBe(false);
 
-  expect(() => defineHarness(quiet({ components: [http], config: { "channel-http": { path: 42 } } }))).toThrow(
+  expect(() => defineApp(quiet({ components: [http], config: { "channel-http": { path: 42 } } }))).toThrow(
     "/channel-http/path");
-  expect(() => defineHarness(quiet({ components: [http], config: { "chanel-http": {} } }))).toThrow("invalid config");
-  expect(() => defineHarness(quiet({ components: [http] }))).toThrow("/channel-http"); // path is required
+  expect(() => defineApp(quiet({ components: [http], config: { "chanel-http": {} } }))).toThrow("invalid config");
+  expect(() => defineApp(quiet({ components: [http] }))).toThrow("/channel-http"); // path is required
 });
 
 test("describe reflects selection and resolved pipeline chains; halt is emitted as pipeline.halted", async () => {
@@ -732,7 +732,7 @@ test("describe reflects selection and resolved pipeline chains; halt is emitted 
     name: "s1",
     setup(pikit) {
       pikit.provide("test.store", { name: "s1" });
-      pikit.pipeline("test.harness.text", (v) => ({ text: `${v.text}1` }), { id: "one", priority: 5 });
+      pikit.pipeline("test.app.text", (v) => ({ text: `${v.text}1` }), { id: "one", priority: 5 });
     },
   });
   const s2 = defineComponent({
@@ -740,7 +740,7 @@ test("describe reflects selection and resolved pipeline chains; halt is emitted 
     version: "1.0.0",
     setup(pikit) {
       pikit.provide("test.store", { name: "s2" });
-      pikit.pipeline("test.harness.text", () => pikit.halt("no"), { id: "gate", priority: 4 });
+      pikit.pipeline("test.app.text", () => pikit.halt("no"), { id: "gate", priority: 4 });
       pikit.on("pipeline.halted", (e) => {
         halted.push(`${e.pipeline}/${e.stage}:${e.reason}`);
       });
@@ -758,21 +758,21 @@ test("describe reflects selection and resolved pipeline chains; halt is emitted 
     },
   });
 
-  const harness = await defineHarness(
+  const app = await defineApp(
     quiet({ components: [s1, s2, reader], config: { capabilities: { "test.store": "s2" } } }),
   ).create();
-  await harness.start();
-  const d = harness.describe();
+  await app.start();
+  const d = app.describe();
 
   expect(d.components.map((c) => c.name)).toEqual(["s1", "s2", "reader"]);
   expect(d.components[1]?.version).toBe("1.0.0");
   expect(d.capabilities).toEqual({ "test.store": { providers: ["s1", "s2"], selected: "s2" } });
-  expect(d.pipelines["test.harness.text"]?.map((s) => s.id)).toEqual(["one", "gate"]);
+  expect(d.pipelines["test.app.text"]?.map((s) => s.id)).toEqual(["one", "gate"]);
   expect(chosen).toBe("s2");
 
-  const result = await harness.context().run("test.harness.text", { text: "" });
+  const result = await app.context().run("test.app.text", { text: "" });
   expect(result).toBeInstanceOf(Halt);
-  expect(halted).toEqual(["test.harness.text/gate:no"]);
+  expect(halted).toEqual(["test.app.text/gate:no"]);
 });
 
 test("a context carries cancellation and values into handlers, nested emits and derivations", async () => {
@@ -782,24 +782,24 @@ test("a context carries cancellation and values into handlers, nested emits and 
   const relay = defineComponent({
     name: "relay",
     setup(pikit) {
-      pikit.on("test.harness.ping", async (e, ctx) => {
+      pikit.on("test.app.ping", async (e, ctx) => {
         seen.push({ signal: ctx.abortSignal, tenant: ctx.value(TENANT), hop: ctx.value(HOP) });
         if (e.via === "outer") {
-          await ctx.derive((c) => withContextValue(HOP, 2, c)).emit("test.harness.ping", { via: "inner" });
+          await ctx.derive((c) => withContextValue(HOP, 2, c)).emit("test.app.ping", { via: "inner" });
         }
       });
     },
   });
-  const harness = await defineHarness(quiet({ components: [relay] })).create();
+  const app = await defineApp(quiet({ components: [relay] })).create();
   const controller = new AbortController();
-  const request = withContextValue(TENANT, "acme", withAbortSignal(controller.signal, harness.context()));
+  const request = withContextValue(TENANT, "acme", withAbortSignal(controller.signal, app.context()));
 
-  await harness.context(request).emit("test.harness.ping", { via: "outer" });
+  await app.context(request).emit("test.app.ping", { via: "outer" });
 
   expect(seen).toEqual([
     { signal: controller.signal, tenant: "acme", hop: undefined },
     { signal: controller.signal, tenant: "acme", hop: 2 },
   ]);
-  expect(harness.context().abortSignal).toBeUndefined();
-  expect(harness.context().value(TENANT)).toBeUndefined();
+  expect(app.context().abortSignal).toBeUndefined();
+  expect(app.context().value(TENANT)).toBeUndefined();
 });

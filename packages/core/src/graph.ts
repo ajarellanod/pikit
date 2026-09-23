@@ -5,8 +5,8 @@
  * only orders components by it.
  */
 
-import type { CapabilityRegistry, HarnessCapabilities, HarnessKeyedCapabilities } from "./capabilities.ts";
-import type { ComponentDefinition, ComponentLifecycle } from "./harness.ts";
+import type { CapabilityRegistry, AppCapabilities, AppKeyedCapabilities } from "./capabilities.ts";
+import type { ComponentDefinition, ComponentLifecycle } from "./app.ts";
 
 /** One `use()` / `useOptional()` / `useKeyed()` a setup made. */
 export interface Use {
@@ -44,7 +44,7 @@ export function recordUse(record: SetupRecord, use: Use): Use {
  */
 export function orderRecords(
   records: SetupRecord[],
-  capabilities: CapabilityRegistry<HarnessCapabilities, HarnessKeyedCapabilities>,
+  capabilities: CapabilityRegistry<AppCapabilities, AppKeyedCapabilities>,
 ): SetupRecord[] {
   const byName = new Map(records.map((r) => [r.component.name, r]));
   /** The components a use depends on: none (optional, absent), all (keyed), or the chosen one. */

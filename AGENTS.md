@@ -269,9 +269,9 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   conversation ownership (one worker has a session open). Always write "conversation
   ownership" for the second.
 - **Session ≠ workspace.** The transcript says a file was edited; it is not the file.
-- **Eviction ≠ reset.** Dropping a harness from memory never deletes the conversation →
+- **Eviction ≠ reset.** Dropping an `AgentHarness` from memory never deletes the conversation →
   session pointer. Only an explicit reset repoints it.
-- **Events cannot fail the harness.** A listener's error is logged and swallowed. If
+- **Events cannot fail the app.** A listener's error is logged and swallowed. If
   something must succeed, it belongs in `start`.
 - **Selection shapes dependency order.** A consumer depends only on the provider `get()`
   will return: the selected one when there are several.
@@ -330,7 +330,7 @@ Local Pi installation for API lookups (versions drift; check `package.json`):
   closest design to `@pikit/core`. Align with its semantics; do not depend on it from core
   without a decision.
 - `~/.bun/install/global/node_modules/@earendil-works/coding-agent/docs/extensions.md`: the
-  extension model pikit mirrors at harness level. Read-only reference; never import it.
+  extension model pikit mirrors at app level. Read-only reference; never import it.
 - `~/.bun/install/global/node_modules/@earendil-works/pi-protocol/README.md` and
   `pi-client/README.md`: transport-neutral remote sessions.
 - Cloudflare: Durable Objects (SQL storage, alarms, hibernation), Workers Node
@@ -392,7 +392,7 @@ Record here anything that went wrong twice, or that the user explicitly said not
 - Bun < 1.4.0 cancels an `AbortSignal.timeout()` for good when its abort-listener count drops
   from one to zero (`removeEventListener`, `onabort = null`): it never fires and `aborted`
   stays `false`. Node and Bun >= 1.4.0 are correct (fixed by oven-sh/bun#37666), so pikit
-  requires Bun >= 1.4.0 and `bounded()` in `harness.ts` removes its listener normally. If a
+  requires Bun >= 1.4.0 and `bounded()` in `lifecycle.ts` removes its listener normally. If a
   deadline test hangs, check `bun --revision` first. Before reporting a runtime bug upstream,
   reproduce it on the latest release (download it to `/tmp`, do not upgrade the global
   install) and search merged PRs, not only issues.

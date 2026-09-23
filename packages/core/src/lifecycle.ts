@@ -2,24 +2,24 @@
  * Start and stop (SPEC §4.6): `start()` runs each component's `start` in dependency order and
  * rolls back on failure; `stop()` runs each `stop` in reverse, even after a failure.
  *
- * Deadlines belong to whoever runs the harness (systemd, a Durable Object constructor), so
+ * Deadlines belong to whoever runs the app (systemd, a Durable Object constructor), so
  * `start(ctx)` and `stop(ctx)` take a context instead of timeout options. Its cancellation
- * reaches every hook as `ctx.abortSignal`, and the harness stops waiting for a hook that
+ * reaches every hook as `ctx.abortSignal`, and the app stops waiting for a hook that
  * outlives it. `runtime.*` listeners share that deadline. JavaScript cannot kill a promise, so
  * an abandoned hook keeps running and must release what it acquired when it sees the abort.
- * The harness logs abandoned work.
+ * The app logs abandoned work.
  *
- * A harness is single-use: once `stop()` is called or `start()` fails, it never starts again.
+ * An app is single-use: once `stop()` is called or `start()` fails, it never starts again.
  * Restarting is `create()` again, which is what every target does anyway (a fresh process, a
  * fresh Durable Object). So abandoned work never shares a closure with a new run.
  */
 
 import { type Context, withAbortSignal, withCancel } from "./context.ts";
 import type { Logger } from "./contracts/logger.ts";
-import type { ComponentLifecycle, HarnessContext } from "./harness.ts";
+import type { ComponentLifecycle, AppContext } from "./app.ts";
 
 declare module "./events.ts" {
-  interface HarnessEvents {
+  interface AppEvents {
     "runtime.starting": Record<string, never>;
     "runtime.ready": Record<string, never>;
     "runtime.stopping": Record<string, never>;
@@ -29,7 +29,7 @@ declare module "./events.ts" {
 
 type RuntimeEvent = "runtime.starting" | "runtime.ready" | "runtime.stopping" | "runtime.stopped";
 
-const SINGLE_USE = "harness has stopped and is single-use; create() a new one to start again";
+const SINGLE_USE = "app has stopped and is single-use; create() a new one to start again";
 
 /** A component that returned hooks from setup. */
 export interface LifecycleEntry {
@@ -40,12 +40,12 @@ export interface LifecycleEntry {
 export interface LifecycleOptions {
   /** In start order. */
   components: readonly LifecycleEntry[];
-  /** Builds the harness context each hook and `runtime.*` listener receives. */
-  context(inner: Context): HarnessContext;
+  /** Builds the app context each hook and `runtime.*` listener receives. */
+  context(inner: Context): AppContext;
   logger: Logger;
 }
 
-/** The harness's `start`/`stop`; see `Harness` for their contract. */
+/** The app's `start`/`stop`; see `App` for their contract. */
 export interface Lifecycle {
   start(parent: Context): Promise<void>;
   stop(parent: Context): Promise<void>;
@@ -54,8 +54,8 @@ export interface Lifecycle {
 export function createLifecycle({ components, context, logger }: LifecycleOptions): Lifecycle {
   const lifecycleStep = (label: string, work: () => unknown, signal: AbortSignal | undefined) =>
     bounded(work, signal, () => logger.warn("abandoned at its deadline; it keeps running", { step: label }));
-  /** `runtime.*` listeners share the lifecycle deadline. Events cannot fail the harness. */
-  const announce = async (ctx: HarnessContext, name: RuntimeEvent): Promise<void> => {
+  /** `runtime.*` listeners share the lifecycle deadline. Events cannot fail the app. */
+  const announce = async (ctx: AppContext, name: RuntimeEvent): Promise<void> => {
     await lifecycleStep(`${name} listeners`, () => ctx.emit(name, {}), ctx.abortSignal).catch(() => {});
   };
 
@@ -63,7 +63,7 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
    * Stops `list` in reverse order under `ctx`. Every stop runs even if an earlier one threw;
    * one still running when `ctx.abortSignal` fires is abandoned and reported.
    */
-  const shutdown = async (list: readonly LifecycleEntry[], ctx: HarnessContext): Promise<Error[]> => {
+  const shutdown = async (list: readonly LifecycleEntry[], ctx: AppContext): Promise<Error[]> => {
     await announce(ctx, "runtime.stopping");
     const errors: Error[] = [];
     for (const { name, hooks } of [...list].reverse()) {
@@ -123,7 +123,7 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
   return {
     async start(parent) {
       if (state === "stopped") throw new Error(SINGLE_USE);
-      if (state === "started") throw new Error("harness already started");
+      if (state === "started") throw new Error("app already started");
       state = "started";
       starting = boot(parent);
       try {
@@ -144,14 +144,14 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
           // A SIGTERM during boot: cancel it and let it roll back within this stop's deadline.
           // Its error belongs to the caller of start().
           starting.boundRollback(parent.abortSignal);
-          starting.cancel(new Error("harness is stopping"));
+          starting.cancel(new Error("app is stopping"));
           await starting.done.catch(() => {});
         }
         if (running === undefined) return;
         const list = running;
         running = undefined;
         const errors = await shutdown(list, context(parent));
-        if (errors.length) throw new AggregateError(errors, "harness stopped with errors");
+        if (errors.length) throw new AggregateError(errors, "app stopped with errors");
       })().finally(() => {
         stopping = Promise.resolve();
       });

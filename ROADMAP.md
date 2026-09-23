@@ -48,7 +48,7 @@ nobody can check is only a wish.
 
 | # | Standard | Check |
 |---|---|---|
-| S8 | **Fail loudly.** If a component fails to start, the harness does not start: the components already started are stopped in reverse, and `start()` rejects. Resources are acquired in `start`, never in `setup` or in an event listener. `/ready` is true only when every component started. | Core lifecycle tests; per-component start-failure test. |
+| S8 | **Fail loudly.** If a component fails to start, the app does not start: the components already started are stopped in reverse, and `start()` rejects. Resources are acquired in `start`, never in `setup` or in an event listener. `/ready` is true only when every component started. | Core lifecycle tests; per-component start-failure test. |
 | S9 | **No silent substitutes.** Outside tests, nothing falls back to an in-memory stand-in for something that must persist. If persistence is missing, it is missing visibly. | Review; `doctor` warnings. |
 | S10 | **Stated delivery semantics.** Every path to or from the outside world states its guarantee (at-least-once by default). Effects carry idempotency keys derived from `${sessionId}:${runId}:${toolCallId}`. Every tool declares `replay: "safe" \| "never"`. | Conformance suites for `inbound.dedup` and `outbound.queue`; tool manifest validation. |
 | S11 | **Actors and workers.** A conversation's state is records, never worker memory. At most one worker has a conversation's session open, on every target. Messages that reach a busy conversation go to Pi's inbox (`steer` by default), never to a pikit queue. Losing a worker loses no conversation, and eviction is never a reset. An idle conversation holds no open session, timer or sandbox. Session is not workspace. | Kill-the-worker-mid-run scenario on each target; a message sent during a run changes its course; a two-replica scenario once several replicas are supported. |
@@ -92,11 +92,11 @@ defined in SPEC §15.
 
 ### M0 — The language is enough ✅
 
-**Proves:** a small core of events, pipelines, capabilities and lifecycle can express a
-harness without knowing anything about channels, storage or Pi.
+**Proves:** a small core of events, pipelines, capabilities and lifecycle can express an
+app without knowing anything about channels, storage or Pi.
 
 **Done:** `@pikit/core` is implemented and tested:
-- typed events, notifications whose failures cannot fail the harness;
+- typed events, notifications whose failures cannot fail the app;
 - pipelines with priority and `halt`;
 - **`setup` is the manifest**: synchronous, registration only, sealed when it returns. The
   dependency graph is derived from `provide`/`use`, with explicit handles resolved from

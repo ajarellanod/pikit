@@ -1,5 +1,5 @@
 /**
- * What `defineHarness` checks synchronously, before any setup runs (SPEC §4.1, §4.6): unique
+ * What `defineApp` checks synchronously, before any setup runs (SPEC §4.1, §4.6): unique
  * component names, the shape of `config.capabilities`, and the config against the merged
  * schema. Whether a selection names a provider is known only after setup, so the capability
  * registry checks it (`validateSelection`).
@@ -7,7 +7,7 @@
 
 import Type, { type TSchema } from "typebox";
 import Value from "typebox/value";
-import type { ComponentDefinition } from "./harness.ts";
+import type { ComponentDefinition } from "./app.ts";
 
 export function checkUniqueNames(components: readonly ComponentDefinition[]): void {
   const seen = new Set<string>();

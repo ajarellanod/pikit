@@ -1,19 +1,19 @@
 // Public surface of @pikit/core (SPEC §12a). Additive changes only within a major.
 
-export { defineComponent, defineHarness } from "./harness.ts";
+export { defineComponent, defineApp } from "./app.ts";
 export type {
   ComponentDefinition,
   ComponentLifecycle,
   Handle,
   KeyedHandle,
-  Harness,
-  HarnessContext,
-  HarnessDefinition,
-  HarnessDescription,
-  HarnessOptions,
+  App,
+  AppContext,
+  AppDefinition,
+  AppDescription,
+  AppOptions,
   Pikit,
   Target,
-} from "./harness.ts";
+} from "./app.ts";
 
 export type { Context, ContextKey } from "./context.ts";
 export {
@@ -25,10 +25,10 @@ export {
 } from "./context.ts";
 
 export { Halt, halt } from "./pipeline.ts";
-export type { HarnessPipelines, ResolvedStage, Stage, StageOptions } from "./pipeline.ts";
+export type { AppPipelines, ResolvedStage, Stage, StageOptions } from "./pipeline.ts";
 
-export type { HarnessEvents } from "./events.ts";
-export type { CapabilityMode, HarnessCapabilities, HarnessKeyedCapabilities, Keyed } from "./capabilities.ts";
+export type { AppEvents } from "./events.ts";
+export type { CapabilityMode, AppCapabilities, AppKeyedCapabilities, Keyed } from "./capabilities.ts";
 
 export type { Clock } from "./contracts/clock.ts";
 export { systemClock } from "./contracts/clock.ts";

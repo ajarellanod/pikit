@@ -1,11 +1,11 @@
 /**
  * Lifecycle conformance (SPEC §4.6, §14): does a component honour `ctx.abortSignal`?
  *
- * The harness stops waiting for a hook that outlives its deadline, but JavaScript cannot stop
+ * The app stops waiting for a hook that outlives its deadline, but JavaScript cannot stop
  * the hook: a component that ignores the abort keeps running and may acquire resources nobody
  * will release. These cases abort the component's own `start` and `stop` while they run, then
  * check that the hook settles promptly, that nothing is left open (when the fixture can count
- * it), and that a fresh harness over the same component can start again (a restart: harnesses
+ * it), and that a fresh app over the same component can start again (a restart: apps
  * are single-use, so a restart is `create()` again, as on every target).
  *
  * Runner-independent, like Pi's session conformance. Register the cases with any framework:
@@ -19,7 +19,7 @@
 
 import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "../context.ts";
 import { silentLogger } from "../contracts/logger.ts";
-import { type ComponentDefinition, type ComponentLifecycle, defineHarness, type Harness } from "../harness.ts";
+import { type ComponentDefinition, type ComponentLifecycle, defineApp, type App } from "../app.ts";
 
 /** One runner-independent case. Same shape as Pi's `ConformanceCase`. `run` throws on failure. */
 export interface ConformanceCase {
@@ -62,26 +62,26 @@ export function createLifecycleConformance(
 
   return [
     lifecycleCase("starts and stops, leaving nothing open", async (s) => {
-      await s.harness.start();
-      await s.harness.stop();
+      await s.app.start();
+      await s.app.stop();
       await s.expectNothingOpen("after stop");
     }),
 
     lifecycleCase("an aborted start settles promptly and leaves nothing open", async (s) => {
-      const started = await s.harness.start(s.abortDuring("start")).then(
+      const started = await s.app.start(s.abortDuring("start")).then(
         () => true,
         () => false,
       );
       await s.expectSettled("start");
       // The abort landed after start finished: the component is legitimately up.
-      if (started) await s.harness.stop();
+      if (started) await s.app.stop();
       await s.expectNothingOpen("after an aborted start");
       await s.expectRestart();
     }),
 
     lifecycleCase("an aborted stop settles promptly and leaves nothing open", async (s) => {
-      await s.harness.start();
-      await s.harness.stop(s.abortDuring("stop")).catch(() => {});
+      await s.app.start();
+      await s.app.stop(s.abortDuring("stop")).catch(() => {});
       await s.expectSettled("stop");
       await s.expectNothingOpen("after an aborted stop");
       await s.expectRestart();
@@ -90,7 +90,7 @@ export function createLifecycleConformance(
 }
 
 interface Subject {
-  harness: Harness;
+  app: App;
   /** A context that aborts one event-loop turn after the component's `hook` is invoked. */
   abortDuring(hook: Hook): Context;
   expectSettled(hook: Hook): Promise<void>;
@@ -108,8 +108,8 @@ async function createSubject(fixture: LifecycleFixture, settleMs: number): Promi
     setTimeout(() => trigger.controller.abort(new Error(`conformance: ${name}.${hook} aborted while running`)), 0);
   };
 
-  // Hooks still running, observed directly: the harness stops waiting at the abort, the hook
-  // does not, so a count above zero once the harness returned is abandoned work.
+  // Hooks still running, observed directly: the app stops waiting at the abort, the hook
+  // does not, so a count above zero once the app returned is abandoned work.
   let running = 0;
   const tracked = (result: unknown): unknown => {
     if (!isThenable(result)) return result;
@@ -125,17 +125,17 @@ async function createSubject(fixture: LifecycleFixture, settleMs: number): Promi
     ...fixture.component,
     setup(pikit, config) {
       const hooks = fixture.component.setup(pikit, config);
-      // A thenable is returned as is, so the harness still rejects an async setup.
+      // A thenable is returned as is, so the app still rejects an async setup.
       if (!hooks || isThenable(hooks)) return hooks;
       return observe(hooks, invoked, tracked);
     },
   };
-  const definition = defineHarness({
+  const definition = defineApp({
     components: [...(fixture.providers ?? []), component],
     ...(fixture.config !== undefined && { config: fixture.config }),
     logger: silentLogger,
   });
-  const harness = await definition.create();
+  const app = await definition.create();
 
   const expectNothingOpen = async (when: string): Promise<void> => {
     if (!fixture.openResources) return;
@@ -149,7 +149,7 @@ async function createSubject(fixture: LifecycleFixture, settleMs: number): Promi
   };
 
   return {
-    harness,
+    app,
     abortDuring(hook) {
       const controller = new AbortController();
       armed = { hook, controller };

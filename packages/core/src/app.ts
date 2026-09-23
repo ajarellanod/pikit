@@ -1,14 +1,14 @@
 /**
  * Composition root and lifecycle (SPEC §4.1, §4.2, §4.6).
  *
- *   defineHarness({ components, config })   checks names and config (sync, throws)
+ *   defineApp({ components, config })   checks names and config (sync, throws)
  *     .create()                              runs every setup, derives the dependency graph
  *                                            from what they did, validates it
  *     .start()                               runtime.starting → start() in order → runtime.ready
  *     .stop()                                runtime.stopping → stop() in reverse → runtime.stopped
  *     .describe()                            what `pikit doctor` prints
  *
- * There is no `provides`/`requires` manifest: `setup` is the only truth. The harness records
+ * There is no `provides`/`requires` manifest: `setup` is the only truth. The app records
  * each `pikit.provide(name)` and `pikit.use(name)` and derives the graph from them (as Chord's
  * plugin host does). Missing and ambiguous providers, bad selections and cycles fail in
  * `create()`, after every setup and before any `start`.
@@ -18,7 +18,7 @@
  * clean up, and why a failed `start()` can roll back exactly the components that did start.
  * `use()` returns a handle whose `get()` works only once the graph is valid, so no component can
  * reach a provider whose setup has not run. `runtime.*` events stay notifications: a listener
- * that throws is logged and cannot make the harness look healthy or unhealthy.
+ * that throws is logged and cannot make the app look healthy or unhealthy.
  *
  * Definition-time checks live in `config.ts`, graph ordering in `graph.ts`, selection rules in
  * the capability registry, and start/stop (with their deadlines) in `lifecycle.ts`.
@@ -28,28 +28,28 @@ import type { Static, TSchema } from "typebox";
 import {
   type CapabilityRegistry,
   createCapabilityRegistry,
-  type HarnessCapabilities,
-  type HarnessKeyedCapabilities,
+  type AppCapabilities,
+  type AppKeyedCapabilities,
   type Keyed,
 } from "./capabilities.ts";
 import { checkUniqueNames, readSelection, validateConfig } from "./config.ts";
 import { BACKGROUND_CONTEXT, type Context } from "./context.ts";
 import { type Clock, systemClock } from "./contracts/clock.ts";
 import { consoleLogger, type Logger } from "./contracts/logger.ts";
-import { createEventBus, type EventBus, type HarnessEvents } from "./events.ts";
+import { createEventBus, type EventBus, type AppEvents } from "./events.ts";
 import { orderRecords, recordUse, type SetupRecord, type Use } from "./graph.ts";
 import { createLifecycle } from "./lifecycle.ts";
 import {
   createPipelineRegistry,
   type Halt,
   halt,
-  type HarnessPipelines,
+  type AppPipelines,
   type PipelineRegistry,
   type ResolvedStage,
 } from "./pipeline.ts";
 
 declare module "./events.ts" {
-  interface HarnessEvents {
+  interface AppEvents {
     "pipeline.halted": { pipeline: string; stage: string; reason: string };
   }
 }
@@ -57,23 +57,23 @@ declare module "./events.ts" {
 export type Target = "server" | "cloudflare";
 
 /** What every handler receives (SPEC §4.7). `emit`/`run` propagate this same context. */
-export interface HarnessContext extends Context {
+export interface AppContext extends Context {
   target: Target;
   /** Resolved, validated global config. Component config lives under `config[name]`. */
   config: Readonly<Record<string, unknown>>;
   logger: Logger;
   clock: Clock;
-  emit<K extends keyof HarnessEvents & string>(name: K, payload: HarnessEvents[K]): Promise<void>;
-  run<K extends keyof HarnessPipelines & string>(
+  emit<K extends keyof AppEvents & string>(name: K, payload: AppEvents[K]): Promise<void>;
+  run<K extends keyof AppPipelines & string>(
     name: K,
-    input: HarnessPipelines[K],
-  ): Promise<HarnessPipelines[K] | Halt>;
+    input: AppPipelines[K],
+  ): Promise<AppPipelines[K] | Halt>;
   /**
-   * A harness context over a derived invocation context, e.g.
+   * An app context over a derived invocation context, e.g.
    * `ctx.derive((c) => withContextValue(TENANT, "acme", c))`. Handlers reached through the
    * result's `emit`/`run` receive the result.
    */
-  derive(change: (context: Context) => Context): HarnessContext;
+  derive(change: (context: Context) => Context): AppContext;
 }
 
 /** A declared dependency. `get()` returns the provider's implementation once the graph is valid. */
@@ -93,13 +93,13 @@ export interface KeyedHandle<T> {
   keys(): string[];
 }
 
-type SingleName = keyof HarnessCapabilities & string;
-type KeyedName = keyof HarnessKeyedCapabilities & string;
+type SingleName = keyof AppCapabilities & string;
+type KeyedName = keyof AppKeyedCapabilities & string;
 
 /**
- * What a component's `setup` receives: read-only harness values plus registration. Not a
+ * What a component's `setup` receives: read-only app values plus registration. Not a
  * context: setup only registers, so it cannot emit, run a pipeline or see a cancellation. Work
- * happens in `start`/`stop` and in handlers, which receive a `HarnessContext`.
+ * happens in `start`/`stop` and in handlers, which receive a `AppContext`.
  */
 export interface Pikit {
   readonly target: Target;
@@ -107,26 +107,26 @@ export interface Pikit {
   readonly config: Readonly<Record<string, unknown>>;
   readonly logger: Logger;
   readonly clock: Clock;
-  on: EventBus<HarnessEvents, HarnessContext>["on"];
-  pipeline: PipelineRegistry<HarnessPipelines, HarnessContext>["register"];
+  on: EventBus<AppEvents, AppContext>["on"];
+  pipeline: PipelineRegistry<AppPipelines, AppContext>["register"];
   /** Declare that this component provides the single capability `name`, and install it. */
-  provide<K extends SingleName>(name: K, impl: HarnessCapabilities[K]): void;
+  provide<K extends SingleName>(name: K, impl: AppCapabilities[K]): void;
   /** Declare that this component provides the keyed capability `name` under `key`, and install it. */
-  provideKeyed<K extends KeyedName>(name: K, key: string, impl: HarnessKeyedCapabilities[K]): void;
+  provideKeyed<K extends KeyedName>(name: K, key: string, impl: AppKeyedCapabilities[K]): void;
   /** Depend on the single capability `name`. Its provider starts first; no provider is an error. */
-  use<K extends SingleName>(name: K): Handle<HarnessCapabilities[K]>;
+  use<K extends SingleName>(name: K): Handle<AppCapabilities[K]>;
   /**
    * Depend on `name` if it is installed: `get()` returns `undefined` when nothing provides it.
    * When it is installed, its provider starts first. A separate verb rather than an option, so
    * whether a dependency is optional is written in code and cannot be switched from config.
    */
-  useOptional<K extends SingleName>(name: K): Handle<HarnessCapabilities[K] | undefined>;
+  useOptional<K extends SingleName>(name: K): Handle<AppCapabilities[K] | undefined>;
   /**
    * Depend on every implementation of the keyed capability `name`. All its providers start
    * first. No provider is not an error: an empty set is a normal state, and a consumer handles
    * a missing key per call anyway.
    */
-  useKeyed<K extends KeyedName>(name: K): KeyedHandle<HarnessKeyedCapabilities[K]>;
+  useKeyed<K extends KeyedName>(name: K): KeyedHandle<AppKeyedCapabilities[K]>;
   halt: typeof halt;
 }
 
@@ -138,16 +138,16 @@ export interface ComponentLifecycle {
   /**
    * Runs in dependency order. A throw rolls back the components already started and fails
    * `start()`. When `ctx.abortSignal` fires (the start deadline, or `stop()` during boot) the
-   * harness stops waiting: release what was acquired and throw.
+   * app stops waiting: release what was acquired and throw.
    * `ctx` carries the start deadline: do not keep it for later work (a server's requests); derive
    * a context per invocation with `ctx.derive(...)` (SPEC §4.7).
    */
-  start?(ctx: HarnessContext): void | Promise<void>;
+  start?(ctx: AppContext): void | Promise<void>;
   /**
    * Runs in reverse dependency order. A throw is collected; the remaining components still stop.
-   * When `ctx.abortSignal` fires (the stop deadline) the harness moves on to the next component.
+   * When `ctx.abortSignal` fires (the stop deadline) the app moves on to the next component.
    */
-  stop?(ctx: HarnessContext): void | Promise<void>;
+  stop?(ctx: AppContext): void | Promise<void>;
 }
 
 export interface ComponentDefinition<Schema extends TSchema = TSchema> {
@@ -177,7 +177,7 @@ export function defineComponent<Schema extends TSchema = TSchema>(
   return definition;
 }
 
-export interface HarnessOptions {
+export interface AppOptions {
   /** Registry and project-local components alike; list order is the tiebreaker for start order. */
   components: ComponentDefinition[];
   /** Values, never a path. `config.capabilities[name]` selects among several providers. */
@@ -187,7 +187,7 @@ export interface HarnessOptions {
   clock?: Clock;
 }
 
-export interface HarnessDescription {
+export interface AppDescription {
   target: Target;
   /**
    * In start order. `provides`/`requires`/`optional` are derived from setup; `component.json` is
@@ -201,9 +201,9 @@ export interface HarnessDescription {
   config: Readonly<Record<string, unknown>>;
 }
 
-export interface Harness {
-  /** Harness context over `parent` (its cancellation and values); `BACKGROUND_CONTEXT` if omitted. */
-  context(parent?: Context): HarnessContext;
+export interface App {
+  /** App context over `parent` (its cancellation and values); `BACKGROUND_CONTEXT` if omitted. */
+  context(parent?: Context): AppContext;
   /**
    * Rejects if a component fails to start, after stopping the ones that did. `parent` bounds the
    * start (e.g. `withAbortSignal(AbortSignal.timeout(ms), BACKGROUND_CONTEXT)`); the rollback is
@@ -218,17 +218,17 @@ export interface Harness {
    * has finished, `stop()` is a no-op.
    */
   stop(parent?: Context): Promise<void>;
-  describe(): HarnessDescription;
+  describe(): AppDescription;
 }
 
-export interface HarnessDefinition {
+export interface AppDefinition {
   /** Components as listed. Start order is known only after `create()` (see `describe()`). */
   readonly components: readonly ComponentDefinition[];
   readonly config: Readonly<Record<string, unknown>>;
-  create(): Promise<Harness>;
+  create(): Promise<App>;
 }
 
-export function defineHarness(options: HarnessOptions): HarnessDefinition {
+export function defineApp(options: AppOptions): AppDefinition {
   const all = [...options.components];
   const target = options.target ?? "server";
   const logger = options.logger ?? consoleLogger;
@@ -243,18 +243,18 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
     config,
 
     async create() {
-      const events = createEventBus<HarnessEvents, HarnessContext>((error, event) =>
+      const events = createEventBus<AppEvents, AppContext>((error, event) =>
         logger.error("event listener failed", { event, error }),
       );
-      const pipelines = createPipelineRegistry<HarnessPipelines, HarnessContext>((info, ctx) =>
+      const pipelines = createPipelineRegistry<AppPipelines, AppContext>((info, ctx) =>
         ctx.emit("pipeline.halted", info),
       );
-      const capabilities: CapabilityRegistry<HarnessCapabilities, HarnessKeyedCapabilities> =
+      const capabilities: CapabilityRegistry<AppCapabilities, AppKeyedCapabilities> =
         createCapabilityRegistry(selection);
 
       // Reading `abortSignal` once is safe because a context never changes after derivation.
-      const context = (inner: Context = BACKGROUND_CONTEXT): HarnessContext => {
-        const ctx: HarnessContext = {
+      const context = (inner: Context = BACKGROUND_CONTEXT): AppContext => {
+        const ctx: AppContext = {
           abortSignal: inner.abortSignal,
           value: (key) => inner.value(key),
           toString: () => inner.toString(),

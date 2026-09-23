@@ -11,7 +11,7 @@
  * both for one name is an error. This mirrors Chord's singleton and keyed services, with keys
  * fixed at setup instead of spawned at runtime.
  *
- * The registry does not know component manifests; the harness derives the dependency graph
+ * The registry does not know component manifests; the app derives the dependency graph
  * from what each setup provides and uses. The registry owns every selection rule: which
  * provider a single capability resolves to, and why none does (`resolveProvider`,
  * `validateSelection`). `config.ts` checks only the shape of the selection.
@@ -19,14 +19,14 @@
 
 /**
  * Typed map of single capabilities: name → service type. Extended by declaration merging like
- * `HarnessEvents`. Contracts are added by the module that defines them.
+ * `AppEvents`. Contracts are added by the module that defines them.
  */
 // biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
-export interface HarnessCapabilities {}
+export interface AppCapabilities {}
 
 /** Typed map of keyed capabilities: name → type of each keyed implementation. */
 // biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
-export interface HarnessKeyedCapabilities {}
+export interface AppKeyedCapabilities {}
 
 /** Every implementation of a keyed capability, by key. */
 export interface Keyed<T> {

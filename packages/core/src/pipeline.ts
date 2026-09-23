@@ -1,7 +1,7 @@
 /**
  * Pipelines are ordered transformations (SPEC §4.4). Each stage receives the previous
  * stage's output and returns the next value. A stage may return `halt(reason)` to stop the
- * chain; the registry reports it through `onHalt` (the harness emits `pipeline.halted`).
+ * chain; the registry reports it through `onHalt` (the app emits `pipeline.halted`).
  *
  * Every pipeline has one value type: stages are `Value → Value`. A pipeline that "produces"
  * something (route.resolve → decision) carries it as a field of the value.
@@ -16,10 +16,10 @@
 
 /**
  * Typed pipeline registry: name → value type. Extended by declaration merging like
- * `HarnessEvents`. Core-owned pipelines are added by the module that runs them.
+ * `AppEvents`. Core-owned pipelines are added by the module that runs them.
  */
 // biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
-export interface HarnessPipelines {}
+export interface AppPipelines {}
 
 export class Halt {
   constructor(

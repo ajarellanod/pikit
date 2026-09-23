@@ -3,28 +3,28 @@
  * are ignored, and a listener that throws is reported but does not stop the others.
  *
  * The bus is generic over the event map and the context so it can be tested on its own;
- * the harness instantiates it with `HarnessEvents` and `HarnessContext`.
+ * the app instantiates it with `AppEvents` and `AppContext`.
  */
 
 /**
  * Typed event registry. Projects and components extend it by declaration merging:
  *
  *   declare module "@pikit/core" {
- *     interface HarnessEvents { "acme.customer.created": { customerId: string } }
+ *     interface AppEvents { "acme.customer.created": { customerId: string } }
  *   }
  *
  * Core-owned namespaces (`runtime.*`, `pipeline.*`, …) are added here by the core module
  * that emits them.
  */
 // biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
-export interface HarnessEvents {}
+export interface AppEvents {}
 
 export type EventListener<Payload, Ctx> = (payload: Payload, ctx: Ctx) => void | Promise<void>;
 
 export interface EventBus<Events extends object, Ctx> {
   /**
    * Register a listener. There is no unsubscribe: listeners are registered in `setup` and live
-   * as long as the harness, so `pikit doctor` shows the real graph. A listener that should act
+   * as long as the app, so `pikit doctor` shows the real graph. A listener that should act
    * once keeps its own flag.
    */
   on<K extends keyof Events & string>(name: K, listener: EventListener<Events[K], Ctx>): void;

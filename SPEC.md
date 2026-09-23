@@ -14,7 +14,7 @@ meet live in `ROADMAP.md`.
 
 1. A **small, stable core** that defines how components communicate and nothing else.
 2. **Source-owned components** installed into the user's project, editable and removable.
-3. A **typed, event-driven harness lifecycle** covering the full path from inbound message to
+3. A **typed, event-driven app lifecycle** covering the full path from inbound message to
    delivered reply, modeled the way Pi models the agent loop.
 4. **Two runtimes from the same project**: long-running server (Bun/Node) and serverless
    Cloudflare Workers + Durable Objects.
@@ -47,13 +47,14 @@ meet live in `ROADMAP.md`.
 | Term | Meaning |
 |---|---|
 | **Core** | `@pikit/core`. Events, pipelines, capabilities, lifecycle, config, diagnostics. |
+| **App** | `[decision]` The composed, running service: `defineApp({ components, config }).create()`, then `start()`/`stop()`. One per process on the server target, one per Durable Object on Cloudflare. It hosts many conversations; it is not Pi's `AgentHarness`, which runs one conversation's agent loop. Named `App` rather than `Harness` for that reason. |
 | **Component** | An installable unit of source: files + manifest + optional migrations, tests, config schema. Copied into the project. |
-| **Extension** | Runtime behavior registered against the harness lifecycle (`pikit.on`, `pikit.pipeline`, `pikit.provide`). Usually the entry point of a component; may also be a standalone project file. |
+| **Extension** | Runtime behavior registered against the app lifecycle (`pikit.on`, `pikit.pipeline`, `pikit.provide`). Usually the entry point of a component; may also be a standalone project file. |
 | **Capability** | A named, typed service that exactly one component provides and others consume (`sessions.store`, `execution.shell`). |
 | **Event** | A typed notification. All listeners receive it; none can change its outcome. |
 | **Pipeline** | A typed, ordered transformation chain. Each stage receives the previous stage's output. |
 | **Registry** | A source of components: official, third-party, private, or local. |
-| **Runtime target** | Where the harness runs: `server` or `cloudflare`. |
+| **Runtime target** | Where the app runs: `server` or `cloudflare`. |
 | **Agent runtime** | The thing that runs the agent loop. In v1: Pi. |
 | **Conversation key** | Stable identity of an external conversation (`tenant:channel:conversation`). |
 | **Actor** | A conversation seen as a unit of execution: a stable identity, a durable state (its session) and a mailbox (Pi's inbox). pikit's only kind of actor is the conversation (§7). |
@@ -105,14 +106,14 @@ Rules:
 
 ```ts
 // pikit.config.ts
-import { defineHarness } from "@pikit/core";
+import { defineApp } from "@pikit/core";
 import telegram from "./src/pikit/channels/telegram";
 import router from "./src/pikit/router";
 import sessions from "./src/pikit/sessions/sqlite";
 import pi from "./src/pikit/runtime/pi";
 import auditLog from "./src/extensions/audit-log";
 
-export default defineHarness({
+export default defineApp({
   components: [telegram, router, sessions, pi, auditLog],   // registry and project-local alike
   config,                                 // a plain object; loading YAML is the target's job
 });
@@ -149,11 +150,11 @@ export default defineComponent({
 });
 ```
 
-`setup` runs once per harness instance. On the server target that is once per process. On
+`setup` runs once per app instance. On the server target that is once per process. On
 Cloudflare it is once per Durable Object instantiation (which may happen many times; setup
 must be cheap and idempotent). `[decision]` `setup` is **synchronous and only registers**:
 it never opens sockets, files, connections or timers. A component that owns resources returns
-`{ start, stop }` from `setup`; the closure carries setup-local state to both. The harness
+`{ start, stop }` from `setup`; the closure carries setup-local state to both. The app
 calls `start` in dependency order and `stop` in reverse (§4.6). Because setup acquires
 nothing, a failed `create()` has nothing to clean up.
 
@@ -162,10 +163,10 @@ read-only `target`, `config`, `logger` and `clock`, the registration verbs (`on`
 `provide`, `provideKeyed`, `use`, `useOptional`, `useKeyed`) and `halt`. It has no `emit`,
 `run`, `derive`, `abortSignal` or `value`: emitting or running a pipeline during setup would
 reach other components' handlers before the graph is validated. Work happens in `start`/`stop`
-and in handlers, which receive a `HarnessContext` (§4.7).
+and in handlers, which receive a `AppContext` (§4.7).
 
 **`setup` is the manifest.** `[decision]` A component does not declare `provides` or
-`requires`. The harness records every `pikit.provide(name, impl)` and `pikit.use(name)` and
+`requires`. The app records every `pikit.provide(name, impl)` and `pikit.use(name)` and
 derives the dependency graph from them, as Chord's plugin host does (§6.4). What the code
 does and what the component claims cannot disagree, because there is only one of them.
 
@@ -182,9 +183,9 @@ does and what the component claims cannot disagree, because there is only one of
   chains.
   What `describe()` reports is everything that runs.
 
-`defineHarness(...)` checks component names, the shape of `config.capabilities` and the
+`defineApp(...)` checks component names, the shape of `config.capabilities` and the
 config schema, synchronously. `await definition.create()` runs every `setup` in list order,
-validates the recorded graph, and returns the harness (`start()`, `stop()`, `describe()`,
+validates the recorded graph, and returns the app (`start()`, `stop()`, `describe()`,
 `context()`). `pikit doctor` is `create()` + `describe()`; `describe()` reports each
 component's derived `provides` and `requires`.
 
@@ -203,7 +204,7 @@ await ctx.emit("outbound.delivered", payload);                    // in start or
 not stop the others (mirrors Pi's extension error handling).
 
 `[decision]` `on()` returns nothing: there is no unsubscribe. Listeners are registered in
-`setup` and live as long as the harness, so the graph `pikit doctor` prints is the one that
+`setup` and live as long as the app, so the graph `pikit doctor` prints is the one that
 runs. A listener that should act once keeps its own flag.
 
 Event names are namespaced. Core-owned namespaces:
@@ -224,7 +225,7 @@ Events are typed by declaration merging, like Pi's `CustomAgentMessages`:
 
 ```ts
 declare module "@pikit/core" {
-  interface HarnessEvents {
+  interface AppEvents {
     "acme.customer.created": { customerId: string; plan: string };
   }
 }
@@ -324,8 +325,8 @@ const store = pikit.use("sessions.store");   // in a component's setup; store.ge
   - Selection does not apply to keyed capabilities.
 
   Same model as Chord's keyed services (§6.4), with keys fixed at setup instead of spawned at
-  runtime. Keyed types are declared in `HarnessKeyedCapabilities`, single ones in
-  `HarnessCapabilities`.
+  runtime. Keyed types are declared in `AppKeyedCapabilities`, single ones in
+  `AppCapabilities`.
 - Capability contracts are TypeScript interfaces exported from `@pikit/core`.
 
 Core-defined capability contracts (interfaces only; no implementations in core):
@@ -349,17 +350,17 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
 | `approvals` | `ApprovalStore` | Decision lifecycle persistence. |
 | `secrets` | `SecretStore` | Read secrets by name. `.env`, Worker bindings, external vault. |
-| `clock` | `Clock` | `now()`, `sleep()`. Injectable for tests and for DO alarms. M0: a `defineHarness` option, not a capability (the harness needs it before any component runs). |
-| `logger` | `Logger` | Structured logging. M0: a `defineHarness` option, same reason. |
+| `clock` | `Clock` | `now()`, `sleep()`. Injectable for tests and for DO alarms. M0: a `defineApp` option, not a capability (the app needs it before any component runs). |
+| `logger` | `Logger` | Structured logging. M0: a `defineApp` option, same reason. |
 
 ### 4.6 Lifecycle
 
 ```
 build time      pikit add/remove edit pikit.config.ts; bundler compiles what is listed
                  │
-define          defineHarness() → unique names, selection shape, config against merged schema
+define          defineApp() → unique names, selection shape, config against merged schema
                  │
-harness create  every component.setup() in list order (sync, registration only; records
+app create      every component.setup() in list order (sync, registration only; records
                  │  provide/use; returns start/stop) → derive and validate the graph
                  │
 runtime.starting
@@ -375,19 +376,19 @@ runtime.stopped
 ```
 
 **Deadlines.** `[decision]` `start(ctx?)` and `stop(ctx?)` take a `Context`; the core has no
-timeout options. The deadline belongs to whoever runs the harness (the `deployment-*`
+timeout options. The deadline belongs to whoever runs the app (the `deployment-*`
 component: systemd's stop timeout, a Durable Object's `blockConcurrencyWhile`), for example
-`harness.stop(withAbortSignal(AbortSignal.timeout(ms), BACKGROUND_CONTEXT))`.
+`app.stop(withAbortSignal(AbortSignal.timeout(ms), BACKGROUND_CONTEXT))`.
 - Every `start`/`stop` hook receives that cancellation as `ctx.abortSignal`.
 - A `start` still running when it fires is abandoned: that start fails and rolls back.
 - A `stop` still running when it fires is abandoned and reported in the `AggregateError`, and
   the remaining components still stop.
 - `runtime.*` listeners share the deadline. A listener still running when it fires is
-  abandoned like a hook; events still cannot fail the harness.
+  abandoned like a hook; events still cannot fail the app.
 - Past the deadline, each remaining step still runs and gets one turn of the event loop
   before it is abandoned, so quick cleanup after a slow step is not reported as a failure.
 - JavaScript cannot kill a promise, so an abandoned hook keeps running. A hook must release
-  what it acquired and return when it sees the abort; the harness only stops waiting. The core
+  what it acquired and return when it sees the abort; the app only stops waiting. The core
   cannot enforce this, so it is checked per component: `createLifecycleConformance` (§14).
 - Abandoned work is visible: a `warn` when it is abandoned.
 - The rollback of a failed start does not inherit the start's cancellation, which is usually
@@ -398,11 +399,11 @@ its rollback within the stop's deadline, and leaves the start's error to the cal
 `start()`. Concurrent `stop()` calls share the first call's shutdown and deadline, and
 `start()` while stopping is rejected.
 
-`[decision]` A harness is **single-use**. Once `stop()` is called or `start()` fails, `start()`
+`[decision]` An app is **single-use**. Once `stop()` is called or `start()` fails, `start()`
 throws; restarting is `create()` again. Every target already restarts that way (a fresh
 process, a fresh Durable Object), and it means abandoned work, which keeps running in its
 component's closure, never shares that closure with a new run. Conversations are unaffected:
-their state is in records (§7), not in the harness.
+their state is in records (§7), not in the app.
 
 Every `runtime.starting` is closed by `runtime.stopped`, including a failed start. On
 Cloudflare, `start` runs inside the Durable Object constructor's `blockConcurrencyWhile`.
@@ -426,12 +427,12 @@ interface Context {
   toString(): string;
 }
 
-interface HarnessContext extends Context {
+interface AppContext extends Context {
   target: "server" | "cloudflare";
   config: ResolvedConfig;
   emit(event, payload): Promise<void>;   // propagates this same ctx to listeners
   run(pipeline, input): Promise<Value | Halt>;
-  derive(change: (context: Context) => Context): HarnessContext;
+  derive(change: (context: Context) => Context): AppContext;
   logger: Logger;
   clock: Clock;
 }
@@ -443,7 +444,7 @@ is a `Context`: immutable, passed explicitly, derived with `withAbortSignal`, `w
 `BACKGROUND_CONTEXT`. `[decision]` Shape and helper semantics match Chord's (§6.4) without
 importing it.
 
-- `harness.context(parent?)` gives a harness context over any `Context`, including one that
+- `app.context(parent?)` gives an app context over any `Context`, including one that
   came from Pi: the request's cancellation and values reach every handler.
 - `ctx.derive(change)` does the same from inside a handler:
   `ctx.derive((c) => withContextValue(TENANT, "acme", c)).emit(...)`.
@@ -461,7 +462,7 @@ pipelines that concern it.
 
 ---
 
-## 5. Harness lifecycle (the main path)
+## 5. App lifecycle (the main path)
 
 ```
 Channel ingress (HTTP/webhook/WebSocket)
@@ -573,7 +574,7 @@ reached the same shape: ack after durable append, claim/commit, completion tombs
 
 ```ts
 interface AgentRuntime {
-  dispatch(request: AgentRequest, ctx: HarnessContext): Promise<AgentResult>;
+  dispatch(request: AgentRequest, ctx: AppContext): Promise<AgentResult>;
   steer(conversation: ConversationRef, message: string): Promise<void>;
   abort(conversation: ConversationRef): Promise<void>;
   resume(conversation: ConversationRef): Promise<AgentResult | undefined>;   // after crash/hibernation
@@ -602,7 +603,7 @@ Who owns these types `[decision]`: the core owns the *shapes* (`defineAgent`,
 are the stable programming model (§12a). The Pi-specific payloads inside them
 (`AgentMessage`, `ImageContent`, `Usage`, the tool type) are opaque in the core and made
 precise by `@pikit/pi-adapter` through declaration merging — the same mechanism as
-`HarnessEvents`. The core never imports Pi; a project with the adapter sees Pi's exact types.
+`AppEvents`. The core never imports Pi; a project with the adapter sees Pi's exact types.
 Components that implement a Pi contract (`sessions.store`, `execution`) import those types
 from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-*`. `[planned]`
 — built in M1 with the adapter.
@@ -652,7 +653,7 @@ Responsibilities:
   - `server`: `drive: "automatic"` (`prompt()` and await).
   - `cloudflare`: `drive: "manual"` (`peekAction()` / `executeAction()` loop with persistence
     between actions; see §9).
-- On harness create, inspect `suspended` operations and expose them through `resume()`.
+- On `AgentHarness` creation, inspect `suspended` operations and expose them through `resume()`.
 - Pass pikit's context into Pi through a one-line bridge:
   `chord.withAbortSignal(ctx.abortSignal, ctx)` when `abortSignal` is set, otherwise `ctx`.
   pikit derives from a parent's `abortSignal` property. Chord's `withContextValue` reads the
@@ -877,8 +878,8 @@ submission the adapter can await until it is answered (§6.4).
 | **Pi session** | transcript entries, lanes, operation records, queues, usage | `sessions.store` |
 
 A conversation can point to many sessions over time (`/reset` creates a new one and repoints;
-old sessions remain). TTL/eviction of in-memory harness objects **never** deletes the
-registry pointer. A conversation must be restorable long after its harness object was
+old sessions remain). TTL/eviction of in-memory `AgentHarness` objects **never** deletes the
+registry pointer. A conversation must be restorable long after its `AgentHarness` was
 evicted; this is a hard rule.
 
 ### 7.5 `sessions.store`
@@ -998,7 +999,7 @@ from `${sessionId}:${runId}:${toolCallId}`.
 - Workers: one process is one worker and owns every conversation (§7.2). Several replicas
   need `conversations.ownership`; until it exists, the server target runs one replica.
 - Start and shutdown `[decision]`: the entrypoint (owned by the `deployment-*` component, not
-  the core) passes deadlines and never restarts a harness in the same process; the supervisor
+  the core) passes deadlines and never restarts an app in the same process; the supervisor
   (systemd, Docker) restarts the process.
   - `start(ctx)` with a deadline. If it rejects, exit non-zero.
   - On SIGTERM or SIGINT, `stop(ctx)` with a deadline shorter than the supervisor's kill
@@ -1015,7 +1016,7 @@ Worker (fetch)                     ← channel ingress, auth, routing (stateless
    │  idFromName(conversationKey)
    ▼
 Durable Object "Conversation"      ← one per conversation key
-   ├── pikit harness instance (setup on construct; must be cheap)
+   ├── pikit app instance          (setup on construct; must be cheap)
    ├── sessions-cloudflare-do      (ctx.storage.sql)
    ├── conversations.registry      (ctx.storage.sql)
    ├── outbox table + alarm        (retries with at-least-once + backoff)
@@ -1035,7 +1036,7 @@ Constraints the design must respect (from Cloudflare docs, verify on change):
 - DO alarm handlers ≤ 15 min; CPU ≤ 30 s default (configurable to 5 min). Waiting on a model
   response is wall-clock, not CPU.
 - ~6 concurrent outbound connections per invocation → cap subagent fan-out.
-- In-memory state is lost on hibernation; everything the harness needs across actions must
+- In-memory state is lost on hibernation; everything the app needs across actions must
   be in `ctx.storage`.
 - `blockConcurrencyWhile` terminates and resets the object if its callback throws or runs
   longer than 30 s. `start(ctx)` runs inside it with a shorter deadline, so a slow start rolls
@@ -1265,7 +1266,7 @@ the whole 1.x line; there is no "pikit 2 rewrites how you define agents".
 
 | Surface | Rule |
 |---|---|
-| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed`, `ctx.emit/run/derive`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
+| `@pikit/core` public API (`defineApp`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed`, `ctx.emit/run/derive`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
 | Contract interfaces (`SessionStore`, `SqlDatabase`, `ExecutionEnv`, `Workspace`, `ChannelTransport`, …) | Same as core. A contract change ships with its updated conformance suite in the same release. |
 | `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface follows the core rule; its Pi-facing internals are unstable by design. |
 | `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. |
@@ -1278,7 +1279,7 @@ is that the answer is "nothing" for every minor.
 
 ## 13. Security model
 
-- Components execute in-process with full privileges of the harness. Installing one is
+- Components execute in-process with full privileges of the app. Installing one is
   running code. The CLI shows provenance (registry, commit, files, deps, env, capabilities)
   and pins commits; it never runs install scripts.
 - Inbound authentication is a pipeline stage every channel must implement; a channel with no
@@ -1299,7 +1300,7 @@ is that the answer is "nothing" for every minor.
 - **Lifecycle conformance** (`createLifecycleConformance` in `@pikit/core/testing`): every
   component that owns resources passes it. It aborts the component's `start` and `stop` while
   they run and checks that each settles within `settleMs`, that nothing is left open (when
-  the fixture provides `openResources()`), and that a fresh harness over the same component can start again. Cases have
+  the fixture provides `openResources()`), and that a fresh app over the same component can start again. Cases have
   Pi's runner-independent shape (`{ group, name, run() }`).
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
@@ -1367,7 +1368,7 @@ And the runtime proof:
 
 Resolved `[decision]`:
 
-- `defineHarness({ config })` takes an object; the core never reads files (rule: runtime
+- `defineApp({ config })` takes an object; the core never reads files (rule: runtime
   neutrality). The CLI/target loads YAML and passes the value.
 - Config is namespaced by component name (`config[component.name]`); core keys live at the
   same level. Merge is mechanical; no `configKey` in the manifest until a collision exists.
@@ -1382,8 +1383,8 @@ Resolved `[decision]`:
   free of timers and timeout options.
 - An extension is a component and is listed in `components` like any other. There is no
   `extensions: [...]` option: one list, one way to install. One `define*` fewer to keep stable.
-- Events are typed by declaration merging on `HarnessEvents` (as Pi's `CustomAgentMessages`);
-  no runtime registration for typing. Pipelines likewise on `HarnessPipelines`.
+- Events are typed by declaration merging on `AppEvents` (as Pi's `CustomAgentMessages`);
+  no runtime registration for typing. Pipelines likewise on `AppPipelines`.
 - Pipelines are `Value → Value` (§4.4). Stage errors propagate; `undefined` from a stage is an
   error, not "unchanged".
 - `setup` registers, `start`/`stop` own resources (§4.2, §4.6). Resource acquisition in an
