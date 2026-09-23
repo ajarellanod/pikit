@@ -102,6 +102,8 @@ Same agents, same routing, same channels. Different infrastructure underneath.
 
 ## What pikit is not
 
+- Not a coding agent. It does not compete with Pi, Claude Code or Codex; it uses Pi as its
+  engine and runs agents as a service.
 - Not a complete assistant. It does not try to match OpenClaw's or Hermes' feature lists —
   but it does match their *time to first running agent*.
 - Not a new agent loop. Pi is the runtime.
@@ -240,5 +242,5 @@ having them fused into one monolith that could not be reshaped. pikit is the res
 
 ## Next steps
 
-See `SPEC.md` for the technical specification, `MANIFESTO.md` for the principles, and the
-roadmap at the end of `SPEC.md` for the first milestones.
+See `MANIFESTO.md` for the principles, `SPEC.md` for the technical specification, and
+`ROADMAP.md` for the standards every milestone must meet and what each one proves.

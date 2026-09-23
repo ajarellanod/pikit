@@ -1,0 +1,197 @@
+# pikit — Roadmap
+
+This roadmap is not a task list. It says what must become true, in what order, and which
+standards hold the whole way. A milestone is done when its proof runs, not when its tasks
+are ticked.
+
+- The **why** is in `MANIFESTO.md`.
+- The **contracts** are in `SPEC.md`.
+- The **how we work** is in `AGENTS.md`.
+
+---
+
+## Part 1 — The standards
+
+These hold at every milestone, for every change. A milestone that breaks one is not done,
+however much it ships. Each standard names the check that enforces it, because a rule
+nobody can check is only a wish.
+
+### The idea
+
+| # | Standard | Check |
+|---|---|---|
+| S1 | **Pi owns the loop.** pikit never implements an agent loop, model providers or compaction. Only `@pikit/pi-adapter` imports `@earendil-works/pi-*`; `coding-agent` is never a dependency. | Import scan: `pi-*` imports only under `packages/pi-adapter`. |
+| S2 | **The core stays small.** `@pikit/core` holds events, pipelines, capabilities, lifecycle, config, diagnostics and contract interfaces. Nothing domain-specific. Its only runtime dependency is `typebox`. | Every new export from `packages/core/src/index.ts` is approved by the maintainer and recorded in `SPEC.md`. |
+| S3 | **Absence, not flags.** A component that is not installed leaves no table, timer, config key, dependency or import. No `enabled: false`. | Removal test: add → run scenario → remove → `pikit doctor` green, `git diff` shows only that component. |
+| S4 | **Contracts are the only coupling.** A component never imports another component's files; it calls `require("capability")`. | Import scan: nothing under a component imports a sibling component path. |
+| S5 | **Runtime neutrality.** No `node:*`, `bun:*` or `cloudflare:*` imports in core or in any component that declares more than one target. | Import scan per declared target; Miniflare run for `cloudflare`. |
+| S6 | **No magic.** No directives, hooks with implicit context, decorators, compiler transforms, side-effect registration or production dynamic imports. | Review, backed by `pikit doctor` printing the full graph from `pikit.config.ts` alone. |
+| S7 | **Values in config, behavior in code.** A config key that selects a strategy is a design error; the strategy is a component and the key is a capability selector. | Review of every new config schema. |
+
+### The service
+
+| # | Standard | Check |
+|---|---|---|
+| S8 | **Fail loudly.** If a component fails to start, the harness does not start: the components already started are stopped in reverse, and `start()` rejects. Resources are acquired in `start`, never in `setup` or in an event listener. `/ready` is true only when every component started. | Core lifecycle tests; per-component start-failure test. |
+| S9 | **No silent substitutes.** Outside tests, nothing falls back to an in-memory stand-in for something that must persist. If persistence is missing, it is missing visibly. | Review; `doctor` warnings. |
+| S10 | **Stated delivery semantics.** Every path to or from the outside world states its guarantee (at-least-once by default). Effects carry idempotency keys derived from `${sessionId}:${runId}:${toolCallId}`. Every tool declares `replay: "safe" \| "never"`. | Conformance suites for `inbound.dedup` and `outbound.queue`; tool manifest validation. |
+| S11 | **Continuity.** Eviction is never a reset: dropping a harness from memory never loses the conversation → session pointer. Session is not workspace: restoring one never implies the other. | Eviction and restart scenarios on both targets. |
+
+### Ownership
+
+| # | Standard | Check |
+|---|---|---|
+| S12 | **Contracts first.** Every capability has an interface and a conformance suite before its first implementation. It is stable only when two implementations (or one implementation plus the memory double) pass the same suite. Session stores also pass Pi's `createSessionRepoConformance` and `createStorageConformance`. | The suite exists and runs in CI for every implementation. |
+| S13 | **Readable source.** Copied components are small files with comments on the *why*. They ship their tests inside `files/`, so the tests keep running in the user's project, and they have no install scripts, ever. | Registry validation; review. |
+| S14 | **One truth per fact.** A component's runtime declaration (`defineComponent`) and its manifest (`component.json`) never disagree about `provides`/`requires`. | `pikit registry validate`, `pikit doctor`. |
+| S15 | **Always green.** `bun test` and `tsc --noEmit` pass on `main`. Every change leaves exactly one runnable check. A milestone ends with its scenarios running, not described. | CI. |
+
+### Stability
+
+| # | Standard | Check |
+|---|---|---|
+| S16 | **Boring on purpose.** Before 1.0 anything may change, but always through `SPEC.md` first: code that contradicts the spec is a bug in one of the two. From 1.0, SPEC §12a applies: additive within a major, deprecate before removing, and majors are rare and come with migrations. | Release notes list "what you must change" first. |
+
+### Budgets
+
+Numbers are part of the design, not deployment details. They are re-measured whenever a
+milestone touches them.
+
+| Budget | Value | From |
+|---|---|---|
+| Empty server → responding agent | ≤ 5 minutes, one command sequence | M1 |
+| Core runtime dependencies | `typebox` only | M0 |
+| Cloudflare bundle | ≤ 10 MB compressed | M4 |
+| Cloudflare cold start | ≤ 1 s | M4 |
+| Cloudflare memory | ≤ 128 MB per isolate | M4 |
+| Subagent fan-out on Cloudflare | ≤ 6 concurrent outbound connections | M4 |
+
+---
+
+## Part 2 — The milestones
+
+Each milestone proves one claim of the idea. The claims build on each other, so the order
+is a rule: a milestone starts when the previous one's evidence is green. The scenarios are
+defined in SPEC §15.
+
+### M0 — The language is enough ✅
+
+**Proves:** a small core of events, pipelines, capabilities and lifecycle can express a
+harness without knowing anything about channels, storage or Pi.
+
+**Done:** `@pikit/core` is implemented and tested:
+- typed events;
+- pipelines with priority, anchors and `halt`;
+- single-provider capabilities with selection;
+- composition validated before any code runs;
+- ordered `start` / reverse `stop` with rollback;
+- config merge and validation;
+- `describe()` for `doctor`.
+
+`Clock` and `Logger` are the only contracts, because every other contract is written when
+its first component needs it.
+
+### M1 — Five minutes, then it's yours
+
+**Proves:** a source-owned harness can be onboarded as fast as a finished product.
+
+**Done when:**
+- On a clean VPS, `curl … | sh && pikit new my-agent --preset http && cd my-agent &&
+  pikit configure && pikit up` gives a responding agent with `/health`, an honest `/ready`,
+  logs and status.
+- `src/pikit/` contains every behavior as readable source.
+- An existing tier-A Pi extension runs unmodified.
+
+**Scope:**
+- `@pikit/pi-adapter` in automatic drive mode.
+- `defineAgent` with `prepare(state)` and `agent.state`.
+- Tools written against `ExecutionEnv`.
+- The http preset.
+- The installer and the core CLI: `new`, `add`, `remove`, `doctor`, `dev`, `configure`, and
+  `up`/`down`/`logs`/`status`.
+
+**Evidence:** scenarios 1 and 7.
+
+### M2 — It survives the real world
+
+**Proves:** the harness is reliable as a service in front of real platforms. It survives
+redeliveries, channel outages, restarts and scheduled work.
+
+**Done when:**
+- A Telegram bot keeps state across restarts.
+- A redelivered update is answered once, and a crashed attempt is retried rather than
+  dropped.
+- A channel outage is retried by the outbox without touching the channel component.
+- Scheduled prompts run.
+
+**Scope:** `channel-telegram`, `inbound-dedup`, `durable-outbox`, `scheduler-cron`, the
+telegram preset, `expose`, `config check`.
+
+**Evidence:** scenarios 2 and 3, plus a redelivery scenario for `inbound-dedup`.
+
+### M3 — Ownership survives upstream change
+
+**Proves:** copied source does not rot. A user can edit components and still take upstream
+improvements.
+
+**Done when:**
+- A locally modified component upgrades with a three-way diff, and conflicts can be resolved
+  with Pi.
+- SQLite is swapped for Postgres without touching the router, channel or agent.
+- A project extension changes routing and blocks a tool without forking a component.
+
+**Scope:** `pikit.json` hashes, `outdated`/`diff`/`upgrade`, `create`,
+`registry init|validate`, `sessions-postgres`.
+
+**Evidence:** scenarios 4 and 5.
+
+### M4 — The contracts are real
+
+**Proves:** the same project runs at the edge, which means none of the contracts was hiding
+a server.
+
+**Done when:**
+- The same agents deploy to Durable Objects and answer.
+- A run survives DO eviction mid-run: `resume()` completes it.
+- The DO session backend passes Pi's conformance suite.
+- Every Cloudflare budget is measured and met.
+
+**Scope:** `sessions-cloudflare-do`, manual drive mode with resume, `deployment-cloudflare`,
+`workspace-virtual`, `execution-fetch`, `scheduler-cloudflare`.
+
+**Evidence:** scenario 6.
+
+### M5 — Operational patterns at the edge
+
+**Proves:** the patterns that made the original production platform worth having can be
+built as removable components:
+- approvals that wait for days and bind to the surface where a human can answer;
+- real shells;
+- workspace snapshots;
+- Google Chat.
+
+**Scope:** `execution-cloudflare-container`, `workspace-container`,
+`workspace-r2-snapshot`, `approvals` on Workflows, `channel-google-chat`.
+
+### 1.0 — The promise
+
+pikit reaches 1.0 when:
+1. All seven scenarios are green on every target they declare.
+2. Every contract is stable under S12.
+3. Every standard above has an automated check.
+4. SPEC §12a is in force.
+
+From then on the programming model does not get rewritten.
+
+### Later, only if demanded
+
+- A remote executor protocol.
+- A second agent runtime behind `AgentRuntime`.
+- A static registry gallery.
+
+Nothing here starts because it would be nice; each item needs a user who needs it.
+
+---
+
+Open design questions are tracked in SPEC §16. A milestone that forces a decision records
+it there as `[decision]` with a one-line rationale.

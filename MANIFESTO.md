@@ -1,141 +1,115 @@
 # The pikit Manifesto
 
-## Software should be moldable
+**Your own agent harness, in the cloud, made of parts you own.**
 
-Most software is delivered as a finished shape. You configure it, you extend it through the
-holes its authors left for you, and when your needs outgrow those holes you fork it or leave.
+pikit runs your AI agents as a service: reachable from your chats and products, remembering
+conversations, delivering replies reliably, acting on a schedule, asking a human when it
+must. It is the moldable alternative to OpenClaw and Hermes: you get to the same place, a
+running agent on your own infrastructure in minutes, but what you are left with is a project
+you can reshape, not a product you have to configure.
 
-We think infrastructure for AI agents should work differently. An agent harness is not a
-product you install; it is a system you grow. It should start small, fit your hand, and change
-shape as your needs change — without a fight.
+pikit is not a coding agent and does not compete with Pi, Claude Code or Codex. Those are
+tools you use at your desk. pikit uses Pi as its engine and builds the service around it.
 
-This is what we mean by **moldable software**: a firm core, honest contracts, and everything
-else owned by you.
+This repository is the idea made real. If the code and this text disagree, one of them is
+wrong, and we fix whichever it is.
 
-## Principles
+---
 
-### 1. A firm core, not a big one
+## The principles
 
-The core is the part everyone depends on, so it must be small, stable, boring, and
-well-reasoned. It defines the *language* components use to talk to each other — events,
-pipelines, capabilities, lifecycle — and nothing more.
+### 1. Pi owns the loop. You own the harness.
 
-The core does not know what a Telegram channel is. It does not know what SQLite is. It does
-not schedule anything. It does not ship a scheduler "just in case". Strength comes from what
-it refuses to include.
+We do not write an agent loop, model providers or compaction. Pi does that, and does it well.
+pikit is everything around the loop: channels, routing, sessions, delivery, scheduling,
+approvals, deployment. Every one of those pieces is yours.
 
-Firm also means firm over time. The model you learn for 1.0 is the model for all of 1.x.
-We would rather ship a small thing that stays the same than a large thing that gets
-rewritten. A harness is the part of your system you least want to rewrite; ours should
-never make you.
+### 2. A firm core, not a big one.
 
-### 2. Everything else is yours
+The core is the language the parts speak: events, pipelines, capabilities, lifecycle. Nothing
+else. It does not know what Telegram or SQLite is, and it schedules nothing. Its strength is
+in what it refuses to include.
 
-Anything that is not core is a component, and components are installed as source into your
-project. You read the code. You edit the code. You delete the code. There is no
-`node_modules/` layer between you and the behavior of your own system.
+### 3. Everything else is source you own.
 
-A component is not a plugin that runs inside someone else's box. It is code that becomes part
-of your box.
+Anything that is not core is a component, and components are copied into your project as
+source. You read them, edit them and delete them. No black box sits between you and the
+behavior of your own system.
 
-### 3. If you don't need it, it doesn't exist
+### 4. If you don't need it, it doesn't exist.
 
-Not "disabled". Not "behind a flag". Not "loaded but idle". Absent.
+Nothing is disabled or hidden behind a flag or left loaded but idle: what you did not install
+is absent. It has no table, timer, config key, dependency or import. A feature you do not use
+costs nothing.
 
-A harness that does not install a scheduler has no scheduler tables, no scheduler timers, no
-scheduler config keys, no scheduler dependencies. The cost of a feature you do not use must be
-zero — in code, in memory, in attack surface, and in the number of things you have to
-understand.
+### 5. Contracts are the only coupling.
 
-### 4. Contracts are stable; implementations are replaceable
+Parts talk through typed events, pipelines and named capabilities, never by reaching into
+each other's files. Replacing one part never requires touching another. That is the test
+that shows the design is honest.
 
-Components talk to each other only through typed events and named capabilities. The contract
-is the only thing that must stay compatible over time. The implementation behind it is free
-to be swapped: SQLite for Postgres, local shell for a remote container, Bun on a VPS for a
-Cloudflare Durable Object.
+### 6. Add, edit, remove: all first-class.
 
-Replacing one component must never require touching another. This is the main test of
-whether the design is honest.
+Add a component to gain a capability, edit it to make it yours, and remove it to be left
+with a clean, working project. We measure simplicity by how much you can remove without the
+rest noticing.
 
-### 5. Grow by adding, shape by editing, simplify by removing
+### 7. Values in config, behavior in code.
 
-Three operations, all first-class:
+Configuration holds ports, tokens and model names. Behavior lives in components and code you
+own. When a config key starts choosing between strategies, those strategies should be
+components.
 
-- **Add** a component to gain a capability.
-- **Edit** the installed source to make it behave the way *you* need.
-- **Remove** a component when you no longer need it, and be left with a clean project.
+### 8. No magic.
 
-If any of these is painful, something is wrong with the design.
+pikit has no directives, no hooks with hidden context, no compiler transforms and no
+mandatory build plugins. It never registers anything as a side effect of an import. Open
+`pikit.config.ts` and follow the imports: that is everything that runs.
 
-### 6. The core is editable too
+### 9. Fail loudly. Recover honestly.
 
-"Firm" does not mean "sacred". The core is also source. If you truly need to change it, you
-can — and the project should make that possible without turning into a fork you can never
-reconcile. But changing the core should be rare, deliberate, and visible. When you find
-yourself needing to, that is a signal to either re-examine your problem or send the change
-upstream.
+A harness is a service, and a service that half-works is worse than one that stops. If a
+part fails to start, the harness does not start. We never fall back silently to a
+best-effort substitute. Delivery guarantees are stated, never implied: at-least-once, with
+idempotency keys for anything with an effect. A restart, eviction or retry never loses a
+conversation and never pretends a message was answered.
 
-### 7. Composition over configuration
+### 10. Run where you want.
 
-Behavior that varies should be expressed as code you own, not as ever-growing YAML with a
-hundred keys. Configuration is for values — ports, tokens, model names. Behavior is for
-components and extensions.
+The same project runs on a single server, in Docker, or on Cloudflare Durable Objects. This
+is not a feature. It is the proof that the contracts are real, because a system that runs in
+only one place has hidden dependencies it has not admitted to.
 
-### 8. No magic
+### 11. Five minutes, then it's yours.
 
-Code you own is only useful if you can read it. pikit has no directives, no compiler
-transforms, no hooks with hidden context, no build plugin you must adopt, no lifecycle you
-cannot trace by reading `pikit.config.ts` and following imports. A component is a plain
-TypeScript module that registers plain functions. What runs is what you see.
+Ownership is no excuse for a slow start. One command takes you from an empty server to a
+running, reachable agent. Presets are shortcuts, never modes: everything they install can be
+edited or removed like anything else.
 
-This is the same instinct that shaped Pi: a minimal, explicit tool that you can extend with
-ordinary files rather than a framework that reinterprets your code. "React for agents" is a
-legitimate design; it is not this one.
+### 12. Boring on purpose.
 
-### 9. Build on what exists; don't reinvent the loop
+The model you learn for 1.0 is the model for all of 1.x. The harness is the part of your
+system you least want to rewrite, so pikit will never make you rewrite it. Excitement belongs
+in components, which you upgrade when you decide to.
 
-pikit does not implement an agent loop. Pi already does that extremely well, with a runtime
-that has been designed to be neutral about where it runs and how it persists. pikit builds the
-harness around it: channels, routing, sessions, delivery, scheduling, approvals, deployment.
+---
 
-We prefer standing on one deliberately chosen foundation over abstracting every foundation.
+## What pikit is not
 
-### 10. Run where you want
+- **Not a coding agent.** It runs agents as a service. It uses Pi rather than competing with
+  it.
+- **Not a finished product.** It will not match OpenClaw or Hermes feature for feature. It
+  matches their time to a first running agent and then gets out of your way.
+- **Not a framework that owns your application.** Your project owns pikit, not the other way
+  around.
+- **Not a plugin marketplace.** Registries distribute source. Nothing is loaded dynamically
+  in production.
 
-The same project must be able to run on a single server, in Docker, or as serverless Durable
-Objects at the edge. This is not a feature; it is the proof that the contracts are real. A
-system that only runs in one place has hidden dependencies it has not admitted to.
+## Who it is for
 
-### 11. Fast to start, yours to keep
-
-Ownership is not an excuse for a slow start. A preset must take you from an empty server to
-a running, reachable agent in minutes — the onboarding of a finished product. The difference
-is what you are left with afterwards: not a black box to configure, but a project to
-reshape. Presets are shortcuts, never modes; everything they install can be edited or
-removed like anything else.
-
-### 12. Simplicity is measured by what you can remove
-
-We do not measure the project by how many things it can do. We measure it by how much a user
-can remove, replace, or rewrite without the rest of the system noticing.
-
-The best compliment pikit can receive is: *"I deleted half of it and everything still
-worked."*
-
-## What we are not
-
-- We are not a complete assistant product. If you want something that works out of the box
-  with every channel and every feature, use OpenClaw or Hermes. They are excellent.
-- We are not a plugin marketplace. Registries exist to *distribute source*, not to run code
-  on your behalf.
-- We are not a framework that owns your application. Your project owns pikit, not the other
-  way around.
-
-## Who this is for
-
-People who build systems and want to keep understanding them. Developers, agencies, platform
-teams, and anyone who has looked at a large agent platform and thought: *I only need a third
-of this, and I need that third to behave differently.*
+People who build systems and want to keep understanding them: developers, agencies, and
+platform teams who looked at a large agent platform and thought, *"I only need a third of
+this, and I need that third to behave differently."*
 
 ---
 
