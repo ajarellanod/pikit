@@ -105,8 +105,9 @@ Never design from memory of Pi's API; its API changes faster than this document.
 - `typebox` for schemas (the same library Pi uses). No zod.
 - A YAML 1.2 parser. Do not use `Bun.YAML`: it implements YAML 1.1, where `off` and `on`
   become booleans.
-- Pi: `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`, pinned to **0.87.x**, later
-  `pi-protocol` and `pi-client`. From 0.87, `pi-agent-core` depends on
+- Pi: `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`, pinned to exactly **0.87.1**
+  (0.87.x is the supported line; a bump is deliberate, SPEC §6.4). `typebox` follows Pi's exact
+  version. Later come `pi-protocol` and `pi-client`. From 0.87, `pi-agent-core` depends on
   `@earendil-works/chord` (the harness `Context` is Chord's); only the adapter sees it. Pi's
   durable runtime (`@earendil-works/pi-durable`) is the target the adapter moves to
   (SPEC §6.4). `pi-coding-agent` is never a dependency. It is only invoked
@@ -305,7 +306,9 @@ Local Pi installation for API lookups (versions drift; check `package.json`):
 
 - `~/.bun/install/global/node_modules/@earendil-works/pi-agent-core/dist/harness/`:
   `AgentHarness`, `ExecutionEnv`, `SessionStorage`, `SessionRepo`, records, conformance.
-  The pin is 0.87.x; check the installed version against it before relying on an API.
+  The pin is exactly 0.87.1. Prefer the project's own copy under
+  `packages/pi-adapter/node_modules/@earendil-works/`: the global install can differ (its
+  top-level `pi-ai` is 0.80.10).
   - Queues: `agent-harness.d.ts` (`steer`, `followUp`, `nextRun`, `steeringMode`,
     `followUpMode`), `session/types.d.ts` (`LaneState.inbox`), and `runtime/lane.js` (drain
     rules).

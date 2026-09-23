@@ -857,7 +857,14 @@ binary (`pi`) invoked by the CLI for `resolve with pi` (§10.6). `[decision]`
 
 ### 6.4 Pi version and alignment with Pi's durable runtime
 
-**Pin:** `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` **0.87.x**. `[decision]`
+**Pin:** `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` at exactly **0.87.1** in the
+adapter's `package.json`; 0.87.x is the supported line. `[decision]` The harness is
+experimental and changes weekly, and the adapter's bridges read Pi's storage records (see
+below). A bump is therefore a deliberate change: run the spike and `pi-gaps` tests, then check
+this section again. Pi's own dependencies use caret ranges within 0.87 (`^0.87.1`); the
+lockfile freezes them. `typebox` follows Pi's exact version (1.3.27), so the core and Pi share
+one copy.
+
 From 0.87, `pi-agent-core` depends on `@earendil-works/chord`, and the harness `Context` is
 Chord's. Only the adapter sees either. The adapter spike ran against 0.87.1 (tag `v0.87.1`,
 `f07218c4`). On Pi's `main` at `7fd564cb` (2026-09-23), the harness runtime is unchanged since
