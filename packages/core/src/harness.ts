@@ -19,6 +19,12 @@
  * `use()` returns a handle whose `get()` works only once the graph is valid, so no component can
  * reach a provider whose setup has not run. `runtime.*` events stay notifications: a listener
  * that throws is logged and cannot make the harness look healthy or unhealthy.
+ *
+ * Deadlines belong to whoever runs the harness (systemd, a Durable Object constructor), so
+ * `start(ctx)` and `stop(ctx)` take a context instead of timeout options. Its cancellation
+ * reaches every hook as `ctx.abortSignal`, and the harness stops waiting for a hook that
+ * outlives it. JavaScript cannot kill a promise, so an abandoned hook keeps running and must
+ * release what it acquired when it sees the abort.
  */
 
 import Type, { type Static, type TSchema } from "typebox";
@@ -30,7 +36,7 @@ import {
   type HarnessKeyedCapabilities,
   type Keyed,
 } from "./capabilities.ts";
-import { BACKGROUND_CONTEXT, type Context } from "./context.ts";
+import { BACKGROUND_CONTEXT, type Context, withAbortSignal, withCancel } from "./context.ts";
 import { type Clock, systemClock } from "./contracts/clock.ts";
 import { consoleLogger, type Logger } from "./contracts/logger.ts";
 import { createEventBus, type EventBus, type HarnessEvents } from "./events.ts";
@@ -127,9 +133,16 @@ export interface Pikit extends HarnessContext {
  * `stop`. Setup-local variables are shared with both through the closure.
  */
 export interface ComponentLifecycle {
-  /** Runs in dependency order. A throw rolls back the components already started and fails `start()`. */
+  /**
+   * Runs in dependency order. A throw rolls back the components already started and fails
+   * `start()`. When `ctx.abortSignal` fires (the start deadline, or `stop()` during boot) the
+   * harness stops waiting: release what was acquired and throw.
+   */
   start?(ctx: HarnessContext): void | Promise<void>;
-  /** Runs in reverse dependency order. A throw is collected; the remaining components still stop. */
+  /**
+   * Runs in reverse dependency order. A throw is collected; the remaining components still stop.
+   * When `ctx.abortSignal` fires (the stop deadline) the harness moves on to the next component.
+   */
   stop?(ctx: HarnessContext): void | Promise<void>;
 }
 
@@ -187,10 +200,18 @@ export interface HarnessDescription {
 export interface Harness {
   /** Harness context over `parent` (its cancellation and values); `BACKGROUND_CONTEXT` if omitted. */
   context(parent?: Context): HarnessContext;
-  /** Rejects if a component fails to start, after stopping the ones that did. */
-  start(): Promise<void>;
-  /** Stops every started component; rejects with an `AggregateError` if any `stop` threw. */
-  stop(): Promise<void>;
+  /**
+   * Rejects if a component fails to start, after stopping the ones that did. `parent` bounds the
+   * start (e.g. `withAbortSignal(AbortSignal.timeout(ms), BACKGROUND_CONTEXT)`); the rollback is
+   * not bounded by it, only by a `stop()` that interrupts the start.
+   */
+  start(parent?: Context): Promise<void>;
+  /**
+   * Stops every started component; rejects with an `AggregateError` if any `stop` threw or was
+   * abandoned when `parent` was cancelled. During a `start()` it cancels the start and waits for
+   * its rollback, bounded by `parent`. Concurrent calls share the first call's shutdown.
+   */
+  stop(parent?: Context): Promise<void>;
   describe(): HarnessDescription;
 }
 
@@ -354,70 +375,93 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
         hooks ? [{ name: component.name, hooks }] : [],
       );
 
-      /** Stops `running` in reverse order; every stop runs even if an earlier one threw. */
-      const shutdown = async (running: typeof lifecycles): Promise<Error[]> => {
-        await base.emit("runtime.stopping", {});
+      /**
+       * Stops `list` in reverse order under `ctx`. Every stop runs even if an earlier one threw;
+       * one still running when `ctx.abortSignal` fires is abandoned and reported.
+       */
+      const shutdown = async (list: typeof lifecycles, ctx: HarnessContext): Promise<Error[]> => {
+        await ctx.emit("runtime.stopping", {});
         const errors: Error[] = [];
-        for (const { name, hooks } of [...running].reverse()) {
+        for (const { name, hooks } of [...list].reverse()) {
           try {
-            await hooks.stop?.(base);
+            await bounded(() => hooks.stop?.(ctx), ctx.abortSignal);
           } catch (error) {
             errors.push(new Error(`component "${name}" failed to stop`, { cause: error }));
           }
         }
-        await base.emit("runtime.stopped", {});
+        await ctx.emit("runtime.stopped", {});
         return errors;
+      };
+
+      /** One in-flight `start()`: `stop()` cancels it and bounds its rollback with its own deadline. */
+      interface Boot {
+        done: Promise<void>;
+        cancel(reason: unknown): void;
+        boundRollback(signal: AbortSignal | undefined): void;
+      }
+
+      const boot = (parent: Context): Boot => {
+        const { context: bootContext, cancel } = withCancel(parent);
+        // The rollback does not inherit the start's cancellation, which is usually why it runs;
+        // only a stop() that interrupts the start bounds it.
+        const rollback = new AbortController();
+        const done = (async () => {
+          const ctx = context(bootContext);
+          await ctx.emit("runtime.starting", {});
+          const up: typeof lifecycles = [];
+          for (const entry of lifecycles) {
+            try {
+              ctx.abortSignal?.throwIfAborted();
+              await bounded(() => entry.hooks.start?.(ctx), ctx.abortSignal);
+            } catch (error) {
+              // Every runtime.starting is closed by runtime.stopped, even when start fails.
+              const rollbackCtx = context(withAbortSignal(rollback.signal, withoutCancel(parent)));
+              for (const stopError of await shutdown(up, rollbackCtx)) {
+                logger.error("rollback after failed start", { error: stopError });
+              }
+              started = false;
+              throw new Error(`component "${entry.name}" failed to start`, { cause: error });
+            }
+            up.push(entry);
+          }
+          running = up;
+          await ctx.emit("runtime.ready", {});
+        })();
+        return { done, cancel, boundRollback: (signal) => follow(signal, rollback) };
       };
 
       let started = false;
       let running: typeof lifecycles = [];
-      // In-flight transitions. `stop()` waits for a `start()` in progress (a SIGTERM during boot)
-      // so that whatever it started is stopped; concurrent `stop()` calls share one shutdown.
-      let starting: Promise<void> | undefined;
+      let starting: Boot | undefined;
       let stopping: Promise<void> | undefined;
-
-      const boot = async (): Promise<void> => {
-        await base.emit("runtime.starting", {});
-        const up: typeof lifecycles = [];
-        for (const entry of lifecycles) {
-          try {
-            await entry.hooks.start?.(base);
-          } catch (error) {
-            // Every runtime.starting is closed by runtime.stopped, even when start fails.
-            for (const stopError of await shutdown(up)) {
-              logger.error("rollback after failed start", { error: stopError });
-            }
-            started = false;
-            throw new Error(`component "${entry.name}" failed to start`, { cause: error });
-          }
-          up.push(entry);
-        }
-        running = up;
-        await base.emit("runtime.ready", {});
-      };
 
       return {
         context,
 
-        async start() {
+        async start(parent = BACKGROUND_CONTEXT) {
           if (stopping) throw new Error("harness is stopping");
           if (started) throw new Error("harness already started");
           started = true;
-          starting = boot();
+          starting = boot(parent);
           try {
-            await starting;
+            await starting.done;
           } finally {
             starting = undefined;
           }
         },
 
-        stop() {
+        stop(parent = BACKGROUND_CONTEXT) {
           stopping ??= (async () => {
-            // A failed start already rolled back; its error belongs to the caller of start().
-            if (starting) await starting.catch(() => {});
+            if (starting) {
+              // A SIGTERM during boot: cancel it and let it roll back within this stop's deadline.
+              // Its error belongs to the caller of start().
+              starting.boundRollback(parent.abortSignal);
+              starting.cancel(new Error("harness is stopping"));
+              await starting.done.catch(() => {});
+            }
             if (!started) return;
             started = false;
-            const errors = await shutdown(running);
+            const errors = await shutdown(running, context(parent));
             running = [];
             if (errors.length) throw new AggregateError(errors, "harness stopped with errors");
           })().finally(() => {
@@ -461,6 +505,38 @@ function checkUniqueNames(components: ComponentDefinition[]): void {
     if (seen.has(name)) throw new Error(`component "${name}" is listed twice`);
     seen.add(name);
   }
+}
+
+/**
+ * Awaits `work()` unless `signal` aborts first; then rejects with the abort reason. `work` is
+ * always called. An abandoned promise keeps running, and its outcome is consumed here so it
+ * cannot surface as an unhandled rejection.
+ */
+function bounded(work: () => unknown, signal: AbortSignal | undefined): Promise<void> {
+  const pending = Promise.resolve().then(work);
+  if (signal === undefined) return pending.then(() => {});
+  return new Promise<void>((resolve, reject) => {
+    const abandon = () => reject(signal.reason);
+    signal.addEventListener("abort", abandon, { once: true });
+    pending.then(() => resolve(), reject).finally(() => signal.removeEventListener("abort", abandon));
+    if (signal.aborted) abandon();
+  });
+}
+
+/** Abort `target` when `signal` aborts (now, if it already has). */
+function follow(signal: AbortSignal | undefined, target: AbortController): void {
+  if (signal === undefined) return;
+  if (signal.aborted) target.abort(signal.reason);
+  else signal.addEventListener("abort", () => target.abort(signal.reason), { once: true });
+}
+
+/** `parent`'s values without its cancellation (for work that must outlive it, like a rollback). */
+function withoutCancel(parent: Context): Context {
+  return {
+    abortSignal: undefined,
+    value: (key) => parent.value(key),
+    toString: () => `${parent}.WithoutCancel`,
+  };
 }
 
 /** One `use()` / `useKeyed()` a setup made. */

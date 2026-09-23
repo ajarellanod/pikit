@@ -105,8 +105,8 @@ harness without knowing anything about channels, storage or Pi.
   keyed (`provideKeyed`/`useKeyed`);
 - composition validated after every setup and before any start: missing, ambiguous and
   badly selected providers, mixed modes, duplicate keys and cycles;
-- ordered `start` / reverse `stop` with rollback, and a `stop()` that waits for an in-flight
-  `start()`;
+- ordered `start` / reverse `stop` with rollback, deadlines passed by the caller as a
+  context, and a `stop()` that cancels an in-flight `start()`;
 - an invocation `Context` (cancellation and values) with Chord's shape, bridged to Pi in one
   line;
 - config merge and validation;

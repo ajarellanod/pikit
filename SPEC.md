@@ -355,9 +355,23 @@ stop            component stop() in reverse order; every stop runs, failures are
 runtime.stopped
 ```
 
-`stop()` during a `start()` in progress (a SIGTERM during boot) waits for it to finish and
-then stops whatever it started. Concurrent `stop()` calls share one shutdown, and `start()`
-while stopping is rejected. A stopped harness can be started again.
+**Deadlines.** `[decision]` `start(ctx?)` and `stop(ctx?)` take a `Context`; the core has no
+timeout options. The deadline belongs to whoever runs the harness (the `deployment-*`
+component: systemd's stop timeout, a Durable Object's `blockConcurrencyWhile`), for example
+`harness.stop(withAbortSignal(AbortSignal.timeout(ms), BACKGROUND_CONTEXT))`.
+- Every `start`/`stop` hook receives that cancellation as `ctx.abortSignal`.
+- A `start` still running when it fires is abandoned: that start fails and rolls back.
+- A `stop` still running when it fires is abandoned and reported in the `AggregateError`, and
+  the remaining components still stop.
+- JavaScript cannot kill a promise, so an abandoned hook keeps running. A hook must release
+  what it acquired and return when it sees the abort; the harness only stops waiting.
+- The rollback of a failed start does not inherit the start's cancellation, which is usually
+  why it runs. It is bounded only by a `stop()` that interrupts the start.
+
+`stop()` during a `start()` in progress (a SIGTERM during boot) cancels the start, waits for
+its rollback within the stop's deadline, and leaves the start's error to the caller of
+`start()`. Concurrent `stop()` calls share the first call's shutdown and deadline, and
+`start()` while stopping is rejected. A stopped harness can be started again.
 
 Every `runtime.starting` is closed by `runtime.stopped`, including a failed start. On
 Cloudflare, `start` runs inside the Durable Object constructor's `blockConcurrencyWhile`.
@@ -1280,8 +1294,11 @@ Resolved `[decision]`:
   ambiguous and badly selected providers and cycles fail in `create()`, before any `start`.
 - `use()` returns an explicit `Handle` whose `get()` works after validation; no proxies, no
   `ctx.require`.
-- Registration is sealed when `setup` returns; `stop()` waits for an in-flight `start()`
+- Registration is sealed when `setup` returns; `stop()` cancels an in-flight `start()`
   (§4.2, §4.6).
+- `start(ctx)`/`stop(ctx)` take their deadline from the caller as a context; hooks that
+  outlive it are abandoned, not awaited (§4.6). The host knows the deadline; the core stays
+  free of timers and timeout options.
 - An extension is a component; `extensions: [...]` is sugar concatenated to `components`. One
   `define*` fewer to keep stable.
 - Events are typed by declaration merging on `HarnessEvents` (as Pi's `CustomAgentMessages`);

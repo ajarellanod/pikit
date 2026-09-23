@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import Type from "typebox";
-import { createContextKey, withAbortSignal, withContextValue } from "./context.ts";
+import { BACKGROUND_CONTEXT, createContextKey, withAbortSignal, withContextValue } from "./context.ts";
 import { silentLogger } from "./contracts/logger.ts";
 import { defineComponent, defineHarness, type HarnessOptions, type Pikit } from "./harness.ts";
 import { Halt } from "./pipeline.ts";
@@ -434,47 +434,119 @@ test("registration is sealed when setup returns", async () => {
   expect(harness.describe().capabilities).toEqual({});
 });
 
-test("stop() during start() waits for it and stops what it started; concurrent stops share one shutdown", async () => {
+test("stop() during start() cancels it; the rollback is bounded by stop's deadline; concurrent stops share one shutdown", async () => {
   const log: string[] = [];
-  let release: () => void = () => {};
-  const booted = new Promise<void>((resolve) => {
-    release = resolve;
-  });
+  let blockStart = true;
   const fast = defineComponent({
     name: "fast",
     setup: () => ({
       start: () => {
         log.push("fast started");
       },
+      // Hangs during the rollback: only the stop deadline can end it.
       stop: () => {
-        log.push("fast stopped");
+        log.push("fast stop called");
+        if (blockStart) return new Promise<void>(() => {});
       },
     }),
   });
   const slow = defineComponent({
     name: "slow",
     setup: () => ({
-      start: () => booted.then(() => void log.push("slow started")),
-      stop: () => {
-        log.push("slow stopped");
-      },
+      // Cooperative: gives up when the harness cancels the start.
+      start: (ctx) =>
+        blockStart
+          ? new Promise<void>((_, reject) => {
+              ctx.abortSignal?.addEventListener("abort", () => {
+                log.push("slow start aborted");
+                reject(ctx.abortSignal?.reason);
+              });
+            })
+          : undefined,
     }),
   });
   const harness = await defineHarness(quiet({ components: [fast, slow] })).create();
 
   const starting = harness.start();
   await new Promise((resolve) => setTimeout(resolve, 5)); // fast is up, slow is still starting
-  const first = harness.stop();
+  const first = harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT));
   const second = harness.stop();
   expect(second).toBe(first);
   await expect(harness.start()).rejects.toThrow("harness is stopping");
-  release();
-  await starting;
   await first;
+  const error = await starting.catch((e: Error) => e);
+  expect(error).toBeInstanceOf(Error);
+  expect((error as Error).message).toBe('component "slow" failed to start');
+  expect(((error as Error).cause as Error).message).toBe("harness is stopping");
+  expect(log).toEqual(["fast started", "slow start aborted", "fast stop called"]);
 
-  expect(log).toEqual(["fast started", "slow started", "slow stopped", "fast stopped"]);
+  blockStart = false;
   await harness.start(); // a stopped harness can start again
   await harness.stop();
+});
+
+test("start(ctx): a start that outlives its deadline is abandoned and rolled back without that deadline", async () => {
+  const log: string[] = [];
+  let rollbackSignal: AbortSignal | undefined;
+  const first = defineComponent({
+    name: "first",
+    setup: () => ({
+      start: () => {
+        log.push("first started");
+      },
+      stop: (ctx) => {
+        rollbackSignal = ctx.abortSignal;
+        log.push("first stopped");
+      },
+    }),
+  });
+  const hung = defineComponent({
+    name: "hung",
+    // Ignores cancellation entirely: the harness must not wait for it.
+    setup: () => ({ start: () => new Promise<void>(() => {}) }),
+  });
+  const harness = await defineHarness(quiet({ components: [first, hung] })).create();
+
+  const error = await harness.start(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT)).catch((e: Error) => e);
+  expect((error as Error).message).toBe('component "hung" failed to start');
+  expect(((error as Error).cause as DOMException).name).toBe("TimeoutError");
+  expect(log).toEqual(["first started", "first stopped"]);
+  // The expired start deadline did not reach the rollback.
+  expect(rollbackSignal?.aborted).toBe(false);
+});
+
+test("stop(ctx): a stop that outlives its deadline is abandoned and reported; the rest still stop", async () => {
+  const log: string[] = [];
+  const events: string[] = [];
+  const store = defineComponent({
+    name: "store",
+    setup(pikit) {
+      pikit.provide("test.store", { name: "mem" });
+      pikit.on("runtime.stopped", () => void events.push("runtime.stopped"));
+      return {
+        stop: () => {
+          log.push("store stopped");
+        },
+      };
+    },
+  });
+  const hung = defineComponent({
+    name: "hung",
+    setup(pikit) {
+      pikit.use("test.store");
+      return { stop: () => new Promise<void>(() => {}) };
+    },
+  });
+  const harness = await defineHarness(quiet({ components: [hung, store] })).create();
+  await harness.start();
+
+  const error = await harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT)).catch((e: Error) => e);
+  expect(error).toBeInstanceOf(AggregateError);
+  const [abandoned] = (error as AggregateError).errors as Error[];
+  expect(abandoned?.message).toBe('component "hung" failed to stop');
+  expect((abandoned?.cause as DOMException).name).toBe("TimeoutError");
+  expect(log).toEqual(["store stopped"]);
+  expect(events).toEqual(["runtime.stopped"]);
 });
 
 test("setup is synchronous and handles cannot be resolved during it", async () => {
