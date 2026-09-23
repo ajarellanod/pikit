@@ -151,7 +151,7 @@ detection is partial: three gaps go upstream (SPEC §6.4).
 **Scope:**
 - `@pikit/pi-adapter` on `accept()` / `drive()` in one server process, shaped by the spike.
 - `defineAgent` with `prepare(state)` and `agent.state`.
-- Tools written against `ExecutionEnv`.
+- Tools: Pi's `read` / `write` / `edit` / `bash` wrapped as `tool-*` components (SPEC §6.3).
 - The http preset, running one server replica: one process is the only worker.
 - The installer and the core CLI: `new`, `add`, `remove`, `doctor`, `dev`, `configure`, and
   `up`/`down`/`logs`/`status`.

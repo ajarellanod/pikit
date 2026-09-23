@@ -380,8 +380,9 @@ Record here anything that went wrong twice, or that the user explicitly said not
 
 - `coding-agent` is never a dependency: it is 19 MB, has 105 files importing `node:*`, uses
   `jiti` for dynamic extension loading, and has its own `SessionManager`. Its tool factories
-  take `cwd` + `operations`, not `ExecutionEnv`, so tools are pikit source over
-  `ExecutionEnv`.
+  take `cwd` + `operations`, not `ExecutionEnv`. Tools come from `pi-agent-core` instead: from
+  0.87.1 it ships `read` / `write` / `edit` / `bash` over `ExecutionEnv` (SPEC §6.3). Check
+  Pi's current exports before writing a tool.
 - Pi's session conformance is `createSessionRepoConformance` + `createStorageConformance`
   under `harness/session/testing`. `createSessionBackendConformance` does not exist.
 - The docs use `§`, `→`, `—` and box-drawing characters. The edit tool keeps writing

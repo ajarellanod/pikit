@@ -682,7 +682,7 @@ what a single Pi process cannot provide for itself. Verified against `pi-agent-c
 | Steering, follow-up and next-run queues, persisted as the session inbox | Routing messages to agents (multi-agent) |
 | Serialized writes per session; exclusive open of a session within a process | Ownership of a session **across** processes (§7.2) |
 | Resume of the operations a dead worker left open; tool replay (`replay: "safe" \| "never"`) | Durable delivery (outbox), scheduling, approvals surfaces |
-| Tool hooks, tool execution modes, turn preparation / finish hooks | Tools written over `ExecutionEnv`; policy; sandboxes via `execution` |
+| Tool hooks, tool execution modes, turn preparation / finish hooks; `read` / `write` / `edit` / `bash` tools over `ExecutionEnv` | Tool components that give Pi's tools a capability and a `replay`; policy; sandboxes via `execution` |
 | Session values, branches, forks, usage records | Conversation registry, reset, workspace references |
 | Skills, prompt templates, system prompt assembly | Deployment, secrets, targets, `doctor` |
 
@@ -822,12 +822,21 @@ Tools are components too (`tool-*`). A tool component declares which capabilitie
 { "name": "tool-http-fetch", "requires": { "capabilities": ["network.fetch"] } }
 ```
 
-`pi-agent-core` ships **no** built-in tools: `AgentHarness` receives `tools: AgentHarnessTool[]`
-and nothing else. The `read`/`write`/`edit`/`bash`/`ls` factories live in `pi-coding-agent`,
-take `cwd` plus a per-tool `operations` interface (not `ExecutionEnv`), and pull in a 19 MB
-Node-only package. pikit therefore ships its own small tools as source in `tool-*` components,
-written against Pi's `ExecutionEnv` contract, so they run on any `execution` provider
-(including `workspace-virtual` on Cloudflare). `[decision]`
+`pi-agent-core` ships `createReadTool`, `createWriteTool`, `createEditTool` and
+`createBashTool` (verified on 0.87.1). They are harness tools over Pi's `ExecutionEnv`, which
+they receive as `toolContext.env`. They import nothing Node-only (`typebox`, `diff`), and Pi's
+own session worker (`mini`) uses them. Following Pi first, `tool-read`, `tool-write`,
+`tool-edit` and `tool-bash` wrap Pi's factories and do not reimplement them. `[decision]`
+
+A wrapper adds only what the kit owns:
+- the capability the tool requires (`execution`, or `execution.shell` for `bash`);
+- its `replay`. Pi's tools declare none, so they default to `"never"`; a read-only wrapper
+  declares `"safe"`.
+
+pikit writes a tool as source only when Pi has none (for example `ls`, or `http-fetch`). The
+tools run on any `execution` provider. Pi's `ExecutionEnv` includes `exec`, so a provider
+without a shell implements it as an error; only `bash` reaches it. When Pi's durable runtime
+redefines tools (pico-v5 §7.2), Pi migrates its own tools and the wrappers follow.
 
 `pi-coding-agent` is never a dependency of a pikit project. Its only use is as an external
 binary (`pi`) invoked by the CLI for `resolve with pi` (§10.6). `[decision]`
