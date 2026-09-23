@@ -113,8 +113,9 @@ harness without knowing anything about channels, storage or Pi.
 - `describe()` for `doctor`.
 
 `Clock` and `Logger` are the only contracts. Every other contract (`sessions.store`,
-`execution`, `channel.transport`…), `@pikit/core/testing` with its conformance suites, the
-`defineAgent` shapes and `registerEvent` arrive with the first component that needs them.
+`execution`, `channel.transport`…) with their conformance suites, the `defineAgent` shapes
+and `registerEvent` arrive with the first component that needs them. `@pikit/core/testing`
+starts with the lifecycle conformance, which every resource-owning component passes.
 
 ### M1 — Five minutes, then it's yours
 

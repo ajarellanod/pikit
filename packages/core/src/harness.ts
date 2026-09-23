@@ -394,11 +394,11 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
       const abandoned = new Map<Promise<unknown>, string>();
       const lifecycleStep = (label: string, work: () => unknown, signal: AbortSignal | undefined) =>
         bounded(work, signal, (pending) => {
-          logger.warn("abandoned at its deadline; it keeps running", { step: label });
+          logger.warn(ABANDONED_MESSAGE, { step: label });
           abandoned.set(pending, label);
           const settled = () => {
             abandoned.delete(pending);
-            logger.info("abandoned step settled", { step: label });
+            logger.info(SETTLED_MESSAGE, { step: label });
           };
           pending.then(settled, settled);
         });
@@ -543,6 +543,13 @@ function checkUniqueNames(components: ComponentDefinition[]): void {
 }
 
 type RuntimeEvent = "runtime.starting" | "runtime.ready" | "runtime.stopping" | "runtime.stopped";
+
+/**
+ * Log messages for abandoned lifecycle work (`fields.step` names it). Not public API, but
+ * `@pikit/core/testing` observes them to tell when abandoned work has settled.
+ */
+export const ABANDONED_MESSAGE = "abandoned at its deadline; it keeps running";
+export const SETTLED_MESSAGE = "abandoned step settled";
 
 /**
  * Awaits `work()` unless `signal` aborts first; then calls `onAbandon` with the still-pending

@@ -243,7 +243,8 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   `outbound.queue`, `scheduler`.
 - **Session stores** also pass Pi's `createSessionRepoConformance()` and
   `createStorageConformance()` (from `pi-agent-core/harness/session/testing`).
-- **Every component that owns resources** has a start-failure test.
+- **Every component that owns resources** has a start-failure test and passes
+  `createLifecycleConformance` (it honours `ctx.abortSignal` and leaves nothing open).
 - **Components targeting `cloudflare`** are tested under Miniflare or `wrangler dev`.
 - **Timezones:** never mutate `process.env.TZ` in a test; spawn a subprocess instead. Do not
   rely on `bun test` forcing UTC; run TZ-sensitive parsing under `bun run` too.

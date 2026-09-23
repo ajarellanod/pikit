@@ -374,7 +374,8 @@ component: systemd's stop timeout, a Durable Object's `blockConcurrencyWhile`), 
 - Past the deadline, each remaining step still runs and gets one turn of the event loop
   before it is abandoned, so quick cleanup after a slow step is not reported as a failure.
 - JavaScript cannot kill a promise, so an abandoned hook keeps running. A hook must release
-  what it acquired and return when it sees the abort; the harness only stops waiting.
+  what it acquired and return when it sees the abort; the harness only stops waiting. The core
+  cannot enforce this, so it is checked per component: `createLifecycleConformance` (§14).
 - Abandoned work is visible: `warn` when it is abandoned, `info` when it settles. `start()`
   refuses to run while any is still running, because it shares its component's closure and a
   late `stop` could release what the new run acquired.
@@ -1249,6 +1250,11 @@ is that the answer is "nothing" for every minor.
 
 - Core: unit tests for event ordering, pipeline priority/halt, capability resolution errors,
   config schema merge, lifecycle order.
+- **Lifecycle conformance** (`createLifecycleConformance` in `@pikit/core/testing`): every
+  component that owns resources passes it. It aborts the component's `start` and `stop` while
+  they run and checks that each settles within `settleMs`, that nothing is left open (when
+  the fixture provides `openResources()`), and that the harness can start again. Cases have
+  Pi's runner-independent shape (`{ group, name, run() }`).
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
   implementation must pass its suite. Pi's session conformance is reused for
