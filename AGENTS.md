@@ -385,3 +385,12 @@ Record here anything that went wrong twice, or that the user explicitly said not
   repeatedly. For doc edits that contain these characters, use a Python heredoc with
   `str.replace` and an `assert count == 1`, then scan for `\\u[0-9a-f]{4}`. An edit batch is
   atomic, so one bad entry discards all the others.
+- Bun < 1.4.0 cancels an `AbortSignal.timeout()` for good when its abort-listener count drops
+  from one to zero (`removeEventListener`, `onabort = null`): it never fires and `aborted`
+  stays `false`. Node and Bun >= 1.4.0 are correct (fixed by oven-sh/bun#37666). Never remove
+  the last abort listener from a signal you did not create; `bounded()` in `harness.ts` keeps
+  its listener for this reason. Before reporting a runtime bug upstream, reproduce it on the
+  latest release (download it to `/tmp`, do not upgrade the global install) and search merged
+  PRs, not only issues.
+- macOS has no `timeout` command. Bound a command that may hang with
+  `perl -e 'alarm 60; exec @ARGV' <cmd>`, and give hanging tests `--timeout <ms>`.
