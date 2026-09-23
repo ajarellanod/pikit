@@ -313,7 +313,7 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           clock,
           on: (name, listener) => {
             open(`on("${name}")`);
-            return events.on(name, listener);
+            events.on(name, listener);
           },
           pipeline: (name, stage, opts) => {
             open(`pipeline("${name}")`);

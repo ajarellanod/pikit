@@ -43,22 +43,3 @@ test("a throwing listener is reported and does not stop the others", async () =>
   expect(reported[0]?.event).toBe("test.ping");
   expect((reported[0]?.error as Error).message).toBe("boom");
 });
-
-test("unsubscribe removes only that listener, even mid-emit", async () => {
-  const bus = createEventBus<Events, undefined>(() => {});
-  const seen: string[] = [];
-
-  const offA = bus.on("test.ping", () => {
-    seen.push("a");
-    offB(); // removing a later listener during emit must not skip anyone in this emit
-  });
-  const offB = bus.on("test.ping", () => {
-    seen.push("b");
-  });
-
-  await bus.emit("test.ping", { n: 1 }, undefined);
-  offA();
-  await bus.emit("test.ping", { n: 2 }, undefined);
-
-  expect(seen).toEqual(["a", "b"]);
-});

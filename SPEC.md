@@ -202,6 +202,10 @@ await ctx.emit("outbound.delivered", payload);                    // in start or
 `emit` awaits all listeners in registration order. A listener that throws is logged and does
 not stop the others (mirrors Pi's extension error handling).
 
+`[decision]` `on()` returns nothing: there is no unsubscribe. Listeners are registered in
+`setup` and live as long as the harness, so the graph `pikit doctor` prints is the one that
+runs. A listener that should act once keeps its own flag.
+
 Event names are namespaced. Core-owned namespaces:
 
 ```

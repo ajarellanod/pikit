@@ -22,8 +22,12 @@ export interface HarnessEvents {}
 export type EventListener<Payload, Ctx> = (payload: Payload, ctx: Ctx) => void | Promise<void>;
 
 export interface EventBus<Events extends object, Ctx> {
-  /** Register a listener. Returns a function that removes it. */
-  on<K extends keyof Events & string>(name: K, listener: EventListener<Events[K], Ctx>): () => void;
+  /**
+   * Register a listener. There is no unsubscribe: listeners are registered in `setup` and live
+   * as long as the harness, so `pikit doctor` shows the real graph. A listener that should act
+   * once keeps its own flag.
+   */
+  on<K extends keyof Events & string>(name: K, listener: EventListener<Events[K], Ctx>): void;
   /** Await every listener in registration order. Never throws because of a listener. */
   emit<K extends keyof Events & string>(name: K, payload: Events[K], ctx: Ctx): Promise<void>;
 }
@@ -38,15 +42,10 @@ export function createEventBus<Events extends object, Ctx>(
       const list = listeners.get(name) ?? [];
       list.push(listener as EventListener<unknown, Ctx>);
       listeners.set(name, list);
-      return () => {
-        const index = list.indexOf(listener as EventListener<unknown, Ctx>);
-        if (index !== -1) list.splice(index, 1);
-      };
     },
 
     async emit(name, payload, ctx) {
-      // Copy so a listener that unsubscribes (itself or another) mid-emit cannot skip entries.
-      for (const listener of [...(listeners.get(name) ?? [])]) {
+      for (const listener of listeners.get(name) ?? []) {
         try {
           await listener(payload, ctx);
         } catch (error) {
