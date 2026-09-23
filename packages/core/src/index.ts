@@ -27,6 +27,21 @@ export {
 export { Halt, halt } from "./pipeline.ts";
 export type { AppPipelines, ResolvedStage, Stage, StageOptions } from "./pipeline.ts";
 
+export { defineAgent } from "./agent.ts";
+export type {
+  Admission,
+  AgentDefinition,
+  AgentMessage,
+  AgentPayloads,
+  AgentRequest,
+  AgentResult,
+  AgentRuntime,
+  AgentTool,
+  ConversationRef,
+  TurnConfig,
+  Usage,
+} from "./agent.ts";
+
 export type { AppEvents } from "./events.ts";
 export type { CapabilityMode, AppCapabilities, AppKeyedCapabilities, Keyed } from "./capabilities.ts";
 

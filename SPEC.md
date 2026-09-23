@@ -343,6 +343,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
 | `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
+| `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
 | `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
 | `channel.transport` (keyed by channel name) | `ChannelTransport` | Send/edit/delete messages for one channel. Each channel component provides its transport under its own key; delivery uses `transports.get(message.channel)`. A missing key is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
@@ -526,7 +527,7 @@ interface ConversationRef {
   key: string;                        // tenant:channel:conversationId[:threadId]
   agent: string;
   sessionId: string;
-  workspaceRef?: WorkspaceRef;
+  workspaceRef?: WorkspaceRef;        // [planned] with `workspace` (§8.2); not in the core yet
 }
 
 interface OutboundMessage {
@@ -582,18 +583,16 @@ interface AgentRuntime {
   dispatch(request: AgentRequest, ctx: AppContext): Promise<Admission>;
   /** Stop the active run now (§7.3). */
   abort(conversation: ConversationRef, ctx: AppContext): Promise<void>;
-  /** Continue the runs a dead worker left open (crash, eviction, hibernation). */
+  /** Wake a conversation with no new message; continue the runs a dead worker left open. */
   resume(conversation: ConversationRef, ctx: AppContext): Promise<void>;
 }
 
 interface AgentRequest {
   /** Logical identity of the message (`InboundMessage.id`); Pi's `operationId` for a run (§6.4). */
   requestId: string;
+  /** Names the session and the agent (`conversation.agent`). */
   conversation: ConversationRef;
-  agent: AgentDefinition;
-  prompt: string | AgentMessage[];
-  images?: ImageContent[];
-  context?: { prefix?: string; quoted?: InboundMessage };
+  prompt: string;
 }
 
 /** What happened to the message, known as soon as Pi has made it durable. */
@@ -613,7 +612,16 @@ interface AgentResult {
   usage?: Usage;
   error?: { code: string; message: string };
 }
+
+// Events (AppEvents), all emitted by the runtime:
+"agent.dispatched": { conversation: ConversationRef; admission: Admission };  // every admission
+"agent.started":    { conversation: ConversationRef; requestId: string; resumed: boolean };
+"agent.settled":    AgentResult & { kind: "completed" | "aborted" };
+"agent.failed":     AgentResult & { kind: "failed" };
 ```
+
+`AgentRequest` starts minimal. Images, a quoted message and prompts made of messages are added
+with the components that produce them: adding a field is compatible, removing one is not.
 
 The shape comes from the adapter spike against `pi-agent-core` 0.87.1 (§6.4). It is the shape
 of a submission in Pi's durable runtime, so moving to that runtime happens inside the adapter.
@@ -661,6 +669,19 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   input placed in one turn. Because the transcript holds every request a run placed, a result
   that lists them all (for channels that reply to each message) needs no new record. Whether
   `AgentResult` carries that list is `[open]` until a channel needs it.
+- **The agent is found by name.** `conversation.agent` names an `AgentDefinition` that the
+  project provides under the keyed capability `agent.definition`, keyed by its name
+  (`pikit.provideKeyed("agent.definition", support.name, support)`). A run resumed after a crash
+  has no request to carry a definition, and one name cannot disagree with itself. The router can
+  check that a name exists and `pikit doctor` lists the agents.
+- **Opening a conversation resumes it.** When the runtime opens a conversation's session, for a
+  `dispatch` or a `resume`, it first continues the runs a dead worker left open, as Pi's `mini`
+  does. Otherwise a message dispatched there would queue behind a run nobody drives. `resume()` is
+  how a host wakes a conversation with no new message: at boot, or from a Durable Object alarm.
+- **The runtime emits `agent.*`.** `agent.dispatched` for every admission, duplicates included,
+  in the caller's context. `agent.started` from Pi's `run_start` / `run_resume`, and
+  `agent.settled` / `agent.failed` from `run_end`, in a context that keeps the dispatch's values
+  without its cancellation.
 - **`resume()`** continues the operations `AgentHarness.create()` reports as `open`, with
   `lane.resume()`; their outcomes arrive as `agent.settled` like any other run. Tools declared
   `replay: "safe"` run again; for any other tool Pi records an "interrupted" error result and
@@ -675,8 +696,12 @@ are the stable programming model (§12a). The Pi-specific payloads inside them
 precise by `@pikit/pi-adapter` through declaration merging — the same mechanism as
 `AppEvents`. The core never imports Pi; a project with the adapter sees Pi's exact types.
 Components that implement a Pi contract (`sessions.store`, `execution`) import those types
-from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-*`. `[planned]`
-— built in M1 with the adapter.
+from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-*`.
+
+Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest`, `Admission`,
+`AgentResult`, `AgentRuntime`, `ConversationRef`, and the opaque `AgentMessage`, `AgentTool` and
+`Usage` with their merge target `AgentPayloads` (each `unknown` until the adapter fills it in).
+The adapter's half is `[planned]`, built in M1.
 
 ### 6.2 Pi adapter (`@pikit/pi-adapter`)
 
@@ -802,6 +827,9 @@ export default defineAgent({
   },
 });
 ```
+
+The core's `AgentDefinition` has `name`, `model`, `systemPrompt` (the text) and `tools` today;
+`state`, `prepare` and `skills` are `[planned]` and are added to it without breaking it.
 
 Rules:
 
@@ -1570,6 +1598,13 @@ Resolved `[decision]`:
   - the `requestId` travels inside a Pi `custom` message.
 
   pikit builds no submission store, and the bridge is deleted on the move (§6.4).
+- The runtime resolves the agent from `conversation.agent` through the keyed capability
+  `agent.definition`; `AgentRequest` carries no definition (§6.1). A resumed run has no request,
+  so the name is the only truth.
+- `AgentRequest` starts as `{ requestId, conversation, prompt: string }`; other inputs arrive with
+  the components that produce them, because adding a field is compatible and removing one is not.
+- Opening a conversation resumes the runs a dead worker left open; `resume()` wakes a
+  conversation without a message (§6.1).
 
 ---
 

@@ -149,6 +149,10 @@ around it.
 `pi-agent-core` are bridged in the adapter with Pi's own mechanisms until it moves to
 `pi-durable` (SPEC §6.4).
 
+✅ **Agent contracts in core:** `defineAgent`, `AgentRuntime`, `agent.definition` and the
+`agent.*` events (SPEC §6.1). Next: the `agent.runtime` conformance suite, then the adapter
+that passes it.
+
 **Scope:**
 - `@pikit/pi-adapter` on `accept()` / `drive()` in one server process, shaped by the spike.
 - `defineAgent` with `prepare(state)` and `agent.state`.
