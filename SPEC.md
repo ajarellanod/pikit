@@ -443,6 +443,11 @@ importing it.
   came from Pi: the request's cancellation and values reach every handler.
 - `ctx.derive(change)` does the same from inside a handler:
   `ctx.derive((c) => withContextValue(TENANT, "acme", c)).emit(...)`.
+- Do not keep the `ctx` of `start` for later work. It carries the start deadline, so a server
+  that uses it for every request sees them all cancelled when that deadline fires. Derive one
+  context per invocation instead, from that invocation's own cancellation:
+  `ctx.derive(() => withAbortSignal(request.signal, BACKGROUND_CONTEXT))`. `derive` is how a
+  component that is not the host leaves the start context.
 - `emit`/`run` live on the context so everything downstream of a request shares its
   cancellation and values without threading them by hand.
 - Cancelling a child never cancels its parent.

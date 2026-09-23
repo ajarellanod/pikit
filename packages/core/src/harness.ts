@@ -139,6 +139,8 @@ export interface ComponentLifecycle {
    * Runs in dependency order. A throw rolls back the components already started and fails
    * `start()`. When `ctx.abortSignal` fires (the start deadline, or `stop()` during boot) the
    * harness stops waiting: release what was acquired and throw.
+   * `ctx` carries the start deadline: do not keep it for later work (a server's requests); derive
+   * a context per invocation with `ctx.derive(...)` (SPEC §4.7).
    */
   start?(ctx: HarnessContext): void | Promise<void>;
   /**
