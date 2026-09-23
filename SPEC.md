@@ -292,8 +292,9 @@ const store = pikit.use("sessions.store");   // in a component's setup; store.ge
 - **Keyed capabilities.** `[decision]` Some capabilities have one implementation per key
   rather than one provider: `channel.transport` has one transport per channel. A provider
   calls `pikit.provideKeyed(name, key, impl)`, possibly for several keys; a consumer calls
-  `pikit.useKeyed(name)` and gets `Keyed<T>` (`get(key)`, `keys()`). A keyed consumer starts
-  after every provider of that capability.
+  `pikit.useKeyed(name)` and gets a `KeyedHandle<T>`: `get(key)` returns that key's
+  implementation (or `undefined`) and `keys()` lists them, both from `start` onward. A keyed
+  consumer starts after every provider of that capability.
   - Two components providing the same key is an error.
   - One capability is either single or keyed. Mixing `provide` and `provideKeyed`, or `use` and
     `useKeyed`, for one name is an error.

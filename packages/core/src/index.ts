@@ -5,6 +5,7 @@ export type {
   ComponentDefinition,
   ComponentLifecycle,
   Handle,
+  KeyedHandle,
   UseOptions,
   Harness,
   HarnessContext,

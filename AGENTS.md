@@ -274,7 +274,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   will return: the selected one when there are several.
 - **Transports are keyed.** `channel.transport` is a keyed capability: each channel provides it
   under its own key (`provideKeyed`), and delivery looks it up per message with
-  `useKeyed(...).get().get(message.channel)`.
+  `useKeyed(...).get(message.channel)`.
 - **`has()` does not order startup.** A component that needs an optional capability declares
   it with `use(name, { optional: true })`, so that its provider starts first when present.
 - **Deduplication belongs to the channel.** The delivery id and the ack rule are

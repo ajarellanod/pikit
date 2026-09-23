@@ -87,6 +87,16 @@ export interface Handle<T> {
   get(): T;
 }
 
+/**
+ * A declared dependency on a keyed capability. `get(key)` returns the implementation for that
+ * key; `keys()` lists them. Both throw during setup, like `Handle.get()`.
+ */
+export interface KeyedHandle<T> {
+  readonly name: string;
+  get(key: string): T | undefined;
+  keys(): string[];
+}
+
 /** `optional`: no provider is not an error (`get()` returns `undefined`, or no keys). */
 export interface UseOptions {
   optional?: boolean;
@@ -108,7 +118,7 @@ export interface Pikit extends HarnessContext {
   /** Depend on `name` if it is installed. When it is, its provider still starts first. */
   use<K extends SingleName>(name: K, options: UseOptions & { optional: true }): Handle<HarnessCapabilities[K] | undefined>;
   /** Depend on every implementation of the keyed capability `name`. All its providers start first. */
-  useKeyed<K extends KeyedName>(name: K, options?: UseOptions): Handle<Keyed<HarnessKeyedCapabilities[K]>>;
+  useKeyed<K extends KeyedName>(name: K, options?: UseOptions): KeyedHandle<HarnessKeyedCapabilities[K]>;
   halt: typeof halt;
 }
 
@@ -238,15 +248,29 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
       // Handles resolve only after the graph is validated; until then a provider's setup may not
       // have run, so `get()` would return nothing or the wrong thing.
       let validated = false;
+      const assertReady = (use: Use, user: string): void => {
+        if (!validated) {
+          throw new Error(
+            `component "${user}": "${use.name}" is not available during setup; call get() in start or later`,
+          );
+        }
+      };
       const handle = <T>(use: Use, user: string, resolve: () => T): Handle<T> => ({
         name: use.name,
         get: () => {
-          if (!validated) {
-            throw new Error(
-              `component "${user}": "${use.name}" is not available during setup; call get() in start or later`,
-            );
-          }
+          assertReady(use, user);
           return resolve();
+        },
+      });
+      const keyedHandle = <T>(use: Use, user: string, resolve: () => Keyed<T>): KeyedHandle<T> => ({
+        name: use.name,
+        get: (key) => {
+          assertReady(use, user);
+          return resolve().get(key);
+        },
+        keys: () => {
+          assertReady(use, user);
+          return resolve().keys();
         },
       });
       /** Record a use once per name and mode; a required use wins over an optional one. */
@@ -284,7 +308,7 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           }) as Pikit["use"],
           useKeyed: (name, options = {}) => {
             const use = recordUse(record, { name, mode: "keyed", optional: options.optional === true });
-            return handle(use, component.name, () => capabilities.keyed(name));
+            return keyedHandle(use, component.name, () => capabilities.keyed(name));
           },
           halt,
         };

@@ -334,8 +334,9 @@ test("keyed capabilities: every provider contributes keys; consumers start after
       const transports = pikit.useKeyed("test.transport");
       return {
         start: () => {
-          const all = transports.get();
-          seen.push(`outbox sees ${all.keys().join(",")}; http=${all.get("http")?.channel}; sms=${all.get("sms")}`);
+          seen.push(
+            `outbox sees ${transports.keys().join(",")}; http=${transports.get("http")?.channel}; sms=${transports.get("sms")}`,
+          );
         },
       };
     },
@@ -401,7 +402,7 @@ test("keyed and single modes cannot be mixed, keys are unique, and keyed ignores
       const transports = pikit.useKeyed("test.transport", { optional: true });
       return {
         start: () => {
-          keys = transports.get().keys();
+          keys = transports.keys();
         },
       };
     },
@@ -426,6 +427,15 @@ test("setup is synchronous and handles cannot be resolved during it", async () =
   });
   await expect(defineHarness(quiet({ components: [store, eager] })).create()).rejects.toThrow(
     'component "eager": "test.store" is not available during setup; call get() in start or later',
+  );
+  const eagerKeyed = defineComponent({
+    name: "eager-keyed",
+    setup(pikit) {
+      pikit.useKeyed("test.transport", { optional: true }).keys();
+    },
+  });
+  await expect(defineHarness(quiet({ components: [eagerKeyed] })).create()).rejects.toThrow(
+    'component "eager-keyed": "test.transport" is not available during setup',
   );
 
   const asyncSetup = defineComponent({
