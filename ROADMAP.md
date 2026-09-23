@@ -22,7 +22,9 @@ nobody can check is only a wish.
 > service in the cloud, and nothing Pi already does.
 >
 > Before building any agent-facing feature, check whether Pi does it:
-> 1. Read `pi-agent-core` (harness, session, runtime) and `pi-ai`.
+> 1. Read `pi-agent-core` (harness, session, runtime) and `pi-ai`, and **always check the
+>    upstream repo `earendil-works/pi`** (`agent`, `durable`, `chord`, `server`). The
+>    installed version shows what Pi does today; the repo shows what it is about to do.
 > 2. If Pi does it, use it through the adapter. pikit builds nothing.
 > 3. If Pi does it partially, wrap it in the adapter and take the gap upstream.
 > 4. Build it in pikit only when one Pi process cannot provide it for itself.

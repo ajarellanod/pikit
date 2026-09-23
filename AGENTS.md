@@ -40,8 +40,11 @@ This rule comes before every other rule in this file. **Before building any agen
 feature, verify whether Pi already does it.** Agent-facing means anything about how the agent
 thinks, queues, remembers, retries, calls tools, compacts, resumes or is configured per turn.
 
-1. **Look in Pi first.** Read `pi-agent-core` (`dist/harness/`: `agent-harness.d.ts`,
-   `session/types.d.ts`, `runtime/`, `types.d.ts`) and `pi-ai`. See "Reference material".
+1. **Look in Pi first, including the upstream repo.** Read the installed `pi-agent-core`
+   (`dist/harness/`: `agent-harness.d.ts`, `session/types.d.ts`, `runtime/`, `types.d.ts`)
+   and `pi-ai`, **and always check `earendil-works/pi` on GitHub**. pikit depends on Pi so
+   heavily that the idea itself rests on it. The installed package shows what Pi does today;
+   the repo shows what Pi is about to do. See "Always check the Pi repo" below.
 2. **If Pi does it, use it through the adapter.** pikit builds nothing.
 3. **If Pi does it partially, wrap it in the adapter** and take the gap upstream. Do not fork
    the behavior.
@@ -57,8 +60,42 @@ An example of the rule working: Pi already has steering, follow-up and next-run 
 persisted as the session inbox. pikit therefore has no message queue of its own. A message
 that reaches a busy conversation is handed to Pi as `steer`.
 
+Pi first also covers **what Pi is building**. Pi's durable runtime (SPEC §6.4) will provide
+submissions with `requestId` deduplication, durable tasks and documents. pikit builds none of
+these: it shapes its contracts to match them and bridges the gap inside the adapter.
+
 If you are about to write a loop, a queue of agent messages, a retry policy for model calls,
 a compaction strategy, a tool scheduler or a session format: stop and read Pi.
+
+### Always check the Pi repo
+
+`earendil-works/pi` is pikit's upstream in every sense: the agent, its session model, its
+durable runtime and its composition runtime all live there, and they move weekly. Check it
+before designing any contract, before starting a milestone, and before writing adapter
+code:
+
+```bash
+gh api 'repos/earendil-works/pi/commits?per_page=20' --jq '.[] | .commit.author.date[:10] + " " + (.commit.message|split("\n")[0])'
+gh pr list -R earendil-works/pi --limit 20
+gh api repos/earendil-works/pi/contents/<path> --jq .content | base64 -d
+```
+
+What to look at:
+
+| Package | Why it matters to pikit |
+|---|---|
+| `packages/agent` | `AgentHarness`, sessions, queues, resume: what the adapter wraps today |
+| `packages/durable` | Pi's durable runtime ("Pico5"): submissions, tasks, documents. The adapter's target (SPEC §6.4) |
+| `packages/chord` | Composition runtime, `Context`, keyed services. The design closest to `@pikit/core` |
+| `packages/server`, `protocol`, `client` | Routing sessions to workers and remote sessions: overlaps with actors and workers |
+| `packages/ai` | Providers and models. Always imported by subpath |
+
+When the repo changes something pikit relies on or plans:
+- update SPEC §6.2 (what Pi does versus what pikit adds) and §6.4 (alignment);
+- delete any pikit piece Pi now provides;
+- record the Pi commit or version you checked against.
+
+Never design from memory of Pi's API; its API changes faster than this document.
 
 ## Stack
 
@@ -67,8 +104,11 @@ a compaction strategy, a tool scheduler or a session format: stop and read Pi.
 - `typebox` for schemas (the same library Pi uses). No zod.
 - A YAML 1.2 parser. Do not use `Bun.YAML`: it implements YAML 1.1, where `off` and `on`
   become booleans.
-- Pi: `@earendil-works/pi-agent-core` (0.85.1) and `@earendil-works/pi-ai` (0.80.10), later
-  `pi-protocol` and `pi-client`. `pi-coding-agent` is never a dependency. It is only invoked
+- Pi: `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai`, pinned to **0.87.x**, later
+  `pi-protocol` and `pi-client`. From 0.87, `pi-agent-core` depends on
+  `@earendil-works/chord` (the harness `Context` is Chord's); only the adapter sees it. Pi's
+  durable runtime (`@earendil-works/pi-durable`) is the target the adapter moves to
+  (SPEC §6.4). `pi-coding-agent` is never a dependency. It is only invoked
   as the external `pi` binary by the CLI.
 - Checks: `bun test` and `bun run typecheck` (`tsc --noEmit`, TypeScript 7, strict,
   `exactOptionalPropertyTypes`). Conformance suites live in `@pikit/core/testing`.
@@ -211,6 +251,12 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   exists to keep that true across processes.
 - **`steer` waits for the tools.** A steered message enters after every tool call of the
   current turn finishes, before the next model call. Stopping at once is `abort()`.
+- **One pikit conversation is one Pi session.** A Pi session is the single-writer unit. The
+  "conversations" inside a Pi session are Pi's transcript scopes: the root one, forks and
+  subagents. Do not map a pikit conversation to a Pi conversation.
+- **Two kinds of deduplication.** Transport deduplication (platform delivery id and ack) is
+  `inbound-dedup`. Logical deduplication ("was this message answered?") is Pi's submission
+  `requestId`.
 - **"Ownership" has two meanings.** Source ownership (the user owns the code) and
   conversation ownership (one worker has a session open). Always write "conversation
   ownership" for the second.
@@ -245,13 +291,21 @@ Local Pi installation for API lookups (versions drift; check `package.json`):
 
 - `~/.bun/install/global/node_modules/@earendil-works/pi-agent-core/dist/harness/`:
   `AgentHarness`, `ExecutionEnv`, `SessionStorage`, `SessionRepo`, records, conformance.
-  The installed version is 0.87.1, while the pin is 0.85.1: re-check an API against the pin
-  before relying on it.
+  The pin is 0.87.x; check the installed version against it before relying on an API.
   - Queues: `agent-harness.d.ts` (`steer`, `followUp`, `nextRun`, `steeringMode`,
     `followUpMode`), `session/types.d.ts` (`LaneState.inbox`), and `runtime/lane.js` (drain
     rules).
   - Queue semantics: `../types.d.ts` (`getSteeringMessages`, `getFollowUpMessages`).
   - Single-process precondition: `pico3/types.d.ts`, `session/mutation-line.d.ts`.
+- Pi's durable runtime ("Pico5"), in the Pi monorepo (`gh api
+  repos/earendil-works/pi/contents/<path> --jq .content | base64 -d`):
+  - `packages/durable/docs/pico-v5.md`, the normative spec. Read §4 (transactions), §5
+    (tasks), §6 (submissions and inbox), §12 (footguns).
+  - `packages/durable/docs/pico-v5-handoff.md` for implementation status.
+- Chord (`packages/chord/README.md`, `PLANNING.md`): Pi's composition runtime. Its plugin host
+  (sync setup, singleton and keyed services, ordered activation, reverse disposal) is the
+  closest design to `@pikit/core`. Align with its semantics; do not depend on it from core
+  without a decision.
 - `~/.bun/install/global/node_modules/@earendil-works/coding-agent/docs/extensions.md`: the
   extension model pikit mirrors at harness level. Read-only reference; never import it.
 - `~/.bun/install/global/node_modules/@earendil-works/pi-protocol/README.md` and
