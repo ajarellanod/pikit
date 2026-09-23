@@ -294,7 +294,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
 | `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
-| `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. See §6.2a. |
+| `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
 | `channel.transport:<name>` | `ChannelTransport` | Send/edit/delete messages for one channel. Resolved per message (`channel.transport:${message.channel}`); never listed in `requires`, because "some transport" is not one capability. A missing transport is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
 | `outbound.queue` | `OutboundQueue` | Durable enqueue + worker. Optional; without it delivery is direct. |
@@ -442,12 +442,17 @@ first attempt crashed. So:
 
 - The **channel** owns the key (`InboundMessage.id` is the platform's delivery id) and the ack
   rule: a webhook is acknowledged only once the message is durably accepted.
-- **`inbound-dedup`** is a component providing `inbound.dedup` with a claim / commit / release
-  contract and a conformance suite. It claims the id in the last `inbound.normalize` stage and
-  halts duplicates (the ingress emits `inbound.rejected { reason: "duplicate" }`); it commits
-  when the reply is handed off (`outbound.queued` with an outbox, `outbound.delivered`
-  without) and releases on `agent.failed`, so the platform's retry runs again. In-flight
-  claims expire, so a crash does not block a conversation forever.
+- **`inbound-dedup`** is a component providing `inbound.dedup`, and it covers **transport
+  deduplication only**: the platform delivery id and the ack. It claims the id in the last
+  `inbound.normalize` stage and halts duplicates (the ingress emits `inbound.rejected
+  { reason: "duplicate" }`); it commits once the message is durably accepted by the
+  conversation, and releases on failure before that point, so the platform's retry runs
+  again. In-flight claims expire, so a crash does not block a conversation forever.
+- **Logical deduplication belongs to Pi.** Once a message reaches the conversation, it is
+  submitted with `requestId = InboundMessage.id`; Pi deduplicates submissions per
+  conversation and tracks each one to its answer (§6.4). pikit does not track "was this
+  message answered" itself. `[upstream]` — until Pi's durable runtime ships, the adapter
+  keeps this record in the session's values.
 - The guarantee is **at-least-once**: a crash between effect and commit can repeat a reply.
   Effectful tools stay safe through idempotency keys (§8.4).
 - Without `inbound-dedup` there is no deduplication — no table, no LRU, no half-measure.
@@ -507,7 +512,7 @@ multi-agent service in the cloud. Before designing any agent-facing feature, che
 Pi already does it; if it does, the adapter exposes Pi's feature and pikit builds nothing.
 If Pi does it partially, the adapter wraps it and the gap goes upstream. pikit builds only
 what a single Pi process cannot provide for itself. Verified against `pi-agent-core`
-(installed 0.87.1):
+0.87.1, the pinned version (§6.4):
 
 | Pi already does it — use it | pikit adds it — Pi cannot, from inside one process |
 |---|---|
@@ -569,8 +574,8 @@ Support tiers (`pikit doctor` lists what an extension uses and at which tier):
 | B — later, chat-meaningful | `registerCommand` (slash commands from a channel), `ui.notify/select/confirm/input` (routed to the channel, awaiting a reply — overlaps with `approvals`) | Component-level; not in the first adapter cut. |
 | C — no-op with a `doctor` warning | `registerShortcut`, `register*Renderer`, `registerMarkdownTransformer`, `addAutocompleteProvider`, `ui.setWidget/setStatus/setTitle/setFooter/setHeader/theme/editor*`, `navigateTree`, `switchSession`, `fork` | TUI-only or session-tree UI. |
 
-Known facts (pi-coding-agent 0.85.1): `AgentSession` still drives the legacy `Agent` class
-(`agent.beforeToolCall`), not `AgentHarness`; the compat layer translates Pi's *semantic*
+Known facts (checked on pi-coding-agent 0.85.1; re-check on 0.87.x): `AgentSession` still
+drives the legacy `Agent` class (`agent.beforeToolCall`), not `AgentHarness`; the compat layer translates Pi's *semantic*
 extension events, not its classes, so Pi's migration lands in the adapter only. Typing the
 compat object against Pi's own `ExtensionAPI` would make `pi-coding-agent` a types-only
 devDependency (19 MB); the alternative is vendoring the subset (~200 lines, attributed in
@@ -612,9 +617,12 @@ Rules:
 - `prepare(state, ctx) → Partial<TurnConfig>` is pure with respect to its inputs. It does not
   register anything as a side effect; it returns a value. `undefined` fields keep the static
   default.
-- `state` is the agent's persisted per-conversation state (capability `agent.state`, §4.5):
-  a JSON document tools and extensions may read and update (`ctx.state.update(patch)`),
-  stored in `storage.sql` or as Pi custom entries. It survives restarts and DO eviction.
+- `state` is the agent's persisted per-conversation state: a JSON document tools and
+  extensions may read and update (`ctx.state.update(patch)`). `[decision]` It is stored **in
+  the Pi session**, as a conversation-scoped document in Pi's durable runtime and, until
+  that ships, as a session value. It commits atomically with the transcript, survives
+  restarts and eviction, and starts fresh on `/reset` (a new session). pikit adds no store for
+  it (§6.4).
 - The adapter runs `prepare` in Pi's `before_run` hook and applies the result via
   `setModel` / `setActiveTools` / system prompt for that run. The resolved `TurnConfig` is
   appended to the session as a custom entry, so "what did the agent have on turn N" is
@@ -646,6 +654,36 @@ written against Pi's `ExecutionEnv` contract, so they run on any `execution` pro
 
 `pi-coding-agent` is never a dependency of a pikit project. Its only use is as an external
 binary (`pi`) invoked by the CLI for `resolve with pi` (§10.6). `[decision]`
+
+### 6.4 Pi version and alignment with Pi's durable runtime
+
+**Pin:** `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` **0.87.x**. `[decision]`
+From 0.87, `pi-agent-core` depends on `@earendil-works/chord`, and the harness `Context` is
+Chord's. Only the adapter sees either.
+
+**Pi's durable runtime** (`@earendil-works/pi-durable`, "Pico5") is Pi's next harness: one
+session holding conversations, immutable entries, durable tasks, submissions and documents,
+all committed atomically. Its storage exists (memory, SQLite, JSONL); its runtime does not yet.
+Following Pi first, pikit **does not build** what it will provide, and shapes its own
+contracts so the move happens inside the adapter. `[upstream]`
+
+| pikit need | Pi durable runtime | Until it ships |
+|---|---|---|
+| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | `steer()` on `AgentHarness` |
+| Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | Adapter record in session values |
+| `agent.state` | Conversation-scoped document | Session value |
+| Multi-step work, waits, approvals that last days | Durable tasks: phases, effect sandwich (commit intent → effect → commit outcome), memos, `sleep(until)`, abort protocol | `state.phase` + tools; nothing more is built |
+| Subagents | Owned child conversations inside the session | Deferred |
+| `sessions-cloudflare-do` | Its SQLite core runs over a synchronous database facade that a Durable Object can implement | Pi's current `SessionRepo` |
+
+Mapping of vocabulary: **one pikit conversation (the actor) is one Pi session.** The session
+is Pi's unit of single-writer ownership (§7.2); conversations inside it are Pi's transcript
+scopes (the root one, forks, subagents). Pi's durable storage states that cross-process
+locking is not supported, which confirms that conversation ownership stays pikit's job.
+
+What stays pikit's: channels, ingress and transport deduplication (§5), routing between
+agents, conversation ownership across processes, delivery, scheduling triggers, approval
+surfaces, deployment.
 
 ---
 
@@ -708,8 +746,12 @@ a new message usually means "change course". An agent may choose another mode
 waiting for tools, is `abort()`, not a queue mode. Pi's `steeringMode` / `followUpMode`
 (`all` or `one-at-a-time`) keep Pi's defaults.
 
-`[open]` Whether `agent.state` lives in the session's values (a `/reset` starts it fresh) or
-next to the registry (it survives a reset).
+`agent.state` lives in the session (§6.2a), so a `/reset` starts it fresh. Anything that
+must survive a reset belongs to the conversation registry's metadata, not to `agent.state`.
+
+The adapter reports what happened to a message sent to a busy conversation as `queued`, and
+the answer arrives through the same run. With Pi's durable runtime this becomes a
+submission the adapter can await until it is answered (§6.4).
 
 ### 7.4 Two different records
 
@@ -729,7 +771,7 @@ The contract is Pi's `SessionRepo<TMetadata>` + `SessionStorage`. `[upstream]` T
 re-exports them; components implement them. Every implementation must pass
 `createSessionRepoConformance()` and `createStorageConformance()` from
 `@earendil-works/pi-agent-core/harness/session/testing` (plus the fork/lifecycle sub-suites
-exported alongside them; verified against `pi-agent-core` 0.85.1).
+exported alongside them; verified against `pi-agent-core` 0.87.1).
 
 Planned implementations:
 
@@ -1198,6 +1240,11 @@ Resolved `[decision]`:
   does not already provide it. pikit is the kit around Pi, never a second agent.
 - Conversations are actors and processes are workers (§7.1). The actor's mailbox is Pi's
   inbox; pikit keeps no message queue of its own.
+- Pi is pinned to 0.87.x (§6.4). Pi's durable runtime is the target: pikit builds no
+  logical deduplication, task engine or state store of its own.
+- `agent.state` lives in the Pi session and resets with it (§6.2a).
+- `inbound-dedup` is transport deduplication only; logical deduplication is Pi's submission
+  `requestId` (§5, §6.4).
 - Messages reaching a busy conversation are `steer`ed by default (§7.3), matching what a chat
   user means by a new message; an agent may choose `followUp` or `nextRun`.
 - "Conversation ownership", not "placement": one worker has a session open at a time. A
@@ -1220,7 +1267,7 @@ value. Each one is built contracts-first against the core in §4–§5 and must 
 | Component | What it encodes |
 |---|---|
 | `approvals` | Deterministic decision lifecycle: proposed → approved/rejected → executed → verified, with retries, reminders, stalled escalation, TTL/abandonment, and **delivery-time binding** of a decision to the message/thread where a human can answer it (a decision created by a scheduled job cannot know its answer surface until the result is sent). |
-| `inbound-dedup` | Claim / commit / release of platform delivery ids (§5): duplicates halted, retries of crashed attempts allowed, stale claims expired. At-least-once by contract. |
+| `inbound-dedup` | Transport deduplication (§5): claim / commit / release of platform delivery ids, duplicates halted, retries of crashed attempts allowed, stale claims expired. At-least-once by contract. Logical deduplication is Pi's. |
 | `durable-outbox` | Outbound intents persisted before send, retried with backoff, dead-lettered, and recorded so later replies can quote or thread against them. |
 | `conversations.registry` | Conversation key → active session + workspace ref, with TTL eviction of memory that never drops the pointer, and explicit `/reset` semantics. |
 | `routines` | File-defined scheduled prompts (`src/agents/{name}/routines/*.yaml`) synced into `scheduler`, with target fan-out by route tags and previous-run context injection. |
