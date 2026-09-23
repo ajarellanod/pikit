@@ -480,13 +480,16 @@ pipeline conversation.resolve      → ConversationRef { key, sessionId, workspa
   │  emit conversation.resolved | conversation.created
   ▼
 hand the message to the worker that owns the conversation (§7.2)
-  │  idle  → start a run
-  │  busy  → Pi's inbox, as `steer` by default (§7.3); the run in progress answers
   ▼
-capability agent.runtime.dispatch(AgentRequest)
-  │  emit agent.dispatched · agent.started
-  │  (Pi lifecycle runs inside; adapter re-emits selected Pi events as agent.* )
-  │  emit agent.settled | agent.failed
+capability agent.runtime.dispatch(AgentRequest) → Admission, once the message is durable (§6.1)
+  │  idle → started:   a run starts
+  │  busy → queued:    Pi's inbox, as `steer` by default (§7.3); the run in progress answers
+  │  seen → duplicate: nothing runs
+  │  emit agent.dispatched
+  ▼
+the run, in the worker (Pi lifecycle; the adapter re-emits selected Pi events as agent.*)
+  │  emit agent.started
+  │  emit agent.settled | agent.failed   (from Pi's run_end, also for a run resumed after a crash)
   ▼
 pipeline outbound.prepare          → OutboundMessage
   │  emit outbound.requested
@@ -574,13 +577,17 @@ reached the same shape: ack after durable append, claim/commit, completion tombs
 
 ```ts
 interface AgentRuntime {
-  dispatch(request: AgentRequest, ctx: AppContext): Promise<AgentResult>;
-  steer(conversation: ConversationRef, message: string): Promise<void>;
-  abort(conversation: ConversationRef): Promise<void>;
-  resume(conversation: ConversationRef): Promise<AgentResult | undefined>;   // after crash/hibernation
+  /** Hand a message to its conversation. Resolves when Pi has accepted it, not when it is answered. */
+  dispatch(request: AgentRequest, ctx: AppContext): Promise<Admission>;
+  /** Stop the active run now (§7.3). */
+  abort(conversation: ConversationRef, ctx: AppContext): Promise<void>;
+  /** Continue the runs a dead worker left open (crash, eviction, hibernation). */
+  resume(conversation: ConversationRef, ctx: AppContext): Promise<void>;
 }
 
 interface AgentRequest {
+  /** Logical identity of the message (`InboundMessage.id`); Pi's `operationId` for a run (§6.4). */
+  requestId: string;
   conversation: ConversationRef;
   agent: AgentDefinition;
   prompt: string | AgentMessage[];
@@ -588,15 +595,62 @@ interface AgentRequest {
   context?: { prefix?: string; quoted?: InboundMessage };
 }
 
+/** What happened to the message, known as soon as Pi has made it durable. */
+type Admission =
+  | { kind: "started"; requestId: string }     // idle: a run started; its operationId is requestId
+  | { kind: "queued"; requestId: string }      // busy: Pi's inbox, `steer` by default (§7.3)
+  | { kind: "duplicate"; requestId: string };  // this conversation already ran requestId
+
+/** Payload of `agent.settled` and `agent.failed`: how one run ended. */
 interface AgentResult {
-  /** `queued`: the conversation was busy; the message went to Pi's inbox (§7.3). */
-  kind: "completed" | "aborted" | "failed" | "suspended" | "queued";
+  conversation: ConversationRef;
+  /** The request that started the run. */
+  requestId: string;
+  kind: "completed" | "aborted" | "failed";
   text?: string;
   messages: AgentMessage[];
   usage?: Usage;
   error?: { code: string; message: string };
 }
 ```
+
+The shape comes from the adapter spike against `pi-agent-core` 0.87.1 (§6.4). It is the shape
+of a submission in Pi's durable runtime, so moving to that runtime happens inside the adapter.
+`[planned]`
+
+- **One way in.** Pi decides whether a conversation is busy, atomically: `accept()` either
+  admits the run or fails with `LaneBusy`, and only then does the adapter `steer()`. A caller
+  that chose "steer" before asking would race the end of the run (§6.4, gap 2), so the
+  contract has no `steer()`: `dispatch` is the only way in, and the mode for a busy
+  conversation is the agent's (`whileRunning`, §7.3).
+- **Answers are events, not return values.** Pi reports every run's end (`run_end`) whether
+  anyone waits for it or not. That includes a run whose caller stopped waiting, and a run that
+  a new worker resumed after a crash, which no `dispatch` call is waiting for. The adapter
+  emits `agent.settled` / `agent.failed` from that event, and delivery (§5) follows the event.
+  `dispatch` therefore returns only the admission.
+- **The admission is the ack point.** `dispatch` resolves once Pi has committed the run or the
+  queued message to the session. That is "durably accepted" in §5: a channel may acknowledge
+  the platform, and `inbound-dedup` may commit its claim.
+- **`ctx` bounds the call, not the run.** Pi keeps the caller's context values (tenant, actor
+  and trace reach the tools) but drops its cancellation from the run (`withoutAbortSignal`).
+  Cancelling `ctx` never stops a run; `abort()` does.
+- **`requestId` is required.** It becomes the run's `operationId`, so Pi's own operation records
+  (`getResult`, `inspectExecution`) answer "was this request already run?". pikit keeps no record
+  of its own.
+- **`abort()` is cooperative.** Pi signals the running tools and waits for them to return; the
+  run then ends as `aborted`. A tool that ignores `context.abortSignal` holds `abort()` until it
+  finishes.
+- **A queued message is answered by the run it joined.** Its entry sits in that run's
+  transcript, and its answer is the first assistant message after it that calls no tools: the
+  same answer as the run's prompt. That is how Pi's durable runtime settles every input placed
+  in one turn. `AgentResult.requestId` names only the request that started the run; carrying
+  the queued ones needs Pi to accept a request id on `steer()` (§6.4, gap 3).
+- **`resume()`** continues the operations `AgentHarness.create()` reports as `open`, with
+  `lane.resume()`; their outcomes arrive as `agent.settled` like any other run. Tools declared
+  `replay: "safe"` run again; for any other tool Pi records an "interrupted" error result and
+  the model decides. The replay rules of §8.4 are Pi's.
+- **No `suspended` result.** A run waiting for a retry or a deferred response has not ended: it
+  is an open operation that `resume()` (or the host's alarm, §9.2) continues.
 
 Who owns these types `[decision]`: the core owns the *shapes* (`defineAgent`,
 `AgentDefinition`, `TurnConfig`, `AgentRequest`, `AgentResult`, `AgentRuntime`), because they
@@ -776,22 +830,50 @@ binary (`pi`) invoked by the CLI for `resolve with pi` (§10.6). `[decision]`
 
 **Pin:** `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` **0.87.x**. `[decision]`
 From 0.87, `pi-agent-core` depends on `@earendil-works/chord`, and the harness `Context` is
-Chord's. Only the adapter sees either.
+Chord's. Only the adapter sees either. The adapter spike ran against 0.87.1 (tag `v0.87.1`,
+`f07218c4`). On Pi's `main` at `7fd564cb` (2026-09-23), the harness runtime is unchanged since
+that tag.
 
 **Pi's durable runtime** (`@earendil-works/pi-durable`, "Pico5") is Pi's next harness: one
 session holding conversations, immutable entries, durable tasks, submissions and documents,
-all committed atomically. Its storage exists (memory, SQLite, JSONL); its runtime does not yet.
+all committed atomically. `pi-durable` 0.87.1 publishes its storage (memory, SQLite; JSONL is on
+`main`), not its runtime: `pico-v5-handoff.md` has the storage packages done and the runtime
+packages pending.
 Following Pi first, pikit **does not build** what it will provide, and shapes its own
 contracts so the move happens inside the adapter. `[upstream]`
 
-| pikit need | Pi durable runtime | Until it ships |
+| pikit need | Pi durable runtime | Until it ships (verified by the spike on 0.87.1) |
 |---|---|---|
-| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | `steer()` on `AgentHarness` |
-| Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | Adapter record in session values |
-| `agent.state` | Conversation-scoped document | Session value |
+| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | `accept()` fails with `LaneBusy`, then `steer()`; the steer's entry id attributes its answer. Gap 2 |
+| Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | `requestId` is the run's `operationId`; Pi's operation records find the duplicate. Gaps 1 and 3 |
+| `agent.state` | Conversation-scoped document | Session value `pikit` / `agent.state`. It is committed apart from the transcript, so a tool's state change and its result are two commits |
+| Continue a killed run | Tasks resume from their records | `AgentHarness.create()` reports `open` operations; `lane.resume()` continues them; tool `replay` is Pi's |
 | Multi-step work, waits, approvals that last days | Durable tasks: phases, effect sandwich (commit intent → effect → commit outcome), memos, `sleep(until)`, abort protocol | `state.phase` + tools; nothing more is built |
 | Subagents | Owned child conversations inside the session | Deferred |
 | `sessions-cloudflare-do` | Its SQLite core runs over a synchronous database facade that a Durable Object can implement | Pi's current `SessionRepo` |
+
+**Gaps found by the adapter spike** `[upstream]`. pikit builds no substitute for any of them.
+Each one has a test that asserts today's behaviour and fails when Pi closes it
+(`packages/pi-adapter/src/spike/pi-gaps.test.ts`; gap 3 in `spike.test.ts`):
+
+| # | Gap in `pi-agent-core` 0.87.1 | Consequence until Pi closes it | Pi durable runtime |
+|---|---|---|---|
+| 1 | `accept()` does not reject a reused `operationId`: an idle lane runs the same request again | The duplicate check happens before `accept()`, not inside it. It holds because one worker owns the conversation (§7.2) | `requestId` deduplicates before any write |
+| 2 | No atomic "run if idle, otherwise queue": a `steer()` that lands after the run's last boundary waits in the inbox for the next run | That message is answered only when another one arrives | Admission decides idle or busy in one transaction; an idle input first drains older queued items |
+| 3 | `steer()`, `followUp()` and `nextRun()` take no request id | A redelivered message that reaches a busy conversation is steered twice; only `inbound-dedup` (transport) stops it | Queued submissions carry their `requestId` |
+
+Facts the adapter relies on (0.87.1):
+
+- `AgentHarness.close()` closes the `Session` it was given. Evicting a conversation closes both;
+  the next owner reopens the session from its repo.
+- A run's operation meta, with the prompt's entry id, is deleted when the run settles; the
+  adapter reads it at admission.
+- There is no `drive: "automatic" | "manual"` option and no `peekAction()`. Admission is
+  `accept()` (durable); execution is `drive()` (process-local). `drive({ waitForRetry: false })`
+  returns `waiting { notBefore }` for the host to schedule, which is the shape a Durable Object
+  alarm needs (read from the types; the spike did not exercise it).
+- The context bridge of §6.2 is needed: Pi derives telemetry contexts with Chord's
+  `withContextValue`, and without the bridge they lose a pikit context's cancellation.
 
 Mapping of vocabulary: **one pikit conversation (the actor) is one Pi session.** The session
 is Pi's unit of single-writer ownership (§7.2); conversations inside it are Pi's transcript
@@ -1422,6 +1504,10 @@ Resolved `[decision]`:
   user means by a new message; an agent may choose `followUp` or `nextRun`.
 - "Conversation ownership", not "placement": one worker has a session open at a time. A
   single-process server and Cloudflare need no component for it; several replicas do (§7.2).
+- `AgentRuntime.dispatch` returns an admission, and a run's answer is the `agent.settled` event
+  the adapter emits from Pi's `run_end` (§6.1). A run resumed after a crash has nobody waiting
+  for it, so a return value cannot carry its answer. The contract has no `steer()`: Pi decides
+  idle or busy atomically, and a caller deciding first would race the end of the run.
 
 ---
 
