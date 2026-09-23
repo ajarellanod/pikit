@@ -14,11 +14,18 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { JsonlSessionRepo } from "@earendil-works/pi-agent-core";
+import { JsonlSessionRepo, MemorySessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { BACKGROUND_CONTEXT, type ComponentDefinition, type ConversationRef, defineComponent } from "@pikit/core";
+import {
+  type AgentDefinition,
+  BACKGROUND_CONTEXT,
+  type ComponentDefinition,
+  type ConversationRef,
+  defineComponent,
+} from "@pikit/core";
 import type { AgentRuntimeFixture } from "@pikit/core/testing";
 import type { HarnessHook } from "../conversation.ts";
+import type { SessionStore } from "../types.ts";
 import { holdTool, scriptedAgent, scriptedProvider } from "./script.ts";
 
 export interface PiRuntimeUnderTest {
@@ -61,12 +68,8 @@ export function createPiRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) 
   };
 
   const agent = scriptedAgent(hold);
-  const provider = scriptedProvider();
-  const records = [
-    defineComponent({ name: "sessions-fixture", setup: (pikit) => pikit.provide("sessions.store", sessions) }),
-    defineComponent({ name: "agents-fixture", setup: (pikit) => pikit.provideKeyed("agent.definition", agent.name, agent) }),
-    defineComponent({ name: "provider-faux", setup: (pikit) => pikit.provideKeyed("model.provider", provider.id, provider) }),
-  ];
+  const support = testComponents({ sessions, agents: [agent] });
+  const records = [support.sessions, support.agents, support.provider];
 
   const conversation = async (): Promise<ConversationRef> => {
     const session = await sessions.create({ cwd: root }, BACKGROUND_CONTEXT);
@@ -95,6 +98,36 @@ export function createPiRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) 
     async dispose() {
       rmSync(root, { recursive: true, force: true });
     },
+  };
+}
+
+/** What a runtime uses, for tests: `sessions.store`, `agent.definition` and the `faux` provider. */
+export interface TestComponents {
+  sessions: ComponentDefinition;
+  agents: ComponentDefinition;
+  provider: ComponentDefinition;
+}
+
+/**
+ * Test providers of what `agent.runtime` uses. Sessions default to Pi's in-memory repo, agents to
+ * the scripted one (whose `hold` returns at once); the provider is `faux`, model `faux/scripted`.
+ */
+export function testComponents(options: { sessions?: SessionStore; agents?: AgentDefinition[] } = {}): TestComponents {
+  const sessions = options.sessions ?? new MemorySessionRepo();
+  const agents = options.agents ?? [scriptedAgent(holdTool(async () => "released"))];
+  const provider = scriptedProvider();
+  return {
+    sessions: defineComponent({ name: "sessions-fixture", setup: (pikit) => pikit.provide("sessions.store", sessions) }),
+    agents: defineComponent({
+      name: "agents-fixture",
+      setup(pikit) {
+        for (const agent of agents) pikit.provideKeyed("agent.definition", agent.name, agent);
+      },
+    }),
+    provider: defineComponent({
+      name: "provider-faux",
+      setup: (pikit) => pikit.provideKeyed("model.provider", provider.id, provider),
+    }),
   };
 }
 
