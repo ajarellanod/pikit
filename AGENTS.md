@@ -235,7 +235,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
 ## Testing expectations
 
-- **Core:** event ordering, pipeline priority, anchors and `halt`, capability resolution and
+- **Core:** event ordering, pipeline priority and `halt`, capability resolution and
   selection, composition errors before setup, lifecycle order and rollback, config
   merge/validation.
 - **Every contract implementation** passes its pikit conformance suite: `storage.sql`,

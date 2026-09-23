@@ -367,8 +367,6 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
 
       capabilities.validateSelection();
       const ordered = orderRecords(records, capabilities);
-      // Surface bad anchors now, not on the first message.
-      for (const name of pipelines.names()) pipelines.chain(name);
       validated = true;
 
       const lifecycle = createLifecycle({

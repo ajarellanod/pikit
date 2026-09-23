@@ -6,9 +6,9 @@
  * Every pipeline has one value type: stages are `Value → Value`. A pipeline that "produces"
  * something (route.resolve → decision) carries it as a field of the value.
  *
- * Order: `priority` descending, then registration order. A stage anchored with
- * `before: id` / `after: id` is placed next to its anchor; stages sharing an anchor keep
- * registration order among themselves.
+ * Order: `priority` descending, then registration order. There are no anchors: a stage that
+ * must run next to another reads its priority (`pikit doctor` prints every chain) and picks a
+ * neighbouring one. Anchors can be added later without breaking anyone; removing them could not.
  *
  * Unlike events, a stage that throws aborts the run: a transformation that failed has no
  * valid output. A stage that returns `undefined` is an error too (a forgotten `return`).
@@ -38,19 +38,13 @@ export type Stage<Value, Ctx> = (value: Value, ctx: Ctx) => Value | Halt | Promi
 export interface StageOptions {
   /** Unique within the pipeline. Defaults to `stage-<n>`. */
   id?: string;
-  /** Higher runs first. Default 0. Ignored when `before`/`after` is set. */
+  /** Higher runs first. Default 0. Equal priorities keep registration order. */
   priority?: number;
-  /** Place immediately before this stage id. */
-  before?: string;
-  /** Place immediately after this stage id. */
-  after?: string;
 }
 
 export interface ResolvedStage {
   id: string;
   priority: number;
-  before?: string;
-  after?: string;
 }
 
 export interface HaltedInfo {
@@ -70,7 +64,7 @@ export interface PipelineRegistry<Pipelines extends object, Ctx> {
     input: Pipelines[K],
     ctx: Ctx,
   ): Promise<Pipelines[K] | Halt>;
-  /** Resolved stage order, for `doctor`. Throws if an anchor cannot be placed. */
+  /** Resolved stage order, for `doctor`. */
   chain(name: string): ResolvedStage[];
   /** Every pipeline that has at least one stage. */
   names(): string[];
@@ -95,34 +89,7 @@ export function createPipelineRegistry<Pipelines extends object, Ctx>(
   function resolve(name: string): Entry<Ctx>[] {
     const cached = chains.get(name);
     if (cached) return cached;
-    const all = entries(name);
-    const before = new Map<string, Entry<Ctx>[]>();
-    const after = new Map<string, Entry<Ctx>[]>();
-    const base: Entry<Ctx>[] = [];
-    for (const entry of all) {
-      if (entry.before) push(before, entry.before, entry);
-      else if (entry.after) push(after, entry.after, entry);
-      else base.push(entry);
-    }
-    base.sort((a, b) => b.priority - a.priority || a.index - b.index);
-
-    const placed = new Set<Entry<Ctx>>();
-    const expand = (entry: Entry<Ctx>): Entry<Ctx>[] => {
-      placed.add(entry);
-      return [
-        ...(before.get(entry.id) ?? []).flatMap(expand),
-        entry,
-        ...(after.get(entry.id) ?? []).flatMap(expand),
-      ];
-    };
-    const chain = base.flatMap(expand);
-
-    const orphan = all.find((entry) => !placed.has(entry));
-    if (orphan) {
-      throw new Error(
-        `pipeline "${name}": stage "${orphan.id}" is anchored to "${orphan.before ?? orphan.after}", which does not exist or is itself unplaced`,
-      );
-    }
+    const chain = [...entries(name)].sort((a, b) => b.priority - a.priority || a.index - b.index);
     chains.set(name, chain);
     return chain;
   }
@@ -134,18 +101,7 @@ export function createPipelineRegistry<Pipelines extends object, Ctx>(
       if (list.some((entry) => entry.id === id)) {
         throw new Error(`pipeline "${name}": duplicate stage id "${id}"`);
       }
-      if (options.before !== undefined && options.after !== undefined) {
-        throw new Error(`pipeline "${name}": stage "${id}" sets both before and after`);
-      }
-      const entry: Entry<Ctx> = {
-        id,
-        index: list.length,
-        priority: options.priority ?? 0,
-        fn: fn as Stage<unknown, Ctx>,
-      };
-      if (options.before !== undefined) entry.before = options.before;
-      if (options.after !== undefined) entry.after = options.after;
-      list.push(entry);
+      list.push({ id, index: list.length, priority: options.priority ?? 0, fn: fn as Stage<unknown, Ctx> });
       pipelines.set(name, list);
       chains.delete(name);
     },
@@ -168,22 +124,11 @@ export function createPipelineRegistry<Pipelines extends object, Ctx>(
     },
 
     chain(name) {
-      return resolve(name).map(({ id, priority, before, after }) => ({
-        id,
-        priority,
-        ...(before !== undefined && { before }),
-        ...(after !== undefined && { after }),
-      }));
+      return resolve(name).map(({ id, priority }) => ({ id, priority }));
     },
 
     names() {
       return [...pipelines.keys()];
     },
   };
-}
-
-function push<K, V>(map: Map<K, V[]>, key: K, value: V): void {
-  const list = map.get(key);
-  if (list) list.push(value);
-  else map.set(key, [value]);
 }

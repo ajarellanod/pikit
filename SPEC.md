@@ -254,9 +254,11 @@ const normalized = await ctx.run("inbound.normalize", raw);   // in start or a h
 ```
 
 Ordering is deterministic: by `priority` (descending), then registration order. Stages have
-ids (default `stage-<n>`) so `pikit doctor` can print the resolved chain and so a project
-extension can insert `before: "trim"` / `after: "mentions"`. An anchored stage sits next to
-its anchor regardless of priority; stages sharing an anchor keep registration order.
+ids (default `stage-<n>`) so `pikit doctor` can print the resolved chain. `[decision]` There
+are no `before`/`after` anchors: a stage that must run next to another reads that stage's
+priority in `pikit doctor` and picks a neighbouring one. Registry code is copied into the
+project, so a priority only changes when its owner changes it. Anchors can be added later as
+an additive change; removing them once shipped could not be.
 
 Every pipeline has **one value type**: stages are `Value → Value`. A pipeline that produces
 something carries it as a field of the value, so later stages see both the input and what

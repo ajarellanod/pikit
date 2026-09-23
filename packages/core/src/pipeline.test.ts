@@ -32,19 +32,6 @@ test("a stage registered after a run is placed in the next run (the cached chain
   expect(await p.run("test.text", { text: "" }, undefined)).toEqual({ text: "ba" });
 });
 
-test("before/after anchor next to the target; same-anchor stages keep registration order", async () => {
-  const p = registry();
-  p.register("test.text", append("x"), { id: "x" });
-  p.register("test.text", append("y"), { id: "y" });
-  p.register("test.text", append("1"), { id: "1", after: "x" });
-  p.register("test.text", append("2"), { id: "2", after: "x" });
-  p.register("test.text", append("3"), { id: "3", before: "y" });
-  p.register("test.text", append("4"), { id: "4", before: "1" }); // anchored to an anchored stage
-
-  expect(p.chain("test.text").map((s) => s.id)).toEqual(["x", "4", "1", "2", "3", "y"]);
-  expect(await p.run("test.text", { text: "" }, undefined)).toEqual({ text: "x4123y" });
-});
-
 test("halt stops the chain, reports the stage, and is returned to the caller", async () => {
   const halts: HaltedInfo[] = [];
   const p = registry(halts);
@@ -60,17 +47,11 @@ test("halt stops the chain, reports the stage, and is returned to the caller", a
   expect(halts).toEqual([{ pipeline: "test.text", stage: "gate", reason: "blocked" }]);
 });
 
-test("registration and resolution errors are explicit", async () => {
+test("a duplicate stage id is an error", async () => {
   const p = registry();
   p.register("test.text", append("a"), { id: "a" });
 
   expect(() => p.register("test.text", append("a"), { id: "a" })).toThrow('duplicate stage id "a"');
-  expect(() => p.register("test.text", append("b"), { id: "b", before: "a", after: "a" })).toThrow(
-    "sets both before and after",
-  );
-
-  p.register("test.text", append("z"), { id: "z", after: "missing" });
-  expect(() => p.chain("test.text")).toThrow('stage "z" is anchored to "missing"');
 });
 
 test("a stage that throws aborts the run; a stage returning undefined is an error", async () => {

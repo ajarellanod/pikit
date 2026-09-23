@@ -743,7 +743,7 @@ test("describe reflects selection and resolved pipeline chains; halt is emitted 
     version: "1.0.0",
     setup(pikit) {
       pikit.provide("test.store", { name: "s2" });
-      pikit.pipeline("test.harness.text", () => pikit.halt("no"), { id: "gate", after: "one" });
+      pikit.pipeline("test.harness.text", () => pikit.halt("no"), { id: "gate", priority: 4 });
       pikit.on("pipeline.halted", (e) => {
         halted.push(`${e.pipeline}/${e.stage}:${e.reason}`);
       });

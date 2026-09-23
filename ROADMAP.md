@@ -97,7 +97,7 @@ harness without knowing anything about channels, storage or Pi.
 
 **Done:** `@pikit/core` is implemented and tested:
 - typed events, notifications whose failures cannot fail the harness;
-- pipelines with priority, anchors and `halt`;
+- pipelines with priority and `halt`;
 - **`setup` is the manifest**: synchronous, registration only, sealed when it returns. The
   dependency graph is derived from `provide`/`use`, with explicit handles resolved from
   `start` onward;
