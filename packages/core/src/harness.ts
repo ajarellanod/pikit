@@ -3,12 +3,19 @@
  *
  *   defineHarness({ components, config })   validates the composition (sync, throws)
  *     .create()                              runs every component's setup in dependency order
- *     .start() / .stop()                     emits runtime.* events
+ *     .start()                               runtime.starting → start() in order → runtime.ready
+ *     .stop()                                runtime.stopping → stop() in reverse → runtime.stopped
  *     .describe()                            what `pikit doctor` prints
  *
  * Validation happens as early as possible: unsatisfied `requires`, ambiguous providers, bad
  * selections, dependency cycles and invalid config all fail in `defineHarness`, before any
  * component code runs.
+ *
+ * `setup` only registers; it must not open sockets, files or timers. Resources are acquired
+ * in the `start` a component returns from `setup` and released in its `stop`. That is why a
+ * failed `create()` has nothing to clean up, and why a failed `start()` can roll back exactly
+ * the components that did start. `runtime.*` events stay notifications: a listener that
+ * throws is logged and cannot make the harness look healthy or unhealthy.
  */
 
 import Type, { type Static, type TSchema } from "typebox";
@@ -66,6 +73,17 @@ export interface Pikit extends HarnessContext {
   halt: typeof halt;
 }
 
+/**
+ * What `setup` may return: the component's resources, acquired in `start` and released in
+ * `stop`. Setup-local variables are shared with both through the closure.
+ */
+export interface ComponentLifecycle {
+  /** Runs in setup order. A throw rolls back the components already started and fails `start()`. */
+  start?(ctx: HarnessContext): void | Promise<void>;
+  /** Runs in reverse setup order. A throw is collected; the remaining components still stop. */
+  stop?(ctx: HarnessContext): void | Promise<void>;
+}
+
 export interface ComponentDefinition<Schema extends TSchema = TSchema> {
   /** kebab-case, prefixed by kind (`channel-telegram`). */
   name: string;
@@ -75,16 +93,24 @@ export interface ComponentDefinition<Schema extends TSchema = TSchema> {
   /** typebox schema for `config[name]`. Absent = the component takes no config. */
   config?: Schema;
   // Method syntax on purpose: keeps heterogeneous component lists assignable.
-  setup(pikit: Pikit, config: Static<Schema>): void | Promise<void>;
+  setup(
+    pikit: Pikit,
+    config: Static<Schema>,
+  ): void | ComponentLifecycle | Promise<void | ComponentLifecycle>;
 }
 
 const COMPONENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+/** Top-level config keys owned by the core; a component with that name would collide. */
+const RESERVED_NAMES = new Set(["capabilities"]);
 
 export function defineComponent<Schema extends TSchema = TSchema>(
   definition: ComponentDefinition<Schema>,
 ): ComponentDefinition<Schema> {
   if (!COMPONENT_NAME.test(definition.name)) {
     throw new Error(`component name "${definition.name}" must be kebab-case (e.g. "channel-http")`);
+  }
+  if (RESERVED_NAMES.has(definition.name)) {
+    throw new Error(`component name "${definition.name}" is reserved by the core config`);
   }
   return definition;
 }
@@ -112,7 +138,9 @@ export interface HarnessDescription {
 export interface Harness {
   /** Base context, or one extended for a run (`signal`). */
   context(extra?: Pick<HarnessContext, "signal">): HarnessContext;
+  /** Rejects if a component fails to start, after stopping the ones that did. */
   start(): Promise<void>;
+  /** Stops every started component; rejects with an `AggregateError` if any `stop` threw. */
   stop(): Promise<void>;
   describe(): HarnessDescription;
 }
@@ -134,7 +162,7 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
   const providersOf = indexProviders(all);
   const selection = readSelection(options.config, providersOf);
   checkRequires(all, providersOf, selection);
-  const ordered = topologicalOrder(all, providersOf);
+  const ordered = topologicalOrder(all, providersOf, selection);
   const config = validateConfig(all, options.config ?? {});
 
   return {
@@ -165,6 +193,7 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
         return ctx;
       };
       const base = context();
+      const lifecycles: { name: string; hooks: ComponentLifecycle }[] = [];
 
       for (const component of ordered) {
         const declared = component.provides ?? [];
@@ -180,7 +209,8 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           },
           halt,
         };
-        await component.setup(pikit, config[component.name]);
+        const hooks = await component.setup(pikit, config[component.name]);
+        if (hooks) lifecycles.push({ name: component.name, hooks });
         for (const name of declared) {
           if (!capabilities.providers(name).includes(component.name)) {
             throw new Error(`component "${component.name}" declares "${name}" but its setup did not provide it`);
@@ -191,7 +221,23 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
       // Surface bad anchors now, not on the first message.
       for (const name of pipelines.names()) pipelines.chain(name);
 
+      /** Stops `running` in reverse order; every stop runs even if an earlier one threw. */
+      const shutdown = async (running: typeof lifecycles): Promise<Error[]> => {
+        await base.emit("runtime.stopping", {});
+        const errors: Error[] = [];
+        for (const { name, hooks } of [...running].reverse()) {
+          try {
+            await hooks.stop?.(base);
+          } catch (error) {
+            errors.push(new Error(`component "${name}" failed to stop`, { cause: error }));
+          }
+        }
+        await base.emit("runtime.stopped", {});
+        return errors;
+      };
+
       let started = false;
+      let running: typeof lifecycles = [];
       return {
         context,
 
@@ -199,14 +245,30 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           if (started) throw new Error("harness already started");
           started = true;
           await base.emit("runtime.starting", {});
+          const up: typeof lifecycles = [];
+          for (const entry of lifecycles) {
+            try {
+              await entry.hooks.start?.(base);
+            } catch (error) {
+              // Every runtime.starting is closed by runtime.stopped, even when start fails.
+              for (const stopError of await shutdown(up)) {
+                logger.error("rollback after failed start", { error: stopError });
+              }
+              started = false;
+              throw new Error(`component "${entry.name}" failed to start`, { cause: error });
+            }
+            up.push(entry);
+          }
+          running = up;
           await base.emit("runtime.ready", {});
         },
 
         async stop() {
           if (!started) return;
           started = false;
-          await base.emit("runtime.stopping", {});
-          await base.emit("runtime.stopped", {});
+          const errors = await shutdown(running);
+          running = [];
+          if (errors.length) throw new AggregateError(errors, "harness stopped with errors");
         },
 
         describe() {
@@ -296,8 +358,16 @@ function checkRequires(
   }
 }
 
-/** Providers before consumers; list order as tiebreaker. Depth-first with cycle detection. */
-function topologicalOrder(components: ComponentDefinition[], providersOf: Map<string, string[]>) {
+/**
+ * Providers before consumers; list order as tiebreaker. Depth-first with cycle detection.
+ * A consumer depends only on the provider `require` will use (the selected one when config
+ * selects), so an installed-but-unselected provider cannot create a false cycle.
+ */
+function topologicalOrder(
+  components: ComponentDefinition[],
+  providersOf: Map<string, string[]>,
+  selection: Record<string, string>,
+) {
   const byName = new Map(components.map((c) => [c.name, c]));
   const state = new Map<string, "visiting" | "done">();
   const ordered: ComponentDefinition[] = [];
@@ -310,7 +380,8 @@ function topologicalOrder(components: ComponentDefinition[], providersOf: Map<st
     }
     state.set(component.name, "visiting");
     for (const capability of component.requires ?? []) {
-      for (const providerName of providersOf.get(capability) ?? []) {
+      const chosen = selection[capability];
+      for (const providerName of chosen !== undefined ? [chosen] : (providersOf.get(capability) ?? [])) {
         if (providerName === component.name) continue; // a component may consume what it provides
         visit(byName.get(providerName) as ComponentDefinition, [...path, component.name]);
       }

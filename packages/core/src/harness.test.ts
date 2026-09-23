@@ -109,8 +109,150 @@ test("composition errors fail in defineHarness, before any setup", () => {
   ).toThrow("dependency cycle: a → b → a");
   expect(() => defineHarness(quiet({ components: [mk("a"), mk("a")] }))).toThrow('component "a" is listed twice');
   expect(() => defineComponent({ name: "Not_Kebab", setup() {} })).toThrow("must be kebab-case");
+  expect(() => defineComponent({ name: "capabilities", setup() {} })).toThrow("reserved");
 
   expect(setupRan.value).toBe(false);
+});
+
+test("an unselected provider does not create a false dependency cycle", async () => {
+  const mk = (name: string, provides: string[], requires: string[]) =>
+    defineComponent({
+      name,
+      provides,
+      requires,
+      setup(pikit) {
+        for (const capability of provides) pikit.provide(capability as "test.store", { name });
+      },
+    });
+  // store-b needs thing-c; thing-c needs test.store, which is store-a (selected), not store-b.
+  const harness = await defineHarness(
+    quiet({
+      config: { capabilities: { "test.store": "store-a" } },
+      components: [mk("store-a", ["test.store"], []), mk("store-b", ["test.store"], ["test.queue"]), mk("thing-c", ["test.queue"], ["test.store"])],
+    }),
+  ).create();
+  expect(harness.describe().components.map((c) => c.name)).toEqual(["store-a", "thing-c", "store-b"]);
+});
+
+test("lifecycle: start in setup order, stop in reverse, events around the hooks", async () => {
+  const seen: string[] = [];
+  const mk = (name: string, provides: string[] = [], requires: string[] = []) =>
+    defineComponent({
+      name,
+      provides,
+      requires,
+      setup(pikit) {
+        for (const capability of provides) pikit.provide(capability as "test.store", { name });
+        const resource = `${name}-resource`; // setup-local state reaches start/stop via closure
+        return {
+          start: () => {
+            seen.push(`start ${resource}`);
+          },
+          stop: () => {
+            seen.push(`stop ${resource}`);
+          },
+        };
+      },
+    });
+  const events = defineComponent({
+    name: "events",
+    setup(pikit) {
+      for (const name of ["runtime.starting", "runtime.ready", "runtime.stopping", "runtime.stopped"] as const) {
+        pikit.on(name, () => {
+          seen.push(name);
+        });
+      }
+    },
+  });
+
+  const harness = await defineHarness(
+    quiet({ components: [events, mk("consumer", [], ["test.store"]), mk("store", ["test.store"])] }),
+  ).create();
+  await harness.start();
+  await harness.stop();
+
+  expect(seen).toEqual([
+    "runtime.starting",
+    "start store-resource",
+    "start consumer-resource",
+    "runtime.ready",
+    "runtime.stopping",
+    "stop consumer-resource",
+    "stop store-resource",
+    "runtime.stopped",
+  ]);
+});
+
+test("a failed start rolls back what started, never emits ready, and can be retried", async () => {
+  const seen: string[] = [];
+  let portBusy = true;
+  const db = defineComponent({
+    name: "storage-db",
+    setup: () => ({
+      start: () => {
+        seen.push("db open");
+      },
+      stop: () => {
+        seen.push("db close");
+      },
+    }),
+  });
+  const server = defineComponent({
+    name: "server-http",
+    setup(pikit) {
+      for (const name of ["runtime.ready", "runtime.stopped"] as const) {
+        pikit.on(name, () => {
+          seen.push(name);
+        });
+      }
+      return {
+        start: () => {
+          if (portBusy) throw new Error("EADDRINUSE");
+          seen.push("listening");
+        },
+        stop: () => {
+          seen.push("server close");
+        },
+      };
+    },
+  });
+
+  const harness = await defineHarness(quiet({ components: [db, server] })).create();
+  const failure = await harness.start().catch((error: Error) => error);
+  expect(failure).toBeInstanceOf(Error);
+  expect((failure as Error).message).toBe('component "server-http" failed to start');
+  expect(((failure as Error).cause as Error).message).toBe("EADDRINUSE");
+  expect(seen).toEqual(["db open", "db close", "runtime.stopped"]);
+
+  portBusy = false;
+  seen.length = 0;
+  await harness.start();
+  expect(seen).toEqual(["db open", "listening", "runtime.ready"]);
+});
+
+test("stop runs every stop hook and reports all failures together", async () => {
+  const stopped: string[] = [];
+  const mk = (name: string, fails: boolean) =>
+    defineComponent({
+      name,
+      setup: () => ({
+        stop: () => {
+          stopped.push(name);
+          if (fails) throw new Error(`${name} broke`);
+        },
+      }),
+    });
+  const harness = await defineHarness(quiet({ components: [mk("a", true), mk("b", false), mk("c", true)] })).create();
+  await harness.start();
+
+  const failure = await harness.stop().catch((error: AggregateError) => error);
+  expect(stopped).toEqual(["c", "b", "a"]);
+  expect(failure).toBeInstanceOf(AggregateError);
+  expect((failure as AggregateError).errors.map((e: Error) => e.message)).toEqual([
+    'component "c" failed to stop',
+    'component "a" failed to stop',
+  ]);
+  await harness.stop(); // already stopped: no-op
 });
 
 test("provide is checked against the manifest, both ways", async () => {
