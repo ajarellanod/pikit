@@ -288,31 +288,54 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
       const records: SetupRecord[] = [];
       for (const component of all) {
         const record: SetupRecord = { component, provides: [], uses: [] };
+        // Registration is sealed when this setup returns: anything registered later (from start,
+        // a listener, a timer) would bypass the validated graph and the pipeline chains.
+        let sealed = false;
+        const open = (what: string): void => {
+          if (sealed) {
+            throw new Error(`component "${component.name}": ${what} is only allowed during setup`);
+          }
+        };
         const pikit: Pikit = {
           ...base,
-          on: (name, listener) => events.on(name, listener),
-          pipeline: (name, stage, opts) => pipelines.register(name, stage, opts),
+          on: (name, listener) => {
+            open(`on("${name}")`);
+            return events.on(name, listener);
+          },
+          pipeline: (name, stage, opts) => {
+            open(`pipeline("${name}")`);
+            pipelines.register(name, stage, opts);
+          },
           provide: (name, impl) => {
+            open(`provide("${name}")`);
             capabilities.provide(name, impl, component.name);
             if (!record.provides.includes(name)) record.provides.push(name);
           },
           provideKeyed: (name, key, impl) => {
+            open(`provideKeyed("${name}")`);
             capabilities.provideKeyed(name, key, impl, component.name);
             if (!record.provides.includes(name)) record.provides.push(name);
           },
           use: ((name: SingleName, options: UseOptions = {}) => {
+            open(`use("${name}")`);
             const use = recordUse(record, { name, mode: "single", optional: options.optional === true });
             return handle(use, component.name, () =>
               use.optional && !capabilities.has(name) ? undefined : capabilities.require(name),
             );
           }) as Pikit["use"],
           useKeyed: (name, options = {}) => {
+            open(`useKeyed("${name}")`);
             const use = recordUse(record, { name, mode: "keyed", optional: options.optional === true });
             return keyedHandle(use, component.name, () => capabilities.keyed(name));
           },
           halt,
         };
-        const hooks: unknown = component.setup(pikit, config[component.name]);
+        let hooks: unknown;
+        try {
+          hooks = component.setup(pikit, config[component.name]);
+        } finally {
+          sealed = true;
+        }
         if (isThenable(hooks)) {
           throw new Error(
             `component "${component.name}": setup must be synchronous; acquire resources in start`,
@@ -348,37 +371,59 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
 
       let started = false;
       let running: typeof lifecycles = [];
+      // In-flight transitions. `stop()` waits for a `start()` in progress (a SIGTERM during boot)
+      // so that whatever it started is stopped; concurrent `stop()` calls share one shutdown.
+      let starting: Promise<void> | undefined;
+      let stopping: Promise<void> | undefined;
+
+      const boot = async (): Promise<void> => {
+        await base.emit("runtime.starting", {});
+        const up: typeof lifecycles = [];
+        for (const entry of lifecycles) {
+          try {
+            await entry.hooks.start?.(base);
+          } catch (error) {
+            // Every runtime.starting is closed by runtime.stopped, even when start fails.
+            for (const stopError of await shutdown(up)) {
+              logger.error("rollback after failed start", { error: stopError });
+            }
+            started = false;
+            throw new Error(`component "${entry.name}" failed to start`, { cause: error });
+          }
+          up.push(entry);
+        }
+        running = up;
+        await base.emit("runtime.ready", {});
+      };
+
       return {
         context,
 
         async start() {
+          if (stopping) throw new Error("harness is stopping");
           if (started) throw new Error("harness already started");
           started = true;
-          await base.emit("runtime.starting", {});
-          const up: typeof lifecycles = [];
-          for (const entry of lifecycles) {
-            try {
-              await entry.hooks.start?.(base);
-            } catch (error) {
-              // Every runtime.starting is closed by runtime.stopped, even when start fails.
-              for (const stopError of await shutdown(up)) {
-                logger.error("rollback after failed start", { error: stopError });
-              }
-              started = false;
-              throw new Error(`component "${entry.name}" failed to start`, { cause: error });
-            }
-            up.push(entry);
+          starting = boot();
+          try {
+            await starting;
+          } finally {
+            starting = undefined;
           }
-          running = up;
-          await base.emit("runtime.ready", {});
         },
 
-        async stop() {
-          if (!started) return;
-          started = false;
-          const errors = await shutdown(running);
-          running = [];
-          if (errors.length) throw new AggregateError(errors, "harness stopped with errors");
+        stop() {
+          stopping ??= (async () => {
+            // A failed start already rolled back; its error belongs to the caller of start().
+            if (starting) await starting.catch(() => {});
+            if (!started) return;
+            started = false;
+            const errors = await shutdown(running);
+            running = [];
+            if (errors.length) throw new AggregateError(errors, "harness stopped with errors");
+          })().finally(() => {
+            stopping = undefined;
+          });
+          return stopping;
         },
 
         describe() {

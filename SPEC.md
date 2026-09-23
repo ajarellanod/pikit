@@ -170,6 +170,10 @@ does and what the component claims cannot disagree, because there is only one of
   are what proxies are for, and a visible `get()` shows where resolution happens.
 - `use()` is the only way to reach a capability. There is no `ctx.require`, because a
   second path would be an undeclared dependency.
+- Registration is **sealed** when a component's `setup` returns. `on`, `pipeline`, `provide`,
+  `provideKeyed`, `use` and `useKeyed` called later (from `start`, a listener or a timer)
+  throw, because they would bypass the validated graph and the resolved pipeline chains.
+  What `describe()` reports is everything that runs.
 
 `defineHarness(...)` checks component names, the shape of `config.capabilities` and the
 config schema, synchronously. `await definition.create()` runs every `setup` in list order,
@@ -350,6 +354,10 @@ runtime.stopping
 stop            component stop() in reverse order; every stop runs, failures are aggregated
 runtime.stopped
 ```
+
+`stop()` during a `start()` in progress (a SIGTERM during boot) waits for it to finish and
+then stops whatever it started. Concurrent `stop()` calls share one shutdown, and `start()`
+while stopping is rejected. A stopped harness can be started again.
 
 Every `runtime.starting` is closed by `runtime.stopped`, including a failed start. On
 Cloudflare, `start` runs inside the Durable Object constructor's `blockConcurrencyWhile`.
@@ -1267,6 +1275,8 @@ Resolved `[decision]`:
   ambiguous and badly selected providers and cycles fail in `create()`, before any `start`.
 - `use()` returns an explicit `Handle` whose `get()` works after validation; no proxies, no
   `ctx.require`.
+- Registration is sealed when `setup` returns; `stop()` waits for an in-flight `start()`
+  (§4.2, §4.6).
 - An extension is a component; `extensions: [...]` is sugar concatenated to `components`. One
   `define*` fewer to keep stable.
 - Events are typed by declaration merging on `HarnessEvents` (as Pi's `CustomAgentMessages`);

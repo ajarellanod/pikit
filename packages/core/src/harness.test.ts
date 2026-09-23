@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import Type from "typebox";
 import { createContextKey, withAbortSignal, withContextValue } from "./context.ts";
 import { silentLogger } from "./contracts/logger.ts";
-import { defineComponent, defineHarness, type HarnessOptions } from "./harness.ts";
+import { defineComponent, defineHarness, type HarnessOptions, type Pikit } from "./harness.ts";
 import { Halt } from "./pipeline.ts";
 
 declare module "./capabilities.ts" {
@@ -410,6 +410,71 @@ test("keyed and single modes cannot be mixed, keys are unique, and keyed ignores
   const harness = await create({ components: [relaxed] });
   await harness.start();
   expect(keys).toEqual([]);
+});
+
+test("registration is sealed when setup returns", async () => {
+  let saved: Pikit | undefined;
+  const sneaky = defineComponent({
+    name: "sneaky",
+    setup(pikit) {
+      saved = pikit;
+    },
+  });
+  const harness = await defineHarness(quiet({ components: [sneaky] })).create();
+  const late = saved as Pikit;
+
+  expect(() => late.provide("test.store", { name: "late" })).toThrow(
+    'component "sneaky": provide("test.store") is only allowed during setup',
+  );
+  expect(() => late.provideKeyed("test.transport", "k", { channel: "k" })).toThrow("only allowed during setup");
+  expect(() => late.use("test.store")).toThrow('use("test.store") is only allowed during setup');
+  expect(() => late.useKeyed("test.transport")).toThrow("only allowed during setup");
+  expect(() => late.on("runtime.ready", () => {})).toThrow('on("runtime.ready") is only allowed during setup');
+  expect(() => late.pipeline("test.harness.text", (v) => v)).toThrow("only allowed during setup");
+  expect(harness.describe().capabilities).toEqual({});
+});
+
+test("stop() during start() waits for it and stops what it started; concurrent stops share one shutdown", async () => {
+  const log: string[] = [];
+  let release: () => void = () => {};
+  const booted = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const fast = defineComponent({
+    name: "fast",
+    setup: () => ({
+      start: () => {
+        log.push("fast started");
+      },
+      stop: () => {
+        log.push("fast stopped");
+      },
+    }),
+  });
+  const slow = defineComponent({
+    name: "slow",
+    setup: () => ({
+      start: () => booted.then(() => void log.push("slow started")),
+      stop: () => {
+        log.push("slow stopped");
+      },
+    }),
+  });
+  const harness = await defineHarness(quiet({ components: [fast, slow] })).create();
+
+  const starting = harness.start();
+  await new Promise((resolve) => setTimeout(resolve, 5)); // fast is up, slow is still starting
+  const first = harness.stop();
+  const second = harness.stop();
+  expect(second).toBe(first);
+  await expect(harness.start()).rejects.toThrow("harness is stopping");
+  release();
+  await starting;
+  await first;
+
+  expect(log).toEqual(["fast started", "slow started", "slow stopped", "fast stopped"]);
+  await harness.start(); // a stopped harness can start again
+  await harness.stop();
 });
 
 test("setup is synchronous and handles cannot be resolved during it", async () => {
