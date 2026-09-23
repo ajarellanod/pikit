@@ -146,7 +146,8 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 6. **`setup` registers; `start`/`stop` own resources** (S8). `setup` is synchronous. It calls
    `on`/`pipeline`/`provide`/`use` and returns `{ start, stop }` if the component owns sockets,
    files, connections or timers. A handle from `use()` is resolved with `get()` in `start` or
-   later, never in `setup`. Never acquire a resource in `setup` or in an event listener:
+   later, never in `setup`. Registration is sealed when `setup` returns: never keep `pikit`
+   around to register something later. Never acquire a resource in `setup` or in an event listener:
    a failure there becomes a log line and a process that looks healthy.
 7. **State delivery semantics** (S10, S11). Anything that talks to the outside world says
    whether it is at-least-once and how duplicates are handled:

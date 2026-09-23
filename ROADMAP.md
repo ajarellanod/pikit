@@ -96,16 +96,25 @@ defined in SPEC §15.
 harness without knowing anything about channels, storage or Pi.
 
 **Done:** `@pikit/core` is implemented and tested:
-- typed events;
+- typed events, notifications whose failures cannot fail the harness;
 - pipelines with priority, anchors and `halt`;
-- single-provider capabilities with selection;
-- composition validated before any code runs;
-- ordered `start` / reverse `stop` with rollback;
+- **`setup` is the manifest**: synchronous, registration only, sealed when it returns. The
+  dependency graph is derived from `provide`/`use`, with explicit handles resolved from
+  `start` onward;
+- capabilities: single (with selection), optional (`use(name, { optional: true })`) and
+  keyed (`provideKeyed`/`useKeyed`);
+- composition validated after every setup and before any start: missing, ambiguous and
+  badly selected providers, mixed modes, duplicate keys and cycles;
+- ordered `start` / reverse `stop` with rollback, and a `stop()` that waits for an in-flight
+  `start()`;
+- an invocation `Context` (cancellation and values) with Chord's shape, bridged to Pi in one
+  line;
 - config merge and validation;
 - `describe()` for `doctor`.
 
-`Clock` and `Logger` are the only contracts, because every other contract is written when
-its first component needs it.
+`Clock` and `Logger` are the only contracts. Every other contract (`sessions.store`,
+`execution`, `channel.transport`…), `@pikit/core/testing` with its conformance suites, the
+`defineAgent` shapes and `registerEvent` arrive with the first component that needs them.
 
 ### M1 — Five minutes, then it's yours
 
