@@ -400,5 +400,9 @@ Record here anything that went wrong twice, or that the user explicitly said not
   deadline test hangs, check `bun --revision` first. Before reporting a runtime bug upstream,
   reproduce it on the latest release (download it to `/tmp`, do not upgrade the global
   install) and search merged PRs, not only issues.
+- Bun's `expect(actual).toBe(expected)` is typed from `actual`, so it fails `tsc` when a test
+  asserts on a value typed by a narrowed annotation (a type-level test with `@ts-expect-error`).
+  Assert on the original value instead, and keep the annotated variable only for the type check
+  (`void variable`). This broke `typecheck` twice in `agent.test.ts`.
 - macOS has no `timeout` command. Bound a command that may hang with
   `perl -e 'alarm 60; exec @ARGV' <cmd>`, and give hanging tests `--timeout <ms>`.
