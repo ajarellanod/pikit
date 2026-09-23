@@ -454,6 +454,7 @@ test("registration is sealed when setup returns", async () => {
 test("stop() during start() cancels it; the rollback is bounded by stop's deadline; concurrent stops share one shutdown", async () => {
   const log: string[] = [];
   let blockStart = true;
+  let releaseFast: () => void = () => {};
   const fast = defineComponent({
     name: "fast",
     setup: () => ({
@@ -463,7 +464,11 @@ test("stop() during start() cancels it; the rollback is bounded by stop's deadli
       // Hangs during the rollback: only the stop deadline can end it.
       stop: () => {
         log.push("fast stop called");
-        if (blockStart) return new Promise<void>(() => {});
+        if (blockStart) {
+          return new Promise<void>((resolve) => {
+            releaseFast = resolve;
+          });
+        }
       },
     }),
   });
@@ -497,6 +502,10 @@ test("stop() during start() cancels it; the rollback is bounded by stop's deadli
   expect(((error as Error).cause as Error).message).toBe("harness is stopping");
   expect(log).toEqual(["fast started", "slow start aborted", "fast stop called"]);
 
+  // The abandoned stop still runs and shares fast's closure: no restart beside it.
+  await expect(harness.start()).rejects.toThrow("abandoned work still running (fast.stop)");
+  releaseFast();
+  await new Promise((resolve) => setTimeout(resolve, 0));
   blockStart = false;
   await harness.start(); // a stopped harness can start again
   await harness.stop();
@@ -564,6 +573,64 @@ test("stop(ctx): a stop that outlives its deadline is abandoned and reported; th
   expect((abandoned?.cause as DOMException).name).toBe("TimeoutError");
   expect(log).toEqual(["store stopped"]);
   expect(events).toEqual(["runtime.stopped"]);
+});
+
+test("runtime.* listeners share the lifecycle deadline: a hung one is abandoned, the rest proceeds", async () => {
+  const log: string[] = [];
+  const watcher = defineComponent({
+    name: "watcher",
+    setup(pikit) {
+      pikit.on("runtime.stopping", () => new Promise<void>(() => {}));
+      pikit.on("runtime.stopped", () => void log.push("runtime.stopped"));
+      return {
+        stop: () => {
+          log.push("watcher stopped");
+        },
+      };
+    },
+  });
+  const harness = await defineHarness(quiet({ components: [watcher] })).create();
+  await harness.start();
+  await harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT));
+  expect(log).toEqual(["watcher stopped", "runtime.stopped"]);
+});
+
+test("abandoned work is logged and blocks a restart until it settles", async () => {
+  const logs: string[] = [];
+  const logger = {
+    ...silentLogger,
+    warn: (_: string, fields?: Record<string, unknown>) => void logs.push(`warn ${String(fields?.step)}`),
+    info: (_: string, fields?: Record<string, unknown>) => void logs.push(`info ${String(fields?.step)}`),
+  };
+  let release: () => void = () => {};
+  let hang = true;
+  const lagging = defineComponent({
+    name: "lagging",
+    setup: () => ({
+      stop: () => {
+        if (!hang) return;
+        return new Promise<void>((resolve) => {
+          release = resolve;
+        });
+      },
+    }),
+  });
+  const harness = await defineHarness({ components: [lagging], logger }).create();
+  await harness.start();
+  await expect(harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT))).rejects.toThrow(
+    "harness stopped with errors",
+  );
+  expect(logs).toEqual(["warn lagging.stop"]);
+
+  // The late stop shares lagging's closure: starting beside it could release the new run.
+  await expect(harness.start()).rejects.toThrow("abandoned work still running (lagging.stop)");
+
+  release();
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(logs).toEqual(["warn lagging.stop", "info lagging.stop"]);
+  hang = false;
+  await harness.start();
+  await harness.stop();
 });
 
 test("setup is synchronous and handles cannot be resolved during it", async () => {

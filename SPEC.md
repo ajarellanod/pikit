@@ -369,8 +369,15 @@ component: systemd's stop timeout, a Durable Object's `blockConcurrencyWhile`), 
 - A `start` still running when it fires is abandoned: that start fails and rolls back.
 - A `stop` still running when it fires is abandoned and reported in the `AggregateError`, and
   the remaining components still stop.
+- `runtime.*` listeners share the deadline. A listener still running when it fires is
+  abandoned like a hook; events still cannot fail the harness.
+- Past the deadline, each remaining step still runs and gets one turn of the event loop
+  before it is abandoned, so quick cleanup after a slow step is not reported as a failure.
 - JavaScript cannot kill a promise, so an abandoned hook keeps running. A hook must release
   what it acquired and return when it sees the abort; the harness only stops waiting.
+- Abandoned work is visible: `warn` when it is abandoned, `info` when it settles. `start()`
+  refuses to run while any is still running, because it shares its component's closure and a
+  late `stop` could release what the new run acquired.
 - The rollback of a failed start does not inherit the start's cancellation, which is usually
   why it runs. It is bounded only by a `stop()` that interrupts the start.
 
