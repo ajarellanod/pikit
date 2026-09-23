@@ -23,7 +23,10 @@ meet live in `ROADMAP.md`.
 
 ### Non-goals
 
-- Reimplementing an agent loop, model providers, or compaction. Pi owns these.
+- Reimplementing anything Pi already does. Pi is the agent: loop, providers, compaction,
+  retries, steering and follow-up queues, session serialization, resume, tool execution,
+  skills. pikit is the kit around it (§6.2, "Pi first"). Before building an agent-facing
+  feature, check Pi; if Pi does it, use it through the adapter.
 - Dynamic plugin loading in production. Components are compiled in at build time.
 - A hosted registry service. Registries are Git repos or static JSON + files.
 - Matching feature-for-feature with OpenClaw or Hermes.
@@ -53,7 +56,11 @@ meet live in `ROADMAP.md`.
 | **Runtime target** | Where the harness runs: `server` or `cloudflare`. |
 | **Agent runtime** | The thing that runs the agent loop. In v1: Pi. |
 | **Conversation key** | Stable identity of an external conversation (`tenant:channel:conversation`). |
-| **Session** | A Pi session (transcript, lanes, records). A conversation points to its active session. |
+| **Actor** | A conversation seen as a unit of execution: a stable identity, a durable state (its session) and a mailbox (Pi's inbox). pikit's only kind of actor is the conversation (§7). |
+| **Worker** | Wherever an actor's steps run right now: a server process, a Durable Object instance. Holds nothing that cannot be rebuilt from the actor's records. Not to be confused with a Cloudflare Worker, which is pikit's ingress. |
+| **Ingress** | The stateless part that receives from channels, authenticates, normalizes and routes to the actor. |
+| **Conversation ownership** | Which worker has an actor's session open. Always at most one (§7.2). Not to be confused with source ownership (the user owns the code). |
+| **Session** | A Pi session: transcript, inbox (steer / follow-up / next-run queues), operations, values. The actor's state. A conversation points to its active session. |
 | **Workspace** | The filesystem an agent operates on. Distinct from the session. |
 
 ---
@@ -281,6 +288,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `storage.blob` | `BlobStore` | put/get/delete/list. Local dir, S3, R2. |
 | `sessions.store` | Pi `SessionRepo` + `SessionStorage` | Re-exported from Pi; see §7. |
 | `conversations.registry` | `ConversationRegistry` | conversation key → active session id, workspace ref, metadata. |
+| `conversations.ownership` | `ConversationOwnership` | `[planned]` Lease per conversation so only one worker has its session open. Needed only with several server replicas (§7.2). |
 | `workspace` | `WorkspaceProvider` | Resolves a `Workspace` for a conversation/agent. |
 | `execution` | Pi `ExecutionEnv` | Filesystem for the agent's tools; `exec()` may return `shell_unavailable`. |
 | `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
@@ -364,6 +372,10 @@ pipeline route.resolve             → RouteDecision { agent, tenant, tags, acce
   ▼
 pipeline conversation.resolve      → ConversationRef { key, sessionId, workspaceRef }
   │  emit conversation.resolved | conversation.created
+  ▼
+hand the message to the worker that owns the conversation (§7.2)
+  │  idle  → start a run
+  │  busy  → Pi's inbox, as `steer` by default (§7.3); the run in progress answers
   ▼
 capability agent.runtime.dispatch(AgentRequest)
   │  emit agent.dispatched · agent.started
@@ -466,7 +478,8 @@ interface AgentRequest {
 }
 
 interface AgentResult {
-  kind: "completed" | "aborted" | "failed" | "suspended";
+  /** `queued`: the conversation was busy; the message went to Pi's inbox (§7.3). */
+  kind: "completed" | "aborted" | "failed" | "suspended" | "queued";
   text?: string;
   messages: AgentMessage[];
   usage?: Usage;
@@ -489,6 +502,25 @@ from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-
 The adapter is the **only** package that imports `@earendil-works/pi-*`. It exposes
 `pikit`-shaped types and hides Pi's experimental surface. `[upstream]`
 
+**Pi first.** `[decision]` Pi is the agent; pikit is the kit that lets Pi run as a robust,
+multi-agent service in the cloud. Before designing any agent-facing feature, check whether
+Pi already does it; if it does, the adapter exposes Pi's feature and pikit builds nothing.
+If Pi does it partially, the adapter wraps it and the gap goes upstream. pikit builds only
+what a single Pi process cannot provide for itself. Verified against `pi-agent-core`
+(installed 0.87.1):
+
+| Pi already does it — use it | pikit adds it — Pi cannot, from inside one process |
+|---|---|
+| Agent loop, providers (`pi-ai`), compaction, retries (`RetryPolicy`) | Channels, ingress, authentication, deduplication |
+| Steering, follow-up and next-run queues, persisted as the session inbox | Routing messages to agents (multi-agent) |
+| Serialized writes per session; exclusive open of a session within a process | Ownership of a session **across** processes (§7.2) |
+| Resume of suspended operations; drive modes | Durable delivery (outbox), scheduling, approvals surfaces |
+| Tool hooks, tool execution modes, turn preparation / finish hooks | Tools written over `ExecutionEnv`; policy; sandboxes via `execution` |
+| Session values, branches, forks, usage records | Conversation registry, reset, workspace references |
+| Skills, prompt templates, system prompt assembly | Deployment, secrets, targets, `doctor` |
+
+When a row moves (Pi ships something pikit built), pikit deletes its version.
+
 Responsibilities:
 
 - Build an `AgentHarness` per conversation from `AgentDefinition` + capabilities:
@@ -506,6 +538,8 @@ Responsibilities:
   - `cloudflare`: `drive: "manual"` (`peekAction()` / `executeAction()` loop with persistence
     between actions; see §9).
 - On harness create, inspect `suspended` operations and expose them through `resume()`.
+- Deliver messages to a busy conversation through Pi's own `steer()` / `followUp()` /
+  `nextRun()`. pikit keeps no queue of its own (§7.3).
 - Classify tools with `replay: "safe" | "never"` from the tool component manifest.
 
 Agent definition (project file, convention-based under `src/agents/{name}/`):
@@ -615,9 +649,69 @@ binary (`pi`) invoked by the CLI for `resolve with pi` (§10.6). `[decision]`
 
 ---
 
-## 7. Sessions and conversations
+## 7. Actors, workers and sessions
 
-### 7.1 Two different things
+### 7.1 The model `[decision]`
+
+A **conversation is an actor**: an identity (the conversation key), a durable state (its Pi
+session) and a mailbox (the session's inbox, which is Pi's). A **worker** is wherever the
+actor's steps run right now — a server process, a Durable Object instance. The actor is
+permanent; the worker is disposable. Everything else follows from five invariants:
+
+1. **The actor's state is records, not memory.** Registry pointer, Pi session (transcript,
+   inbox, operations, values) and workspace ref are persisted through capabilities. What a
+   worker holds in memory is a cache that can be rebuilt from those records.
+2. **One owner at a time.** Any worker may run any actor's next step, but only one worker has
+   an actor's session open at a time, on every target (§7.2).
+3. **One mailbox, Pi's.** Messages that reach a busy actor go to Pi's inbox (§7.3); two runs
+   of the same conversation never overlap.
+4. **Workers are disposable.** Losing a worker loses no actor: the next owner opens the
+   session, `resume()` continues the run, and the inbox is still there (replay rules in §8.4).
+5. **Idle actors cost only storage.** No open session, timer or sandbox is kept for an idle
+   conversation. Closing a session deactivates the actor; it never resets it.
+
+An `AgentDefinition` is to an actor what a class is to an object: routing picks the agent,
+`conversation.resolve` picks the actor. Everything with state that receives messages is a
+conversation — a routine posts to a conversation, an approval answer arrives in one, a
+subagent is a child conversation.
+
+### 7.2 Conversation ownership
+
+Pi serializes writes to a session and opens a session exclusively **within one process**, and
+states its precondition: "a storage path has one owning process and one owning Session at a
+time; a second process is unsupported." pikit's job is to guarantee that precondition when
+there is more than one process. That is all ownership means.
+
+| Target | How one owner is guaranteed | Component |
+|---|---|---|
+| Server, one replica | The process is the only worker; an in-memory map of open sessions is a cache | none |
+| Server, several replicas | A lease per conversation in the database; the non-owner forwards or waits | `[planned]` `conversations.ownership` |
+| Cloudflare | `idFromName(conversationKey)` routes every message for a key to one Durable Object | none (platform) |
+
+`[open]` Several replicas need fenced writes: a worker that stalls past its lease must not
+write over the next owner. Pi's `Storage.commit` has no expected-sequence check, so the
+fencing belongs in the session store or the lease; decide when the component is built.
+
+### 7.3 Messages that arrive during a run `[decision]`
+
+They go to Pi's inbox; pikit keeps no queue. Pi's semantics, which pikit does not change:
+
+| Pi call | When the message enters the run |
+|---|---|
+| `steer()` | After **all** tool calls of the current assistant turn finish (tools are not cancelled), before the next model call. Changes the agent's course. |
+| `followUp()` | When the agent would otherwise stop; the same run continues with another turn. |
+| `nextRun()` | At the next run; the current run is not extended. |
+
+**The default is `steer`**, for every message that reaches a busy conversation: in a chat,
+a new message usually means "change course". An agent may choose another mode
+(`defineAgent({ whileRunning: "followUp" })`) `[planned]`. Stopping at once, without
+waiting for tools, is `abort()`, not a queue mode. Pi's `steeringMode` / `followUpMode`
+(`all` or `one-at-a-time`) keep Pi's defaults.
+
+`[open]` Whether `agent.state` lives in the session's values (a `/reset` starts it fresh) or
+next to the registry (it survives a reset).
+
+### 7.4 Two different records
 
 | | Persists | Lives in |
 |---|---|---|
@@ -629,7 +723,7 @@ old sessions remain). TTL/eviction of in-memory harness objects **never** delete
 registry pointer. A conversation must be restorable long after its harness object was
 evicted; this is a hard rule.
 
-### 7.2 `sessions.store`
+### 7.5 `sessions.store`
 
 The contract is Pi's `SessionRepo<TMetadata>` + `SessionStorage`. `[upstream]` The adapter
 re-exports them; components implement them. Every implementation must pass
@@ -647,7 +741,7 @@ Planned implementations:
 | `sessions-postgres` | own implementation | server |
 | `sessions-cloudflare-do` | DO `ctx.storage.sql` | cloudflare |
 
-### 7.3 Reset semantics
+### 7.6 Reset semantics
 
 ```yaml
 reset:
@@ -743,6 +837,8 @@ from `${sessionId}:${runId}:${toolCallId}`.
   `deployment-systemd` generates a unit file. `pikit up/down/logs/status` wrap them.
 - Agent runtime is `pi-agent-core` here too; `pi-coding-agent` is not imported on any target
   (§6.3).
+- Workers: one process is one worker and owns every conversation (§7.2). Several replicas
+  need `conversations.ownership`; until it exists, the server target runs one replica.
 
 ### 9.2 Cloudflare
 
@@ -1098,6 +1194,14 @@ Resolved `[decision]`:
   agree (§10.2).
 - `defineAgent` and the agent shapes are core; Pi payload types are opaque in core and made
   precise by the adapter (§6.1).
+- **Pi first** (§6.2): an agent-facing feature is built in pikit only after checking that Pi
+  does not already provide it. pikit is the kit around Pi, never a second agent.
+- Conversations are actors and processes are workers (§7.1). The actor's mailbox is Pi's
+  inbox; pikit keeps no message queue of its own.
+- Messages reaching a busy conversation are `steer`ed by default (§7.3), matching what a chat
+  user means by a new message; an agent may choose `followUp` or `nextRun`.
+- "Conversation ownership", not "placement": one worker has a session open at a time. A
+  single-process server and Cloudflare need no component for it; several replicas do (§7.2).
 
 ---
 
