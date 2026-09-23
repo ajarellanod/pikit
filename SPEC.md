@@ -773,7 +773,16 @@ Responsibilities:
   invariant 5). Everything that touches one conversation runs in that conversation's line, one
   step at a time; runs execute outside it.
 - Give each conversation's harness to `onHarness` when it opens: where Pi hooks attach (the
-  tier-A extensions of §6.2b; tests).
+  tier-A extensions of §6.2b; tests). The `runtime-pi` component takes it as
+  `createRuntimePi({ onHarness })`, a plain function in its own source; its default export is
+  the component without options.
+
+The split `[decision]`: `@pikit/pi-adapter` (npm, pinned with Pi) holds everything that talks to
+Pi, including the bridges that read Pi's storage layout, because it changes when Pi changes.
+`runtime-pi` (copied to `src/pikit/runtime/pi/`) is the wiring the user owns: which
+capabilities it reads, what it refuses to start without (no agent, a model no provider has), and
+its tests, which run the `agent.runtime` and lifecycle conformance suites through
+`@pikit/pi-adapter/testing` without importing Pi (rule 13).
 - Pass each tool component's `replay: "safe" | "never"` to Pi's `AgentHarnessTool.replay`; Pi
   applies it on resume (§8.4).
 

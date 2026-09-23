@@ -155,8 +155,12 @@ around it.
 
 ✅ **The adapter:** `@pikit/pi-adapter` passes that suite on Pi 0.87.1, killed-process cases
 included. It bridges four gaps of `pi-agent-core` (SPEC §6.4), the spike is deleted, and
-`pi-gaps.test.ts` / `pi-facts.test.ts` pin the Pi behaviour it relies on. Next: the `runtime-pi`
-component.
+`pi-gaps.test.ts` / `pi-facts.test.ts` pin the Pi behaviour it relies on.
+
+✅ **`runtime-pi`** (`registry/components/runtime-pi`): provides `agent.runtime` and passes both
+suites from its own copied tests. Its `component.json` waits for the CLI's generator; a test pins
+what `setup` declares until then. Next: prepare/`agent.state`, the `tool-*` components, the http
+preset, the installer and the CLI.
 
 **Scope:**
 - `@pikit/pi-adapter` on `accept()` / `drive()` in one server process, shaped by the spike.

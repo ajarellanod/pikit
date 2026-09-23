@@ -5,6 +5,8 @@
     "": {
       "name": "pikit-monorepo",
       "devDependencies": {
+        "@pikit/core": "workspace:*",
+        "@pikit/pi-adapter": "workspace:*",
         "@types/bun": "^1.4.2",
         "typescript": "^7.0.2",
       },
