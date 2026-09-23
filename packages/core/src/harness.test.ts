@@ -81,6 +81,7 @@ test("runtime.* events fire in order on start/stop", async () => {
   await expect(harness.start()).rejects.toThrow("already started");
   await harness.stop();
   await harness.stop(); // idempotent
+  await expect(harness.start()).rejects.toThrow("single-use; create() a new one");
 
   expect(seen).toEqual(["runtime.starting", "runtime.ready", "runtime.stopping", "runtime.stopped"]);
 });
@@ -236,16 +237,19 @@ test("a failed start rolls back what started, never emits ready, and can be retr
     },
   });
 
-  const harness = await defineHarness(quiet({ components: [db, server] })).create();
+  const definition = defineHarness(quiet({ components: [db, server] }));
+  const harness = await definition.create();
   const failure = await harness.start().catch((error: Error) => error);
   expect(failure).toBeInstanceOf(Error);
   expect((failure as Error).message).toBe('component "server-http" failed to start');
   expect(((failure as Error).cause as Error).message).toBe("EADDRINUSE");
   expect(seen).toEqual(["db open", "db close", "runtime.stopped"]);
 
+  // A failed start is final for that harness; retrying is a fresh create().
+  await expect(harness.start()).rejects.toThrow("single-use");
   portBusy = false;
   seen.length = 0;
-  await harness.start();
+  await (await definition.create()).start();
   expect(seen).toEqual(["db open", "listening", "runtime.ready"]);
 });
 
@@ -494,7 +498,7 @@ test("stop() during start() cancels it; the rollback is bounded by stop's deadli
   const first = harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT));
   const second = harness.stop();
   expect(second).toBe(first);
-  await expect(harness.start()).rejects.toThrow("harness is stopping");
+  await expect(harness.start()).rejects.toThrow("single-use");
   await first;
   const error = await starting.catch((e: Error) => e);
   expect(error).toBeInstanceOf(Error);
@@ -502,13 +506,9 @@ test("stop() during start() cancels it; the rollback is bounded by stop's deadli
   expect(((error as Error).cause as Error).message).toBe("harness is stopping");
   expect(log).toEqual(["fast started", "slow start aborted", "fast stop called"]);
 
-  // The abandoned stop still runs and shares fast's closure: no restart beside it.
-  await expect(harness.start()).rejects.toThrow("abandoned work still running (fast.stop)");
+  // The abandoned stop still runs and shares fast's closure; that harness never starts again.
+  await expect(harness.start()).rejects.toThrow("single-use");
   releaseFast();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  blockStart = false;
-  await harness.start(); // a stopped harness can start again
-  await harness.stop();
 });
 
 test("start(ctx): a start that outlives its deadline is abandoned and rolled back without that deadline", async () => {
@@ -595,12 +595,11 @@ test("runtime.* listeners share the lifecycle deadline: a hung one is abandoned,
   expect(log).toEqual(["watcher stopped", "runtime.stopped"]);
 });
 
-test("abandoned work is logged and blocks a restart until it settles", async () => {
+test("abandoned work is logged; a restart is a fresh harness that shares nothing with it", async () => {
   const logs: string[] = [];
   const logger = {
     ...silentLogger,
     warn: (_: string, fields?: Record<string, unknown>) => void logs.push(`warn ${String(fields?.step)}`),
-    info: (_: string, fields?: Record<string, unknown>) => void logs.push(`info ${String(fields?.step)}`),
   };
   let release: () => void = () => {};
   let hang = true;
@@ -615,22 +614,20 @@ test("abandoned work is logged and blocks a restart until it settles", async () 
       },
     }),
   });
-  const harness = await defineHarness({ components: [lagging], logger }).create();
+  const definition = defineHarness({ components: [lagging], logger });
+  const harness = await definition.create();
   await harness.start();
   await expect(harness.stop(withAbortSignal(AbortSignal.timeout(20), BACKGROUND_CONTEXT))).rejects.toThrow(
     "harness stopped with errors",
   );
   expect(logs).toEqual(["warn lagging.stop"]);
 
-  // The late stop shares lagging's closure: starting beside it could release the new run.
-  await expect(harness.start()).rejects.toThrow("abandoned work still running (lagging.stop)");
-
-  release();
-  await new Promise((resolve) => setTimeout(resolve, 0));
-  expect(logs).toEqual(["warn lagging.stop", "info lagging.stop"]);
+  // The late stop still runs in the old harness's closure; the new one has its own setup.
   hang = false;
-  await harness.start();
-  await harness.stop();
+  const fresh = await definition.create();
+  await fresh.start();
+  await fresh.stop();
+  release();
 });
 
 test("setup is synchronous and handles cannot be resolved during it", async () => {

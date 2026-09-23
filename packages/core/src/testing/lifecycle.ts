@@ -5,7 +5,8 @@
  * the hook: a component that ignores the abort keeps running and may acquire resources nobody
  * will release. These cases abort the component's own `start` and `stop` while they run, then
  * check that the hook settles promptly, that nothing is left open (when the fixture can count
- * it), and that the harness can start again.
+ * it), and that a fresh harness over the same component can start again (a restart: harnesses
+ * are single-use, so a restart is `create()` again, as on every target).
  *
  * Runner-independent, like Pi's session conformance. Register the cases with any framework:
  *
@@ -17,9 +18,8 @@
  */
 
 import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "../context.ts";
-import type { Logger } from "../contracts/logger.ts";
+import { silentLogger } from "../contracts/logger.ts";
 import { type ComponentDefinition, type ComponentLifecycle, defineHarness, type Harness } from "../harness.ts";
-import { ABANDONED_MESSAGE, SETTLED_MESSAGE } from "../lifecycle.ts";
 
 /** One runner-independent case. Same shape as Pi's `ConformanceCase`. `run` throws on failure. */
 export interface ConformanceCase {
@@ -108,17 +108,17 @@ async function createSubject(fixture: LifecycleFixture, settleMs: number): Promi
     setTimeout(() => trigger.controller.abort(new Error(`conformance: ${name}.${hook} aborted while running`)), 0);
   };
 
-  // Abandoned work is observed through the harness's own log: abandoned minus settled.
-  let outstanding = 0;
-  const logger: Logger = {
-    debug: () => {},
-    info: (message) => {
-      if (message === SETTLED_MESSAGE) outstanding--;
-    },
-    warn: (message) => {
-      if (message === ABANDONED_MESSAGE) outstanding++;
-    },
-    error: () => {},
+  // Hooks still running, observed directly: the harness stops waiting at the abort, the hook
+  // does not, so a count above zero once the harness returned is abandoned work.
+  let running = 0;
+  const tracked = (result: unknown): unknown => {
+    if (!isThenable(result)) return result;
+    running++;
+    const settled = () => {
+      running--;
+    };
+    result.then(settled, settled);
+    return result;
   };
 
   const component: ComponentDefinition = {
@@ -126,15 +126,16 @@ async function createSubject(fixture: LifecycleFixture, settleMs: number): Promi
     setup(pikit, config) {
       const hooks = fixture.component.setup(pikit, config);
       // A thenable is returned as is, so the harness still rejects an async setup.
-      if (!hooks || typeof (hooks as { then?: unknown }).then === "function") return hooks;
-      return observe(hooks, invoked);
+      if (!hooks || isThenable(hooks)) return hooks;
+      return observe(hooks, invoked, tracked);
     },
   };
-  const harness = await defineHarness({
+  const definition = defineHarness({
     components: [...(fixture.providers ?? []), component],
     ...(fixture.config !== undefined && { config: fixture.config }),
-    logger,
-  }).create();
+    logger: silentLogger,
+  });
+  const harness = await definition.create();
 
   const expectNothingOpen = async (when: string): Promise<void> => {
     if (!fixture.openResources) return;
@@ -156,7 +157,7 @@ async function createSubject(fixture: LifecycleFixture, settleMs: number): Promi
     },
     async expectSettled(hook) {
       const deadline = Date.now() + settleMs;
-      while (outstanding > 0) {
+      while (running > 0) {
         if (Date.now() >= deadline) {
           throw new Error(
             `component "${name}": ${hook} was still running ${settleMs} ms after its abort; ` +
@@ -168,30 +169,42 @@ async function createSubject(fixture: LifecycleFixture, settleMs: number): Promi
     },
     expectNothingOpen,
     async expectRestart() {
-      await harness.start();
-      await harness.stop();
+      const fresh = await definition.create();
+      await fresh.start();
+      await fresh.stop();
       await expectNothingOpen("after a restart");
     },
   };
 }
 
-/** The same hooks, reporting each invocation (after the call, so the hook is running). */
-function observe(hooks: ComponentLifecycle, invoked: (hook: Hook) => void): ComponentLifecycle {
+/**
+ * The same hooks, reporting each invocation (after the call, so the hook is running) and
+ * passing each result through `track` so the subject knows when it settles.
+ */
+function observe(
+  hooks: ComponentLifecycle,
+  invoked: (hook: Hook) => void,
+  track: (result: unknown) => unknown,
+): ComponentLifecycle {
   const observed: ComponentLifecycle = {};
   const { start, stop } = hooks;
   if (start) {
     observed.start = (ctx) => {
-      const result = start.call(hooks, ctx);
+      const result = track(start.call(hooks, ctx)) as ReturnType<typeof start>;
       invoked("start");
       return result;
     };
   }
   if (stop) {
     observed.stop = (ctx) => {
-      const result = stop.call(hooks, ctx);
+      const result = track(stop.call(hooks, ctx)) as ReturnType<typeof stop>;
       invoked("stop");
       return result;
     };
   }
   return observed;
+}
+
+function isThenable(value: unknown): value is PromiseLike<unknown> {
+  return typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
 }

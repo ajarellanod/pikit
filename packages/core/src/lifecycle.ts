@@ -7,7 +7,11 @@
  * reaches every hook as `ctx.abortSignal`, and the harness stops waiting for a hook that
  * outlives it. `runtime.*` listeners share that deadline. JavaScript cannot kill a promise, so
  * an abandoned hook keeps running and must release what it acquired when it sees the abort.
- * The harness logs abandoned work, and refuses to start again until it has settled.
+ * The harness logs abandoned work.
+ *
+ * A harness is single-use: once `stop()` is called or `start()` fails, it never starts again.
+ * Restarting is `create()` again, which is what every target does anyway (a fresh process, a
+ * fresh Durable Object). So abandoned work never shares a closure with a new run.
  */
 
 import { type Context, withAbortSignal, withCancel } from "./context.ts";
@@ -25,12 +29,7 @@ declare module "./events.ts" {
 
 type RuntimeEvent = "runtime.starting" | "runtime.ready" | "runtime.stopping" | "runtime.stopped";
 
-/**
- * Log messages for abandoned lifecycle work (`fields.step` names it). Not public API, but
- * `@pikit/core/testing` observes them to tell when abandoned work has settled.
- */
-export const ABANDONED_MESSAGE = "abandoned at its deadline; it keeps running";
-export const SETTLED_MESSAGE = "abandoned step settled";
+const SINGLE_USE = "harness has stopped and is single-use; create() a new one to start again";
 
 /** A component that returned hooks from setup. */
 export interface LifecycleEntry {
@@ -53,22 +52,8 @@ export interface Lifecycle {
 }
 
 export function createLifecycle({ components, context, logger }: LifecycleOptions): Lifecycle {
-  /**
-   * Work abandoned at a deadline that has not settled yet, by label. It keeps running and
-   * shares its component's closure, so `start()` refuses to run beside it: a late `stop` could
-   * otherwise release what the new run acquired.
-   */
-  const abandoned = new Map<Promise<unknown>, string>();
   const lifecycleStep = (label: string, work: () => unknown, signal: AbortSignal | undefined) =>
-    bounded(work, signal, (pending) => {
-      logger.warn(ABANDONED_MESSAGE, { step: label });
-      abandoned.set(pending, label);
-      const settled = () => {
-        abandoned.delete(pending);
-        logger.info(SETTLED_MESSAGE, { step: label });
-      };
-      pending.then(settled, settled);
-    });
+    bounded(work, signal, () => logger.warn("abandoned at its deadline; it keeps running", { step: label }));
   /** `runtime.*` listeners share the lifecycle deadline. Events cannot fail the harness. */
   const announce = async (ctx: HarnessContext, name: RuntimeEvent): Promise<void> => {
     await lifecycleStep(`${name} listeners`, () => ctx.emit(name, {}), ctx.abortSignal).catch(() => {});
@@ -118,7 +103,6 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
           for (const stopError of await shutdown(up, rollbackCtx)) {
             logger.error("rollback after failed start", { error: stopError });
           }
-          started = false;
           throw new Error(`component "${entry.name}" failed to start`, { cause: error });
         }
         up.push(entry);
@@ -129,29 +113,33 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
     return { done, cancel, boundRollback: (signal) => follow(signal, rollback) };
   };
 
-  let started = false;
-  let running: readonly LifecycleEntry[] = [];
+  /** `stopped` is terminal: set by the first `stop()` or by a failed `start()`. */
+  let state: "new" | "started" | "stopped" = "new";
+  /** The components a successful boot brought up; `stop()` takes them. */
+  let running: readonly LifecycleEntry[] | undefined;
   let starting: Boot | undefined;
   let stopping: Promise<void> | undefined;
 
   return {
     async start(parent) {
-      if (stopping) throw new Error("harness is stopping");
-      if (started) throw new Error("harness already started");
-      if (abandoned.size) {
-        throw new Error(`harness cannot start: abandoned work still running (${[...abandoned.values()].join(", ")})`);
-      }
-      started = true;
+      if (state === "stopped") throw new Error(SINGLE_USE);
+      if (state === "started") throw new Error("harness already started");
+      state = "started";
       starting = boot(parent);
       try {
         await starting.done;
+      } catch (error) {
+        state = "stopped";
+        throw error;
       } finally {
         starting = undefined;
       }
     },
 
     stop(parent) {
+      // Concurrent calls share the first call's shutdown; once it has finished, stop() is a no-op.
       stopping ??= (async () => {
+        state = "stopped";
         if (starting) {
           // A SIGTERM during boot: cancel it and let it roll back within this stop's deadline.
           // Its error belongs to the caller of start().
@@ -159,13 +147,13 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
           starting.cancel(new Error("harness is stopping"));
           await starting.done.catch(() => {});
         }
-        if (!started) return;
-        started = false;
-        const errors = await shutdown(running, context(parent));
-        running = [];
+        if (running === undefined) return;
+        const list = running;
+        running = undefined;
+        const errors = await shutdown(list, context(parent));
         if (errors.length) throw new AggregateError(errors, "harness stopped with errors");
       })().finally(() => {
-        stopping = undefined;
+        stopping = Promise.resolve();
       });
       return stopping;
     },
@@ -173,14 +161,14 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
 }
 
 /**
- * Awaits `work()` unless `signal` aborts first; then calls `onAbandon` with the still-pending
- * work and rejects with the abort reason. `work` is always called. An abandoned promise keeps
+ * Awaits `work()` unless `signal` aborts first; then calls `onAbandon` and rejects with the
+ * abort reason. `work` is always called. An abandoned promise keeps
  * running, and its outcome is consumed here so it cannot surface as an unhandled rejection.
  */
 function bounded(
   work: () => unknown,
   signal: AbortSignal | undefined,
-  onAbandon: (pending: Promise<unknown>) => void,
+  onAbandon: () => void,
 ): Promise<void> {
   const pending = Promise.resolve().then(work);
   if (signal === undefined) return pending.then(() => {});
@@ -195,7 +183,7 @@ function bounded(
     };
     const abandon = () =>
       decide(() => {
-        onAbandon(pending);
+        onAbandon();
         reject(signal.reason);
       });
     pending.then(

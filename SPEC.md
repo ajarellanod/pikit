@@ -389,16 +389,20 @@ component: systemd's stop timeout, a Durable Object's `blockConcurrencyWhile`), 
 - JavaScript cannot kill a promise, so an abandoned hook keeps running. A hook must release
   what it acquired and return when it sees the abort; the harness only stops waiting. The core
   cannot enforce this, so it is checked per component: `createLifecycleConformance` (§14).
-- Abandoned work is visible: `warn` when it is abandoned, `info` when it settles. `start()`
-  refuses to run while any is still running, because it shares its component's closure and a
-  late `stop` could release what the new run acquired.
+- Abandoned work is visible: a `warn` when it is abandoned.
 - The rollback of a failed start does not inherit the start's cancellation, which is usually
   why it runs. It is bounded only by a `stop()` that interrupts the start.
 
 `stop()` during a `start()` in progress (a SIGTERM during boot) cancels the start, waits for
 its rollback within the stop's deadline, and leaves the start's error to the caller of
 `start()`. Concurrent `stop()` calls share the first call's shutdown and deadline, and
-`start()` while stopping is rejected. A stopped harness can be started again.
+`start()` while stopping is rejected.
+
+`[decision]` A harness is **single-use**. Once `stop()` is called or `start()` fails, `start()`
+throws; restarting is `create()` again. Every target already restarts that way (a fresh
+process, a fresh Durable Object), and it means abandoned work, which keeps running in its
+component's closure, never shares that closure with a new run. Conversations are unaffected:
+their state is in records (§7), not in the harness.
 
 Every `runtime.starting` is closed by `runtime.stopped`, including a failed start. On
 Cloudflare, `start` runs inside the Durable Object constructor's `blockConcurrencyWhile`.
@@ -1295,7 +1299,7 @@ is that the answer is "nothing" for every minor.
 - **Lifecycle conformance** (`createLifecycleConformance` in `@pikit/core/testing`): every
   component that owns resources passes it. It aborts the component's `start` and `stop` while
   they run and checks that each settles within `settleMs`, that nothing is left open (when
-  the fixture provides `openResources()`), and that the harness can start again. Cases have
+  the fixture provides `openResources()`), and that a fresh harness over the same component can start again. Cases have
   Pi's runner-independent shape (`{ group, name, run() }`).
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`

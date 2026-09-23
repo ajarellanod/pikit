@@ -208,12 +208,14 @@ export interface Harness {
    * Rejects if a component fails to start, after stopping the ones that did. `parent` bounds the
    * start (e.g. `withAbortSignal(AbortSignal.timeout(ms), BACKGROUND_CONTEXT)`); the rollback is
    * not bounded by it, only by a `stop()` that interrupts the start.
+   * Single-use: throws after `stop()` or a failed start. Restarting is `create()` again.
    */
   start(parent?: Context): Promise<void>;
   /**
    * Stops every started component; rejects with an `AggregateError` if any `stop` threw or was
    * abandoned when `parent` was cancelled. During a `start()` it cancels the start and waits for
-   * its rollback, bounded by `parent`. Concurrent calls share the first call's shutdown.
+   * its rollback, bounded by `parent`. Concurrent calls share the first call's shutdown; once it
+   * has finished, `stop()` is a no-op.
    */
   stop(parent?: Context): Promise<void>;
   describe(): HarnessDescription;
