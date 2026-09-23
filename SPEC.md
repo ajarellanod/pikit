@@ -580,6 +580,11 @@ When a row moves (Pi ships something pikit built), pikit deletes its version.
 
 Responsibilities:
 
+- Build on Pi's durable `AgentHarness`, the harness Pi's own session-worker prototype uses,
+  until Pi's durable runtime replaces it (§6.4). Reference: `mini` in the Pi repo
+  (`packages/coding-agent/src/experimental/mini`). One worker per session holds the
+  harness, storage and model runtime; a replacement worker resumes each open operation with
+  `lane.resume(context)`. This is the actors-and-workers model of §7 inside one host.
 - Build an `AgentHarness` per conversation from `AgentDefinition` + capabilities:
   - `session` from `sessions.store`.
   - `ExecutionEnv` from `execution`.

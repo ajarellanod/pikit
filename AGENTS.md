@@ -306,6 +306,15 @@ Local Pi installation for API lookups (versions drift; check `package.json`):
     rules).
   - Queue semantics: `../types.d.ts` (`getSteeringMessages`, `getFollowUpMessages`).
   - Single-process precondition: `pico3/types.d.ts`, `session/mutation-line.d.ts`.
+- `mini`, Pi's experimental session-worker host
+  (`packages/coding-agent/src/experimental/mini`): the reference for `@pikit/pi-adapter`.
+  - `worker/run.ts`: opens a session (`JsonlSessionRepo`, `NodeExecutionEnv` from
+    `pi-agent-core/node`), builds the `AgentHarness`, and resumes every open operation with
+    `lane.resume(context)` after the previous worker died.
+  - `README.md`: the topology. A server routes calls to one worker per session, kills the
+    worker when nobody is attached, and a new worker resumes.
+
+  Read it for how Pi drives its own harness from a host. Do not copy its RPC or its TUI.
 - Pi's durable runtime ("Pico5"), in the Pi monorepo (`gh api
   repos/earendil-works/pi/contents/<path> --jq .content | base64 -d`):
   - `packages/durable/docs/pico-v5.md`, the normative spec. Read §4 (transactions), §5
