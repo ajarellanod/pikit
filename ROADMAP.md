@@ -120,8 +120,23 @@ its first component needs it.
   inbox, and pikit has no queue of its own.
 - An existing tier-A Pi extension runs unmodified.
 
+**First step, before any M1 component: the adapter spike.** A throwaway spike of
+`@pikit/pi-adapter` on Pi 0.87.x that proves the translation to the shapes of Pi's durable
+runtime (SPEC §6.4) before any contract depends on it:
+- one conversation is one `AgentHarness` over one Pi session;
+- a prompt runs to an answer;
+- a message sent mid-run is steered and its answer is attributable to it (the future
+  submission);
+- a repeated `requestId` is recognised as a duplicate;
+- `agent.state` reads and writes session values and starts fresh after a reset;
+- a killed run is continued by `resume()` in a new process.
+
+The spike's findings update SPEC §6.1 and §6.4, and it is then deleted or turned into the
+adapter. If Pi cannot do one of these things, the gap goes upstream before pikit works
+around it.
+
 **Scope:**
-- `@pikit/pi-adapter` in automatic drive mode.
+- `@pikit/pi-adapter` in automatic drive mode, shaped by the spike.
 - `defineAgent` with `prepare(state)` and `agent.state`.
 - Tools written against `ExecutionEnv`.
 - The http preset, running one server replica: one process is the only worker.
