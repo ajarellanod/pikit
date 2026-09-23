@@ -131,9 +131,9 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
    behavior that changes depending on which components are installed. Never add an in-memory
    fallback for something that must persist.
 4. **Contracts are the only coupling** (S4). A component imports `@pikit/core` and contract
-   types, and calls `pikit.require("capability")`. It never imports another component's
-   files. Events are notifications, pipelines transform, and capabilities are services with
-   one provider. Do not fake a service call with an event and a shared variable.
+   types, and depends on a capability with `pikit.use("capability")`. It never imports
+   another component's files. Events are notifications, pipelines transform, and
+   capabilities are services with one provider. Do not fake a service call with an event and a shared variable.
 5. **Runtime neutral by default** (S5). No `node:*`, `bun:*` or `cloudflare:*` imports
    unless the component declares a single target. Other needs go through capabilities:
    - filesystem and shell through `execution`;
@@ -143,9 +143,10 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
    Anything that must survive a restart or an eviction is persisted through a capability,
    never kept in module state.
-6. **`setup` registers; `start`/`stop` own resources** (S8). `setup` calls
-   `on`/`pipeline`/`provide` and returns `{ start, stop }` if the component owns sockets,
-   files, connections or timers. Never acquire a resource in `setup` or in an event listener:
+6. **`setup` registers; `start`/`stop` own resources** (S8). `setup` is synchronous. It calls
+   `on`/`pipeline`/`provide`/`use` and returns `{ start, stop }` if the component owns sockets,
+   files, connections or timers. A handle from `use()` is resolved with `get()` in `start` or
+   later, never in `setup`. Never acquire a resource in `setup` or in an event listener:
    a failure there becomes a log line and a process that looks healthy.
 7. **State delivery semantics** (S10, S11). Anything that talks to the outside world says
    whether it is at-least-once and how duplicates are handled:
@@ -179,8 +180,9 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
     - tests inside `files/`;
     - no install scripts.
 
-    Protocols and crypto are npm dependencies; behavior is copied source. `defineComponent`
-    is the runtime truth, and `component.json` must agree with it.
+    Protocols and crypto are npm dependencies; behavior is copied source. `setup` is the
+    manifest: `provides`/`requires` are derived from its `provide`/`use` calls, and
+    `component.json` is generated from them, never edited by hand.
 14. **Prove it by removing** (S3). When a component is finished, install it, run its
     scenario, remove it, run `pikit doctor`, and confirm that nothing else changed.
 15. **Stable on purpose** (S16). If two designs are equivalent, pick the one that will need
@@ -271,7 +273,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **Selection shapes dependency order.** A consumer depends only on the provider `require`
   will return: the selected one when there are several.
 - **Transports are per message.** `channel.transport:<name>` is resolved from
-  `message.channel` and never listed in `requires`.
+  `message.channel` and never passed to `use()`.
 - **Deduplication belongs to the channel.** The delivery id and the ack rule are
   platform-specific; `inbound-dedup` holds claims, and the core holds nothing.
 - **Cloudflare limits are design inputs:** no `child_process`, no `eval`, no dynamic

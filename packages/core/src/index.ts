@@ -4,6 +4,7 @@ export { defineComponent, defineHarness } from "./harness.ts";
 export type {
   ComponentDefinition,
   ComponentLifecycle,
+  Handle,
   Harness,
   HarnessContext,
   HarnessDefinition,

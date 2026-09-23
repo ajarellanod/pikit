@@ -24,27 +24,40 @@ declare module "./pipeline.ts" {
 
 const quiet = (options: HarnessOptions): HarnessOptions => ({ logger: silentLogger, ...options });
 
-test("setup runs providers before consumers regardless of list order; require works inside setup", async () => {
+test("start runs providers before consumers regardless of list order; handles resolve after setup", async () => {
   const order: string[] = [];
   const consumer = defineComponent({
     name: "consumer",
-    requires: ["test.store"],
     setup(pikit) {
-      order.push(`consumer(${pikit.require("test.store").name})`);
+      order.push("setup consumer");
+      const store = pikit.use("test.store");
+      return {
+        start: () => {
+          order.push(`start consumer(${store.get().name})`);
+        },
+      };
     },
   });
   const store = defineComponent({
     name: "store",
-    provides: ["test.store"],
     setup(pikit) {
-      order.push("store");
+      order.push("setup store");
       pikit.provide("test.store", { name: "mem" });
+      return {
+        start: () => {
+          order.push("start store");
+        },
+      };
     },
   });
 
   const harness = await defineHarness(quiet({ components: [consumer, store] })).create();
-  expect(order).toEqual(["store", "consumer(mem)"]);
-  expect(harness.describe().components.map((c) => c.name)).toEqual(["store", "consumer"]);
+  await harness.start();
+  expect(order).toEqual(["setup consumer", "setup store", "start store", "start consumer(mem)"]);
+  expect(harness.describe().components).toEqual([
+    { name: "store", provides: ["test.store"], requires: [] },
+    { name: "consumer", provides: [], requires: ["test.store"] },
+  ]);
 });
 
 test("runtime.* events fire in order on start/stop; extensions are components", async () => {
@@ -69,60 +82,63 @@ test("runtime.* events fire in order on start/stop; extensions are components", 
   expect(seen).toEqual(["runtime.starting", "runtime.ready", "runtime.stopping", "runtime.stopped"]);
 });
 
-test("composition errors fail in defineHarness, before any setup", () => {
-  const setupRan = { value: false };
-  const mk = (name: string, opts: { provides?: string[]; requires?: string[] } = {}) =>
+test("composition errors fail in create(), after every setup and before any start", async () => {
+  const started: string[] = [];
+  const mk = (name: string, opts: { provides?: string[]; uses?: string[] } = {}) =>
     defineComponent({
       name,
-      ...opts,
-      setup() {
-        setupRan.value = true;
+      setup(pikit) {
+        for (const capability of opts.provides ?? []) pikit.provide(capability as "test.store", { name });
+        for (const capability of opts.uses ?? []) pikit.use(capability as "test.store");
+        return {
+          start: () => {
+            started.push(name);
+          },
+        };
       },
     });
+  const create = (options: HarnessOptions) => defineHarness(quiet(options)).create();
 
-  expect(() => defineHarness(quiet({ components: [mk("a", { requires: ["test.store"] })] }))).toThrow(
-    'component "a" requires "test.store" but no installed component provides it',
+  await expect(create({ components: [mk("a", { uses: ["test.store"] })] })).rejects.toThrow(
+    'component "a" uses "test.store" but no installed component provides it',
   );
-  expect(() =>
-    defineHarness(
-      quiet({
-        components: [mk("s1", { provides: ["test.store"] }), mk("s2", { provides: ["test.store"] }), mk("c", { requires: ["test.store"] })],
-      }),
-    ),
-  ).toThrow('several providers (s1, s2); select one with config.capabilities["test.store"]');
-  expect(() =>
-    defineHarness(
-      quiet({
-        components: [mk("s1", { provides: ["test.store"] })],
-        config: { capabilities: { "test.store": "nope" } },
-      }),
-    ),
-  ).toThrow('selects "nope", which does not declare it (declared by s1)');
-  expect(() =>
-    defineHarness(
-      quiet({
-        components: [
-          mk("a", { provides: ["test.store"], requires: ["test.queue"] }),
-          mk("b", { provides: ["test.queue"], requires: ["test.store"] }),
-        ],
-      }),
-    ),
-  ).toThrow("dependency cycle: a → b → a");
+  await expect(
+    create({
+      components: [mk("s1", { provides: ["test.store"] }), mk("s2", { provides: ["test.store"] }), mk("c", { uses: ["test.store"] })],
+    }),
+  ).rejects.toThrow('several providers (s1, s2); select one with config.capabilities["test.store"]');
+  await expect(
+    create({
+      components: [mk("s1", { provides: ["test.store"] }), mk("other")],
+      config: { capabilities: { "test.store": "other" } },
+    }),
+  ).rejects.toThrow('selects "other", which does not provide it (provided by s1)');
+  await expect(
+    create({
+      components: [
+        mk("a", { provides: ["test.store"], uses: ["test.queue"] }),
+        mk("b", { provides: ["test.queue"], uses: ["test.store"] }),
+      ],
+    }),
+  ).rejects.toThrow("dependency cycle: a → b → a");
+  expect(started).toEqual([]);
+
+  // Names, selection targets and config fail even earlier, in defineHarness.
   expect(() => defineHarness(quiet({ components: [mk("a"), mk("a")] }))).toThrow('component "a" is listed twice');
+  expect(() =>
+    defineHarness(quiet({ components: [mk("s1")], config: { capabilities: { "test.store": "nope" } } })),
+  ).toThrow('selects "nope", which is not an installed component');
   expect(() => defineComponent({ name: "Not_Kebab", setup() {} })).toThrow("must be kebab-case");
   expect(() => defineComponent({ name: "capabilities", setup() {} })).toThrow("reserved");
-
-  expect(setupRan.value).toBe(false);
 });
 
 test("an unselected provider does not create a false dependency cycle", async () => {
-  const mk = (name: string, provides: string[], requires: string[]) =>
+  const mk = (name: string, provides: string[], uses: string[]) =>
     defineComponent({
       name,
-      provides,
-      requires,
       setup(pikit) {
         for (const capability of provides) pikit.provide(capability as "test.store", { name });
+        for (const capability of uses) pikit.use(capability as "test.store");
       },
     });
   // store-b needs thing-c; thing-c needs test.store, which is store-a (selected), not store-b.
@@ -135,15 +151,14 @@ test("an unselected provider does not create a false dependency cycle", async ()
   expect(harness.describe().components.map((c) => c.name)).toEqual(["store-a", "thing-c", "store-b"]);
 });
 
-test("lifecycle: start in setup order, stop in reverse, events around the hooks", async () => {
+test("lifecycle: start in dependency order, stop in reverse, events around the hooks", async () => {
   const seen: string[] = [];
-  const mk = (name: string, provides: string[] = [], requires: string[] = []) =>
+  const mk = (name: string, provides: string[] = [], uses: string[] = []) =>
     defineComponent({
       name,
-      provides,
-      requires,
       setup(pikit) {
         for (const capability of provides) pikit.provide(capability as "test.store", { name });
+        for (const capability of uses) pikit.use(capability as "test.store");
         const resource = `${name}-resource`; // setup-local state reaches start/stop via closure
         return {
           start: () => {
@@ -256,20 +271,30 @@ test("stop runs every stop hook and reports all failures together", async () => 
   await harness.stop(); // already stopped: no-op
 });
 
-test("provide is checked against the manifest, both ways", async () => {
-  const sneaky = defineComponent({
-    name: "sneaky",
+test("setup is synchronous and handles cannot be resolved during it", async () => {
+  const eager = defineComponent({
+    name: "eager",
     setup(pikit) {
-      pikit.provide("test.store", { name: "x" });
+      pikit.use("test.store").get();
     },
   });
-  await expect(defineHarness(quiet({ components: [sneaky] })).create()).rejects.toThrow(
-    'component "sneaky" provides "test.store" but its manifest does not declare it',
+  const store = defineComponent({
+    name: "store",
+    setup(pikit) {
+      pikit.provide("test.store", { name: "mem" });
+    },
+  });
+  await expect(defineHarness(quiet({ components: [store, eager] })).create()).rejects.toThrow(
+    'component "eager": "test.store" is not available during setup; call get() in start or later',
   );
 
-  const lazy = defineComponent({ name: "lazy", provides: ["test.store"], setup() {} });
-  await expect(defineHarness(quiet({ components: [lazy] })).create()).rejects.toThrow(
-    'component "lazy" declares "test.store" but its setup did not provide it',
+  const asyncSetup = defineComponent({
+    name: "async-setup",
+    // @ts-expect-error: setup must be synchronous; the type rejects it and so does the harness.
+    async setup() {},
+  });
+  await expect(defineHarness(quiet({ components: [asyncSetup] })).create()).rejects.toThrow(
+    'component "async-setup": setup must be synchronous; acquire resources in start',
   );
 });
 
@@ -296,9 +321,9 @@ test("config is validated and defaulted per component; typos and bad values are 
 
 test("describe reflects selection and resolved pipeline chains; halt is emitted as pipeline.halted", async () => {
   const halted: string[] = [];
+  let chosen = "";
   const s1 = defineComponent({
     name: "s1",
-    provides: ["test.store"],
     setup(pikit) {
       pikit.provide("test.store", { name: "s1" });
       pikit.pipeline("test.harness.text", (v) => ({ text: `${v.text}1` }), { id: "one", priority: 5 });
@@ -307,7 +332,6 @@ test("describe reflects selection and resolved pipeline chains; halt is emitted 
   const s2 = defineComponent({
     name: "s2",
     version: "1.0.0",
-    provides: ["test.store"],
     setup(pikit) {
       pikit.provide("test.store", { name: "s2" });
       pikit.pipeline("test.harness.text", () => pikit.halt("no"), { id: "gate", after: "one" });
@@ -316,17 +340,30 @@ test("describe reflects selection and resolved pipeline chains; halt is emitted 
       });
     },
   });
+  const reader = defineComponent({
+    name: "reader",
+    setup(pikit) {
+      const store = pikit.use("test.store");
+      return {
+        start: () => {
+          chosen = store.get().name;
+        },
+      };
+    },
+  });
 
   const harness = await defineHarness(
-    quiet({ components: [s1, s2], config: { capabilities: { "test.store": "s2" } } }),
+    quiet({ components: [s1, s2, reader], config: { capabilities: { "test.store": "s2" } } }),
   ).create();
+  await harness.start();
   const d = harness.describe();
 
-  expect(d.components.map((c) => c.name)).toEqual(["s1", "s2"]);
+  expect(d.components.map((c) => c.name)).toEqual(["s1", "s2", "reader"]);
   expect(d.components[1]?.version).toBe("1.0.0");
   expect(d.capabilities).toEqual({ "test.store": { providers: ["s1", "s2"], selected: "s2" } });
   expect(d.pipelines["test.harness.text"]?.map((s) => s.id)).toEqual(["one", "gate"]);
-  expect(harness.context().require("test.store").name).toBe("s2");
+  expect(chosen).toBe("s2");
+  expect(harness.context().has("test.store")).toBe(true);
 
   const result = await harness.context().run("test.harness.text", { text: "" });
   expect(result).toBeInstanceOf(Halt);

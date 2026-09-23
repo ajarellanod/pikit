@@ -114,7 +114,7 @@ import auditLog from "./src/extensions/audit-log";
 
 export default defineHarness({
   components: [telegram, router, sessions, pi],
-  extensions: [auditLog],                 // sugar: components without `provides`
+  extensions: [auditLog],                 // sugar: project-local components
   config,                                 // a plain object; loading YAML is the target's job
 });
 ```
@@ -135,20 +135,16 @@ export default defineComponent({
   name: "durable-outbox",
   version: "1.2.0",
 
-  provides: ["outbound.queue"],
-  requires: ["storage.sql"],
-
   config: OutboxConfigSchema,        // typebox; merged into the global config schema
 
   setup(pikit, config) {
-    const sql = pikit.require("storage.sql");
-    const queue = createQueue(sql, config);
-    pikit.provide("outbound.queue", queue);
+    const sql = pikit.use("storage.sql");          // declares the dependency; a handle
+    const queue = createQueue(config);
+    pikit.provide("outbound.queue", queue);        // declares and installs
     pikit.on("outbound.requested", (message) => queue.enqueue(message));
-    const worker = createWorker(queue);   // the transport is resolved per message (§4.5)
     return {
-      start: () => worker.start(),        // resources are acquired here, not in setup
-      stop: () => worker.stop(),
+      start: () => queue.open(sql.get()),          // resources are acquired here, not in setup
+      stop: () => queue.close(),
     };
   },
 });
@@ -156,19 +152,30 @@ export default defineComponent({
 
 `setup` runs once per harness instance. On the server target that is once per process. On
 Cloudflare it is once per Durable Object instantiation (which may happen many times; setup
-must be cheap and idempotent). It may be async. `[decision]` `setup` only **registers**: it
-never opens sockets, files, connections or timers. A component that owns resources returns
+must be cheap and idempotent). `[decision]` `setup` is **synchronous and only registers**:
+it never opens sockets, files, connections or timers. A component that owns resources returns
 `{ start, stop }` from `setup`; the closure carries setup-local state to both. The harness
-calls `start` in setup order and `stop` in reverse (§4.6). Because setup acquires nothing, a
-failed `create()` has nothing to clean up.
+calls `start` in dependency order and `stop` in reverse (§4.6). Because setup acquires
+nothing, a failed `create()` has nothing to clean up.
 
-`provide` is checked against the manifest both ways: providing an undeclared capability is
-an error, and a declared capability that `setup` did not provide is an error. The manifest
-is what orders setup, so it must be truthful.
+**`setup` is the manifest.** `[decision]` A component does not declare `provides` or
+`requires`. The harness records every `pikit.provide(name, impl)` and `pikit.use(name)` and
+derives the dependency graph from them, as Chord's plugin host does (§6.4). What the code
+does and what the component claims cannot disagree, because there is only one of them.
 
-`defineHarness(...)` validates the composition synchronously and returns a definition;
-`await definition.create()` runs every `setup` in dependency order and returns the harness
-(`start()`, `stop()`, `describe()`, `context()`). `pikit doctor` is `create()` + `describe()`.
+- `use(name)` returns a `Handle<T>`. `handle.get()` returns the provider's implementation (the
+  selected one, §4.5) and throws during `setup`, because the provider's setup may not have run
+  yet. Call it in `start`, in a listener or in a pipeline stage. `[decision]` An explicit
+  handle rather than Chord's proxies: pikit has no hot reload and no remote services, which
+  are what proxies are for, and a visible `get()` shows where resolution happens.
+- `use()` is the only way to reach a capability. There is no `ctx.require`, because a
+  second path would be an undeclared dependency.
+
+`defineHarness(...)` checks component names, the shape of `config.capabilities` and the
+config schema, synchronously. `await definition.create()` runs every `setup` in list order,
+validates the recorded graph, and returns the harness (`start()`, `stop()`, `describe()`,
+`context()`). `pikit doctor` is `create()` + `describe()`; `describe()` reports each
+component's derived `provides` and `requires`.
 
 ### 4.3 Events
 
@@ -265,7 +272,7 @@ Capabilities are **named services with exactly one provider**.
 
 ```ts
 pikit.provide("sessions.store", store);      // in a component's setup
-const store = pikit.require("sessions.store"); // anywhere
+const store = pikit.use("sessions.store");   // in a component's setup; store.get() later
 ```
 
 - Two providers for the same capability is a startup error unless config selects one:
@@ -273,11 +280,12 @@ const store = pikit.require("sessions.store"); // anywhere
   capabilities:
     sessions.store: postgres
   ```
-- `require` of a missing capability is a startup error listing components that provide it.
-  Unsatisfied `requires` and ambiguous providers fail in `defineHarness`, before any setup.
-- `has(name)` answers whether `require` would succeed, for optional capabilities
-  (`outbound.queue`). Setup order only covers declared `requires`, so `has` is meaningful
-  after `create()`, not inside another component's `setup`.
+- A `use` with no provider, an ambiguous provider and a selection that names a component
+  which does not provide the capability all fail in `create()`: after every setup, before any
+  `start`.
+- `has(name)` answers whether a capability is provided, for optional capabilities
+  (`outbound.queue`). It is meaningful after `create()`. Only `use()` orders startup, so a
+  component must not rely on an optional capability's provider having started.
 - Capability contracts are TypeScript interfaces exported from `@pikit/core`.
 
 Core-defined capability contracts (interfaces only; no implementations in core):
@@ -295,7 +303,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
 | `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
-| `channel.transport:<name>` | `ChannelTransport` | Send/edit/delete messages for one channel. Resolved per message (`channel.transport:${message.channel}`); never listed in `requires`, because "some transport" is not one capability. A missing transport is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
+| `channel.transport:<name>` | `ChannelTransport` | Send/edit/delete messages for one channel. Resolved per message (`channel.transport:${message.channel}`); never passed to `use()`, because "some transport" is not one capability (keyed capabilities will replace this rule). A missing transport is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
 | `outbound.queue` | `OutboundQueue` | Durable enqueue + worker. Optional; without it delivery is direct. |
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
@@ -309,12 +317,13 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 ```
 build time      pikit add/remove edit pikit.config.ts; bundler compiles what is listed
                  │
-harness create  defineHarness() → resolve components → validate requires/provides
-                 │                                     → validate config against merged schema
-setup           component.setup() in dependency order (registration only; returns start/stop)
+define          defineHarness() → unique names, selection shape, config against merged schema
+                 │
+harness create  every component.setup() in list order (sync, registration only; records
+                 │  provide/use; returns start/stop) → derive and validate the graph
                  │
 runtime.starting
-start           component start() in setup order; a failure stops the started ones in
+start           component start() in dependency order; a failure stops the started ones in
                  reverse, emits runtime.stopping/stopped, and rejects start()
 runtime.ready   every component is up
                  │
@@ -346,7 +355,6 @@ interface Context {
 interface HarnessContext extends Context {
   target: "server" | "cloudflare";
   config: ResolvedConfig;
-  require<K extends CapabilityName>(name: K): Capability<K>;
   has(name: string): boolean;
   emit(event, payload): Promise<void>;   // propagates this same ctx to listeners
   run(pipeline, input): Promise<Value | Halt>;
@@ -1020,11 +1028,10 @@ Rules:
 - `dependencies` are real npm deps (SDKs, crypto). They are added to the project's
   `package.json`. Behavior is copied; protocols and crypto are depended on.
 - No install scripts. Ever. `[decision]`
-- `name`, `version`, `provides` and the required capabilities are declared twice: in
-  `component.json` (install time — the CLI reads it before any code is copied) and in
-  `defineComponent` (runtime — `component.json` is not copied into the project). The runtime
-  declaration is the source of truth; `pikit registry validate` and `pikit doctor` fail when
-  the two disagree. `[decision]`
+- `provides` and the required capabilities in `component.json` exist because the CLI must
+  read them before any code is copied. They are **generated** from the component's `setup`
+  (`describe()`), never written by hand, and `pikit registry validate` and `pikit doctor` fail
+  when they drift. `[decision]`
 - `targets` gates `pikit add` against the project's configured targets.
 
 ### 10.3 Project manifest
@@ -1151,7 +1158,7 @@ the whole 1.x line; there is no "pikit 2 rewrites how you define agents".
 
 | Surface | Rule |
 |---|---|
-| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/require/emit/run`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
+| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/use/emit/run`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
 | Contract interfaces (`SessionStore`, `SqlDatabase`, `ExecutionEnv`, `Workspace`, `ChannelTransport`, …) | Same as core. A contract change ships with its updated conformance suite in the same release. |
 | `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface follows the core rule; its Pi-facing internals are unstable by design. |
 | `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. |
@@ -1239,26 +1246,27 @@ Resolved `[decision]`:
   neutrality). The CLI/target loads YAML and passes the value.
 - Config is namespaced by component name (`config[component.name]`); core keys live at the
   same level. Merge is mechanical; no `configKey` in the manifest until a collision exists.
-- `setup` order is topological over `provides`/`requires`; cycles and unsatisfied `requires`
-  fail in `defineHarness`, not at runtime, so `require` inside `setup` is always safe.
-- An extension is a component without `provides`; `extensions: [...]` is sugar concatenated
-  to `components`. One `define*` fewer to keep stable.
+- `setup` is the manifest: the graph is derived from `provide`/`use` calls (§4.2). Missing,
+  ambiguous and badly selected providers and cycles fail in `create()`, before any `start`.
+- `use()` returns an explicit `Handle` whose `get()` works after validation; no proxies, no
+  `ctx.require`.
+- An extension is a component; `extensions: [...]` is sugar concatenated to `components`. One
+  `define*` fewer to keep stable.
 - Events are typed by declaration merging on `HarnessEvents` (as Pi's `CustomAgentMessages`);
   no runtime registration for typing. Pipelines likewise on `HarnessPipelines`.
 - Pipelines are `Value → Value` (§4.4). Stage errors propagate; `undefined` from a stage is an
   error, not "unchanged".
 - `setup` registers, `start`/`stop` own resources (§4.2, §4.6). Resource acquisition in an
   event listener would turn a failed start into a log line and a healthy-looking process.
-- A consumer is ordered after the provider `require` will use (the selected one), not after
+- A consumer is ordered after the provider `get()` will return (the selected one), not after
   every installed provider; an unselected provider cannot create a false cycle.
 - `capabilities` is a reserved component name (it is the core's config key).
 - Inbound deduplication is the `inbound-dedup` component, not core (§5).
-- `channel.transport:<name>` is resolved per message and never listed in `requires`; no
-  pattern-matching `requires` until a second case needs it.
+- `channel.transport:<name>` is resolved per message and never passed to `use()`; no
+  pattern-matching `use` until a second case needs it.
 - Capability names: `execution` (filesystem, maybe no shell), `execution.shell` (real shell),
   `network.fetch` (outbound HTTP). `workspace.posix` is dropped: a real shell implies it.
-- `defineComponent` is the runtime truth for `provides`/`requires`; `component.json` must
-  agree (§10.2).
+- `component.json`'s `provides`/`requires` are generated from `setup` (§10.2).
 - `defineAgent` and the agent shapes are core; Pi payload types are opaque in core and made
   precise by the adapter (§6.1).
 - **Pi first** (§6.2): an agent-facing feature is built in pikit only after checking that Pi

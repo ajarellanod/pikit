@@ -1,21 +1,24 @@
 /**
  * Composition root and lifecycle (SPEC §4.1, §4.2, §4.6).
  *
- *   defineHarness({ components, config })   validates the composition (sync, throws)
- *     .create()                              runs every component's setup in dependency order
+ *   defineHarness({ components, config })   checks names and config (sync, throws)
+ *     .create()                              runs every setup, derives the dependency graph
+ *                                            from what they did, validates it
  *     .start()                               runtime.starting → start() in order → runtime.ready
  *     .stop()                                runtime.stopping → stop() in reverse → runtime.stopped
  *     .describe()                            what `pikit doctor` prints
  *
- * Validation happens as early as possible: unsatisfied `requires`, ambiguous providers, bad
- * selections, dependency cycles and invalid config all fail in `defineHarness`, before any
- * component code runs.
+ * There is no `provides`/`requires` manifest: `setup` is the only truth. The harness records
+ * each `pikit.provide(name)` and `pikit.use(name)` and derives the graph from them (as Chord's
+ * plugin host does). Missing and ambiguous providers, bad selections and cycles fail in
+ * `create()`, after every setup and before any `start`.
  *
- * `setup` only registers; it must not open sockets, files or timers. Resources are acquired
- * in the `start` a component returns from `setup` and released in its `stop`. That is why a
- * failed `create()` has nothing to clean up, and why a failed `start()` can roll back exactly
- * the components that did start. `runtime.*` events stay notifications: a listener that
- * throws is logged and cannot make the harness look healthy or unhealthy.
+ * `setup` is synchronous and only registers; it must not open sockets, files or timers. That is
+ * why running every setup before validating is safe, why a failed `create()` has nothing to
+ * clean up, and why a failed `start()` can roll back exactly the components that did start.
+ * `use()` returns a handle whose `get()` works only once the graph is valid, so no component can
+ * reach a provider whose setup has not run. `runtime.*` events stay notifications: a listener
+ * that throws is logged and cannot make the harness look healthy or unhealthy.
  */
 
 import Type, { type Static, type TSchema } from "typebox";
@@ -53,8 +56,10 @@ export interface HarnessContext extends Context {
   config: Readonly<Record<string, unknown>>;
   logger: Logger;
   clock: Clock;
-  require<K extends keyof HarnessCapabilities & string>(name: K): HarnessCapabilities[K];
-  /** For optional capabilities. Meaningful after `create()`; setup order only covers `requires`. */
+  /**
+   * For optional capabilities. Meaningful after `create()`. Only `use()` orders startup, so a
+   * component must not rely on an optional capability's provider having started.
+   */
   has(name: string): boolean;
   emit<K extends keyof HarnessEvents & string>(name: K, payload: HarnessEvents[K]): Promise<void>;
   run<K extends keyof HarnessPipelines & string>(
@@ -69,12 +74,21 @@ export interface HarnessContext extends Context {
   derive(change: (context: Context) => Context): HarnessContext;
 }
 
+/** A declared dependency. `get()` returns the provider's implementation once the graph is valid. */
+export interface Handle<T> {
+  readonly name: string;
+  /** Throws during setup: the provider's setup may not have run yet. Call it in `start` or later. */
+  get(): T;
+}
+
 /** What a component's `setup` receives: the context plus registration. */
 export interface Pikit extends HarnessContext {
   on: EventBus<HarnessEvents, HarnessContext>["on"];
   pipeline: PipelineRegistry<HarnessPipelines, HarnessContext>["register"];
-  /** Only capabilities declared in the component's `provides`. */
+  /** Declare that this component provides `name`, and install its implementation. */
   provide<K extends keyof HarnessCapabilities & string>(name: K, impl: HarnessCapabilities[K]): void;
+  /** Declare that this component depends on `name`. Its provider starts first. */
+  use<K extends keyof HarnessCapabilities & string>(name: K): Handle<HarnessCapabilities[K]>;
   halt: typeof halt;
 }
 
@@ -83,9 +97,9 @@ export interface Pikit extends HarnessContext {
  * `stop`. Setup-local variables are shared with both through the closure.
  */
 export interface ComponentLifecycle {
-  /** Runs in setup order. A throw rolls back the components already started and fails `start()`. */
+  /** Runs in dependency order. A throw rolls back the components already started and fails `start()`. */
   start?(ctx: HarnessContext): void | Promise<void>;
-  /** Runs in reverse setup order. A throw is collected; the remaining components still stop. */
+  /** Runs in reverse dependency order. A throw is collected; the remaining components still stop. */
   stop?(ctx: HarnessContext): void | Promise<void>;
 }
 
@@ -93,15 +107,11 @@ export interface ComponentDefinition<Schema extends TSchema = TSchema> {
   /** kebab-case, prefixed by kind (`channel-telegram`). */
   name: string;
   version?: string;
-  provides?: readonly string[];
-  requires?: readonly string[];
   /** typebox schema for `config[name]`. Absent = the component takes no config. */
   config?: Schema;
+  /** Synchronous and registration-only. What it provides and uses is the component's manifest. */
   // Method syntax on purpose: keeps heterogeneous component lists assignable.
-  setup(
-    pikit: Pikit,
-    config: Static<Schema>,
-  ): void | ComponentLifecycle | Promise<void | ComponentLifecycle>;
+  setup(pikit: Pikit, config: Static<Schema>): void | ComponentLifecycle;
 }
 
 const COMPONENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
@@ -122,7 +132,7 @@ export function defineComponent<Schema extends TSchema = TSchema>(
 
 export interface HarnessOptions {
   components: ComponentDefinition[];
-  /** Sugar: components without `provides`. Concatenated after `components`. */
+  /** Sugar for project-local components. Concatenated after `components`. */
   extensions?: ComponentDefinition[];
   /** Values, never a path. `config.capabilities[name]` selects among several providers. */
   config?: Record<string, unknown>;
@@ -133,7 +143,7 @@ export interface HarnessOptions {
 
 export interface HarnessDescription {
   target: Target;
-  /** In setup order. */
+  /** In start order. `provides`/`requires` are derived from setup; `component.json` must match. */
   components: { name: string; version?: string; provides: string[]; requires: string[] }[];
   capabilities: Record<string, { providers: string[]; selected?: string }>;
   pipelines: Record<string, ResolvedStage[]>;
@@ -151,7 +161,7 @@ export interface Harness {
 }
 
 export interface HarnessDefinition {
-  /** Components in setup (dependency) order. */
+  /** Components as listed. Start order is known only after `create()` (see `describe()`). */
   readonly components: readonly ComponentDefinition[];
   readonly config: Readonly<Record<string, unknown>>;
   create(): Promise<Harness>;
@@ -164,14 +174,11 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
   const clock = options.clock ?? systemClock;
 
   checkUniqueNames(all);
-  const providersOf = indexProviders(all);
-  const selection = readSelection(options.config, providersOf);
-  checkRequires(all, providersOf, selection);
-  const ordered = topologicalOrder(all, providersOf, selection);
+  const selection = readSelection(options.config, all);
   const config = validateConfig(all, options.config ?? {});
 
   return {
-    components: ordered,
+    components: all,
     config,
 
     async create() {
@@ -194,7 +201,6 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           config,
           logger,
           clock,
-          require: (name) => capabilities.require(name),
           has: (name) => capabilities.has(name),
           emit: (name, payload) => events.emit(name, payload, ctx),
           run: (name, input) => pipelines.run(name, input, ctx),
@@ -203,33 +209,61 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
         return ctx;
       };
       const base = context();
-      const lifecycles: { name: string; hooks: ComponentLifecycle }[] = [];
 
-      for (const component of ordered) {
-        const declared = component.provides ?? [];
+      // Handles resolve only after the graph is validated; until then a provider's setup may not
+      // have run, so `get()` would return nothing or the wrong thing.
+      let validated = false;
+      const handle = <K extends keyof HarnessCapabilities & string>(
+        name: K,
+        user: string,
+      ): Handle<HarnessCapabilities[K]> => ({
+        name,
+        get: () => {
+          if (!validated) {
+            throw new Error(
+              `component "${user}": "${name}" is not available during setup; call get() in start or later`,
+            );
+          }
+          return capabilities.require(name);
+        },
+      });
+
+      // Every setup runs, in list order, and records what it provides and uses.
+      const records: SetupRecord[] = [];
+      for (const component of all) {
+        const record: SetupRecord = { component, provides: [], uses: [] };
         const pikit: Pikit = {
           ...base,
           on: (name, listener) => events.on(name, listener),
           pipeline: (name, stage, opts) => pipelines.register(name, stage, opts),
           provide: (name, impl) => {
-            if (!declared.includes(name)) {
-              throw new Error(`component "${component.name}" provides "${name}" but its manifest does not declare it`);
-            }
             capabilities.provide(name, impl, component.name);
+            record.provides.push(name);
+          },
+          use: (name) => {
+            if (!record.uses.includes(name)) record.uses.push(name);
+            return handle(name, component.name);
           },
           halt,
         };
-        const hooks = await component.setup(pikit, config[component.name]);
-        if (hooks) lifecycles.push({ name: component.name, hooks });
-        for (const name of declared) {
-          if (!capabilities.providers(name).includes(component.name)) {
-            throw new Error(`component "${component.name}" declares "${name}" but its setup did not provide it`);
-          }
+        const hooks: unknown = component.setup(pikit, config[component.name]);
+        if (isThenable(hooks)) {
+          throw new Error(
+            `component "${component.name}": setup must be synchronous; acquire resources in start`,
+          );
         }
+        if (hooks) record.hooks = hooks as ComponentLifecycle;
+        records.push(record);
       }
 
+      const ordered = orderRecords(records, capabilities, selection);
       // Surface bad anchors now, not on the first message.
       for (const name of pipelines.names()) pipelines.chain(name);
+      validated = true;
+
+      const lifecycles = ordered.flatMap(({ component, hooks }) =>
+        hooks ? [{ name: component.name, hooks }] : [],
+      );
 
       /** Stops `running` in reverse order; every stop runs even if an earlier one threw. */
       const shutdown = async (running: typeof lifecycles): Promise<Error[]> => {
@@ -284,11 +318,11 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
         describe() {
           return {
             target,
-            components: ordered.map((c) => ({
-              name: c.name,
-              ...(c.version !== undefined && { version: c.version }),
-              provides: [...(c.provides ?? [])],
-              requires: [...(c.requires ?? [])],
+            components: ordered.map(({ component, provides, uses }) => ({
+              name: component.name,
+              ...(component.version !== undefined && { version: component.version }),
+              provides: [...provides],
+              requires: [...uses],
             })),
             capabilities: Object.fromEntries(
               capabilities.names().map((name) => {
@@ -305,7 +339,7 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
   };
 }
 
-// ---- validation helpers (all run inside defineHarness, before any setup) ----
+// ---- validation helpers ----
 
 function checkUniqueNames(components: ComponentDefinition[]): void {
   const seen = new Set<string>();
@@ -315,92 +349,91 @@ function checkUniqueNames(components: ComponentDefinition[]): void {
   }
 }
 
-/** capability → names of components declaring it in `provides`. */
-function indexProviders(components: ComponentDefinition[]): Map<string, string[]> {
-  const index = new Map<string, string[]>();
-  for (const component of components) {
-    for (const capability of component.provides ?? []) {
-      index.set(capability, [...(index.get(capability) ?? []), component.name]);
-    }
-  }
-  return index;
+/** What one component's setup did. */
+interface SetupRecord {
+  component: ComponentDefinition;
+  provides: string[];
+  uses: string[];
+  hooks?: ComponentLifecycle;
 }
 
-function readSelection(config: Record<string, unknown> | undefined, providersOf: Map<string, string[]>) {
+function isThenable(value: unknown): boolean {
+  return typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
+}
+
+/** Shape only; whether the chosen component provides the capability is known after setup. */
+function readSelection(config: Record<string, unknown> | undefined, components: ComponentDefinition[]) {
   const raw = config?.capabilities;
   if (raw === undefined) return {};
   if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
     throw new Error("config.capabilities must be an object of capability → component name");
   }
+  const names = new Set(components.map((c) => c.name));
   const selection: Record<string, string> = {};
   for (const [capability, chosen] of Object.entries(raw)) {
     if (typeof chosen !== "string") throw new Error(`config.capabilities["${capability}"] must be a component name`);
-    const providers = providersOf.get(capability) ?? [];
-    if (!providers.includes(chosen)) {
-      throw new Error(
-        `config.capabilities["${capability}"] selects "${chosen}", which does not declare it` +
-          (providers.length ? ` (declared by ${providers.join(", ")})` : ""),
-      );
+    if (!names.has(chosen)) {
+      throw new Error(`config.capabilities["${capability}"] selects "${chosen}", which is not an installed component`);
     }
     selection[capability] = chosen;
   }
   return selection;
 }
 
-function checkRequires(
-  components: ComponentDefinition[],
-  providersOf: Map<string, string[]>,
+/**
+ * Validates the graph recorded by setup and returns records in start order: providers before
+ * consumers, list order as tiebreaker, depth-first with cycle detection. A consumer depends only
+ * on the provider `get()` will return (the selected one), so an installed-but-unselected provider
+ * cannot create a false cycle.
+ */
+function orderRecords(
+  records: SetupRecord[],
+  capabilities: CapabilityRegistry<HarnessCapabilities>,
   selection: Record<string, string>,
-): void {
-  for (const component of components) {
-    for (const capability of component.requires ?? []) {
-      const providers = providersOf.get(capability) ?? [];
-      if (providers.length === 0) {
-        throw new Error(`component "${component.name}" requires "${capability}" but no installed component provides it`);
-      }
-      if (providers.length > 1 && selection[capability] === undefined) {
-        throw new Error(
-          `capability "${capability}" has several providers (${providers.join(", ")}); ` +
-            `select one with config.capabilities["${capability}"]`,
-        );
-      }
+): SetupRecord[] {
+  for (const [capability, chosen] of Object.entries(selection)) {
+    const providers = capabilities.providers(capability);
+    if (!providers.includes(chosen)) {
+      throw new Error(
+        `config.capabilities["${capability}"] selects "${chosen}", which does not provide it` +
+          (providers.length ? ` (provided by ${providers.join(", ")})` : ""),
+      );
     }
   }
-}
 
-/**
- * Providers before consumers; list order as tiebreaker. Depth-first with cycle detection.
- * A consumer depends only on the provider `require` will use (the selected one when config
- * selects), so an installed-but-unselected provider cannot create a false cycle.
- */
-function topologicalOrder(
-  components: ComponentDefinition[],
-  providersOf: Map<string, string[]>,
-  selection: Record<string, string>,
-) {
-  const byName = new Map(components.map((c) => [c.name, c]));
-  const state = new Map<string, "visiting" | "done">();
-  const ordered: ComponentDefinition[] = [];
-
-  const visit = (component: ComponentDefinition, path: string[]): void => {
-    const mark = state.get(component.name);
-    if (mark === "done") return;
-    if (mark === "visiting") {
-      throw new Error(`dependency cycle: ${[...path, component.name].join(" → ")}`);
+  const byName = new Map(records.map((r) => [r.component.name, r]));
+  const providerOf = (user: string, capability: string): string => {
+    const providers = capabilities.providers(capability);
+    if (providers.length === 0) {
+      throw new Error(`component "${user}" uses "${capability}" but no installed component provides it`);
     }
-    state.set(component.name, "visiting");
-    for (const capability of component.requires ?? []) {
-      const chosen = selection[capability];
-      for (const providerName of chosen !== undefined ? [chosen] : (providersOf.get(capability) ?? [])) {
-        if (providerName === component.name) continue; // a component may consume what it provides
-        visit(byName.get(providerName) as ComponentDefinition, [...path, component.name]);
-      }
+    const chosen = selection[capability] ?? (providers.length === 1 ? providers[0] : undefined);
+    if (chosen === undefined) {
+      throw new Error(
+        `capability "${capability}" has several providers (${providers.join(", ")}); ` +
+          `select one with config.capabilities["${capability}"]`,
+      );
     }
-    state.set(component.name, "done");
-    ordered.push(component);
+    return chosen;
   };
 
-  for (const component of components) visit(component, []);
+  const state = new Map<string, "visiting" | "done">();
+  const ordered: SetupRecord[] = [];
+  const visit = (record: SetupRecord, path: string[]): void => {
+    const name = record.component.name;
+    const mark = state.get(name);
+    if (mark === "done") return;
+    if (mark === "visiting") throw new Error(`dependency cycle: ${[...path, name].join(" → ")}`);
+    state.set(name, "visiting");
+    for (const capability of record.uses) {
+      const provider = providerOf(name, capability);
+      if (provider === name) continue; // a component may consume what it provides
+      visit(byName.get(provider) as SetupRecord, [...path, name]);
+    }
+    state.set(name, "done");
+    ordered.push(record);
+  };
+  for (const record of records) visit(record, []);
   return ordered;
 }
 
