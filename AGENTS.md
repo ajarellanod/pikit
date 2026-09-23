@@ -4,9 +4,10 @@ How to work on this repository. Read it before touching code.
 
 ## What this project is
 
-pikit is a harness for running your own AI agents as a cloud service, built from parts you
-own. It is the moldable alternative to OpenClaw and Hermes. It does not compete with Pi,
-Claude Code or Codex: Pi is its engine.
+**Pi is the agent. pikit is the kit.** As its name says, pikit is a kit for Pi: everything Pi
+needs to run as a robust, multi-agent service in the cloud, and nothing Pi already does. It
+is the moldable alternative to OpenClaw and Hermes. It is not a second agent and does not
+compete with Pi, Claude Code or Codex.
 
 The project has four parts:
 - **A small core:** events, pipelines, capabilities and lifecycle.
@@ -33,6 +34,32 @@ Tags in the SPEC:
 **Status:** `ROADMAP.md` is the single place that says what is done. Do not start a
 milestone's work until the user asks for it.
 
+## Rule zero: Pi first
+
+This rule comes before every other rule in this file. **Before building any agent-facing
+feature, verify whether Pi already does it.** Agent-facing means anything about how the agent
+thinks, queues, remembers, retries, calls tools, compacts, resumes or is configured per turn.
+
+1. **Look in Pi first.** Read `pi-agent-core` (`dist/harness/`: `agent-harness.d.ts`,
+   `session/types.d.ts`, `runtime/`, `types.d.ts`) and `pi-ai`. See "Reference material".
+2. **If Pi does it, use it through the adapter.** pikit builds nothing.
+3. **If Pi does it partially, wrap it in the adapter** and take the gap upstream. Do not fork
+   the behavior.
+4. **Build it in pikit only when one Pi process cannot provide it for itself:** channels,
+   ingress, routing between agents, conversation ownership across processes, durable
+   delivery, deduplication, scheduling, approvals surfaces, deployment.
+5. **Write the check down.** The SPEC section of the feature names the Pi API it uses, or
+   says why Pi cannot provide it. SPEC §6.2 keeps the table of what Pi does and what pikit
+   adds.
+6. **When Pi ships something pikit built,** delete pikit's version.
+
+An example of the rule working: Pi already has steering, follow-up and next-run queues,
+persisted as the session inbox. pikit therefore has no message queue of its own. A message
+that reaches a busy conversation is handed to Pi as `steer`.
+
+If you are about to write a loop, a queue of agent messages, a retry policy for model calls,
+a compaction strategy, a tool scheduler or a session format: stop and read Pi.
+
 ## Stack
 
 - TypeScript, ESM only. Bun for development and tests. Node ≥ 22 must also work for the
@@ -51,8 +78,8 @@ milestone's work until the user asks for it.
 These are not style preferences. A change that breaks one is wrong even if it works. Each
 rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is checked.
 
-1. **Pi only through the adapter** (S1). `@pikit/pi-adapter` is the only package that
-   imports `@earendil-works/pi-*`. It exposes pikit-shaped types, and components import Pi
+1. **Pi first, and Pi only through the adapter** (S1). Rule zero applies.
+   `@pikit/pi-adapter` is the only package that imports `@earendil-works/pi-*`. It exposes pikit-shaped types, and components import Pi
    contract types (`ExecutionEnv`, `SessionRepo`) from the adapter's re-exports. Import
    `pi-ai` providers by subpath, never through the barrel, because of the Cloudflare bundle
    limit. Existing non-TUI Pi extensions must run unmodified (SPEC §6.2b). That compatibility
@@ -90,16 +117,23 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
    transforms or registration as a side effect of an import. A component is
    `defineComponent({ setup(pikit) { … } })`. Do not propose hooks as an ergonomic
    improvement; that is Flue's model, and IDEA.md explains why pikit rejects it.
-9. **Dynamic agents through `prepare(state)`**. Agents change tools, model, prompt and skills
+9. **Conversations are actors; processes are workers** (S11).
+   - A conversation's state lives in records: registry, Pi session, workspace ref. A
+     worker's memory is only a cache.
+   - At most one worker has a conversation's session open. On a single-process server that
+     is automatic; several replicas need `conversations.ownership`.
+   - Messages that reach a busy conversation go to Pi's inbox as `steer` by default. An
+     agent may choose `followUp` or `nextRun`. pikit never builds its own queue.
+10. **Dynamic agents through `prepare(state)`**. Agents change tools, model, prompt and skills
    per turn by returning a `TurnConfig` from `defineAgent({ prepare(state, ctx) })`, with
    state kept in `agent.state`. A multi-step process is `state.phase` plus conditional tools,
    never a workflow DSL. `prepare` has no registration side effects.
-10. **Values in config, behavior in code** (S7). A config key that selects between
+11. **Values in config, behavior in code** (S7). A config key that selects between
     strategies means those strategies are components, and the key is a capability selector
     (`capabilities: { sessions.store: postgres }`).
-11. **Contracts first** (S12). Write the interface and its conformance suite before the
+12. **Contracts first** (S12). Write the interface and its conformance suite before the
     first implementation.
-12. **Source ownership is real** (S13, S14). Copied code must be readable by someone who did
+13. **Source ownership is real** (S13, S14). Copied code must be readable by someone who did
     not write it:
     - small files, explicit names, comments on the *why*;
     - tests inside `files/`;
@@ -107,9 +141,9 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
     Protocols and crypto are npm dependencies; behavior is copied source. `defineComponent`
     is the runtime truth, and `component.json` must agree with it.
-13. **Prove it by removing** (S3). When a component is finished, install it, run its
+14. **Prove it by removing** (S3). When a component is finished, install it, run its
     scenario, remove it, run `pikit doctor`, and confirm that nothing else changed.
-14. **Stable on purpose** (S16). If two designs are equivalent, pick the one that will need
+15. **Stable on purpose** (S16). If two designs are equivalent, pick the one that will need
     fewer changes later. Never propose rewriting the agent model as a minor change.
 
 ## Where does this code go?
@@ -172,6 +206,14 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
 ## Things that are easy to get wrong
 
+- **Pi is single-process by contract.** Pi serializes writes and opens a session exclusively
+  inside one process, and calls a second process "unsupported". Conversation ownership
+  exists to keep that true across processes.
+- **`steer` waits for the tools.** A steered message enters after every tool call of the
+  current turn finishes, before the next model call. Stopping at once is `abort()`.
+- **"Ownership" has two meanings.** Source ownership (the user owns the code) and
+  conversation ownership (one worker has a session open). Always write "conversation
+  ownership" for the second.
 - **Session ≠ workspace.** The transcript says a file was edited; it is not the file.
 - **Eviction ≠ reset.** Dropping a harness from memory never deletes the conversation →
   session pointer. Only an explicit reset repoints it.
@@ -203,6 +245,13 @@ Local Pi installation for API lookups (versions drift; check `package.json`):
 
 - `~/.bun/install/global/node_modules/@earendil-works/pi-agent-core/dist/harness/`:
   `AgentHarness`, `ExecutionEnv`, `SessionStorage`, `SessionRepo`, records, conformance.
+  The installed version is 0.87.1, while the pin is 0.85.1: re-check an API against the pin
+  before relying on it.
+  - Queues: `agent-harness.d.ts` (`steer`, `followUp`, `nextRun`, `steeringMode`,
+    `followUpMode`), `session/types.d.ts` (`LaneState.inbox`), and `runtime/lane.js` (drain
+    rules).
+  - Queue semantics: `../types.d.ts` (`getSteeringMessages`, `getFollowUpMessages`).
+  - Single-process precondition: `pico3/types.d.ts`, `session/mutation-line.d.ts`.
 - `~/.bun/install/global/node_modules/@earendil-works/coding-agent/docs/extensions.md`: the
   extension model pikit mirrors at harness level. Read-only reference; never import it.
 - `~/.bun/install/global/node_modules/@earendil-works/pi-protocol/README.md` and
@@ -227,7 +276,7 @@ Flue (`withastro/flue`, Apache-2.0) is the closest project.
   a line in `NOTICE`.
 - **Channel blueprints** (`blueprints/channel--*.md` on `main`) are the reference for
   `channel-*` components. Depending on `@flue/<provider>` for protocol/crypto is allowed by
-  rule 12.
+  rule 13.
 - **Do not converge on its model** (rule 8). Borrow ideas, credit them in the changelog, and
   express them the pikit way.
 
@@ -258,7 +307,8 @@ Record here anything that went wrong twice, or that the user explicitly said not
   `ExecutionEnv`.
 - Pi's session conformance is `createSessionRepoConformance` + `createStorageConformance`
   under `harness/session/testing`. `createSessionBackendConformance` does not exist.
-- The docs use `§`, `→` and `—`. When editing them with the edit tool, write these characters
-  literally in both `oldText` and `newText`: `\uXXXX` escapes are written into the file as
-  literal text or fail to match. An edit batch is atomic, so one bad entry discards all the
-  others.
+- The docs use `§`, `→`, `—` and box-drawing characters. The edit tool keeps writing
+  `\uXXXX` escapes as literal text, or fails to match with them, and this has happened
+  repeatedly. For doc edits that contain these characters, use a Python heredoc with
+  `str.replace` and an `assert count == 1`, then scan for `\\u[0-9a-f]{4}`. An edit batch is
+  atomic, so one bad entry discards all the others.

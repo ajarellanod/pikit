@@ -238,7 +238,9 @@ having them fused into one monolith that could not be reshaped. pikit is the res
 
 ## Name
 
-**pikit** — a kit for Pi. A set of parts you assemble, not a machine you buy.
+**pikit** — a kit for Pi. Pi is the agent; pikit is the kit that lets Pi run as a robust,
+multi-agent service in the cloud, and nothing Pi already does. A set of parts you assemble,
+not a machine you buy.
 
 ## Next steps
 

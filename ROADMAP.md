@@ -16,11 +16,25 @@ These hold at every milestone, for every change. A milestone that breaks one is 
 however much it ships. Each standard names the check that enforces it, because a rule
 nobody can check is only a wish.
 
+> **The first standard: Pi first.**
+>
+> Pi is the agent. pikit is the kit: everything Pi needs to run as a robust, multi-agent
+> service in the cloud, and nothing Pi already does.
+>
+> Before building any agent-facing feature, check whether Pi does it:
+> 1. Read `pi-agent-core` (harness, session, runtime) and `pi-ai`.
+> 2. If Pi does it, use it through the adapter. pikit builds nothing.
+> 3. If Pi does it partially, wrap it in the adapter and take the gap upstream.
+> 4. Build it in pikit only when one Pi process cannot provide it for itself.
+>
+> When Pi ships something pikit built, pikit deletes its version. If another standard seems
+> to conflict with this one, this one wins.
+
 ### The idea
 
 | # | Standard | Check |
 |---|---|---|
-| S1 | **Pi owns the loop.** pikit never implements an agent loop, model providers or compaction. Only `@pikit/pi-adapter` imports `@earendil-works/pi-*`; `coding-agent` is never a dependency. | Import scan: `pi-*` imports only under `packages/pi-adapter`. |
+| S1 | **Pi first.** No agent behavior is built in pikit if Pi provides it: loop, models, compaction, retries, steering and follow-up queues, session serialization, resume, tool execution, skills. Only `@pikit/pi-adapter` imports `@earendil-works/pi-*`; `coding-agent` is never a dependency. | Every agent-facing SPEC section names the Pi API it uses, or why one Pi process cannot provide it; SPEC §6.2 lists what Pi does and what pikit adds. Import scan: `pi-*` imports only under `packages/pi-adapter`. |
 | S2 | **The core stays small.** `@pikit/core` holds events, pipelines, capabilities, lifecycle, config, diagnostics and contract interfaces. Nothing domain-specific. Its only runtime dependency is `typebox`. | Every new export from `packages/core/src/index.ts` is approved by the maintainer and recorded in `SPEC.md`. |
 | S3 | **Absence, not flags.** A component that is not installed leaves no table, timer, config key, dependency or import. No `enabled: false`. | Removal test: add → run scenario → remove → `pikit doctor` green, `git diff` shows only that component. |
 | S4 | **Contracts are the only coupling.** A component never imports another component's files; it calls `require("capability")`. | Import scan: nothing under a component imports a sibling component path. |
@@ -35,7 +49,7 @@ nobody can check is only a wish.
 | S8 | **Fail loudly.** If a component fails to start, the harness does not start: the components already started are stopped in reverse, and `start()` rejects. Resources are acquired in `start`, never in `setup` or in an event listener. `/ready` is true only when every component started. | Core lifecycle tests; per-component start-failure test. |
 | S9 | **No silent substitutes.** Outside tests, nothing falls back to an in-memory stand-in for something that must persist. If persistence is missing, it is missing visibly. | Review; `doctor` warnings. |
 | S10 | **Stated delivery semantics.** Every path to or from the outside world states its guarantee (at-least-once by default). Effects carry idempotency keys derived from `${sessionId}:${runId}:${toolCallId}`. Every tool declares `replay: "safe" \| "never"`. | Conformance suites for `inbound.dedup` and `outbound.queue`; tool manifest validation. |
-| S11 | **Continuity.** Eviction is never a reset: dropping a harness from memory never loses the conversation → session pointer. Session is not workspace: restoring one never implies the other. | Eviction and restart scenarios on both targets. |
+| S11 | **Actors and workers.** A conversation's state is records, never worker memory. At most one worker has a conversation's session open, on every target. Messages that reach a busy conversation go to Pi's inbox (`steer` by default), never to a pikit queue. Losing a worker loses no conversation, and eviction is never a reset. An idle conversation holds no open session, timer or sandbox. Session is not workspace. | Kill-the-worker-mid-run scenario on each target; a message sent during a run changes its course; a two-replica scenario once several replicas are supported. |
 
 ### Ownership
 
@@ -100,13 +114,15 @@ its first component needs it.
   pikit configure && pikit up` gives a responding agent with `/health`, an honest `/ready`,
   logs and status.
 - `src/pikit/` contains every behavior as readable source.
+- A message sent while the agent is working changes its course: it is steered through Pi's
+  inbox, and pikit has no queue of its own.
 - An existing tier-A Pi extension runs unmodified.
 
 **Scope:**
 - `@pikit/pi-adapter` in automatic drive mode.
 - `defineAgent` with `prepare(state)` and `agent.state`.
 - Tools written against `ExecutionEnv`.
-- The http preset.
+- The http preset, running one server replica: one process is the only worker.
 - The installer and the core CLI: `new`, `add`, `remove`, `doctor`, `dev`, `configure`, and
   `up`/`down`/`logs`/`status`.
 
@@ -185,6 +201,8 @@ From then on the programming model does not get rewritten.
 
 ### Later, only if demanded
 
+- Several server replicas, with `conversations.ownership` (a lease per conversation and
+  fenced writes).
 - A remote executor protocol.
 - A second agent runtime behind `AgentRuntime`.
 - A static registry gallery.
