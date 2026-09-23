@@ -560,10 +560,9 @@ first attempt crashed. So:
 - **Logical deduplication belongs to Pi.** Once a message reaches the conversation, it is
   submitted with `requestId = InboundMessage.id`; Pi deduplicates submissions per
   conversation and tracks each one to its answer (§6.4). pikit does not track "was this
-  message answered" itself. `[upstream]` — until Pi's durable runtime ships, a run's
-  `requestId` is its Pi `operationId` and Pi's operation records answer the question. A
-  message queued to a busy conversation has no request id in Pi yet, so only `inbound-dedup`
-  catches its redelivery (§6.4, gaps 1–3). pikit keeps no record of its own.
+  message answered" itself. `[upstream]` — until Pi's durable runtime ships, the adapter
+  hands the message to Pi with its `requestId` inside and finds duplicates in Pi's inbox and
+  transcript (§6.1, §6.4). pikit keeps no record of its own.
 - The guarantee is **at-least-once**: a crash between effect and commit can repeat a reply.
   Effectful tools stay safe through idempotency keys (§8.4).
 - Without `inbound-dedup` there is no deduplication — no table, no LRU, no half-measure.
@@ -620,11 +619,17 @@ The shape comes from the adapter spike against `pi-agent-core` 0.87.1 (§6.4). I
 of a submission in Pi's durable runtime, so moving to that runtime happens inside the adapter.
 `[planned]`
 
-- **One way in.** Pi decides whether a conversation is busy, atomically: `accept()` either
-  admits the run or fails with `LaneBusy`, and only then does the adapter `steer()`. A caller
-  that chose "steer" before asking would race the end of the run (§6.4, gap 2), so the
-  contract has no `steer()`: `dispatch` is the only way in, and the mode for a busy
-  conversation is the agent's (`whileRunning`, §7.3).
+- **Enqueue first, then start.** `dispatch` puts every message in Pi's inbox first (`steer`,
+  or the agent's `whileRunning` mode, §7.3), and then calls `accept()` with no prompt of its
+  own.
+  - On an idle conversation, Pi starts a run and drains its inbox into it.
+  - On a busy one, `accept()` fails with `LaneBusy`, and the run in progress takes the message
+    at its next boundary. Pi re-reads its inbox inside the commit that ends a run, so a message
+    enqueued before that commit is never left behind.
+
+  Deciding "busy, so steer" first and enqueuing afterwards would race the end of the run
+  (§6.4, gap 2). That is why the contract has no `steer()`: `dispatch` is the only way in. It
+  is also the order of Pi's durable runtime, where an idle input first drains what is queued.
 - **Answers are events, not return values.** Pi reports every run's end (`run_end`) whether
   anyone waits for it or not. That includes a run whose caller stopped waiting, and a run that
   a new worker resumed after a crash, which no `dispatch` call is waiting for. The adapter
@@ -636,17 +641,26 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
 - **`ctx` bounds the call, not the run.** Pi keeps the caller's context values (tenant, actor
   and trace reach the tools) but drops its cancellation from the run (`withoutAbortSignal`).
   Cancelling `ctx` never stops a run; `abort()` does.
-- **`requestId` is required.** It becomes the run's `operationId`, so Pi's own operation records
-  (`getResult`, `inspectExecution`) answer "was this request already run?". pikit keeps no record
-  of its own.
+- **The `requestId` travels with the message.** Each inbound message is a Pi `custom` message
+  (`customType: "pikit.inbound"`, `details: { requestId }`). It is committed together with the
+  message, first in the inbox and then in the transcript, and Pi's default conversion gives it
+  to the model as a user message.
+  - A duplicate is found in Pi's inbox or transcript, also after a crash and after compaction
+    (which keeps old entries).
+  - Admissions of one conversation run one at a time in its worker, so two deliveries of one
+    request cannot both pass the check.
+  - A run takes the `requestId` of the message that started it as its `operationId`.
+
+  pikit keeps no record of its own.
 - **`abort()` is cooperative.** Pi signals the running tools and waits for them to return; the
   run then ends as `aborted`. A tool that ignores `context.abortSignal` holds `abort()` until it
   finishes.
-- **A queued message is answered by the run it joined.** Its entry sits in that run's
-  transcript, and its answer is the first assistant message after it that calls no tools: the
-  same answer as the run's prompt. That is how Pi's durable runtime settles every input placed
-  in one turn. `AgentResult.requestId` names only the request that started the run; carrying
-  the queued ones needs Pi to accept a request id on `steer()` (§6.4, gap 3).
+- **A queued message is answered by the run it joined.** Its entry, with its `requestId`, sits
+  in that run's transcript. Its answer is the first assistant message after it that calls no
+  tools, the same answer as the run's prompt. That is how Pi's durable runtime settles every
+  input placed in one turn. Because the transcript holds every request a run placed, a result
+  that lists them all (for channels that reply to each message) needs no new record. Whether
+  `AgentResult` carries that list is `[open]` until a channel needs it.
 - **`resume()`** continues the operations `AgentHarness.create()` reports as `open`, with
   `lane.resume()`; their outcomes arrive as `agent.settled` like any other run. Tools declared
   `replay: "safe"` run again; for any other tool Pi records an "interrupted" error result and
@@ -859,30 +873,47 @@ contracts so the move happens inside the adapter. `[upstream]`
 
 | pikit need | Pi durable runtime | Until it ships (verified by the spike on 0.87.1) |
 |---|---|---|
-| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | `accept()` fails with `LaneBusy`, then `steer()`; the steer's entry id attributes its answer. Gap 2 |
-| Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | `requestId` is the run's `operationId`; Pi's operation records find the duplicate. Gaps 1 and 3 |
+| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | Enqueue first (`steer()`), then `accept()`. Pi drains its inbox into a new run, or the run in progress takes the message at a boundary. Bridges gap 2 |
+| Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | The `requestId` travels inside the message (a Pi `custom` message) and is found in Pi's inbox or transcript. Bridges gaps 1 and 3 |
 | `agent.state` | Conversation-scoped document | Session value `pikit` / `agent.state`. It is committed apart from the transcript, so a tool's state change and its result are two commits |
 | Continue a killed run | Tasks resume from their records | `AgentHarness.create()` reports `open` operations; `lane.resume()` continues them; tool `replay` is Pi's |
 | Multi-step work, waits, approvals that last days | Durable tasks: phases, effect sandwich (commit intent → effect → commit outcome), memos, `sleep(until)`, abort protocol | `state.phase` + tools; nothing more is built |
 | Subagents | Owned child conversations inside the session | Deferred |
 | `sessions-cloudflare-do` | Its SQLite core runs over a synchronous database facade that a Durable Object can implement | Pi's current `SessionRepo` |
 
-**Gaps found by the adapter spike** `[upstream]`. pikit builds no substitute for any of them.
-Each one has a test that asserts today's behaviour and fails when Pi closes it
-(`packages/pi-adapter/src/spike/pi-gaps.test.ts`; gap 3 in `spike.test.ts`):
+**Gaps found by the adapter spike, and their bridges** `[planned]`. Pi's durable runtime lives in
+its own package (`pi-durable`) and replaces `AgentHarness`, so these gaps will not be closed
+in `pi-agent-core`. The adapter bridges each one with mechanisms Pi already has, reproducing
+the durable runtime's submission semantics, and deletes the bridge when it moves to
+`pi-durable`. `pi-gaps.test.ts` asserts Pi's own behaviour, called directly, and
+`spike.test.ts` proves each bridge (`packages/pi-adapter/src/spike/`).
 
-| # | Gap in `pi-agent-core` 0.87.1 | Consequence until Pi closes it | Pi durable runtime |
+| # | Gap in `pi-agent-core` 0.87.1 | Bridge in the adapter | Pi durable runtime |
 |---|---|---|---|
-| 1 | `accept()` does not reject a reused `operationId`: an idle lane runs the same request again | The duplicate check happens before `accept()`, not inside it. It holds because one worker owns the conversation (§7.2) | `requestId` deduplicates before any write |
-| 2 | No atomic "run if idle, otherwise queue": a `steer()` that lands after the run's last boundary waits in the inbox for the next run | That message is answered only when another one arrives | Admission decides idle or busy in one transaction; an idle input first drains older queued items |
-| 3 | `steer()`, `followUp()` and `nextRun()` take no request id | A redelivered message that reaches a busy conversation is steered twice; only `inbound-dedup` (transport) stops it | Queued submissions carry their `requestId` |
+| 1 | `accept()` does not reject a reused `operationId`: an idle lane runs the same request again | Duplicate check before admission, and one admission at a time per conversation in its worker. One worker owns a conversation (§7.2) | `requestId` deduplicates before any write |
+| 2 | No atomic "run if idle, otherwise queue": a `steer()` that lands after the run's last boundary waits in the inbox for the next run | Enqueue first, then `accept()`. Pi re-reads its inbox in the commit that ends a run, and `accept()` drains it on an idle lane | Admission decides idle or busy in one transaction; an idle input first drains older queued items |
+| 3 | `steer()`, `followUp()` and `nextRun()` take no request id | The message is a Pi `custom` message with `details: { requestId }`, committed with it | Queued submissions carry their `requestId` |
+
+Costs of the bridges:
+
+- **Inbound messages have the role `custom`, not `user`.** Pi's conversion, compaction and
+  events handle them, and Pi extensions already see `custom` messages from `sendMessage`.
+  Two limits remain:
+  - compaction detects a split turn by looking for `user`, so a cut inside a turn is not
+    recognised as split (read from the code, not tested);
+  - images go inside `content`, because `steer()`'s `images` parameter accepts only user
+    messages.
+- **The inbox is read through Pi's exported record addresses** (`laneState`, `pendingEntry`).
+  They follow Pi's storage layout, which is one more reason to pin the exact version.
+- **Deduplication scans the transcript,** so the adapter bounds it to a redelivery window.
+  Compaction keeps old entries on the branch, so it does not hide a request.
+- **One admission at a time holds only inside one worker.** Several replicas need
+  `conversations.ownership` (§7.2).
 
 Facts the adapter relies on (0.87.1):
 
 - `AgentHarness.close()` closes the `Session` it was given. Evicting a conversation closes both;
   the next owner reopens the session from its repo.
-- A run's operation meta, with the prompt's entry id, is deleted when the run settles; the
-  adapter reads it at admission.
 - There is no `drive: "automatic" | "manual"` option and no `peekAction()`. Admission is
   `accept()` (durable); execution is `drive()` (process-local). `drive({ waitForRetry: false })`
   returns `waiting { notBefore }` for the host to schedule, which is the shape a Durable Object
@@ -1525,6 +1556,13 @@ Resolved `[decision]`:
   the adapter emits from Pi's `run_end` (§6.1). A run resumed after a crash has nobody waiting
   for it, so a return value cannot carry its answer. The contract has no `steer()`: Pi decides
   idle or busy atomically, and a caller deciding first would race the end of the run.
+- Pi will not add submissions to `pi-agent-core`: its durable runtime is a separate package.
+  Until the adapter moves to it, the adapter bridges Pi 0.87.1's gaps with Pi's own mechanisms,
+  reproducing the durable runtime's semantics:
+  - it enqueues first and then calls `accept()`;
+  - the `requestId` travels inside a Pi `custom` message.
+
+  pikit builds no submission store, and the bridge is deleted on the move (§6.4).
 
 ---
 

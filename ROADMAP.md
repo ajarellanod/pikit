@@ -145,8 +145,9 @@ The spike's findings update SPEC §6.1 and §6.4, and it is then deleted or turn
 adapter. If Pi cannot do one of these things, the gap goes upstream before pikit works
 around it.
 
-✅ **Spike done** on Pi 0.87.1 (`packages/pi-adapter/src/spike`). All six run. Duplicate
-detection is partial: three gaps go upstream (SPEC §6.4).
+✅ **Spike done** on Pi 0.87.1 (`packages/pi-adapter/src/spike`). All six run. Three gaps in
+`pi-agent-core` are bridged in the adapter with Pi's own mechanisms until it moves to
+`pi-durable` (SPEC §6.4).
 
 **Scope:**
 - `@pikit/pi-adapter` on `accept()` / `drive()` in one server process, shaped by the spike.
