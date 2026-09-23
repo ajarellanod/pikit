@@ -69,11 +69,6 @@ export interface HarnessContext extends Context {
   config: Readonly<Record<string, unknown>>;
   logger: Logger;
   clock: Clock;
-  /**
-   * Whether a capability is provided. Meaningful after `create()`. It does not order startup:
-   * a component that needs an optional capability declares it with `useOptional(name)`.
-   */
-  has(name: string): boolean;
   emit<K extends keyof HarnessEvents & string>(name: K, payload: HarnessEvents[K]): Promise<void>;
   run<K extends keyof HarnessPipelines & string>(
     name: K,
@@ -262,7 +257,6 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           config,
           logger,
           clock,
-          has: (name) => capabilities.has(name),
           emit: (name, payload) => events.emit(name, payload, ctx),
           run: (name, input) => pipelines.run(name, input, ctx),
           derive: (change) => context(change(inner)),

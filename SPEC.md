@@ -291,11 +291,12 @@ const store = pikit.use("sessions.store");   // in a component's setup; store.ge
 - **Optional dependencies.** `[decision]` `useOptional(name)` declares a dependency that may be
   absent: `get()` returns `undefined` when nothing provides it. It is a separate verb, not an
   option of `use`, so whether a dependency is optional is written in code and no config value
-  can switch it (S3). `use` and `useOptional` of the same name in one setup is a required use. When it is installed, its
-  provider starts first like any other dependency. Optional is not permissive: several
-  providers still need a selection. `describe()` lists optional uses apart from required ones,
-  so `component.json` does not require them at install time. `has(name)` answers the same
-  question after `create()` but does not order startup.
+  can switch it (S3). `use` and `useOptional` of the same name in one setup is a required use.
+  When it is installed, its provider starts first like any other dependency. Optional is not
+  permissive: several providers still need a selection. `describe()` lists optional uses apart
+  from required ones, so `component.json` does not require them at install time. There is no
+  `ctx.has(name)`: asking whether a capability exists is `useOptional(name).get()`, a declared
+  question.
 - **Keyed capabilities.** `[decision]` Some capabilities have one implementation per key
   rather than one provider: `channel.transport` has one transport per channel. A provider
   calls `pikit.provideKeyed(name, key, impl)`, possibly for several keys; a consumer calls
@@ -412,7 +413,6 @@ interface Context {
 interface HarnessContext extends Context {
   target: "server" | "cloudflare";
   config: ResolvedConfig;
-  has(name: string): boolean;
   emit(event, payload): Promise<void>;   // propagates this same ctx to listeners
   run(pipeline, input): Promise<Value | Halt>;
   derive(change: (context: Context) => Context): HarnessContext;
@@ -1355,6 +1355,8 @@ Resolved `[decision]`:
 - Optional dependencies are `useOptional(name)`, a verb rather than a boolean option: absent
   means `undefined`, present means ordered first. `useKeyed` accepts no providers, so it needs
   no optional form.
+- `ctx.has(name)` is removed: `useOptional(name).get()` answers the same question as a declared
+  dependency, and a second, undeclared path would contradict §4.2.
 - Capability names: `execution` (filesystem, maybe no shell), `execution.shell` (real shell),
   `network.fetch` (outbound HTTP). `workspace.posix` is dropped: a real shell implies it.
 - `component.json`'s `provides`/`requires` are generated from `setup` (§10.2).

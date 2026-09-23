@@ -743,7 +743,6 @@ test("describe reflects selection and resolved pipeline chains; halt is emitted 
   expect(d.capabilities).toEqual({ "test.store": { providers: ["s1", "s2"], selected: "s2" } });
   expect(d.pipelines["test.harness.text"]?.map((s) => s.id)).toEqual(["one", "gate"]);
   expect(chosen).toBe("s2");
-  expect(harness.context().has("test.store")).toBe(true);
 
   const result = await harness.context().run("test.harness.text", { text: "" });
   expect(result).toBeInstanceOf(Halt);
