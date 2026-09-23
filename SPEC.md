@@ -335,7 +335,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 |---|---|---|
 | `storage.sql` | `SqlDatabase` | Minimal sync/async SQL surface. Backed by `bun:sqlite`, `node:sqlite`, Postgres driver, or DO `ctx.storage.sql`. |
 | `storage.blob` | `BlobStore` | put/get/delete/list. Local dir, S3, R2. |
-| `sessions.store` | Pi `SessionRepo` + `SessionStorage` | Re-exported from Pi; see §7. |
+| `sessions.store` | Pi `SessionRepo` + `SessionStorage` | Re-exported from Pi; typed by `@pikit/pi-adapter`. See §7. |
 | `conversations.registry` | `ConversationRegistry` | conversation key → active session id, workspace ref, metadata. |
 | `conversations.ownership` | `ConversationOwnership` | `[planned]` Lease per conversation so only one worker has its session open. Needed only with several server replicas (§7.2). |
 | `workspace` | `WorkspaceProvider` | Resolves a `Workspace` for a conversation/agent. |
@@ -343,6 +343,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
 | `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
+| `model.provider` (keyed by provider id) | pi-ai `Provider` | One per model provider (`anthropic`, `faux` in tests), each its own component importing its pi-ai provider by subpath. The runtime builds its models from all of them; an agent names `provider/modelId`. Typed by `@pikit/pi-adapter` (§6.2). |
 | `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
 | `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
 | `channel.transport` (keyed by channel name) | `ChannelTransport` | Send/edit/delete messages for one channel. Each channel component provides its transport under its own key; delivery uses `transports.get(message.channel)`. A missing key is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
@@ -663,6 +664,10 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
 - **`abort()` is cooperative.** Pi signals the running tools and waits for them to return; the
   run then ends as `aborted`. A tool that ignores `context.abortSignal` holds `abort()` until it
   finishes.
+- **`abort()` withdraws what was queued.** Messages queued in the aborted run are not answered:
+  Pi takes them out of its inbox. They stay known, so a redelivery is a `duplicate` (§6.4,
+  gap 4), as Pi's durable runtime records a withdrawn submission `unanswered`. Reporting them to
+  their channel belongs with the `[open]` list of a run's requests.
 - **A queued message is answered by the run it joined.** Its entry, with its `requestId`, sits
   in that run's transcript. Its answer is the first assistant message after it that calls no
   tools, the same answer as the run's prompt. That is how Pi's durable runtime settles every
@@ -679,9 +684,11 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   does. Otherwise a message dispatched there would queue behind a run nobody drives. `resume()` is
   how a host wakes a conversation with no new message: at boot, or from a Durable Object alarm.
 - **The runtime emits `agent.*`.** `agent.dispatched` for every admission, duplicates included,
-  in the caller's context. `agent.started` from Pi's `run_start` / `run_resume`, and
-  `agent.settled` / `agent.failed` from `run_end`, in a context that keeps the dispatch's values
-  without its cancellation.
+  in the caller's context. `agent.started` when a run starts or a worker resumes one (Pi emits
+  no `run_start` for a resumed run). `agent.settled` / `agent.failed` from the run's terminal
+  record, the one Pi's `run_end` announces: the adapter drives every run of a conversation it has
+  open, a started one with `drive()` and an interrupted one with `lane.resume()`, so every end
+  reaches it. Run events carry the admitting call's values without its cancellation.
 - **`resume()`** continues the operations `AgentHarness.create()` reports as `open`, with
   `lane.resume()`; their outcomes arrive as `agent.settled` like any other run. Tools declared
   `replay: "safe"` run again; for any other tool Pi records an "interrupted" error result and
@@ -701,7 +708,8 @@ from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-
 Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest`, `Admission`,
 `AgentResult`, `AgentRuntime`, `ConversationRef`, and the opaque `AgentMessage`, `AgentTool` and
 `Usage` with their merge target `AgentPayloads` (each `unknown` until the adapter fills it in).
-The adapter's half is `[planned]`, built in M1.
+`@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`)
+and `model.provider` (pi-ai's `Provider`) by importing it anywhere in the project.
 
 ### 6.2 Pi adapter (`@pikit/pi-adapter`)
 
@@ -738,12 +746,13 @@ Responsibilities:
   - `session` from `sessions.store`.
   - `ExecutionEnv` from `execution`.
   - `tools` from the agent definition and installed tool components.
-  - `models` from `pi-ai` with providers imported **by subpath** (bundle size on Cloudflare).
+  - `models` from the `model.provider` components (`modelsFrom`), each importing its pi-ai
+    provider **by subpath** (bundle size on Cloudflare).
 - Translate Pi hooks/events → `agent.*` events and `agent.prepare` pipeline:
   - `before_run` → `agent.prepare` (system prompt, tools, context injection).
   - `before_tool` / `after_tool` → `agent.tool.call` / `agent.tool.result` (interceptable).
   - `after_response` → `agent.response` (provider errors, failover hooks).
-  - `run_end` → `agent.settled` / `agent.failed`, whether or not anyone waits (§6.1).
+  - `run_end` → `agent.settled` / `agent.failed`, whether or not anyone waits (§6.1). Built.
 - Run in Pi's two steps: `accept()` makes the run durable (the admission of §6.1), and
   `drive()` executes it in this process.
   - `server`: `drive({ waitForRetry: true })`; the worker waits through retry backoff.
@@ -757,9 +766,14 @@ Responsibilities:
   signal through a private key, so without the bridge a pikit context that Pi derives would
   lose its cancellation (verified against chord 0.87.1). A Chord context passed into pikit
   needs no bridge.
-- Deliver messages to a busy conversation through Pi's own `steer()` / `followUp()` /
-  `nextRun()`, once `accept()` has reported `LaneBusy` (§6.1). pikit keeps no queue of its
-  own (§7.3).
+- Deliver every message through Pi's own `steer()` first (or the agent's `whileRunning` mode,
+  `[planned]`), then `accept()`: an idle conversation starts a run that drains it, a busy one
+  answers `LaneBusy` and its run takes the message (§6.1). pikit keeps no queue of its own (§7.3).
+- Keep a conversation's harness open only while it drives a run, and close it when idle (§7.1,
+  invariant 5). Everything that touches one conversation runs in that conversation's line, one
+  step at a time; runs execute outside it.
+- Give each conversation's harness to `onHarness` when it opens: where Pi hooks attach (the
+  tier-A extensions of §6.2b; tests).
 - Pass each tool component's `replay: "safe" | "never"` to Pi's `AgentHarnessTool.replay`; Pi
   applies it on resume (§8.4).
 
@@ -888,7 +902,7 @@ binary (`pi`) invoked by the CLI for `resolve with pi` (§10.6). `[decision]`
 **Pin:** `@earendil-works/pi-agent-core` and `@earendil-works/pi-ai` at exactly **0.87.1** in the
 adapter's `package.json`; 0.87.x is the supported line. `[decision]` The harness is
 experimental and changes weekly, and the adapter's bridges read Pi's storage records (see
-below). A bump is therefore a deliberate change: run the spike and `pi-gaps` tests, then check
+below). A bump is therefore a deliberate change: run `pi-gaps.test.ts`, `pi-facts.test.ts` and the adapter's conformance tests, then check
 this section again. Pi's own dependencies use caret ranges within 0.87 (`^0.87.1`); the
 lockfile freezes them. `typebox` follows Pi's exact version (1.3.27), so the core and Pi share
 one copy.
@@ -916,18 +930,20 @@ contracts so the move happens inside the adapter. `[upstream]`
 | Subagents | Owned child conversations inside the session | Deferred |
 | `sessions-cloudflare-do` | Its SQLite core runs over a synchronous database facade that a Durable Object can implement | Pi's current `SessionRepo` |
 
-**Gaps found by the adapter spike, and their bridges** `[planned]`. Pi's durable runtime lives in
+**Gaps found by the adapter spike, and their bridges.** Pi's durable runtime lives in
 its own package (`pi-durable`) and replaces `AgentHarness`, so these gaps will not be closed
 in `pi-agent-core`. The adapter bridges each one with mechanisms Pi already has, reproducing
 the durable runtime's submission semantics, and deletes the bridge when it moves to
-`pi-durable`. `pi-gaps.test.ts` asserts Pi's own behaviour, called directly, and
-`spike.test.ts` proves each bridge (`packages/pi-adapter/src/spike/`).
+`pi-durable`. `pi-gaps.test.ts` asserts Pi's own behaviour, called directly; the `agent.runtime`
+conformance suite and `adapter.test.ts` prove each bridge. The bridges live in
+`packages/pi-adapter/src/inbound.ts`.
 
 | # | Gap in `pi-agent-core` 0.87.1 | Bridge in the adapter | Pi durable runtime |
 |---|---|---|---|
 | 1 | `accept()` does not reject a reused `operationId`: an idle lane runs the same request again | Duplicate check before admission, and one admission at a time per conversation in its worker. One worker owns a conversation (§7.2) | `requestId` deduplicates before any write |
 | 2 | No atomic "run if idle, otherwise queue": a `steer()` that lands after the run's last boundary waits in the inbox for the next run | Enqueue first, then `accept()`. Pi re-reads its inbox in the commit that ends a run, and `accept()` drains it on an idle lane | Admission decides idle or busy in one transaction; an idle input first drains older queued items |
 | 3 | `steer()`, `followUp()` and `nextRun()` take no request id | The message is a Pi `custom` message with `details: { requestId }`, committed with it | Queued submissions carry their `requestId` |
+| 4 | `abort()` takes the queued steers and follow-ups out of the inbox and returns them only in memory: a redelivery looks new | After `abort()`, a `custom` entry `pikit.withdrawn { requestIds }`, which the duplicate check reads | `Conversation.abort()` withdraws queued submissions and records them `unanswered` |
 
 Costs of the bridges:
 
@@ -940,8 +956,13 @@ Costs of the bridges:
     messages.
 - **The inbox is read through Pi's exported record addresses** (`laneState`, `pendingEntry`).
   They follow Pi's storage layout, which is one more reason to pin the exact version.
-- **Deduplication scans the transcript,** so the adapter bounds it to a redelivery window.
-  Compaction keeps old entries on the branch, so it does not hide a request.
+- **Deduplication scans the transcript,** so the adapter bounds it to a redelivery window: the
+  last 1000 message entries of the branch. Compaction keeps old entries on the branch, so it
+  does not hide a request.
+- **The withdrawn record is a second write.** A crash between Pi's abort and the
+  `pikit.withdrawn` entry loses the record, not a message: the message was already withdrawn.
+- **Opening a session by id lists the store.** Pi's repos open from metadata; the conversation
+  knows only its session id. A conversation registry that keeps the metadata can remove the scan.
 - **One admission at a time holds only inside one worker.** Several replicas need
   `conversations.ownership` (§7.2).
 
@@ -955,6 +976,14 @@ Facts the adapter relies on (0.87.1):
   alarm needs (read from the types; the spike did not exercise it).
 - The context bridge of §6.2 is needed: Pi derives telemetry contexts with Chord's
   `withContextValue`, and without the bridge they lose a pikit context's cancellation.
+- A branch scan honours `start` and `stopAtId` only `newestFirst`, and includes the stop entry;
+  `oldestFirst` walks from the root. A run's messages are read newest first and reversed.
+- A run resumed after a crash emits no `run_start`, and `run_end` is also emitted for
+  compactions and navigations. The adapter reports only the runs it accepted or resumed.
+- Session values survive a new harness over the same stored session, and a new session starts
+  without them: the basis of `agent.state` (§6.2a).
+
+`pi-facts.test.ts` asserts each of these on Pi directly.
 
 Mapping of vocabulary: **one pikit conversation (the actor) is one Pi session.** The session
 is Pi's unit of single-writer ownership (§7.2); conversations inside it are Pi's transcript
@@ -1617,6 +1646,11 @@ Resolved `[decision]`:
   the components that produce them, because adding a field is compatible and removing one is not.
 - Opening a conversation resumes the runs a dead worker left open; `resume()` wakes a
   conversation without a message (§6.1).
+- `abort()` withdraws the messages queued in the run; they stay duplicates (§6.1, §6.4 gap 4),
+  as in Pi's durable runtime.
+- Model providers are components: each provides the keyed capability `model.provider` under its
+  id, and the runtime builds its models from all of them (§4.5). Adding a provider is adding a
+  component, and a missing one is visible in `doctor`, not a config flag.
 
 ---
 

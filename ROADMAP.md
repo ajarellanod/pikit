@@ -151,7 +151,12 @@ around it.
 
 ✅ **Agent contracts in core:** `defineAgent`, `AgentRuntime`, `agent.definition` and the
 `agent.*` events (SPEC §6.1), and the `agent.runtime` conformance suite in
-`@pikit/core/testing`, passed by an in-memory double. Next: the adapter that passes it.
+`@pikit/core/testing`, passed by an in-memory double.
+
+✅ **The adapter:** `@pikit/pi-adapter` passes that suite on Pi 0.87.1, killed-process cases
+included. It bridges four gaps of `pi-agent-core` (SPEC §6.4), the spike is deleted, and
+`pi-gaps.test.ts` / `pi-facts.test.ts` pin the Pi behaviour it relies on. Next: the `runtime-pi`
+component.
 
 **Scope:**
 - `@pikit/pi-adapter` on `accept()` / `drive()` in one server process, shaped by the spike.
