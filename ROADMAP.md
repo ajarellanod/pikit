@@ -145,8 +145,11 @@ The spike's findings update SPEC §6.1 and §6.4, and it is then deleted or turn
 adapter. If Pi cannot do one of these things, the gap goes upstream before pikit works
 around it.
 
+✅ **Spike done** on Pi 0.87.1 (`packages/pi-adapter/src/spike`). All six run. Duplicate
+detection is partial: three gaps go upstream (SPEC §6.4).
+
 **Scope:**
-- `@pikit/pi-adapter` in automatic drive mode, shaped by the spike.
+- `@pikit/pi-adapter` on `accept()` / `drive()` in one server process, shaped by the spike.
 - `defineAgent` with `prepare(state)` and `agent.state`.
 - Tools written against `ExecutionEnv`.
 - The http preset, running one server replica: one process is the only worker.
@@ -200,7 +203,7 @@ a server.
 - The DO session backend passes Pi's conformance suite.
 - Every Cloudflare budget is measured and met.
 
-**Scope:** `sessions-cloudflare-do`, manual drive mode with resume, `deployment-cloudflare`,
+**Scope:** `sessions-cloudflare-do`, alarm-driven `drive()` with resume, `deployment-cloudflare`,
 `workspace-virtual`, `execution-fetch`, `scheduler-cloudflare`.
 
 **Evidence:** scenario 6.

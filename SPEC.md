@@ -560,8 +560,10 @@ first attempt crashed. So:
 - **Logical deduplication belongs to Pi.** Once a message reaches the conversation, it is
   submitted with `requestId = InboundMessage.id`; Pi deduplicates submissions per
   conversation and tracks each one to its answer (§6.4). pikit does not track "was this
-  message answered" itself. `[upstream]` — until Pi's durable runtime ships, the adapter
-  keeps this record in the session's values.
+  message answered" itself. `[upstream]` — until Pi's durable runtime ships, a run's
+  `requestId` is its Pi `operationId` and Pi's operation records answer the question. A
+  message queued to a busy conversation has no request id in Pi yet, so only `inbound-dedup`
+  catches its redelivery (§6.4, gaps 1–3). pikit keeps no record of its own.
 - The guarantee is **at-least-once**: a crash between effect and commit can repeat a reply.
   Effectful tools stay safe through idempotency keys (§8.4).
 - Without `inbound-dedup` there is no deduplication — no table, no LRU, no half-measure.
@@ -679,7 +681,7 @@ what a single Pi process cannot provide for itself. Verified against `pi-agent-c
 | Agent loop, providers (`pi-ai`), compaction, retries (`RetryPolicy`) | Channels, ingress, authentication, deduplication |
 | Steering, follow-up and next-run queues, persisted as the session inbox | Routing messages to agents (multi-agent) |
 | Serialized writes per session; exclusive open of a session within a process | Ownership of a session **across** processes (§7.2) |
-| Resume of suspended operations; drive modes | Durable delivery (outbox), scheduling, approvals surfaces |
+| Resume of the operations a dead worker left open; tool replay (`replay: "safe" \| "never"`) | Durable delivery (outbox), scheduling, approvals surfaces |
 | Tool hooks, tool execution modes, turn preparation / finish hooks | Tools written over `ExecutionEnv`; policy; sandboxes via `execution` |
 | Session values, branches, forks, usage records | Conversation registry, reset, workspace references |
 | Skills, prompt templates, system prompt assembly | Deployment, secrets, targets, `doctor` |
@@ -702,12 +704,14 @@ Responsibilities:
   - `before_run` → `agent.prepare` (system prompt, tools, context injection).
   - `before_tool` / `after_tool` → `agent.tool.call` / `agent.tool.result` (interceptable).
   - `after_response` → `agent.response` (provider errors, failover hooks).
-  - run finish → `agent.settled` / `agent.failed`.
-- Choose drive mode by target:
-  - `server`: `drive: "automatic"` (`prompt()` and await).
-  - `cloudflare`: `drive: "manual"` (`peekAction()` / `executeAction()` loop with persistence
-    between actions; see §9).
-- On `AgentHarness` creation, inspect `suspended` operations and expose them through `resume()`.
+  - `run_end` → `agent.settled` / `agent.failed`, whether or not anyone waits (§6.1).
+- Run in Pi's two steps: `accept()` makes the run durable (the admission of §6.1), and
+  `drive()` executes it in this process.
+  - `server`: `drive({ waitForRetry: true })`; the worker waits through retry backoff.
+  - `cloudflare`: `drive({ waitForRetry: false })` returns `waiting { notBefore }`, and the
+    Durable Object sets an alarm and drives again (§9.2). `[open]` — settled in M4.
+- On `AgentHarness` creation, Pi reports the operations a dead worker left `open`, without
+  starting their effects; `resume()` continues them with `lane.resume()`.
 - Pass pikit's context into Pi through a one-line bridge:
   `chord.withAbortSignal(ctx.abortSignal, ctx)` when `abortSignal` is set, otherwise `ctx`.
   pikit derives from a parent's `abortSignal` property. Chord's `withContextValue` reads the
@@ -715,8 +719,10 @@ Responsibilities:
   lose its cancellation (verified against chord 0.87.1). A Chord context passed into pikit
   needs no bridge.
 - Deliver messages to a busy conversation through Pi's own `steer()` / `followUp()` /
-  `nextRun()`. pikit keeps no queue of its own (§7.3).
-- Classify tools with `replay: "safe" | "never"` from the tool component manifest.
+  `nextRun()`, once `accept()` has reported `LaneBusy` (§6.1). pikit keeps no queue of its
+  own (§7.3).
+- Pass each tool component's `replay: "safe" | "never"` to Pi's `AgentHarnessTool.replay`; Pi
+  applies it on resume (§8.4).
 
 Agent definition (project file, convention-based under `src/agents/{name}/`):
 
@@ -1056,11 +1062,13 @@ Tools that need a shell declare `execution.shell`; `execution-fetch` does not pr
 
 ### 8.4 Effectful tools and replay
 
-After a crash or DO eviction, Pi may find a `tool_started` record without a result. Tools
-marked `replay: "safe"` are re-run. Tools marked `replay: "never"` are not; the adapter
-returns a tool error explaining the uncertainty and the agent decides. Components that
-perform external writes must use `OutboundMessage.idempotencyKey` / their own keys derived
-from `${sessionId}:${runId}:${toolCallId}`.
+After a crash or DO eviction, a tool call can have its intent recorded and no result. Pi
+handles this itself (verified by the adapter spike on 0.87.1). On `resume()`, a tool declared
+`replay: "safe"` runs again. Any other tool (`"never"` is Pi's default) is not re-run: Pi
+records an error result saying that the call was interrupted and its external outcome is
+unknown, and the model decides. The adapter only passes each tool's declared `replay` to Pi.
+Components that perform external writes must use `OutboundMessage.idempotencyKey` / their own
+keys derived from `${sessionId}:${runId}:${toolCallId}`.
 
 ---
 
@@ -1127,11 +1135,11 @@ Constraints the design must respect (from Cloudflare docs, verify on change):
 - SQL row/blob ≤ 2 MB → large attachments and images go to R2 with a reference in the
   transcript.
 
-Drive model: the adapter runs Pi in `drive: "manual"`. Each `executeAction()` result is
-persisted by Pi's own records; the DO loops until `peekAction()` returns `undefined` or the
-request budget is near exhaustion, in which case it sets an alarm and returns. On alarm (or
-next request) the DO calls `resume()` and continues. `[upstream]` — depends on the current
-`AgentHarness` API; the adapter owns this.
+Drive model: the adapter admits with `accept()` and executes with
+`drive({ waitForRetry: false })`; Pi commits every step to the session. When the drive returns
+`waiting { notBefore }` (a retry backoff), the DO sets an alarm and returns, and on the alarm it
+drives again. If the object is evicted mid-drive, the next request or alarm calls `resume()`.
+`[upstream]` `[open]` — read from the 0.87.1 types, not yet exercised; settled in M4.
 
 Streaming: `agent.*` progress events are forwarded to hibernating WebSockets attached to the
 DO; the authoritative state is always the session, never the stream.
