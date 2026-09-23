@@ -390,6 +390,10 @@ its rollback within the stop's deadline, and leaves the start's error to the cal
 Every `runtime.starting` is closed by `runtime.stopped`, including a failed start. On
 Cloudflare, `start` runs inside the Durable Object constructor's `blockConcurrencyWhile`.
 
+The core never restarts on its own. After a failed start or a stop that abandoned work, the
+process is in an unknown state, and recovery is a fresh process: each target's shutdown rule is
+in §9.1 and §9.2.
+
 `pikit doctor` performs everything up to and including *setup* without starting servers, and
 prints the resolved component graph, capability providers, pipeline chains, and config.
 
@@ -972,6 +976,14 @@ from `${sessionId}:${runId}:${toolCallId}`.
   (§6.3).
 - Workers: one process is one worker and owns every conversation (§7.2). Several replicas
   need `conversations.ownership`; until it exists, the server target runs one replica.
+- Start and shutdown `[decision]`: the entrypoint (owned by the `deployment-*` component, not
+  the core) passes deadlines and never restarts a harness in the same process; the supervisor
+  (systemd, Docker) restarts the process.
+  - `start(ctx)` with a deadline. If it rejects, exit non-zero.
+  - On SIGTERM or SIGINT, `stop(ctx)` with a deadline shorter than the supervisor's kill
+    timeout (systemd `TimeoutStopSec`, Docker's stop grace period), leaving room to exit.
+    Exit 0 if it resolves, non-zero if it rejects (a stop that failed or was abandoned).
+  - A second signal during the stop exits at once.
 
 ### 9.2 Cloudflare
 
@@ -1004,6 +1016,10 @@ Constraints the design must respect (from Cloudflare docs, verify on change):
 - ~6 concurrent outbound connections per invocation → cap subagent fan-out.
 - In-memory state is lost on hibernation; everything the harness needs across actions must
   be in `ctx.storage`.
+- `blockConcurrencyWhile` terminates and resets the object if its callback throws or runs
+  longer than 30 s. `start(ctx)` runs inside it with a shorter deadline, so a slow start rolls
+  back before the platform kills it, and its rejection is rethrown: the reset is the fresh
+  process. There is no in-object restart.
 - SQL row/blob ≤ 2 MB → large attachments and images go to R2 with a reference in the
   transcript.
 
