@@ -283,9 +283,25 @@ const store = pikit.use("sessions.store");   // in a component's setup; store.ge
 - A `use` with no provider, an ambiguous provider and a selection that names a component
   which does not provide the capability all fail in `create()`: after every setup, before any
   `start`.
-- `has(name)` answers whether a capability is provided, for optional capabilities
-  (`outbound.queue`). It is meaningful after `create()`. Only `use()` orders startup, so a
-  component must not rely on an optional capability's provider having started.
+- **Optional dependencies.** `use(name, { optional: true })` declares a dependency that may be
+  absent: `get()` returns `undefined` when nothing provides it. When it is installed, its
+  provider starts first like any other dependency. Optional is not permissive: several
+  providers still need a selection. `describe()` lists optional uses apart from required ones,
+  so `component.json` does not require them at install time. `has(name)` answers the same
+  question after `create()` but does not order startup.
+- **Keyed capabilities.** `[decision]` Some capabilities have one implementation per key
+  rather than one provider: `channel.transport` has one transport per channel. A provider
+  calls `pikit.provideKeyed(name, key, impl)`, possibly for several keys; a consumer calls
+  `pikit.useKeyed(name)` and gets `Keyed<T>` (`get(key)`, `keys()`). A keyed consumer starts
+  after every provider of that capability.
+  - Two components providing the same key is an error.
+  - One capability is either single or keyed. Mixing `provide` and `provideKeyed`, or `use` and
+    `useKeyed`, for one name is an error.
+  - Selection does not apply to keyed capabilities.
+
+  Same model as Chord's keyed services (§6.4), with keys fixed at setup instead of spawned at
+  runtime. Keyed types are declared in `HarnessKeyedCapabilities`, single ones in
+  `HarnessCapabilities`.
 - Capability contracts are TypeScript interfaces exported from `@pikit/core`.
 
 Core-defined capability contracts (interfaces only; no implementations in core):
@@ -303,7 +319,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
 | `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
-| `channel.transport:<name>` | `ChannelTransport` | Send/edit/delete messages for one channel. Resolved per message (`channel.transport:${message.channel}`); never passed to `use()`, because "some transport" is not one capability (keyed capabilities will replace this rule). A missing transport is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
+| `channel.transport` (keyed by channel name) | `ChannelTransport` | Send/edit/delete messages for one channel. Each channel component provides its transport under its own key; delivery uses `transports.get(message.channel)`. A missing key is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
 | `outbound.queue` | `OutboundQueue` | Durable enqueue + worker. Optional; without it delivery is direct. |
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
@@ -413,7 +429,7 @@ pipeline outbound.prepare          → OutboundMessage
   │  emit outbound.requested
   ▼
   if outbound.queue provided → enqueue; worker delivers; emit outbound.queued/delivered/failed
-  else                       → channel.transport:<name>.send(); emit outbound.delivered/failed
+  else                       → channel.transport[message.channel].send(); emit outbound.delivered/failed
 ```
 
 Core types (abridged):
@@ -1010,7 +1026,7 @@ channel-telegram/
     "components": ["channel-core"],
     "capabilities": ["network.fetch", "secrets"]
   },
-  "provides": ["channel.transport:telegram"],
+  "provides": ["channel.transport"],
   "dependencies": {},
   "files": [{ "source": "files/src", "target": "src" }],
   "environment": [
@@ -1158,7 +1174,7 @@ the whole 1.x line; there is no "pikit 2 rewrites how you define agents".
 
 | Surface | Rule |
 |---|---|
-| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/use/emit/run`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
+| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/provideKeyed/use/useKeyed/emit/run`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
 | Contract interfaces (`SessionStore`, `SqlDatabase`, `ExecutionEnv`, `Workspace`, `ChannelTransport`, …) | Same as core. A contract change ships with its updated conformance suite in the same release. |
 | `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface follows the core rule; its Pi-facing internals are unstable by design. |
 | `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. |
@@ -1262,8 +1278,11 @@ Resolved `[decision]`:
   every installed provider; an unselected provider cannot create a false cycle.
 - `capabilities` is a reserved component name (it is the core's config key).
 - Inbound deduplication is the `inbound-dedup` component, not core (§5).
-- `channel.transport:<name>` is resolved per message and never passed to `use()`; no
-  pattern-matching `use` until a second case needs it.
+- Keyed capabilities (`provideKeyed` / `useKeyed`) replace `channel.transport:<name>` and its
+  "never in `use`" rule (§4.5). A transport is found by key per message, and the outbox
+  depends on every transport.
+- Optional dependencies are `use(name, { optional: true })`: absent means `undefined`, and
+  present means ordered first.
 - Capability names: `execution` (filesystem, maybe no shell), `execution.shell` (real shell),
   `network.fetch` (outbound HTTP). `workspace.posix` is dropped: a real shell implies it.
 - `component.json`'s `provides`/`requires` are generated from `setup` (§10.2).

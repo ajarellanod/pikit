@@ -5,6 +5,9 @@ interface Caps {
   "storage.sql": { kind: string };
   "outbound.queue": { push(): void };
 }
+interface KeyedCaps {
+  "channel.transport": { channel: string };
+}
 
 test("single provider resolves; missing capability names what is required", () => {
   const caps = createCapabilityRegistry<Caps>();
@@ -47,4 +50,42 @@ test("a component cannot provide the same capability twice", () => {
   caps.provide("storage.sql", { kind: "a" }, "storage-sqlite");
   expect(() => caps.provide("storage.sql", { kind: "b" }, "storage-sqlite")).toThrow("provided it twice");
   expect(caps.names()).toEqual(["storage.sql"]);
+});
+
+test("keyed: each key has one implementation; a provider may contribute several keys", () => {
+  const caps = createCapabilityRegistry<Caps, KeyedCaps>();
+  caps.provideKeyed("channel.transport", "http", { channel: "http" }, "channel-http");
+  caps.provideKeyed("channel.transport", "ws", { channel: "ws" }, "channel-http");
+  caps.provideKeyed("channel.transport", "telegram", { channel: "telegram" }, "channel-telegram");
+
+  const transports = caps.keyed("channel.transport");
+  expect(transports.keys()).toEqual(["http", "ws", "telegram"]);
+  expect(transports.get("telegram")).toEqual({ channel: "telegram" });
+  expect(transports.get("sms")).toBeUndefined();
+  expect(caps.mode("channel.transport")).toBe("keyed");
+  expect(caps.providers("channel.transport")).toEqual(["channel-http", "channel-telegram"]);
+  expect(caps.keys("channel.transport")).toEqual({ http: "channel-http", ws: "channel-http", telegram: "channel-telegram" });
+  expect(caps.has("channel.transport")).toBe(true);
+  expect(caps.selected("channel.transport")).toBeUndefined();
+
+  expect(() => caps.provideKeyed("channel.transport", "http", { channel: "x" }, "channel-other")).toThrow(
+    'key "http" is provided by both "channel-http" and "channel-other"',
+  );
+  expect(() => caps.provideKeyed("channel.transport", "", { channel: "x" }, "channel-other")).toThrow("empty key");
+});
+
+test("keyed and single modes do not mix, in either direction", () => {
+  const caps = createCapabilityRegistry<Caps & KeyedCaps, Caps & KeyedCaps>();
+  caps.provideKeyed("channel.transport", "http", { channel: "http" }, "channel-http");
+  caps.provide("storage.sql", { kind: "sqlite" }, "storage-sqlite");
+
+  expect(() => caps.provide("channel.transport", { channel: "x" }, "other")).toThrow(
+    'capability "channel.transport" is keyed (provided by channel-http); component "other" provides it without a key',
+  );
+  expect(() => caps.provideKeyed("storage.sql", "k", { kind: "x" }, "other")).toThrow(
+    'capability "storage.sql" is single (provided by storage-sqlite); component "other" provides it with a key',
+  );
+  expect(() => caps.require("channel.transport")).toThrow("is keyed; use it with useKeyed()");
+  expect(() => caps.keyed("storage.sql")).toThrow("is not keyed; use it with use()");
+  expect(caps.keyed("outbound.queue" as "channel.transport").keys()).toEqual([]);
 });

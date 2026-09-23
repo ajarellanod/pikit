@@ -1,45 +1,112 @@
 /**
- * Capabilities are named services with exactly one provider (SPEC §4.5).
+ * Capabilities are named services (SPEC §4.5). A capability is either:
  *
- * Several installed components may declare the same capability; then `config.capabilities`
- * must select one by component name. `require` resolves at call time so a consumer's `setup`
- * can call it as long as the provider's `setup` ran first (the harness orders setup so that
- * it always does).
+ * - **single**: exactly one provider is used. When several installed components provide it,
+ *   `config.capabilities` must select one by component name.
+ * - **keyed**: every provider contributes one or more implementations, each under a distinct
+ *   key (`channel.transport` keyed by channel name). Consumers see all of them. Selection does
+ *   not apply.
  *
- * The registry does not know component manifests. The harness checks that a component only
- * provides what its manifest declares and that a selection names a real provider.
+ * The mode is fixed by how the capability is provided (`provide` or `provideKeyed`); mixing
+ * both for one name is an error. This mirrors Chord's singleton and keyed services, with keys
+ * fixed at setup instead of spawned at runtime.
+ *
+ * The registry does not know component manifests; the harness derives the dependency graph
+ * from what each setup provides and uses.
  */
 
 /**
- * Typed capability map: name → service type. Extended by declaration merging like
+ * Typed map of single capabilities: name → service type. Extended by declaration merging like
  * `HarnessEvents`. Contracts are added by the module that defines them.
  */
 // biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
 export interface HarnessCapabilities {}
 
-export interface CapabilityRegistry<Caps extends object> {
-  /** Register `impl` as `provider`'s implementation of `name`. */
+/** Typed map of keyed capabilities: name → type of each keyed implementation. */
+// biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
+export interface HarnessKeyedCapabilities {}
+
+/** Every implementation of a keyed capability, by key. */
+export interface Keyed<T> {
+  /** The implementation for `key`, or `undefined` when no component provides that key. */
+  get(key: string): T | undefined;
+  /** Every provided key, in registration order. */
+  keys(): string[];
+}
+
+export type CapabilityMode = "single" | "keyed";
+
+export interface CapabilityRegistry<Caps extends object, KeyedCaps extends object = object> {
+  /** Register `impl` as `provider`'s implementation of the single capability `name`. */
   provide<K extends keyof Caps & string>(name: K, impl: Caps[K], provider: string): void;
+  /** Register `impl` as `provider`'s implementation of the keyed capability `name` under `key`. */
+  provideKeyed<K extends keyof KeyedCaps & string>(name: K, key: string, impl: KeyedCaps[K], provider: string): void;
   /** Resolve the single provider of `name`. Throws when there is none or the choice is ambiguous. */
   require<K extends keyof Caps & string>(name: K): Caps[K];
-  /** True when `require(name)` would succeed. For optional capabilities (`outbound.queue`). */
+  /** Every implementation of the keyed capability `name`; empty when nothing provides it. */
+  keyed<K extends keyof KeyedCaps & string>(name: K): Keyed<KeyedCaps[K]>;
+  /** Single: `require(name)` would succeed. Keyed: at least one key is provided. */
   has(name: string): boolean;
-  /** Provider component names registered for `name`, in registration order. */
+  /** How `name` is provided, or `undefined` if nothing provides it. */
+  mode(name: string): CapabilityMode | undefined;
+  /** Provider component names for `name`, unique, in registration order. */
   providers(name: string): string[];
-  /** The provider `require(name)` would use, or `undefined` if it would throw. */
+  /** The single provider `require(name)` would use, or `undefined` if it would throw. */
   selected(name: string): string | undefined;
+  /** Keyed capabilities only: key → provider component name. */
+  keys(name: string): Record<string, string>;
   /** Every capability with at least one provider. */
   names(): string[];
 }
 
-export function createCapabilityRegistry<Caps extends object>(
+interface Entry {
+  provider: string;
+  impl: unknown;
+  /** Present exactly when the capability is keyed. */
+  key?: string;
+}
+
+export function createCapabilityRegistry<Caps extends object, KeyedCaps extends object = object>(
   /** `config.capabilities`: capability name → chosen component name. */
   selection: Readonly<Record<string, string>> = {},
-): CapabilityRegistry<Caps> {
-  const providers = new Map<string, { provider: string; impl: unknown }[]>();
+): CapabilityRegistry<Caps, KeyedCaps> {
+  const entries = new Map<string, Entry[]>();
 
-  function resolve(name: string): { provider: string; impl: unknown } | Error {
-    const list = providers.get(name) ?? [];
+  function modeOf(name: string): CapabilityMode | undefined {
+    const first = entries.get(name)?.[0];
+    if (first === undefined) return undefined;
+    return first.key === undefined ? "single" : "keyed";
+  }
+
+  function add(name: string, entry: Entry): void {
+    const mode = modeOf(name);
+    const wanted: CapabilityMode = entry.key === undefined ? "single" : "keyed";
+    if (mode !== undefined && mode !== wanted) {
+      const others = unique((entries.get(name) ?? []).map((e) => e.provider)).join(", ");
+      throw new Error(
+        `capability "${name}" is ${mode} (provided by ${others}); component "${entry.provider}" ` +
+          (wanted === "keyed" ? "provides it with a key" : "provides it without a key"),
+      );
+    }
+    const list = entries.get(name) ?? [];
+    if (entry.key === undefined && list.some((e) => e.provider === entry.provider)) {
+      throw new Error(`capability "${name}": component "${entry.provider}" provided it twice`);
+    }
+    const clash = entry.key === undefined ? undefined : list.find((e) => e.key === entry.key);
+    if (clash) {
+      throw new Error(
+        `capability "${name}": key "${entry.key}" is provided by both "${clash.provider}" and "${entry.provider}"`,
+      );
+    }
+    list.push(entry);
+    entries.set(name, list);
+  }
+
+  function resolve(name: string): Entry | Error {
+    if (modeOf(name) === "keyed") {
+      return new Error(`capability "${name}" is keyed; use it with useKeyed()`);
+    }
+    const list = entries.get(name) ?? [];
     const chosen = selection[name];
     if (chosen !== undefined) {
       const match = list.find((entry) => entry.provider === chosen);
@@ -51,7 +118,7 @@ export function createCapabilityRegistry<Caps extends object>(
         )
       );
     }
-    if (list.length === 1) return list[0] as { provider: string; impl: unknown };
+    if (list.length === 1) return list[0] as Entry;
     if (list.length === 0) return new Error(`capability "${name}" is required but no installed component provides it`);
     return new Error(
       `capability "${name}" has several providers (${list.map((e) => e.provider).join(", ")}); ` +
@@ -61,12 +128,12 @@ export function createCapabilityRegistry<Caps extends object>(
 
   return {
     provide(name, impl, provider) {
-      const list = providers.get(name) ?? [];
-      if (list.some((entry) => entry.provider === provider)) {
-        throw new Error(`capability "${name}": component "${provider}" provided it twice`);
-      }
-      list.push({ provider, impl });
-      providers.set(name, list);
+      add(name, { provider, impl });
+    },
+
+    provideKeyed(name, key, impl, provider) {
+      if (key.length === 0) throw new Error(`capability "${name}": component "${provider}" provided an empty key`);
+      add(name, { provider, impl, key });
     },
 
     require(name) {
@@ -75,9 +142,21 @@ export function createCapabilityRegistry<Caps extends object>(
       return result.impl as Caps[typeof name];
     },
 
+    keyed(name) {
+      if (modeOf(name) === "single") throw new Error(`capability "${name}" is not keyed; use it with use()`);
+      const list = entries.get(name) ?? [];
+      return {
+        get: (key) => list.find((entry) => entry.key === key)?.impl as KeyedCaps[typeof name] | undefined,
+        keys: () => list.map((entry) => entry.key as string),
+      };
+    },
+
     has(name) {
+      if (modeOf(name) === "keyed") return true;
       return !(resolve(name) instanceof Error);
     },
+
+    mode: modeOf,
 
     selected(name) {
       const result = resolve(name);
@@ -85,11 +164,20 @@ export function createCapabilityRegistry<Caps extends object>(
     },
 
     providers(name) {
-      return (providers.get(name) ?? []).map((entry) => entry.provider);
+      return unique((entries.get(name) ?? []).map((entry) => entry.provider));
+    },
+
+    keys(name) {
+      if (modeOf(name) !== "keyed") return {};
+      return Object.fromEntries((entries.get(name) ?? []).map((entry) => [entry.key as string, entry.provider]));
     },
 
     names() {
-      return [...providers.keys()];
+      return [...entries.keys()];
     },
   };
+}
+
+function unique(values: string[]): string[] {
+  return [...new Set(values)];
 }

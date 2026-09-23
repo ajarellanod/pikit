@@ -10,6 +10,9 @@ declare module "./capabilities.ts" {
     "test.store": { name: string };
     "test.queue": { name: string };
   }
+  interface HarnessKeyedCapabilities {
+    "test.transport": { channel: string };
+  }
 }
 declare module "./events.ts" {
   interface HarnessEvents {
@@ -55,8 +58,8 @@ test("start runs providers before consumers regardless of list order; handles re
   await harness.start();
   expect(order).toEqual(["setup consumer", "setup store", "start store", "start consumer(mem)"]);
   expect(harness.describe().components).toEqual([
-    { name: "store", provides: ["test.store"], requires: [] },
-    { name: "consumer", provides: [], requires: ["test.store"] },
+    { name: "store", provides: ["test.store"], requires: [], optional: [] },
+    { name: "consumer", provides: [], requires: ["test.store"], optional: [] },
   ]);
 });
 
@@ -269,6 +272,143 @@ test("stop runs every stop hook and reports all failures together", async () => 
     'component "a" failed to stop',
   ]);
   await harness.stop(); // already stopped: no-op
+});
+
+test("optional use: absent is undefined; present is ordered first like any dependency", async () => {
+  const seen: string[] = [];
+  const channel = defineComponent({
+    name: "channel",
+    setup(pikit) {
+      const queue = pikit.use("test.queue", { optional: true });
+      return {
+        start: () => {
+          seen.push(`channel sees ${queue.get()?.name ?? "no queue"}`);
+        },
+      };
+    },
+  });
+  const outbox = defineComponent({
+    name: "outbox",
+    setup(pikit) {
+      pikit.provide("test.queue", { name: "outbox" });
+      return {
+        start: () => {
+          seen.push("outbox started");
+        },
+      };
+    },
+  });
+
+  const alone = await defineHarness(quiet({ components: [channel] })).create();
+  await alone.start();
+  expect(alone.describe().components).toEqual([{ name: "channel", provides: [], requires: [], optional: ["test.queue"] }]);
+
+  const both = await defineHarness(quiet({ components: [channel, outbox] })).create();
+  await both.start();
+  expect(seen).toEqual(["channel sees no queue", "outbox started", "channel sees outbox"]);
+
+  // Optional is not "anything goes": several providers still need a selection.
+  const second = defineComponent({ name: "outbox-2", setup: (pikit) => pikit.provide("test.queue", { name: "2" }) });
+  await expect(defineHarness(quiet({ components: [channel, outbox, second] })).create()).rejects.toThrow(
+    "several providers (outbox, outbox-2)",
+  );
+});
+
+test("keyed capabilities: every provider contributes keys; consumers start after all of them", async () => {
+  const seen: string[] = [];
+  const channel = (name: string, key: string) =>
+    defineComponent({
+      name,
+      setup(pikit) {
+        pikit.provideKeyed("test.transport", key, { channel: key });
+        return {
+          start: () => {
+            seen.push(`start ${name}`);
+          },
+        };
+      },
+    });
+  const outbox = defineComponent({
+    name: "outbox",
+    setup(pikit) {
+      const transports = pikit.useKeyed("test.transport");
+      return {
+        start: () => {
+          const all = transports.get();
+          seen.push(`outbox sees ${all.keys().join(",")}; http=${all.get("http")?.channel}; sms=${all.get("sms")}`);
+        },
+      };
+    },
+  });
+
+  const harness = await defineHarness(
+    quiet({ components: [outbox, channel("channel-http", "http"), channel("channel-telegram", "telegram")] }),
+  ).create();
+  await harness.start();
+
+  expect(seen).toEqual([
+    "start channel-http",
+    "start channel-telegram",
+    "outbox sees http,telegram; http=http; sms=undefined",
+  ]);
+  expect(harness.describe().capabilities["test.transport"]).toEqual({
+    providers: ["channel-http", "channel-telegram"],
+    keys: { http: "channel-http", telegram: "channel-telegram" },
+  });
+});
+
+test("keyed and single modes cannot be mixed, keys are unique, and keyed ignores selection", async () => {
+  const create = (options: HarnessOptions) => defineHarness(quiet(options)).create();
+  const keyed = (name: string, key: string) =>
+    defineComponent({ name, setup: (pikit) => pikit.provideKeyed("test.transport", key, { channel: key }) });
+
+  await expect(create({ components: [keyed("a", "http"), keyed("b", "http")] })).rejects.toThrow(
+    'capability "test.transport": key "http" is provided by both "a" and "b"',
+  );
+  await expect(
+    create({
+      components: [
+        keyed("a", "http"),
+        defineComponent({ name: "b", setup: (pikit) => pikit.provide("test.transport" as "test.store", { name: "b" }) }),
+      ],
+    }),
+  ).rejects.toThrow('capability "test.transport" is keyed (provided by a); component "b" provides it without a key');
+  await expect(
+    create({
+      components: [keyed("a", "http"), defineComponent({ name: "c", setup: (pikit) => void pikit.use("test.transport" as "test.store") })],
+    }),
+  ).rejects.toThrow('component "c" uses "test.transport" with use(), but it is keyed; use useKeyed()');
+  await expect(
+    create({
+      components: [
+        defineComponent({ name: "s", setup: (pikit) => pikit.provide("test.store", { name: "s" }) }),
+        defineComponent({ name: "c", setup: (pikit) => void pikit.useKeyed("test.store" as "test.transport") }),
+      ],
+    }),
+  ).rejects.toThrow('component "c" uses "test.store" with useKeyed(), but it is provided without a key');
+  await expect(
+    create({ components: [keyed("a", "http")], config: { capabilities: { "test.transport": "a" } } }),
+  ).rejects.toThrow('"test.transport" is keyed and every provider is used');
+
+  const needy = defineComponent({ name: "needy", setup: (pikit) => void pikit.useKeyed("test.transport") });
+  await expect(create({ components: [needy] })).rejects.toThrow(
+    'component "needy" uses "test.transport" but no installed component provides it',
+  );
+  let keys: string[] = ["unset"];
+  const relaxed = defineComponent({
+    name: "relaxed",
+    setup(pikit) {
+      const transports = pikit.useKeyed("test.transport", { optional: true });
+      return {
+        start: () => {
+          keys = transports.get().keys();
+        },
+      };
+    },
+  });
+  const harness = await create({ components: [relaxed] });
+  await harness.start();
+  expect(keys).toEqual([]);
 });
 
 test("setup is synchronous and handles cannot be resolved during it", async () => {

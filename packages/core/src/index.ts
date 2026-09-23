@@ -5,6 +5,7 @@ export type {
   ComponentDefinition,
   ComponentLifecycle,
   Handle,
+  UseOptions,
   Harness,
   HarnessContext,
   HarnessDefinition,
@@ -27,7 +28,7 @@ export { Halt, halt } from "./pipeline.ts";
 export type { HarnessPipelines, ResolvedStage, Stage, StageOptions } from "./pipeline.ts";
 
 export type { HarnessEvents } from "./events.ts";
-export type { HarnessCapabilities } from "./capabilities.ts";
+export type { CapabilityMode, HarnessCapabilities, HarnessKeyedCapabilities, Keyed } from "./capabilities.ts";
 
 export type { Clock } from "./contracts/clock.ts";
 export { systemClock } from "./contracts/clock.ts";

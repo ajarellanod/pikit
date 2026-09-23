@@ -208,7 +208,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 |---|---|---|
 | Components | kebab-case, prefixed by kind | `channel-*`, `router-*`, `sessions-*`, `storage-*`, `workspace-*`, `execution-*`, `scheduler-*`, `deployment-*`, `tool-*`, `policy-*`, `admin-*`, `inbound-*` |
 | Reserved component names | never used | `capabilities` (it is a core config key) |
-| Capabilities | `dotted.lowercase` | `sessions.store`, `execution.shell`, `channel.transport:telegram` |
+| Capabilities | `dotted.lowercase`; keyed ones take a key per implementation | `sessions.store`, `execution.shell`, `channel.transport` (key `telegram`) |
 | Events (notifications) | `namespace.verb`, past tense | `outbound.delivered` |
 | Pipelines | present tense | `inbound.normalize` |
 
@@ -270,10 +270,13 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   session pointer. Only an explicit reset repoints it.
 - **Events cannot fail the harness.** A listener's error is logged and swallowed. If
   something must succeed, it belongs in `start`.
-- **Selection shapes dependency order.** A consumer depends only on the provider `require`
+- **Selection shapes dependency order.** A consumer depends only on the provider `get()`
   will return: the selected one when there are several.
-- **Transports are per message.** `channel.transport:<name>` is resolved from
-  `message.channel` and never passed to `use()`.
+- **Transports are keyed.** `channel.transport` is a keyed capability: each channel provides it
+  under its own key (`provideKeyed`), and delivery looks it up per message with
+  `useKeyed(...).get().get(message.channel)`.
+- **`has()` does not order startup.** A component that needs an optional capability declares
+  it with `use(name, { optional: true })`, so that its provider starts first when present.
 - **Deduplication belongs to the channel.** The delivery id and the ack rule are
   platform-specific; `inbound-dedup` holds claims, and the core holds nothing.
 - **Cloudflare limits are design inputs:** no `child_process`, no `eval`, no dynamic

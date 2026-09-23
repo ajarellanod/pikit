@@ -23,7 +23,13 @@
 
 import Type, { type Static, type TSchema } from "typebox";
 import Value from "typebox/value";
-import { type CapabilityRegistry, createCapabilityRegistry, type HarnessCapabilities } from "./capabilities.ts";
+import {
+  type CapabilityRegistry,
+  createCapabilityRegistry,
+  type HarnessCapabilities,
+  type HarnessKeyedCapabilities,
+  type Keyed,
+} from "./capabilities.ts";
 import { BACKGROUND_CONTEXT, type Context } from "./context.ts";
 import { type Clock, systemClock } from "./contracts/clock.ts";
 import { consoleLogger, type Logger } from "./contracts/logger.ts";
@@ -57,8 +63,8 @@ export interface HarnessContext extends Context {
   logger: Logger;
   clock: Clock;
   /**
-   * For optional capabilities. Meaningful after `create()`. Only `use()` orders startup, so a
-   * component must not rely on an optional capability's provider having started.
+   * Whether a capability is provided. Meaningful after `create()`. It does not order startup:
+   * a component that needs an optional capability declares it with `use(name, { optional: true })`.
    */
   has(name: string): boolean;
   emit<K extends keyof HarnessEvents & string>(name: K, payload: HarnessEvents[K]): Promise<void>;
@@ -81,14 +87,28 @@ export interface Handle<T> {
   get(): T;
 }
 
+/** `optional`: no provider is not an error (`get()` returns `undefined`, or no keys). */
+export interface UseOptions {
+  optional?: boolean;
+}
+
+type SingleName = keyof HarnessCapabilities & string;
+type KeyedName = keyof HarnessKeyedCapabilities & string;
+
 /** What a component's `setup` receives: the context plus registration. */
 export interface Pikit extends HarnessContext {
   on: EventBus<HarnessEvents, HarnessContext>["on"];
   pipeline: PipelineRegistry<HarnessPipelines, HarnessContext>["register"];
-  /** Declare that this component provides `name`, and install its implementation. */
-  provide<K extends keyof HarnessCapabilities & string>(name: K, impl: HarnessCapabilities[K]): void;
-  /** Declare that this component depends on `name`. Its provider starts first. */
-  use<K extends keyof HarnessCapabilities & string>(name: K): Handle<HarnessCapabilities[K]>;
+  /** Declare that this component provides the single capability `name`, and install it. */
+  provide<K extends SingleName>(name: K, impl: HarnessCapabilities[K]): void;
+  /** Declare that this component provides the keyed capability `name` under `key`, and install it. */
+  provideKeyed<K extends KeyedName>(name: K, key: string, impl: HarnessKeyedCapabilities[K]): void;
+  /** Depend on the single capability `name`. Its provider starts first. */
+  use<K extends SingleName>(name: K): Handle<HarnessCapabilities[K]>;
+  /** Depend on `name` if it is installed. When it is, its provider still starts first. */
+  use<K extends SingleName>(name: K, options: UseOptions & { optional: true }): Handle<HarnessCapabilities[K] | undefined>;
+  /** Depend on every implementation of the keyed capability `name`. All its providers start first. */
+  useKeyed<K extends KeyedName>(name: K, options?: UseOptions): Handle<Keyed<HarnessKeyedCapabilities[K]>>;
   halt: typeof halt;
 }
 
@@ -143,9 +163,13 @@ export interface HarnessOptions {
 
 export interface HarnessDescription {
   target: Target;
-  /** In start order. `provides`/`requires` are derived from setup; `component.json` must match. */
-  components: { name: string; version?: string; provides: string[]; requires: string[] }[];
-  capabilities: Record<string, { providers: string[]; selected?: string }>;
+  /**
+   * In start order. `provides`/`requires`/`optional` are derived from setup; `component.json` is
+   * generated from them.
+   */
+  components: { name: string; version?: string; provides: string[]; requires: string[]; optional: string[] }[];
+  /** `selected` for single capabilities; `keys` (key → provider) for keyed ones. */
+  capabilities: Record<string, { providers: string[]; selected?: string; keys?: Record<string, string> }>;
   pipelines: Record<string, ResolvedStage[]>;
   config: Readonly<Record<string, unknown>>;
 }
@@ -188,7 +212,8 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
       const pipelines = createPipelineRegistry<HarnessPipelines, HarnessContext>((info, ctx) =>
         ctx.emit("pipeline.halted", info),
       );
-      const capabilities: CapabilityRegistry<HarnessCapabilities> = createCapabilityRegistry(selection);
+      const capabilities: CapabilityRegistry<HarnessCapabilities, HarnessKeyedCapabilities> =
+        createCapabilityRegistry(selection);
 
       // Plain own properties (no getters): `setup` spreads the base context into `pikit`.
       // Reading `abortSignal` once is safe because a context never changes after derivation.
@@ -213,20 +238,27 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
       // Handles resolve only after the graph is validated; until then a provider's setup may not
       // have run, so `get()` would return nothing or the wrong thing.
       let validated = false;
-      const handle = <K extends keyof HarnessCapabilities & string>(
-        name: K,
-        user: string,
-      ): Handle<HarnessCapabilities[K]> => ({
-        name,
+      const handle = <T>(use: Use, user: string, resolve: () => T): Handle<T> => ({
+        name: use.name,
         get: () => {
           if (!validated) {
             throw new Error(
-              `component "${user}": "${name}" is not available during setup; call get() in start or later`,
+              `component "${user}": "${use.name}" is not available during setup; call get() in start or later`,
             );
           }
-          return capabilities.require(name);
+          return resolve();
         },
       });
+      /** Record a use once per name and mode; a required use wins over an optional one. */
+      const recordUse = (record: SetupRecord, use: Use): Use => {
+        const existing = record.uses.find((u) => u.name === use.name && u.mode === use.mode);
+        if (!existing) {
+          record.uses.push(use);
+          return use;
+        }
+        existing.optional &&= use.optional;
+        return existing;
+      };
 
       // Every setup runs, in list order, and records what it provides and uses.
       const records: SetupRecord[] = [];
@@ -238,11 +270,21 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           pipeline: (name, stage, opts) => pipelines.register(name, stage, opts),
           provide: (name, impl) => {
             capabilities.provide(name, impl, component.name);
-            record.provides.push(name);
+            if (!record.provides.includes(name)) record.provides.push(name);
           },
-          use: (name) => {
-            if (!record.uses.includes(name)) record.uses.push(name);
-            return handle(name, component.name);
+          provideKeyed: (name, key, impl) => {
+            capabilities.provideKeyed(name, key, impl, component.name);
+            if (!record.provides.includes(name)) record.provides.push(name);
+          },
+          use: ((name: SingleName, options: UseOptions = {}) => {
+            const use = recordUse(record, { name, mode: "single", optional: options.optional === true });
+            return handle(use, component.name, () =>
+              use.optional && !capabilities.has(name) ? undefined : capabilities.require(name),
+            );
+          }) as Pikit["use"],
+          useKeyed: (name, options = {}) => {
+            const use = recordUse(record, { name, mode: "keyed", optional: options.optional === true });
+            return handle(use, component.name, () => capabilities.keyed(name));
           },
           halt,
         };
@@ -322,12 +364,15 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
               name: component.name,
               ...(component.version !== undefined && { version: component.version }),
               provides: [...provides],
-              requires: [...uses],
+              requires: uses.filter((u) => !u.optional).map((u) => u.name),
+              optional: uses.filter((u) => u.optional).map((u) => u.name),
             })),
             capabilities: Object.fromEntries(
               capabilities.names().map((name) => {
+                const providers = capabilities.providers(name);
+                if (capabilities.mode(name) === "keyed") return [name, { providers, keys: capabilities.keys(name) }];
                 const selected = capabilities.selected(name);
-                return [name, { providers: capabilities.providers(name), ...(selected && { selected }) }];
+                return [name, { providers, ...(selected && { selected }) }];
               }),
             ),
             pipelines: Object.fromEntries(pipelines.names().map((name) => [name, pipelines.chain(name)])),
@@ -349,11 +394,18 @@ function checkUniqueNames(components: ComponentDefinition[]): void {
   }
 }
 
+/** One `use()` / `useKeyed()` a setup made. */
+interface Use {
+  name: string;
+  mode: "single" | "keyed";
+  optional: boolean;
+}
+
 /** What one component's setup did. */
 interface SetupRecord {
   component: ComponentDefinition;
   provides: string[];
-  uses: string[];
+  uses: Use[];
   hooks?: ComponentLifecycle;
 }
 
@@ -384,14 +436,20 @@ function readSelection(config: Record<string, unknown> | undefined, components: 
  * Validates the graph recorded by setup and returns records in start order: providers before
  * consumers, list order as tiebreaker, depth-first with cycle detection. A consumer depends only
  * on the provider `get()` will return (the selected one), so an installed-but-unselected provider
- * cannot create a false cycle.
+ * cannot create a false cycle. A keyed use depends on every provider; an optional use on its
+ * provider when one is installed.
  */
 function orderRecords(
   records: SetupRecord[],
-  capabilities: CapabilityRegistry<HarnessCapabilities>,
+  capabilities: CapabilityRegistry<HarnessCapabilities, HarnessKeyedCapabilities>,
   selection: Record<string, string>,
 ): SetupRecord[] {
   for (const [capability, chosen] of Object.entries(selection)) {
+    if (capabilities.mode(capability) === "keyed") {
+      throw new Error(
+        `config.capabilities["${capability}"] cannot select a provider: "${capability}" is keyed and every provider is used`,
+      );
+    }
     const providers = capabilities.providers(capability);
     if (!providers.includes(chosen)) {
       throw new Error(
@@ -402,11 +460,23 @@ function orderRecords(
   }
 
   const byName = new Map(records.map((r) => [r.component.name, r]));
-  const providerOf = (user: string, capability: string): string => {
-    const providers = capabilities.providers(capability);
-    if (providers.length === 0) {
+  /** The components a use depends on: none (optional, absent), all (keyed), or the chosen one. */
+  const providersOf = (user: string, use: Use): string[] => {
+    const capability = use.name;
+    const mode = capabilities.mode(capability);
+    if (mode === undefined) {
+      if (use.optional) return [];
       throw new Error(`component "${user}" uses "${capability}" but no installed component provides it`);
     }
+    if (mode !== use.mode) {
+      throw new Error(
+        mode === "keyed"
+          ? `component "${user}" uses "${capability}" with use(), but it is keyed; use useKeyed()`
+          : `component "${user}" uses "${capability}" with useKeyed(), but it is provided without a key`,
+      );
+    }
+    const providers = capabilities.providers(capability);
+    if (mode === "keyed") return providers;
     const chosen = selection[capability] ?? (providers.length === 1 ? providers[0] : undefined);
     if (chosen === undefined) {
       throw new Error(
@@ -414,7 +484,7 @@ function orderRecords(
           `select one with config.capabilities["${capability}"]`,
       );
     }
-    return chosen;
+    return [chosen];
   };
 
   const state = new Map<string, "visiting" | "done">();
@@ -425,10 +495,11 @@ function orderRecords(
     if (mark === "done") return;
     if (mark === "visiting") throw new Error(`dependency cycle: ${[...path, name].join(" → ")}`);
     state.set(name, "visiting");
-    for (const capability of record.uses) {
-      const provider = providerOf(name, capability);
-      if (provider === name) continue; // a component may consume what it provides
-      visit(byName.get(provider) as SetupRecord, [...path, name]);
+    for (const use of record.uses) {
+      for (const provider of providersOf(name, use)) {
+        if (provider === name) continue; // a component may consume what it provides
+        visit(byName.get(provider) as SetupRecord, [...path, name]);
+      }
     }
     state.set(name, "done");
     ordered.push(record);
