@@ -24,6 +24,14 @@ test("stages run by priority desc, then registration order, threading the value"
   expect(await p.run("test.text", { text: "" }, undefined)).toEqual({ text: "bdac" });
 });
 
+test("a stage registered after a run is placed in the next run (the cached chain is invalidated)", async () => {
+  const p = registry();
+  p.register("test.text", append("a"), { id: "a" });
+  expect(await p.run("test.text", { text: "" }, undefined)).toEqual({ text: "a" });
+  p.register("test.text", append("b"), { id: "b", priority: 10 });
+  expect(await p.run("test.text", { text: "" }, undefined)).toEqual({ text: "ba" });
+});
+
 test("before/after anchor next to the target; same-anchor stages keep registration order", async () => {
   const p = registry();
   p.register("test.text", append("x"), { id: "x" });

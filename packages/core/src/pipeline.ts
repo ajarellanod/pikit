@@ -85,12 +85,16 @@ export function createPipelineRegistry<Pipelines extends object, Ctx>(
   onHalt: (info: HaltedInfo, ctx: Ctx) => void | Promise<void>,
 ): PipelineRegistry<Pipelines, Ctx> {
   const pipelines = new Map<string, Entry<Ctx>[]>();
+  /** Resolved chains, so `run()` does not re-sort per call. Invalidated by `register`. */
+  const chains = new Map<string, Entry<Ctx>[]>();
 
   function entries(name: string): Entry<Ctx>[] {
     return pipelines.get(name) ?? [];
   }
 
   function resolve(name: string): Entry<Ctx>[] {
+    const cached = chains.get(name);
+    if (cached) return cached;
     const all = entries(name);
     const before = new Map<string, Entry<Ctx>[]>();
     const after = new Map<string, Entry<Ctx>[]>();
@@ -119,6 +123,7 @@ export function createPipelineRegistry<Pipelines extends object, Ctx>(
         `pipeline "${name}": stage "${orphan.id}" is anchored to "${orphan.before ?? orphan.after}", which does not exist or is itself unplaced`,
       );
     }
+    chains.set(name, chain);
     return chain;
   }
 
@@ -142,6 +147,7 @@ export function createPipelineRegistry<Pipelines extends object, Ctx>(
       if (options.after !== undefined) entry.after = options.after;
       list.push(entry);
       pipelines.set(name, list);
+      chains.delete(name);
     },
 
     async run(name, input, ctx) {

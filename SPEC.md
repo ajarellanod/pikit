@@ -1205,6 +1205,9 @@ components:
 - `.env` (server) / Worker secrets (cloudflare) — secrets, read through `secrets` capability.
 - Profiles: `config/<profile>.yaml` overlays for `--profile`.
 - YAML is parsed with a YAML 1.2 parser; `on/off/yes/no` are strings. `[decision]`
+- The validated config is a deep-frozen copy. `ctx.config` is shared by every component, so a
+  mutation would be a hidden coupling between them; frozen, it throws where it happens. The
+  caller's objects are never defaulted or frozen in place. `[decision]`
 
 ---
 

@@ -724,7 +724,8 @@ function validateConfig(components: ComponentDefinition[], raw: Record<string, u
   const properties: Record<string, TSchema> = {
     capabilities: Type.Optional(Type.Record(Type.String(), Type.String())),
   };
-  const value: Record<string, unknown> = { ...raw };
+  // A deep copy: defaults and freezing must never touch the caller's objects.
+  const value = Value.Clone(raw) as Record<string, unknown>;
   for (const component of components) {
     if (!component.config) continue;
     properties[component.name] = component.config;
@@ -736,5 +737,15 @@ function validateConfig(components: ComponentDefinition[], raw: Record<string, u
     const problems = Value.Errors(schema, defaulted).map((e) => `${e.instancePath || "/"}: ${e.message}`);
     throw new Error(`invalid config:\n  ${problems.join("\n  ")}`);
   }
-  return defaulted;
+  // `ctx.config` is shared by every component: a mutation would be a hidden coupling between
+  // them (and leak into the next `create()`). Frozen, it throws at the line that tries.
+  return deepFreeze(defaulted);
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    Object.freeze(value);
+    for (const child of Object.values(value)) deepFreeze(child);
+  }
+  return value;
 }

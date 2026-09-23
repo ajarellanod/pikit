@@ -679,10 +679,19 @@ test("config is validated and defaulted per component; typos and bad values are 
     },
   });
 
-  const def = defineHarness(quiet({ components: [http], config: { "channel-http": { path: "/hook" } } }));
+  const raw = { "channel-http": { path: "/hook" } };
+  const def = defineHarness(quiet({ components: [http], config: raw }));
   expect(def.config).toEqual({ "channel-http": { port: 8080, path: "/hook" } });
   await def.create();
   expect(received).toEqual({ port: 8080, path: "/hook" });
+
+  // Shared by every component, so frozen: a mutation throws where it happens.
+  expect(() => {
+    (received as { port: number }).port = 1;
+  }).toThrow(TypeError);
+  // The caller's objects are copied, never defaulted or frozen in place.
+  expect(raw).toEqual({ "channel-http": { path: "/hook" } });
+  expect(Object.isFrozen(raw["channel-http"])).toBe(false);
 
   expect(() => defineHarness(quiet({ components: [http], config: { "channel-http": { path: 42 } } }))).toThrow(
     "/channel-http/path");
