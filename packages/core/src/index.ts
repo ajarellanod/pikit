@@ -13,6 +13,15 @@ export type {
   Target,
 } from "./harness.ts";
 
+export type { Context, ContextKey } from "./context.ts";
+export {
+  BACKGROUND_CONTEXT,
+  createContextKey,
+  withAbortSignal,
+  withCancel,
+  withContextValue,
+} from "./context.ts";
+
 export { Halt, halt } from "./pipeline.ts";
 export type { HarnessPipelines, ResolvedStage, Stage, StageOptions } from "./pipeline.ts";
 

@@ -254,6 +254,9 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **One pikit conversation is one Pi session.** A Pi session is the single-writer unit. The
   "conversations" inside a Pi session are Pi's transcript scopes: the root one, forks and
   subagents. Do not map a pikit conversation to a Pi conversation.
+- **A context crossing into Pi needs the bridge.** pikit's `Context` has Chord's shape, but
+  Chord's `withContextValue` drops a foreign context's cancellation. The adapter wraps it once
+  with Chord's `withAbortSignal` (SPEC §6.2). A context coming from Pi needs nothing.
 - **Two kinds of deduplication.** Transport deduplication (platform delivery id and ack) is
   `inbound-dedup`. Logical deduplication ("was this message answered?") is Pi's submission
   `requestId`.

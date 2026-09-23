@@ -336,23 +336,42 @@ prints the resolved component graph, capability providers, pipeline chains, and 
 Every handler receives `ctx`:
 
 ```ts
-interface HarnessContext {
+// Same shape as Chord's `Context`, which Pi's APIs take as their last argument.
+interface Context {
+  readonly abortSignal: AbortSignal | undefined;
+  value<T>(key: ContextKey<T>): T | undefined;
+  toString(): string;
+}
+
+interface HarnessContext extends Context {
   target: "server" | "cloudflare";
   config: ResolvedConfig;
   require<K extends CapabilityName>(name: K): Capability<K>;
   has(name: string): boolean;
   emit(event, payload): Promise<void>;   // propagates this same ctx to listeners
   run(pipeline, input): Promise<Value | Halt>;
+  derive(change: (context: Context) => Context): HarnessContext;
   logger: Logger;
   clock: Clock;
-  signal?: AbortSignal;              // present during an agent run
-  conversation?: ConversationRef;    // present once resolved (added with the slice)
 }
 ```
 
-`emit`/`run` live on the context so a handler that emits from inside a run forwards the
-run's `signal` without threading it by hand. `harness.context({ signal })` derives a run
-context from the base one.
+The invocation part of the context (cancellation and values such as tenant, actor or trace)
+is a `Context`: immutable, passed explicitly, derived with `withAbortSignal`, `withCancel` and
+`withContextValue` over typed keys from `createContextKey`, starting from
+`BACKGROUND_CONTEXT`. `[decision]` Shape and helper semantics match Chord's (§6.4) without
+importing it.
+
+- `harness.context(parent?)` gives a harness context over any `Context`, including one that
+  came from Pi: the request's cancellation and values reach every handler.
+- `ctx.derive(change)` does the same from inside a handler:
+  `ctx.derive((c) => withContextValue(TENANT, "acme", c)).emit(...)`.
+- `emit`/`run` live on the context so everything downstream of a request shares its
+  cancellation and values without threading them by hand.
+- Cancelling a child never cancels its parent.
+
+Conversation data is not a context value: it arrives in the payloads of the events and
+pipelines that concern it.
 
 ---
 
@@ -543,6 +562,12 @@ Responsibilities:
   - `cloudflare`: `drive: "manual"` (`peekAction()` / `executeAction()` loop with persistence
     between actions; see §9).
 - On harness create, inspect `suspended` operations and expose them through `resume()`.
+- Pass pikit's context into Pi through a one-line bridge:
+  `chord.withAbortSignal(ctx.abortSignal, ctx)` when `abortSignal` is set, otherwise `ctx`.
+  pikit derives from a parent's `abortSignal` property. Chord's `withContextValue` reads the
+  signal through a private key, so without the bridge a pikit context that Pi derives would
+  lose its cancellation (verified against chord 0.87.1). A Chord context passed into pikit
+  needs no bridge.
 - Deliver messages to a busy conversation through Pi's own `steer()` / `followUp()` /
   `nextRun()`. pikit keeps no queue of its own (§7.3).
 - Classify tools with `replay: "safe" | "never"` from the tool component manifest.
@@ -1240,6 +1265,8 @@ Resolved `[decision]`:
   does not already provide it. pikit is the kit around Pi, never a second agent.
 - Conversations are actors and processes are workers (§7.1). The actor's mailbox is Pi's
   inbox; pikit keeps no message queue of its own.
+- The invocation context has Chord's `Context` shape and helper semantics, with no Chord
+  dependency (§4.7). Crossing into Pi needs a one-line bridge in the adapter (§6.2).
 - Pi is pinned to 0.87.x (§6.4). Pi's durable runtime is the target: pikit builds no
   logical deduplication, task engine or state store of its own.
 - `agent.state` lives in the Pi session and resets with it (§6.2a).

@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import Type from "typebox";
+import { createContextKey, withAbortSignal, withContextValue } from "./context.ts";
 import { silentLogger } from "./contracts/logger.ts";
 import { defineComponent, defineHarness, type HarnessOptions } from "./harness.ts";
 import { Halt } from "./pipeline.ts";
@@ -332,22 +333,31 @@ test("describe reflects selection and resolved pipeline chains; halt is emitted 
   expect(halted).toEqual(["test.harness.text/gate:no"]);
 });
 
-test("a run context carries its signal into handlers and nested emits", async () => {
-  const seen: (AbortSignal | undefined)[] = [];
+test("a context carries cancellation and values into handlers, nested emits and derivations", async () => {
+  const TENANT = createContextKey<string>("tenant");
+  const HOP = createContextKey<number>("hop");
+  const seen: { signal: AbortSignal | undefined; tenant: string | undefined; hop: number | undefined }[] = [];
   const relay = defineComponent({
     name: "relay",
     setup(pikit) {
       pikit.on("test.harness.ping", async (e, ctx) => {
-        seen.push(ctx.signal);
-        if (e.via === "outer") await ctx.emit("test.harness.ping", { via: "inner" });
+        seen.push({ signal: ctx.abortSignal, tenant: ctx.value(TENANT), hop: ctx.value(HOP) });
+        if (e.via === "outer") {
+          await ctx.derive((c) => withContextValue(HOP, 2, c)).emit("test.harness.ping", { via: "inner" });
+        }
       });
     },
   });
   const harness = await defineHarness(quiet({ components: [relay] })).create();
   const controller = new AbortController();
+  const request = withContextValue(TENANT, "acme", withAbortSignal(controller.signal, harness.context()));
 
-  await harness.context({ signal: controller.signal }).emit("test.harness.ping", { via: "outer" });
+  await harness.context(request).emit("test.harness.ping", { via: "outer" });
 
-  expect(seen).toEqual([controller.signal, controller.signal]);
-  expect(harness.context().signal).toBeUndefined();
+  expect(seen).toEqual([
+    { signal: controller.signal, tenant: "acme", hop: undefined },
+    { signal: controller.signal, tenant: "acme", hop: 2 },
+  ]);
+  expect(harness.context().abortSignal).toBeUndefined();
+  expect(harness.context().value(TENANT)).toBeUndefined();
 });

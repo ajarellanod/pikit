@@ -21,6 +21,7 @@
 import Type, { type Static, type TSchema } from "typebox";
 import Value from "typebox/value";
 import { type CapabilityRegistry, createCapabilityRegistry, type HarnessCapabilities } from "./capabilities.ts";
+import { BACKGROUND_CONTEXT, type Context } from "./context.ts";
 import { type Clock, systemClock } from "./contracts/clock.ts";
 import { consoleLogger, type Logger } from "./contracts/logger.ts";
 import { createEventBus, type EventBus, type HarnessEvents } from "./events.ts";
@@ -46,7 +47,7 @@ declare module "./events.ts" {
 export type Target = "server" | "cloudflare";
 
 /** What every handler receives (SPEC §4.7). `emit`/`run` propagate this same context. */
-export interface HarnessContext {
+export interface HarnessContext extends Context {
   target: Target;
   /** Resolved, validated global config. Component config lives under `config[name]`. */
   config: Readonly<Record<string, unknown>>;
@@ -60,8 +61,12 @@ export interface HarnessContext {
     name: K,
     input: HarnessPipelines[K],
   ): Promise<HarnessPipelines[K] | Halt>;
-  /** Present during an agent run. */
-  signal?: AbortSignal;
+  /**
+   * A harness context over a derived invocation context, e.g.
+   * `ctx.derive((c) => withContextValue(TENANT, "acme", c))`. Handlers reached through the
+   * result's `emit`/`run` receive the result.
+   */
+  derive(change: (context: Context) => Context): HarnessContext;
 }
 
 /** What a component's `setup` receives: the context plus registration. */
@@ -136,8 +141,8 @@ export interface HarnessDescription {
 }
 
 export interface Harness {
-  /** Base context, or one extended for a run (`signal`). */
-  context(extra?: Pick<HarnessContext, "signal">): HarnessContext;
+  /** Harness context over `parent` (its cancellation and values); `BACKGROUND_CONTEXT` if omitted. */
+  context(parent?: Context): HarnessContext;
   /** Rejects if a component fails to start, after stopping the ones that did. */
   start(): Promise<void>;
   /** Stops every started component; rejects with an `AggregateError` if any `stop` threw. */
@@ -178,8 +183,13 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
       );
       const capabilities: CapabilityRegistry<HarnessCapabilities> = createCapabilityRegistry(selection);
 
-      const context = (extra: Pick<HarnessContext, "signal"> = {}): HarnessContext => {
+      // Plain own properties (no getters): `setup` spreads the base context into `pikit`.
+      // Reading `abortSignal` once is safe because a context never changes after derivation.
+      const context = (inner: Context = BACKGROUND_CONTEXT): HarnessContext => {
         const ctx: HarnessContext = {
+          abortSignal: inner.abortSignal,
+          value: (key) => inner.value(key),
+          toString: () => inner.toString(),
           target,
           config,
           logger,
@@ -188,7 +198,7 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           has: (name) => capabilities.has(name),
           emit: (name, payload) => events.emit(name, payload, ctx),
           run: (name, input) => pipelines.run(name, input, ctx),
-          ...extra,
+          derive: (change) => context(change(inner)),
         };
         return ctx;
       };
