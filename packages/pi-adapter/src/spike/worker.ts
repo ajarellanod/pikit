@@ -34,5 +34,5 @@ say({ event: "session", sessionId: conversation.sessionId });
 await conversation.setState({ phase: "working" }, ctx);
 const submitted = await conversation.submit("req-killed", "use-tool:slow", ctx);
 if (submitted.kind !== "started") throw new Error(`expected a run, got ${submitted.kind}`);
-say({ event: "submitted", promptEntryId: submitted.promptEntryId });
+say({ event: "submitted" });
 await submitted.settled;

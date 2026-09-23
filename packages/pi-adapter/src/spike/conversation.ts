@@ -2,21 +2,26 @@
  * THROWAWAY SPIKE (ROADMAP M1, first step). Not the adapter's API.
  *
  * Proves that one pikit conversation maps onto one `AgentHarness` over one Pi session
- * (pi-agent-core 0.87.1), using only Pi's public harness API. Where Pi cannot do what pikit
- * needs, this file does NOT fill the gap; it says so, and the gap is recorded in SPEC §6.4.
+ * (pi-agent-core 0.87.1), using only Pi's public harness API. The admission follows the
+ * semantics of a submission in Pi's durable runtime (pico-v5 §6), built from mechanisms Pi
+ * already has; it is deleted when the adapter moves to `pi-durable` (SPEC §6.4).
  *
  * Reference: `packages/coding-agent/src/experimental/mini/worker/run.ts` in earendil-works/pi.
  */
 
 import {
   AgentHarness,
+  createCustomMessage,
   LaneBusy,
-  operationMeta,
+  laneState,
+  pendingEntry,
   value,
   withAbortSignal,
   type AgentHarnessTool,
   type AgentLane,
+  type AgentMessage,
   type Context as PiContext,
+  type Entry,
   type JsonValue,
   type OpenOperation,
   type OperationResultRecord,
@@ -42,13 +47,20 @@ const AGENT_STATE = value<JsonValue>("pikit", "agent.state");
 /** A pikit conversation drives a single Pi lane. Pi's other lanes are its own transcript scopes. */
 const LANE = "main";
 
+/**
+ * Inbound messages are Pi `custom` messages (`createCustomMessage`), so the request id is
+ * committed with the message itself, in Pi's inbox and then in the transcript. Pi's default
+ * `convertToLlm` turns them into user messages for the model.
+ */
+const INBOUND = "pikit.inbound";
+
 export type Submission =
-  /** `requestId` already names a run of this conversation (running or settled). */
-  | { kind: "duplicate"; requestId: string; status: "running" | OperationResultRecord["status"] }
+  /** This conversation already has `requestId`, waiting in the inbox or in the transcript. */
+  | { kind: "duplicate"; requestId: string; where: "queued" | "transcript" }
   /** The conversation was idle: a run started, with `operationId === requestId`. */
-  | { kind: "started"; requestId: string; promptEntryId: string; settled: Promise<OperationResultRecord> }
-  /** The conversation was busy: the message went to Pi's inbox as `steer`. */
-  | { kind: "steered"; requestId: string; entryId: string };
+  | { kind: "started"; requestId: string; entryId: string; settled: Promise<OperationResultRecord> }
+  /** The conversation was busy: the message waits in Pi's inbox as `steer`. */
+  | { kind: "queued"; requestId: string; entryId: string };
 
 export interface Answer {
   /** Transcript entry of the assistant message that answers. */
@@ -66,7 +78,20 @@ export interface ConversationOptions {
   initialState?: JsonValue;
 }
 
+function requestIdOf(message: AgentMessage): string | undefined {
+  if (message.role !== "custom" || message.customType !== INBOUND) return undefined;
+  const details = message.details as { requestId?: unknown } | undefined;
+  return typeof details?.requestId === "string" ? details.requestId : undefined;
+}
+
+function isRequest(entry: Entry, requestId: string): boolean {
+  return entry.type === "message" && requestIdOf(entry.message) === requestId;
+}
+
 export class SpikeConversation {
+  /** Orders the admissions of this worker; holds no message (see `submit`). */
+  private admission: Promise<unknown> = Promise.resolve();
+
   private constructor(
     private readonly session: Session,
     private readonly harness: AgentHarness<undefined>,
@@ -77,12 +102,12 @@ export class SpikeConversation {
   /**
    * Open the conversation's harness. `openOperations` lists runs a previous worker left open;
    * creation restores them without starting effects (Pi's contract), and `resume()` continues
-   * them.
+   * them. `harness` is returned for tests only.
    */
   static async open(
     options: ConversationOptions,
     ctx: Context,
-  ): Promise<{ conversation: SpikeConversation; openOperations: OpenOperation[] }> {
+  ): Promise<{ conversation: SpikeConversation; openOperations: OpenOperation[]; harness: AgentHarness<undefined> }> {
     const pi = toPi(ctx);
     const { harness, open } = await AgentHarness.create<undefined>(
       {
@@ -98,6 +123,7 @@ export class SpikeConversation {
     return {
       conversation: new SpikeConversation(options.session, harness, lane, options.initialState),
       openOperations: open,
+      harness,
     };
   }
 
@@ -106,37 +132,55 @@ export class SpikeConversation {
   }
 
   /**
-   * Hand one inbound message to the conversation (SPEC §7.3). Idle: start a run whose
-   * `operationId` is the `requestId`. Busy: `steer`.
+   * Hand one inbound message to the conversation (SPEC §6.1), in the order Pi's durable runtime
+   * uses for a submission:
    *
-   * Duplicates are detected only for requests that started a run, by looking the id up in Pi's
-   * own operation records. Two gaps stay open, on purpose (SPEC §6.4):
-   * - `accept()` does not reject a reused `operationId`, so this check-then-accept is not atomic;
-   * - `steer()` takes no request id, so a repeated steered message is not recognised.
+   * 1. Duplicate check: the request id is looked up in Pi's inbox and transcript.
+   * 2. Enqueue first: the message becomes durable in Pi's inbox, carrying its request id.
+   * 3. Then start a run if the conversation is idle. `accept()` drains Pi's inbox into the new
+   *    run; if a run is active it fails with `LaneBusy`, and that run's next boundary takes the
+   *    message. Its final boundary re-reads the inbox inside its own commit, so a message
+   *    enqueued before that commit is never left behind (SPEC §6.4, gap 2).
+   *
+   * Admissions of one conversation run one at a time in this worker, so two deliveries of the
+   * same request cannot both pass step 1 (gap 1). One worker owns a conversation (§7.2).
    */
-  async submit(requestId: string, text: string, ctx: Context): Promise<Submission> {
+  submit(requestId: string, text: string, ctx: Context): Promise<Submission> {
+    const next = this.admission.then(() => this.admit(requestId, text, ctx));
+    this.admission = next.catch(() => {});
+    return next;
+  }
+
+  private async admit(requestId: string, text: string, ctx: Context): Promise<Submission> {
     const pi = toPi(ctx);
+    const seen = await this.find(requestId, pi);
+    if (seen !== undefined) return { kind: "duplicate", requestId, where: seen };
 
-    const settled = await this.lane.getResult(requestId, pi);
-    if (settled !== undefined) return { kind: "duplicate", requestId, status: settled.status };
-    const execution = await this.lane.inspectExecution(pi);
-    if (execution.current?.id === requestId) return { kind: "duplicate", requestId, status: "running" };
+    const message = createCustomMessage(INBOUND, text, true, { requestId }, Date.now());
+    const queued = await this.lane.steer(message, undefined, pi);
+    if (!queued.ok) throw queued.error;
+    const { entryId } = queued.value;
 
-    // Pi decides idle/busy atomically: `accept` fails with LaneBusy if a run is active.
-    const admission = await this.lane.accept({ kind: "prompt", operationId: requestId, prompt: text }, pi);
+    const admission = await this.lane.accept({ kind: "prompt", operationId: requestId, prompt: [] }, pi);
     if (!admission.ok) {
       if (!LaneBusy.is(admission.error)) throw admission.error;
-      const queued = await this.lane.steer(text, undefined, pi);
-      if (!queued.ok) throw queued.error;
-      return { kind: "steered", requestId, entryId: queued.value.entryId };
+      return { kind: "queued", requestId, entryId };
     }
+    return { kind: "started", requestId, entryId, settled: this.wait(requestId, ctx) };
+  }
 
-    // Read before driving: Pi deletes the operation's meta when the run settles.
-    const meta = await this.session.getValue(operationMeta(requestId), pi);
-    const promptEntryId = meta?.value.intent.kind === "run" ? meta.value.intent.promptEntryIds[0] : undefined;
-    if (promptEntryId === undefined) throw new Error(`Run ${requestId} has no prompt entry`);
-
-    return { kind: "started", requestId, promptEntryId, settled: this.wait(requestId, ctx) };
+  /**
+   * Where Pi holds `requestId`, if anywhere. The inbox is read from Pi's own lane records; the
+   * transcript is scanned whole, which a real adapter bounds to a redelivery window.
+   */
+  private async find(requestId: string, pi: PiContext): Promise<"queued" | "transcript" | undefined> {
+    const lane = await this.session.getValue(laneState(LANE), pi);
+    for (const item of lane?.value.inbox ?? []) {
+      const pending = await this.session.getValue(pendingEntry(item.entryId), pi);
+      if (pending?.value.type === "message" && requestIdOf(pending.value.payload) === requestId) return "queued";
+    }
+    const entries = await this.lane.findEntries({ type: "message", order: "newestFirst" }, pi);
+    return entries.some((entry) => isRequest(entry, requestId)) ? "transcript" : undefined;
   }
 
   /**
@@ -151,7 +195,7 @@ export class SpikeConversation {
     return driven.value.outcome;
   }
 
-  /** Stop the active run now, without waiting for its tools (SPEC §7.3). Queued steers come back. */
+  /** Stop the active run now, without waiting for the model (SPEC §7.3). Queued steers come back. */
   async abort(ctx: Context): Promise<void> {
     const aborted = await this.lane.abort(toPi(ctx));
     if (!aborted.ok) throw aborted.error;
@@ -168,13 +212,14 @@ export class SpikeConversation {
   }
 
   /**
-   * The answer to a user message: the first assistant message after it on the branch that does
-   * not call tools. A steered message and the prompt of the run it joined share that answer,
-   * which is how Pi's durable runtime settles every input placed in one turn (pico-v5 §6).
+   * The answer to a request: the first assistant message after it on the branch that does not
+   * call tools. A queued message and the prompt of the run it joined share that answer, which
+   * is how Pi's durable runtime settles every input placed in one turn (pico-v5 §6). It reads
+   * the transcript, so it works in any worker, after a crash too.
    */
-  async answerTo(entryId: string, ctx: Context): Promise<Answer | undefined> {
+  async answerTo(requestId: string, ctx: Context): Promise<Answer | undefined> {
     const entries = await this.lane.findEntries({ order: "oldestFirst" }, toPi(ctx));
-    const at = entries.findIndex((entry) => entry.id === entryId);
+    const at = entries.findIndex((entry) => isRequest(entry, requestId));
     if (at === -1) return undefined;
     for (const entry of entries.slice(at + 1)) {
       if (entry.type !== "message" || entry.message.role !== "assistant") continue;
@@ -196,9 +241,8 @@ export class SpikeConversation {
 
   /** Messages waiting in Pi's inbox (steer, follow-up, next run). */
   async queued(ctx: Context): Promise<{ entryId: string; kind: string }[]> {
-    const watch = await this.lane.watch(toPi(ctx));
-    watch.unsubscribe();
-    return watch.snapshot.queues.map(({ entryId, kind }) => ({ entryId, kind }));
+    const lane = await this.session.getValue(laneState(LANE), toPi(ctx));
+    return (lane?.value.inbox ?? []).map(({ entryId, kind }) => ({ entryId, kind }));
   }
 
   async getState(ctx: Context): Promise<JsonValue | undefined> {

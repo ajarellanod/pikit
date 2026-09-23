@@ -1,7 +1,8 @@
 /**
  * Characterisation of what pi-agent-core 0.87.1 does NOT do for pikit. These tests assert
- * today's behaviour on purpose: when Pi closes a gap, its test fails, and the adapter drops
- * whatever it does around it (SPEC §6.4, "Gaps found by the spike"). pikit builds no substitute.
+ * Pi's behaviour on purpose, called directly. The adapter bridges each gap with Pi's own
+ * mechanisms (`conversation.ts`, `submit`); if Pi changes, the test fails and the bridge is
+ * revisited (SPEC §6.4). The bridge goes when the adapter moves to `pi-durable`.
  */
 
 import { describe, expect, test } from "bun:test";

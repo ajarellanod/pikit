@@ -1,6 +1,6 @@
 /**
  * The adapter spike's proofs (ROADMAP M1, first step), one `describe` per claim.
- * Gaps Pi has today are characterised in `pi-gaps.test.ts`.
+ * What Pi itself does not do is characterised in `pi-gaps.test.ts`.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -15,10 +15,11 @@ import {
   NOOP_TELEMETRY_CONTEXT,
   withTelemetryContext,
   type AgentHarnessTool,
+  type AgentMessage,
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { BACKGROUND_CONTEXT, createContextKey, withCancel, withContextValue } from "@pikit/core";
-import { SpikeConversation, toPi } from "./conversation.ts";
+import { SpikeConversation, toPi, type Submission } from "./conversation.ts";
 import { gateTool, scriptedModel, tool } from "./fixtures.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -26,11 +27,11 @@ const ctx = BACKGROUND_CONTEXT;
 async function openFresh(tools: AgentHarnessTool<undefined>[] = []) {
   const repo = new MemorySessionRepo();
   const session = await repo.create({}, ctx);
-  const { conversation } = await SpikeConversation.open({ session, ...scriptedModel(), tools }, ctx);
-  return { repo, session, conversation };
+  const opened = await SpikeConversation.open({ session, ...scriptedModel(), tools }, ctx);
+  return { repo, session, ...opened };
 }
 
-function started(submission: Awaited<ReturnType<SpikeConversation["submit"]>>) {
+function started(submission: Submission) {
   if (submission.kind !== "started") throw new Error(`expected a started run, got ${submission.kind}`);
   return submission;
 }
@@ -60,21 +61,21 @@ describe("2. a prompt runs to an answer", () => {
 
     expect(outcome.status).toBe("completed");
     expect(outcome.operationId).toBe("req-1");
-    expect((await conversation.answerTo(run.promptEntryId, ctx))?.text).toBe("answer: hello");
+    expect((await conversation.answerTo("req-1", ctx))?.text).toBe("answer: hello");
     await conversation.close(ctx);
   });
 });
 
 describe("3. a message sent mid-run is steered and its answer is attributable", () => {
-  test("busy conversation: the message enters Pi's inbox and the same run answers it", async () => {
+  test("busy conversation: the message waits in Pi's inbox and the same run answers it", async () => {
     const gate = gateTool("gate");
     const { conversation } = await openFresh([gate.tool]);
     const run = started(await conversation.submit("req-1", "use-tool:gate", ctx));
     await gate.started;
 
-    const steered = await conversation.submit("req-2", "change course", ctx);
-    if (steered.kind !== "steered") throw new Error(`expected steer, got ${steered.kind}`);
-    expect(await conversation.queued(ctx)).toEqual([{ entryId: steered.entryId, kind: "steer" }]);
+    const queued = await conversation.submit("req-2", "change course", ctx);
+    if (queued.kind !== "queued") throw new Error(`expected queued, got ${queued.kind}`);
+    expect(await conversation.queued(ctx)).toEqual([{ entryId: queued.entryId, kind: "steer" }]);
 
     gate.open("gate opened");
     const outcome = await run.settled;
@@ -82,10 +83,38 @@ describe("3. a message sent mid-run is steered and its answer is attributable", 
     // One run: the steer entered after the tool finished, before the next model call.
     expect(outcome.status).toBe("completed");
     expect(await conversation.queued(ctx)).toEqual([]);
-    const answer = await conversation.answerTo(steered.entryId, ctx);
+    const answer = await conversation.answerTo("req-2", ctx);
     expect(answer?.text).toBe("answer: change course");
-    // The prompt and the steer placed in its turn settle with the same answer entry.
-    expect((await conversation.answerTo(run.promptEntryId, ctx))?.entryId).toBe(answer?.entryId);
+    // The prompt and the message placed in its turn settle with the same answer entry.
+    expect((await conversation.answerTo("req-1", ctx))?.entryId).toBe(answer?.entryId);
+    await conversation.close(ctx);
+  });
+
+  test("gap 2 closed: a message that arrives while the run is ending is answered by that run", async () => {
+    const { conversation, harness } = await openFresh();
+    let entered!: () => void;
+    let release!: () => void;
+    const ending = new Promise<void>((resolve) => (entered = resolve));
+    const held = new Promise<void>((resolve) => (release = resolve));
+    let first = true;
+    // Holds the run at its last boundary: after the final answer, before Pi commits its end.
+    harness.hooks.on("before_run_end", async () => {
+      if (!first) return undefined;
+      first = false;
+      entered();
+      await held;
+      return undefined;
+    });
+    const run = started(await conversation.submit("req-1", "hello", ctx));
+    await ending;
+
+    const late = await conversation.submit("req-2", "one more thing", ctx);
+    release();
+
+    expect(late.kind).toBe("queued");
+    expect((await run.settled).status).toBe("completed");
+    expect((await conversation.answerTo("req-2", ctx))?.text).toBe("answer: one more thing");
+    expect(await conversation.queued(ctx)).toEqual([]);
     await conversation.close(ctx);
   });
 });
@@ -98,7 +127,7 @@ describe("4. a repeated requestId is recognised as a duplicate", () => {
     expect(await conversation.submit("req-1", "hello", ctx)).toEqual({
       kind: "duplicate",
       requestId: "req-1",
-      status: "completed",
+      where: "transcript",
     });
     await conversation.close(ctx);
   });
@@ -109,17 +138,13 @@ describe("4. a repeated requestId is recognised as a duplicate", () => {
     const run = started(await conversation.submit("req-1", "use-tool:gate", ctx));
     await gate.started;
 
-    expect(await conversation.submit("req-1", "use-tool:gate", ctx)).toEqual({
-      kind: "duplicate",
-      requestId: "req-1",
-      status: "running",
-    });
+    expect(await conversation.submit("req-1", "use-tool:gate", ctx)).toMatchObject({ kind: "duplicate" });
     gate.open("done");
     await run.settled;
     await conversation.close(ctx);
   });
 
-  test("GAP: a repeated steered requestId is not recognised (steer() takes no request id)", async () => {
+  test("gap 3 closed: of a message still waiting in the inbox", async () => {
     const gate = gateTool("gate");
     const { conversation } = await openFresh([gate.tool]);
     const run = started(await conversation.submit("req-1", "use-tool:gate", ctx));
@@ -128,10 +153,24 @@ describe("4. a repeated requestId is recognised as a duplicate", () => {
     const first = await conversation.submit("req-2", "change course", ctx);
     const again = await conversation.submit("req-2", "change course", ctx);
 
-    expect([first.kind, again.kind]).toEqual(["steered", "steered"]);
-    expect(await conversation.queued(ctx)).toHaveLength(2);
+    expect(first.kind).toBe("queued");
+    expect(again).toEqual({ kind: "duplicate", requestId: "req-2", where: "queued" });
+    expect(await conversation.queued(ctx)).toHaveLength(1);
     gate.open("done");
     await run.settled;
+    await conversation.close(ctx);
+  });
+
+  test("gap 1 closed: two deliveries of one request at the same time start one run", async () => {
+    const { conversation } = await openFresh();
+
+    const [a, b] = await Promise.all([
+      conversation.submit("req-1", "hello", ctx),
+      conversation.submit("req-1", "hello", ctx),
+    ]);
+
+    expect([a.kind, b.kind]).toEqual(["started", "duplicate"]);
+    await started(a).settled;
     await conversation.close(ctx);
   });
 });
@@ -170,18 +209,18 @@ describe("6. a killed run is continued by resume() in a new process", () => {
       stdio: ["ignore", "pipe", "inherit"],
     });
     let sessionId: string | undefined;
-    let promptEntryId: string | undefined;
+    let submitted = false;
     let toolStarted = false;
     for await (const line of createInterface({ input: worker.stdout })) {
-      const event = JSON.parse(line) as { event: string; sessionId?: string; promptEntryId?: string };
+      const event = JSON.parse(line) as { event: string; sessionId?: string };
       if (event.event === "session") sessionId = event.sessionId;
-      if (event.event === "submitted") promptEntryId = event.promptEntryId;
+      if (event.event === "submitted") submitted = true;
       if (event.event === "tool_started") toolStarted = true;
-      if (toolStarted && promptEntryId !== undefined) break;
+      if (toolStarted && submitted) break;
     }
     worker.kill("SIGKILL");
     await new Promise((resolve) => worker.once("exit", resolve));
-    if (sessionId === undefined || promptEntryId === undefined) throw new Error("worker died before its run started");
+    if (sessionId === undefined || !submitted) throw new Error("worker died before its run started");
 
     // This process is the new worker: it opens the same session and resumes.
     const repo = new JsonlSessionRepo({ fileSystem: new NodeExecutionEnv({ cwd: root }), sessionsRoot: root });
@@ -195,11 +234,11 @@ describe("6. a killed run is continued by resume() in a new process", () => {
       await repo.close(ctx);
       rmSync(root, { recursive: true, force: true });
     };
-    return { ...opened, promptEntryId, cleanup };
+    return { ...opened, cleanup };
   }
 
   test("replay: safe — the interrupted tool runs again and the run completes", async () => {
-    const { conversation, openOperations, promptEntryId, cleanup } = await killMidTool("safe");
+    const { conversation, openOperations, cleanup } = await killMidTool("safe");
     expect(openOperations.map((operation) => operation.operationId)).toEqual(["req-killed"]);
     // Nobody in this process submitted req-killed; its end still arrives as an event.
     const ends: { runId: string; status: string }[] = [];
@@ -209,25 +248,62 @@ describe("6. a killed run is continued by resume() in a new process", () => {
 
     expect(outcome?.status).toBe("completed");
     expect(outcome?.operationId).toBe("req-killed");
-    expect((await conversation.answerTo(promptEntryId, ctx))?.text).toBe("tool said: finished after resume");
+    expect((await conversation.answerTo("req-killed", ctx))?.text).toBe("tool said: finished after resume");
     expect(ends).toEqual([{ runId: "req-killed", status: "completed" }]);
     expect(await conversation.getState(ctx)).toEqual({ phase: "working" });
+    // The request id was committed with the message, so a redelivery after the crash is known.
     expect(await conversation.submit("req-killed", "use-tool:slow", ctx)).toMatchObject({ kind: "duplicate" });
     await cleanup();
   }, 20_000);
 
   test("replay: never — the tool is not re-run; Pi reports it interrupted and the run completes", async () => {
-    const { conversation, openOperations, promptEntryId, cleanup } = await killMidTool("never");
+    const { conversation, openOperations, cleanup } = await killMidTool("never");
     expect(openOperations).toHaveLength(1);
 
     const outcome = await conversation.resume(ctx);
 
     expect(outcome?.status).toBe("completed");
-    const answer = await conversation.answerTo(promptEntryId, ctx);
+    const answer = await conversation.answerTo("req-killed", ctx);
     expect(answer?.text).toStartWith("tool said: [Tool execution was interrupted.");
     expect(answer?.text).not.toContain("finished after resume");
     await cleanup();
   }, 20_000);
+});
+
+describe("inbound messages as Pi custom messages", () => {
+  test("Pi's events show them as `custom` messages, the role Pi extensions already handle", async () => {
+    const { conversation, harness } = await openFresh();
+    const ended: AgentMessage[] = [];
+    harness.events.on("message_end", (event) => void ended.push(event.message));
+
+    await started(await conversation.submit("req-1", "hello", ctx)).settled;
+
+    expect(ended.map((message) => message.role)).toEqual(["custom", "assistant"]);
+    expect(ended[0]).toMatchObject({ customType: "pikit.inbound", details: { requestId: "req-1" } });
+    await conversation.close(ctx);
+  });
+
+  test("compaction summarises them, and the conversation goes on after it", async () => {
+    const repo = new MemorySessionRepo();
+    const session = await repo.create({}, ctx);
+    const { conversation, harness } = await SpikeConversation.open({ session, ...scriptedModel() }, ctx);
+    await harness.setCompactionSettings({ enabled: true, reserveTokens: 16_384, keepRecentTokens: 1 }, ctx);
+    for (const [id, text] of [["req-1", "first"], ["req-2", "second"], ["req-3", "third"]] as const) {
+      await started(await conversation.submit(id, text, ctx)).settled;
+    }
+
+    const compacted = await (await harness.lane("main", ctx)).compact(undefined, ctx);
+
+    if (!compacted.ok) throw compacted.error;
+    expect(compacted.value.compaction.status).toBe("completed");
+    const after = started(await conversation.submit("req-4", "fourth", ctx));
+    expect((await after.settled).status).toBe("completed");
+    expect((await conversation.answerTo("req-4", ctx))?.text).toBe("answer: fourth");
+    // Compaction adds a summary entry and keeps the old entries on the branch, so a request
+    // summarised away is still recognised.
+    expect(await conversation.submit("req-1", "first", ctx)).toMatchObject({ kind: "duplicate" });
+    await conversation.close(ctx);
+  });
 });
 
 describe("context bridge (SPEC §6.2)", () => {
