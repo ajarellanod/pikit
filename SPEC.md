@@ -1,8 +1,10 @@
 # pikit — Technical Specification
 
-Status: **draft v0.1** — this document describes intent and contracts, not shipped code.
-Anything marked `[open]` is undecided. Anything marked `[upstream]` depends on experimental
-Pi APIs and must be isolated behind the Pi adapter.
+Status: **draft v0.1**. §4 (core) is implemented in `packages/core`; the rest describes
+intent and contracts. `[open]` is undecided, `[decision]` is settled, `[planned]` is agreed
+but not built, and `[upstream]` depends on experimental Pi APIs and must be isolated behind
+the Pi adapter. Principles live in `MANIFESTO.md`; milestones and the standards they must
+meet live in `ROADMAP.md`.
 
 ---
 
@@ -127,23 +129,31 @@ export default defineComponent({
   version: "1.2.0",
 
   provides: ["outbound.queue"],
-  requires: ["storage.sql", "channel.transport"],
+  requires: ["storage.sql"],
 
   config: OutboxConfigSchema,        // typebox; merged into the global config schema
 
   setup(pikit, config) {
     const sql = pikit.require("storage.sql");
-    pikit.provide("outbound.queue", createQueue(sql, config));
-    pikit.on("outbound.requested", enqueue);
-    pikit.on("runtime.ready", startWorker);
-    pikit.on("runtime.stopping", stopWorker);
+    const queue = createQueue(sql, config);
+    pikit.provide("outbound.queue", queue);
+    pikit.on("outbound.requested", (message) => queue.enqueue(message));
+    const worker = createWorker(queue);   // the transport is resolved per message (§4.5)
+    return {
+      start: () => worker.start(),        // resources are acquired here, not in setup
+      stop: () => worker.stop(),
+    };
   },
 });
 ```
 
 `setup` runs once per harness instance. On the server target that is once per process. On
 Cloudflare it is once per Durable Object instantiation (which may happen many times; setup
-must be cheap and idempotent). It may be async.
+must be cheap and idempotent). It may be async. `[decision]` `setup` only **registers**: it
+never opens sockets, files, connections or timers. A component that owns resources returns
+`{ start, stop }` from `setup`; the closure carries setup-local state to both. The harness
+calls `start` in setup order and `stop` in reverse (§4.6). Because setup acquires nothing, a
+failed `create()` has nothing to clean up.
 
 `provide` is checked against the manifest both ways: providing an undeclared capability is
 an error, and a declared capability that `setup` did not provide is an error. The manifest
@@ -156,6 +166,8 @@ is what orders setup, so it must be truthful.
 ### 4.3 Events
 
 Events are **notifications**. Every listener receives the event; return values are ignored.
+Because a listener's failure is only logged, nothing that must succeed (starting a server,
+opening a database) may live in an event listener; that is what `start`/`stop` are for.
 
 ```ts
 pikit.on("outbound.delivered", async (event, ctx) => { ... });
@@ -190,7 +202,8 @@ declare module "@pikit/core" {
 ```
 
 For events that cross a process or persistence boundary (queues, webhooks, restored state) a
-runtime schema is also registered:
+runtime schema is also registered. `[planned]` — built with the first component that
+persists an event (`durable-outbox`):
 
 ```ts
 pikit.registerEvent({
@@ -269,10 +282,13 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `sessions.store` | Pi `SessionRepo` + `SessionStorage` | Re-exported from Pi; see §7. |
 | `conversations.registry` | `ConversationRegistry` | conversation key → active session id, workspace ref, metadata. |
 | `workspace` | `WorkspaceProvider` | Resolves a `Workspace` for a conversation/agent. |
-| `execution` | Pi `ExecutionEnv` | Filesystem + shell for the agent's tools. |
+| `execution` | Pi `ExecutionEnv` | Filesystem for the agent's tools; `exec()` may return `shell_unavailable`. |
+| `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
+| `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
 | `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. See §6.2a. |
-| `channel.transport:<name>` | `ChannelTransport` | Send/edit/delete messages for one channel. |
+| `channel.transport:<name>` | `ChannelTransport` | Send/edit/delete messages for one channel. Resolved per message (`channel.transport:${message.channel}`); never listed in `requires`, because "some transport" is not one capability. A missing transport is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
+| `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
 | `outbound.queue` | `OutboundQueue` | Durable enqueue + worker. Optional; without it delivery is direct. |
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
 | `approvals` | `ApprovalStore` | Decision lifecycle persistence. |
@@ -287,16 +303,22 @@ build time      pikit add/remove edit pikit.config.ts; bundler compiles what is 
                  │
 harness create  defineHarness() → resolve components → validate requires/provides
                  │                                     → validate config against merged schema
-setup           component.setup() in dependency order
+setup           component.setup() in dependency order (registration only; returns start/stop)
                  │
 runtime.starting
-runtime.ready   listeners/servers/alarms may start
+start           component start() in setup order; a failure stops the started ones in
+                 reverse, emits runtime.stopping/stopped, and rejects start()
+runtime.ready   every component is up
                  │
    ... handle inbound → route → agent → outbound ...
                  │
 runtime.stopping
+stop            component stop() in reverse order; every stop runs, failures are aggregated
 runtime.stopped
 ```
+
+Every `runtime.starting` is closed by `runtime.stopped`, including a failed start. On
+Cloudflare, `start` runs inside the Durable Object constructor's `blockConcurrencyWhile`.
 
 `pikit doctor` performs everything up to and including *setup* without starting servers, and
 prints the resolved component graph, capability providers, pipeline chains, and config.
@@ -399,10 +421,27 @@ interface OutboundMessage {
 }
 ```
 
-Idempotency: `InboundMessage.id` is recorded by the core before dispatch; a duplicate id
-within a retention window is dropped and `inbound.rejected { reason: "duplicate" }` is
-emitted. Storage for this uses `storage.sql` if present, otherwise an in-memory LRU (documented
-as best-effort).
+Inbound deduplication is **not core**. `[decision]` Platforms redeliver (webhook retries,
+polling restarts), and both what identifies a redelivery (Telegram `update_id`, Slack
+`event_id`) and when the platform may be acknowledged are channel-specific. A core table with
+an in-memory fallback would break absence (MANIFESTO, "If you don't need it, it doesn't exist"), silently stop working after
+a restart or hibernation, and — recorded before dispatch — drop the retry of a message whose
+first attempt crashed. So:
+
+- The **channel** owns the key (`InboundMessage.id` is the platform's delivery id) and the ack
+  rule: a webhook is acknowledged only once the message is durably accepted.
+- **`inbound-dedup`** is a component providing `inbound.dedup` with a claim / commit / release
+  contract and a conformance suite. It claims the id in the last `inbound.normalize` stage and
+  halts duplicates (the ingress emits `inbound.rejected { reason: "duplicate" }`); it commits
+  when the reply is handed off (`outbound.queued` with an outbox, `outbound.delivered`
+  without) and releases on `agent.failed`, so the platform's retry runs again. In-flight
+  claims expire, so a crash does not block a conversation forever.
+- The guarantee is **at-least-once**: a crash between effect and commit can repeat a reply.
+  Effectful tools stay safe through idempotency keys (§8.4).
+- Without `inbound-dedup` there is no deduplication — no table, no LRU, no half-measure.
+
+Prior art: OpenClaw's durable ingress (`docs/plugins/sdk-channel-plugins/durable-ingress.md`)
+reached the same shape: ack after durable append, claim/commit, completion tombstones.
 
 ---
 
@@ -434,6 +473,16 @@ interface AgentResult {
   error?: { code: string; message: string };
 }
 ```
+
+Who owns these types `[decision]`: the core owns the *shapes* (`defineAgent`,
+`AgentDefinition`, `TurnConfig`, `AgentRequest`, `AgentResult`, `AgentRuntime`), because they
+are the stable programming model (§12a). The Pi-specific payloads inside them
+(`AgentMessage`, `ImageContent`, `Usage`, the tool type) are opaque in the core and made
+precise by `@pikit/pi-adapter` through declaration merging — the same mechanism as
+`HarnessEvents`. The core never imports Pi; a project with the adapter sees Pi's exact types.
+Components that implement a Pi contract (`sessions.store`, `execution`) import those types
+from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-*`. `[planned]`
+— built in M1 with the adapter.
 
 ### 6.2 Pi adapter (`@pikit/pi-adapter`)
 
@@ -550,7 +599,7 @@ Tools are components too (`tool-*`). A tool component declares which capabilitie
 `pikit doctor` can refuse a deployment that cannot satisfy it:
 
 ```json
-{ "name": "tool-shell", "requires": { "capabilities": ["execution.shell", "workspace.posix"] } }
+{ "name": "tool-shell", "requires": { "capabilities": ["execution.shell"] } }
 { "name": "tool-http-fetch", "requires": { "capabilities": ["network.fetch"] } }
 ```
 
@@ -808,6 +857,11 @@ Rules:
 - `dependencies` are real npm deps (SDKs, crypto). They are added to the project's
   `package.json`. Behavior is copied; protocols and crypto are depended on.
 - No install scripts. Ever. `[decision]`
+- `name`, `version`, `provides` and the required capabilities are declared twice: in
+  `component.json` (install time — the CLI reads it before any code is copied) and in
+  `defineComponent` (runtime — `component.json` is not copied into the project). The runtime
+  declaration is the source of truth; `pikit registry validate` and `pikit doctor` fail when
+  the two disagree. `[decision]`
 - `targets` gates `pikit add` against the project's configured targets.
 
 ### 10.3 Project manifest
@@ -1016,7 +1070,7 @@ And the runtime proof:
 - Multi-tenant isolation guarantees: routing is not isolation. Document clearly; consider a
   `tenant-isolation` component that maps tenants to separate DO namespaces / DB files.
 
-Resolved while building M0 `[decision]`:
+Resolved `[decision]`:
 
 - `defineHarness({ config })` takes an object; the core never reads files (rule: runtime
   neutrality). The CLI/target loads YAML and passes the value.
@@ -1030,57 +1084,27 @@ Resolved while building M0 `[decision]`:
   no runtime registration for typing. Pipelines likewise on `HarnessPipelines`.
 - Pipelines are `Value → Value` (§4.4). Stage errors propagate; `undefined` from a stage is an
   error, not "unchanged".
+- `setup` registers, `start`/`stop` own resources (§4.2, §4.6). Resource acquisition in an
+  event listener would turn a failed start into a log line and a healthy-looking process.
+- A consumer is ordered after the provider `require` will use (the selected one), not after
+  every installed provider; an unselected provider cannot create a false cycle.
+- `capabilities` is a reserved component name (it is the core's config key).
+- Inbound deduplication is the `inbound-dedup` component, not core (§5).
+- `channel.transport:<name>` is resolved per message and never listed in `requires`; no
+  pattern-matching `requires` until a second case needs it.
+- Capability names: `execution` (filesystem, maybe no shell), `execution.shell` (real shell),
+  `network.fetch` (outbound HTTP). `workspace.posix` is dropped: a real shell implies it.
+- `defineComponent` is the runtime truth for `provides`/`requires`; `component.json` must
+  agree (§10.2).
+- `defineAgent` and the agent shapes are core; Pi payload types are opaque in core and made
+  precise by the adapter (§6.1).
 
 ---
 
 ## 17. Roadmap
 
-### M0 — Core (implemented, tested, no Pi)
-- `@pikit/core` implemented with unit tests: events, pipelines, capabilities, lifecycle,
-  config merge/validation, diagnostics (§4). Only the contracts `HarnessContext` needs
-  (`Clock`, `Logger`); every other contract is written when the first component requires it,
-  interface + conformance suite before implementation. `[decision]` — a types-only
-  milestone has no runnable check; contracts are validated by running them.
-- This spec reviewed; open questions resolved or deferred explicitly.
-
-### M1 — Five minutes to a running agent
-Definition of done: on a clean VPS, `curl … | sh && pikit new my-agent --preset http && cd
-my-agent && pikit configure && pikit up` yields a responding agent with `/health`, logs, and
-status — and `src/pikit/` contains every behavior as readable source.
-- `@pikit/core` implementation; `@pikit/pi-adapter` (automatic drive); `defineAgent` with
-  `prepare(state)` and `agent.state`.
-- Components: `runtime-pi`, `server-bun`, `channel-http`, `router-basic`, `storage-sqlite`,
-  `sessions-sqlite`, `workspace-local`, `execution-local`, `tool-shell` (Pi built-ins),
-  `deployment-docker`, `admin-basic`.
-- CLI: installer script, `new`, `add`, `remove`, `doctor`, `dev`, `configure`, `up/down/
-  logs/status/restart`.
-- Scenario 1 green.
-
-### M2 — Chat + reliability
-- `channel-telegram`, `durable-outbox`, `scheduler-cron`, `preset telegram`.
-- CLI: `expose` (Cloudflare tunnel / Caddy), `config check`.
-- Scenarios 2–3 green.
-
-### M3 — Ownership tooling
-- `pikit.json` hashes, `outdated`, `diff`, `upgrade` (incl. resolve-with-pi).
-- `create extension|component`, `registry init|validate`.
-- `sessions-postgres`. Scenarios 4–5 green.
-
-### M4 — Cloudflare PoC
-- `sessions-cloudflare-do` passing Pi conformance.
-- Pi adapter manual-drive mode + resume.
-- `deployment-cloudflare`, `workspace-virtual`, `execution-fetch`, `scheduler-cloudflare`.
-- Bundle ≤ 10 MB gz, startup ≤ 1 s measured. Scenario 6 green.
-
-### M5 — Cloudflare full
-- `execution-cloudflare-container`, `workspace-container`, `workspace-r2-snapshot`.
-- Approvals via Workflows.
-- `channel-google-chat`, `approvals` (deterministic decision lifecycle, see §18).
-
-### Later
-- `execution-remote` executor protocol.
-- Second agent runtime behind `AgentRuntime` (only if demanded).
-- Registry gallery site (static).
+Milestones, what each one proves, and the standards every milestone must meet live in
+`ROADMAP.md`. This spec defines the contracts; the roadmap defines when they are real.
 
 ---
 
@@ -1092,6 +1116,7 @@ value. Each one is built contracts-first against the core in §4–§5 and must 
 | Component | What it encodes |
 |---|---|
 | `approvals` | Deterministic decision lifecycle: proposed → approved/rejected → executed → verified, with retries, reminders, stalled escalation, TTL/abandonment, and **delivery-time binding** of a decision to the message/thread where a human can answer it (a decision created by a scheduled job cannot know its answer surface until the result is sent). |
+| `inbound-dedup` | Claim / commit / release of platform delivery ids (§5): duplicates halted, retries of crashed attempts allowed, stale claims expired. At-least-once by contract. |
 | `durable-outbox` | Outbound intents persisted before send, retried with backoff, dead-lettered, and recorded so later replies can quote or thread against them. |
 | `conversations.registry` | Conversation key → active session + workspace ref, with TTL eviction of memory that never drops the pointer, and explicit `/reset` semantics. |
 | `routines` | File-defined scheduled prompts (`src/agents/{name}/routines/*.yaml`) synced into `scheduler`, with target fan-out by route tags and previous-run context injection. |
