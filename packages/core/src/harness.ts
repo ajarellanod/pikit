@@ -562,6 +562,7 @@ function bounded(
     const decide = (outcome: () => void) => {
       if (decided) return;
       decided = true;
+      signal.removeEventListener("abort", abandon);
       outcome();
     };
     const abandon = () =>
@@ -578,9 +579,7 @@ function bounded(
       // after a slow step is not reported as abandoned.
       setTimeout(abandon, 0);
     } else {
-      // Never removed: Bun < 1.4.0 cancels an `AbortSignal.timeout()` whose last listener is
-      // removed, and it then never fires (fixed by oven-sh/bun#37666). Delete this workaround
-      // once pikit requires Bun >= 1.4. `decided` makes a call after the work settled a no-op.
+      // Removed by `decide`, so a long-lived signal does not collect one listener per step.
       signal.addEventListener("abort", abandon, { once: true });
     }
   });

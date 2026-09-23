@@ -959,7 +959,7 @@ from `${sessionId}:${runId}:${toolCallId}`.
 
 ### 9.1 Server
 
-- Process: Bun (preferred) or Node ≥ 22.
+- Process: Bun ≥ 1.4 (preferred) or Node ≥ 22.
 - HTTP: a thin `server-bun` component (Hono or `Bun.serve`) exposing `/health`, `/ready`,
   channel webhooks, and admin routes contributed by components.
 - Storage: `sessions-sqlite` + `storage-sqlite` by default; Postgres optional.

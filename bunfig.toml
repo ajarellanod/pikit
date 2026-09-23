@@ -1,0 +1,5 @@
+# Bun ignores `engines`; this preload enforces the minimum version (see the script).
+preload = ["./scripts/require-bun.ts"]
+
+[test]
+preload = ["./scripts/require-bun.ts"]

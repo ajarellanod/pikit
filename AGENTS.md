@@ -99,7 +99,8 @@ Never design from memory of Pi's API; its API changes faster than this document.
 
 ## Stack
 
-- TypeScript, ESM only. Bun for development and tests. Node ≥ 22 must also work for the
+- TypeScript, ESM only. Bun >= 1.4.0 for development and tests (enforced by
+  `scripts/require-bun.ts` through `bunfig.toml`, because Bun ignores `engines`). Node ≥ 22 must also work for the
   server target. The Cloudflare target is built with Wrangler.
 - `typebox` for schemas (the same library Pi uses). No zod.
 - A YAML 1.2 parser. Do not use `Bun.YAML`: it implements YAML 1.1, where `off` and `on`
@@ -387,10 +388,10 @@ Record here anything that went wrong twice, or that the user explicitly said not
   atomic, so one bad entry discards all the others.
 - Bun < 1.4.0 cancels an `AbortSignal.timeout()` for good when its abort-listener count drops
   from one to zero (`removeEventListener`, `onabort = null`): it never fires and `aborted`
-  stays `false`. Node and Bun >= 1.4.0 are correct (fixed by oven-sh/bun#37666). Never remove
-  the last abort listener from a signal you did not create; `bounded()` in `harness.ts` keeps
-  its listener for this reason. Before reporting a runtime bug upstream, reproduce it on the
-  latest release (download it to `/tmp`, do not upgrade the global install) and search merged
-  PRs, not only issues.
+  stays `false`. Node and Bun >= 1.4.0 are correct (fixed by oven-sh/bun#37666), so pikit
+  requires Bun >= 1.4.0 and `bounded()` in `harness.ts` removes its listener normally. If a
+  deadline test hangs, check `bun --revision` first. Before reporting a runtime bug upstream,
+  reproduce it on the latest release (download it to `/tmp`, do not upgrade the global
+  install) and search merged PRs, not only issues.
 - macOS has no `timeout` command. Bound a command that may hang with
   `perl -e 'alarm 60; exec @ARGV' <cmd>`, and give hanging tests `--timeout <ms>`.
