@@ -669,6 +669,35 @@ test("setup is synchronous and handles cannot be resolved during it", async () =
   );
 });
 
+test("setup only registers: pikit has no emit, run, derive or invocation context", async () => {
+  let keys: string[] = [];
+  const probe = defineComponent({
+    name: "probe",
+    setup(pikit) {
+      keys = Object.keys(pikit);
+    },
+  });
+  await defineHarness(quiet({ components: [probe] })).create();
+  expect(keys.sort()).toEqual(
+    ["target", "config", "logger", "clock", "on", "pipeline", "provide", "provideKeyed", "use", "useOptional", "useKeyed", "halt"].sort(),
+  );
+
+  // Type level too: doing work in setup does not compile.
+  const work = (pikit: Pikit) => {
+    // @ts-expect-error: emitting is work; emit from start or a handler's ctx
+    void pikit.emit("test.harness.ping", { via: "setup" });
+    // @ts-expect-error: running a pipeline is work
+    void pikit.run("test.harness.text", { text: "" });
+    // @ts-expect-error: setup has no invocation context to derive from
+    void pikit.derive((c: never) => c);
+    // @ts-expect-error: setup has no cancellation
+    void pikit.abortSignal;
+    // @ts-expect-error: setup has no invocation values
+    void pikit.value;
+  };
+  void work;
+});
+
 test("config is validated and defaulted per component; typos and bad values are errors", async () => {
   let received: unknown;
   const http = defineComponent({

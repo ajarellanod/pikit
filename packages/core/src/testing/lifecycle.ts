@@ -18,14 +18,8 @@
 
 import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "../context.ts";
 import type { Logger } from "../contracts/logger.ts";
-import {
-  ABANDONED_MESSAGE,
-  type ComponentDefinition,
-  type ComponentLifecycle,
-  defineHarness,
-  type Harness,
-  SETTLED_MESSAGE,
-} from "../harness.ts";
+import { type ComponentDefinition, type ComponentLifecycle, defineHarness, type Harness } from "../harness.ts";
+import { ABANDONED_MESSAGE, SETTLED_MESSAGE } from "../lifecycle.ts";
 
 /** One runner-independent case. Same shape as Pi's `ConformanceCase`. `run` throws on failure. */
 export interface ConformanceCase {

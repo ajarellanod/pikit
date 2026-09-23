@@ -40,9 +40,12 @@ test("a selection that names a non-provider is an error, even with one real prov
   const caps = createCapabilityRegistry<Caps>({ "storage.sql": "storage-postgres" });
   caps.provide("storage.sql", { kind: "sqlite" }, "storage-sqlite");
 
-  expect(() => caps.require("storage.sql")).toThrow(
-    'config selects "storage-postgres" but it is not provided by that component (provided by storage-sqlite)',
-  );
+  const message =
+    'config.capabilities["storage.sql"] selects "storage-postgres", which does not provide it (provided by storage-sqlite)';
+  expect(() => caps.require("storage.sql")).toThrow(message);
+  // Same rule, same error, whether it is reached by a use or by validating the whole selection.
+  expect((caps.resolveProvider("storage.sql") as Error).message).toBe(message);
+  expect(() => caps.validateSelection()).toThrow(message);
 });
 
 test("a component cannot provide the same capability twice", () => {

@@ -158,6 +158,13 @@ it never opens sockets, files, connections or timers. A component that owns reso
 calls `start` in dependency order and `stop` in reverse (§4.6). Because setup acquires
 nothing, a failed `create()` has nothing to clean up.
 
+`[decision]` `setup` receives `pikit: Pikit`, which is **not** a context. It carries the
+read-only `target`, `config`, `logger` and `clock`, the registration verbs (`on`, `pipeline`,
+`provide`, `provideKeyed`, `use`, `useOptional`, `useKeyed`) and `halt`. It has no `emit`,
+`run`, `derive`, `abortSignal` or `value`: emitting or running a pipeline during setup would
+reach other components' handlers before the graph is validated. Work happens in `start`/`stop`
+and in handlers, which receive a `HarnessContext` (§4.7).
+
 **`setup` is the manifest.** `[decision]` A component does not declare `provides` or
 `requires`. The harness records every `pikit.provide(name, impl)` and `pikit.use(name)` and
 derives the dependency graph from them, as Chord's plugin host does (§6.4). What the code
@@ -189,8 +196,8 @@ Because a listener's failure is only logged, nothing that must succeed (starting
 opening a database) may live in an event listener; that is what `start`/`stop` are for.
 
 ```ts
-pikit.on("outbound.delivered", async (event, ctx) => { ... });
-await pikit.emit("outbound.delivered", payload);
+pikit.on("outbound.delivered", async (event, ctx) => { ... });   // in setup
+await ctx.emit("outbound.delivered", payload);                    // in start or a handler
 ```
 
 `emit` awaits all listeners in registration order. A listener that throws is logged and does
@@ -243,7 +250,7 @@ pikit.pipeline("inbound.normalize", async (message, ctx) => ({
   text: message.text.trim(),
 }), { priority: 100, id: "trim" });
 
-const normalized = await pikit.run("inbound.normalize", raw);
+const normalized = await ctx.run("inbound.normalize", raw);   // in start or a handler
 ```
 
 Ordering is deterministic: by `priority` (descending), then registration order. Stages have
@@ -400,7 +407,7 @@ prints the resolved component graph, capability providers, pipeline chains, and 
 
 ### 4.7 Context object
 
-Every handler receives `ctx`:
+Every handler, `start` and `stop` receives `ctx` (setup does not; it receives `Pikit`, §4.2):
 
 ```ts
 // Same shape as Chord's `Context`, which Pi's APIs take as their last argument.
@@ -1244,7 +1251,7 @@ the whole 1.x line; there is no "pikit 2 rewrites how you define agents".
 
 | Surface | Rule |
 |---|---|
-| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed/emit/run`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
+| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed`, `ctx.emit/run/derive`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
 | Contract interfaces (`SessionStore`, `SqlDatabase`, `ExecutionEnv`, `Workspace`, `ChannelTransport`, …) | Same as core. A contract change ships with its updated conformance suite in the same release. |
 | `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface follows the core rule; its Pi-facing internals are unstable by design. |
 | `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. |

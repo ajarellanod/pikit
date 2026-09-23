@@ -12,7 +12,9 @@
  * fixed at setup instead of spawned at runtime.
  *
  * The registry does not know component manifests; the harness derives the dependency graph
- * from what each setup provides and uses.
+ * from what each setup provides and uses. The registry owns every selection rule: which
+ * provider a single capability resolves to, and why none does (`resolveProvider`,
+ * `validateSelection`). `config.ts` checks only the shape of the selection.
  */
 
 /**
@@ -53,6 +55,13 @@ export interface CapabilityRegistry<Caps extends object, KeyedCaps extends objec
   providers(name: string): string[];
   /** The single provider `require(name)` would use, or `undefined` if it would throw. */
   selected(name: string): string | undefined;
+  /** The single provider `require(name)` would use, or the error it would throw. */
+  resolveProvider(name: string): string | Error;
+  /**
+   * Throws unless every selected capability is single and provided by the selected component.
+   * Call it once every provider is registered.
+   */
+  validateSelection(): void;
   /** Keyed capabilities only: key → provider component name. */
   keys(name: string): Record<string, string>;
   /** Every capability with at least one provider. */
@@ -102,6 +111,7 @@ export function createCapabilityRegistry<Caps extends object, KeyedCaps extends 
     entries.set(name, list);
   }
 
+  /** The single provider of `name`, or why there is none. The only place selection is applied. */
   function resolve(name: string): Entry | Error {
     if (modeOf(name) === "keyed") {
       return new Error(`capability "${name}" is keyed; use it with useKeyed()`);
@@ -113,7 +123,7 @@ export function createCapabilityRegistry<Caps extends object, KeyedCaps extends 
       return (
         match ??
         new Error(
-          `capability "${name}": config selects "${chosen}" but it is not provided by that component` +
+          `config.capabilities["${name}"] selects "${chosen}", which does not provide it` +
             (list.length ? ` (provided by ${list.map((e) => e.provider).join(", ")})` : ""),
         )
       );
@@ -161,6 +171,23 @@ export function createCapabilityRegistry<Caps extends object, KeyedCaps extends 
     selected(name) {
       const result = resolve(name);
       return result instanceof Error ? undefined : result.provider;
+    },
+
+    resolveProvider(name) {
+      const result = resolve(name);
+      return result instanceof Error ? result : result.provider;
+    },
+
+    validateSelection() {
+      for (const name of Object.keys(selection)) {
+        if (modeOf(name) === "keyed") {
+          throw new Error(
+            `config.capabilities["${name}"] cannot select a provider: "${name}" is keyed and every provider is used`,
+          );
+        }
+        const result = resolve(name);
+        if (result instanceof Error) throw result;
+      }
     },
 
     providers(name) {

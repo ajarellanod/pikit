@@ -20,16 +20,11 @@
  * reach a provider whose setup has not run. `runtime.*` events stay notifications: a listener
  * that throws is logged and cannot make the harness look healthy or unhealthy.
  *
- * Deadlines belong to whoever runs the harness (systemd, a Durable Object constructor), so
- * `start(ctx)` and `stop(ctx)` take a context instead of timeout options. Its cancellation
- * reaches every hook as `ctx.abortSignal`, and the harness stops waiting for a hook that
- * outlives it. `runtime.*` listeners share that deadline. JavaScript cannot kill a promise, so
- * an abandoned hook keeps running and must release what it acquired when it sees the abort.
- * The harness logs abandoned work, and refuses to start again until it has settled.
+ * Definition-time checks live in `config.ts`, graph ordering in `graph.ts`, selection rules in
+ * the capability registry, and start/stop (with their deadlines) in `lifecycle.ts`.
  */
 
-import Type, { type Static, type TSchema } from "typebox";
-import Value from "typebox/value";
+import type { Static, TSchema } from "typebox";
 import {
   type CapabilityRegistry,
   createCapabilityRegistry,
@@ -37,10 +32,13 @@ import {
   type HarnessKeyedCapabilities,
   type Keyed,
 } from "./capabilities.ts";
-import { BACKGROUND_CONTEXT, type Context, withAbortSignal, withCancel } from "./context.ts";
+import { checkUniqueNames, readSelection, validateConfig } from "./config.ts";
+import { BACKGROUND_CONTEXT, type Context } from "./context.ts";
 import { type Clock, systemClock } from "./contracts/clock.ts";
 import { consoleLogger, type Logger } from "./contracts/logger.ts";
 import { createEventBus, type EventBus, type HarnessEvents } from "./events.ts";
+import { orderRecords, recordUse, type SetupRecord, type Use } from "./graph.ts";
+import { createLifecycle } from "./lifecycle.ts";
 import {
   createPipelineRegistry,
   type Halt,
@@ -52,10 +50,6 @@ import {
 
 declare module "./events.ts" {
   interface HarnessEvents {
-    "runtime.starting": Record<string, never>;
-    "runtime.ready": Record<string, never>;
-    "runtime.stopping": Record<string, never>;
-    "runtime.stopped": Record<string, never>;
     "pipeline.halted": { pipeline: string; stage: string; reason: string };
   }
 }
@@ -102,8 +96,17 @@ export interface KeyedHandle<T> {
 type SingleName = keyof HarnessCapabilities & string;
 type KeyedName = keyof HarnessKeyedCapabilities & string;
 
-/** What a component's `setup` receives: the context plus registration. */
-export interface Pikit extends HarnessContext {
+/**
+ * What a component's `setup` receives: read-only harness values plus registration. Not a
+ * context: setup only registers, so it cannot emit, run a pipeline or see a cancellation. Work
+ * happens in `start`/`stop` and in handlers, which receive a `HarnessContext`.
+ */
+export interface Pikit {
+  readonly target: Target;
+  /** Resolved, validated global config. The component's own config is `setup`'s second argument. */
+  readonly config: Readonly<Record<string, unknown>>;
+  readonly logger: Logger;
+  readonly clock: Clock;
   on: EventBus<HarnessEvents, HarnessContext>["on"];
   pipeline: PipelineRegistry<HarnessPipelines, HarnessContext>["register"];
   /** Declare that this component provides the single capability `name`, and install it. */
@@ -246,7 +249,6 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
       const capabilities: CapabilityRegistry<HarnessCapabilities, HarnessKeyedCapabilities> =
         createCapabilityRegistry(selection);
 
-      // Plain own properties (no getters): `setup` spreads the base context into `pikit`.
       // Reading `abortSignal` once is safe because a context never changes after derivation.
       const context = (inner: Context = BACKGROUND_CONTEXT): HarnessContext => {
         const ctx: HarnessContext = {
@@ -263,7 +265,6 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
         };
         return ctx;
       };
-      const base = context();
 
       // Handles resolve only after the graph is validated; until then a provider's setup may not
       // have run, so `get()` would return nothing or the wrong thing.
@@ -293,16 +294,6 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           return resolve().keys();
         },
       });
-      /** Record a use once per name and mode; a required use wins over an optional one. */
-      const recordUse = (record: SetupRecord, use: Use): Use => {
-        const existing = record.uses.find((u) => u.name === use.name && u.mode === use.mode);
-        if (!existing) {
-          record.uses.push(use);
-          return use;
-        }
-        existing.optional &&= use.optional;
-        return existing;
-      };
 
       // Every setup runs, in list order, and records what it provides and uses.
       const records: SetupRecord[] = [];
@@ -317,7 +308,10 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
           }
         };
         const pikit: Pikit = {
-          ...base,
+          target,
+          config,
+          logger,
+          clock,
           on: (name, listener) => {
             open(`on("${name}")`);
             return events.on(name, listener);
@@ -371,133 +365,22 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
         records.push(record);
       }
 
-      const ordered = orderRecords(records, capabilities, selection);
+      capabilities.validateSelection();
+      const ordered = orderRecords(records, capabilities);
       // Surface bad anchors now, not on the first message.
       for (const name of pipelines.names()) pipelines.chain(name);
       validated = true;
 
-      const lifecycles = ordered.flatMap(({ component, hooks }) =>
-        hooks ? [{ name: component.name, hooks }] : [],
-      );
-
-      /**
-       * Work abandoned at a deadline that has not settled yet, by label. It keeps running and
-       * shares its component's closure, so `start()` refuses to run beside it: a late `stop` could
-       * otherwise release what the new run acquired.
-       */
-      const abandoned = new Map<Promise<unknown>, string>();
-      const lifecycleStep = (label: string, work: () => unknown, signal: AbortSignal | undefined) =>
-        bounded(work, signal, (pending) => {
-          logger.warn(ABANDONED_MESSAGE, { step: label });
-          abandoned.set(pending, label);
-          const settled = () => {
-            abandoned.delete(pending);
-            logger.info(SETTLED_MESSAGE, { step: label });
-          };
-          pending.then(settled, settled);
-        });
-      /** `runtime.*` listeners share the lifecycle deadline. Events cannot fail the harness. */
-      const announce = async (ctx: HarnessContext, name: RuntimeEvent): Promise<void> => {
-        await lifecycleStep(`${name} listeners`, () => ctx.emit(name, {}), ctx.abortSignal).catch(() => {});
-      };
-
-      /**
-       * Stops `list` in reverse order under `ctx`. Every stop runs even if an earlier one threw;
-       * one still running when `ctx.abortSignal` fires is abandoned and reported.
-       */
-      const shutdown = async (list: typeof lifecycles, ctx: HarnessContext): Promise<Error[]> => {
-        await announce(ctx, "runtime.stopping");
-        const errors: Error[] = [];
-        for (const { name, hooks } of [...list].reverse()) {
-          try {
-            await lifecycleStep(`${name}.stop`, () => hooks.stop?.(ctx), ctx.abortSignal);
-          } catch (error) {
-            errors.push(new Error(`component "${name}" failed to stop`, { cause: error }));
-          }
-        }
-        await announce(ctx, "runtime.stopped");
-        return errors;
-      };
-
-      /** One in-flight `start()`: `stop()` cancels it and bounds its rollback with its own deadline. */
-      interface Boot {
-        done: Promise<void>;
-        cancel(reason: unknown): void;
-        boundRollback(signal: AbortSignal | undefined): void;
-      }
-
-      const boot = (parent: Context): Boot => {
-        const { context: bootContext, cancel } = withCancel(parent);
-        // The rollback does not inherit the start's cancellation, which is usually why it runs;
-        // only a stop() that interrupts the start bounds it.
-        const rollback = new AbortController();
-        const done = (async () => {
-          const ctx = context(bootContext);
-          await announce(ctx, "runtime.starting");
-          const up: typeof lifecycles = [];
-          for (const entry of lifecycles) {
-            try {
-              ctx.abortSignal?.throwIfAborted();
-              await lifecycleStep(`${entry.name}.start`, () => entry.hooks.start?.(ctx), ctx.abortSignal);
-            } catch (error) {
-              // Every runtime.starting is closed by runtime.stopped, even when start fails.
-              const rollbackCtx = context(withAbortSignal(rollback.signal, withoutCancel(parent)));
-              for (const stopError of await shutdown(up, rollbackCtx)) {
-                logger.error("rollback after failed start", { error: stopError });
-              }
-              started = false;
-              throw new Error(`component "${entry.name}" failed to start`, { cause: error });
-            }
-            up.push(entry);
-          }
-          running = up;
-          await announce(ctx, "runtime.ready");
-        })();
-        return { done, cancel, boundRollback: (signal) => follow(signal, rollback) };
-      };
-
-      let started = false;
-      let running: typeof lifecycles = [];
-      let starting: Boot | undefined;
-      let stopping: Promise<void> | undefined;
+      const lifecycle = createLifecycle({
+        components: ordered.flatMap(({ component, hooks }) => (hooks ? [{ name: component.name, hooks }] : [])),
+        context,
+        logger,
+      });
 
       return {
         context,
-
-        async start(parent = BACKGROUND_CONTEXT) {
-          if (stopping) throw new Error("harness is stopping");
-          if (started) throw new Error("harness already started");
-          if (abandoned.size) {
-            throw new Error(`harness cannot start: abandoned work still running (${[...abandoned.values()].join(", ")})`);
-          }
-          started = true;
-          starting = boot(parent);
-          try {
-            await starting.done;
-          } finally {
-            starting = undefined;
-          }
-        },
-
-        stop(parent = BACKGROUND_CONTEXT) {
-          stopping ??= (async () => {
-            if (starting) {
-              // A SIGTERM during boot: cancel it and let it roll back within this stop's deadline.
-              // Its error belongs to the caller of start().
-              starting.boundRollback(parent.abortSignal);
-              starting.cancel(new Error("harness is stopping"));
-              await starting.done.catch(() => {});
-            }
-            if (!started) return;
-            started = false;
-            const errors = await shutdown(running, context(parent));
-            running = [];
-            if (errors.length) throw new AggregateError(errors, "harness stopped with errors");
-          })().finally(() => {
-            stopping = undefined;
-          });
-          return stopping;
-        },
+        start: (parent = BACKGROUND_CONTEXT) => lifecycle.start(parent),
+        stop: (parent = BACKGROUND_CONTEXT) => lifecycle.stop(parent),
 
         describe() {
           return {
@@ -526,227 +409,6 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
   };
 }
 
-// ---- validation helpers ----
-
-function checkUniqueNames(components: ComponentDefinition[]): void {
-  const seen = new Set<string>();
-  for (const { name } of components) {
-    if (seen.has(name)) throw new Error(`component "${name}" is listed twice`);
-    seen.add(name);
-  }
-}
-
-type RuntimeEvent = "runtime.starting" | "runtime.ready" | "runtime.stopping" | "runtime.stopped";
-
-/**
- * Log messages for abandoned lifecycle work (`fields.step` names it). Not public API, but
- * `@pikit/core/testing` observes them to tell when abandoned work has settled.
- */
-export const ABANDONED_MESSAGE = "abandoned at its deadline; it keeps running";
-export const SETTLED_MESSAGE = "abandoned step settled";
-
-/**
- * Awaits `work()` unless `signal` aborts first; then calls `onAbandon` with the still-pending
- * work and rejects with the abort reason. `work` is always called. An abandoned promise keeps
- * running, and its outcome is consumed here so it cannot surface as an unhandled rejection.
- */
-function bounded(
-  work: () => unknown,
-  signal: AbortSignal | undefined,
-  onAbandon: (pending: Promise<unknown>) => void,
-): Promise<void> {
-  const pending = Promise.resolve().then(work);
-  if (signal === undefined) return pending.then(() => {});
-  return new Promise<void>((resolve, reject) => {
-    // Whichever happens first wins: the work settling, or the abort.
-    let decided = false;
-    const decide = (outcome: () => void) => {
-      if (decided) return;
-      decided = true;
-      signal.removeEventListener("abort", abandon);
-      outcome();
-    };
-    const abandon = () =>
-      decide(() => {
-        onAbandon(pending);
-        reject(signal.reason);
-      });
-    pending.then(
-      () => decide(resolve),
-      (error: unknown) => decide(() => reject(error)),
-    );
-    if (signal.aborted) {
-      // Past the deadline a step still runs and gets one turn of the event loop, so quick cleanup
-      // after a slow step is not reported as abandoned.
-      setTimeout(abandon, 0);
-    } else {
-      // Removed by `decide`, so a long-lived signal does not collect one listener per step.
-      signal.addEventListener("abort", abandon, { once: true });
-    }
-  });
-}
-
-/** Abort `target` when `signal` aborts (now, if it already has). */
-function follow(signal: AbortSignal | undefined, target: AbortController): void {
-  if (signal === undefined) return;
-  if (signal.aborted) target.abort(signal.reason);
-  else signal.addEventListener("abort", () => target.abort(signal.reason), { once: true });
-}
-
-/** `parent`'s values without its cancellation (for work that must outlive it, like a rollback). */
-function withoutCancel(parent: Context): Context {
-  return {
-    abortSignal: undefined,
-    value: (key) => parent.value(key),
-    toString: () => `${parent}.WithoutCancel`,
-  };
-}
-
-/** One `use()` / `useOptional()` / `useKeyed()` a setup made. */
-interface Use {
-  name: string;
-  mode: "single" | "keyed";
-  /** May have no provider: `useOptional`, and every `useKeyed`. */
-  optional: boolean;
-}
-
-/** What one component's setup did. */
-interface SetupRecord {
-  component: ComponentDefinition;
-  provides: string[];
-  uses: Use[];
-  hooks?: ComponentLifecycle;
-}
-
 function isThenable(value: unknown): boolean {
   return typeof value === "object" && value !== null && typeof (value as { then?: unknown }).then === "function";
-}
-
-/** Shape only; whether the chosen component provides the capability is known after setup. */
-function readSelection(config: Record<string, unknown> | undefined, components: ComponentDefinition[]) {
-  const raw = config?.capabilities;
-  if (raw === undefined) return {};
-  if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
-    throw new Error("config.capabilities must be an object of capability → component name");
-  }
-  const names = new Set(components.map((c) => c.name));
-  const selection: Record<string, string> = {};
-  for (const [capability, chosen] of Object.entries(raw)) {
-    if (typeof chosen !== "string") throw new Error(`config.capabilities["${capability}"] must be a component name`);
-    if (!names.has(chosen)) {
-      throw new Error(`config.capabilities["${capability}"] selects "${chosen}", which is not an installed component`);
-    }
-    selection[capability] = chosen;
-  }
-  return selection;
-}
-
-/**
- * Validates the graph recorded by setup and returns records in start order: providers before
- * consumers, list order as tiebreaker, depth-first with cycle detection. A consumer depends only
- * on the provider `get()` will return (the selected one), so an installed-but-unselected provider
- * cannot create a false cycle. A keyed use depends on every provider (possibly none); an
- * optional use on its provider when one is installed.
- */
-function orderRecords(
-  records: SetupRecord[],
-  capabilities: CapabilityRegistry<HarnessCapabilities, HarnessKeyedCapabilities>,
-  selection: Record<string, string>,
-): SetupRecord[] {
-  for (const [capability, chosen] of Object.entries(selection)) {
-    if (capabilities.mode(capability) === "keyed") {
-      throw new Error(
-        `config.capabilities["${capability}"] cannot select a provider: "${capability}" is keyed and every provider is used`,
-      );
-    }
-    const providers = capabilities.providers(capability);
-    if (!providers.includes(chosen)) {
-      throw new Error(
-        `config.capabilities["${capability}"] selects "${chosen}", which does not provide it` +
-          (providers.length ? ` (provided by ${providers.join(", ")})` : ""),
-      );
-    }
-  }
-
-  const byName = new Map(records.map((r) => [r.component.name, r]));
-  /** The components a use depends on: none (optional, absent), all (keyed), or the chosen one. */
-  const providersOf = (user: string, use: Use): string[] => {
-    const capability = use.name;
-    const mode = capabilities.mode(capability);
-    if (mode === undefined) {
-      if (use.optional) return [];
-      throw new Error(`component "${user}" uses "${capability}" but no installed component provides it`);
-    }
-    if (mode !== use.mode) {
-      throw new Error(
-        mode === "keyed"
-          ? `component "${user}" uses "${capability}" with use()/useOptional(), but it is keyed; use useKeyed()`
-          : `component "${user}" uses "${capability}" with useKeyed(), but it is provided without a key`,
-      );
-    }
-    const providers = capabilities.providers(capability);
-    if (mode === "keyed") return providers;
-    const chosen = selection[capability] ?? (providers.length === 1 ? providers[0] : undefined);
-    if (chosen === undefined) {
-      throw new Error(
-        `capability "${capability}" has several providers (${providers.join(", ")}); ` +
-          `select one with config.capabilities["${capability}"]`,
-      );
-    }
-    return [chosen];
-  };
-
-  const state = new Map<string, "visiting" | "done">();
-  const ordered: SetupRecord[] = [];
-  const visit = (record: SetupRecord, path: string[]): void => {
-    const name = record.component.name;
-    const mark = state.get(name);
-    if (mark === "done") return;
-    if (mark === "visiting") throw new Error(`dependency cycle: ${[...path, name].join(" → ")}`);
-    state.set(name, "visiting");
-    for (const use of record.uses) {
-      for (const provider of providersOf(name, use)) {
-        if (provider === name) continue; // a component may consume what it provides
-        visit(byName.get(provider) as SetupRecord, [...path, name]);
-      }
-    }
-    state.set(name, "done");
-    ordered.push(record);
-  };
-  for (const record of records) visit(record, []);
-  return ordered;
-}
-
-/**
- * Merged schema: `capabilities` plus one property per component that declares `config`,
- * with `additionalProperties: false` so a typo in a component name is an error, not silence.
- */
-function validateConfig(components: ComponentDefinition[], raw: Record<string, unknown>) {
-  const properties: Record<string, TSchema> = {
-    capabilities: Type.Optional(Type.Record(Type.String(), Type.String())),
-  };
-  // A deep copy: defaults and freezing must never touch the caller's objects.
-  const value = Value.Clone(raw) as Record<string, unknown>;
-  for (const component of components) {
-    if (!component.config) continue;
-    properties[component.name] = component.config;
-    value[component.name] ??= {};
-  }
-  const schema = Type.Object(properties, { additionalProperties: false });
-  const defaulted = Value.Default(schema, value) as Record<string, unknown>;
-  if (!Value.Check(schema, defaulted)) {
-    const problems = Value.Errors(schema, defaulted).map((e) => `${e.instancePath || "/"}: ${e.message}`);
-    throw new Error(`invalid config:\n  ${problems.join("\n  ")}`);
-  }
-  // `ctx.config` is shared by every component: a mutation would be a hidden coupling between
-  // them (and leak into the next `create()`). Frozen, it throws at the line that tries.
-  return deepFreeze(defaulted);
-}
-
-function deepFreeze<T>(value: T): T {
-  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
-    Object.freeze(value);
-    for (const child of Object.values(value)) deepFreeze(child);
-  }
-  return value;
 }
