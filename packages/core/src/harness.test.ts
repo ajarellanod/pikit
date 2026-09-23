@@ -63,7 +63,7 @@ test("start runs providers before consumers regardless of list order; handles re
   ]);
 });
 
-test("runtime.* events fire in order on start/stop; extensions are components", async () => {
+test("runtime.* events fire in order on start/stop", async () => {
   const seen: string[] = [];
   const audit = defineComponent({
     name: "audit",
@@ -76,7 +76,7 @@ test("runtime.* events fire in order on start/stop; extensions are components", 
     },
   });
 
-  const harness = await defineHarness(quiet({ components: [], extensions: [audit] })).create();
+  const harness = await defineHarness(quiet({ components: [audit] })).create();
   await harness.start();
   await expect(harness.start()).rejects.toThrow("already started");
   await harness.stop();

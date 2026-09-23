@@ -176,9 +176,8 @@ export function defineComponent<Schema extends TSchema = TSchema>(
 }
 
 export interface HarnessOptions {
+  /** Registry and project-local components alike; list order is the tiebreaker for start order. */
   components: ComponentDefinition[];
-  /** Sugar for project-local components. Concatenated after `components`. */
-  extensions?: ComponentDefinition[];
   /** Values, never a path. `config.capabilities[name]` selects among several providers. */
   config?: Record<string, unknown>;
   target?: Target;
@@ -226,7 +225,7 @@ export interface HarnessDefinition {
 }
 
 export function defineHarness(options: HarnessOptions): HarnessDefinition {
-  const all = [...options.components, ...(options.extensions ?? [])];
+  const all = [...options.components];
   const target = options.target ?? "server";
   const logger = options.logger ?? consoleLogger;
   const clock = options.clock ?? systemClock;

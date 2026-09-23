@@ -113,8 +113,7 @@ import pi from "./src/pikit/runtime/pi";
 import auditLog from "./src/extensions/audit-log";
 
 export default defineHarness({
-  components: [telegram, router, sessions, pi],
-  extensions: [auditLog],                 // sugar: project-local components
+  components: [telegram, router, sessions, pi, auditLog],   // registry and project-local alike
   config,                                 // a plain object; loading YAML is the target's job
 });
 ```
@@ -1368,8 +1367,8 @@ Resolved `[decision]`:
 - `start(ctx)`/`stop(ctx)` take their deadline from the caller as a context; hooks that
   outlive it are abandoned, not awaited (§4.6). The host knows the deadline; the core stays
   free of timers and timeout options.
-- An extension is a component; `extensions: [...]` is sugar concatenated to `components`. One
-  `define*` fewer to keep stable.
+- An extension is a component and is listed in `components` like any other. There is no
+  `extensions: [...]` option: one list, one way to install. One `define*` fewer to keep stable.
 - Events are typed by declaration merging on `HarnessEvents` (as Pi's `CustomAgentMessages`);
   no runtime registration for typing. Pipelines likewise on `HarnessPipelines`.
 - Pipelines are `Value → Value` (§4.4). Stage errors propagate; `undefined` from a stage is an
