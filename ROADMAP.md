@@ -101,7 +101,7 @@ harness without knowing anything about channels, storage or Pi.
 - **`setup` is the manifest**: synchronous, registration only, sealed when it returns. The
   dependency graph is derived from `provide`/`use`, with explicit handles resolved from
   `start` onward;
-- capabilities: single (with selection), optional (`use(name, { optional: true })`) and
+- capabilities: single (with selection), optional (`useOptional(name)`) and
   keyed (`provideKeyed`/`useKeyed`);
 - composition validated after every setup and before any start: missing, ambiguous and
   badly selected providers, mixed modes, duplicate keys and cycles;

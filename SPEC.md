@@ -168,11 +168,12 @@ does and what the component claims cannot disagree, because there is only one of
   yet. Call it in `start`, in a listener or in a pipeline stage. `[decision]` An explicit
   handle rather than Chord's proxies: pikit has no hot reload and no remote services, which
   are what proxies are for, and a visible `get()` shows where resolution happens.
-- `use()` is the only way to reach a capability. There is no `ctx.require`, because a
-  second path would be an undeclared dependency.
+- `use()`, `useOptional()` and `useKeyed()` are the only ways to reach a capability. There is
+  no `ctx.require`, because a second path would be an undeclared dependency.
 - Registration is **sealed** when a component's `setup` returns. `on`, `pipeline`, `provide`,
-  `provideKeyed`, `use` and `useKeyed` called later (from `start`, a listener or a timer)
-  throw, because they would bypass the validated graph and the resolved pipeline chains.
+  `provideKeyed`, `use`, `useOptional` and `useKeyed` called later (from `start`, a listener or
+  a timer) throw, because they would bypass the validated graph and the resolved pipeline
+  chains.
   What `describe()` reports is everything that runs.
 
 `defineHarness(...)` checks component names, the shape of `config.capabilities` and the
@@ -287,8 +288,10 @@ const store = pikit.use("sessions.store");   // in a component's setup; store.ge
 - A `use` with no provider, an ambiguous provider and a selection that names a component
   which does not provide the capability all fail in `create()`: after every setup, before any
   `start`.
-- **Optional dependencies.** `use(name, { optional: true })` declares a dependency that may be
-  absent: `get()` returns `undefined` when nothing provides it. When it is installed, its
+- **Optional dependencies.** `[decision]` `useOptional(name)` declares a dependency that may be
+  absent: `get()` returns `undefined` when nothing provides it. It is a separate verb, not an
+  option of `use`, so whether a dependency is optional is written in code and no config value
+  can switch it (S3). `use` and `useOptional` of the same name in one setup is a required use. When it is installed, its
   provider starts first like any other dependency. Optional is not permissive: several
   providers still need a selection. `describe()` lists optional uses apart from required ones,
   so `component.json` does not require them at install time. `has(name)` answers the same
@@ -299,9 +302,12 @@ const store = pikit.use("sessions.store");   // in a component's setup; store.ge
   `pikit.useKeyed(name)` and gets a `KeyedHandle<T>`: `get(key)` returns that key's
   implementation (or `undefined`) and `keys()` lists them, both from `start` onward. A keyed
   consumer starts after every provider of that capability.
+  - No provider is not an error: an empty set is a normal state, and a consumer already
+    handles a missing key per call (a missing transport is an `outbound.failed`). A consumer
+    that needs at least one key checks `keys()` in its `start`, visibly.
   - Two components providing the same key is an error.
-  - One capability is either single or keyed. Mixing `provide` and `provideKeyed`, or `use` and
-    `useKeyed`, for one name is an error.
+  - One capability is either single or keyed. Mixing `provide` and `provideKeyed`, or
+    `use`/`useOptional` and `useKeyed`, for one name is an error.
   - Selection does not apply to keyed capabilities.
 
   Same model as Chord's keyed services (§6.4), with keys fixed at setup instead of spawned at
@@ -1202,7 +1208,7 @@ the whole 1.x line; there is no "pikit 2 rewrites how you define agents".
 
 | Surface | Rule |
 |---|---|
-| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/provideKeyed/use/useKeyed/emit/run`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
+| `@pikit/core` public API (`defineHarness`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed/emit/run`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
 | Contract interfaces (`SessionStore`, `SqlDatabase`, `ExecutionEnv`, `Workspace`, `ChannelTransport`, …) | Same as core. A contract change ships with its updated conformance suite in the same release. |
 | `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface follows the core rule; its Pi-facing internals are unstable by design. |
 | `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. |
@@ -1314,8 +1320,9 @@ Resolved `[decision]`:
 - Keyed capabilities (`provideKeyed` / `useKeyed`) replace `channel.transport:<name>` and its
   "never in `use`" rule (§4.5). A transport is found by key per message, and the outbox
   depends on every transport.
-- Optional dependencies are `use(name, { optional: true })`: absent means `undefined`, and
-  present means ordered first.
+- Optional dependencies are `useOptional(name)`, a verb rather than a boolean option: absent
+  means `undefined`, present means ordered first. `useKeyed` accepts no providers, so it needs
+  no optional form.
 - Capability names: `execution` (filesystem, maybe no shell), `execution.shell` (real shell),
   `network.fetch` (outbound HTTP). `workspace.posix` is dropped: a real shell implies it.
 - `component.json`'s `provides`/`requires` are generated from `setup` (§10.2).

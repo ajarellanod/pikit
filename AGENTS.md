@@ -277,7 +277,8 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   under its own key (`provideKeyed`), and delivery looks it up per message with
   `useKeyed(...).get(message.channel)`.
 - **`has()` does not order startup.** A component that needs an optional capability declares
-  it with `use(name, { optional: true })`, so that its provider starts first when present.
+  it with `useOptional(name)`, so that its provider starts first when present. It is a verb,
+  not a `{ optional }` option: a boolean could be wired to config, which is a flag.
 - **Deduplication belongs to the channel.** The delivery id and the ack rule are
   platform-specific; `inbound-dedup` holds claims, and the core holds nothing.
 - **Cloudflare limits are design inputs:** no `child_process`, no `eval`, no dynamic

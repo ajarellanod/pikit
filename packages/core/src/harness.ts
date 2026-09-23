@@ -70,7 +70,7 @@ export interface HarnessContext extends Context {
   clock: Clock;
   /**
    * Whether a capability is provided. Meaningful after `create()`. It does not order startup:
-   * a component that needs an optional capability declares it with `use(name, { optional: true })`.
+   * a component that needs an optional capability declares it with `useOptional(name)`.
    */
   has(name: string): boolean;
   emit<K extends keyof HarnessEvents & string>(name: K, payload: HarnessEvents[K]): Promise<void>;
@@ -95,17 +95,12 @@ export interface Handle<T> {
 
 /**
  * A declared dependency on a keyed capability. `get(key)` returns the implementation for that
- * key; `keys()` lists them. Both throw during setup, like `Handle.get()`.
+ * key; `keys()` lists them (possibly none). Both throw during setup, like `Handle.get()`.
  */
 export interface KeyedHandle<T> {
   readonly name: string;
   get(key: string): T | undefined;
   keys(): string[];
-}
-
-/** `optional`: no provider is not an error (`get()` returns `undefined`, or no keys). */
-export interface UseOptions {
-  optional?: boolean;
 }
 
 type SingleName = keyof HarnessCapabilities & string;
@@ -119,12 +114,20 @@ export interface Pikit extends HarnessContext {
   provide<K extends SingleName>(name: K, impl: HarnessCapabilities[K]): void;
   /** Declare that this component provides the keyed capability `name` under `key`, and install it. */
   provideKeyed<K extends KeyedName>(name: K, key: string, impl: HarnessKeyedCapabilities[K]): void;
-  /** Depend on the single capability `name`. Its provider starts first. */
+  /** Depend on the single capability `name`. Its provider starts first; no provider is an error. */
   use<K extends SingleName>(name: K): Handle<HarnessCapabilities[K]>;
-  /** Depend on `name` if it is installed. When it is, its provider still starts first. */
-  use<K extends SingleName>(name: K, options: UseOptions & { optional: true }): Handle<HarnessCapabilities[K] | undefined>;
-  /** Depend on every implementation of the keyed capability `name`. All its providers start first. */
-  useKeyed<K extends KeyedName>(name: K, options?: UseOptions): KeyedHandle<HarnessKeyedCapabilities[K]>;
+  /**
+   * Depend on `name` if it is installed: `get()` returns `undefined` when nothing provides it.
+   * When it is installed, its provider starts first. A separate verb rather than an option, so
+   * whether a dependency is optional is written in code and cannot be switched from config.
+   */
+  useOptional<K extends SingleName>(name: K): Handle<HarnessCapabilities[K] | undefined>;
+  /**
+   * Depend on every implementation of the keyed capability `name`. All its providers start
+   * first. No provider is not an error: an empty set is a normal state, and a consumer handles
+   * a missing key per call anyway.
+   */
+  useKeyed<K extends KeyedName>(name: K): KeyedHandle<HarnessKeyedCapabilities[K]>;
   halt: typeof halt;
 }
 
@@ -188,7 +191,8 @@ export interface HarnessDescription {
   target: Target;
   /**
    * In start order. `provides`/`requires`/`optional` are derived from setup; `component.json` is
-   * generated from them.
+   * generated from them. `requires` are `use()`s; `optional` are `useOptional()`s and
+   * `useKeyed()`s, which install fine with no provider.
    */
   components: { name: string; version?: string; provides: string[]; requires: string[]; optional: string[] }[];
   /** `selected` for single capabilities; `keys` (key → provider) for keyed ones. */
@@ -337,16 +341,22 @@ export function defineHarness(options: HarnessOptions): HarnessDefinition {
             capabilities.provideKeyed(name, key, impl, component.name);
             if (!record.provides.includes(name)) record.provides.push(name);
           },
-          use: ((name: SingleName, options: UseOptions = {}) => {
+          use: (name) => {
             open(`use("${name}")`);
-            const use = recordUse(record, { name, mode: "single", optional: options.optional === true });
+            const use = recordUse(record, { name, mode: "single", optional: false });
+            return handle(use, component.name, () => capabilities.require(name));
+          },
+          useOptional: (name) => {
+            open(`useOptional("${name}")`);
+            const use = recordUse(record, { name, mode: "single", optional: true });
+            // `use.optional` is read at get() time: a use(name) in the same setup makes it required.
             return handle(use, component.name, () =>
               use.optional && !capabilities.has(name) ? undefined : capabilities.require(name),
             );
-          }) as Pikit["use"],
-          useKeyed: (name, options = {}) => {
+          },
+          useKeyed: (name) => {
             open(`useKeyed("${name}")`);
-            const use = recordUse(record, { name, mode: "keyed", optional: options.optional === true });
+            const use = recordUse(record, { name, mode: "keyed", optional: true });
             return keyedHandle(use, component.name, () => capabilities.keyed(name));
           },
           halt,
@@ -539,10 +549,11 @@ function withoutCancel(parent: Context): Context {
   };
 }
 
-/** One `use()` / `useKeyed()` a setup made. */
+/** One `use()` / `useOptional()` / `useKeyed()` a setup made. */
 interface Use {
   name: string;
   mode: "single" | "keyed";
+  /** May have no provider: `useOptional`, and every `useKeyed`. */
   optional: boolean;
 }
 
@@ -581,8 +592,8 @@ function readSelection(config: Record<string, unknown> | undefined, components: 
  * Validates the graph recorded by setup and returns records in start order: providers before
  * consumers, list order as tiebreaker, depth-first with cycle detection. A consumer depends only
  * on the provider `get()` will return (the selected one), so an installed-but-unselected provider
- * cannot create a false cycle. A keyed use depends on every provider; an optional use on its
- * provider when one is installed.
+ * cannot create a false cycle. A keyed use depends on every provider (possibly none); an
+ * optional use on its provider when one is installed.
  */
 function orderRecords(
   records: SetupRecord[],
@@ -616,7 +627,7 @@ function orderRecords(
     if (mode !== use.mode) {
       throw new Error(
         mode === "keyed"
-          ? `component "${user}" uses "${capability}" with use(), but it is keyed; use useKeyed()`
+          ? `component "${user}" uses "${capability}" with use()/useOptional(), but it is keyed; use useKeyed()`
           : `component "${user}" uses "${capability}" with useKeyed(), but it is provided without a key`,
       );
     }

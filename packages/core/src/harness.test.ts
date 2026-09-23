@@ -274,12 +274,12 @@ test("stop runs every stop hook and reports all failures together", async () => 
   await harness.stop(); // already stopped: no-op
 });
 
-test("optional use: absent is undefined; present is ordered first like any dependency", async () => {
+test("useOptional: absent is undefined; present is ordered first like any dependency", async () => {
   const seen: string[] = [];
   const channel = defineComponent({
     name: "channel",
     setup(pikit) {
-      const queue = pikit.use("test.queue", { optional: true });
+      const queue = pikit.useOptional("test.queue");
       return {
         start: () => {
           seen.push(`channel sees ${queue.get()?.name ?? "no queue"}`);
@@ -312,6 +312,23 @@ test("optional use: absent is undefined; present is ordered first like any depen
   await expect(defineHarness(quiet({ components: [channel, outbox, second] })).create()).rejects.toThrow(
     "several providers (outbox, outbox-2)",
   );
+
+  // use() and useOptional() of the same name in one setup: required wins.
+  const both2 = defineComponent({
+    name: "both",
+    setup(pikit) {
+      pikit.useOptional("test.queue");
+      pikit.use("test.queue");
+    },
+  });
+  await expect(defineHarness(quiet({ components: [both2] })).create()).rejects.toThrow(
+    'component "both" uses "test.queue" but no installed component provides it',
+  );
+
+  // The verb is the declaration: there is no option that config could switch.
+  // @ts-expect-error: use() takes no options
+  const flagged = (pikit: Pikit) => pikit.use("test.queue", { optional: true });
+  void flagged;
 });
 
 test("keyed capabilities: every provider contributes keys; consumers start after all of them", async () => {
@@ -378,7 +395,7 @@ test("keyed and single modes cannot be mixed, keys are unique, and keyed ignores
     create({
       components: [keyed("a", "http"), defineComponent({ name: "c", setup: (pikit) => void pikit.use("test.transport" as "test.store") })],
     }),
-  ).rejects.toThrow('component "c" uses "test.transport" with use(), but it is keyed; use useKeyed()');
+  ).rejects.toThrow('component "c" uses "test.transport" with use()/useOptional(), but it is keyed; use useKeyed()');
   await expect(
     create({
       components: [
@@ -391,15 +408,12 @@ test("keyed and single modes cannot be mixed, keys are unique, and keyed ignores
     create({ components: [keyed("a", "http")], config: { capabilities: { "test.transport": "a" } } }),
   ).rejects.toThrow('"test.transport" is keyed and every provider is used');
 
-  const needy = defineComponent({ name: "needy", setup: (pikit) => void pikit.useKeyed("test.transport") });
-  await expect(create({ components: [needy] })).rejects.toThrow(
-    'component "needy" uses "test.transport" but no installed component provides it',
-  );
+  // No provider is a normal state for a keyed capability, not a composition error.
   let keys: string[] = ["unset"];
   const relaxed = defineComponent({
     name: "relaxed",
     setup(pikit) {
-      const transports = pikit.useKeyed("test.transport", { optional: true });
+      const transports = pikit.useKeyed("test.transport");
       return {
         start: () => {
           keys = transports.keys();
@@ -410,6 +424,9 @@ test("keyed and single modes cannot be mixed, keys are unique, and keyed ignores
   const harness = await create({ components: [relaxed] });
   await harness.start();
   expect(keys).toEqual([]);
+  expect(harness.describe().components).toEqual([
+    { name: "relaxed", provides: [], requires: [], optional: ["test.transport"] },
+  ]);
 });
 
 test("registration is sealed when setup returns", async () => {
@@ -568,7 +585,7 @@ test("setup is synchronous and handles cannot be resolved during it", async () =
   const eagerKeyed = defineComponent({
     name: "eager-keyed",
     setup(pikit) {
-      pikit.useKeyed("test.transport", { optional: true }).keys();
+      pikit.useKeyed("test.transport").keys();
     },
   });
   await expect(defineHarness(quiet({ components: [eagerKeyed] })).create()).rejects.toThrow(
