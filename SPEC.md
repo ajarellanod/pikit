@@ -1330,6 +1330,19 @@ And the runtime proof:
   `channel.transport` optional `edit()` + a `stream-to-edit` component, or core support.
 - Multi-tenant isolation guarantees: routing is not isolation. Document clearly; consider a
   `tenant-isolation` component that maps tenants to separate DO namespaces / DB files.
+- Runtime availability and degradation: how a component that breaks after `start` (a stuck
+  poller, a dead connection) becomes visible, and who decides between degrading and
+  restarting. Today `/ready` reflects only the start, so a broken process looks healthy
+  and no supervisor restarts it (§9.1). Chord has the consumer half (stable handles,
+  `unavailable`/`replaced`, calls fail fast without queueing, `ready()`) but no
+  self-report, no notion of essential, and no policy. Current lean: a `health` capability
+  and a `health-registry` component, not core. Components report through
+  `useOptional("health")`, so absence changes nothing. The registry owns the policy: degrade
+  what can be tolerated, fail `/health` for what is essential so that the supervisor
+  restarts the process. It follows Chord's availability semantics so that §6.4 does not end
+  up with two models. It is decided with M2's real components, not before. To settle: grace
+  periods against flapping, where "essential" is declared (per deployment, so config), and a
+  conformance suite that proves a component reports its failures.
 
 Resolved `[decision]`:
 

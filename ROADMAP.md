@@ -168,7 +168,8 @@ redeliveries, channel outages, restarts and scheduled work.
 - Scheduled prompts run.
 
 **Scope:** `channel-telegram`, `inbound-dedup`, `durable-outbox`, `scheduler-cron`, the
-telegram preset, `expose`, `config check`.
+telegram preset, `expose`, `config check`. Runtime availability (SPEC §16) is decided here,
+with the first components that can fail while running.
 
 **Evidence:** scenarios 2 and 3, plus a redelivery scenario for `inbound-dedup`.
 
