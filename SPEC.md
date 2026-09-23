@@ -1467,6 +1467,18 @@ is that the answer is "nothing" for every minor.
   they run and checks that each settles within `settleMs`, that nothing is left open (when
   the fixture provides `openResources()`), and that a fresh app over the same component can start again. Cases have
   Pi's runner-independent shape (`{ group, name, run() }`).
+- **Agent runtime conformance** (`createAgentRuntimeConformance` in `@pikit/core/testing`):
+  every `agent.runtime` passes it. It drives a scripted agent that the fixture provides (each
+  turn answers `answer: <newest inbound message>`; `hold` blocks in a tool until released;
+  `holdAtEnd()` pauses a run after its final answer) and observes only the capability and the
+  `agent.*` events. It covers admission (`started` / `queued` / `duplicate`, concurrent
+  deliveries included), a message answered by the run in progress even when it arrives as that run
+  ends, `agent.settled` with nobody waiting, a cancelled caller that does not stop the run,
+  `abort()` withdrawing queued messages that stay duplicates, and a run left open by a dead worker:
+  resumed by `resume()` or by the next `dispatch`, answering the messages dispatched to it, its
+  request still a duplicate. The fixture's `interrupted()` provides that dead worker; the Pi
+  adapter kills a real process. An in-memory double in the suite's own tests proves the suite
+  asks nothing Pi-specific (S12).
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
   implementation must pass its suite. Pi's session conformance is reused for

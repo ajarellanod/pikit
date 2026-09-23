@@ -150,8 +150,8 @@ around it.
 `pi-durable` (SPEC §6.4).
 
 ✅ **Agent contracts in core:** `defineAgent`, `AgentRuntime`, `agent.definition` and the
-`agent.*` events (SPEC §6.1). Next: the `agent.runtime` conformance suite, then the adapter
-that passes it.
+`agent.*` events (SPEC §6.1), and the `agent.runtime` conformance suite in
+`@pikit/core/testing`, passed by an in-memory double. Next: the adapter that passes it.
 
 **Scope:**
 - `@pikit/pi-adapter` on `accept()` / `drive()` in one server process, shaped by the spike.
