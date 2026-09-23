@@ -1081,9 +1081,9 @@ channel-telegram/
   "targets": ["server", "cloudflare"],
   "requires": {
     "pikit": ">=0.1.0",
-    "components": ["channel-core"],
     "capabilities": ["network.fetch", "secrets"]
   },
+  "optional": { "capabilities": [] },
   "provides": ["channel.transport"],
   "dependencies": {},
   "files": [{ "source": "files/src", "target": "src" }],
@@ -1102,10 +1102,17 @@ Rules:
 - `dependencies` are real npm deps (SDKs, crypto). They are added to the project's
   `package.json`. Behavior is copied; protocols and crypto are depended on.
 - No install scripts. Ever. `[decision]`
-- `provides` and the required capabilities in `component.json` exist because the CLI must
+- `provides`, `requires.capabilities` and `optional.capabilities` exist because the CLI must
   read them before any code is copied. They are **generated** from the component's `setup`
   (`describe()`), never written by hand, and `pikit registry validate` and `pikit doctor` fail
   when they drift. `[decision]`
+  - `requires.capabilities` are its `use()`s: the component cannot run without a provider.
+  - `optional.capabilities` are its `useOptional()`s and `useKeyed()`s: it runs without a
+    provider. The delivery component's `useKeyed("channel.transport")` lands here.
+- A component depends on **capabilities, never on components** (rule 4). There is no
+  `requires.components`: the manifest is generated from `setup`, and `setup` has no way to
+  name another component. A capability no installed component provides is reported by
+  `pikit add` and `pikit doctor`, not installed implicitly. `[decision]`
 - `targets` gates `pikit add` against the project's configured targets.
 
 ### 10.3 Project manifest
@@ -1151,7 +1158,7 @@ No server-side logic. Private registries use the user's existing Git credentials
 pikit add acme/channel-whatsapp
   1. resolve registry + version (pinned commit)
   2. fetch component package
-  3. check targets, pikit version, capability availability (warn), component deps (install)
+  3. check targets and pikit version; warn for each required capability nothing installed provides
   4. show: files to write, npm deps to add, env vars required, capabilities requested, source
   5. confirm
   6. write files; refuse to overwrite modified files without --force
@@ -1162,7 +1169,9 @@ pikit add acme/channel-whatsapp
  11. run `pikit doctor`
 ```
 
-`pikit remove` reverses it and refuses if another installed component `requires` it.
+`pikit remove` reverses it and refuses if that would leave a capability that another installed
+component requires (`use`) without a provider. Losing the provider of an optional capability is
+allowed; `doctor` reports it.
 
 ### 10.6 Upgrade flow
 
@@ -1359,7 +1368,8 @@ Resolved `[decision]`:
   dependency, and a second, undeclared path would contradict §4.2.
 - Capability names: `execution` (filesystem, maybe no shell), `execution.shell` (real shell),
   `network.fetch` (outbound HTTP). `workspace.posix` is dropped: a real shell implies it.
-- `component.json`'s `provides`/`requires` are generated from `setup` (§10.2).
+- `component.json`'s `provides`/`requires`/`optional` are generated from `setup` (§10.2).
+  Components depend on capabilities only; there is no `requires.components`.
 - `defineAgent` and the agent shapes are core; Pi payload types are opaque in core and made
   precise by the adapter (§6.1).
 - **Pi first** (§6.2): an agent-facing feature is built in pikit only after checking that Pi

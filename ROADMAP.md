@@ -59,7 +59,7 @@ nobody can check is only a wish.
 |---|---|---|
 | S12 | **Contracts first.** Every capability has an interface and a conformance suite before its first implementation. It is stable only when two implementations (or one implementation plus the memory double) pass the same suite. Session stores also pass Pi's `createSessionRepoConformance` and `createStorageConformance`. | The suite exists and runs in CI for every implementation. |
 | S13 | **Readable source.** Copied components are small files with comments on the *why*. They ship their tests inside `files/`, so the tests keep running in the user's project, and they have no install scripts, ever. | Registry validation; review. |
-| S14 | **One truth per fact.** A component's dependencies are what its `setup` does (`provide`/`use`), never a separate declaration. `component.json`'s `provides`/`requires` are generated from `setup` and never edited by hand. | `describe()` in `pikit registry validate` and `pikit doctor` fails on drift. |
+| S14 | **One truth per fact.** A component's dependencies are what its `setup` does (`provide`/`use`), never a separate declaration. `component.json`'s `provides`/`requires`/`optional` are generated from `setup` and never edited by hand. | `describe()` in `pikit registry validate` and `pikit doctor` fails on drift. |
 | S15 | **Always green.** `bun test` and `tsc --noEmit` pass on `main`. Every change leaves exactly one runnable check. A milestone ends with its scenarios running, not described. | CI. |
 
 ### Stability
