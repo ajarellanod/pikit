@@ -1713,8 +1713,6 @@ And the runtime proof:
   all conversations): D1 index vs per-DO only. Probably per-DO + optional D1 index component.
 - Config format: YAML vs TypeScript-only. TS gives types for free; YAML is friendlier for
   `configure` wizards. Current lean: YAML for values, TS for composition.
-- Whether `router` should be core or a component. Current lean: the `route.resolve`
-  pipeline is core; every actual routing strategy is a component.
 - Streaming to channels that support message editing (Telegram, Google Chat): a
   `channel.transport` optional `edit()` + a `stream-to-edit` component, or core support.
 - Multi-tenant isolation guarantees: routing is not isolation. Document clearly; consider a
@@ -1818,6 +1816,10 @@ Resolved `[decision]`:
 - `AgentResult.requestIds` lists every request a run took (§6.1). Without it, a request queued
   into a running run would never learn it was answered, and a channel that replies per message
   (HTTP) would wait forever. The list is read from the transcript; no record is added.
+- The router is a component (M1). The `route.resolve` pipeline and `RouteDecision` are core; every
+  routing strategy is a component that adds a stage. `router-basic` fills in `defaultAgent` when no
+  earlier stage decided, so a project stage with a higher priority routes around it without forking
+  it.
 - Model providers are components: each provides the keyed capability `model.provider` under its
   id, and the runtime builds its models from all of them (§4.5). Adding a provider is adding a
   component, and a missing one is visible in `doctor`, not a config flag.

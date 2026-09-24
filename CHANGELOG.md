@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/router-basic: a `route.resolve` stage that sends every message no earlier stage routed
+  to `defaultAgent` (SPEC §5).
 - component/provider-anthropic: provides pi-ai's Anthropic provider as `model.provider` `anthropic`,
   signing in with a stored OAuth login or API key, or `ANTHROPIC_API_KEY` (SPEC §4.5).
 - component/runtime-pi: builds its models with `model.credentials` when installed, and refuses to
