@@ -28,6 +28,13 @@ started it and each one queued into it.
 
 `abort()` stops the active run. Any message queued in it is withdrawn and stays a duplicate.
 
+Duplicates are found in the conversation's inbox and in its last 1000 messages. A platform
+redelivers within minutes, so a redelivery older than 1000 messages is not expected; one that
+arrives anyway runs as a new message.
+
+Each agent names its model as `provider/modelId`, so different agents can use different
+providers. Install one `model.provider` component per provider.
+
 A conversation's session is open only while a run is being driven. Stopping the app leaves
 unfinished runs open in their sessions, and the next process resumes them.
 

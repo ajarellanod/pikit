@@ -18,10 +18,12 @@ import {
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import {
+  type AgentDefinition,
   type AgentTool,
   type AppEvents,
   BACKGROUND_CONTEXT,
   createContextKey,
+  defineAgent,
   defineApp,
   defineComponent,
   silentLogger,
@@ -30,14 +32,19 @@ import {
 } from "@pikit/core";
 import { toPi } from "./context.ts";
 import { hasRequest, inboundMessage, LANE } from "./inbound.ts";
-import { createPiRuntime, modelsFrom, type SessionStore } from "./index.ts";
-import { holdTool, killMidRun, scriptedAgent, scriptedProvider } from "./testing/index.ts";
+import { createPiRuntime, modelsFrom, type Provider, type SessionStore } from "./index.ts";
+import { holdTool, killMidRun, type ModelRequest, scriptedAgent, scriptedProvider } from "./testing/index.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 type Result = AppEvents["agent.settled"] | AppEvents["agent.failed"];
 
-/** A runtime over `sessions` with one scripted agent, and the results it reports. */
-async function setup(options: { tools?: AgentTool[]; sessions?: SessionStore } = {}) {
+/**
+ * A runtime over `sessions`, and the results it reports. By default one scripted agent (with
+ * `tools`) on the `faux` provider.
+ */
+async function setup(
+  options: { tools?: AgentTool[]; sessions?: SessionStore; agents?: AgentDefinition[]; providers?: Provider[] } = {},
+) {
   const sessions = options.sessions ?? new MemorySessionRepo();
   const results: Result[] = [];
   const waiters: (() => void)[] = [];
@@ -53,19 +60,19 @@ async function setup(options: { tools?: AgentTool[]; sessions?: SessionStore } =
     },
   });
   const app = await defineApp({ components: [observer], logger: silentLogger }).create();
-  const agent = { ...scriptedAgent(holdTool(async () => "unused")), tools: options.tools ?? [] };
+  const agents = options.agents ?? [{ ...scriptedAgent(holdTool(async () => "unused")), tools: options.tools ?? [] }];
   let opened = 0;
   const runtime = createPiRuntime({
     sessions,
-    agent: (name) => (name === agent.name ? agent : undefined),
-    models: modelsFrom([scriptedProvider()]),
+    agent: (name) => agents.find((agent) => agent.name === name),
+    models: modelsFrom(options.providers ?? [scriptedProvider()]),
     events: app.context(),
     onHarness: () => void opened++,
   });
-  const conversation = async (id?: string) => {
-    const session = await sessions.create({ cwd: "/", ...(id !== undefined && { id }) }, ctx);
+  const conversation = async (agent = agents[0]?.name ?? "scripted") => {
+    const session = await sessions.create({ cwd: "/" }, ctx);
     await session.close(ctx);
-    return { key: `test:${session.metadata.id}`, agent: agent.name, sessionId: session.metadata.id };
+    return { key: `test:${session.metadata.id}`, agent, sessionId: session.metadata.id };
   };
   const result = async (requestId: string): Promise<Result> => {
     for (;;) {
@@ -126,6 +133,69 @@ describe("conversations", () => {
     };
     expect(await stats(a.sessionId)).toBe(4);
     expect(await stats(b.sessionId)).toBe(0);
+    await s.runtime.close(s.app.context());
+  });
+});
+
+describe("models", () => {
+  test("each agent runs on the provider its model names", async () => {
+    const support = defineAgent({ name: "support", model: "faux/scripted" });
+    const sales = defineAgent({ name: "sales", model: "other/scripted" });
+    const s = await setup({ agents: [support, sales], providers: [scriptedProvider(), scriptedProvider({ id: "other" })] });
+
+    await s.runtime.dispatch({ requestId: "r1", conversation: await s.conversation("support"), prompt: "hi" }, s.app.context());
+    await s.runtime.dispatch({ requestId: "r2", conversation: await s.conversation("sales"), prompt: "hi" }, s.app.context());
+
+    const providerOf = async (requestId: string) =>
+      (await s.result(requestId)).messages.flatMap((message) => (message.role === "assistant" ? [message.provider] : []));
+    expect(await providerOf("r1")).toEqual(["faux"]);
+    expect(await providerOf("r2")).toEqual(["other"]);
+    await s.runtime.close(s.app.context());
+  });
+});
+
+describe("caches", () => {
+  test("a busy conversation reuses its open harness: a queued message opens nothing", async () => {
+    let release!: () => void;
+    let started!: () => void;
+    const running = new Promise<void>((resolve) => (started = resolve));
+    const released = new Promise<string>((resolve) => (release = () => resolve("released")));
+    const s = await setup({ tools: [holdTool(() => (started(), released))] });
+    const conversation = await s.conversation();
+
+    await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "hold" }, s.app.context());
+    await running;
+    const queued = await s.runtime.dispatch({ requestId: "r2", conversation, prompt: "and this" }, s.app.context());
+    release();
+    await s.result("r1");
+
+    expect(queued.kind).toBe("queued");
+    expect(s.opens()).toBe(1);
+    await s.runtime.close(s.app.context());
+  });
+
+  test("reopening an idle conversation sends the same prefix, so the provider's prompt cache still hits", async () => {
+    const requests: ModelRequest[] = [];
+    const s = await setup({ providers: [scriptedProvider({ onRequest: (request) => void requests.push(structuredClone(request)) })] });
+    const conversation = await s.conversation();
+
+    await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "one" }, s.app.context());
+    await s.result("r1");
+    await s.runtime.dispatch({ requestId: "r2", conversation, prompt: "two" }, s.app.context());
+    const second = await s.result("r2");
+
+    // Closed in between (SPEC §7.1, invariant 5), then reopened from the session.
+    expect(s.opens()).toBe(2);
+    const [before, after] = requests;
+    if (before === undefined || after === undefined) throw new Error("expected two model requests");
+    const { messages: beforeMessages, ...beforeRest } = before;
+    const { messages: afterMessages, ...afterRest } = after;
+    // Same system prompt and tools, and the earlier conversation as an unchanged prefix.
+    expect(afterRest).toEqual(beforeRest);
+    expect(afterMessages.slice(0, beforeMessages.length)).toEqual(beforeMessages);
+    const answer = second.messages.find((message) => message.role === "assistant");
+    if (answer?.role !== "assistant") throw new Error("expected an answer");
+    expect(answer.usage.cacheRead).toBeGreaterThan(0);
     await s.runtime.close(s.app.context());
   });
 });

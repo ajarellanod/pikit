@@ -4,3 +4,4 @@
 export { createPiRuntimeFixture, killMidRun, testComponents } from "./fixture.ts";
 export type { PiRuntimeUnderTest, TestComponents } from "./fixture.ts";
 export { holdTool, scriptedAgent, scriptedProvider } from "./script.ts";
+export type { ModelRequest, ScriptedProviderOptions } from "./script.ts";

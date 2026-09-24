@@ -343,7 +343,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
 | `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
-| `model.provider` (keyed by provider id) | pi-ai `Provider` | One per model provider (`anthropic`, `faux` in tests), each its own component importing its pi-ai provider by subpath. The runtime builds its models from all of them; an agent names `provider/modelId`. Typed by `@pikit/pi-adapter` (§6.2). |
+| `model.provider` (keyed by provider id) | pi-ai `Provider` | One per model provider (`anthropic`, `faux` in tests), each its own component importing its pi-ai provider by subpath. The runtime builds its models from all of them, and each agent names its own `provider/modelId`, so agents may use different providers side by side. Typed by `@pikit/pi-adapter` (§6.2). |
 | `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
 | `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
 | `channel.transport` (keyed by channel name) | `ChannelTransport` | Send/edit/delete messages for one channel. Each channel component provides its transport under its own key; delivery uses `transports.get(message.channel)`. A missing key is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
@@ -775,6 +775,12 @@ Responsibilities:
 - Keep a conversation's harness open only while it drives a run, and close it when idle (§7.1,
   invariant 5). Everything that touches one conversation runs in that conversation's line, one
   step at a time; runs execute outside it.
+  - A busy conversation reuses its open harness: a message queued into its run opens nothing.
+  - Reopening costs a session read, not the provider's prompt cache: Pi sends the same system
+    prompt, tools and message prefix under the same cache key (`<sessionId>:<lane>`), so the
+    provider still hits its cache. Both are tested (`adapter.test.ts`, "caches").
+  - Keeping idle conversations open for a while (an `idleMs`) is added only if reopening is
+    measured to be slow.
 - Give each conversation's harness to `onHarness` when it opens: where Pi hooks attach (the
   tier-A extensions of §6.2b; tests). The `runtime-pi` component takes it as
   `createRuntimePi({ onHarness })`, a plain function in its own source; its default export is

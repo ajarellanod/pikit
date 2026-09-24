@@ -18,10 +18,24 @@ function textOf(message: Message | undefined): string {
   return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 }
 
-/** The provider `faux`, with the model `faux/scripted`. */
-export function scriptedProvider(): Provider {
-  const faux = fauxProvider({ provider: "faux", models: [{ id: "scripted" }] });
+/** What the provider was asked: the context of one model request. */
+export type ModelRequest = Parameters<FauxResponseFactory>[0];
+
+export interface ScriptedProviderOptions {
+  /** Provider id. Default `faux`; its model is `<id>/scripted`. */
+  id?: string;
+  /** Sees every request, e.g. to check what reached the model. */
+  onRequest?(request: ModelRequest): void;
+}
+
+/**
+ * The scripted provider, model `<id>/scripted`. Like pi-ai's faux provider it reports prompt-cache
+ * usage: `cacheRead` counts the prefix a request shares with the previous one of its session.
+ */
+export function scriptedProvider(options: ScriptedProviderOptions = {}): Provider {
+  const faux = fauxProvider({ provider: options.id ?? "faux", models: [{ id: "scripted" }] });
   const step: FauxResponseFactory = (context) => {
+    options.onRequest?.(context);
     const last = context.messages.at(-1);
     if (last?.role === "user" && textOf(last) === "hold") {
       return fauxAssistantMessage(fauxToolCall("hold", {}), { stopReason: "toolUse" });
