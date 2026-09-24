@@ -114,6 +114,10 @@ export class PiConversation {
           return undefined;
         });
       }
+      const interrupted = open.find((operation) => operation.lane === LANE);
+      // Pi runs `before_run` only when a run starts: a resumed run is prepared here (see turns.ts),
+      // before the extensions bind, so they start from the tools it was prepared with.
+      if (interrupted?.kind === "run" && agent.prepare !== undefined) await turns.prepareRun(harness, lane, pi);
       // Bound before any run is resumed, so a resumed run is seen by the extensions too.
       conversation.extensions = await loaded?.bind(
         {
@@ -127,9 +131,6 @@ export class PiConversation {
         },
         pi,
       );
-      const interrupted = open.find((operation) => operation.lane === LANE);
-      // Pi runs `before_run` only when a run starts: a resumed run is prepared here (see turns.ts).
-      if (interrupted?.kind === "run" && agent.prepare !== undefined) await turns.prepareRun(harness, lane, pi);
       if (interrupted !== undefined) conversation.resumeOpen(interrupted.operationId, interrupted.kind === "run", ctx);
       return conversation;
     } catch (error) {

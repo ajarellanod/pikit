@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: a Pi extension's `pi.getActiveTools()` returns the tools an agent's `prepare` gave the
+  run, in `before_agent_start` and after, and in a run resumed after a crash. It returned the tools
+  the conversation opened with.
 - component/deployment-docker: the `Dockerfile` copies `vendor/` before `bun install`, so a project
   whose `@pikit/*` packages are vendored tarballs (M1, until they are published) builds in Docker.
 - component/deployment-docker: the JSON logger compares field names word by word, so token counts

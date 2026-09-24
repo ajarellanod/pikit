@@ -420,6 +420,8 @@ class Bound {
       }),
       hooks.on("before_run", async (event, ctx) => {
         this.systemPromptOverride = undefined;
+        // An agent's `prepare` sets the run's tools in its own `before_run`, which runs first.
+        this.activeTools = await this.lane.getActiveTools(ctx);
         if (!handled("before_agent_start")) return undefined;
         const added: AgentMessage[] = [];
         const start = { type: "before_agent_start", prompt: promptText(event.prompt), systemPrompt: this.target.systemPrompt ?? "" };

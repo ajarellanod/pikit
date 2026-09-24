@@ -242,6 +242,18 @@ test("a Pi extension's before_agent_start sees the system prompt prepare chose",
   await s.runtime.close(s.app.context());
 });
 
+test("a Pi extension's getActiveTools() sees the tools prepare chose", async () => {
+  const seen: string[][] = [];
+  const s = await setup({ extensions: [(pi) => void pi.on("before_agent_start", () => void seen.push(pi.getActiveTools()))] });
+  const conversation = await s.conversation();
+  await s.ask(conversation, "r1", 'call: advance {"phase":"deploying"}');
+  await s.ask(conversation, "r2", 'call: advance {"phase":"testing"}');
+  await s.ask(conversation, "r3", "hello");
+
+  expect(seen).toEqual([["advance"], ["advance", "deploy"], ["advance"]]);
+  await s.runtime.close(s.app.context());
+});
+
 describe("a resumed run is prepared again (SPEC §6.2a)", () => {
   const WORKER = fileURLToPath(new URL("./testing/prepared-worker.ts", import.meta.url));
 
@@ -261,12 +273,13 @@ describe("a resumed run is prepared again (SPEC §6.2a)", () => {
     if (!held) throw new Error("the prepared worker died before its run reached the tool");
   }
 
-  async function resumeAfter(mode: "keep" | "advance") {
+  async function resumeAfter(mode: "keep" | "advance", extensions?: PiExtension[]) {
     const root = mkdtempSync(join(tmpdir(), "pikit-prepared-"));
     try {
       let runs = 0;
       const agent = preparedAgent(holdTool(async () => `run ${++runs}`, "safe"));
-      const s = await setup({ sessions: new JsonlSessionRepo({ fileSystem: new NodeExecutionEnv({ cwd: root }), sessionsRoot: root }), agents: [agent] });
+      const sessions = new JsonlSessionRepo({ fileSystem: new NodeExecutionEnv({ cwd: root }), sessionsRoot: root });
+      const s = await setup({ sessions, agents: [agent], ...(extensions !== undefined && { extensions }) });
       const conversation = await s.conversation("prepared");
       await killPrepared(root, conversation.sessionId, mode);
 
@@ -295,5 +308,13 @@ describe("a resumed run is prepared again (SPEC §6.2a)", () => {
     // `hold` is no longer the agent's: Pi records the interrupted call instead of running it again.
     expect(runs).toBe(0);
     expect(sent(requests[0])).toEqual({ systemPrompt: "done prompt", tools: [] });
+  }, 20_000);
+
+  test("a Pi extension sees the tools the resumed run was prepared with", async () => {
+    const seen: string[][] = [];
+    await resumeAfter("advance", [(pi) => void pi.on("turn_start", () => void seen.push(pi.getActiveTools()))]);
+
+    // `hold` was active when the worker died; prepare gives the resumed run no tools.
+    expect(seen[0]).toEqual([]);
   }, 20_000);
 });
