@@ -117,7 +117,7 @@ app without knowing anything about channels, storage or Pi.
 and `registerEvent` arrive with the first component that needs them. `@pikit/core/testing`
 starts with the lifecycle conformance, which every resource-owning component passes.
 
-### M1 — Five minutes, then it's yours
+### M1 — Five minutes, then it's yours ✅
 
 **Proves:** a source-owned harness can be onboarded as fast as a finished product.
 
@@ -265,8 +265,15 @@ and the channel (the registry's presets), runs the channel's own setup and the m
 starts the agent. `e2e-wizard.test.ts` drives it in a real pseudo-terminal against the fake Bot API:
 Ctrl-C with nothing written, configuring later, and `pikit new` continuing.
 
-Left for M1:
-- **Measure the five-minute budget on a real, clean VPS.**
+✅ **Five minutes on a real, clean VPS** (GCE `e2-small`, Debian 12, 2 GB).
+- Scripted, with a dummy key: `curl … | sh` to a healthy container in 74 s (install 36 s, `new` 2 s,
+  `configure` 1 s, `up` with the image build 34 s).
+- By a person, with the guided path: the install line, then Telegram, a bot made in @BotFather, the
+  owner allowed by writing to it, Claude by OAuth inside the container, and `up`. The bot answered in
+  the real Telegram; the credential in the volume is `oauth`, mode 0600; no warning or error in the
+  logs. About a minute from `pikit new` to a configured project.
+- The rehearsals found and fixed three things no local test showed: the docker group, Compose 5.5
+  failing `run --build` without a terminal, and a pasted bot token answered with a 404.
 
 Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle
 delay before closing a conversation (`idleMs`) is added only if reopening is measured to be slow.
@@ -303,8 +310,8 @@ redeliveries, channel outages, restarts and scheduled work.
 - Already covered:
   - a redelivered update is one request, answered once;
   - only allowlisted users reach the agent.
-- Left for M2: replies through `channel.transport` and `durable-outbox`, and a run against the real
-  Telegram.
+- Run against the real Telegram (M1's VPS run): the owner's messages answered, OAuth in Docker.
+- Left for M2: replies through `channel.transport` and `durable-outbox`.
 
 **Scope:** `channel-telegram`, `inbound-dedup`, `durable-outbox`, `scheduler-cron`, the
 telegram preset, `expose`, `config check`. Runtime availability (SPEC §16) is decided here,
