@@ -1,0 +1,35 @@
+# The sample in Docker: deployment-docker's compose.yaml, adapted to this monorepo (see Dockerfile).
+# Only the build and the volume's path differ; run it from this directory:
+#   docker compose up --detach --build --wait
+
+services:
+  app:
+    build:
+      # The repository's root: @pikit/* are workspace packages, not published ones.
+      context: ../..
+      dockerfile: samples/http/Dockerfile
+    restart: unless-stopped
+    init: true
+    # PIKIT_HTTP_TOKEN and ANTHROPIC_API_KEY, from samples/http/.env (git ignores it).
+    env_file:
+      - .env
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      - pikit-state:/app/samples/http/.pikit
+    # Longer than the entrypoint's 10 s stop deadline.
+    stop_grace_period: 20s
+    healthcheck:
+      test: ["CMD", "bun", "--eval", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  pikit-state:

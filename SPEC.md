@@ -1709,6 +1709,10 @@ components:
   - admin-basic
 ```
 
+`registry/presets/http.yaml` (M1) is `samples/http`'s composition, plus `log-events` and
+`deployment-docker`; a test in the sample keeps the two together. The project's own agents
+(`src/extensions/`) are not registry components and are not in a preset.
+
 ---
 
 ## 12. Configuration

@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- samples: `samples/http` runs through `deployment-docker`'s entrypoint (JSON-lines logs, deadlines,
+  signals) and in Docker (`docker compose up` from `samples/http/`, built from the repository's root).
+  `registry/presets/http.yaml` lists its components plus `log-events` and `deployment-docker`.
 - component/deployment-docker: runs a project in Docker. Its entrypoint starts with a deadline, stops
   on SIGTERM/SIGINT within `stop_grace_period` and exits non-zero on failure; logs are JSON lines
   with secrets redacted by name; `Dockerfile`, `compose.yaml` and `.dockerignore` at the project root

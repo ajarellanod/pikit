@@ -1,0 +1,15 @@
+# The ignore file of samples/http/Dockerfile, whose build context is the repository's root. BuildKit
+# reads `<Dockerfile>.dockerignore` next to the Dockerfile before `.dockerignore` at the context's root.
+# Same rules as deployment-docker's .dockerignore, at any depth.
+
+# Secrets: compose.yaml passes samples/http/.env at run time; never baked into the image.
+**/.env
+**/.env.*
+
+# State: a volume at run time.
+**/.pikit
+
+# Installed inside the image from bun.lock, for its own platform.
+**/node_modules
+
+.git

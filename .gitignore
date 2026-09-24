@@ -2,3 +2,7 @@ node_modules/
 dist/
 .DS_Store
 samples/*/.pikit/
+# Secrets (a sample's compose.yaml reads its .env); never committed.
+.env
+.env.*
+!.env.example

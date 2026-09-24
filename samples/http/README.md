@@ -22,6 +22,7 @@ copy them to `src/pikit/` instead.
 | `router-basic` | every message goes to `assistant` |
 | `channel-http` | `POST /v1/messages`, `POST /v1/conversations/:id/reset` |
 | `server-bun` | HTTP on port 3000, `/health`, `/ready` |
+| `deployment-docker` | the process (`main.ts`): deadlines, signals, JSON-lines logs; and Docker |
 
 Everything the sample writes is in `samples/http/.pikit/`, which git ignores.
 
@@ -42,8 +43,37 @@ bun samples/http/scripts/login.ts
 bun samples/http/main.ts
 ```
 
-The app refuses to start without `PIKIT_HTTP_TOKEN`, or when Claude has no credentials. The error
-says which one is missing.
+`main.ts` runs `pikit.config.ts` through `deployment-docker`'s entrypoint (SPEC §9.1). It starts
+with a 30 s deadline and stops with a 10 s one, and exits non-zero when either fails. It logs one
+JSON object per line; pipe it through `jq` to read it. The app refuses to start without
+`PIKIT_HTTP_TOKEN`, or when Claude has no credentials, and the error line says which one is
+missing.
+
+## Run it in Docker
+
+With Docker and its Compose plugin, from `samples/http/`:
+
+```sh
+cd samples/http
+# Secrets live in .env, next to compose.yaml. Git ignores it, and it never enters the image.
+printf 'PIKIT_HTTP_TOKEN=%s\nANTHROPIC_API_KEY=%s\n' "$(openssl rand -hex 32)" 'sk-ant-…' > .env
+chmod 600 .env
+
+docker compose up --detach --build --wait   # what `pikit up` will run; fails if never healthy
+curl -s localhost:3000/ready
+docker compose logs --no-log-prefix app     # `pikit logs`: JSON lines
+docker compose down                         # `pikit down`: the state volume stays
+```
+
+This compose.yaml is `deployment-docker`'s, adapted to this monorepo: `@pikit/*` are workspace
+packages here, not published ones, so the image is built from the repository's root
+(`context: ../..`) with its own `Dockerfile` and `Dockerfile.dockerignore`. A project made with
+`pikit new --preset http` uses the component's files unchanged. The container runs as the user
+`bun`, keeps `.pikit/` on the volume `pikit-state`, and listens on `127.0.0.1:3000` only.
+
+To log in with a Claude subscription instead of an API key, run the login inside the container, so
+the tokens land on its volume. Paste the final redirect URL when it asks, because the browser cannot
+reach the container's callback: `docker compose run --rm app bun samples/http/scripts/login.ts`.
 
 Then:
 
@@ -108,6 +138,11 @@ Run from the repository root:
   workspace. It runs only when `.pikit/credentials.json` has an `anthropic` entry or
   `ANTHROPIC_API_KEY` is exported, and is skipped otherwise.
 
-`main.ts` stands in for `pikit up` and for the entrypoint a `deployment-*` component will own
-(SPEC §9.1). It starts with a deadline, stops on SIGTERM or SIGINT with a deadline, and exits
-non-zero when either fails.
+- `test/docker.test.ts`: the sample's Docker files keep `deployment-docker`'s promises: no `.env`,
+  `.pikit` or `node_modules` in the image, a non-root user, the volume where the state is, and a stop
+  that fits in the grace period.
+- `test/preset.test.ts`: `registry/presets/http.yaml` lists every registry component of this sample,
+  and `deployment-docker`.
+
+The entrypoint's own tests (signals, deadlines, exit codes, logs) are in
+`registry/components/deployment-docker/`.
