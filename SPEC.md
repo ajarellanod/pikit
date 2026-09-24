@@ -271,13 +271,19 @@ earlier stages decided. `[decision]` — this is Pi's patch model and makes §6.
 Core-owned pipelines (value types defined with the components that first run them):
 
 ```
-inbound.authenticate   { request, verdict?: authenticated | rejected }
+inbound.authenticate   { channel, request: Request, verdict?: authenticated { actor } | rejected { reason } }
 inbound.normalize      InboundMessage
 route.resolve          { message: InboundMessage, decision?: RouteDecision }
-conversation.resolve   { decision: RouteDecision, conversation?: ConversationRef }
-agent.prepare          AgentRequest                 (system prompt, tools, context)
-outbound.prepare       OutboundMessage
+conversation.resolve   { decision: RouteDecision, conversation?: ConversationRef }   [planned]
+agent.prepare          AgentRequest                 (system prompt, tools, context)   [planned]
+outbound.prepare       OutboundMessage                                               [planned] M2
 ```
+
+The first three are typed in the core since M1 (`inbound.ts`), with the first channel that runs
+them (`channel-http`). `inbound.authenticate` is shared by every channel: each channel adds its
+own stage, which acts only on requests whose `channel` is its own. A request is authenticated
+only when a stage returns the `authenticated` verdict; no verdict is a rejection, so a missing
+stage fails closed.
 
 A stage may short-circuit by returning `pikit.halt(reason)`; the pipeline stops, `run`
 returns the `Halt` (with the stage id) and `pipeline.halted { pipeline, stage, reason }` is
@@ -504,24 +510,22 @@ Core types (abridged):
 
 ```ts
 interface InboundMessage {
-  id: string;
+  id: string;                         // platform delivery id or client message id; the requestId
   channel: string;
-  tenant?: string;
   conversationId: string;
-  threadId?: string;
-  actor: { id: string; displayName?: string; roles?: string[] };
+  actor: { id: string };
   text: string;
-  attachments: Attachment[];
   raw: unknown;                       // channel-specific payload, never inspected by core
   receivedAt: number;
+  // [planned], each optional, with the component that produces it:
+  // tenant, threadId, actor.displayName / roles, attachments
 }
 
 interface RouteDecision {
   agent: string;
-  tenant?: string;
-  tags: string[];
   access: "allow" | "deny";
   reason?: string;
+  // [planned], optional: tenant, tags
 }
 
 interface ConversationRef {
@@ -711,6 +715,8 @@ from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-
 Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest`, `Admission`,
 `AgentResult`, `AgentRuntime`, `ConversationRef`, and the opaque `AgentMessage`, `AgentTool` and
 `Usage` with their merge target `AgentPayloads` (each `unknown` until the adapter fills it in).
+For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
+`inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`.
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`)
 and `model.provider` (pi-ai's `Provider`) by importing it anywhere in the project.
 

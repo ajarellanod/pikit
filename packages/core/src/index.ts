@@ -42,6 +42,8 @@ export type {
   Usage,
 } from "./agent.ts";
 
+export type { InboundMessage, RouteDecision } from "./inbound.ts";
+
 export type { AppEvents } from "./events.ts";
 export type { CapabilityMode, AppCapabilities, AppKeyedCapabilities, Keyed } from "./capabilities.ts";
 
