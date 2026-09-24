@@ -204,8 +204,41 @@ anything.
   - scenario 7 now runs against the real `bash`;
   - the live test has Claude write a file in the workspace.
 
-Next: prepare/`agent.state`, the http preset (its composition is `samples/http`),
-`deployment-docker`, logs and status, the installer and the CLI (`pikit new … && pikit up`).
+✅ **Dynamic agents** (SPEC §6.2a). `defineAgent({ state, prepare(state, ctx) })`:
+- `prepare` runs once per run in Pi's `before_run` and changes the model, system prompt and tools
+  for that run.
+- The state is a Pi session value. It survives restarts and starts fresh after a reset.
+- Tools update it through their run's context (`context.value(AGENT_STATE)`), never another
+  conversation's.
+- Each run records what it had as a `pikit.turn` entry, and a resumed run is prepared again.
+- `createAgentStateConformance` checks the contract. The `agent.prepare` pipeline stays
+  `[planned]` until a component needs it.
+
+✅ **Logs and usage.**
+- `AgentResult.usage` carries each run's tokens and cost, summed from Pi's own records; the runs of
+  a session add up to Pi's session totals.
+- `log-events` writes one structured line per event, and never a message's text.
+
+✅ **`deployment-docker` and the `http` preset** (SPEC §9.1, §11).
+- The entrypoint follows §9.1: start and stop deadlines, signals, exit codes.
+- Logs are JSON lines, with fields named like secrets redacted.
+- `Dockerfile` (non-root, no secrets in the image, `.pikit/` on a volume) and `compose.yaml`
+  (healthcheck, stop grace period above the stop deadline, localhost port, rotated logs).
+- `up`, `down`, `restart`, `logs` and `status` are functions for the CLI to delegate to.
+- `registry/presets/http.yaml` is exactly `samples/http`'s components plus `deployment-docker`,
+  and a test keeps them equal.
+- Not yet run in a real container: the build and `up` wait for a running Docker daemon.
+
+✅ **Manifests** (SPEC §10.2, §10.4).
+- Every component has a `component.json`. Its `provides`, `requires`, `optional` and the tools'
+  `replay` are generated from `setup` through `describe()`.
+- `registry/registry.json` indexes the components.
+- `bun run registry validate` enforces S1, S4, S5, S13 and S14, dependencies and file mappings:
+  the checks `pikit registry validate` and `doctor` will run.
+
+Next: the core CLI (`new`, `add`, `remove`, `doctor`, `configure` with the login, and
+`up`/`down`/`logs`/`status` delegating to `deployment-docker`), the installer, a real container
+run, and measuring the five-minute budget on a clean VPS.
 
 Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle
 delay before closing a conversation (`idleMs`) is added only if reopening is measured to be slow.
