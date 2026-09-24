@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/runtime-pi: gives each agent the installed tools it names (`agent.tool`), and refuses to
+  start when a named tool has no provider (SPEC §6.3).
 - core: an agent names installed tools in `AgentDefinition.tools` (`["read", "bash", myTool]`),
   resolved through the keyed capability `agent.tool`; the adapter resolves them when a conversation
   opens (SPEC §6.3).

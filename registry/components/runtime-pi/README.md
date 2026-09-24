@@ -7,12 +7,15 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
 - **Uses:**
   - `agent.definition`: your agents, one per name;
   - `model.provider`: the providers your agents name as `provider/modelId`;
+  - `agent.tool`: the installed tools (`tool-read`, `tool-bash`…) that your agents name in their
+    `tools`;
   - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth
     tokens). pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read
     only their environment variables (`ANTHROPIC_API_KEY`).
 
-  It refuses to start without an agent, when an agent names a model that no provider has, or when
-  an agent's provider has no credentials at all. That last check makes no network call and
+  It refuses to start without an agent, when an agent names a model that no provider has, when an
+  agent names a tool that no component provides, or when an agent's provider has no credentials at
+  all. That last check makes no network call and
   refreshes nothing: it only asks whether a credential is stored or an environment variable is
   set.
 - **Target:** `server`. Cloudflare comes in M4, when Durable Object alarms drive runs.
@@ -81,6 +84,17 @@ export default defineComponent({
   },
 });
 ```
+
+## Tools
+
+An agent gets the tools it names, and only those:
+
+```ts
+defineAgent({ name: "ops", model: "anthropic/claude-sonnet-4-6", tools: ["read", "bash", lookupTicket] })
+```
+
+A name (`"bash"`) is a tool that a `tool-*` component provides. An object (`lookupTicket`) is a tool
+of your own. Installing `tool-bash` gives no agent a shell until one of them names `bash`.
 
 ## Tests
 

@@ -5,6 +5,7 @@
  * - `sessions.store`: where each conversation's Pi session lives;
  * - `agent.definition`: your agents, one per name (a project component provides them);
  * - `model.provider`: the model providers your agents name as `provider/modelId`;
+ * - `agent.tool`: the installed tools (`tool-*` components) that agents name in their `tools`;
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
  *   read only their environment variables (`ANTHROPIC_API_KEY`).
  *
@@ -39,6 +40,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
       const credentials = pikit.useOptional("model.credentials");
+      const tools = pikit.useKeyed("agent.tool");
 
       // Created in start, when the capabilities can be read; consumers start after this component.
       let runtime: PiRuntime | undefined;
@@ -61,7 +63,18 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           );
           // Fail at start, not at the first message: an agent that cannot run is a broken deployment.
           if (agents.keys().length === 0) throw new Error("runtime-pi: no agent.definition is provided");
+          for (const key of tools.keys()) {
+            const tool = tools.get(key);
+            if (tool !== undefined && tool.name !== key) {
+              throw new Error(`runtime-pi: the agent.tool "${key}" is a tool named "${tool.name}"; a tool is provided under its own name`);
+            }
+          }
           for (const name of agents.keys()) {
+            for (const tool of agents.get(name)?.tools ?? []) {
+              if (typeof tool === "string" && tools.get(tool) === undefined) {
+                throw new Error(`runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides (install tool-${tool}?)`);
+              }
+            }
             const model = agents.get(name)?.model ?? "";
             const slash = model.indexOf("/");
             if (models.getModel(model.slice(0, slash), model.slice(slash + 1)) === undefined) {
@@ -79,6 +92,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           runtime = createPiRuntime({
             sessions: sessions.get(),
             agent: (name) => agents.get(name),
+            tool: (name) => tools.get(name),
             models,
             // Runs outlive the calls that admit them; never keep start's context (its deadline).
             events: ctx.derive(() => BACKGROUND_CONTEXT),

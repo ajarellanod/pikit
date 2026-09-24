@@ -8,7 +8,7 @@ import { expect, test } from "bun:test";
 import { type AgentRuntime, defineAgent, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { createAgentRuntimeConformance, createLifecycleConformance } from "@pikit/core/testing";
 import type { Credential, CredentialStore, SessionStore } from "@pikit/pi-adapter";
-import { createPiRuntimeFixture, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
+import { createPiRuntimeFixture, recordingBash, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
 import runtimePi, { createRuntimePi } from "./index.ts";
 
 // The agent.runtime contract, including a worker killed mid-run (SPEC §14).
@@ -33,7 +33,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(described).toMatchObject({
     provides: ["agent.runtime"],
     requires: ["sessions.store"],
-    optional: ["agent.definition", "model.provider", "model.credentials"],
+    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool"],
   });
 });
 
@@ -152,4 +152,51 @@ test("it builds the models with model.credentials: a stored key lets the agent a
 
   expect(await answer).toBe("answer: hello");
   await app.stop();
+});
+
+/** Provides `bash` as a `tool-bash` component would, recording what it is asked to run. */
+function bashComponent(ran: string[], key = "bash") {
+  return defineComponent({ name: "tool-test", setup: (pikit) => pikit.provideKeyed("agent.tool", key, recordingBash(ran)) });
+}
+
+test("an agent's named tools are the installed agent.tool ones", async () => {
+  const ran: string[] = [];
+  const { sessions, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
+  let answered!: (text: string | undefined) => void;
+  const answer = new Promise<string | undefined>((resolve) => (answered = resolve));
+  let channel!: { runtime: AgentRuntime; sessions: SessionStore };
+  const observer = defineComponent({
+    name: "channel-test",
+    setup(pikit) {
+      const runtimeHandle = pikit.use("agent.runtime");
+      const sessionsHandle = pikit.use("sessions.store");
+      pikit.on("agent.settled", (result) => answered(result.text));
+      return { start: () => void (channel = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
+    },
+  });
+  const app = await defineApp({ components: [sessions, agents, provider, bashComponent(ran), runtimePi, observer], logger: silentLogger }).create();
+  await app.start();
+
+  const ctx = app.context();
+  const session = await channel.sessions.create({}, ctx);
+  await session.close(ctx);
+  await channel.runtime.dispatch({ requestId: "r1", conversation: { key: "test:tools", agent: "scripted", sessionId: session.metadata.id }, prompt: "bash: ls" }, ctx);
+
+  expect(await answer).toBe("tool said: ran");
+  expect(ran).toEqual(["ls"]);
+  await app.stop();
+});
+
+test("it refuses to start when an agent names a tool no agent.tool provides", async () => {
+  const { sessions, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
+  const app = await defineApp({ components: [sessions, agents, provider, runtimePi], logger: silentLogger }).create();
+
+  expect(await startFailure(app)).toContain('agent "scripted" names the tool "bash", which no agent.tool provides');
+});
+
+test("it refuses to start when a tool is provided under another name", async () => {
+  const { sessions, agents, provider } = testComponents();
+  const app = await defineApp({ components: [sessions, agents, provider, bashComponent([], "shell"), runtimePi], logger: silentLogger }).create();
+
+  expect(await startFailure(app)).toContain('the agent.tool "shell" is a tool named "bash"');
 });
