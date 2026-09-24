@@ -21,6 +21,8 @@ export interface Registry {
   dir(name: string): string;
   /** The preset's component names, in order. */
   preset(name: string): string[];
+  /** Every preset, with the `title` `pikit new` shows for it, by name. */
+  presets(): { name: string; title: string }[];
   /** Every file a component installs: project-relative target → absolute source. */
   files(name: string): Map<string, string>;
 }
@@ -50,16 +52,15 @@ export function openRegistry(path: string): Registry {
       if (manifest === undefined) throw new Error(`the registry's component "${name}" has no component.json`);
       return manifest;
     },
-    preset(name) {
-      const file = join(root, "presets", `${name}.yaml`);
-      if (!existsSync(file)) throw new Error(`the registry ${root} has no preset "${name}" (presets/${name}.yaml)`);
-      // YAML 1.2 (SPEC §12): a preset is a list of names and nothing else (SPEC §11).
-      const preset = parse(readFileSync(file, "utf8")) as { components?: unknown };
-      const components = preset?.components;
-      if (!Array.isArray(components) || !components.every((c) => typeof c === "string")) {
-        throw new Error(`presets/${name}.yaml must be \`components:\` followed by a list of component names`);
-      }
-      return components as string[];
+    preset: (name) => readPreset(root, name).components,
+    presets() {
+      const dir = join(root, "presets");
+      if (!existsSync(dir)) return [];
+      return readdirSync(dir)
+        .filter((file) => file.endsWith(".yaml"))
+        .map((file) => file.slice(0, -".yaml".length))
+        .sort()
+        .map((name) => ({ name, title: readPreset(root, name).title ?? name }));
     },
     files(name) {
       const componentDir = dir(name);
@@ -99,4 +100,20 @@ function gitCommit(root: string): string | undefined {
   const status = Bun.spawnSync(["git", "-C", root, "status", "--porcelain", "--", "."], { stdout: "pipe", stderr: "ignore" });
   const dirty = status.stdout.toString().trim() !== "";
   return `${head.stdout.toString().trim()}${dirty ? "-dirty" : ""}`;
+}
+
+/**
+ * A preset: the list of `add` calls, and a `title` for `pikit new`'s question. Nothing reads which
+ * preset a project came from (SPEC §11). YAML 1.2 (SPEC §12).
+ */
+function readPreset(root: string, name: string): { components: string[]; title: string | undefined } {
+  const file = join(root, "presets", `${name}.yaml`);
+  if (!existsSync(file)) throw new Error(`the registry ${root} has no preset "${name}" (presets/${name}.yaml)`);
+  const preset = parse(readFileSync(file, "utf8")) as { components?: unknown; title?: unknown };
+  const components = preset?.components;
+  if (!Array.isArray(components) || !components.every((c) => typeof c === "string")) {
+    throw new Error(`presets/${name}.yaml must be \`components:\` followed by a list of component names`);
+  }
+  if (preset.title !== undefined && typeof preset.title !== "string") throw new Error(`presets/${name}.yaml: \`title\` must be a string`);
+  return { components, title: preset.title };
 }

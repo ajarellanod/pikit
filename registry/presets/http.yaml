@@ -2,6 +2,8 @@
 # A preset is only the list of `pikit add` calls, in order. Nothing branches on which preset a
 # project came from. Its composition is samples/http's, plus the deployment and the log lines.
 # The agents (src/agents/, src/extensions/agents.ts) belong to the project, not to the registry.
+# `title` is what `pikit new` shows when it asks where to talk to the agent.
+title: "HTTP API: call your agent from your own code (POST /v1/messages)"
 components:
   - secrets-env
   - sessions-jsonl

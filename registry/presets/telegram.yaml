@@ -3,6 +3,8 @@
 # project came from. The http preset with channel-telegram instead of channel-http; server-bun stays
 # for /health and /ready, which the container's healthcheck and `pikit status` use.
 # The agents (src/agents/, src/extensions/agents.ts) belong to the project, not to the registry.
+# `title` is what `pikit new` shows when it asks where to talk to the agent.
+title: "Telegram: chat with your agent from the Telegram app"
 components:
   - secrets-env
   - sessions-jsonl
