@@ -409,5 +409,10 @@ Record here anything that went wrong twice, or that the user explicitly said not
   asserts on a value typed by a narrowed annotation (a type-level test with `@ts-expect-error`).
   Assert on the original value instead, and keep the annotated variable only for the type check
   (`void variable`). This broke `typecheck` twice in `agent.test.ts`.
+- TypeScript 7 loses the core tests' relative module augmentations (`declare module "./capabilities.ts"`
+  in `app.test.ts`: 37 errors) when another workspace package resolves `@pikit/pi-adapter` through its
+  own `node_modules`. It passed in a `/tmp` worktree and failed in the main checkout, so a typecheck in
+  a worktree alone is not proof. Tooling that talks to a project's adapter (the CLI) describes the few
+  calls it makes with local types and loads the adapter at run time; it does not import it.
 - macOS has no `timeout` command. Bound a command that may hang with
   `perl -e 'alarm 60; exec @ARGV' <cmd>`, and give hanging tests `--timeout <ms>`.

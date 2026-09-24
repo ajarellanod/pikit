@@ -12,7 +12,8 @@
   "scripts": {
     "test": "bun test",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "registry": "bun scripts/registry.ts"
+    "registry": "bun scripts/registry.ts",
+    "pikit": "bun packages/cli/src/main.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "workspace:@pikit/pi-extension-shim@*",

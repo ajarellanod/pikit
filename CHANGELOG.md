@@ -5,6 +5,17 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: the `pikit` CLI (`packages/cli`, M1 commands of SPEC §11). `pikit new <dir> --preset <name>`
+  writes a project (its agent, `pikit.config.ts`, `package.json`, README), vendors `@pikit/core`,
+  `@pikit/pi-adapter` and `@pikit/pi-extension-shim` into `vendor/`, adds every component of the
+  preset, runs `bun install` and `doctor`. `pikit add` / `pikit remove` follow the install flow
+  (files, npm dependencies, `pikit.config.ts`, `.env.example`, hashes in `pikit.json`) and removing
+  what was added leaves no trace; `remove` refuses to leave a required capability without a provider
+  and never deletes a file you modified without `--force`. `pikit doctor` prints the graph and checks
+  providers, required variables and the Pi import rule, and lists modified files. `pikit configure`
+  fills `.env` (0600) and logs in to model providers through pi-ai, also without a terminal
+  (`--yes`, `--generate`). `pikit dev` runs the deployment's entrypoint with `bun --watch`;
+  `up | down | restart | logs | status` delegate to the installed `deployment-*` component.
 - registry: the `generate` / `validate` code moved into the CLI package (`packages/cli/src/registry/`);
   `bun run registry` is now a thin caller of `pikit registry`, so both run the same checks.
 - adapter: a Pi extension's `pi.getActiveTools()` returns the tools an agent's `prepare` gave the
