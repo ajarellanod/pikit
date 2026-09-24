@@ -5,7 +5,7 @@ The model providers' credentials in one JSON file, readable only by its owner (m
 - **Provides:** `model.credentials` (pi-ai's `CredentialStore`).
 - **Requires:** nothing.
 - **Target:** `server` (it uses the filesystem).
-- **Installs to:** `src/pikit/credentials/file/`.
+- **Installs to:** `src/pikit/credentials-file/`.
 - **npm dependencies:** `@pikit/pi-adapter` (for the `CredentialStore` type), `typebox`.
 
 ## What it does
