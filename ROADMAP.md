@@ -255,10 +255,12 @@ anything.
 - The installer ran on macOS (in a temporary HOME) and in a clean `debian:bookworm-slim`
   container: install in 4 s, `new` → answering in 1 s.
 
+✅ **An OAuth login reaches the container** (SPEC §11). `pikit configure` logs in where the app runs,
+through `deployment-docker`'s `exec` (`docker compose run`), so the tokens land in the volume; `pikit
+up` refuses to start an agent with no credentials there. The Docker end-to-end test covers both, and
+the login was run in a pseudo-terminal up to pi-ai's URL and paste prompt, inside the container.
+
 Left for M1:
-- **An OAuth login made by `pikit configure` does not reach the container:** compose mounts a
-  named volume over `.pikit/`. An API key in `.env` works. Decide how credentials enter the
-  container.
 - **The installer's repository URL is a placeholder.**
 - **Measure the five-minute budget on a real, clean VPS.**
 

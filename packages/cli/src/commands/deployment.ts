@@ -12,22 +12,16 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { pathToFileURL } from "node:url";
-import { readProjectManifest } from "../project/pikit-json.ts";
+import { deploymentComponent, deploymentExec, loadDeployment } from "../project/deployment-module.ts";
+import { checkModelCredentials } from "../project/model-credentials.ts";
 import { projectEnv } from "../project/run.ts";
 import { CliError, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
 
+export { deploymentComponent };
+
 export const DEPLOYMENT_COMMANDS = ["up", "down", "restart", "logs", "status"] as const;
 export type DeploymentCommand = (typeof DEPLOYMENT_COMMANDS)[number];
-
-/** The installed `deployment-*` component: exactly one. */
-export function deploymentComponent(projectDir: string): string {
-  const names = Object.keys(readProjectManifest(projectDir).components).filter((name) => name.startsWith("deployment-"));
-  if (names.length === 0) throw new CliError("no deployment-* component is installed; add one, e.g. `pikit add deployment-docker`");
-  if (names.length > 1) throw new CliError(`several deployment components are installed (${names.join(", ")}); remove all but one`);
-  return names[0] as string;
-}
 
 /** `up` and `dev` start the app: refuse before that when doctor would. */
 async function checkReady(projectDir: string): Promise<void> {
@@ -37,18 +31,35 @@ async function checkReady(projectDir: string): Promise<void> {
   if (report.problems.length + report.unconfigured.length > 0) throw new CliError("fix what `pikit doctor` reports first");
 }
 
+/**
+ * `up` refuses to start an agent that cannot reach its model: it checks the credentials where the app
+ * runs (the deployment's volume and `.env`), not on this machine, which only `pikit dev` uses.
+ */
+async function checkAppCredentials(projectDir: string): Promise<void> {
+  const exec = await deploymentExec(projectDir);
+  if (exec === undefined) return;
+  log.step("checking the model credentials where the app runs");
+  const missing = Object.entries((await checkModelCredentials(projectDir, exec)).providers)
+    .filter(([, ok]) => !ok)
+    .map(([id]) => id);
+  for (const id of missing) {
+    log.problem(`the model provider "${id}" has no credentials where the app runs: run \`pikit configure\` (log in for \`pikit up\`, or put its API key in .env)`);
+  }
+  if (missing.length > 0) throw new CliError("the app would start without model credentials");
+}
+
 export interface DeploymentOptions {
   follow?: boolean;
   tail?: number;
 }
 
 export async function deployment(projectDir: string, command: DeploymentCommand, options: DeploymentOptions = {}): Promise<void> {
-  const name = deploymentComponent(projectDir);
-  const entry = join(projectDir, "src", "pikit", name, "index.ts");
-  if (!existsSync(entry)) throw new CliError(`${name} is installed but src/pikit/${name}/index.ts is missing`);
-  if (command === "up") await checkReady(projectDir);
+  const { name, module } = await loadDeployment(projectDir);
+  if (command === "up") {
+    await checkReady(projectDir);
+    await checkAppCredentials(projectDir);
+  }
 
-  const module = (await import(pathToFileURL(entry).href)) as Record<string, unknown>;
   const run = module[command];
   if (typeof run !== "function") throw new CliError(`${name} does not export ${command}() from src/pikit/${name}/index.ts`);
 

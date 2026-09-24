@@ -4,10 +4,11 @@
  * its own process, except the deployment component's commands, which are plain functions.
  */
 
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { chmodSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readEnv } from "./env-file.ts";
+import type { AppExec } from "./deployment-module.ts";
 import type { ProbeResult } from "./probe.ts";
 
 /**
@@ -22,9 +23,7 @@ export function projectEnv(projectDir: string): Record<string, string> {
 
 /** Runs a script of this package with Bun in the project's directory; its JSON result is read from a file. */
 export async function runScript<T>(script: string, projectDir: string, args: string[], options: { interactive?: boolean } = {}): Promise<T> {
-  const dir = mkdtempSync(join(tmpdir(), "pikit-cli-"));
-  const output = join(dir, "result.json");
-  try {
+  return await withResultFile<T>(script, async (output) => {
     const child = Bun.spawn([process.execPath, join(import.meta.dir, script), projectDir, output, ...args], {
       cwd: projectDir,
       env: projectEnv(projectDir),
@@ -32,7 +31,33 @@ export async function runScript<T>(script: string, projectDir: string, args: str
       stdout: options.interactive ? "inherit" : "pipe",
       stderr: "inherit",
     });
-    const code = await child.exited;
+    return await child.exited;
+  });
+}
+
+/**
+ * The same, where the app runs (the deployment's `exec`: in Docker, a one-off container with the
+ * app's image, `.env` and volume). The script and the result's directory are shared at the same
+ * path; the project is the command's working directory there, so it is passed as `.`.
+ */
+export async function runScriptInApp<T>(exec: AppExec, script: string, args: string[], options: { interactive?: boolean } = {}): Promise<T> {
+  return await withResultFile<T>(script, async (output, dir) => {
+    // The app may run as another user (the image's `bun`): it must be able to write its result here.
+    // Nobody else can list the directory, and the result holds no secret.
+    chmodSync(dir, 0o733);
+    return await exec({
+      command: ["bun", join(import.meta.dir, script), ".", output, ...args],
+      share: [{ path: import.meta.dir }, { path: dir, writable: true }],
+      interactive: options.interactive === true,
+    });
+  });
+}
+
+async function withResultFile<T>(script: string, run: (output: string, dir: string) => Promise<number>): Promise<T> {
+  const dir = mkdtempSync(join(tmpdir(), "pikit-cli-"));
+  const output = join(dir, "result.json");
+  try {
+    const code = await run(output, dir);
     let text: string;
     try {
       text = readFileSync(output, "utf8");

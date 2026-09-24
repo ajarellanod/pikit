@@ -25,7 +25,7 @@ Usage:
   pikit add <component> [--registry <path>] [--force] [--yes]
   pikit remove <component> [--force]
   pikit doctor                        the component graph, and what is missing
-  pikit configure [--yes] [--generate <NAME>]... [--login <provider>]
+  pikit configure [--yes] [--generate <NAME>]... [--login <provider> [--local]]
   pikit dev                           run the project here, reloading on change
   pikit up | down | restart | status  delegate to the installed deployment-* component
   pikit logs [--follow] [--tail <n>]
@@ -64,6 +64,7 @@ async function main(argv: string[]): Promise<number> {
       yes: { type: "boolean", short: "y" },
       generate: { type: "string", multiple: true },
       login: { type: "string" },
+      local: { type: "boolean" },
       follow: { type: "boolean", short: "f" },
       tail: { type: "string" },
       version: { type: "boolean", short: "v" },
@@ -109,6 +110,7 @@ async function main(argv: string[]): Promise<number> {
         yes: values.yes === true,
         generate: values.generate ?? [],
         ...(values.login !== undefined && { login: values.login }),
+        local: values.local === true,
       });
       return 0;
     case "dev":

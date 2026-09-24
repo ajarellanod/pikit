@@ -180,11 +180,27 @@ test.skipIf(!E2E)(
 );
 
 test.skipIf(!DOCKER)(
-  "pikit up, status and down delegate to deployment-docker",
+  "pikit up, status and down delegate to deployment-docker; credentials are checked where the app runs",
   async () => {
     try {
+      // Without the key in .env the container has none, even when this shell exports one.
+      const envFile = join(project, ".env");
+      writeFileSync(envFile, readFileSync(envFile, "utf8").replace(/^ANTHROPIC_API_KEY=.*\n/m, ""));
+      const refused = await pikit(["up"], { env: { ANTHROPIC_API_KEY: DUMMY_KEY } });
+      expect(refused.code).toBe(1);
+      expect(refused.err).toContain('the model provider "anthropic" has no credentials where the app runs');
+
+      // A credential stored in the app's volume, where `pikit configure` logs in for `pikit up` (an
+      // OAuth login lands in the same file; a stored key needs no browser).
+      const store = `require("node:fs").writeFileSync(".pikit/credentials.json", JSON.stringify({ anthropic: { type: "api_key", key: "${DUMMY_KEY}" } }), { mode: 0o600 })`;
+      expect(sh(["docker", "compose", "run", "--rm", "-T", "app", "bun", "--eval", store]).code).toBe(0);
+      const configured = await pikit(["configure", "--yes"], { env: { ANTHROPIC_API_KEY: "" } });
+      expect(configured.code).toBe(0);
+      expect(configured.out).toContain("model provider anthropic: has credentials for `pikit up`");
+      expect(configured.out + configured.err).not.toContain(DUMMY_KEY);
+
       const started = performance.now();
-      const up = await pikit(["up"]);
+      const up = await pikit(["up"], { env: { ANTHROPIC_API_KEY: "" } });
       expect(up.code).toBe(0);
       console.info(`e2e timings: pikit up ${ms(performance.now() - started)} (image build included)`);
       const status = await pikit(["status"]);

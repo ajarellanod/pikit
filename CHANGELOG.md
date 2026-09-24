@@ -5,6 +5,11 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli, component/deployment-docker: an OAuth login made by `pikit configure` now reaches `pikit up`.
+  `deployment-docker` exports `exec()` (`docker compose run --rm` of the app), and `configure` logs in
+  through it, into the app's volume; `--login <provider> --local` logs in on this machine for `pikit
+  dev`. `pikit up` checks the credentials where the app runs and refuses to start without them. It
+  used to start an agent that failed at its first message.
 - cli: `pikit configure` runs the steps components ship in `src/pikit/<name>/configure.ts`, before
   asking for the other variables; a component's variables are then its own. `channel-telegram`'s
   step checks the bot and allows you by asking you to message it. An end-to-end test covers

@@ -8,7 +8,9 @@
  *    generated.
  * 3. Model credentials, for each installed model provider that has none: a login through pi-ai's
  *    own flow, stored by the project's `model.credentials` component (`credentials-file`), or an
- *    API key in `.env`.
+ *    API key in `.env`. The login runs where the app will run: through the deployment's `exec` for
+ *    `pikit up` (in Docker, its volume), or on this machine for `pikit dev`. Each place keeps its
+ *    own copy; nothing is copied between them (SPEC §11).
  *
  * Without a terminal (or with `--yes`) it asks nothing: a variable comes from the process
  * environment or from `--generate <NAME>`, and a missing required one fails the command. It never
@@ -17,8 +19,9 @@
 
 import type { EnvironmentVariable } from "../registry/manifest.ts";
 import { type ComponentConfigureResult, componentsWithSteps } from "../project/component-configure.ts";
-import type { CredentialsResult } from "../project/credentials.ts";
+import { type AppExec, deploymentExec } from "../project/deployment-module.ts";
 import { ENV_FILE, readEnv, writeEnv } from "../project/env-file.ts";
+import { apiKeyName, checkModelCredentials, loginModel } from "../project/model-credentials.ts";
 import { readProjectManifest } from "../project/pikit-json.ts";
 import { runScript } from "../project/run.ts";
 import { ask, askSecret, CliError, isInteractive, log } from "../ui.ts";
@@ -28,8 +31,13 @@ export interface ConfigureOptions {
   yes?: boolean;
   /** Variables to fill with a new random value (32 bytes, hex). */
   generate?: string[];
-  /** Run this provider's OAuth login (in a terminal: it prints a URL to open). */
+  /**
+   * Run this provider's OAuth login (in a terminal: it prints a URL to open). It logs in where the app
+   * runs for `pikit up` when the deployment can run a command there (`exec`), else on this machine.
+   */
   login?: string;
+  /** Log in on this machine, for `pikit dev`, even when the deployment could run the login. */
+  local?: boolean;
 }
 
 export async function configure(projectDir: string, options: ConfigureOptions = {}): Promise<void> {
@@ -111,25 +119,53 @@ async function configureModels(
   interactive: boolean,
   variables: EnvironmentVariable[],
 ): Promise<string[]> {
-  const checked = await credentials(projectDir, ["check"]);
-  const unconfigured = Object.entries(checked.providers).filter(([, ok]) => !ok).map(([id]) => id);
-  for (const [id, ok] of Object.entries(checked.providers)) if (ok) log.info(`  model provider ${id}: has credentials`);
+  const here = await checkModelCredentials(projectDir);
+  const ids = Object.keys(here.providers);
+  const exec = options.local === true ? undefined : await deploymentExec(projectDir);
 
   if (options.login !== undefined) {
-    if (!(options.login in checked.providers)) throw new CliError(`no installed component provides the model provider "${options.login}"`);
-    await login(projectDir, options.login, checked.store);
-    return unconfigured.filter((id) => id !== options.login);
+    if (!ids.includes(options.login)) throw new CliError(`no installed component provides the model provider "${options.login}"`);
+    await login(projectDir, options.login, here.store, exec);
+    return ids.filter((id) => here.providers[id] !== true && id !== options.login);
   }
+
+  // What this machine lacks may be where the app runs: `pikit up` reads the deployment's copy.
+  const lacking = ids.filter((id) => here.providers[id] !== true);
+  let there: Record<string, boolean> | undefined;
+  if (lacking.length > 0 && exec !== undefined) {
+    log.step("checking the model credentials where the app runs (`pikit up`)");
+    try {
+      there = (await checkModelCredentials(projectDir, exec)).providers;
+    } catch (error) {
+      log.warn(`could not check where the app runs, so only \`pikit dev\` can be configured now: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  for (const id of ids) {
+    if (here.providers[id] === true) log.info(`  model provider ${id}: has credentials`);
+    else if (there?.[id] === true) log.info(`  model provider ${id}: has credentials for \`pikit up\` (for \`pikit dev\` too: \`pikit configure --login ${id} --local\`)`);
+  }
+  const unconfigured = lacking.filter((id) => there?.[id] !== true);
   if (!interactive) return unconfigured;
 
   const left: string[] = [];
   for (const id of unconfigured) {
     const keyName = apiKeyName(id);
     const hasKeyVariable = variables.some((v) => v.name === keyName);
+    const inApp = there !== undefined;
     const choice = await ask(
-      `\nThe model provider "${id}" has no credentials.\n  1) log in with your subscription (OAuth, opens a URL)\n${hasKeyVariable ? `  2) paste an API key (stored in ${ENV_FILE} as ${keyName})\n` : ""}  s) skip\nChoice: `,
+      [
+        `\nThe model provider "${id}" has no credentials.`,
+        inApp
+          ? "  1) log in with your subscription, for `pikit up` (OAuth: open a URL, then paste the page's address back here)"
+          : "  1) log in with your subscription (OAuth, opens a URL)",
+        ...(hasKeyVariable ? [`  2) paste an API key (stored in ${ENV_FILE} as ${keyName}; \`pikit up\` and \`pikit dev\` both read it)`] : []),
+        ...(inApp ? ["  3) log in with your subscription, for `pikit dev` only (on this machine)"] : []),
+        "  s) skip",
+        "Choice: ",
+      ].join("\n"),
     );
-    if (choice === "1") await login(projectDir, id, checked.store);
+    if (choice === "1") await login(projectDir, id, here.store, inApp ? exec : undefined);
+    else if (choice === "3" && inApp) await login(projectDir, id, here.store, undefined);
     else if (choice === "2" && hasKeyVariable) {
       const key = await askSecret(`${keyName}: `);
       if (key === "") left.push(id);
@@ -142,21 +178,12 @@ async function configureModels(
   return left;
 }
 
-async function login(projectDir: string, id: string, store: string | undefined): Promise<void> {
-  const result = await runScript<CredentialsResult>("credentials.ts", projectDir, ["login", id], { interactive: true });
-  if (!result.ok) throw new CliError(`login to ${id} failed: ${result.error}`);
-  log.ok(`logged in to ${id}; the tokens are stored by ${store ?? "model.credentials"} (see its config in pikit.config.ts)`);
-}
-
-async function credentials(projectDir: string, args: string[]): Promise<Extract<CredentialsResult, { ok: true }>> {
-  const result = await runScript<CredentialsResult>("credentials.ts", projectDir, args);
-  if (!result.ok) throw new CliError(`could not read the model credentials: ${result.error}\nRun \`pikit doctor\`.`);
-  return result;
-}
-
-/** pi-ai's variable for a provider's API key: `ANTHROPIC_API_KEY` for `anthropic`. */
-function apiKeyName(providerId: string): string {
-  return `${providerId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
+/** Logs in where the app will run: through the deployment's `exec` for `pikit up`, else here. */
+async function login(projectDir: string, id: string, store: string | undefined, exec: AppExec | undefined): Promise<void> {
+  if (exec !== undefined) log.step(`logging in to ${id} where the app runs (\`pikit up\`); the first time, its image is built`);
+  await loginModel(projectDir, id, exec);
+  const where = exec === undefined ? "on this machine, for `pikit dev`" : "where the app runs, for `pikit up`";
+  log.ok(`logged in to ${id} ${where}; the tokens are stored by ${store ?? "model.credentials"} (see its config in pikit.config.ts)`);
 }
 
 function randomToken(): string {

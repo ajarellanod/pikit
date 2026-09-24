@@ -1906,9 +1906,9 @@ M1 has these commands; the others print "not yet" and name the milestone that br
 |---|---|
 | `new`, `add`, `remove` | §10.5 |
 | `doctor` | Creates the app (every setup, no start) and prints the component graph, capability providers, pipelines and config (§4.6). Fails when the app does not compose, when a variable a component marks required is set neither in the environment nor in `.env` (names only, never values), or when a file breaks the Pi import rule (S1: a component imports no `@earendil-works/*`, project code only `@earendil-works/pi-coding-agent`, the Pi extensions' alias). Lists modified and deleted installed files as information. |
-| `configure` | First runs the components' own steps (below). Then writes the other variables of the installed components to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login made on the host lands in the host's `.pikit/`, which `deployment-docker` does not share with its container's volume: in Docker, use an API key or log in inside the container. |
+| `configure` | First runs the components' own steps (below). Then writes the other variables of the installed components to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login runs where the app will run (below). |
 | `dev` | After `doctor`, `bun --watch src/pikit/<deployment>/main.ts` (the installed `deployment-*` component's entrypoint) with `.env` loaded. |
-| `up`, `down`, `restart`, `logs`, `status` | Delegate, as above. `up` runs `doctor` first. |
+| `up`, `down`, `restart`, `logs`, `status` | Delegate, as above. `up` runs `doctor` first, then checks the model credentials where the app runs (through the deployment's `exec`), and refuses to start an agent that has none. |
 | `registry validate`, `registry generate` | §10.2, §14. `bun run registry` in this repository calls the same code. |
 
 `[decision]` **A component can own its setup.** A component that needs more than a value typed in
@@ -1924,8 +1924,19 @@ discovering an id. `pikit configure` runs these steps first, in a child process 
 The CLI knows nothing about what a step does, as with `deployment-*`. `channel-telegram`'s step
 checks the bot token with `getMe`, and allows whoever sends the bot a message.
 
+`[decision]` **A login lives where the app runs; nothing is copied.** A deployment component may
+export `exec({ command, share, interactive })`: it runs a command where the app runs and resolves
+with its exit code. `deployment-docker`'s is `docker compose run --rm --build --no-deps app …`: the
+app's image, `.env` and `.pikit/` volume, no ports, with the directories in `share` mounted at the
+same path. When `exec` exists, `configure`'s model step runs `credentials.ts` through it, so an OAuth
+login lands in the volume `pikit up`'s app reads; `--login <provider> --local` (or choice 3) logs in
+on this machine for `pikit dev` instead. The login prints pi-ai's URL and takes the redirect address
+pasted back, which works on a VPS without a browser. An API key in `.env` serves both. Rationale:
+mounting the host's `.pikit/` clashes over users and lets `dev` and `up` open one session at once,
+and copying the login leaves a stale copy once a refresh rotates the token.
+
 `[decision]` The CLI runs a project's code only in child `bun` processes in the project's directory
-(`doctor`'s app, `configure`'s login and the components' steps), so the project's own `@pikit/core` and components load, never
+(`doctor`'s app, `configure`'s login and the components' steps), or where the app runs through the deployment's `exec` (the login for `pikit up`), so the project's own `@pikit/core` and components load, never
 the CLI's, and every run sees the files as they are now. The exception is the deployment component's
 commands, which are plain functions the CLI calls.
 

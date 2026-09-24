@@ -1,6 +1,7 @@
 /**
  * Run as `bun credentials.ts <project-dir> <output-file> check | login <provider>` in the project's
- * directory. The model-credential half of `pikit configure`, as `samples/http/scripts/login.ts`:
+ * directory: on this machine for `pikit dev`, or where the app runs for `pikit up` (the deployment's
+ * `exec`, SPEC §11). The model-credential half of `pikit configure`, as `samples/http/scripts/login.ts`:
  *
  * - It builds a small app from the project's own components: the one that provides
  *   `model.credentials` (`credentials-file`) and those that provide `model.provider`, with the
@@ -16,7 +17,7 @@
  */
 
 import { writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 import type { AppDefinition, ComponentDefinition, defineApp, defineComponent } from "@pikit/core";
@@ -136,7 +137,9 @@ async function login(projectDir: string, providerId: string): Promise<Credential
 }
 
 if (import.meta.main) {
-  const [projectDir = ".", output = "", mode, providerId = ""] = process.argv.slice(2);
+  const [dir = ".", output = "", mode, providerId = ""] = process.argv.slice(2);
+  // Where the app runs (`runScriptInApp`), the project is passed as `.`.
+  const projectDir = resolve(dir);
   let result: CredentialsResult;
   try {
     result = mode === "login" ? await login(projectDir, providerId) : await check(projectDir);
