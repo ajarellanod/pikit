@@ -17,7 +17,7 @@ import {
   type Session,
 } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
-import type { Admission, AgentDefinition, AgentRequest, AgentResult, AppContext, ConversationRef } from "@pikit/core";
+import type { Admission, AgentDefinition, AgentRequest, AgentResult, AgentTool, AppContext, ConversationRef } from "@pikit/core";
 import { detached, toPi } from "./context.ts";
 import type { PiExtension } from "./extensions/api.ts";
 import { type BoundExtensions, loadExtensions } from "./extensions/host.ts";
@@ -38,6 +38,8 @@ export interface OpenOptions {
   ref: ConversationRef;
   session: Session;
   agent: AgentDefinition;
+  /** Resolves the tools the agent names (`agent.tool`); a name it cannot resolve fails the open. */
+  tool?: ((name: string) => AgentTool | undefined) | undefined;
   models: Models;
   host: ConversationHost;
   onHarness?: HarnessHook | undefined;
@@ -73,7 +75,7 @@ export class PiConversation {
         session,
         models,
         model,
-        tools: [...(agent.tools ?? []), ...(loaded?.tools ?? [])],
+        tools: [...resolveTools(agent, options.tool), ...(loaded?.tools ?? [])],
         ...(agent.systemPrompt !== undefined && { systemPrompt: agent.systemPrompt }),
       },
       pi,
@@ -233,4 +235,14 @@ function resolveModel(models: Models, agent: AgentDefinition) {
     throw new Error(`agent "${agent.name}": model "${agent.model}" is not provided by any model.provider`);
   }
   return model;
+}
+
+/** The agent's tools as objects: each name resolved through `agent.tool`, each object as it is. */
+function resolveTools(agent: AgentDefinition, tool: ((name: string) => AgentTool | undefined) | undefined): AgentTool[] {
+  return (agent.tools ?? []).map((entry) => {
+    if (typeof entry !== "string") return entry;
+    const resolved = tool?.(entry);
+    if (resolved === undefined) throw new Error(`agent "${agent.name}" names the tool "${entry}", which no agent.tool provides`);
+    return resolved;
+  });
 }

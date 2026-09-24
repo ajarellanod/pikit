@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   type Admission,
   type AgentRuntime,
+  type AgentTool,
   type AppEvents,
   defineAgent,
   defineApp,
@@ -22,6 +23,16 @@ test("defineAgent rejects a name that is not kebab-case and a model without a pr
   expect(() => defineAgent({ name: "Support", model: "anthropic/claude" })).toThrow("kebab-case");
   expect(() => defineAgent({ name: "support", model: "claude" })).toThrow('"provider/modelId"');
   expect(() => defineAgent({ name: "support", model: "anthropic/" })).toThrow('"provider/modelId"');
+});
+
+test("an agent names installed tools by name, next to tools of its own", () => {
+  const own = { name: "lookup" } as unknown as AgentTool;
+  const coder = defineAgent({ name: "coder", model: "faux/scripted", tools: ["read", "bash", own] });
+
+  expect(coder.tools).toEqual(["read", "bash", own]);
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: ["read", "read"] })).toThrow('tool "read" is named twice');
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: ["rm -rf"] })).toThrow("is not a tool name");
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: [""] })).toThrow("is not a tool name");
 });
 
 test("agent.runtime and agent.definition are typed capabilities, agent.* typed events", async () => {

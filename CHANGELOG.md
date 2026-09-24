@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core: an agent names installed tools in `AgentDefinition.tools` (`["read", "bash", myTool]`),
+  resolved through the keyed capability `agent.tool`; the adapter resolves them when a conversation
+  opens (SPEC §6.3).
 - adapter: `@pikit/pi-adapter` types `execution` and `execution.shell` (Pi's `ExecutionEnv`), and
   `createExecutionConformance` in `@pikit/pi-adapter/testing` checks them (SPEC §8.3, §14).
 - spec: every component installs to `src/pikit/<name>/`, under its exact name, instead of a path by

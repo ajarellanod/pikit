@@ -353,6 +353,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `model.provider` (keyed by provider id) | pi-ai `Provider` | One per model provider (`anthropic`, `faux` in tests), each its own component importing its pi-ai provider by subpath. The runtime builds its models from all of them, and each agent names its own `provider/modelId`, so agents may use different providers side by side. Typed by `@pikit/pi-adapter` (§6.2). |
 | `model.credentials` | pi-ai `CredentialStore` | Credentials of the model providers, one per provider id (API key or OAuth tokens). pi-ai refreshes OAuth tokens inside the store's `modify` and writes them back, and reads the environment (`ANTHROPIC_API_KEY`) only when nothing is stored. Optional: without it, providers read their environment variables only. Typed by `@pikit/pi-adapter`; its conformance suite is in `@pikit/pi-adapter/testing` (§14), because the contract is pi-ai's. |
 | `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
+| `agent.tool` (keyed by tool name) | `AgentTool` | One per tool, provided by `tool-*` components. An agent names the tools it uses in `AgentDefinition.tools`; the runtime resolves the names (§6.3). |
 | `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
 | `channel.transport` (keyed by channel name) | `ChannelTransport` | Send/edit/delete messages for one channel. Each channel component provides its transport under its own key; delivery uses `transports.get(message.channel)`. A missing key is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
@@ -950,7 +951,8 @@ export default defineAgent({
 });
 ```
 
-The core's `AgentDefinition` has `name`, `model`, `systemPrompt` (the text) and `tools` today;
+The core's `AgentDefinition` has `name`, `model`, `systemPrompt` (the text) and `tools` (tool names
+and tool objects, §6.3) today;
 `state`, `prepare` and `skills` are `[planned]` and are added to it without breaking it.
 
 Rules:
@@ -996,6 +998,21 @@ A wrapper adds only what the kit owns:
 - the capability the tool requires (`execution`, or `execution.shell` for `bash`);
 - its `replay`. Pi's tools declare none, so they default to `"never"`; a read-only wrapper
   declares `"safe"`.
+
+**How an agent gets a tool.** `[decision]`
+- A tool component provides its tool under the keyed capability `agent.tool`, keyed by the name
+  the model calls it by.
+- An agent names the tools it wants in `AgentDefinition.tools`, next to tool objects of its own:
+  `defineAgent({ tools: ["read", "bash", lookupTicket] })`. It gets those and nothing else.
+- Installing `tool-bash` gives no agent a shell until one names `bash`. What an agent can do is
+  written where the agent is defined, and a project with a support agent and an ops agent gives
+  `bash` to one of them only.
+- The runtime resolves the names when a conversation opens. `runtime-pi` refuses to start when a
+  name has no provider.
+- `defineAgent` rejects a name that is not a tool name, and a name listed twice.
+- Rejected: every installed tool for every agent. Pi's coding agent does that for one person in a
+  terminal; a multi-agent service behind a channel should not. Adding names later would also
+  silently change what an agent without a list can do.
 
 pikit writes a tool as source only when Pi has none (for example `ls`, or `http-fetch`). The
 tools run on any `execution` provider. Pi's `ExecutionEnv` includes `exec`, so a provider
@@ -1875,6 +1892,10 @@ Resolved `[decision]`:
   `outbound-direct`, `outbound.prepare` or `channel.transport` until M2's `durable-outbox`: a
   synchronous reply has nothing to retry, and a direct outbound path built now would be replaced
   in M2. A duplicate `messageId` is a `409`, with no stored answer to replay.
+- An agent names its tools (§6.3): `AgentDefinition.tools` takes names of installed tools, which
+  `tool-*` components provide under the keyed capability `agent.tool`, next to tool objects. An
+  installed tool reaches no agent that does not name it, so what an agent can do is written where
+  it is defined.
 - The router is a component (M1). The `route.resolve` pipeline and `RouteDecision` are core; every
   routing strategy is a component that adds a stage. `router-basic` fills in `defaultAgent` when no
   earlier stage decided, so a project stage with a higher priority routes around it without forking

@@ -11,7 +11,7 @@
  */
 
 import type { Models } from "@earendil-works/pi-ai";
-import type { Admission, AgentDefinition, AgentRequest, AgentRuntime, AppContext, Context, ConversationRef } from "@pikit/core";
+import type { Admission, AgentDefinition, AgentRequest, AgentRuntime, AgentTool, AppContext, Context, ConversationRef } from "@pikit/core";
 import { toPi } from "./context.ts";
 import { type HarnessHook, PiConversation, runContext } from "./conversation.ts";
 import type { PiExtension } from "./extensions/api.ts";
@@ -22,6 +22,8 @@ export interface PiRuntimeOptions {
   sessions: SessionStore;
   /** The definition of an agent by name (`agent.definition`), or `undefined` if none has it. */
   agent(name: string): AgentDefinition | undefined;
+  /** An installed tool by name (`agent.tool`), for the tools agents name. Without it, only tool objects work. */
+  tool?(name: string): AgentTool | undefined;
   /** Every model the agents may name (`provider/modelId`). */
   models: Models;
   /**
@@ -98,6 +100,7 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
         ref,
         session,
         agent,
+        tool: options.tool,
         models: options.models,
         host: { serial: (work) => serial(slot, work), events: options.events },
         onHarness: options.onHarness,

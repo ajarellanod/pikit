@@ -53,7 +53,8 @@ export interface TurnConfig {
   /** `provider/modelId`, resolved by the runtime against its models. */
   model: string;
   systemPrompt?: string;
-  tools: readonly AgentTool[];
+  /** As in `AgentDefinition.tools`: names of installed tools, or tool objects. */
+  tools: readonly (AgentTool | string)[];
 }
 
 /**
@@ -66,10 +67,19 @@ export interface AgentDefinition {
   /** `provider/modelId`. */
   model: string;
   systemPrompt?: string;
-  tools?: readonly AgentTool[];
+  /**
+   * The agent's tools, and only these. A string names a tool that a `tool-*` component provides
+   * under the keyed capability `agent.tool` (`"read"`, `"bash"`); an object is a tool of the
+   * project's own. Installing a tool component gives no agent anything until it names the tool, so
+   * what an agent can do is written where the agent is defined. The runtime refuses to start when a
+   * name has no provider.
+   */
+  tools?: readonly (AgentTool | string)[];
 }
 
 const AGENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
+/** The name a model calls a tool by: letters, digits, `_` and `-`. */
+const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
 /** `provider/modelId`; the model id may contain slashes of its own (`openrouter/anthropic/x`). */
 const MODEL = /^[^/\s]+\/\S+$/;
 
@@ -80,6 +90,11 @@ export function defineAgent(definition: AgentDefinition): AgentDefinition {
   }
   if (!MODEL.test(definition.model)) {
     throw new Error(`agent "${definition.name}": model "${definition.model}" must be "provider/modelId"`);
+  }
+  const named = (definition.tools ?? []).filter((tool): tool is string => typeof tool === "string");
+  for (const [index, name] of named.entries()) {
+    if (!TOOL_NAME.test(name)) throw new Error(`agent "${definition.name}": tool name "${name}" is not a tool name`);
+    if (named.indexOf(name) !== index) throw new Error(`agent "${definition.name}": tool "${name}" is named twice`);
   }
   return definition;
 }
@@ -162,5 +177,7 @@ declare module "./capabilities.ts" {
   interface AppKeyedCapabilities {
     /** One per agent, keyed by its name; provided by the project. */
     "agent.definition": AgentDefinition;
+    /** One per tool, keyed by the name the model calls it by; provided by `tool-*` components. */
+    "agent.tool": AgentTool;
   }
 }
