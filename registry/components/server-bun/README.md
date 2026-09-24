@@ -5,7 +5,7 @@ The HTTP server of the server target: Hono on `Bun.serve`.
 - **Provides:** nothing. It serves every `http.route` other components provide.
 - **Uses:** `http.route` (keyed by `"METHOD /path"`).
 - **Target:** `server` (it uses `Bun.serve`).
-- **Installs to:** `src/pikit/server/bun/`.
+- **Installs to:** `src/pikit/server-bun/`.
 - **npm dependencies:** `hono` (exact version, `4.13.9`), `typebox`.
 
 ## What it does

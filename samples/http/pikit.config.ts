@@ -16,7 +16,7 @@ import providerAnthropic from "../../registry/components/provider-anthropic/file
 import routerBasic from "../../registry/components/router-basic/files/src/pikit/router-basic/index.ts";
 import runtimePi from "../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import secretsEnv from "../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
-import serverBun from "../../registry/components/server-bun/files/src/pikit/server/bun/index.ts";
+import serverBun from "../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
 import sessionsJsonl from "../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
 import agents from "./src/extensions/agents.ts";
 
