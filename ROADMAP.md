@@ -159,8 +159,12 @@ included. It bridges four gaps of `pi-agent-core` (SPEC §6.4), the spike is del
 
 ✅ **`runtime-pi`** (`registry/components/runtime-pi`): provides `agent.runtime` and passes both
 suites from its own copied tests. Its `component.json` waits for the CLI's generator; a test pins
-what `setup` declares until then. Next: prepare/`agent.state`, the `tool-*` components, the http
+what `setup` declares until then. Next: prepare/`agent.state`, the `tool-*` components, Pi
+extensions through a vendored `ExtensionAPI` subset with no TUI (SPEC §6.2b, scenario 7), the http
 preset, the installer and the CLI.
+
+Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle
+delay before closing a conversation (`idleMs`) is added only if reopening is measured to be slow.
 
 **Scope:**
 - `@pikit/pi-adapter` on `accept()` / `drive()` in one server process, shaped by the spike.

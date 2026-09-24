@@ -822,12 +822,27 @@ Support tiers (`pikit doctor` lists what an extension uses and at which tier):
 | B — later, chat-meaningful | `registerCommand` (slash commands from a channel), `ui.notify/select/confirm/input` (routed to the channel, awaiting a reply — overlaps with `approvals`) | Component-level; not in the first adapter cut. |
 | C — no-op with a `doctor` warning | `registerShortcut`, `register*Renderer`, `registerMarkdownTransformer`, `addAutocompleteProvider`, `ui.setWidget/setStatus/setTitle/setFooter/setHeader/theme/editor*`, `navigateTree`, `switchSession`, `fork` | TUI-only or session-tree UI. |
 
-Known facts (checked on pi-coding-agent 0.85.1; re-check on 0.87.x): `AgentSession` still
-drives the legacy `Agent` class (`agent.beforeToolCall`), not `AgentHarness`; the compat layer translates Pi's *semantic*
-extension events, not its classes, so Pi's migration lands in the adapter only. Typing the
-compat object against Pi's own `ExtensionAPI` would make `pi-coding-agent` a types-only
-devDependency (19 MB); the alternative is vendoring the subset (~200 lines, attributed in
-`NOTICE`). `[open]` — decide in the adapter step.
+Known facts (checked on pi-coding-agent 0.87.1):
+- `AgentSession` still drives the legacy `Agent` class (`agent.beforeToolCall`), not
+  `AgentHarness`. The compat layer translates Pi's *semantic* extension events onto the harness
+  hooks, not Pi's classes, so Pi's own migration lands in the adapter only.
+- `ExtensionAPI` has grown since 0.85: among others `context_with_system`,
+  `cache_warming_decision`, `agent_before_settle` / `agent_settled`, `before_provider_headers`,
+  `input`, `user_bash`, `model_select`, `project_trust`, and results on `message_end` and
+  `turn_end`. The tier table above is re-derived from 0.87.1 when the compat layer is built.
+- Existing extensions import from `@earendil-works/pi-coding-agent`, and not only types:
+  `defineTool` is a value. Running one unmodified means that import resolves to the compat
+  layer (how is part of the design below).
+
+`[decision]` The compat layer's `ExtensionAPI` is a **vendored subset** in `@pikit/pi-adapter`
+(attributed in `NOTICE`; Pi is MIT), not a dependency on `pi-coding-agent`: 19 MB for types is
+out of proportion, and a subset states exactly what pikit supports. A type test pins it against
+Pi's own shapes on each bump. **No TUI:** the compat object reports `mode: "rpc"` and
+`hasUI: false`, `ui.*` calls are no-ops (tier C, with a `doctor` warning), and extensions that
+guard on `hasUI` take their non-interactive path, as Pi already asks them to.
+`[open]` — how extensions are declared (for the whole runtime or per agent), when their factory
+runs, and how the `@earendil-works/pi-coding-agent` import resolves: decided with the compat
+layer.
 
 ### 6.2a Dynamic agents without hooks
 
@@ -1666,6 +1681,9 @@ Resolved `[decision]`:
   conversation without a message (§6.1).
 - `abort()` withdraws the messages queued in the run; they stay duplicates (§6.1, §6.4 gap 4),
   as in Pi's durable runtime.
+- Pi extensions run through a vendored subset of `ExtensionAPI` in the adapter, with no TUI
+  (`hasUI: false`, `ui.*` no-ops) (§6.2b). Extensibility through Pi's ecosystem is a goal, and a
+  19 MB types-only dependency is not.
 - `AgentResult.requestIds` lists every request a run took (§6.1). Without it, a request queued
   into a running run would never learn it was answered, and a channel that replies per message
   (HTTP) would wait forever. The list is read from the transcript; no record is added.
