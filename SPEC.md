@@ -762,7 +762,9 @@ Responsibilities:
   - `ExecutionEnv` from `execution`.
   - `tools` from the agent definition and installed tool components.
   - `models` from the `model.provider` components (`modelsFrom`), each importing its pi-ai
-    provider **by subpath** (bundle size on Cloudflare).
+    provider **by subpath** (bundle size on Cloudflare). A component does not import pi-ai, so
+    the adapter has one subpath per provider it exposes (`@pikit/pi-adapter/providers/anthropic`),
+    each re-exporting pi-ai's subpath and nothing else.
 - Translate Pi hooks/events → `agent.*` events and `agent.prepare` pipeline:
   - `before_run` → `agent.prepare` (system prompt, tools, context injection).
   - `before_tool` / `after_tool` → `agent.tool.call` / `agent.tool.result` (interceptable).
