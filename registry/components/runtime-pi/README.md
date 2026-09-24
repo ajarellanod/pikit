@@ -38,6 +38,28 @@ providers. Install one `model.provider` component per provider.
 A conversation's session is open only while a run is being driven. Stopping the app leaves
 unfinished runs open in their sessions, and the next process resumes them.
 
+## Pi extensions
+
+Existing Pi extensions run unmodified, except for their terminal UI: `ctx.hasUI` is `false`,
+and `ctx.ui.*` does nothing. List them where you compose the app:
+
+```ts
+import { createRuntimePi } from "./src/pikit/runtime/pi";
+import permissionGate from "./extensions/permission-gate.ts";
+
+const runtimePi = createRuntimePi({ extensions: [permissionGate] });
+```
+
+They import `@earendil-works/pi-coding-agent`. Your project installs `@pikit/pi-extension-shim`
+under that name, so the import resolves without the coding agent itself:
+
+```json
+"@earendil-works/pi-coding-agent": "npm:@pikit/pi-extension-shim@…"
+```
+
+Each conversation loads the extensions when it opens. What pikit supports is listed in
+SPEC §6.2b; anything else logs a warning and does nothing.
+
 ## Your agents
 
 A component of your own provides your agents:

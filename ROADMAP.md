@@ -128,7 +128,8 @@ starts with the lifecycle conformance, which every resource-owning component pas
 - `src/pikit/` contains every behavior as readable source.
 - A message sent while the agent is working changes its course: it is steered through Pi's
   inbox, and pikit has no queue of its own.
-- An existing tier-A Pi extension runs unmodified.
+- An existing tier-A Pi extension runs unmodified. (✅ Pi's own examples run byte for byte
+  through `createRuntimePi({ extensions })`; the HTTP half of scenario 7 waits for scenario 1.)
 
 **First step, before any M1 component: the adapter spike.** A throwaway spike of
 `@pikit/pi-adapter` on Pi 0.87.x that proves the translation to the shapes of Pi's durable
@@ -159,9 +160,14 @@ included. It bridges four gaps of `pi-agent-core` (SPEC §6.4), the spike is del
 
 ✅ **`runtime-pi`** (`registry/components/runtime-pi`): provides `agent.runtime` and passes both
 suites from its own copied tests. Its `component.json` waits for the CLI's generator; a test pins
-what `setup` declares until then. Next: prepare/`agent.state`, the `tool-*` components, Pi
-extensions through a vendored `ExtensionAPI` subset with no TUI (SPEC §6.2b, scenario 7), the http
-preset, the installer and the CLI.
+what `setup` declares until then.
+
+✅ **Pi extensions** (SPEC §6.2b): a vendored `ExtensionAPI` subset with no TUI, loaded per
+conversation and imported through `@pikit/pi-extension-shim`. Pi's `permission-gate`,
+`protected-paths` and `hello` examples run unmodified. **Pending tests** (SPEC §6.2b): how a
+conversation with extensions is taken up again: reopened after idle, resumed after a crash,
+the provider's prompt cache across a reopen, and extension state across a reopen. Next: prepare/`agent.state`, the `tool-*`
+components, the http preset, the installer and the CLI.
 
 Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle
 delay before closing a conversation (`idleMs`) is added only if reopening is measured to be slow.

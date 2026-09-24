@@ -5,8 +5,9 @@
  */
 
 import { expect, test } from "bun:test";
-import { defineAgent, defineApp, silentLogger } from "@pikit/core";
+import { type AgentRuntime, defineAgent, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { createAgentRuntimeConformance, createLifecycleConformance } from "@pikit/core/testing";
+import type { SessionStore } from "@pikit/pi-adapter";
 import { createPiRuntimeFixture, testComponents } from "@pikit/pi-adapter/testing";
 import runtimePi, { createRuntimePi } from "./index.ts";
 
@@ -45,6 +46,39 @@ async function startFailure(app: { start(): Promise<void> }): Promise<string> {
   if (!(error instanceof Error)) throw new Error("expected start() to fail");
   return String(error.cause instanceof Error ? error.cause.message : error.cause);
 }
+
+test("Pi extensions given to createRuntimePi see the conversation's tool calls", async () => {
+  const calls: string[] = [];
+  const runtime = createRuntimePi({
+    extensions: [(pi) => void pi.on("tool_call", (event) => void calls.push(event.toolName))],
+  });
+  const { sessions, agents, provider } = testComponents();
+  let answered!: (text: string | undefined) => void;
+  const answer = new Promise<string | undefined>((resolve) => (answered = resolve));
+  // Stands for a channel: it reaches the runtime and the sessions through their capabilities.
+  let channel!: { runtime: AgentRuntime; sessions: SessionStore };
+  const observer = defineComponent({
+    name: "channel-test",
+    setup(pikit) {
+      const runtimeHandle = pikit.use("agent.runtime");
+      const sessionsHandle = pikit.use("sessions.store");
+      pikit.on("agent.settled", (result) => answered(result.text));
+      return { start: () => void (channel = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
+    },
+  });
+  const app = await defineApp({ components: [sessions, agents, provider, runtime, observer], logger: silentLogger }).create();
+  await app.start();
+
+  const ctx = app.context();
+  const session = await channel.sessions.create({}, ctx);
+  await session.close(ctx);
+  const conversation = { key: "test:ext", agent: "scripted", sessionId: session.metadata.id };
+  await channel.runtime.dispatch({ requestId: "r1", conversation, prompt: "hold" }, ctx);
+
+  expect(await answer).toBe("answer: hold");
+  expect(calls).toEqual(["hold"]);
+  await app.stop();
+});
 
 test("it refuses to start without an agent", async () => {
   const { sessions, provider } = testComponents();

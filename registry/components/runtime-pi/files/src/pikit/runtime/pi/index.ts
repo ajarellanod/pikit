@@ -16,10 +16,16 @@
  */
 
 import { type AgentRuntime, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { createPiRuntime, type HarnessHook, modelsFrom, type PiRuntime } from "@pikit/pi-adapter";
+import { createPiRuntime, type HarnessHook, modelsFrom, type PiExtension, type PiRuntime } from "@pikit/pi-adapter";
 
 export interface RuntimePiOptions {
-  /** Attach Pi hooks to each conversation's harness when it opens (tests; Pi extensions later). */
+  /**
+   * Pi extensions, unmodified: `createRuntimePi({ extensions: [permissionGate] })` in
+   * `pikit.config.ts`. Each conversation loads them when it opens, as Pi loads them per session.
+   * There is no terminal UI: `ctx.hasUI` is false and `ctx.ui.*` does nothing (SPEC §6.2b).
+   */
+  extensions?: readonly PiExtension[];
+  /** Attach Pi hooks to each conversation's harness when it opens (tests). */
   onHarness?: HarnessHook;
 }
 
@@ -63,6 +69,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             // Runs outlive the calls that admit them; never keep start's context (its deadline).
             events: ctx.derive(() => BACKGROUND_CONTEXT),
             ...(options.onHarness !== undefined && { onHarness: options.onHarness }),
+            ...(options.extensions !== undefined && { extensions: options.extensions }),
           });
         },
         async stop(ctx) {

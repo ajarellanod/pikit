@@ -9,6 +9,8 @@ line names its area (AGENTS.md, "Git and docs").
   subset of `ExtensionAPI` lives in `@pikit/pi-adapter/extensions`, and
   `@pikit/pi-extension-shim` is installed as `@earendil-works/pi-coding-agent` so their imports
   resolve (SPEC §6.2b).
+- component/runtime-pi: `createRuntimePi({ extensions })` loads Pi extensions for every
+  conversation.
 - core: `AgentResult.requestIds` lists every request a run answered, so a channel that replies per
   message answers the ones queued into a run too (SPEC §6.1).
 - component/runtime-pi: the agent runtime component. Pi runs the agents through `@pikit/pi-adapter`;
