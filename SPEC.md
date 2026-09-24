@@ -1969,6 +1969,11 @@ is that the answer is "nothing" for every minor.
 - Operational logs (`log-events`, §9.1) never carry a message's text, a prompt, an answer or a
   run's error message: a log line names what happened, the session holds what was said. Each field
   is picked by name, so a field added to an event is not logged until it is chosen.
+- Diagnostic logs are not operational logs. `[decision]` When the adapter logs a failure it
+  swallows (a run no longer driven, a failing `prepare`, a Pi extension's handler or action), the
+  line carries the error's message, because the operator has nothing else to diagnose it with.
+  That message comes from Pi, from `prepare` or from an extension's own code, and may quote what
+  that code put in it; it never comes from `log-events`, whose lines stay without messages.
 - Model credentials (API keys, OAuth tokens) are not secrets read by name: pi-ai reads, refreshes
   and writes them through `model.credentials`. On a server, `credentials-file` keeps them in a
   file with mode `0600`. It never logs a value, and never quotes the file in an error. It never
