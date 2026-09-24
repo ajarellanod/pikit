@@ -87,15 +87,18 @@ export interface ExecOptions extends CommandOptions {
  *
  * `docker compose run --rm` starts a separate, short-lived container of the same service: it
  * publishes no ports and leaves a running app alone. Without a person, it gets no terminal (`-T`)
- * and its output is not shown; Docker's build progress still is.
+ * and its output is not shown, nor is the build's progress: Compose 5.5 fails a `run --build` whose
+ * stdout is not a terminal while stderr is ("failed to get console") unless progress is `quiet`. A
+ * failing build still prints its error.
  */
 export async function exec(options: ExecOptions): Promise<number> {
-  const args = ["run", "--rm", "--build", "--no-deps"];
-  if (options.interactive !== true) args.push("-T");
+  const interactive = options.interactive === true;
+  const args = [...(interactive ? [] : ["--progress", "quiet"]), "run", "--rm", "--build", "--no-deps"];
+  if (!interactive) args.push("-T");
   for (const dir of options.share ?? []) args.push("--volume", `${dir.path}:${dir.path}${dir.writable === true ? "" : ":ro"}`);
   const command = ["docker", "compose", ...args, "app", ...options.command];
   const run = options.run ?? spawnRunner;
-  const result = await run(command, { cwd: options.cwd ?? process.cwd(), capture: options.interactive !== true });
+  const result = await run(command, { cwd: options.cwd ?? process.cwd(), capture: !interactive });
   return result.code;
 }
 

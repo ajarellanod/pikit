@@ -85,7 +85,7 @@ The CLI delegates to these functions; you can call them from a script too. Each 
 | `restart()` | `docker compose restart`: a clean stop and a new process; rebuilding is `up()` |
 | `logs({ follow, tail })` | `docker compose logs --no-log-prefix [--follow] [--tail N]` |
 | `status({ url })` | `docker compose ps --all --format json`, plus `GET /health` and `GET /ready` |
-| `exec({ command, share, interactive })` | `docker compose run --rm --build --no-deps [-T] [--volume dir:dir] app …`: a one-off container of the app, resolving with its exit code |
+| `exec({ command, share, interactive })` | `docker compose [--progress quiet] run --rm --build --no-deps [-T] [--volume dir:dir] app …`: a one-off container of the app, resolving with its exit code. Without a person, no terminal and a quiet build (Compose 5.5 fails a `run --build` whose stdout is not a terminal otherwise) |
 
 `status()` returns the containers (name, state, health) and each probe's HTTP status, or
 `"unreachable"`. The default URL is `http://127.0.0.1:3000`, the port `compose.yaml` publishes.

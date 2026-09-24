@@ -38,7 +38,7 @@ async function checkReady(projectDir: string): Promise<void> {
 async function checkAppCredentials(projectDir: string): Promise<void> {
   const exec = await deploymentExec(projectDir);
   if (exec === undefined) return;
-  log.step("checking the model credentials where the app runs");
+  log.step("checking the model credentials where the app runs (the first time, its image is built)");
   const missing = Object.entries((await checkModelCredentials(projectDir, exec)).providers)
     .filter(([, ok]) => !ok)
     .map(([id]) => id);

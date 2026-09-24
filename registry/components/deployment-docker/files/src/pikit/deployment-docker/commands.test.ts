@@ -63,7 +63,7 @@ test("exec runs a one-off container of the app, with the shared directories at t
   expect(calls).toEqual([
     {
       command: [
-        "docker", "compose", "run", "--rm", "--build", "--no-deps", "-T",
+        "docker", "compose", "--progress", "quiet", "run", "--rm", "--build", "--no-deps", "-T",
         "--volume", "/cli:/cli:ro", "--volume", "/tmp/out:/tmp/out",
         "app", "bun", "/cli/credentials.ts", ".", "/tmp/out/result.json", "check",
       ],

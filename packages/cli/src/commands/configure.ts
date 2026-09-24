@@ -134,7 +134,7 @@ async function configureModels(
   const lacking = ids.filter((id) => here.providers[id] !== true);
   let there: Record<string, boolean> | undefined;
   if (lacking.length > 0 && exec !== undefined) {
-    log.step("checking the model credentials where the app runs (`pikit up`)");
+    log.step("checking the model credentials where the app runs (`pikit up`); the first time, its image is built (about a minute)");
     try {
       there = (await checkModelCredentials(projectDir, exec)).providers;
     } catch (error) {
