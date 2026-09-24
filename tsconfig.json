@@ -3,6 +3,7 @@
   "include": [
     "packages/*/src/**/*.ts",
     "registry/components/*/files/**/*.ts",
-    "scripts/**/*.ts"
+    "scripts/**/*.ts",
+    "samples/**/*.ts"
   ]
 }

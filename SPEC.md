@@ -1709,7 +1709,11 @@ is that the answer is "nothing" for every minor.
 
 The design is considered validated when all five pass without touching the core:
 
-1. **Minimal**: `runtime-pi` + `server-bun` + `channel-http` → working agent over HTTP.
+1. **Minimal**: `runtime-pi` + `server-bun` + `channel-http` → working agent over HTTP. Runs
+   (M1) in `samples/http`, with `secrets-env`, `sessions-jsonl`, `conversations-file`,
+   `credentials-file`, `provider-anthropic` and `router-basic`. Its end-to-end test uses Pi's faux
+   model over real HTTP, and a live test against Anthropic runs when a credential exists. The
+   one-command install (`pikit new … && pikit up`) waits for the CLI.
 2. **Chat**: `+ channel-telegram + sessions-sqlite` → stateful Telegram bot.
 3. **Reliability**: `+ durable-outbox` → delivery retried after simulated channel failure;
    channel component unchanged.
@@ -1727,8 +1731,9 @@ And the runtime proof:
 7. **Pi compat**: an existing Pi extension that uses only tier A of §6.2b (e.g. a
    `tool_call` policy + one `registerTool`) is added to `runtime-pi` unmodified and its
    handlers fire during scenario 1. The extension half runs today: Pi's own `permission-gate`,
-   `protected-paths` and `hello` examples, byte for byte (`compat.test.ts`). The HTTP half
-   waits for scenario 1.
+   `protected-paths` and `hello` examples, byte for byte (`compat.test.ts`). The HTTP half runs
+   too: `permission-gate`, loaded with `createRuntimePi({ extensions })`, blocks `rm -rf` asked
+   for over HTTP (`samples/http/test/scenario-7.test.ts`).
 
 ---
 

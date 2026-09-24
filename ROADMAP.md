@@ -127,9 +127,10 @@ starts with the lifecycle conformance, which every resource-owning component pas
   logs and status.
 - `src/pikit/` contains every behavior as readable source.
 - A message sent while the agent is working changes its course: it is steered through Pi's
-  inbox, and pikit has no queue of its own.
+  inbox, and pikit has no queue of its own. (✅ over HTTP in `samples/http`: both requests get the
+  run's answer.)
 - An existing tier-A Pi extension runs unmodified. (✅ Pi's own examples run byte for byte
-  through `createRuntimePi({ extensions })`; the HTTP half of scenario 7 waits for scenario 1.)
+  through `createRuntimePi({ extensions })`, and over HTTP in `samples/http`, scenario 7.)
 
 **First step, before any M1 component: the adapter spike.** A throwaway spike of
 `@pikit/pi-adapter` on Pi 0.87.x that proves the translation to the shapes of Pi's durable
@@ -167,8 +168,31 @@ conversation and imported through `@pikit/pi-extension-shim`. Pi's `permission-g
 `protected-paths` and `hello` examples run unmodified. Tested how a conversation with extensions
 is taken up again: reopened after idle, resumed after a crash, the provider's prompt cache across
 a reopen, and extension state across a reopen (SPEC §6.2b). Open: reading an extension's entries
-back (`ctx.sessionManager`). Next: prepare/`agent.state`, the `tool-*`
-components, the http preset, the installer and the CLI.
+back (`ctx.sessionManager`).
+
+✅ **Scenario 1, talk to an agent over HTTP** (`samples/http`, SPEC §15). It runs `runtime-pi` +
+`server-bun` + `channel-http`, with `secrets-env`, `sessions-jsonl`, `conversations-file`,
+`credentials-file`, `provider-anthropic` and `router-basic`. Each component passes its contract's
+conformance suite and the lifecycle suite, and has a start-failure test.
+- New core contracts, each with a suite and an in-memory double: `secrets`,
+  `conversations.registry` (with `conversation.reset`), `http.route`, and the inbound pipelines
+  of §5.
+- In the adapter: Pi's JSONL store and session suites, `model.credentials` (pi-ai's
+  `CredentialStore`) with its suite, and Anthropic by subpath.
+- Two end-to-end tests over real HTTP, with Pi's faux model:
+  - scenario 1: the answer in the response; a message steered into a busy run, both POSTs
+    answered through `requestIds`; `401`; an honest `/ready`; reset; a conversation surviving a
+    restart;
+  - the HTTP half of scenario 7: Pi's `permission-gate` blocks `rm -rf` asked for over HTTP.
+- A live test against Anthropic runs when a credential exists (a stored login or
+  `ANTHROPIC_API_KEY`). Login is pi-ai's OAuth flow (`samples/http/scripts/login.ts`), stored by
+  `credentials-file`.
+- The answer is the HTTP response; `outbound.prepare`, `channel.transport` and the outbox wait for
+  M2 (SPEC §5).
+
+Next: prepare/`agent.state`, the `tool-*` components, the http preset (its composition is
+`samples/http`), `deployment-docker`, logs and status, the installer and the CLI
+(`pikit new … && pikit up`).
 
 Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle
 delay before closing a conversation (`idleMs`) is added only if reopening is measured to be slow.

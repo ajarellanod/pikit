@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- samples: `samples/http` talks to Claude over HTTP (SPEC §15 scenario 1), with an OAuth login
+  script and end-to-end tests for scenario 1 and the HTTP half of scenario 7.
 - component/channel-http: `POST /v1/messages` answers in the response (`200`, or `202` past
   `replyTimeoutMs`), including messages steered into a busy run; `POST /v1/conversations/:id/reset`;
   bearer token from `PIKIT_HTTP_TOKEN` (SPEC §5).
