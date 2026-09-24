@@ -9,6 +9,7 @@
         "@pikit/core": "workspace:*",
         "@pikit/pi-adapter": "workspace:*",
         "@types/bun": "^1.4.2",
+        "typebox": "1.3.27",
         "typescript": "^7.0.2",
       },
     },

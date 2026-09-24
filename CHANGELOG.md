@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/sessions-jsonl: provides `sessions.store` as Pi's JSONL files on the server's disk, and
+  passes Pi's session suites (SPEC §7.5).
 - component/secrets-env: provides `secrets` from the process environment. An empty variable is not
   set, and it never reads a `.env` file itself (SPEC §4.5, §13).
 - adapter: `@pikit/pi-adapter/providers/anthropic` exposes pi-ai's Anthropic provider by subpath

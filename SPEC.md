@@ -1198,7 +1198,7 @@ Planned implementations:
 | Component | Backing | Target |
 |---|---|---|
 | `sessions-memory` | in-memory (Pi's `MemorySessionRepo`) | tests |
-| `sessions-jsonl` | Pi's `JsonlSessionRepo` over local FS | server |
+| `sessions-jsonl` | Pi's `JsonlSessionRepo` over local FS. Built (M1) | server |
 | `sessions-sqlite` | `@earendil-works/pi-session-backend-sqlite-node` or `bun:sqlite` | server |
 | `sessions-postgres` | own implementation | server |
 | `sessions-cloudflare-do` | DO `ctx.storage.sql` | cloudflare |
