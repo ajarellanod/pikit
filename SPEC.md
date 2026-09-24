@@ -982,12 +982,13 @@ Rules:
   register anything as a side effect; it returns a value. `undefined` fields keep the static
   default. Every run starts from the static fields plus what `prepare` returns for that run:
   nothing carries over from the previous run's result.
-- `state` is the agent's persisted per-conversation state: a JSON document tools and
-  extensions may read and update (`ctx.state.update(patch)`). `[decision]` It is stored **in
-  the Pi session**, as a conversation-scoped document in Pi's durable runtime and, until
-  that ships, as a session value. It commits atomically with the transcript, survives
-  restarts and eviction, and starts fresh on `/reset` (a new session). pikit adds no store for
-  it (§6.4).
+- `state` is the agent's persisted per-conversation state: a JSON document its tools read and
+  update through their context (below). `[decision]` It is stored **in the Pi session**, as a
+  conversation-scoped document in Pi's durable runtime and, until that ships, as a session
+  value. It survives restarts and eviction, and starts fresh on `/reset` (a new session). pikit
+  adds no store for it (§6.4). Today an update is a session commit of its own, apart from the
+  tool result that follows it: a crash between the two leaves the state moved on and the call
+  without a result, which then follows its tool's `replay` (§6.4, §8.4).
 - **How a tool reaches it.** `[decision]` Through its context, not a global and not a capability:
   the runtime puts the conversation's `AgentState` in the context of every run under the core's
   key `AGENT_STATE`, and Pi passes that context to each tool call (Chord's values cross into Pi
@@ -1000,6 +1001,11 @@ Rules:
     conversation so parallel tools never lose each other's keys. A patch that is not JSON is
     rejected. Its suite is `createAgentStateConformance` (`@pikit/core/testing`), passed by an
     in-memory double and by the adapter's session-backed state.
+  - A patch replaces whole keys, and it is computed before it is queued. A value built from
+    the previous one (appending to a list, a counter) read with `get()` can lose a parallel
+    tool's write to the same key. Keep such values in keys only one tool writes, or run the
+    tools one at a time. A functional `update(fn)`, applied in the queue, is additive and waits
+    for the first agent that needs it.
 - The adapter runs `prepare` in Pi's `before_run` hook, once per run, before the run's first
   model call, with the conversation's state as it is then (`packages/pi-adapter/src/turns.ts`).
   Everything it applies is Pi's own mechanism:
@@ -1033,6 +1039,8 @@ Rules:
   or for `prepare`.
 - Pi extensions do not reach `agent.state` yet: their tools and handlers receive an
   `ExtensionContext`, not the run's context. `[planned]` with the first extension that needs it.
+  Once the state is a Pi document (§6.4), an extension reads it through Pi's own document API,
+  so pikit adds nothing to the vendored `ExtensionAPI` for it.
 
 **Workflows are state, not graphs.** pikit has no workflow DSL. A multi-step process is a
 `state.phase` the agent advances by calling tools, with `prepare` exposing the tools that
@@ -1115,7 +1123,7 @@ contracts so the move happens inside the adapter. `[upstream]`
 |---|---|---|
 | Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | Enqueue first (`steer()`), then `accept()`. Pi drains its inbox into a new run, or the run in progress takes the message at a boundary. Bridges gap 2 |
 | Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | The `requestId` travels inside the message (a Pi `custom` message) and is found in Pi's inbox or transcript. Bridges gaps 1 and 3 |
-| `agent.state` | Conversation-scoped document (a JSON object with an `initial()`) | Session value `pikit` / `agent.state` (`state.ts`), holding the updated keys; `get()` merges them over the agent's initial state. It is committed apart from the transcript, so a tool's state change and its result are two commits. Passes `createAgentStateConformance` on memory and JSONL sessions |
+| `agent.state` | Conversation-scoped document (a JSON object with an `initial()`). It can declare `history: "rewindable"` and `fork: "asOf"`, so the state follows a fork or a rewind of the transcript (`pico-v5.md` §3, checked at `cbe7cf00`) | Session value `pikit` / `agent.state` (`state.ts`), holding the updated keys; `get()` merges them over the agent's initial state. It is committed apart from the transcript, so a tool's state change and its result are two commits. A session value belongs to the whole session, not to a branch: correct while pikit never forks or rewinds a conversation. Passes `createAgentStateConformance` on memory and JSONL sessions |
 | Continue a killed run | Tasks resume from their records | `AgentHarness.create()` reports `open` operations; `lane.resume()` continues them; tool `replay` is Pi's |
 | Multi-step work, waits, approvals that last days | Durable tasks: phases, effect sandwich (commit intent → effect → commit outcome), memos, `sleep(until)`, abort protocol | `state.phase` + tools; nothing more is built |
 | Subagents | Owned child conversations inside the session | Deferred |
