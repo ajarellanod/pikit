@@ -992,7 +992,7 @@ Tools are components too (`tool-*`). A tool component declares which capabilitie
 `createBashTool` (verified on 0.87.1). They are harness tools over Pi's `ExecutionEnv`, which
 they receive as `toolContext.env`. They import nothing Node-only (`typebox`, `diff`), and Pi's
 own session worker (`mini`) uses them. Following Pi first, `tool-read`, `tool-write`,
-`tool-edit` and `tool-bash` wrap Pi's factories and do not reimplement them. `[decision]`
+`tool-edit` and `tool-bash` wrap Pi's factories and do not reimplement them. `[decision]` Built in M1.
 
 A wrapper adds only what the kit owns:
 - the capability the tool requires (`execution`, or `execution.shell` for `bash`);

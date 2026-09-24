@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/tool-bash: provides Pi's `bash` tool as `agent.tool` `bash`, working on `execution.shell`,
+  with replay `never`; an agent gets it by naming it (SPEC §6.3).
 - component/tool-edit: provides Pi's `edit` tool as `agent.tool` `edit`, working on `execution`,
   with replay `never`; an agent gets it by naming it (SPEC §6.3).
 - component/tool-write: provides Pi's `write` tool as `agent.tool` `write`, working on `execution`,
