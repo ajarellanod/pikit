@@ -297,6 +297,10 @@ a server.
 - A run survives DO eviction mid-run: `resume()` completes it.
 - The DO session backend passes Pi's conformance suite.
 - Every Cloudflare budget is measured and met.
+- The tools' own tests (`tool-read`, `tool-write`, `tool-edit`, `tool-bash`) run under
+  Miniflare, as their `cloudflare` target promises. Today they set their files up with
+  `node:fs` in a temporary directory; they set them up through `execution` instead. `tool-bash`
+  has a shell there only when something provides `execution.shell` (M5's container).
 
 **Scope:** `sessions-cloudflare-do`, alarm-driven `drive()` with resume, `deployment-cloudflare`,
 `workspace-virtual`, `execution-fetch`, `scheduler-cloudflare`.
