@@ -5,6 +5,11 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/deployment-docker: runs a project in Docker. Its entrypoint starts with a deadline, stops
+  on SIGTERM/SIGINT within `stop_grace_period` and exits non-zero on failure; logs are JSON lines
+  with secrets redacted by name; `Dockerfile`, `compose.yaml` and `.dockerignore` at the project root
+  (non-root, `.pikit/` on a volume, `.env` at run time, healthcheck on `/health`); `up`, `down`,
+  `restart`, `logs` and `status` for the CLI to delegate to (SPEC §9.1, §10.2, §11).
 - component/log-events: one structured log line per `agent.*`, `conversation.reset`,
   `pipeline.halted` and `runtime.*` event, with the conversation, agent, request ids, admission and
   run kinds, duration, tokens, cost and error code; never a message's text (SPEC §9.1, §13).

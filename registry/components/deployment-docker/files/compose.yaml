@@ -1,0 +1,42 @@
+# How this pikit project runs in Docker (deployment-docker, SPEC §9.1).
+# `pikit up | down | restart | logs | status` run `docker compose` over this file.
+
+services:
+  app:
+    build: .
+    # Docker restarts the process when it exits: a failed start exits 1 (SPEC §9.1). The core never
+    # restarts an app inside the same process.
+    restart: unless-stopped
+    # A small init as PID 1: it forwards SIGTERM to Bun and reaps the commands the agent's tools run.
+    init: true
+    # Secrets and settings (PIKIT_HTTP_TOKEN, ANTHROPIC_API_KEY…) are read from .env when the
+    # container starts. .env stays on this machine: .dockerignore keeps it out of the image.
+    env_file:
+      - .env
+    # Only this machine can reach the port. To serve other machines, put a TLS proxy in front
+    # (`pikit expose`), or publish "3000:3000" knowing that the bearer token is the only lock.
+    ports:
+      - "127.0.0.1:3000:3000"
+    volumes:
+      # Sessions, conversations, credentials and the workspace survive `down`, `up` and new images.
+      - pikit-state:/app/.pikit
+    # Longer than the entrypoint's stop deadline (STOP_DEADLINE_MS, 10 s), so the app stops itself
+    # before Docker sends SIGKILL.
+    stop_grace_period: 20s
+    healthcheck:
+      # `/health` answers 200 while the process can answer. The slim image has no curl; Bun fetches.
+      test: ["CMD", "bun", "--eval", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      # The entrypoint's start deadline (START_DEADLINE_MS, 30 s).
+      start_period: 30s
+    # One JSON object per line (the entrypoint's logger), rotated so a busy agent cannot fill the disk.
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
+volumes:
+  pikit-state:

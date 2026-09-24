@@ -1406,8 +1406,16 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
 - Storage: `sessions-sqlite` + `storage-sqlite` by default; Postgres optional.
 - Scheduler: `scheduler-cron` (in-process, `Bun.cron` or `croner`), jobs persisted in
   `storage.sql`.
-- Deployment: `deployment-docker` generates `Dockerfile` + `compose.yaml`;
-  `deployment-systemd` generates a unit file. `pikit up/down/logs/status` wrap them.
+- Deployment: a `deployment-*` component owns everything that runs the app on a machine: the
+  process entrypoint, its logger, the supervisor's files and the commands `pikit up | down | restart
+  | logs | status` delegate to (§11). It is not an app component: it runs the app rather than running
+  inside it, so it is not listed in `pikit.config.ts`, and it provides and requires nothing.
+  - `deployment-docker` (M1) installs `Dockerfile`, `compose.yaml` and `.dockerignore` at the
+    project's root: `oven/bun:1.4-slim`, a production install from `bun.lock`, a non-root user,
+    `.pikit/` on a volume, secrets from `.env` at run time (never in the image), a healthcheck on
+    `GET /health`, and `restart: unless-stopped`. Its commands run `docker compose …` without a shell,
+    and `status` adds what `/health` and `/ready` answer.
+  - `deployment-systemd` `[planned]` generates a unit file.
 - Agent runtime is `pi-agent-core` here too; `pi-coding-agent` is not imported on any target
   (§6.3).
 - Workers: one process is one worker and owns every conversation (§7.2). Several replicas
@@ -1420,6 +1428,16 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
     timeout (systemd `TimeoutStopSec`, Docker's stop grace period), leaving room to exit.
     Exit 0 if it resolves, non-zero if it rejects (a stop that failed or was abandoned).
   - A second signal during the stop exits at once.
+  - A signal during the start cancels it (§4.6) and is a stop like any other.
+  - `deployment-docker`'s deadlines are 30 s to start and 10 s to stop, under a 20 s
+    `stop_grace_period`; a test in the component keeps the grace period above the stop deadline.
+- Logs `[decision]`: the entrypoint recomposes the definition `pikit.config.ts` exports
+  (`defineApp({ components, config, target: "server", logger })`) with the deployment's `Logger`.
+  How a process logs belongs to where it runs, like its deadlines. `deployment-docker` writes JSON
+  lines (`time`, `level`, `msg`, then the fields; `warn`/`error` on stderr), redacts fields by name
+  (§13), and never throws on a field it cannot serialize. A `logger` or `clock` set in
+  `pikit.config.ts` is not visible from its `AppDefinition` and does not reach the process; the
+  entrypoint takes them as options.
 
 ### 9.2 Cloudflare
 
@@ -1511,7 +1529,10 @@ A component installs to `src/pikit/<name>/`, under its exact name (`src/pikit/ch
 config key and its entry in `pikit.json`, so there is no mapping from name to path to remember or
 to get wrong. Each directory belongs to exactly one component, which is what `pikit remove` and
 the hashes in `pikit.json` rely on. `files/` mirrors the project: `files/src/pikit/<name>/` is
-copied to `src/pikit/<name>/`.
+copied to `src/pikit/<name>/`, and a file a component installs at the project's root (a
+`deployment-*` component's `Dockerfile`) sits at the root of `files/`. Because the layout is the
+same, a component's tests reach the root files by the same relative path in the registry and in the
+project.
 
 ### 10.2 Manifest
 
@@ -1557,6 +1578,22 @@ Rules:
   name another component. A capability no installed component provides is reported by
   `pikit add` and `pikit doctor`, not installed implicitly. `[decision]`
 - `targets` gates `pikit add` against the project's configured targets.
+- `files` maps paths under the component to paths under the project. `[decision]` `src` is mapped
+  as a directory (`{ "source": "files/src", "target": "src" }`), and every file outside `src/` is
+  named one by one, with a target relative to the project's root:
+  ```json
+  "files": [
+    { "source": "files/src", "target": "src" },
+    { "source": "files/Dockerfile", "target": "Dockerfile" },
+    { "source": "files/compose.yaml", "target": "compose.yaml" },
+    { "source": "files/.dockerignore", "target": ".dockerignore" }
+  ]
+  ```
+  A component never maps a directory onto the project's root, so it owns exactly the root files it
+  names: `pikit remove` deletes those and nothing else, `pikit.json` hashes each of them, and two
+  components naming the same target is an install error. A root file already present is not
+  overwritten without `--force`, as in step 6 of §10.5. A target never leaves the project (no `..`,
+  no absolute path).
 
 ### 10.3 Project manifest
 
@@ -1648,6 +1685,13 @@ pikit deploy [--profile <name>]              # delegates to deployment-* compone
 pikit expose                                 # cloudflare tunnel / caddy helper (server)
 ```
 
+`pikit up | down | restart | logs | status` only delegate `[decision]`: they call the functions
+of the same names that the installed `deployment-*` component exports from
+`src/pikit/<name>/index.ts`. `deployment-docker`'s run `docker compose` in the project's directory;
+`down` keeps the `.pikit/` volume, and `status` returns the containers' state plus what `GET /health`
+and `GET /ready` answer. The CLI holds no Docker or systemd knowledge, so changing how a project is
+deployed is editing or swapping that component.
+
 Presets are lists of `add` calls, nothing more:
 
 ```yaml
@@ -1672,6 +1716,8 @@ components:
 - `config/pikit.yaml` — non-secret values. Schema is the merge of core schema + every
   installed component's schema; validated at `doctor`, `dev`, `up`, `deploy`.
 - `.env` (server) / Worker secrets (cloudflare) — secrets, read through `secrets` capability.
+  With `deployment-docker`, compose passes `.env` to the container when it starts (`env_file`);
+  `.dockerignore` keeps it out of the build context, so no image ever contains a secret.
 - Profiles: `config/<profile>.yaml` overlays for `--profile`.
 - YAML is parsed with a YAML 1.2 parser; `on/off/yes/no` are strings. `[decision]`
 - The validated config is a deep-frozen copy. `ctx.config` is shared by every component, so a
@@ -1949,6 +1995,15 @@ Resolved `[decision]`:
 - Operational logs are the `log-events` component, not core behaviour (§9.1): installing it is
   enabling it. Its lines carry no text of a conversation and log an error's code, not its message
   (§13), because a provider's error message may quote the request.
+- A `deployment-*` component is not an app component: it owns the entrypoint, the logger and the
+  supervisor's files, and exports the functions `pikit up | down | restart | logs | status` call
+  (§9.1, §11). The app runs the same with or without it, and the CLI holds no Docker or systemd
+  knowledge.
+- The entrypoint recomposes `pikit.config.ts`'s components and config with the deployment's logger
+  (§9.1): the log format belongs to where a process runs, and `AppDefinition` does not expose the
+  logger to reuse it. No core change was needed.
+- A component's files outside `src/` are named one by one in `files` (§10.2), so a component owns
+  exactly the root files it lists, and removing it cannot touch a file it did not install.
 
 ---
 

@@ -1,0 +1,15 @@
+# Never sent to `docker build` (deployment-docker).
+
+# Secrets: compose.yaml passes .env to the container at run time; it is never baked into an image.
+.env
+.env.*
+!.env.example
+
+# State: a volume at run time (compose.yaml). An image with it would ship this machine's
+# conversations and model credentials to wherever the image goes.
+.pikit
+
+# Installed inside the image from bun.lock, for its own platform.
+node_modules
+
+.git
