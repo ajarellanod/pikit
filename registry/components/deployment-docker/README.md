@@ -85,9 +85,17 @@ The CLI delegates to these functions; you can call them from a script too. Each 
 | `restart()` | `docker compose restart`: a clean stop and a new process; rebuilding is `up()` |
 | `logs({ follow, tail })` | `docker compose logs --no-log-prefix [--follow] [--tail N]` |
 | `status({ url })` | `docker compose ps --all --format json`, plus `GET /health` and `GET /ready` |
+| `exec({ command, share, interactive })` | `docker compose run --rm --build --no-deps [-T] [--volume dir:dir] app …`: a one-off container of the app, resolving with its exit code |
 
 `status()` returns the containers (name, state, health) and each probe's HTTP status, or
 `"unreachable"`. The default URL is `http://127.0.0.1:3000`, the port `compose.yaml` publishes.
+
+`exec()` runs a command where the app runs: the same image (rebuilt first if the source changed),
+`.env` and the `pikit-state` volume, in a separate short-lived container that publishes no ports and
+leaves a running app alone. `pikit configure` logs in to a model provider through it, so an OAuth
+login lands in the volume the app reads, and `pikit up` checks there that the app has credentials.
+There is one copy of each login: the one on your machine (`.pikit/`) is for `pikit dev` only.
+Directories in `share` are mounted at the same path, read-only unless `writable`.
 
 ## Removing it
 

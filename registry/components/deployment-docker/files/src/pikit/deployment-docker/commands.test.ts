@@ -4,7 +4,7 @@
  */
 
 import { expect, test } from "bun:test";
-import { down, logs, parseContainers, restart, type Runner, spawnRunner, status, up } from "./commands.ts";
+import { down, exec, logs, parseContainers, restart, type Runner, spawnRunner, status, up } from "./commands.ts";
 
 function recorder(stdout = "", code = 0) {
   const calls: { command: readonly string[]; cwd: string; capture: boolean }[] = [];
@@ -46,6 +46,40 @@ test("logs streams to the terminal, without prefixes so every line stays JSON", 
     { command: ["docker", "compose", "logs", "--no-log-prefix"], cwd: "/p", capture: false },
     { command: ["docker", "compose", "logs", "--no-log-prefix", "--follow", "--tail", "100"], cwd: "/p", capture: false },
   ]);
+});
+
+test("exec runs a one-off container of the app, with the shared directories at the same path", async () => {
+  const { calls, run } = recorder("", 3);
+
+  const code = await exec({
+    cwd: "/srv/my-agent",
+    run,
+    command: ["bun", "/cli/credentials.ts", ".", "/tmp/out/result.json", "check"],
+    share: [{ path: "/cli" }, { path: "/tmp/out", writable: true }],
+  });
+
+  // The exit code is returned, not thrown: the caller reads the command's own result.
+  expect(code).toBe(3);
+  expect(calls).toEqual([
+    {
+      command: [
+        "docker", "compose", "run", "--rm", "--build", "--no-deps", "-T",
+        "--volume", "/cli:/cli:ro", "--volume", "/tmp/out:/tmp/out",
+        "app", "bun", "/cli/credentials.ts", ".", "/tmp/out/result.json", "check",
+      ],
+      cwd: "/srv/my-agent",
+      capture: true,
+    },
+  ]);
+});
+
+test("exec with a person gets a terminal, and its output reaches it", async () => {
+  const { calls, run } = recorder();
+
+  await exec({ cwd: "/p", run, command: ["bun", "login.ts"], interactive: true });
+
+  expect(calls[0]?.command).toEqual(["docker", "compose", "run", "--rm", "--build", "--no-deps", "app", "bun", "login.ts"]);
+  expect(calls[0]?.capture).toBe(false);
 });
 
 test("the current directory is the default project", async () => {

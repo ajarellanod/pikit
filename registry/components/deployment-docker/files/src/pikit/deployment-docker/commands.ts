@@ -63,6 +63,42 @@ export async function logs(options: LogsOptions = {}): Promise<void> {
   await compose(args, options);
 }
 
+/** A directory of this machine that a command run by `exec` needs, at the same absolute path inside. */
+export interface SharedDirectory {
+  path: string;
+  /** The command writes into it. Default: false, mounted read-only. */
+  writable?: boolean;
+}
+
+export interface ExecOptions extends CommandOptions {
+  /** The program and its arguments, run in the app's working directory (`/app`). */
+  command: readonly string[];
+  /** Directories of this machine the command reads (a script) or writes (its result). */
+  share?: readonly SharedDirectory[];
+  /** A person answers the command: it gets a terminal. Default: false. */
+  interactive?: boolean;
+}
+
+/**
+ * Runs a one-off command where the app runs, and resolves with its exit code: the app's image
+ * (rebuilt first when the source changed), its `.env` and its `.pikit/` volume. `pikit configure`
+ * logs in to a model provider this way, so the tokens land in the volume the app reads (SPEC §11),
+ * and `pikit up` checks there that the app has credentials.
+ *
+ * `docker compose run --rm` starts a separate, short-lived container of the same service: it
+ * publishes no ports and leaves a running app alone. Without a person, it gets no terminal (`-T`)
+ * and its output is not shown; Docker's build progress still is.
+ */
+export async function exec(options: ExecOptions): Promise<number> {
+  const args = ["run", "--rm", "--build", "--no-deps"];
+  if (options.interactive !== true) args.push("-T");
+  for (const dir of options.share ?? []) args.push("--volume", `${dir.path}:${dir.path}${dir.writable === true ? "" : ":ro"}`);
+  const command = ["docker", "compose", ...args, "app", ...options.command];
+  const run = options.run ?? spawnRunner;
+  const result = await run(command, { cwd: options.cwd ?? process.cwd(), capture: options.interactive !== true });
+  return result.code;
+}
+
 export interface ContainerState {
   name: string;
   service: string;
