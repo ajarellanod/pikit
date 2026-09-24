@@ -5,7 +5,7 @@
  */
 
 import type { AgentHarnessTool, AgentMessage, SessionRepo } from "@earendil-works/pi-agent-core";
-import type { Provider, Usage } from "@earendil-works/pi-ai";
+import type { CredentialStore, Provider, Usage } from "@earendil-works/pi-ai";
 
 /**
  * Any `SessionRepo`: JSONL, memory, SQLite. Their metadata and options differ; the adapter only
@@ -25,6 +25,12 @@ declare module "@pikit/core" {
   interface AppCapabilities {
     /** Pi's `SessionRepo` (SPEC §7.5): where conversations' sessions live. */
     "sessions.store": SessionStore;
+    /**
+     * pi-ai's `CredentialStore`: the credentials the model providers use, stored per provider id.
+     * Tokens that Pi refreshes are written back through it. Without it, providers read only their
+     * environment variables (`ANTHROPIC_API_KEY`).
+     */
+    "model.credentials": CredentialStore;
   }
   interface AppKeyedCapabilities {
     /** One pi-ai model provider per key (its id): `anthropic`, `openai`, `faux` in tests. */

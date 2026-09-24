@@ -351,6 +351,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
 | `model.provider` (keyed by provider id) | pi-ai `Provider` | One per model provider (`anthropic`, `faux` in tests), each its own component importing its pi-ai provider by subpath. The runtime builds its models from all of them, and each agent names its own `provider/modelId`, so agents may use different providers side by side. Typed by `@pikit/pi-adapter` (§6.2). |
+| `model.credentials` | pi-ai `CredentialStore` | Credentials of the model providers, one per provider id (API key or OAuth tokens). pi-ai refreshes OAuth tokens inside the store's `modify` and writes them back, and reads the environment (`ANTHROPIC_API_KEY`) only when nothing is stored. Optional: without it, providers read their environment variables only. Typed by `@pikit/pi-adapter`; its conformance suite is in `@pikit/pi-adapter/testing` (§14), because the contract is pi-ai's. |
 | `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
 | `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
 | `channel.transport` (keyed by channel name) | `ChannelTransport` | Send/edit/delete messages for one channel. Each channel component provides its transport under its own key; delivery uses `transports.get(message.channel)`. A missing key is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
@@ -720,8 +721,9 @@ For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipel
 `inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
 `SecretStore` (`secrets`), and `ConversationRegistry` with `ConversationReset` (`conversations.registry`
 and the payload of `conversation.reset`), and `HttpRoute` (`http.route`).
-`@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`)
-and `model.provider` (pi-ai's `Provider`) by importing it anywhere in the project.
+`@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`),
+`model.provider` (pi-ai's `Provider`) and `model.credentials` (pi-ai's `CredentialStore`) by
+importing it anywhere in the project.
 
 ### 6.2 Pi adapter (`@pikit/pi-adapter`)
 
@@ -744,6 +746,7 @@ what a single Pi process cannot provide for itself. Verified against `pi-agent-c
 | Tool hooks, tool execution modes, turn preparation / finish hooks; `read` / `write` / `edit` / `bash` tools over `ExecutionEnv` | Tool components that give Pi's tools a capability and a `replay`; policy; sandboxes via `execution` |
 | Session values, branches, forks, usage records | Conversation registry, reset, workspace references |
 | Skills, prompt templates, system prompt assembly | Deployment, secrets, targets, `doctor` |
+| Credentials per provider (`CredentialStore`), API-key and OAuth login flows, OAuth refresh under the store's lock, environment fallback | Where credentials are stored (`model.credentials`: a file on a server) |
 
 When a row moves (Pi ships something pikit built), pikit deletes its version.
 
@@ -1642,6 +1645,12 @@ is that the answer is "nothing" for every minor.
 - **HTTP route conformance** (`createHttpRouteConformance`): every server of `http.route`
   (§9.1). The suite provides the routes and sends requests through the fixture. An in-memory
   double that routes a `Request` with no socket passes it.
+- **Credential store conformance** (`createCredentialStoreConformance` in
+  `@pikit/pi-adapter/testing`, because the contract is pi-ai's): every `model.credentials`. It
+  covers read, list without secrets, `modify` serialized per provider and returning the stored
+  credential when its function returns nothing, failed `modify`, `delete` and persistence. It also
+  checks what pikit relies on: an OAuth refresh and a login by pi-ai are written back through the
+  store. pi-ai's `InMemoryCredentialStore` is the double.
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
   implementation must pass its suite. Pi's session conformance is reused for

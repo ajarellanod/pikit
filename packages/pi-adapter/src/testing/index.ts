@@ -7,3 +7,5 @@ export { holdTool, scriptedAgent, scriptedProvider } from "./script.ts";
 export type { ModelRequest, ScriptedProviderOptions } from "./script.ts";
 export { createSessionRepoConformance, createStorageConformance, JSONL_REPO_CONFORMANCE_GAPS, storageOf } from "./sessions.ts";
 export type { StorageFixture } from "./sessions.ts";
+export { createCredentialStoreConformance } from "./credentials.ts";
+export type { CredentialStoreFixture } from "./credentials.ts";
