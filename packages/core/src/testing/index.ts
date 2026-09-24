@@ -5,3 +5,6 @@ export { createLifecycleConformance } from "./lifecycle.ts";
 
 export type { AgentRuntimeConformanceOptions, AgentRuntimeFixture } from "./agent-runtime.ts";
 export { createAgentRuntimeConformance } from "./agent-runtime.ts";
+
+export type { SecretStoreFixture } from "./secrets.ts";
+export { createSecretStoreConformance } from "./secrets.ts";

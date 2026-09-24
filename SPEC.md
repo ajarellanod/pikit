@@ -357,7 +357,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `outbound.queue` | `OutboundQueue` | Durable enqueue + worker. Optional; without it delivery is direct. |
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
 | `approvals` | `ApprovalStore` | Decision lifecycle persistence. |
-| `secrets` | `SecretStore` | Read secrets by name. `.env`, Worker bindings, external vault. |
+| `secrets` | `SecretStore` | `get(name)`: the value, or `undefined` when it is not set; an empty value is not set. The process environment (`secrets-env`, which never reads `.env` files itself), Worker bindings, an external vault. |
 | `clock` | `Clock` | `now()`, `sleep()`. Injectable for tests and for DO alarms. M0: a `defineApp` option, not a capability (the app needs it before any component runs). |
 | `logger` | `Logger` | Structured logging. M0: a `defineApp` option, same reason. |
 
@@ -716,7 +716,8 @@ Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest
 `AgentResult`, `AgentRuntime`, `ConversationRef`, and the opaque `AgentMessage`, `AgentTool` and
 `Usage` with their merge target `AgentPayloads` (each `unknown` until the adapter fills it in).
 For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
-`inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`.
+`inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
+`SecretStore` (`secrets`).
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`)
 and `model.provider` (pi-ai's `Provider`) by importing it anywhere in the project.
 
@@ -1586,6 +1587,10 @@ is that the answer is "nothing" for every minor.
   request still a duplicate. The fixture's `interrupted()` provides that dead worker; the Pi
   adapter kills a real process. An in-memory double in the suite's own tests proves the suite
   asks nothing Pi-specific (S12).
+- **Secrets conformance** (`createSecretStoreConformance`): every `secrets` provider. The suite
+  chooses the secrets and the fixture seeds its store with them. A secret reads back exactly
+  (spaces, symbols, unicode, 4 KB), an unset or empty one reads `undefined`, and no value appears
+  in `describe()` or in a log line. An in-memory double passes it.
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
   implementation must pass its suite. Pi's session conformance is reused for
