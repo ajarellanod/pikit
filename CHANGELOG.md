@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: Pi extensions see `agent_start` for a run resumed after a crash, and a closing
+  conversation waits for their handlers and actions in flight, so an `agent_end` handler's
+  `appendEntry` is not lost (SPEC §6.2b).
 - adapter: existing Pi extensions run unmodified, except for their terminal UI. A vendored
   subset of `ExtensionAPI` lives in `@pikit/pi-adapter/extensions`, and
   `@pikit/pi-extension-shim` is installed as `@earendil-works/pi-coding-agent` so their imports

@@ -859,18 +859,29 @@ Where pikit differs from Pi in a way an extension may notice:
 - A lane created before an extension was installed gets that extension's tools activated when
   it opens.
 
-`[planned]` **To test: how a conversation is taken up again with extensions loaded.** Loading per
-conversation means extensions load again each time a conversation reopens, so what the "caches"
-tests of §6.2 prove without extensions must also hold with them:
-- **Reopen after idle:** the extensions load again, `session_start` fires again, their tools are
-  still active, and their handlers act on the next message.
-- **Resume after a crash:** the extensions are bound before the interrupted run continues, so
-  `tool_call`, `tool_result` and `agent_end` fire for the resumed run; their tools are not
-  replayed (`replay: "never"`).
-- **Prompt cache across a reopen:** with extensions installed, the provider still receives the
-  same prefix (system prompt, tools in the same order), so its cache still hits.
-- **Extension state:** state an extension keeps in its closure starts over on each reopen, as in
-  Pi on each session load. What must survive belongs in the session (`pi.appendEntry`).
+**Taking a conversation up again with extensions loaded.** Loading per conversation means
+extensions load again each time a conversation reopens. Tested in `compat.test.ts`:
+- **Reopen after idle:** the extensions load again and `session_start` fires again; their tools
+  stay active and their handlers act on the next message.
+- **Resume after a crash** (a worker killed with SIGKILL, resumed in this process): the extensions
+  are bound before the run continues and see `agent_start` (the adapter fires it, because Pi
+  emits no `run_start` for a resumed run), the interrupted tool's end, and `agent_end`.
+  - With `replay: "safe"` the tool runs again and `tool_result` can rewrite its result.
+  - With `replay: "never"` it does not run; Pi records it interrupted, and only
+    `tool_execution_end` reaches the extensions.
+  - **The interrupted call is not put to `tool_call` again**, even when it is replayed: Pi
+    records a call's intent after its `before_tool` check and replays that decision. The same
+    extensions ran before the crash, so the call was checked then. An extension installed
+    between the crash and the resume does not see it.
+- **Prompt cache across a reopen:** with extensions installed (a tool, a policy and a system
+  prompt change), the provider receives the same system prompt, the same tools in the same
+  place and the same message prefix, and its cache hits.
+- **Extension state:** what an extension keeps in its closure starts over on each reopen, as in
+  Pi on each session load. What it appends with `pi.appendEntry` stays in the session. When a
+  conversation closes, the adapter waits for the extensions' notifications and actions still in
+  flight (an `agent_end` handler writing an entry) before `session_shutdown` and the harness
+  closes. `[open]`: reading those entries back needs `ctx.sessionManager`, which pikit does not
+  provide yet; decide a read-only subset when an extension needs it.
 
 ### 6.2a Dynamic agents without hooks
 

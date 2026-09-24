@@ -181,12 +181,19 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
   return {
     tools,
     async bind(target, ctx) {
-      bound = await Bound.create(target, { handlers, definitions, logger }, ctx);
-      await bound.emit("session_start", { type: "session_start", reason: "resume" }, ctx);
+      const current = await Bound.create(target, { handlers, definitions, logger }, ctx);
+      bound = current;
+      await current.emit("session_start", { type: "session_start", reason: "resume" }, ctx);
+      // A run a dead worker left open is continued right after this, and Pi emits no `run_start`
+      // for it: the extensions learn here that the agent is running.
+      if (current.resuming) await current.emit("agent_start", { type: "agent_start" }, ctx);
       return {
         close: async (closeCtx) => {
-          await bound?.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, closeCtx);
-          bound?.dispose();
+          // Notifications and actions still in flight belong to this session: let them finish
+          // (an `agent_end` handler's `appendEntry`) before the shutdown, and the harness closes.
+          await current.drain();
+          await current.emit("session_shutdown", { type: "session_shutdown", reason: "quit" }, closeCtx);
+          current.dispose();
         },
       };
     },
@@ -220,6 +227,10 @@ class Bound {
   thinkingLevel: Awaited<ReturnType<AgentLane["getThinkingLevel"]>> = "off";
   private model: Model<Api> | undefined;
   private idle = true;
+  /** The conversation opened with a run a dead worker left open. */
+  resuming = false;
+  /** Actions started by extensions and not finished yet. */
+  private readonly acting = new Set<Promise<unknown>>();
   private pending = 0;
   /** A `before_agent_start` system prompt, for the run in progress. */
   private systemPromptOverride: string | undefined;
@@ -248,6 +259,11 @@ class Bound {
     bound.name = await harness.getName(ctx);
     bound.thinkingLevel = await lane.getThinkingLevel(ctx);
     bound.model = await lane.getModel(ctx);
+    const execution = await lane.inspectExecution(ctx);
+    if (execution.current?.kind === "run") {
+      bound.resuming = true;
+      bound.idle = false;
+    }
     // A lane created before an extension was installed has its tools inactive: activate them.
     const missing = registry.definitions.map((tool) => tool.name).filter((name) => !bound.activeTools.includes(name));
     if (missing.length > 0) await bound.setActiveTools([...bound.activeTools, ...missing]);
@@ -296,9 +312,21 @@ class Bound {
 
   /** Fire and forget an action (Pi's API is synchronous where the harness is not); failures are logged. */
   act(work: (bound: Bound) => Promise<unknown>): void {
-    void work(this).catch((error: unknown) => {
+    const acting = work(this).catch((error: unknown) => {
       this.registry.logger.warn("a Pi extension's action failed", { error: String(error) });
     });
+    this.acting.add(acting);
+    void acting.finally(() => this.acting.delete(acting));
+  }
+
+  /** Wait for the notifications and actions in flight, including the actions they start. */
+  async drain(): Promise<void> {
+    for (;;) {
+      const notified = this.notified;
+      await notified;
+      await Promise.all(this.acting);
+      if (notified === this.notified && this.acting.size === 0) return;
+    }
   }
 
   setName(name: string): void {

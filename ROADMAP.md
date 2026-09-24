@@ -164,9 +164,10 @@ what `setup` declares until then.
 
 ✅ **Pi extensions** (SPEC §6.2b): a vendored `ExtensionAPI` subset with no TUI, loaded per
 conversation and imported through `@pikit/pi-extension-shim`. Pi's `permission-gate`,
-`protected-paths` and `hello` examples run unmodified. **Pending tests** (SPEC §6.2b): how a
-conversation with extensions is taken up again: reopened after idle, resumed after a crash,
-the provider's prompt cache across a reopen, and extension state across a reopen. Next: prepare/`agent.state`, the `tool-*`
+`protected-paths` and `hello` examples run unmodified. Tested how a conversation with extensions
+is taken up again: reopened after idle, resumed after a crash, the provider's prompt cache across
+a reopen, and extension state across a reopen (SPEC §6.2b). Open: reading an extension's entries
+back (`ctx.sessionManager`). Next: prepare/`agent.state`, the `tool-*`
 components, the http preset, the installer and the CLI.
 
 Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle
