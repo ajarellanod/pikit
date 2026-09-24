@@ -1319,6 +1319,15 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
   - concurrent handling;
   - a `500` that does not reveal a thrown error, and a `404` for no match;
   - a refusal to start with a key it cannot serve.
+- `server-bun` (M1) serves them with Hono 4.13.9 on `Bun.serve` `[decision]`:
+  - `GET /health` answers `200` while the process can answer.
+  - `GET /ready` answers `200` from `runtime.ready` until `runtime.stopping`, and `503` before and
+    after. Today it reflects the start only (runtime availability is §16).
+  - Stopping cancels every request in flight through its context, so a handler that waits answers
+    at once. Past the stop deadline, the remaining connections are closed.
+  - Bun closes a connection idle for about twice `idleTimeout`, even while its handler works, so
+    `idleTimeoutSeconds` defaults to Bun's maximum, 255, above a channel's reply timeout.
+  - Its port, host and limits are values in its config.
 - Storage: `sessions-sqlite` + `storage-sqlite` by default; Postgres optional.
 - Scheduler: `scheduler-cron` (in-process, `Bun.cron` or `croner`), jobs persisted in
   `storage.sql`.

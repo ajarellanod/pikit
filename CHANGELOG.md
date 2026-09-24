@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/server-bun: serves every `http.route` with Hono on `Bun.serve`, plus `GET /health` and an
+  honest `GET /ready`. Stopping cancels the requests in flight (SPEC §9.1).
 - component/router-basic: a `route.resolve` stage that sends every message no earlier stage routed
   to `defaultAgent` (SPEC §5).
 - component/provider-anthropic: provides pi-ai's Anthropic provider as `model.provider` `anthropic`,
