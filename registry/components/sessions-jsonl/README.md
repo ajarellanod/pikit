@@ -5,7 +5,7 @@ Each conversation's Pi session is a JSONL file on the server's disk.
 - **Provides:** `sessions.store`.
 - **Requires:** nothing.
 - **Target:** `server` (it uses the filesystem).
-- **Installs to:** `src/pikit/sessions/jsonl/`.
+- **Installs to:** `src/pikit/sessions-jsonl/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi), `typebox`.
 
 ## What it does

@@ -17,7 +17,7 @@ import routerBasic from "../../registry/components/router-basic/files/src/pikit/
 import runtimePi from "../../registry/components/runtime-pi/files/src/pikit/runtime/pi/index.ts";
 import secretsEnv from "../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import serverBun from "../../registry/components/server-bun/files/src/pikit/server/bun/index.ts";
-import sessionsJsonl from "../../registry/components/sessions-jsonl/files/src/pikit/sessions/jsonl/index.ts";
+import sessionsJsonl from "../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
 import agents from "./src/extensions/agents.ts";
 
 /** The sample's state lives in `.pikit/` next to this file, whatever the working directory. */

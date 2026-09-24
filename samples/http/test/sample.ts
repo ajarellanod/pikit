@@ -17,7 +17,7 @@ import routerBasic from "../../../registry/components/router-basic/files/src/pik
 import { createRuntimePi } from "../../../registry/components/runtime-pi/files/src/pikit/runtime/pi/index.ts";
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import { createServerBun } from "../../../registry/components/server-bun/files/src/pikit/server/bun/index.ts";
-import sessionsJsonl from "../../../registry/components/sessions-jsonl/files/src/pikit/sessions/jsonl/index.ts";
+import sessionsJsonl from "../../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
 
 export const TOKEN = "sample-test-token-0123456789abcdef";
 
