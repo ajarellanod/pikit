@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: `agent.state` stored in the conversation's Pi session as the session value
+  `pikit` / `agent.state`; it passes `createAgentStateConformance` on memory and JSONL sessions
+  (SPEC §6.4).
 - core: `defineAgent({ state, prepare })`. `state` is each conversation's initial JSON state;
   `prepare(state, ctx)` returns what changes for a run (model, system prompt, tools) and is a plain
   function in tests. New export: `PrepareContext` (SPEC §6.2a).

@@ -1088,7 +1088,7 @@ contracts so the move happens inside the adapter. `[upstream]`
 |---|---|---|
 | Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | Enqueue first (`steer()`), then `accept()`. Pi drains its inbox into a new run, or the run in progress takes the message at a boundary. Bridges gap 2 |
 | Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | The `requestId` travels inside the message (a Pi `custom` message) and is found in Pi's inbox or transcript. Bridges gaps 1 and 3 |
-| `agent.state` | Conversation-scoped document | Session value `pikit` / `agent.state`. It is committed apart from the transcript, so a tool's state change and its result are two commits |
+| `agent.state` | Conversation-scoped document (a JSON object with an `initial()`) | Session value `pikit` / `agent.state` (`state.ts`), holding the updated keys; `get()` merges them over the agent's initial state. It is committed apart from the transcript, so a tool's state change and its result are two commits. Passes `createAgentStateConformance` on memory and JSONL sessions |
 | Continue a killed run | Tasks resume from their records | `AgentHarness.create()` reports `open` operations; `lane.resume()` continues them; tool `replay` is Pi's |
 | Multi-step work, waits, approvals that last days | Durable tasks: phases, effect sandwich (commit intent → effect → commit outcome), memos, `sleep(until)`, abort protocol | `state.phase` + tools; nothing more is built |
 | Subagents | Owned child conversations inside the session | Deferred |
