@@ -1,0 +1,43 @@
+{
+  "name": "channel-telegram",
+  "version": "0.0.0",
+  "description": "Talk to your agent in Telegram: send your bot a message, get the answer in the chat.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "secrets",
+      "conversations.registry",
+      "agent.runtime"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [],
+  "dependencies": {
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "TELEGRAM_BOT_TOKEN",
+      "secret": true,
+      "required": true,
+      "description": "The bot's token from @BotFather; `pikit configure` asks for it and checks it."
+    },
+    {
+      "name": "TELEGRAM_ALLOWED_USERS",
+      "secret": false,
+      "required": true,
+      "description": "Telegram user ids allowed to talk to the bot, separated by commas; `pikit configure` fills it when you message the bot."
+    }
+  ]
+}

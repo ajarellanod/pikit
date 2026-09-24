@@ -527,6 +527,31 @@ pipeline outbound.prepare          → OutboundMessage
   is in the session. pikit keeps no copy of answers to return again; Pi's durable runtime will make
   a submission awaitable until its answer (§6.4).
 
+**Telegram, before M2.** `[decision]` `channel-telegram`, the first chat channel:
+- **Long polling, not a webhook.** The bot asks Telegram for updates (`getUpdates`), so it needs no
+  public URL, certificate or open port, and runs the same on a laptop and on a VPS without a
+  domain. Flue and Eve take webhooks; NanoClaw polls. A webhook, which Cloudflare needs, would be
+  another component.
+- **Acknowledged after admission.** The offset moves past an update only once `dispatch` admitted
+  its message. A redelivery after a crash is the same request (`telegram:<chat>:<message>`), which
+  the conversation recognises as a duplicate (§6.4). Logical deduplication is enough here:
+  `inbound-dedup` is for platforms whose retries a crashed attempt must not lose (§5).
+- **Senders are authorized, not requests authenticated.** Updates come from Telegram's own API, over
+  TLS, with the bot's token, so there is no request to authenticate (§13). Anyone can find a bot,
+  and an agent with tools must not answer strangers. Only the user ids in `TELEGRAM_ALLOWED_USERS`
+  reach the agent; a stranger is told their id once, for the owner to add. The list is read through
+  `secrets`, like the token, because it lives in `.env` next to it and `pikit configure` fills it.
+- **Private chats only**, one conversation each (`telegram:<chat id>`). Groups need the bot's privacy
+  mode and mention rules; later.
+- **Replies as for HTTP.** The channel listens to `agent.settled` / `agent.failed` and sends the run's
+  answer to the chat once per run, with "typing…" while it runs. It converts Markdown to Telegram's
+  HTML (plain text when Telegram refuses it) and splits answers at 4096 characters. It retries in
+  the process: after `retry_after` on a 429, with backoff on network errors and 5xx.
+  - This is the platform-sending case M2's `durable-outbox` is for. When the outbox exists, the
+    sending moves behind `channel.transport`, and ingress does not change.
+  - Until then, a reply lost to a crash while sending is not sent again; the answer is in the
+    session.
+
 Core types (abridged):
 
 ```ts
@@ -1958,8 +1983,12 @@ is that the answer is "nothing" for every minor.
 - Components execute in-process with full privileges of the app. Installing one is
   running code. The CLI shows provenance (registry, commit, files, deps, env, capabilities)
   and pins commits; it never runs install scripts.
-- Inbound authentication is a pipeline stage every channel must implement; a channel with no
-  `inbound.authenticate` stage fails `doctor`.
+- Inbound authentication is a pipeline stage every channel that receives requests must implement
+  (an HTTP API, a webhook). A channel with no `inbound.authenticate` stage fails `doctor`.
+  - A channel that pulls from a platform's API (Telegram long polling) has no request to
+    authenticate: it reached the platform over TLS with its own token.
+  - Such a channel still authorizes senders: `channel-telegram` lets only the Telegram users in its
+    allowlist reach the agent (§5).
 - Tool gating is a component (`policy-tools`): intercepts `agent.tool.call`, evaluates rules
   by agent role, blocks or allows. It is **policy mediation, not a sandbox**; documented as
   such. Real isolation is a property of the `execution` provider (container, micro-VM,
@@ -2216,6 +2245,10 @@ Resolved `[decision]`:
   `outbound-direct`, `outbound.prepare` or `channel.transport` until M2's `durable-outbox`: a
   synchronous reply has nothing to retry, and a direct outbound path built now would be replaced
   in M2. A duplicate `messageId` is a `409`, with no stored answer to replay.
+- `channel-telegram` receives by long polling, acknowledges after admission, relies on the request
+  id for duplicates, and lets only allowlisted users reach the agent (§5, §13). No public URL is
+  needed, so a bot runs where the project runs; the allowlist is what keeps an agent with tools
+  from answering strangers.
 - An agent names its tools (§6.3): `AgentDefinition.tools` takes names of installed tools, which
   `tool-*` components provide under the keyed capability `agent.tool`, next to tool objects. An
   installed tool reaches no agent that does not name it, so what an agent can do is written where

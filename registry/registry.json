@@ -10,6 +10,14 @@
       ],
       "path": "components/channel-http"
     },
+    "channel-telegram": {
+      "version": "0.0.0",
+      "description": "Talk to your agent in Telegram: send your bot a message, get the answer in the chat.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/channel-telegram"
+    },
     "conversations-file": {
       "version": "0.0.0",
       "description": "The conversation registry in one JSON file: which Pi session each conversation is in now.",

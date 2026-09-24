@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/channel-telegram: talk to the agent in Telegram. It receives by long polling (no public
+  URL), lets only `TELEGRAM_ALLOWED_USERS` reach the agent, and handles `/new`. It shows "typing…",
+  formats Markdown, splits long answers and retries sends. It ships its own `pikit configure` step,
+  which checks the token and allows whoever messages the bot (SPEC §5, §13).
 - installer: `installer/install.sh` (`curl -fsSL <url> | sh`) puts `pikit` on a clean Debian/Ubuntu
   VPS or macOS: git, curl and unzip through apt-get after asking, Bun >= 1.4 from bun.sh, a Git
   checkout of pikit in `~/.pikit/pikit`, and `~/.pikit/bin/pikit`. It prints the PATH line instead
