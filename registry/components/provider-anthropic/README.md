@@ -8,7 +8,7 @@ Anthropic's Claude models for your agents. An agent names one as `anthropic/<mod
   installed.
 - **Target:** `server`. On Cloudflare an API key would work, but an OAuth refresh loads its flow
   with a dynamic import, which Workers do not allow. That is settled in M4.
-- **Installs to:** `src/pikit/providers/anthropic/`.
+- **Installs to:** `src/pikit/provider-anthropic/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi).
 
 ## What it does

@@ -18,7 +18,7 @@ import { createInterface } from "node:readline/promises";
 import { defineApp, defineComponent } from "@pikit/core";
 import { type AuthInteraction, type CredentialStore, modelsFrom, type Provider } from "@pikit/pi-adapter";
 import credentialsFile from "../../../registry/components/credentials-file/files/src/pikit/credentials-file/index.ts";
-import providerAnthropic from "../../../registry/components/provider-anthropic/files/src/pikit/providers/anthropic/index.ts";
+import providerAnthropic from "../../../registry/components/provider-anthropic/files/src/pikit/provider-anthropic/index.ts";
 import { config } from "../pikit.config.ts";
 
 // The same two components the app uses, reached through their capabilities.
