@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/credentials-file: provides `model.credentials` in a JSON file with mode 0600. Tokens
+  that pi-ai refreshes are written back (SPEC §4.5).
 - component/conversations-file: provides `conversations.registry` in one JSON file written
   atomically. It creates sessions through `sessions.store`, and a reset keeps the old session (SPEC §7.4, §7.6).
 - component/sessions-jsonl: provides `sessions.store` as Pi's JSONL files on the server's disk, and

@@ -1616,6 +1616,10 @@ is that the answer is "nothing" for every minor.
   remote sandbox).
 - Secrets never appear in config files or session transcripts; the `secrets` capability is
   the only read path and logs redact by name.
+- Model credentials (API keys, OAuth tokens) are not secrets read by name: pi-ai reads, refreshes
+  and writes them through `model.credentials`. On a server, `credentials-file` keeps them in a
+  file with mode `0600`. It never logs a value, and never quotes the file in an error. It never
+  shares Pi's own `~/.pi/agent/auth.json`: a refresh would rotate the token the Pi CLI holds.
 
 ---
 
