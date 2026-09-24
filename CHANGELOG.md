@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/tool-read: provides Pi's `read` tool as `agent.tool` `read`, working on `execution`,
+  with replay `safe`; an agent gets it by naming it (SPEC §6.3).
 - adapter: `@pikit/pi-adapter/tools` exposes Pi's `read`, `write`, `edit` and `bash` tools and
   `bindTool(tool, { env, replay })`, which binds a tool to its environment and sets its replay (SPEC §6.3).
 - component/execution-local: provides `execution` and `execution.shell` on the server's filesystem
