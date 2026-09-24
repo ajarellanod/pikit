@@ -102,6 +102,28 @@ test("a saved token Telegram cannot parse (404) is asked again, not a failure", 
   expect(t.env.get("TELEGRAM_BOT_TOKEN")).toBe(telegram.token);
 });
 
+test("with a CLI that has confirm, allowing someone is a yes/no whose Enter means yes", async () => {
+  const telegram = fake();
+  const t = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token } });
+  const confirmed: { message: string; initialValue: boolean }[] = [];
+  const answers = [false, true];
+  t.io.confirm = async (message, initialValue) => {
+    confirmed.push({ message, initialValue });
+    return answers.shift() ?? false;
+  };
+  setTimeout(() => {
+    telegram.say(STRANGER, "hi");
+    telegram.say(OWNER, "hi");
+  }, 50);
+
+  expect(await configure(t.io)).toEqual([]);
+  expect(confirmed).toEqual([
+    { message: "Message from Eve, id 2002. Allow them to talk to your agent?", initialValue: true },
+    { message: "Message from Ada (@ada), id 1001. Allow them to talk to your agent?", initialValue: true },
+  ]);
+  expect(t.env.get("TELEGRAM_ALLOWED_USERS")).toBe("1001");
+});
+
 test("findToken takes the bot id and secret out of any text", () => {
   expect(findToken("123456789:AAEabc_DEF-ghi123")).toBe("123456789:AAEabc_DEF-ghi123");
   expect(findToken("token: 123456789:AAEabc_DEF-ghi123\nKeep it secure")).toBe("123456789:AAEabc_DEF-ghi123");

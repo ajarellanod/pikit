@@ -28,6 +28,8 @@ export interface ConfigureIO {
   ask(question: string): Promise<string>;
   /** Asks without echoing the answer. */
   askSecret(question: string): Promise<string>;
+  /** Yes or no, Enter giving `initialValue`. Optional: a CLI before it only has `ask`. */
+  confirm?(message: string, initialValue: boolean): Promise<boolean>;
   say(line: string): void;
 }
 
@@ -135,8 +137,9 @@ async function allow(io: ConfigureIO, api: TelegramApi, bot: TelegramUser): Prom
       const from = update.message?.from;
       if (update.message?.chat.type !== "private" || from === undefined || from.is_bot) continue;
       const who = `${[from.first_name, from.last_name].filter(Boolean).join(" ")}${from.username ? ` (@${from.username})` : ""}, id ${from.id}`;
-      const answer = (await io.ask(`Message from ${who}. Allow them to talk to your agent? [Y/n] `)).trim().toLowerCase();
-      if (answer !== "" && answer !== "y" && answer !== "yes") continue;
+      const question = `Message from ${who}. Allow them to talk to your agent?`;
+      const allowed = io.confirm ? await io.confirm(question, true) : /^(y|yes)?$/.test((await io.ask(`${question} [Y/n] `)).trim().toLowerCase());
+      if (!allowed) continue;
       // Confirm the update, so the running bot does not answer this setup message later.
       await api.getUpdates({ offset, timeout: 0 }).catch(() => {});
       await api.sendMessage(update.message.chat.id, "✓ You can talk to this bot once it runs (pikit up).").catch(() => {});
