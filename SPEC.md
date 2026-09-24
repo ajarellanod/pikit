@@ -1687,29 +1687,48 @@ Rules:
 
 ### 10.3 Project manifest
 
+`pikit.json` is the install record: what `pikit add` installed, from where, and what it wrote.
+`pikit remove`, `pikit doctor` and `pikit configure` read it without the registry at hand.
+
 ```json
 // pikit.json
 {
   "version": 1,
   "targets": ["server"],
   "registries": {
-    "official": "https://github.com/pikit-dev/registry",
-    "acme": "git+ssh://git@github.com/acme/pikit-registry.git",
-    "local": "../my-components"
+    "default": "/home/me/.pikit/pikit/registry"
   },
   "components": {
-    "channel-telegram": {
-      "registry": "official",
-      "version": "1.4.0",
-      "commit": "a83f92c",
+    "channel-http": {
+      "registry": "default",
+      "version": "0.0.0",
+      "commit": "ffc1a8f…",
       "files": {
-        "src/pikit/channel-telegram/index.ts": { "hash": "sha256:...", "modified": false },
-        "src/pikit/channel-telegram/format.ts": { "hash": "sha256:...", "modified": true }
-      }
+        "src/pikit/channel-http/auth.ts": { "hash": "sha256:…" },
+        "src/pikit/channel-http/index.ts": { "hash": "sha256:…" }
+      },
+      "dependencies": { "typebox": "1.3.27" },
+      "environment": [{ "name": "PIKIT_HTTP_TOKEN", "secret": true, "required": true, "description": "…" }]
     }
   }
 }
 ```
+
+- `version` is the schema version (§12a). Components and files are sorted, so the file's diff shows
+  only what changed.
+- `registries` maps a name to a location. `[decision]` M1 reads local paths only: by default the
+  registry of the pikit checkout the CLI runs from, or `--registry <path>`. Git and HTTP registries
+  (`"official": "https://github.com/…"`, `"acme": "git+ssh://…"`) come with M3's `upgrade`, which is
+  when a pinned commit starts to be fetched again.
+- `commit` is the registry's Git commit when the component was installed, ending in `-dirty` when the
+  registry had uncommitted changes; absent when the registry is not in Git.
+- `files` holds each installed file's hash. `[decision]` Whether a file is modified is computed by
+  comparing hashes and never stored: a stored flag goes stale as soon as someone edits the file.
+  `doctor` lists modified files as information, `remove` refuses to delete them without `--force`,
+  and M3's three-way `upgrade` takes the hash as its base.
+- `dependencies` and `environment` are the manifest's fields at install time: `remove` deletes the
+  npm packages nothing else needs, and `doctor` and `configure` know the variables, from this file
+  alone.
 
 ### 10.4 Registry format
 
@@ -1746,23 +1765,76 @@ No server-side logic. Private registries use the user's existing Git credentials
 ### 10.5 Install flow
 
 ```
-pikit add acme/channel-whatsapp
-  1. resolve registry + version (pinned commit)
-  2. fetch component package
-  3. check targets and pikit version; warn for each required capability nothing installed provides
-  4. show: files to write, npm deps to add, env vars required, capabilities requested, source
-  5. confirm
-  6. write files; refuse to overwrite modified files without --force
-  7. add npm deps; run package manager install
-  8. edit pikit.config.ts (append import + entry)
-  9. append config schema; scaffold config/ values; append .env.example
- 10. record hashes in pikit.json
+pikit add channel-http [--registry <path>] [--force] [--yes]
+  1. resolve the registry and the component's version (and the registry's commit)
+  2. read the component package
+  3. check targets and requires.pikit; warn for each required capability nothing installed provides
+  4. show: files to write, npm deps to add, env vars, capabilities provided and required, source
+  5. confirm (--yes when there is no terminal)
+  6. write files; refuse to overwrite a file that differs without --force
+  7. add npm deps (kit packages to their vendored tarballs); run `bun install`
+  8. edit pikit.config.ts: append the import and the `components` entry
+     (a component with no default export, a `deployment-*`, is not listed)
+  9. append its variables to .env.example, one block per component
+ 10. record registry, version, commit, file hashes, dependencies and environment in pikit.json
  11. run `pikit doctor`
 ```
 
+`[decision]` The CLI edits `pikit.config.ts` as text, on one shape: one import line per component
+(`import channelHttp from "./src/pikit/channel-http/index.ts";`), one entry per line in
+`components`, one key per component in `const config = { … }`. When the file does not have that
+shape, the CLI stops and says what to change; it never guesses. `add` scaffolds no config value: a
+component whose config has required fields makes `doctor` fail with the core's config error until
+they are set in `config` (M1 keeps values in `pikit.config.ts`, §12).
+
 `pikit remove` reverses it and refuses if that would leave a capability that another installed
 component requires (`use`) without a provider. Losing the provider of an optional capability is
-allowed; `doctor` reports it.
+allowed; `doctor` reports it. `[decision]` The answer comes from the app's own `describe()` (every
+setup, no start), not from manifests, so project components count too and `remove` cannot disagree
+with `doctor`. `remove` also:
+- refuses to delete a file whose hash differs from `pikit.json` without `--force`;
+- removes the component's import, its `components` entry and its `config` key, its `.env.example`
+  block, and the npm dependencies no remaining component declares and no project file imports.
+
+Adding and then removing a component leaves `git status` clean (S3). The CLI's end-to-end test checks
+it on a generated project.
+
+`pikit new <dir> [--preset <name>]` writes the project's own files first: an agent (`assistant`,
+`src/agents/assistant/agent.ts`, naming the tools the preset installs), `src/extensions/agents.ts`,
+Pi's `permission-gate` example unmodified, `package.json`, `tsconfig.json`, `.gitignore` and a
+README. Then it runs steps 1–10 for each component of the preset, and `bun install` and `doctor`
+once. Two lines depend on what gets installed, never on the preset's name: `runtime-pi` is listed as
+`createRuntimePi({ extensions: [permissionGate] })`, and `router-basic` gets
+`defaultAgent: "assistant"`.
+
+#### Vendored kit packages (M1 interim) `[decision]`
+
+`@pikit/core`, `@pikit/pi-adapter` and `@pikit/pi-extension-shim` are not published yet. Until they
+are, `pikit new` packs them from the CLI's checkout (`bun pm pack`) into the project's `vendor/`, and
+the project depends on the tarballs:
+
+```json
+"dependencies": {
+  "@earendil-works/pi-coding-agent": "file:vendor/pikit-pi-extension-shim-0.0.0.tgz",
+  "@pikit/core": "file:vendor/pikit-core-0.0.0.tgz",
+  "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0.tgz"
+},
+"overrides": {
+  "@pikit/core": "file:vendor/pikit-core-0.0.0.tgz",
+  "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0.tgz",
+  "@pikit/pi-extension-shim": "file:vendor/pikit-pi-extension-shim-0.0.0.tgz"
+}
+```
+
+- A packed package names its kit dependencies by version (`"@pikit/core": "0.0.0"`), which npm does
+  not have. `overrides` points each one at its tarball, which also keeps exactly one copy of
+  `@pikit/core` in `node_modules` (two copies would be two sets of contracts). The CLI's end-to-end
+  test checks that there is one.
+- Everything resolves inside the project, so `bun install --frozen-lockfile` works in
+  `deployment-docker`'s image build, which copies `vendor/` before the install.
+- A tarball already in `vendor/` is never repacked: `bun.lock` records its integrity.
+- `vendor/` is committed with the project. When the packages are on npm, each `file:vendor/…`
+  becomes a version, and `overrides` and `vendor/` go.
 
 ### 10.6 Upgrade flow
 
@@ -1802,6 +1874,28 @@ of the same names that the installed `deployment-*` component exports from
 `down` keeps the `.pikit/` volume, and `status` returns the containers' state plus what `GET /health`
 and `GET /ready` answer. The CLI holds no Docker or systemd knowledge, so changing how a project is
 deployed is editing or swapping that component.
+
+M1 has these commands; the others print "not yet" and name the milestone that brings them.
+
+| Command | M1 |
+|---|---|
+| `new`, `add`, `remove` | §10.5 |
+| `doctor` | Creates the app (every setup, no start) and prints the component graph, capability providers, pipelines and config (§4.6). Fails when the app does not compose, when a variable a component marks required is set neither in the environment nor in `.env` (names only, never values), or when a file breaks the Pi import rule (S1: a component imports no `@earendil-works/*`, project code only `@earendil-works/pi-coding-agent`, the Pi extensions' alias). Lists modified and deleted installed files as information. |
+| `configure` | Writes the installed components' variables to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login made on the host lands in the host's `.pikit/`, which `deployment-docker` does not share with its container's volume: in Docker, use an API key or log in inside the container. |
+| `dev` | After `doctor`, `bun --watch src/pikit/<deployment>/main.ts` (the installed `deployment-*` component's entrypoint) with `.env` loaded. |
+| `up`, `down`, `restart`, `logs`, `status` | Delegate, as above. `up` runs `doctor` first. |
+| `registry validate`, `registry generate` | §10.2, §14. `bun run registry` in this repository calls the same code. |
+
+`[decision]` The CLI runs a project's code only in child `bun` processes in the project's directory
+(`doctor`'s app, `configure`'s login), so the project's own `@pikit/core` and components load, never
+the CLI's, and every run sees the files as they are now. The exception is the deployment component's
+commands, which are plain functions the CLI calls.
+
+`[decision]` The CLI is installed by `installer/install.sh` (`curl -fsSL <url> | sh`, M1): it
+ensures git and Bun >= 1.4, clones pikit into `~/.pikit/pikit` at a ref, and writes the shim
+`~/.pikit/bin/pikit`. It prints the `PATH` line instead of editing shell files, asks before any
+`apt-get` or `sudo`, and installs Docker only with explicit consent (`--install-docker` or a "y";
+on macOS it points to Docker Desktop).
 
 Presets are lists of `add` calls, nothing more:
 
@@ -2168,6 +2262,22 @@ Resolved `[decision]`:
   test runner, which every component test already imports as `bun:test` (§14).
 - `registry.json` gives each component one `version`: a Git registry at a commit holds one
   version, and `pikit.json` pins the commit (§10.4).
+- The CLI's M1 registries are local paths, the CLI checkout's registry by default (§10.3). Fetching
+  Git registries matters once a pinned commit must be fetched again, which is M3's `upgrade`.
+- Until `@pikit/*` are published, `pikit new` vendors them as tarballs in `vendor/`, with `overrides`
+  (§10.5): the project installs from its own directory, in a Docker build too, with one `@pikit/core`.
+- `pikit.json` stores each file's hash, not a `modified` flag (§10.3): a flag goes stale when the
+  file is edited, a hash cannot.
+- `pikit.json` keeps each component's `dependencies` and `environment` as installed (§10.3), so
+  `remove`, `doctor` and `configure` need no registry.
+- The CLI edits `pikit.config.ts` as text on one recognised shape and refuses any other (§10.5): the
+  user's file stays explicit and reviewable, and an unexpected shape is an error, not a guess.
+- `pikit remove` asks the app's `describe()` what depends on a component (§10.5), so project
+  components count and `remove` agrees with `doctor`.
+- A required variable that is not set fails `pikit doctor`, reported apart from composition
+  problems; `pikit new` expects it, because `pikit configure` comes next (§11).
+- The CLI runs project code in child processes, in the project's directory (§11): the project's own
+  `@pikit/core` loads, and nothing is cached from an earlier version of the file.
 
 ---
 
