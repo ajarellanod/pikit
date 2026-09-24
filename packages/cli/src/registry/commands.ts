@@ -7,6 +7,7 @@
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Target } from "@pikit/core";
+import { PIKIT_ROOT as REPO } from "../paths.ts";
 import { checkDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeSetup, loadComponent } from "./describe.ts";
 import {
@@ -22,7 +23,6 @@ import {
   writeManifest,
 } from "./manifest.ts";
 
-const REPO = join(import.meta.dir, "..", "..");
 
 /** The `@pikit/core` a registry at this commit is built with; `requires.pikit` must accept it. */
 export function coreVersion(): string {

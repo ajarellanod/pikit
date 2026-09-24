@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- registry: the `generate` / `validate` code moved into the CLI package (`packages/cli/src/registry/`);
+  `bun run registry` is now a thin caller of `pikit registry`, so both run the same checks.
 - adapter: a Pi extension's `pi.getActiveTools()` returns the tools an agent's `prepare` gave the
   run, in `before_agent_start` and after, and in a run resumed after a crash. It returned the tools
   the conversation opened with.

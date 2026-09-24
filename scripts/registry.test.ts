@@ -8,9 +8,9 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { generate, validate } from "./registry/commands.ts";
-import { scanImports } from "./registry/imports.ts";
-import type { Manifest } from "./registry/manifest.ts";
+import { generate, validate } from "../packages/cli/src/registry/commands.ts";
+import { scanImports } from "../packages/cli/src/registry/imports.ts";
+import type { Manifest } from "../packages/cli/src/registry/manifest.ts";
 
 const REPO = join(import.meta.dir, "..");
 const roots: string[] = [];

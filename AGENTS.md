@@ -211,7 +211,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
 | Thing | Convention | Examples |
 |---|---|---|
-| Components | kebab-case, prefixed by kind | `channel-*`, `router-*`, `sessions-*`, `storage-*`, `workspace-*`, `execution-*`, `scheduler-*`, `deployment-*`, `tool-*`, `policy-*`, `admin-*`, `inbound-*`, `log-*`, `conversations-*`, `credentials-*`, `provider-*`, `runtime-*`, `secrets-*`, `server-*`. `bun run registry validate` enforces the list (`KINDS` in `scripts/registry/checks.ts`) |
+| Components | kebab-case, prefixed by kind | `channel-*`, `router-*`, `sessions-*`, `storage-*`, `workspace-*`, `execution-*`, `scheduler-*`, `deployment-*`, `tool-*`, `policy-*`, `admin-*`, `inbound-*`, `log-*`, `conversations-*`, `credentials-*`, `provider-*`, `runtime-*`, `secrets-*`, `server-*`. `bun run registry validate` enforces the list (`KINDS` in `packages/cli/src/registry/checks.ts`) |
 | Reserved component names | never used | `capabilities` (it is a core config key) |
 | Capabilities | `dotted.lowercase`; keyed ones take a key per implementation | `sessions.store`, `execution.shell`, `channel.transport` (key `telegram`) |
 | Events (notifications) | `namespace.verb`, past tense | `outbound.delivered` |
@@ -296,7 +296,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 ## Git and docs
 
 - Commit messages follow `<area>: <imperative summary>`. Areas: `core`, `adapter`, `cli`,
-  `component/<name>`, `registry` (manifests, `registry.json`, presets, `scripts/registry*`),
+  `component/<name>`, `registry` (manifests, `registry.json`, presets, `scripts/registry*`, `packages/cli/src/registry/`),
   `samples`, `spec`, `docs`.
 - A change that adds a component, changes a contract or fixes user-visible behavior gets a
   line in `CHANGELOG.md` (created at M1).

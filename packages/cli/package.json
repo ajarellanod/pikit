@@ -1,0 +1,21 @@
+{
+  "name": "@pikit/cli",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "pikit": "./src/main.ts"
+  },
+  "files": [
+    "src"
+  ],
+  "engines": {
+    "bun": ">=1.4.0"
+  },
+  "dependencies": {
+    "@pikit/core": "workspace:*",
+    "@pikit/pi-adapter": "workspace:*",
+    "typebox": "1.3.27",
+    "yaml": "2.9.1"
+  }
+}

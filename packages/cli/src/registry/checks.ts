@@ -33,7 +33,7 @@ export function checkNaming(name: string): string[] {
   if (!KEBAB.test(name)) return [`name "${name}" is not kebab-case`];
   const kind = name.split("-")[0] ?? "";
   if (!name.includes("-") || !KINDS.includes(kind)) {
-    return [`name "${name}" has no known kind prefix (${KINDS.map((k) => `${k}-`).join(", ")}); a new kind goes in KINDS in scripts/registry/checks.ts and the AGENTS.md naming table`];
+    return [`name "${name}" has no known kind prefix (${KINDS.map((k) => `${k}-`).join(", ")}); a new kind goes in KINDS in packages/cli/src/registry/checks.ts and the AGENTS.md naming table`];
   }
   return [];
 }
