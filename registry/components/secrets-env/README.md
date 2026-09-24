@@ -5,7 +5,7 @@ Secrets from the process environment.
 - **Provides:** `secrets`.
 - **Requires:** nothing.
 - **Target:** `server`. On Cloudflare, secrets are Worker bindings, which is another component.
-- **Installs to:** `src/pikit/secrets/env/`.
+- **Installs to:** `src/pikit/secrets-env/`.
 - **npm dependencies:** none.
 
 ## What it does

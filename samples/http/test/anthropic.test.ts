@@ -11,7 +11,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineApp } from "@pikit/core";
-import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets/env/index.ts";
+import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import { createServerBun } from "../../../registry/components/server-bun/files/src/pikit/server/bun/index.ts";
 import definition, { config } from "../pikit.config.ts";
 

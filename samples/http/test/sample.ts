@@ -15,7 +15,7 @@ import channelHttp from "../../../registry/components/channel-http/files/src/pik
 import conversationsFile from "../../../registry/components/conversations-file/files/src/pikit/conversations/file/index.ts";
 import routerBasic from "../../../registry/components/router-basic/files/src/pikit/router/basic/index.ts";
 import { createRuntimePi } from "../../../registry/components/runtime-pi/files/src/pikit/runtime/pi/index.ts";
-import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets/env/index.ts";
+import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import { createServerBun } from "../../../registry/components/server-bun/files/src/pikit/server/bun/index.ts";
 import sessionsJsonl from "../../../registry/components/sessions-jsonl/files/src/pikit/sessions/jsonl/index.ts";
 
