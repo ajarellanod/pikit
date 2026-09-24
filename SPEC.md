@@ -1606,8 +1606,7 @@ project.
     { "name": "TELEGRAM_WEBHOOK_SECRET", "secret": true, "required": true }
   ],
   "config": "config/schema.ts",
-  "migrations": "migrations",
-  "replay": { "tools": {} }
+  "migrations": "migrations"
 }
 ```
 
@@ -1644,6 +1643,39 @@ Rules:
   components naming the same target is an install error. A root file already present is not
   overwritten without `--force`, as in step 6 of §10.5. A target never leaves the project (no `..`,
   no absolute path).
+- `replay.tools` is generated too, and only for a component that provides `agent.tool`: each tool's
+  name → its `replay` (`"safe"` or `"never"`, §8.4), read from the tool it provides. A component with
+  no tool has no `replay`. `[decision]`
+- Every other field is written by hand, and the generator never changes it:
+  - `name` is the directory's name; `version` is semver.
+  - `requires.pikit` must accept the `@pikit/core` of the registry's own commit.
+  - `targets` is `server`, `cloudflare` or both.
+  - `dependencies` lists exactly the npm packages the component's files import, tests included
+    (they are copied and run in the project), except `@pikit/core`, which `requires.pikit` covers.
+    Versions are pinned as the repository pins them (`typebox` follows Pi exactly).
+  - `files` maps `files/src` onto `src`, and names each file outside `src/` on its own (see
+    `files` above). `validate` rejects any other directory mapping.
+  - `environment` lists every variable the component, or the Pi code it wraps, reads. A fallback
+    that pi-ai reads only when nothing is stored (`ANTHROPIC_API_KEY`) is `required: false`.
+  - `license`, `config` and `migrations` are optional. A component whose schema is its
+    definition's `config` (every component so far) has no `config` path, so the schema is
+    written once. `migrations` exists only for a component that ships some.
+- Commands, from the repository root:
+  - `bun run registry generate` rewrites the generated fields of every `component.json` in a stable
+    key order and rebuilds `registry.json`. A component without `component.json` gets a skeleton
+    (name, README summary, imported dependencies) with no `targets`: `validate` rejects it until
+    someone writes them.
+  - A component with no default export in `src/pikit/<name>/index.ts` is not an app component
+  (a `deployment-*`, which runs the app, §9.1): it has no `setup`, so its generated fields are
+  empty. A default export that is not a component is an error. `[decision]`
+- `bun run registry validate` checks every component and exits non-zero with one line per
+    problem (§14).
+- The fields are derived without starting anything:
+  1. a recording `Pikit` runs `setup` to learn its single uses and its tools;
+  2. an app of the component plus a stub provider per single use is created, and its
+     `describe()` gives `provides`, `requires` and `optional`, as in `pikit doctor`.
+
+  A config with required fields gets typebox's minimal valid value, only for describing.
 
 ### 10.3 Project manifest
 
@@ -1676,9 +1708,30 @@ Rules:
 A registry is a Git repository (or static HTTP root) with:
 
 ```
-registry.json                index: name → { versions, description, targets, path }
+registry.json                index: name → { version, description, targets, path }
 components/<name>/           component packages as in §10.1
 ```
+
+```json
+{
+  "version": 1,
+  "components": {
+    "channel-http": {
+      "version": "0.0.0",
+      "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
+      "targets": ["server", "cloudflare"],
+      "path": "components/channel-http"
+    }
+  }
+}
+```
+
+- The top-level `version` is the schema version of `registry.json` (§12a).
+- `registry.json` is generated from the manifests by `bun run registry generate`, sorted by name,
+  and `validate` fails when it differs.
+- An entry has one `version`, not a list. `[decision]` A Git registry at one commit holds one
+  version of each component. The other versions are earlier commits, and `pikit.json` pins the
+  commit (§10.3).
 
 No server-side logic. Private registries use the user's existing Git credentials.
 
@@ -1878,6 +1931,28 @@ is that the answer is "nothing" for every minor.
   and keep running there.
 - The registry CI runs every component's tests on both targets it declares (server: Bun;
   cloudflare: `wrangler dev` / Miniflare).
+- **Registry validation** (`bun run registry validate`, `scripts/registry.ts`; `pikit registry
+  validate` will call the same `validate`). For every directory under `registry/components/` it
+  checks:
+  - **drift** (S14): the generated fields equal what `setup` declares (§10.2), the manifest is in
+    generated form, and `registry.json` matches the manifests;
+  - **tools** (S10): every `agent.tool` has `replay` `"safe"` or `"never"`;
+  - **naming**: the name equals the directory, is kebab-case, and has a known kind prefix. The
+    kinds are AGENTS.md's naming table plus the kinds in use; a new kind is added on purpose;
+  - **manifest**: the hand-written fields are well-formed, there is no `requires.components`, and
+    `files` maps no directory but `files/src` → `src`;
+  - **layout** (S13): `README.md`, `files/src/pikit/<name>/index.ts` and at least one `*.test.ts`
+    exist, and no `package.json` in the component has `scripts`;
+  - **imports** (S1, S4, S5), comments ignored and type-only imports included:
+    - no import of `@earendil-works/*`;
+    - no relative import into another component's `src/pikit/<other>/` or outside `files/`;
+    - `node:*` and `bun:*` only when `targets` is exactly `["server"]`, `cloudflare:*` only
+      when it is exactly `["cloudflare"]`, and Node builtins only with their `node:` scheme;
+      `*.test.ts` files are exempt, because they run under Bun's test runner, never in a bundle;
+  - **dependencies**: `dependencies` names exactly the npm packages the files import.
+
+  `scripts/registry.test.ts` runs it on the real registry and proves each check fails on a
+  fixture component.
 
 ---
 
@@ -2073,6 +2148,18 @@ Resolved `[decision]`:
   crashed run's `pikit.turn` entry could name tool objects no longer given by `prepare`.
 - A failing `prepare` gives the run the static definition, logged (§6.2a). A run cannot be refused
   from `before_run`, and the static fields are the agent's declared baseline.
+- `component.json`'s generated fields come from the app's own `describe()`, over the component
+  and a stub per single use, not from a second reading of `setup` (§10.2). `pikit doctor` and the
+  manifest then cannot disagree on what `use`, `useOptional` and `useKeyed` mean.
+- `replay.tools` is generated from the tools a component provides and exists only for tool
+  providers (§10.2). It is a fact of the code, like `provides`, and S10's tool manifest validation
+  reads it.
+- `dependencies` lists exactly the packages the component's files import, tests included,
+  minus `@pikit/core` (§10.2). Validation compares the two, so the list cannot go stale.
+- The runtime-neutrality import scan (S5) covers the files that ship. `*.test.ts` runs under Bun's
+  test runner, which every component test already imports as `bun:test` (§14).
+- `registry.json` gives each component one `version`: a Git registry at a commit holds one
+  version, and `pikit.json` pins the commit (§10.4).
 
 ---
 
