@@ -297,7 +297,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
 - Commit messages follow `<area>: <imperative summary>`. Areas: `core`, `adapter`, `cli`,
   `component/<name>`, `registry` (manifests, `registry.json`, presets, `scripts/registry*`, `packages/cli/src/registry/`),
-  `samples`, `spec`, `docs`.
+  `samples`, `installer`, `spec`, `docs`.
 - A change that adds a component, changes a contract or fixes user-visible behavior gets a
   line in `CHANGELOG.md` (created at M1).
 - Do not commit generated user-project files (`pikit.json`, `src/pikit/**`) from samples

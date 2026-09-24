@@ -4,6 +4,7 @@
     "packages/*/src/**/*.ts",
     "registry/components/*/files/**/*.ts",
     "scripts/**/*.ts",
+    "installer/**/*.ts",
     "samples/**/*.ts"
   ]
 }

@@ -5,6 +5,11 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- installer: `installer/install.sh` (`curl -fsSL <url> | sh`) puts `pikit` on a clean Debian/Ubuntu
+  VPS or macOS: git, curl and unzip through apt-get after asking, Bun >= 1.4 from bun.sh, a Git
+  checkout of pikit in `~/.pikit/pikit`, and `~/.pikit/bin/pikit`. It prints the PATH line instead
+  of editing shell files, and installs Docker (Linux, official script) only with `--install-docker`
+  or a "y". Idempotent; `PIKIT_SOURCE` installs from a local checkout.
 - cli: the `pikit` CLI (`packages/cli`, M1 commands of SPEC §11). `pikit new <dir> --preset <name>`
   writes a project (its agent, `pikit.config.ts`, `package.json`, README), vendors `@pikit/core`,
   `@pikit/pi-adapter` and `@pikit/pi-extension-shim` into `vendor/`, adds every component of the
