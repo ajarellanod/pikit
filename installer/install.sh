@@ -9,9 +9,9 @@
 #   2. checks Bun >= 1.4; installs it from bun.sh when missing (in ~/.bun, no sudo);
 #   3. fetches pikit with git into ~/.pikit/pikit, at a ref, and runs `bun install` there;
 #   4. writes ~/.pikit/bin/pikit and prints the PATH line to add (it edits no shell file);
-#   5. checks Docker, which only `pikit up` needs. On Linux it offers Docker's official script, and
-#      runs it only with your consent (--install-docker, or "y" at the prompt); on macOS it points
-#      to Docker Desktop.
+#   5. checks Docker, which only `pikit up` needs. On Linux it offers Docker's official script and
+#      the docker group, and does either only with your consent (--install-docker, or "y" at the
+#      prompt); on macOS it points to Docker Desktop.
 # Running it again updates pikit and changes nothing else. It never runs sudo without saying so
 # first and asking, and it never runs as a side effect what it did not print.
 #
@@ -151,33 +151,50 @@ chmod 755 "$BIN_DIR/pikit"
 "$BIN_DIR/pikit" --version >/dev/null || fail "$BIN_DIR/pikit does not run"
 say "installed $("$BIN_DIR/pikit" --version) as $BIN_DIR/pikit"
 
-# 5. Docker, for `pikit up` only.
+# 5. Docker, for `pikit up` only. Without root, using it needs the docker group, which a running shell
+# only gets after `newgrp docker` or a new login: the closing lines say so.
+NEWGRP=""
+join_docker_group() {
+  as_root usermod -aG docker "$(id -un)"
+  NEWGRP=1
+}
 if has docker && docker compose version >/dev/null 2>&1; then
   say "Docker with Compose found: pikit up can run your project in a container"
+  if [ "$OS" = "Linux" ] && [ "$(id -u)" != "0" ] && ! docker info >/dev/null 2>&1; then
+    # `id -nG` alone: this shell's groups; with the user: the groups a new login gets.
+    if id -nG | tr ' ' '\n' | grep -qx docker; then
+      warn "docker info fails although this shell is in the docker group: is the daemon running? (sudo systemctl start docker)"
+    elif id -nG "$(id -un)" | tr ' ' '\n' | grep -qx docker; then
+      NEWGRP=1
+    elif ask "Docker needs root here. Add you to the docker group, so pikit can use it without sudo (--install-docker to consent)?" "$PIKIT_INSTALL_DOCKER"; then
+      join_docker_group
+    else
+      say "  pikit up and pikit configure's login for it need Docker: sudo usermod -aG docker \"\$USER\", then log in again."
+    fi
+  fi
 elif [ "$OS" = "Darwin" ]; then
   say "Docker is not installed. pikit up needs it; pikit dev does not."
   say "  Install Docker Desktop: https://docs.docker.com/desktop/setup/install/mac-install/"
 else
   say "Docker is not installed. pikit up needs it; pikit dev does not."
-  if ask "Install Docker with its official script (https://get.docker.com, runs as root; PIKIT_INSTALL_DOCKER=1 or --install-docker to consent)?" "$PIKIT_INSTALL_DOCKER"; then
+  if ask "Install Docker with its official script (https://get.docker.com, runs as root), and add you to the docker group (PIKIT_INSTALL_DOCKER=1 or --install-docker to consent)?" "$PIKIT_INSTALL_DOCKER"; then
     curl -fsSL https://get.docker.com -o "$PIKIT_HOME/get-docker.sh"
     as_root sh "$PIKIT_HOME/get-docker.sh"
     rm -f "$PIKIT_HOME/get-docker.sh"
-    if [ "$(id -u)" != "0" ]; then
-      say "  To use Docker without sudo: sudo usermod -aG docker \"\$USER\", then log in again."
-    fi
+    if [ "$(id -u)" != "0" ]; then join_docker_group; fi
   else
     say "  Later: https://docs.docker.com/engine/install/ (or rerun this with --install-docker)"
   fi
 fi
 
-# Done.
+# Done: the lines to paste, in order. The PATH line comes first: `newgrp` starts a new shell that
+# keeps this environment.
+say "done. Now paste:"
+printf '\n'
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  *)
-    say "add pikit to your PATH (in ~/.profile, ~/.bashrc or ~/.zshrc):"
-    # shellcheck disable=SC2016 # $PATH is meant literally: it is the line to paste
-    printf '\n  export PATH="%s:$PATH"\n\n' "$BIN_DIR"
-    ;;
+  # shellcheck disable=SC2016 # $PATH is meant literally: it is the line to paste
+  *) printf '  export PATH="%s:$PATH"    # add this line to ~/.profile too\n' "$BIN_DIR" ;;
 esac
-say "next: pikit new my-agent --preset http && cd my-agent && pikit configure && pikit up"
+if [ -n "$NEWGRP" ]; then printf '  newgrp docker    # this shell joins the docker group (or log in again)\n'; fi
+printf '  pikit new my-agent --preset http && cd my-agent && pikit configure && pikit up\n\n'
