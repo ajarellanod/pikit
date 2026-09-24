@@ -50,6 +50,8 @@ export type { CapabilityMode, AppCapabilities, AppKeyedCapabilities, Keyed } fro
 export type { Clock } from "./contracts/clock.ts";
 export { systemClock } from "./contracts/clock.ts";
 export type { Logger } from "./contracts/logger.ts";
+export type { AgentState } from "./contracts/agent-state.ts";
+export { AGENT_STATE } from "./contracts/agent-state.ts";
 export type { ConversationRegistry, ConversationReset } from "./contracts/conversations.ts";
 export type { HttpRoute } from "./contracts/http.ts";
 export type { SecretStore } from "./contracts/secrets.ts";

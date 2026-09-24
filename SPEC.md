@@ -354,7 +354,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `model.credentials` | pi-ai `CredentialStore` | Credentials of the model providers, one per provider id (API key or OAuth tokens). pi-ai refreshes OAuth tokens inside the store's `modify` and writes them back, and reads the environment (`ANTHROPIC_API_KEY`) only when nothing is stored. Optional: without it, providers read their environment variables only. Typed by `@pikit/pi-adapter`; its conformance suite is in `@pikit/pi-adapter/testing` (§14), because the contract is pi-ai's. |
 | `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
 | `agent.tool` (keyed by tool name) | `AgentTool` | One per tool, provided by `tool-*` components. An agent names the tools it uses in `AgentDefinition.tools`; the runtime resolves the names (§6.3). |
-| `agent.state` | `AgentStateStore` | Per-conversation JSON state read by `prepare` and updated by tools. Provided by the Pi adapter over the session (§6.2a, §6.4); no separate store. |
+| `agent.state` | `AgentState` | Per-conversation JSON state read by `prepare` and updated by tools. Not a capability today: the runtime puts the conversation's `AgentState` in the context of each run (`AGENT_STATE`), stored in the Pi session (§6.2a, §6.4); no separate store. A capability for components that act outside a run (an admin route, a scheduler) is `[planned]`, with the first one that needs it. |
 | `channel.transport` (keyed by channel name) | `ChannelTransport` | Send/edit/delete messages for one channel. Each channel component provides its transport under its own key; delivery uses `transports.get(message.channel)`. A missing key is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
 | `outbound.queue` | `OutboundQueue` | Durable enqueue + worker. Optional; without it delivery is direct. |
@@ -749,7 +749,8 @@ Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest
 For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
 `inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
 `SecretStore` (`secrets`), and `ConversationRegistry` with `ConversationReset` (`conversations.registry`
-and the payload of `conversation.reset`), and `HttpRoute` (`http.route`).
+and the payload of `conversation.reset`), and `HttpRoute` (`http.route`). For agent state (§6.2a): `AgentState` and the context key `AGENT_STATE`;
+`@pikit/core/testing` has its suite, `createAgentStateConformance`.
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`),
 `model.provider` (pi-ai's `Provider`) and `model.credentials` (pi-ai's `CredentialStore`) by
 importing it anywhere in the project.
@@ -976,6 +977,18 @@ Rules:
   that ships, as a session value. It commits atomically with the transcript, survives
   restarts and eviction, and starts fresh on `/reset` (a new session). pikit adds no store for
   it (§6.4).
+- **How a tool reaches it.** `[decision]` Through its context, not a global and not a capability:
+  the runtime puts the conversation's `AgentState` in the context of every run under the core's
+  key `AGENT_STATE`, and Pi passes that context to each tool call (Chord's values cross into Pi
+  unchanged, §6.2). `context.value(AGENT_STATE)?.update({ phase: "deploying" }, context)`.
+  - A tool has no `ConversationRef` of its own, and a project's tool objects are not components,
+    so a capability would still need the conversation from the context. The context value is
+    scoped to one run of one conversation: a tool cannot reach another conversation's state.
+  - `AgentState` is `get(ctx)` (a copy of the initial state with every update merged over it) and
+    `update(patch, ctx)`: a shallow merge, committed before it resolves, applied one at a time per
+    conversation so parallel tools never lose each other's keys. A patch that is not JSON is
+    rejected. Its suite is `createAgentStateConformance` (`@pikit/core/testing`), passed by an
+    in-memory double and by the adapter's session-backed state.
 - The adapter runs `prepare` in Pi's `before_run` hook and applies the result via
   `setModel` / `setActiveTools` / system prompt for that run. The resolved `TurnConfig` is
   appended to the session as a custom entry, so "what did the agent have on turn N" is

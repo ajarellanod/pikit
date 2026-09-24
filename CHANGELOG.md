@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core: `AgentState` (`get` / `update(patch)`), the per-conversation JSON state of an agent, and the
+  context key `AGENT_STATE` through which a tool reaches the state of the conversation it runs in;
+  `createAgentStateConformance` in `@pikit/core/testing`, passed by an in-memory double (SPEC §6.2a).
 - samples: `samples/http` runs through `deployment-docker`'s entrypoint (JSON-lines logs, deadlines,
   signals) and in Docker (`docker compose up` from `samples/http/`, built from the repository's root).
   `registry/presets/http.yaml` lists its components plus `log-events` and `deployment-docker`.
