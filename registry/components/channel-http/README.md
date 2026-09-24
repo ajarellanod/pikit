@@ -7,7 +7,7 @@ Talk to an agent over HTTP: send a message, get the answer in the response.
 - **Requires:** `secrets` (the token), `conversations.registry`, `agent.runtime`. A server (such as
   `server-bun`) serves the routes, and a router (such as `router-basic`) picks the agent.
 - **Targets:** `server` and `cloudflare` (fetch handlers and Web Crypto only).
-- **Installs to:** `src/pikit/channels/http/`.
+- **Installs to:** `src/pikit/channel-http/`.
 - **npm dependencies:** `typebox`.
 - **Environment:** `PIKIT_HTTP_TOKEN` (secret, required, at least 16 characters; for example
   `openssl rand -hex 32`).
