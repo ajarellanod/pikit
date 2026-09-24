@@ -47,7 +47,7 @@ depending on a black-box library — as long as the pieces are small, consistent
 shared foundation.
 
 pikit applies the same distribution model to infrastructure. `pikit add channel-telegram`
-does not add a dependency; it adds files to `src/pikit/channels/telegram/` that you can read,
+does not add a dependency; it adds files to `src/pikit/channel-telegram/` that you can read,
 edit, and delete.
 
 ## What you get

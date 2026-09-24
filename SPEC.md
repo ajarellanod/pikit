@@ -107,10 +107,10 @@ Rules:
 ```ts
 // pikit.config.ts
 import { defineApp } from "@pikit/core";
-import telegram from "./src/pikit/channels/telegram";
-import router from "./src/pikit/router";
-import sessions from "./src/pikit/sessions/sqlite";
-import pi from "./src/pikit/runtime/pi";
+import telegram from "./src/pikit/channel-telegram";
+import router from "./src/pikit/router-basic";
+import sessions from "./src/pikit/sessions-sqlite";
+import pi from "./src/pikit/runtime-pi";
 import auditLog from "./src/extensions/audit-log";
 
 export default defineApp({
@@ -822,7 +822,7 @@ Responsibilities:
 
 The split `[decision]`: `@pikit/pi-adapter` (npm, pinned with Pi) holds everything that talks to
 Pi, including the bridges that read Pi's storage layout, because it changes when Pi changes.
-`runtime-pi` (copied to `src/pikit/runtime/pi/`) is the wiring the user owns: which
+`runtime-pi` (copied to `src/pikit/runtime-pi/`) is the wiring the user owns: which
 capabilities it reads, what it refuses to start without (no agent, a model no provider has, a
 provider with no credentials at all, checked with pi-ai's `checkAuth`, which makes no network call
 and refreshes nothing), and
@@ -1436,7 +1436,7 @@ cron, optional Container), and `pikit deploy --profile cloudflare` wraps `wrangl
 channel-telegram/
 ├── component.json
 ├── files/
-│   └── src/pikit/channels/telegram/
+│   └── src/pikit/channel-telegram/
 │       ├── index.ts          defineComponent(...)
 │       ├── ingress.ts        webhook → InboundMessage
 │       ├── transport.ts      ChannelTransport
@@ -1448,6 +1448,13 @@ channel-telegram/
 │   └── 001_telegram.sql
 └── README.md
 ```
+
+A component installs to `src/pikit/<name>/`, under its exact name (`src/pikit/channel-telegram/`,
+`src/pikit/runtime-pi/`). `[decision]` One name is used for the component, its directory, its
+config key and its entry in `pikit.json`, so there is no mapping from name to path to remember or
+to get wrong. Each directory belongs to exactly one component, which is what `pikit remove` and
+the hashes in `pikit.json` rely on. `files/` mirrors the project: `files/src/pikit/<name>/` is
+copied to `src/pikit/<name>/`.
 
 ### 10.2 Manifest
 
@@ -1512,8 +1519,8 @@ Rules:
       "version": "1.4.0",
       "commit": "a83f92c",
       "files": {
-        "src/pikit/channels/telegram/index.ts": { "hash": "sha256:...", "modified": false },
-        "src/pikit/channels/telegram/format.ts": { "hash": "sha256:...", "modified": true }
+        "src/pikit/channel-telegram/index.ts": { "hash": "sha256:...", "modified": false },
+        "src/pikit/channel-telegram/format.ts": { "hash": "sha256:...", "modified": true }
       }
     }
   }
@@ -1789,6 +1796,8 @@ Resolved `[decision]`:
 - A consumer is ordered after the provider `get()` will return (the selected one), not after
   every installed provider; an unselected provider cannot create a false cycle.
 - `capabilities` is a reserved component name (it is the core's config key).
+- A component installs to `src/pikit/<name>/`, under its exact name (§10.1). There is no
+  kind-based path such as `channels/telegram`: one name, no mapping, one directory per component.
 - Inbound deduplication is the `inbound-dedup` component, not core (§5).
 - Keyed capabilities (`provideKeyed` / `useKeyed`) replace `channel.transport:<name>` and its
   "never in `use`" rule (§4.5). A transport is found by key per message, and the outbox

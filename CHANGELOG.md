@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- spec: every component installs to `src/pikit/<name>/`, under its exact name, instead of a path by
+  kind (`src/pikit/secrets-env/`, not `src/pikit/secrets/env/`) (SPEC §10.1).
 - samples: `samples/http` talks to Claude over HTTP (SPEC §15 scenario 1), with an OAuth login
   script and end-to-end tests for scenario 1 and the HTTP half of scenario 7.
 - component/channel-http: `POST /v1/messages` answers in the response (`200`, or `202` past
