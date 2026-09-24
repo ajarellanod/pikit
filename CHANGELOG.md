@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core: `AgentResult.requestIds` lists every request a run answered, so a channel that replies per
+  message answers the ones queued into a run too (SPEC §6.1).
 - component/runtime-pi: the agent runtime component. Pi runs the agents through `@pikit/pi-adapter`;
   it provides `agent.runtime` over `sessions.store`, `agent.definition` and `model.provider`, and
   ships the `agent.runtime` and lifecycle conformance tests (SPEC §6).

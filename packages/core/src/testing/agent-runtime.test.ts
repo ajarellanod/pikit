@@ -48,10 +48,15 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
       const drive = (ref: ConversationRef, record: Conversation, requestId: string, entry?: Entry): void => {
         const controller = new AbortController();
         record.open = { requestId };
+        /** The requests this run took: its starter, then what joined it. */
+        const taken = [requestId];
         const run = async (): Promise<{ kind: "completed" | "aborted"; text?: string }> => {
           if (entry !== undefined) record.transcript.push({ kind: "tool", text: entry.text });
           for (;;) {
-            record.transcript.push(...record.inbox.splice(0));
+            for (const e of record.inbox.splice(0)) {
+              record.transcript.push(e);
+              if (e.requestId !== undefined && !taken.includes(e.requestId)) taken.push(e.requestId);
+            }
             const last = record.transcript.at(-1);
             if (last?.kind === "in" && last.text === "hold") {
               try {
@@ -81,7 +86,7 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
         const done = run().then(async (result) => {
           end();
           const ctx = background ?? notStarted();
-          await ctx.emit("agent.settled", { conversation: ref, requestId, messages: [], ...result });
+          await ctx.emit("agent.settled", { conversation: ref, requestId, requestIds: taken, messages: [], ...result });
         });
         live.set(ref.sessionId, { controller, done });
       };

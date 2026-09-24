@@ -23,7 +23,8 @@ A message goes in with `dispatch`. Once the message is durable in its conversati
 
 The answer arrives as the `agent.settled` event, or `agent.failed` if the run failed. The event
 fires even when nobody is waiting: after the caller went away, or after a crash, when the next
-process resumes the run.
+process resumes the run. Its `requestIds` lists every message the run answered: the one that
+started it and each one queued into it.
 
 `abort()` stops the active run. Any message queued in it is withdrawn and stays a duplicate.
 

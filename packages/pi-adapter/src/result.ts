@@ -4,6 +4,7 @@
 
 import type { AgentLane, AgentMessage, Context, OperationResultRecord } from "@earendil-works/pi-agent-core";
 import type { AgentResult, ConversationRef } from "@pikit/core";
+import { requestIdOf } from "./inbound.ts";
 
 export async function toResult(
   lane: AgentLane,
@@ -12,7 +13,7 @@ export async function toResult(
   ctx: Context,
 ): Promise<AgentResult> {
   const messages = await runMessages(lane, record, ctx);
-  const base = { conversation, requestId: record.operationId, messages };
+  const base = { conversation, requestId: record.operationId, requestIds: requestsOf(record.operationId, messages), messages };
   if (record.status === "completed") {
     const text = finalText(messages);
     return { ...base, kind: "completed", ...(text !== undefined && { text }) };
@@ -37,6 +38,15 @@ async function runMessages(lane: AgentLane, record: OperationResultRecord, ctx: 
   return entries
     .reverse()
     .flatMap((entry) => (entry.type === "message" && entry.id !== record.fromTipId ? [entry.message] : []));
+}
+
+/**
+ * The requests the run took: the inbound messages among its own entries, in transcript order. The
+ * starter is always first; it is in the run's entries unless the run began before them.
+ */
+function requestsOf(starter: string, messages: readonly AgentMessage[]): string[] {
+  const taken = messages.map(requestIdOf).filter((id): id is string => id !== undefined && id !== starter);
+  return [starter, ...new Set(taken)];
 }
 
 /** The last assistant message that answers rather than calls tools. */

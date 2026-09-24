@@ -102,7 +102,7 @@ export function createAgentRuntimeConformance(
       const started = await w.event("agent.started", (e) => e.requestId === "r1");
       expect(started, { conversation, requestId: "r1", resumed: false }, "agent.started");
       const result = await w.result("r1");
-      expect([result.kind, result.text], ["completed", "answer: hello"], "result");
+      expect([result.kind, result.text, result.requestIds], ["completed", "answer: hello", ["r1"]], "result");
       same(result.conversation, conversation, "result conversation");
     }),
 
@@ -117,6 +117,7 @@ export function createAgentRuntimeConformance(
 
       const result = await w.result("r1");
       expect([result.kind, result.text], ["completed", "answer: change course"], "result of the run");
+      expect(result.requestIds, ["r1", "r2"], "the requests the run answered");
       await s.quiet();
       w.none((e) => e.name !== "agent.dispatched" && requestIdOf(e) === "r2", "a run of its own for the queued message");
     }),
@@ -133,6 +134,7 @@ export function createAgentRuntimeConformance(
 
       const result = await w.result("r1");
       expect([result.kind, result.text], ["completed", "answer: one more thing"], "result of the run");
+      expect(result.requestIds, ["r1", "r2"], "the requests the run answered");
       await s.quiet();
       w.none((e) => e.name !== "agent.dispatched" && requestIdOf(e) === "r2", "a run of its own for the late message");
     }),
@@ -187,7 +189,8 @@ export function createAgentRuntimeConformance(
 
       await s.within(w.runtime.abort(conversation, w.app.context()), "abort() to return");
 
-      expect((await w.result("r1")).kind, "aborted", "result kind");
+      const aborted = await w.result("r1");
+      expect([aborted.kind, aborted.requestIds], ["aborted", ["r1"]], "result, without the withdrawn request");
       expect(await w.dispatch("r2", "change course", conversation), { kind: "duplicate", requestId: "r2" }, "a withdrawn request");
       // The conversation is usable again.
       expect((await w.dispatch("r3", "hello", conversation)).kind, "started", "a new message after abort");
@@ -223,6 +226,7 @@ export function createAgentRuntimeConformance(
 
       const result = await w.result(requestId);
       expect([result.kind, result.text], ["completed", "answer: after the crash"], "result of the resumed run");
+      expect(result.requestIds, [requestId, "r2"], "the requests the resumed run answered");
     }),
   ];
 }

@@ -607,6 +607,8 @@ interface AgentResult {
   conversation: ConversationRef;
   /** The request that started the run. */
   requestId: string;
+  /** Every request the run took: its starter, then each message queued into it. */
+  requestIds: string[];
   kind: "completed" | "aborted" | "failed";
   text?: string;
   messages: AgentMessage[];
@@ -666,14 +668,15 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   finishes.
 - **`abort()` withdraws what was queued.** Messages queued in the aborted run are not answered:
   Pi takes them out of its inbox. They stay known, so a redelivery is a `duplicate` (§6.4,
-  gap 4), as Pi's durable runtime records a withdrawn submission `unanswered`. Reporting them to
-  their channel belongs with the `[open]` list of a run's requests.
+  gap 4), as Pi's durable runtime records a withdrawn submission `unanswered`. They are not in
+  the aborted run's `requestIds`; telling their channel they were dropped is the channel's
+  choice.
 - **A queued message is answered by the run it joined.** Its entry, with its `requestId`, sits
   in that run's transcript. Its answer is the first assistant message after it that calls no
   tools, the same answer as the run's prompt. That is how Pi's durable runtime settles every
-  input placed in one turn. Because the transcript holds every request a run placed, a result
-  that lists them all (for channels that reply to each message) needs no new record. Whether
-  `AgentResult` carries that list is `[open]` until a channel needs it.
+  input placed in one turn. `AgentResult.requestIds` lists every request a run took, read from
+  the run's own transcript entries, so a channel that replies per message (an HTTP request
+  waiting for its answer) replies to each of them with the run's answer. It needs no new record.
 - **The agent is found by name.** `conversation.agent` names an `AgentDefinition` that the
   project provides under the keyed capability `agent.definition`, keyed by its name
   (`pikit.provideKeyed("agent.definition", support.name, support)`). A run resumed after a crash
@@ -1657,6 +1660,9 @@ Resolved `[decision]`:
   conversation without a message (§6.1).
 - `abort()` withdraws the messages queued in the run; they stay duplicates (§6.1, §6.4 gap 4),
   as in Pi's durable runtime.
+- `AgentResult.requestIds` lists every request a run took (§6.1). Without it, a request queued
+  into a running run would never learn it was answered, and a channel that replies per message
+  (HTTP) would wait forever. The list is read from the transcript; no record is added.
 - Model providers are components: each provides the keyed capability `model.provider` under its
   id, and the runtime builds its models from all of them (§4.5). Adding a provider is adding a
   component, and a missing one is visible in `doctor`, not a config flag.

@@ -110,6 +110,12 @@ export interface AgentResult {
   conversation: ConversationRef;
   /** The request that started the run. */
   requestId: string;
+  /**
+   * Every request the run took, in order: the one that started it, then each message that was
+   * queued into it while it ran. The run's answer answers all of them, so a channel that replies
+   * per message replies to each. A message withdrawn by `abort()` is not among them.
+   */
+  requestIds: string[];
   kind: "completed" | "aborted" | "failed";
   /** The run's final answer, when it produced one. */
   text?: string;

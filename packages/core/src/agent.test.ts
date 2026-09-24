@@ -39,7 +39,13 @@ test("agent.runtime and agent.definition are typed capabilities, agent.* typed e
           if (agents.get(request.conversation.agent) === undefined) throw new Error("unknown agent");
           const admission: Admission = { kind: "started", requestId: request.requestId };
           await ctx.emit("agent.dispatched", { conversation: request.conversation, admission });
-          await ctx.emit("agent.settled", { ...admission, conversation: request.conversation, kind: "completed", messages: [] });
+          await ctx.emit("agent.settled", {
+            ...admission,
+            requestIds: [admission.requestId],
+            conversation: request.conversation,
+            kind: "completed",
+            messages: [],
+          });
           return admission;
         },
         async abort() {},
@@ -81,6 +87,7 @@ test("agent.settled carries completed or aborted runs; failures are agent.failed
   const failed: AppEvents["agent.failed"] = {
     conversation,
     requestId: "r1",
+    requestIds: ["r1"],
     kind: "failed",
     messages: [],
     error: { code: "provider", message: "down" },
