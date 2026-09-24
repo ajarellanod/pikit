@@ -2033,8 +2033,8 @@ is that the answer is "nothing" for every minor.
   and keep running there.
 - The registry CI runs every component's tests on both targets it declares (server: Bun;
   cloudflare: `wrangler dev` / Miniflare).
-- **Registry validation** (`bun run registry validate`, `scripts/registry.ts`; `pikit registry
-  validate` will call the same `validate`). For every directory under `registry/components/` it
+- **Registry validation** (`pikit registry validate`, and `bun run registry validate`, which calls
+  the same code in `packages/cli/src/registry/`). For every directory under `registry/components/` it
   checks:
   - **drift** (S14): the generated fields equal what `setup` declares (§10.2), the manifest is in
     generated form, and `registry.json` matches the manifests;
@@ -2066,7 +2066,9 @@ The design is considered validated when all five pass without touching the core:
    (M1) in `samples/http`, with `secrets-env`, `sessions-jsonl`, `conversations-file`,
    `credentials-file`, `provider-anthropic` and `router-basic`. Its end-to-end test uses Pi's faux
    model over real HTTP, and a live test against Anthropic runs when a credential exists. The
-   one-command install (`pikit new … && pikit up`) waits for the CLI.
+   one-command path runs too: `pikit new --preset http` → `configure` → `dev` answers, and
+   `pikit up` / `status` / `down` run it in Docker (`packages/cli/src/e2e.test.ts`,
+   `PIKIT_E2E=1 PIKIT_E2E_DOCKER=1`, about 19 s on a warm cache).
 2. **Chat**: `+ channel-telegram + sessions-sqlite` → stateful Telegram bot.
 3. **Reliability**: `+ durable-outbox` → delivery retried after simulated channel failure;
    channel component unchanged.

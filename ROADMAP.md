@@ -236,9 +236,31 @@ anything.
 - `bun run registry validate` enforces S1, S4, S5, S13 and S14, dependencies and file mappings:
   the checks `pikit registry validate` and `doctor` will run.
 
-Next: the core CLI (`new`, `add`, `remove`, `doctor`, `configure` with the login, and
-`up`/`down`/`logs`/`status` delegating to `deployment-docker`), the installer, a real container
-run, and measuring the five-minute budget on a clean VPS.
+✅ **Docker, for real** (Docker Desktop 29.6, arm64).
+- `samples/http` builds and goes healthy in about 10 s. It runs as a non-root user, keeps `.env`
+  out of the image, and logs JSON lines.
+- SIGTERM stops it in milliseconds with exit 0.
+- A conversation survives `down` and `up` on the volume.
+- A real Claude answers from inside the container, and its `bash` does not see
+  `PIKIT_HTTP_TOKEN`.
+
+✅ **The CLI and the installer** (`packages/cli`, `installer/install.sh`, SPEC §10.3, §10.5, §11).
+- The CLI has `new`, `add`, `remove`, `doctor`, `configure` (with the Anthropic OAuth login),
+  `dev`, and `up`/`down`/`restart`/`logs`/`status` delegating to `deployment-docker`, plus
+  `registry validate`/`generate`.
+- The `@pikit/*` packages are vendored in the project until they are published; the project
+  resolves one copy of the core.
+- The end-to-end test runs `new` → `doctor` → the project's own tests → `configure` → `dev`
+  answers → S3 add/remove → `up`/`status`/`down` in Docker, in about 19 s on a warm cache.
+- The installer ran on macOS (in a temporary HOME) and in a clean `debian:bookworm-slim`
+  container: install in 4 s, `new` → answering in 1 s.
+
+Left for M1:
+- **An OAuth login made by `pikit configure` does not reach the container:** compose mounts a
+  named volume over `.pikit/`. An API key in `.env` works. Decide how credentials enter the
+  container.
+- **The installer's repository URL is a placeholder.**
+- **Measure the five-minute budget on a real, clean VPS.**
 
 Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle
 delay before closing a conversation (`idleMs`) is added only if reopening is measured to be slow.
