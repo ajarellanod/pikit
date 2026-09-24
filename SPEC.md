@@ -1940,7 +1940,7 @@ and copying the login leaves a stale copy once a refresh rotates the token.
 the CLI's, and every run sees the files as they are now. The exception is the deployment component's
 commands, which are plain functions the CLI calls.
 
-`[decision]` The CLI is installed by `installer/install.sh` (`curl -fsSL <url> | sh`, M1): it
+`[decision]` The CLI is installed by `installer/install.sh` (`curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh`, M1; the repository is `github.com/ajarellanod/pikit` for now): it
 ensures git and Bun >= 1.4, clones pikit into `~/.pikit/pikit` at a ref, and writes the shim
 `~/.pikit/bin/pikit`. It prints the `PATH` line instead of editing shell files, asks before any
 `apt-get` or `sudo`, and installs Docker only with explicit consent (`--install-docker` or a "y";

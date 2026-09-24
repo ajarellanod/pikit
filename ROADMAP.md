@@ -261,7 +261,6 @@ up` refuses to start an agent with no credentials there. The Docker end-to-end t
 the login was run in a pseudo-terminal up to pi-ai's URL and paste prompt, inside the container.
 
 Left for M1:
-- **The installer's repository URL is a placeholder.**
 - **Measure the five-minute budget on a real, clean VPS.**
 
 Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle

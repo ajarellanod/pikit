@@ -3,8 +3,8 @@
 `install.sh` puts the `pikit` CLI on a machine (ROADMAP M1): a clean Debian/Ubuntu VPS or macOS.
 
 ```sh
-curl -fsSL <url>/install.sh | sh                                 # asks before anything with sudo
-curl -fsSL <url>/install.sh | sh -s -- --yes --install-docker    # a script's consent
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh                                 # asks before anything with sudo
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --yes --install-docker    # a script's consent
 ```
 
 It is POSIX sh (`set -eu`), idempotent (running it again updates pikit), and says what it does

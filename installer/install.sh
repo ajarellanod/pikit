@@ -1,8 +1,8 @@
 #!/bin/sh
 # pikit installer (ROADMAP M1): puts the `pikit` CLI on this machine.
 #
-#   curl -fsSL <url>/install.sh | sh
-#   curl -fsSL <url>/install.sh | sh -s -- --yes --install-docker
+#   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh
+#   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --yes --install-docker
 #
 # What it does, in order, and it says so as it goes:
 #   1. checks git, curl and (Linux) unzip; installs the missing ones with apt-get, after asking;
@@ -17,7 +17,7 @@
 #
 # Settings (environment):
 #   PIKIT_HOME            where pikit lives (default ~/.pikit)
-#   PIKIT_REPO            the Git repository (default https://github.com/pikit-dev/pikit.git)
+#   PIKIT_REPO            the Git repository (default https://github.com/ajarellanod/pikit.git)
 #   PIKIT_REF             the branch, tag or commit (default main; HEAD with PIKIT_SOURCE)
 #   PIKIT_SOURCE          a local checkout to install from instead of PIKIT_REPO (tests, development)
 #   PIKIT_YES=1           answer yes to installing git, curl, unzip, and to upgrading Bun (not Docker)
@@ -27,7 +27,7 @@ set -eu
 
 BUN_MINIMUM="1.4.0"
 PIKIT_HOME="${PIKIT_HOME:-$HOME/.pikit}"
-PIKIT_REPO="${PIKIT_REPO:-https://github.com/pikit-dev/pikit.git}"
+PIKIT_REPO="${PIKIT_REPO:-https://github.com/ajarellanod/pikit.git}"
 PIKIT_SOURCE="${PIKIT_SOURCE:-}"
 PIKIT_YES="${PIKIT_YES:-}"
 PIKIT_INSTALL_DOCKER="${PIKIT_INSTALL_DOCKER:-}"
