@@ -11,7 +11,9 @@
 #   4. writes ~/.pikit/bin/pikit and prints the PATH line to add (it edits no shell file);
 #   5. checks Docker, which only `pikit up` needs. On Linux it offers Docker's official script and
 #      the docker group, and does either only with your consent (--install-docker, or "y" at the
-#      prompt); on macOS it points to Docker Desktop.
+#      prompt); on macOS it points to Docker Desktop;
+#   6. on a terminal, runs `pikit new`, which asks everything and starts your first agent
+#      (PIKIT_NO_WIZARD=1 skips it; Ctrl-C stops it, and `pikit new` continues later).
 # Running it again updates pikit and changes nothing else. It never runs sudo without saying so
 # first and asking, and it never runs as a side effect what it did not print.
 #
@@ -187,14 +189,34 @@ else
   fi
 fi
 
-# Done: the lines to paste, in order. The PATH line comes first: `newgrp` starts a new shell that
+# 6. The first agent, step by step: `pikit new` with no arguments asks everything (its name, where to
+# talk to it, the channel's setup, the model's login) and starts it. Only on a terminal; Ctrl-C stops
+# it, and `pikit new` continues later. With a new docker group, `sg` gives it that group now, since
+# this shell only gets it at the next login.
+if [ -t 1 ] && (: </dev/tty) 2>/dev/null && [ -z "${PIKIT_NO_WIZARD:-}" ]; then
+  say "installed. Now your first agent, step by step:"
+  if [ -n "$NEWGRP" ] && has sg; then
+    sg docker -c "exec '$BIN_DIR/pikit' new" </dev/tty || true
+  else
+    "$BIN_DIR/pikit" new </dev/tty || true
+  fi
+  printf '\n'
+fi
+
+# Done: what this shell still needs. The PATH line comes first: `newgrp` starts a new shell that
 # keeps this environment.
-say "done. Now paste:"
-printf '\n'
+LINES=""
+# shellcheck disable=SC2016 # $PATH is meant literally: it is the line to paste
 case ":$PATH:" in
   *":$BIN_DIR:"*) ;;
-  # shellcheck disable=SC2016 # $PATH is meant literally: it is the line to paste
-  *) printf '  export PATH="%s:$PATH"    # add this line to ~/.profile too\n' "$BIN_DIR" ;;
+  *) LINES="$(printf '  export PATH="%s:$PATH"    # add this line to ~/.profile too' "$BIN_DIR")" ;;
 esac
-if [ -n "$NEWGRP" ]; then printf '  newgrp docker    # this shell joins the docker group (or log in again)\n'; fi
-printf '  pikit new my-agent --preset http && cd my-agent && pikit configure && pikit up\n\n'
+if [ -n "$NEWGRP" ]; then
+  LINES="$LINES${LINES:+
+}  newgrp docker    # this shell joins the docker group (or log in again)"
+fi
+if [ -n "$LINES" ]; then
+  say "to use pikit in this shell, paste:"
+  printf '\n%s\n\n' "$LINES"
+fi
+say "pikit new starts a new agent step by step; pikit --help lists the rest."

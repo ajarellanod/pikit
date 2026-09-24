@@ -17,7 +17,12 @@ before doing it. The steps and settings are at the top of the script.
 - `~/.pikit/bin/pikit`: a two-line shim that runs the checkout's CLI with that Bun. The installer
   prints the `PATH` line to add; it edits no shell file.
 - Docker: only `pikit up` needs it. On Linux the official script (`get.docker.com`) runs only with
-  `--install-docker` / `PIKIT_INSTALL_DOCKER=1` or a "y"; on macOS it points to Docker Desktop.
+  `--install-docker` / `PIKIT_INSTALL_DOCKER=1` or a "y", and with the same consent adds you to the
+  `docker` group; on macOS it points to Docker Desktop.
+- Then, on a terminal, it runs `pikit new`: the guided path asks the agent's name, where to talk to it
+  (Telegram, HTTP…), sets that up, logs in to the model and starts it. Ctrl-C stops it; `pikit new`
+  continues later. `PIKIT_NO_WIZARD=1` skips it. It ends with the lines this shell still needs
+  (`PATH`, `newgrp docker`).
 
 M1 installs from Git because `@pikit/*` are not published yet; `pikit new` vendors them from this
 checkout into each project (SPEC §10.5).
