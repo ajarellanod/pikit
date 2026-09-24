@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/secrets-env: provides `secrets` from the process environment. An empty variable is not
+  set, and it never reads a `.env` file itself (SPEC §4.5, §13).
 - adapter: `@pikit/pi-adapter/providers/anthropic` exposes pi-ai's Anthropic provider by subpath
   (SPEC §6.2).
 - adapter: `@pikit/pi-adapter` types `model.credentials` (pi-ai's `CredentialStore`),
