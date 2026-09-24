@@ -3,3 +3,5 @@
 
 export { createJsonlSessionStore } from "./jsonl.ts";
 export type { JsonlSessionStore, JsonlSessionStoreOptions } from "./jsonl.ts";
+export { createLocalExecution } from "./local.ts";
+export type { LocalExecutionOptions } from "./local.ts";

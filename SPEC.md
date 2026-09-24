@@ -1324,6 +1324,19 @@ The contract is Pi's `ExecutionEnv`. Implementations:
 Tools that need a shell declare `execution.shell`; `execution-fetch` does not provide it, so
 `pikit doctor` fails early.
 
+**Commands do not inherit the server's environment.** `[decision]` Pi's `NodeExecutionEnv` merges
+the whole `process.env` into every command, so a `bash` tool could print the server's secrets
+(`PIKIT_HTTP_TOKEN`, `ANTHROPIC_API_KEY`) with `env`. Pi's contract lets an environment define its
+default variables (`ShellExecOptions.inheritEnv`). `createLocalExecution({ cwd, env })` in
+`@pikit/pi-adapter/node` is `NodeExecutionEnv` whose defaults are only the variables it is given.
+`execution-local` gives it an allowlist from its config.
+
+This is not a sandbox, and the docs say so. Commands run as the server's OS user and can read
+what that user can, including the credentials file. Paths are not confined to the working
+directory either: with a shell, that would be false security. Isolation is the job of another
+`execution-*` component that runs commands elsewhere (a container, a VM, a remote host), with the
+same contract (§13).
+
 `@pikit/pi-adapter` types both capabilities as Pi's `ExecutionEnv`. Pi ships no conformance suite
 for it, so `createExecutionConformance` lives in `@pikit/pi-adapter/testing` (§14), and Pi's own
 `NodeExecutionEnv` is its double.

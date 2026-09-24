@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: `createLocalExecution({ cwd, env })` in `@pikit/pi-adapter/node` is Pi's `NodeExecutionEnv`
+  whose commands start from the variables given, not from the server's environment (SPEC §8.3).
 - component/runtime-pi: gives each agent the installed tools it names (`agent.tool`), and refuses to
   start when a named tool has no provider (SPEC §6.3).
 - core: an agent names installed tools in `AgentDefinition.tools` (`["read", "bash", myTool]`),
