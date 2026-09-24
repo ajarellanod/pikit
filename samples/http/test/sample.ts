@@ -12,7 +12,7 @@ import { type AgentDefinition, type App, type ComponentDefinition, defineApp, si
 import type { PiExtension } from "@pikit/pi-adapter";
 import { testComponents } from "@pikit/pi-adapter/testing";
 import channelHttp from "../../../registry/components/channel-http/files/src/pikit/channels/http/index.ts";
-import conversationsFile from "../../../registry/components/conversations-file/files/src/pikit/conversations/file/index.ts";
+import conversationsFile from "../../../registry/components/conversations-file/files/src/pikit/conversations-file/index.ts";
 import routerBasic from "../../../registry/components/router-basic/files/src/pikit/router/basic/index.ts";
 import { createRuntimePi } from "../../../registry/components/runtime-pi/files/src/pikit/runtime/pi/index.ts";
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";

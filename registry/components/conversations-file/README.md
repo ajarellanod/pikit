@@ -5,7 +5,7 @@ The conversation registry in one JSON file: which Pi session each conversation i
 - **Provides:** `conversations.registry`.
 - **Requires:** `sessions.store` (it creates each conversation's session there).
 - **Target:** `server` (it uses the filesystem).
-- **Installs to:** `src/pikit/conversations/file/`.
+- **Installs to:** `src/pikit/conversations-file/`.
 - **npm dependencies:** `@pikit/pi-adapter` (for the `sessions.store` type), `typebox`.
 
 ## What it does

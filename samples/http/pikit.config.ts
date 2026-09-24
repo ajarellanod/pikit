@@ -10,7 +10,7 @@
 import { fileURLToPath } from "node:url";
 import { defineApp } from "@pikit/core";
 import channelHttp from "../../registry/components/channel-http/files/src/pikit/channels/http/index.ts";
-import conversationsFile from "../../registry/components/conversations-file/files/src/pikit/conversations/file/index.ts";
+import conversationsFile from "../../registry/components/conversations-file/files/src/pikit/conversations-file/index.ts";
 import credentialsFile from "../../registry/components/credentials-file/files/src/pikit/credentials/file/index.ts";
 import providerAnthropic from "../../registry/components/provider-anthropic/files/src/pikit/providers/anthropic/index.ts";
 import routerBasic from "../../registry/components/router-basic/files/src/pikit/router/basic/index.ts";
