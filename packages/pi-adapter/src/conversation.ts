@@ -6,6 +6,9 @@
  * Every run of the conversation is driven by this worker, whoever admitted it: a run started by a
  * `dispatch`, or a run a dead worker left open, which is resumed as soon as the conversation opens.
  * That is why a run's end always reaches `agent.settled`, with or without a caller waiting.
+ *
+ * Every run's context carries the conversation's `agent.state` (`AGENT_STATE`), and Pi hands that
+ * context to each tool call: that is how a tool reaches the state of the conversation it runs in.
  */
 
 import {
@@ -17,12 +20,26 @@ import {
   type Session,
 } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
-import type { Admission, AgentDefinition, AgentRequest, AgentResult, AgentTool, AppContext, ConversationRef } from "@pikit/core";
+import {
+  AGENT_STATE,
+  type Admission,
+  type AgentDefinition,
+  type AgentRequest,
+  type AgentResult,
+  type AgentState,
+  type AgentTool,
+  type AppContext,
+  type Context,
+  type ConversationRef,
+  withContextValue,
+} from "@pikit/core";
 import { detached, toPi } from "./context.ts";
 import type { PiExtension } from "./extensions/api.ts";
 import { type BoundExtensions, loadExtensions } from "./extensions/host.ts";
 import { hasRequest, inboundMessage, LANE, recordWithdrawn } from "./inbound.ts";
 import { toResult } from "./result.ts";
+import { sessionState } from "./state.ts";
+import { Turns } from "./turns.ts";
 
 /** Called with each conversation's harness when it opens: where Pi hooks attach (§6.2b). */
 export type HarnessHook = (harness: AgentHarness<undefined>, conversation: ConversationRef) => void;
@@ -58,6 +75,7 @@ export class PiConversation {
     private readonly harness: AgentHarness<undefined>,
     private readonly lane: AgentLane,
     private readonly host: ConversationHost,
+    private readonly state: AgentState,
   ) {}
 
   /** Open the harness and continue the run a dead worker left open, if there is one. */
@@ -69,33 +87,49 @@ export class PiConversation {
       options.extensions !== undefined && options.extensions.length > 0
         ? await loadExtensions(options.extensions, { models, logger: ctx.logger })
         : undefined;
-    const model = resolveModel(models, agent);
+    const state = sessionState(session, agent.state);
+    const source = { agent, models, tool: options.tool, extensionTools: loaded?.tools ?? [] };
+    const turns = new Turns(source, ref, state, ctx.logger);
     const { harness, open } = await AgentHarness.create<undefined>(
       {
         session,
         models,
-        model,
-        tools: [...resolveTools(agent, options.tool), ...(loaded?.tools ?? [])],
-        ...(agent.systemPrompt !== undefined && { systemPrompt: agent.systemPrompt }),
+        model: turns.initial.model,
+        tools: turns.tools,
+        // Read for every model call: the prompt `prepare` chose for the run, or the static one.
+        systemPrompt: () => turns.systemPrompt ?? "",
       },
       pi,
     );
     try {
       options.onHarness?.(harness, ref);
       const lane = await harness.lane(LANE, pi);
-      const conversation = new PiConversation(ref, session, harness, lane, host);
+      const conversation = new PiConversation(ref, session, harness, lane, host, state);
+      if (agent.prepare !== undefined) {
+        // Registered before the extensions bind, so their `before_agent_start` sees the prepared prompt.
+        harness.hooks.on("before_run", async (_event, hookCtx) => {
+          await turns.prepareRun(harness, lane, hookCtx).catch((error: unknown) => {
+            ctx.logger.error("preparing a run failed", { conversation: ref.key, error: String(error) });
+          });
+          return undefined;
+        });
+      }
       // Bound before any run is resumed, so a resumed run is seen by the extensions too.
       conversation.extensions = await loaded?.bind(
         {
           harness,
           lane,
           cwd: session.metadata.cwd ?? "/",
-          systemPrompt: agent.systemPrompt,
+          get systemPrompt() {
+            return turns.systemPrompt;
+          },
           abort: () => host.serial(() => conversation.abort(host.events)),
         },
         pi,
       );
       const interrupted = open.find((operation) => operation.lane === LANE);
+      // Pi runs `before_run` only when a run starts: a resumed run is prepared here (see turns.ts).
+      if (interrupted?.kind === "run" && agent.prepare !== undefined) await turns.prepareRun(harness, lane, pi);
       if (interrupted !== undefined) conversation.resumeOpen(interrupted.operationId, interrupted.kind === "run", ctx);
       return conversation;
     } catch (error) {
@@ -128,7 +162,7 @@ export class PiConversation {
       throw accepted.error;
     }
     this.drive(requestId, runContext(ctx), () =>
-      this.lane.drive({ operationId: requestId, waitForRetry: true }, detached(ctx)).then((driven) => {
+      this.lane.drive({ operationId: requestId, waitForRetry: true }, this.runScope(ctx)).then((driven) => {
         if (!driven.ok) throw driven.error;
         if (driven.value.kind !== "settled") return undefined;
         return driven.value.outcome;
@@ -164,11 +198,16 @@ export class PiConversation {
     const runCtx = runContext(ctx);
     if (isRun) void runCtx.emit("agent.started", { conversation: this.ref, requestId: operationId, resumed: true });
     this.drive(isRun ? operationId : undefined, runCtx, () =>
-      this.lane.resume(detached(ctx)).then((resumed) => {
+      this.lane.resume(this.runScope(ctx)).then((resumed) => {
         if (!resumed.ok) throw resumed.error;
         return "kind" in resumed.value ? resumed.value : undefined;
       }),
     );
+  }
+
+  /** The context a run is driven in: the caller's values, no cancellation, and the conversation's state. */
+  private runScope(ctx: AppContext): Context {
+    return withContextValue(AGENT_STATE, this.state, detached(ctx));
   }
 
   /**
@@ -228,21 +267,3 @@ export function runContext(ctx: AppContext): AppContext {
   return ctx.derive((inner) => detached(inner));
 }
 
-function resolveModel(models: Models, agent: AgentDefinition) {
-  const slash = agent.model.indexOf("/");
-  const model = models.getModel(agent.model.slice(0, slash), agent.model.slice(slash + 1));
-  if (model === undefined) {
-    throw new Error(`agent "${agent.name}": model "${agent.model}" is not provided by any model.provider`);
-  }
-  return model;
-}
-
-/** The agent's tools as objects: each name resolved through `agent.tool`, each object as it is. */
-function resolveTools(agent: AgentDefinition, tool: ((name: string) => AgentTool | undefined) | undefined): AgentTool[] {
-  return (agent.tools ?? []).map((entry) => {
-    if (typeof entry !== "string") return entry;
-    const resolved = tool?.(entry);
-    if (resolved === undefined) throw new Error(`agent "${agent.name}" names the tool "${entry}", which no agent.tool provides`);
-    return resolved;
-  });
-}

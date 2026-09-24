@@ -798,7 +798,8 @@ Responsibilities:
     the adapter has one subpath per provider it exposes (`@pikit/pi-adapter/providers/anthropic`),
     each re-exporting pi-ai's subpath and nothing else.
 - Translate Pi hooks/events → `agent.*` events and `agent.prepare` pipeline:
-  - `before_run` → `agent.prepare` (system prompt, tools, context injection).
+  - `before_run` → the agent's `prepare(state)` (§6.2a). Built. The `agent.prepare` pipeline after
+    it (context injection, policy) is `[planned]`.
   - `before_tool` / `after_tool` → `agent.tool.call` / `agent.tool.result` (interceptable).
   - `after_response` → `agent.response` (provider errors, failover hooks).
   - `run_end` → `agent.settled` / `agent.failed`, whether or not anyone waits (§6.1). Built.
@@ -999,13 +1000,39 @@ Rules:
     conversation so parallel tools never lose each other's keys. A patch that is not JSON is
     rejected. Its suite is `createAgentStateConformance` (`@pikit/core/testing`), passed by an
     in-memory double and by the adapter's session-backed state.
-- The adapter runs `prepare` in Pi's `before_run` hook and applies the result via
-  `setModel` / `setActiveTools` / system prompt for that run. The resolved `TurnConfig` is
-  appended to the session as a custom entry, so "what did the agent have on turn N" is
-  answered by reading the transcript, not by re-deriving code paths.
+- The adapter runs `prepare` in Pi's `before_run` hook, once per run, before the run's first
+  model call, with the conversation's state as it is then (`packages/pi-adapter/src/turns.ts`).
+  Everything it applies is Pi's own mechanism:
+  - the model and the active tools are Pi's lane configuration (`setModel`, `setActiveTools`),
+    which Pi persists;
+  - the tool objects are the harness's (`setTools`): the agent's tools for this run next to the
+    tools of Pi extensions, which stay as the extensions left them;
+  - the system prompt is the harness's `systemPrompt` function, which returns the prompt chosen
+    for the run. A Pi extension's `before_agent_start` sees that prompt, and may still replace it.
+- The resolved `TurnConfig` is appended to the session as a custom entry, `pikit.turn`
+  (`{ model, systemPrompt?, tools }`, tools by name), one per run. "What did the agent have on
+  run N" is answered by reading the transcript, not by re-deriving code paths. Custom entries
+  never reach the model.
+- An agent without `prepare` is unchanged: its static fields, as the harness was created.
+- If `prepare` throws, or returns a model or a tool name nothing provides, the run gets the static
+  definition and the error is logged. The static fields are the agent's baseline, so the idiom
+  (static fields restrictive, `prepare` unlocking) fails closed. `runtime-pi` checks the static
+  fields at start; what `prepare` returns can only be checked when it runs.
+- **A resumed run is prepared again.** Pi runs `before_run` only when a run starts, and persists
+  neither the system prompt nor the tool objects. When a new worker resumes a run a dead worker
+  left open, the adapter calls `prepare` with the state as it is then, before continuing the run.
+  The run's own tools may have moved the state on before the crash; preparing again keeps the
+  harness and Pi's lane configuration consistent. The interrupted tool call follows Pi's replay
+  rules (§8.4); a `safe` tool that the new configuration no longer has is recorded interrupted,
+  like a `never` one.
 - `prepare` is callable in tests as a plain function: `prepare({ testsPassed: true }, ctx)`.
-- The `agent.prepare` pipeline (§4.4) runs *after* `prepare` and lets components and
-  extensions patch the `TurnConfig` further (context injection, policy restrictions).
+- `[planned]` The `agent.prepare` pipeline (§4.4) runs *after* `prepare` and lets components and
+  extensions patch the `TurnConfig` further (context injection, policy restrictions). Deferred
+  until the first component needs it (`policy-tools`, context injection): its value type is a core
+  export to decide with a real consumer, and adding the pipeline later changes nothing for agents
+  or for `prepare`.
+- Pi extensions do not reach `agent.state` yet: their tools and handlers receive an
+  `ExtensionContext`, not the run's context. `[planned]` with the first extension that needs it.
 
 **Workflows are state, not graphs.** pikit has no workflow DSL. A multi-step process is a
 `state.phase` the agent advances by calling tools, with `prepare` exposing the tools that
@@ -2031,6 +2058,21 @@ Resolved `[decision]`:
   logger to reuse it. No core change was needed.
 - A component's files outside `src/` are named one by one in `files` (§10.2), so a component owns
   exactly the root files it lists, and removing it cannot touch a file it did not install.
+- A tool reaches `agent.state` through its context (`context.value(AGENT_STATE)`), not through a
+  capability (§6.2a). A tool has no `ConversationRef`, a project's tool objects are not components,
+  and a value scoped to one run of one conversation cannot reach another conversation. A capability
+  for components outside a run waits for one that needs it.
+- `AgentState.update(patch)` is a shallow merge, applied one at a time per conversation (§6.2a).
+  It is the smallest operation that lets parallel tools write different keys; the stored value holds
+  only the updated keys, so a key added to an agent's initial state reaches existing conversations.
+- `prepare` runs once per run, in Pi's `before_run`, and every run starts from the static fields
+  (§6.2a). A run is the unit Pi configures and records; nothing carries over, so a run's
+  configuration is a function of the state alone.
+- A resumed run is prepared again with the current state (§6.2a). Pi does not persist the system
+  prompt or the tool objects, and the state may have moved before the crash; reading back the
+  crashed run's `pikit.turn` entry could name tool objects no longer given by `prepare`.
+- A failing `prepare` gives the run the static definition, logged (§6.2a). A run cannot be refused
+  from `before_run`, and the static fields are the agent's declared baseline.
 
 ---
 

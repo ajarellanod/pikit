@@ -3,8 +3,9 @@
  * each turn answers `answer: <newest inbound message>`, and a turn whose newest message is exactly
  * `hold` first calls the `hold` tool.
  *
- * For component and sample tests, two more rules: a message `bash: <command>` calls the `bash` tool
- * with that command, and the turn after a `bash` result answers `tool said: <result>`.
+ * For component and sample tests, more rules: a message `bash: <command>` calls the `bash` tool
+ * with that command, and the turn after a `bash` result answers `tool said: <result>`; a message
+ * `call: <tool> <json arguments>` calls any tool with those arguments.
  */
 
 import type { AgentHarnessTool, Context } from "@earendil-works/pi-agent-core";
@@ -47,6 +48,10 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}): Provide
     const last = context.messages.at(-1);
     if (last?.role === "user" && textOf(last) === "hold") {
       return fauxAssistantMessage(fauxToolCall("hold", {}), { stopReason: "toolUse" });
+    }
+    const call = last?.role === "user" ? /^call: (\S+)(?: (.+))?$/s.exec(textOf(last)) : null;
+    if (call?.[1] !== undefined) {
+      return fauxAssistantMessage(fauxToolCall(call[1], JSON.parse(call[2] ?? "{}")), { stopReason: "toolUse" });
     }
     const command = last?.role === "user" ? /^bash: (.+)$/s.exec(textOf(last))?.[1] : undefined;
     if (command !== undefined) return fauxAssistantMessage(fauxToolCall("bash", { command }), { stopReason: "toolUse" });
@@ -103,6 +108,21 @@ export function recordingBash(ran: string[]): AgentHarnessTool<undefined, typeof
       return { content: [{ type: "text", text: "ran" }], details: undefined };
     },
   };
+}
+
+/**
+ * An agent whose `prepare` gives it `hold` and the prompt `holding prompt` while its state's phase is
+ * `holding` (the initial state), and only the prompt `<phase> prompt` otherwise.
+ */
+export function preparedAgent(hold: AgentHarnessTool<undefined>): AgentDefinition {
+  return defineAgent({
+    name: "prepared",
+    model: "faux/scripted",
+    systemPrompt: "static prompt",
+    state: { phase: "holding" },
+    prepare: (state) =>
+      state.phase === "holding" ? { systemPrompt: "holding prompt", tools: [hold] } : { systemPrompt: `${state.phase} prompt` },
+  });
 }
 
 /** The suite's agent over `faux/scripted`. */

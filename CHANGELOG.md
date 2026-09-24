@@ -5,6 +5,12 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: runs an agent's `prepare(state)` in Pi's `before_run`, once per run, and gives the run
+  the model, system prompt and tools it returns; each run's configuration is a `pikit.turn` custom
+  entry in the session. A resumed run is prepared again with the current state; a failing `prepare`
+  gives the run the static definition, logged. Every run's context carries its conversation's
+  `AGENT_STATE`, so tools update the state. The scripted test provider calls any tool on
+  `call: <tool> <json>` (SPEC §6.2a).
 - adapter: `agent.state` stored in the conversation's Pi session as the session value
   `pikit` / `agent.state`; it passes `createAgentStateConformance` on memory and JSONL sessions
   (SPEC §6.4).
