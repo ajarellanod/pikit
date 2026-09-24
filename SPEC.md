@@ -1316,7 +1316,7 @@ The contract is Pi's `ExecutionEnv`. Implementations:
 
 | Component | `exec()` | Notes |
 |---|---|---|
-| `execution-local` | Pi `NodeExecutionEnv` | server |
+| `execution-local` | Pi `NodeExecutionEnv`, commands from an allowlist of variables | server. Built (M1). Not a sandbox |
 | `execution-fetch` | returns `err(shell_unavailable)` | edge-pure; FS from `workspace-virtual` |
 | `execution-cloudflare-container` | RPC to the DO's attached Container | cloudflare |
 | `execution-remote` | HTTP/WebSocket to any host implementing the executor protocol | both |

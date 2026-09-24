@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/execution-local: provides `execution` and `execution.shell` on the server's filesystem
+  and shell, in a working directory; commands start from an allowlist of variables. Not a sandbox
+  (SPEC §8.3).
 - adapter: `createLocalExecution({ cwd, env })` in `@pikit/pi-adapter/node` is Pi's `NodeExecutionEnv`
   whose commands start from the variables given, not from the server's environment (SPEC §8.3).
 - component/runtime-pi: gives each agent the installed tools it names (`agent.tool`), and refuses to
