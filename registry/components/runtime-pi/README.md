@@ -96,13 +96,37 @@ defineAgent({ name: "ops", model: "anthropic/claude-sonnet-4-6", tools: ["read",
 A name (`"bash"`) is a tool that a `tool-*` component provides. An object (`lookupTicket`) is a tool
 of your own. Installing `tool-bash` gives no agent a shell until one of them names `bash`.
 
+## Agents that change with the conversation
+
+An agent can keep a JSON state per conversation and choose its model, system prompt and tools
+for each run from it (SPEC §6.2a):
+
+```ts
+defineAgent({
+  name: "release",
+  model: "anthropic/claude-sonnet-4-6",
+  tools: ["read", advance],
+  state: { phase: "testing" },
+  prepare: (state) => (state.phase === "deploying" ? { tools: ["read", "bash", advance] } : {}),
+});
+```
+
+`prepare` runs before every run, with the conversation's state as it is then; what it leaves out
+keeps the static value. A tool changes the state of the conversation it runs in through its context:
+`await context.value(AGENT_STATE)?.update({ phase: "deploying" }, context)`. The state lives in the
+conversation's Pi session: it survives restarts and starts again from `state` after a reset.
+
+Tool names that only `prepare` returns cannot be checked at start. If `prepare` throws, or names a
+tool or a model nothing provides, that run gets the static definition and the error is logged.
+
 ## Tests
 
 `runtime-pi.test.ts` is copied with the component and runs in your project. It uses a scripted model
 from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
 - the `agent.runtime` conformance suite, including a worker killed mid-run;
 - the lifecycle conformance suite;
-- the start failures above, and a stored credential reaching the provider.
+- the start failures above, and a stored credential reaching the provider;
+- an agent whose `prepare` gives it a tool once another tool has moved its state on.
 
 `component.json` is generated from `setup` by the CLI (`pikit registry validate`) and is not written by
 hand. Until the CLI exists, the test "what setup declares" pins it.

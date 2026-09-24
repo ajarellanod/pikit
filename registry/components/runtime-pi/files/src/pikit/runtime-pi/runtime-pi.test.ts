@@ -5,10 +5,11 @@
  */
 
 import { expect, test } from "bun:test";
-import { type AgentRuntime, defineAgent, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { AGENT_STATE, type AgentRuntime, type AgentTool, defineAgent, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { createAgentRuntimeConformance, createLifecycleConformance } from "@pikit/core/testing";
 import type { Credential, CredentialStore, SessionStore } from "@pikit/pi-adapter";
 import { createPiRuntimeFixture, recordingBash, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
+import Type from "typebox";
 import runtimePi, { createRuntimePi } from "./index.ts";
 
 // The agent.runtime contract, including a worker killed mid-run (SPEC §14).
@@ -199,4 +200,58 @@ test("it refuses to start when a tool is provided under another name", async () 
   const app = await defineApp({ components: [sessions, agents, provider, bashComponent([], "shell"), runtimePi], logger: silentLogger }).create();
 
   expect(await startFailure(app)).toContain('the agent.tool "shell" is a tool named "bash"');
+});
+
+/** Moves the conversation's state to the phase it is called with (SPEC §6.2a). */
+const advance: AgentTool = {
+  name: "advance",
+  label: "advance",
+  description: "Moves the release to another phase",
+  parameters: Type.Object({ phase: Type.String() }),
+  async execute(_toolCallId, params, _onUpdate, _toolContext, _invocation, context) {
+    await context.value(AGENT_STATE)?.update({ phase: (params as { phase: string }).phase }, context);
+    return { content: [{ type: "text", text: "advanced" }], details: undefined };
+  },
+};
+
+test("an agent's prepare gives it bash once a tool has moved its state on", async () => {
+  const ran: string[] = [];
+  const release = defineAgent({
+    name: "scripted",
+    model: "faux/scripted",
+    tools: [advance],
+    state: { phase: "testing" },
+    prepare: (state) => (state.phase === "deploying" ? { tools: [advance, "bash"] } : {}),
+  });
+  const { sessions, agents, provider } = testComponents({ agents: [release] });
+  const answers = new Map<string, (text: string | undefined) => void>();
+  let channel!: { runtime: AgentRuntime; sessions: SessionStore };
+  const observer = defineComponent({
+    name: "channel-test",
+    setup(pikit) {
+      const runtimeHandle = pikit.use("agent.runtime");
+      const sessionsHandle = pikit.use("sessions.store");
+      pikit.on("agent.settled", (result) => answers.get(result.requestId)?.(result.text));
+      return { start: () => void (channel = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
+    },
+  });
+  const app = await defineApp({ components: [sessions, agents, provider, bashComponent(ran), runtimePi, observer], logger: silentLogger }).create();
+  await app.start();
+  const ctx = app.context();
+  const session = await channel.sessions.create({}, ctx);
+  await session.close(ctx);
+  const conversation = { key: "test:prepare", agent: "scripted", sessionId: session.metadata.id };
+  const ask = (requestId: string, prompt: string) => {
+    const answer = new Promise<string | undefined>((resolve) => answers.set(requestId, resolve));
+    return channel.runtime.dispatch({ requestId, conversation, prompt }, ctx).then(() => answer);
+  };
+
+  await ask("r1", "bash: ls");
+  await ask("r2", 'call: advance {"phase":"deploying"}');
+  const deployed = await ask("r3", "bash: ls");
+
+  // The first `bash` call reached no tool: the agent did not have it yet.
+  expect(ran).toEqual(["ls"]);
+  expect(deployed).toBe("tool said: ran");
+  await app.stop();
 });

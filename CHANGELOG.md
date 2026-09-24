@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/runtime-pi: documents and tests agents with `state` and `prepare`: a tool moves the
+  conversation's state on and the next run gets the tools `prepare` gives for it. No new wiring:
+  the state lives in the Pi session (SPEC §6.2a).
 - adapter: runs an agent's `prepare(state)` in Pi's `before_run`, once per run, and gives the run
   the model, system prompt and tools it returns; each run's configuration is a `pikit.turn` custom
   entry in the session. A resumed run is prepared again with the current state; a failing `prepare`
