@@ -47,6 +47,16 @@ test("Dockerfile: Bun >= 1.4, a production install from the lockfile, and the en
   expect(existsSync(join(ROOT, "src", "pikit", "deployment-docker", "main.ts"))).toBe(true);
 });
 
+test("Dockerfile: the vendored @pikit/* tarballs are in place before the install (M1)", () => {
+  const dockerfile = lines("Dockerfile");
+  const vendor = dockerfile.findIndex((line) => /^COPY\s+vendor\/?\s/.test(line));
+  const install = dockerfile.findIndex((line) => line.startsWith("RUN bun install"));
+
+  expect(vendor).toBeGreaterThan(-1);
+  expect(vendor).toBeLessThan(install);
+  expect(lines(".dockerignore").some((line) => /^\/?vendor\b/.test(line))).toBe(false);
+});
+
 test("Dockerfile: the app runs as a user that is not root, and owns .pikit/", () => {
   const dockerfile = lines("Dockerfile");
   const users = dockerfile.filter((line) => line.startsWith("USER "));

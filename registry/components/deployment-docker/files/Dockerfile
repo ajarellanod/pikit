@@ -13,6 +13,9 @@ ENV NODE_ENV=production
 # Dependencies first, so that changing the source does not reinstall them. `--frozen-lockfile`
 # installs exactly what bun.lock says; `--production` leaves out devDependencies (tests, types).
 COPY package.json bun.lock ./
+# @pikit/* are not on npm yet: `pikit new` vendors them as tarballs in vendor/, and package.json
+# depends on them with `file:vendor/…` (SPEC §10.5, M1). They must be here before the install.
+COPY vendor/ ./vendor/
 RUN bun install --frozen-lockfile --production
 
 COPY . .
