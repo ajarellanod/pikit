@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/provider-anthropic: provides pi-ai's Anthropic provider as `model.provider` `anthropic`,
+  signing in with a stored OAuth login or API key, or `ANTHROPIC_API_KEY` (SPEC §4.5).
 - component/runtime-pi: builds its models with `model.credentials` when installed, and refuses to
   start when an agent's provider has no credentials at all (SPEC §6.2).
 - adapter: the scripted test provider answers `bash: <command>` with a `bash` tool call and can
