@@ -744,7 +744,7 @@ Components that implement a Pi contract (`sessions.store`, `execution`) import t
 from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-*`.
 
 Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest`, `Admission`,
-`AgentResult`, `AgentRuntime`, `ConversationRef`, and the opaque `AgentMessage`, `AgentTool` and
+`AgentResult`, `AgentRuntime`, `ConversationRef`, `PrepareContext`, and the opaque `AgentMessage`, `AgentTool` and
 `Usage` with their merge target `AgentPayloads` (each `unknown` until the adapter fills it in).
 For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
 `inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
@@ -941,36 +941,46 @@ model, with an explicit input, an explicit output, and a documented moment of ex
 ```ts
 // src/agents/release/agent.ts
 import { defineAgent } from "@pikit/core";
-import { runTests, deploy, summarize } from "../../tools";
+import { deploy, summarize } from "../../tools";
+import { DEPLOYING, RELEASE } from "./prompts";
 
 export default defineAgent({
   name: "release",
   model: "anthropic/claude-sonnet",           // static defaults
-  tools: [runTests, summarize],
-  systemPrompt: "./system-prompt.md",
-  skills: "./skills",
+  systemPrompt: RELEASE,
+  tools: ["bash", summarize],
 
-  state: { phase: "testing", testsPassed: false },   // initial persisted state (JSON)
+  state: { phase: "testing", testsPassed: false },   // initial state of each conversation (JSON)
 
-  prepare(state, ctx) {                       // runs before every turn
+  prepare(state, ctx) {                       // runs before every run of the conversation
     return {
       model: state.phase === "summarize" ? "anthropic/claude-haiku" : undefined,
-      tools: state.testsPassed ? [runTests, summarize, deploy] : undefined,
-      systemPrompt: state.phase === "deploying" ? ctx.prompt("deploying.md") : undefined,
+      tools: state.testsPassed ? ["bash", summarize, deploy] : undefined,
+      systemPrompt: state.phase === "deploying" ? DEPLOYING : undefined,
     };
   },
 });
+
+// A tool of that agent moves it on, in the conversation it runs in:
+async execute(toolCallId, params, onUpdate, toolContext, invocation, context) {
+  await context.value(AGENT_STATE)?.update({ phase: "deploying" }, context);
+  ...
+}
 ```
 
-The core's `AgentDefinition` has `name`, `model`, `systemPrompt` (the text) and `tools` (tool names
-and tool objects, §6.3) today;
-`state`, `prepare` and `skills` are `[planned]` and are added to it without breaking it.
+The core's `AgentDefinition` has `name`, `model`, `systemPrompt` (the text), `tools` (tool names
+and tool objects, §6.3), `state` and `prepare` (M1). `defineAgent` infers the state's type from
+`state`, so `prepare` sees `state.phase` typed, and rejects a `state` that is not a JSON object.
+`prepare`'s `ctx` is a `PrepareContext`, `{ conversation }`; fields are added with the features
+that need them. `skills` and a `ctx.prompt(file)` helper are `[planned]` with skills, and are added
+without breaking it.
 
 Rules:
 
 - `prepare(state, ctx) → Partial<TurnConfig>` is pure with respect to its inputs. It does not
   register anything as a side effect; it returns a value. `undefined` fields keep the static
-  default.
+  default. Every run starts from the static fields plus what `prepare` returns for that run:
+  nothing carries over from the previous run's result.
 - `state` is the agent's persisted per-conversation state: a JSON document tools and
   extensions may read and update (`ctx.state.update(patch)`). `[decision]` It is stored **in
   the Pi session**, as a conversation-scoped document in Pi's durable runtime and, until

@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core: `defineAgent({ state, prepare })`. `state` is each conversation's initial JSON state;
+  `prepare(state, ctx)` returns what changes for a run (model, system prompt, tools) and is a plain
+  function in tests. New export: `PrepareContext` (SPEC §6.2a).
 - core: `AgentState` (`get` / `update(patch)`), the per-conversation JSON state of an agent, and the
   context key `AGENT_STATE` through which a tool reaches the state of the conversation it runs in;
   `createAgentStateConformance` in `@pikit/core/testing`, passed by an in-memory double (SPEC §6.2a).

@@ -13,6 +13,7 @@
  */
 
 import type { AppContext } from "./app.ts";
+import { isJsonObject } from "./contracts/agent-state.ts";
 
 /**
  * Pi payload types, filled in by `@pikit/pi-adapter`:
@@ -46,8 +47,8 @@ export interface ConversationRef {
 }
 
 /**
- * What the agent has for one turn: model, instructions and tools. The static fields of an
- * `AgentDefinition` are its defaults; `prepare(state)` will return a partial one (§6.2a).
+ * What the agent has for one run: model, instructions and tools. The static fields of an
+ * `AgentDefinition` are its defaults; `prepare(state)` returns the fields it changes (§6.2a).
  */
 export interface TurnConfig {
   /** `provider/modelId`, resolved by the runtime against its models. */
@@ -58,10 +59,25 @@ export interface TurnConfig {
 }
 
 /**
+ * What `prepare` returns: the fields of `TurnConfig` it changes for this run. A field that is absent
+ * or `undefined` keeps the agent's static default, so `{ model: late ? "x/y" : undefined }` works.
+ */
+type TurnChanges = { [K in keyof TurnConfig]?: TurnConfig[K] | undefined };
+
+/** What `prepare` knows besides the state. Fields are added with the features that need them. */
+export interface PrepareContext {
+  /** The conversation the run belongs to. */
+  conversation: ConversationRef;
+}
+
+/**
  * An agent is to a conversation what a class is to an object (SPEC §7.1): routing picks the agent
  * by name, and the runtime finds its definition under the keyed capability `agent.definition`.
+ *
+ * `S` is the type of the agent's state. It defaults to `object` so that a definition with a typed
+ * state is still an `AgentDefinition` wherever one is expected (the `agent.definition` capability).
  */
-export interface AgentDefinition {
+export interface AgentDefinition<S extends object = object> {
   /** kebab-case; the key under which the project provides it and `ConversationRef.agent`. */
   name: string;
   /** `provider/modelId`. */
@@ -75,6 +91,19 @@ export interface AgentDefinition {
    * name has no provider.
    */
   tools?: readonly (AgentTool | string)[];
+  /**
+   * The initial state of each conversation: a JSON object. Tools update it through `AGENT_STATE`;
+   * it is stored in the conversation's Pi session and starts again from here after a reset. Absent,
+   * it is `{}`.
+   */
+  state?: S;
+  /**
+   * Runs before every run of a conversation, with the conversation's current state, and returns what
+   * changes for that run: model, system prompt, tools. It must be pure: it returns a value and
+   * registers nothing, so it is also a plain function in tests (`agent.prepare?.(state, ctx)`).
+   * Without it, every run has the static fields above.
+   */
+  prepare?(state: Readonly<S>, ctx: PrepareContext): TurnChanges;
 }
 
 const AGENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
@@ -84,7 +113,7 @@ const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
 const MODEL = /^[^/\s]+\/\S+$/;
 
 /** Check an agent definition's shape and return it unchanged. */
-export function defineAgent(definition: AgentDefinition): AgentDefinition {
+export function defineAgent<S extends object = object>(definition: AgentDefinition<S>): AgentDefinition<S> {
   if (!AGENT_NAME.test(definition.name)) {
     throw new Error(`agent name "${definition.name}" must be kebab-case (e.g. "support")`);
   }
@@ -95,6 +124,10 @@ export function defineAgent(definition: AgentDefinition): AgentDefinition {
   for (const [index, name] of named.entries()) {
     if (!TOOL_NAME.test(name)) throw new Error(`agent "${definition.name}": tool name "${name}" is not a tool name`);
     if (named.indexOf(name) !== index) throw new Error(`agent "${definition.name}": tool "${name}" is named twice`);
+  }
+  // Checked here, not at the first update: the state is stored in the session as JSON.
+  if (definition.state !== undefined && !isJsonObject(definition.state)) {
+    throw new Error(`agent "${definition.name}": state must be a JSON object`);
   }
   return definition;
 }

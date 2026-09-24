@@ -38,6 +38,7 @@ export type {
   AgentRuntime,
   AgentTool,
   ConversationRef,
+  PrepareContext,
   TurnConfig,
   Usage,
 } from "./agent.ts";

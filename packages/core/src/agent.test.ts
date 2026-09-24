@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import {
   type Admission,
+  type AgentDefinition,
   type AgentRuntime,
   type AgentTool,
   type AppEvents,
@@ -33,6 +34,41 @@ test("an agent names installed tools by name, next to tools of its own", () => {
   expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: ["read", "read"] })).toThrow('tool "read" is named twice');
   expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: ["rm -rf"] })).toThrow("is not a tool name");
   expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: [""] })).toThrow("is not a tool name");
+});
+
+test("prepare is a plain function from state to what changes for the run", () => {
+  const deploy = { name: "deploy" } as unknown as AgentTool;
+  const release = defineAgent({
+    name: "release",
+    model: "anthropic/claude-sonnet",
+    tools: ["run_tests"],
+    state: { phase: "testing", testsPassed: false },
+    prepare(state) {
+      return {
+        model: state.phase === "summarize" ? "anthropic/claude-haiku" : undefined,
+        tools: state.testsPassed ? ["run_tests", deploy] : undefined,
+      };
+    },
+  });
+  const ctx = { conversation: { key: "t:http:c1", agent: "release", sessionId: "s1" } };
+
+  expect(release.prepare?.({ phase: "testing", testsPassed: false }, ctx)).toEqual({ model: undefined, tools: undefined });
+  expect(release.prepare?.({ phase: "summarize", testsPassed: true }, ctx)).toEqual({
+    model: "anthropic/claude-haiku",
+    tools: ["run_tests", deploy],
+  });
+  // A definition with a typed state is still an agent.definition.
+  const provided: AgentDefinition = release;
+  void provided;
+});
+
+test("defineAgent rejects a state that is not a JSON object", () => {
+  expect(() => defineAgent({ name: "a", model: "x/y", state: [] })).toThrow("state must be a JSON object");
+  expect(() => defineAgent({ name: "a", model: "x/y", state: { at: new Date(0) } })).toThrow("state must be a JSON object");
+  expect(() => defineAgent({ name: "a", model: "x/y", state: { fn: () => 1 } })).toThrow("state must be a JSON object");
+  expect(defineAgent({ name: "a", model: "x/y", state: { list: [1, "two", null, { three: true }] } }).state).toEqual({
+    list: [1, "two", null, { three: true }],
+  });
 });
 
 test("agent.runtime and agent.definition are typed capabilities, agent.* typed events", async () => {
