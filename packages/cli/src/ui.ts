@@ -5,6 +5,14 @@
 
 import * as clack from "@clack/prompts";
 
+// A terminal that reports no size (some web consoles, a pseudo-terminal nobody sized, `ssh -tt` from
+// one) would make clack wrap after every character: assume a common one.
+for (const stream of [process.stdout, process.stderr]) {
+  if (stream.isTTY !== true) continue;
+  if (!stream.columns) stream.columns = 80;
+  if (!stream.rows) stream.rows = 24;
+}
+
 export function isInteractive(): boolean {
   return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
