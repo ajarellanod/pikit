@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/conversations-file: provides `conversations.registry` in one JSON file written
+  atomically. It creates sessions through `sessions.store`, and a reset keeps the old session (SPEC §7.4, §7.6).
 - component/sessions-jsonl: provides `sessions.store` as Pi's JSONL files on the server's disk, and
   passes Pi's session suites (SPEC §7.5).
 - component/secrets-env: provides `secrets` from the process environment. An empty variable is not

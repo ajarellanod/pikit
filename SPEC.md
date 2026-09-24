@@ -1169,7 +1169,13 @@ The registry's contract, `ConversationRegistry` (core, M1) `[decision]`:
 - `get(key, ctx)` reads without creating. `reset(key, ctx)` is §7.6, and returns `undefined` for a
   key with no conversation.
 - Keys are opaque strings. The channel builds them (`http:<conversationId>` for `channel-http`);
-  the tenant enters the key when tenants are routed (§16). TTL/eviction of in-memory `AgentHarness` objects **never** deletes the
+  the tenant enters the key when tenants are routed (§16).
+
+Implementations: `conversations-file` (M1, server) keeps the pointers in one JSON file. Every change
+is written to a temporary file, flushed and renamed, and a pointer is used only once it is on disk.
+A crash between creating a session and writing its pointer leaves an unused session, never a
+pointer to a missing one. A registry on `storage.sql` waits for the synchronous or asynchronous
+`SqlDatabase` question (§16); on Cloudflare the Durable Object holds its own pointer (§9.2). TTL/eviction of in-memory `AgentHarness` objects **never** deletes the
 registry pointer. A conversation must be restorable long after its `AgentHarness` was
 evicted; this is a hard rule.
 
