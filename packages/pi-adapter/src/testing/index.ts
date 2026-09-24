@@ -9,3 +9,5 @@ export { createSessionRepoConformance, createStorageConformance, JSONL_REPO_CONF
 export type { StorageFixture } from "./sessions.ts";
 export { createCredentialStoreConformance } from "./credentials.ts";
 export type { CredentialStoreFixture } from "./credentials.ts";
+export { createExecutionConformance } from "./execution.ts";
+export type { ExecutionFixture } from "./execution.ts";

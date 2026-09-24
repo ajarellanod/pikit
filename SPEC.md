@@ -1307,6 +1307,10 @@ The contract is Pi's `ExecutionEnv`. Implementations:
 Tools that need a shell declare `execution.shell`; `execution-fetch` does not provide it, so
 `pikit doctor` fails early.
 
+`@pikit/pi-adapter` types both capabilities as Pi's `ExecutionEnv`. Pi ships no conformance suite
+for it, so `createExecutionConformance` lives in `@pikit/pi-adapter/testing` (§14), and Pi's own
+`NodeExecutionEnv` is its double.
+
 ### 8.4 Effectful tools and replay
 
 After a crash or DO eviction, a tool call can have its intent recorded and no result. Pi
@@ -1701,6 +1705,15 @@ is that the answer is "nothing" for every minor.
   credential when its function returns nothing, failed `modify`, `delete` and persistence. It also
   checks what pikit relies on: an OAuth refresh and a login by pi-ai are written back through the
   store. pi-ai's `InMemoryCredentialStore` is the double.
+- **Execution conformance** (`createExecutionConformance` in `@pikit/pi-adapter/testing`): every
+  `execution` and `execution.shell`. It checks what Pi's tools rely on:
+  - paths relative to `cwd`, and reading, writing, appending, listing, renaming and removing;
+  - failures returned as results, never thrown;
+  - with a shell: exit code and output, `cwd` and `env` options, `inheritEnv: false`, timeout and
+    cancellation;
+  - without a shell: `shell_unavailable`.
+
+  Pi's `NodeExecutionEnv` is the double, with and without a shell.
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
   implementation must pass its suite. Pi's session conformance is reused for

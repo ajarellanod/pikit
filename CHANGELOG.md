@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: `@pikit/pi-adapter` types `execution` and `execution.shell` (Pi's `ExecutionEnv`), and
+  `createExecutionConformance` in `@pikit/pi-adapter/testing` checks them (SPEC §8.3, §14).
 - spec: every component installs to `src/pikit/<name>/`, under its exact name, instead of a path by
   kind (`src/pikit/secrets-env/`, not `src/pikit/secrets/env/`) (SPEC §10.1).
 - samples: `samples/http` talks to Claude over HTTP (SPEC §15 scenario 1), with an OAuth login

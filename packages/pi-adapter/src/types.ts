@@ -4,7 +4,7 @@
  * makes them precise everywhere, by declaration merging, as `AppEvents` is extended.
  */
 
-import type { AgentHarnessTool, AgentMessage, SessionRepo } from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, AgentMessage, ExecutionEnv, SessionRepo } from "@earendil-works/pi-agent-core";
 import type { CredentialStore, Provider, Usage } from "@earendil-works/pi-ai";
 
 /**
@@ -31,6 +31,13 @@ declare module "@pikit/core" {
      * environment variables (`ANTHROPIC_API_KEY`).
      */
     "model.credentials": CredentialStore;
+    /**
+     * Pi's `ExecutionEnv` (SPEC §8.3): the filesystem the agent's tools work on. Its `exec` may answer
+     * `shell_unavailable`.
+     */
+    execution: ExecutionEnv;
+    /** The same contract, provided only when `exec` really runs commands. Shell tools require it. */
+    "execution.shell": ExecutionEnv;
   }
   interface AppKeyedCapabilities {
     /** One pi-ai model provider per key (its id): `anthropic`, `openai`, `faux` in tests. */
