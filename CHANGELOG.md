@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/runtime-pi: builds its models with `model.credentials` when installed, and refuses to
+  start when an agent's provider has no credentials at all (SPEC §6.2).
 - adapter: the scripted test provider answers `bash: <command>` with a `bash` tool call and can
   require a stored API key (`scriptedProvider({ apiKey })`); `recordingBash` stands in for Pi's `bash`.
 - component/credentials-file: provides `model.credentials` in a JSON file with mode 0600. Tokens

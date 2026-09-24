@@ -4,7 +4,9 @@
  * It provides `agent.runtime` and uses:
  * - `sessions.store`: where each conversation's Pi session lives;
  * - `agent.definition`: your agents, one per name (a project component provides them);
- * - `model.provider`: the model providers your agents name as `provider/modelId`.
+ * - `model.provider`: the model providers your agents name as `provider/modelId`;
+ * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
+ *   read only their environment variables (`ANTHROPIC_API_KEY`).
  *
  * Everything that talks to Pi is in `@pikit/pi-adapter`, an npm dependency pinned with Pi: it
  * changes when Pi changes, and this file does not. What is here is the wiring, which is yours to
@@ -36,6 +38,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const sessions = pikit.use("sessions.store");
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
+      const credentials = pikit.useOptional("model.credentials");
 
       // Created in start, when the capabilities can be read; consumers start after this component.
       let runtime: PiRuntime | undefined;
@@ -51,8 +54,11 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       pikit.provide("agent.runtime", agentRuntime);
 
       return {
-        start(ctx) {
-          const models = modelsFrom(providers.keys().flatMap((key) => providers.get(key) ?? []));
+        async start(ctx) {
+          const models = modelsFrom(
+            providers.keys().flatMap((key) => providers.get(key) ?? []),
+            { credentials: credentials.get() },
+          );
           // Fail at start, not at the first message: an agent that cannot run is a broken deployment.
           if (agents.keys().length === 0) throw new Error("runtime-pi: no agent.definition is provided");
           for (const name of agents.keys()) {
@@ -60,6 +66,14 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             const slash = model.indexOf("/");
             if (models.getModel(model.slice(0, slash), model.slice(slash + 1)) === undefined) {
               throw new Error(`runtime-pi: agent "${name}" names model "${model}", which no model.provider provides`);
+            }
+            // Checked without a network call or an OAuth refresh: is anything configured at all?
+            const provider = model.slice(0, slash);
+            if ((await models.checkAuth(provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) === undefined) {
+              throw new Error(
+                `runtime-pi: agent "${name}" uses provider "${provider}", which has no credentials: ` +
+                  "log in to store one in model.credentials, or set the provider's API key in the environment",
+              );
             }
           }
           runtime = createPiRuntime({

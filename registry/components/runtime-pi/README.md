@@ -6,9 +6,15 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
 - **Requires:** `sessions.store` (where each conversation's Pi session lives).
 - **Uses:**
   - `agent.definition`: your agents, one per name;
-  - `model.provider`: the providers your agents name as `provider/modelId`.
+  - `model.provider`: the providers your agents name as `provider/modelId`;
+  - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth
+    tokens). pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read
+    only their environment variables (`ANTHROPIC_API_KEY`).
 
-  It refuses to start without an agent, or when an agent names a model that no provider has.
+  It refuses to start without an agent, when an agent names a model that no provider has, or when
+  an agent's provider has no credentials at all. That last check makes no network call and
+  refreshes nothing: it only asks whether a credential is stored or an environment variable is
+  set.
 - **Target:** `server`. Cloudflare comes in M4, when Durable Object alarms drive runs.
 - **Installs to:** `src/pikit/runtime/pi/`.
 - **npm dependencies:** `@pikit/pi-adapter`, which is pinned with Pi.
@@ -82,7 +88,7 @@ export default defineComponent({
 from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
 - the `agent.runtime` conformance suite, including a worker killed mid-run;
 - the lifecycle conformance suite;
-- the start failures above.
+- the start failures above, and a stored credential reaching the provider.
 
 `component.json` is generated from `setup` by the CLI (`pikit registry validate`) and is not written by
 hand. Until the CLI exists, the test "what setup declares" pins it.

@@ -761,6 +761,8 @@ Responsibilities:
   - `session` from `sessions.store`.
   - `ExecutionEnv` from `execution`.
   - `tools` from the agent definition and installed tool components.
+  - credentials from `model.credentials` when it is installed (`modelsFrom(providers,
+    { credentials })`); pi-ai resolves, refreshes and writes them back.
   - `models` from the `model.provider` components (`modelsFrom`), each importing its pi-ai
     provider **by subpath** (bundle size on Cloudflare). A component does not import pi-ai, so
     the adapter has one subpath per provider it exposes (`@pikit/pi-adapter/providers/anthropic`),
@@ -803,7 +805,9 @@ Responsibilities:
 The split `[decision]`: `@pikit/pi-adapter` (npm, pinned with Pi) holds everything that talks to
 Pi, including the bridges that read Pi's storage layout, because it changes when Pi changes.
 `runtime-pi` (copied to `src/pikit/runtime/pi/`) is the wiring the user owns: which
-capabilities it reads, what it refuses to start without (no agent, a model no provider has), and
+capabilities it reads, what it refuses to start without (no agent, a model no provider has, a
+provider with no credentials at all, checked with pi-ai's `checkAuth`, which makes no network call
+and refreshes nothing), and
 its tests, which run the `agent.runtime` and lifecycle conformance suites through
 `@pikit/pi-adapter/testing` without importing Pi (rule 13).
 - Pass each tool component's `replay: "safe" | "never"` to Pi's `AgentHarnessTool.replay`; Pi

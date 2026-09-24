@@ -7,8 +7,8 @@
 import { expect, test } from "bun:test";
 import { type AgentRuntime, defineAgent, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { createAgentRuntimeConformance, createLifecycleConformance } from "@pikit/core/testing";
-import type { SessionStore } from "@pikit/pi-adapter";
-import { createPiRuntimeFixture, testComponents } from "@pikit/pi-adapter/testing";
+import type { Credential, CredentialStore, SessionStore } from "@pikit/pi-adapter";
+import { createPiRuntimeFixture, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
 import runtimePi, { createRuntimePi } from "./index.ts";
 
 // The agent.runtime contract, including a worker killed mid-run (SPEC §14).
@@ -33,7 +33,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(described).toMatchObject({
     provides: ["agent.runtime"],
     requires: ["sessions.store"],
-    optional: ["agent.definition", "model.provider"],
+    optional: ["agent.definition", "model.provider", "model.credentials"],
   });
 });
 
@@ -94,4 +94,62 @@ test("it refuses to start when an agent names a model no provider has", async ()
   const app = await defineApp({ components: [sessions, agents, provider, runtimePi], logger: silentLogger }).create();
 
   expect(await startFailure(app)).toContain('"anthropic/claude-sonnet"');
+});
+
+/** A provider that is configured only by an API key stored in `model.credentials`. */
+const keyedProvider = defineComponent({
+  name: "provider-keyed",
+  setup: (pikit) => pikit.provideKeyed("model.provider", "faux", scriptedProvider({ apiKey: "made-up-key" })),
+});
+
+/** A `model.credentials` holding `stored`, kept in memory for the test. */
+function credentialsHolding(stored: Record<string, Credential>) {
+  const store: CredentialStore = {
+    read: async (id) => stored[id],
+    list: async () => Object.entries(stored).map(([providerId, credential]) => ({ providerId, type: credential.type })),
+    modify: async (id, fn) => {
+      const next = await fn(stored[id]);
+      if (next !== undefined) stored[id] = next;
+      return next ?? stored[id];
+    },
+    delete: async (id) => void delete stored[id],
+  };
+  return defineComponent({ name: "credentials-test", setup: (pikit) => pikit.provide("model.credentials", store) });
+}
+
+test("it refuses to start when an agent's provider has no credentials", async () => {
+  const { sessions, agents } = testComponents();
+  const app = await defineApp({ components: [sessions, agents, keyedProvider, runtimePi], logger: silentLogger }).create();
+
+  expect(await startFailure(app)).toContain('provider "faux", which has no credentials');
+});
+
+test("it builds the models with model.credentials: a stored key lets the agent answer", async () => {
+  const { sessions, agents } = testComponents();
+  let answered!: (text: string | undefined) => void;
+  const answer = new Promise<string | undefined>((resolve) => (answered = resolve));
+  let channel!: { runtime: AgentRuntime; sessions: SessionStore };
+  const observer = defineComponent({
+    name: "channel-test",
+    setup(pikit) {
+      const runtimeHandle = pikit.use("agent.runtime");
+      const sessionsHandle = pikit.use("sessions.store");
+      pikit.on("agent.settled", (result) => answered(result.text));
+      return { start: () => void (channel = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
+    },
+  });
+  const credentials = credentialsHolding({ faux: { type: "api_key", key: "made-up-key" } });
+  const app = await defineApp({
+    components: [sessions, agents, keyedProvider, credentials, runtimePi, observer],
+    logger: silentLogger,
+  }).create();
+  await app.start();
+
+  const ctx = app.context();
+  const session = await channel.sessions.create({}, ctx);
+  await session.close(ctx);
+  await channel.runtime.dispatch({ requestId: "r1", conversation: { key: "test:keyed", agent: "scripted", sessionId: session.metadata.id }, prompt: "hello" }, ctx);
+
+  expect(await answer).toBe("answer: hello");
+  await app.stop();
 });
