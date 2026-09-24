@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: the scripted test provider answers `bash: <command>` with a `bash` tool call and can
+  require a stored API key (`scriptedProvider({ apiKey })`); `recordingBash` stands in for Pi's `bash`.
 - component/credentials-file: provides `model.credentials` in a JSON file with mode 0600. Tokens
   that pi-ai refreshes are written back (SPEC §4.5).
 - component/conversations-file: provides `conversations.registry` in one JSON file written

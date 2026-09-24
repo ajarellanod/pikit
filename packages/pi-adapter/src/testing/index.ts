@@ -3,7 +3,7 @@
 
 export { createPiRuntimeFixture, killMidRun, testComponents } from "./fixture.ts";
 export type { PiRuntimeUnderTest, TestComponents } from "./fixture.ts";
-export { holdTool, scriptedAgent, scriptedProvider } from "./script.ts";
+export { holdTool, recordingBash, scriptedAgent, scriptedProvider } from "./script.ts";
 export type { ModelRequest, ScriptedProviderOptions } from "./script.ts";
 export { createSessionRepoConformance, createStorageConformance, JSONL_REPO_CONFORMANCE_GAPS, storageOf } from "./sessions.ts";
 export type { StorageFixture } from "./sessions.ts";
