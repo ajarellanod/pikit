@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: existing Pi extensions run unmodified, except for their terminal UI. A vendored
+  subset of `ExtensionAPI` lives in `@pikit/pi-adapter/extensions`, and
+  `@pikit/pi-extension-shim` is installed as `@earendil-works/pi-coding-agent` so their imports
+  resolve (SPEC §6.2b).
 - core: `AgentResult.requestIds` lists every request a run answered, so a channel that replies per
   message answers the ones queued into a run too (SPEC §6.1).
 - component/runtime-pi: the agent runtime component. Pi runs the agents through `@pikit/pi-adapter`;

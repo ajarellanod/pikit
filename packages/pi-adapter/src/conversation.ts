@@ -19,6 +19,8 @@ import {
 import type { Models } from "@earendil-works/pi-ai";
 import type { Admission, AgentDefinition, AgentRequest, AgentResult, AppContext, ConversationRef } from "@pikit/core";
 import { detached, toPi } from "./context.ts";
+import type { PiExtension } from "./extensions/api.ts";
+import { type BoundExtensions, loadExtensions } from "./extensions/host.ts";
 import { hasRequest, inboundMessage, LANE, recordWithdrawn } from "./inbound.ts";
 import { toResult } from "./result.ts";
 
@@ -39,11 +41,14 @@ export interface OpenOptions {
   models: Models;
   host: ConversationHost;
   onHarness?: HarnessHook | undefined;
+  /** Pi extensions, loaded for this conversation as Pi loads them for a session (§6.2b). */
+  extensions?: readonly PiExtension[] | undefined;
 }
 
 export class PiConversation {
   /** Runs this worker is driving right now. At zero the conversation is idle and may close. */
   private driving = 0;
+  private extensions: BoundExtensions | undefined;
 
   private constructor(
     readonly ref: ConversationRef,
@@ -57,13 +62,18 @@ export class PiConversation {
   static async open(options: OpenOptions, ctx: AppContext): Promise<PiConversation> {
     const { ref, session, agent, models, host } = options;
     const pi = toPi(ctx);
+    // Extensions load first: their tools and providers belong in the harness from the start.
+    const loaded =
+      options.extensions !== undefined && options.extensions.length > 0
+        ? await loadExtensions(options.extensions, { models, logger: ctx.logger })
+        : undefined;
     const model = resolveModel(models, agent);
     const { harness, open } = await AgentHarness.create<undefined>(
       {
         session,
         models,
         model,
-        tools: [...(agent.tools ?? [])],
+        tools: [...(agent.tools ?? []), ...(loaded?.tools ?? [])],
         ...(agent.systemPrompt !== undefined && { systemPrompt: agent.systemPrompt }),
       },
       pi,
@@ -72,6 +82,17 @@ export class PiConversation {
       options.onHarness?.(harness, ref);
       const lane = await harness.lane(LANE, pi);
       const conversation = new PiConversation(ref, session, harness, lane, host);
+      // Bound before any run is resumed, so a resumed run is seen by the extensions too.
+      conversation.extensions = await loaded?.bind(
+        {
+          harness,
+          lane,
+          cwd: session.metadata.cwd ?? "/",
+          systemPrompt: agent.systemPrompt,
+          abort: () => host.serial(() => conversation.abort(host.events)),
+        },
+        pi,
+      );
       const interrupted = open.find((operation) => operation.lane === LANE);
       if (interrupted !== undefined) conversation.resumeOpen(interrupted.operationId, interrupted.kind === "run", ctx);
       return conversation;
@@ -133,6 +154,7 @@ export class PiConversation {
    * in the session, for the next owner to resume: eviction is never a reset.
    */
   async close(ctx: AppContext): Promise<void> {
+    await this.extensions?.close(toPi(ctx));
     await this.harness.close(toPi(ctx));
   }
 

@@ -14,6 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "devDependencies": {
+    "@earendil-works/pi-coding-agent": "workspace:@pikit/pi-extension-shim@*",
     "@pikit/core": "workspace:*",
     "@pikit/pi-adapter": "workspace:*",
     "@types/bun": "^1.4.2",

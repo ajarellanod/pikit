@@ -111,7 +111,9 @@ Never design from memory of Pi's API; its API changes faster than this document.
   `@earendil-works/chord` (the harness `Context` is Chord's); only the adapter sees it. Pi's
   durable runtime (`@earendil-works/pi-durable`) is the target the adapter moves to
   (SPEC §6.4). `pi-coding-agent` is never a dependency. It is only invoked
-  as the external `pi` binary by the CLI.
+  as the external `pi` binary by the CLI. A `package.json` entry named
+  `@earendil-works/pi-coding-agent` is an alias of `@pikit/pi-extension-shim` (SPEC §6.2b),
+  never the real coding agent.
 - Checks: `bun test` and `bun run typecheck` (`tsc --noEmit`, TypeScript 7, strict,
   `exactOptionalPropertyTypes`). Conformance suites live in `@pikit/core/testing`.
 
@@ -375,7 +377,9 @@ Take its operational lessons; do not take its plugin model.
 
 Add an entry here when you fetch something for context.
 
-- _(none yet)_
+- `packages/pi-adapter/src/extensions/pi-examples/`: Pi 0.87.1's `permission-gate.ts`,
+  `protected-paths.ts` and `hello.ts` example extensions, byte for byte (scenario 7). Refresh
+  them from the tag when Pi is bumped; attribution in `NOTICE`.
 
 ## Lessons
 

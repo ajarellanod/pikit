@@ -781,8 +781,8 @@ Responsibilities:
     provider still hits its cache. Both are tested (`adapter.test.ts`, "caches").
   - Keeping idle conversations open for a while (an `idleMs`) is added only if reopening is
     measured to be slow.
-- Give each conversation's harness to `onHarness` when it opens: where Pi hooks attach (the
-  tier-A extensions of §6.2b; tests). The `runtime-pi` component takes it as
+- Load Pi extensions for each conversation and bind them to its harness (§6.2b). `onHarness`
+  also receives each harness as it opens, for tests. The `runtime-pi` component takes it as
   `createRuntimePi({ onHarness })`, a plain function in its own source; its default export is
   the component without options.
 
@@ -805,44 +805,72 @@ src/agents/assistant/
 └── context/            files copied into the workspace before a run
 ```
 
-### 6.2b Running Pi extensions unchanged `[planned]`
+### 6.2b Running Pi extensions unchanged
 
-A Pi extension is `export default function (pi: ExtensionAPI) { ... }`. The adapter exposes a
-compat object implementing the non-UI subset of `ExtensionAPI` over `AgentHarness` and pikit
-capabilities, so existing extensions run without modification. They are imported statically
-(`runtime-pi` config `extensions: [...]`), never discovered or loaded dynamically. The compat
-layer reports `mode: "rpc"`, `hasUI: false` — the case Pi already documents and requires
-extensions to guard for.
+A Pi extension is `export default function (pi: ExtensionAPI) { ... }`. pikit runs existing
+extensions without modification, except for what needs a terminal UI. Built in M1
+(`packages/pi-adapter/src/extensions/`), checked against pi-coding-agent 0.87.1.
 
-Support tiers (`pikit doctor` lists what an extension uses and at which tier):
-
-| Tier | Surface | Mapping |
-|---|---|---|
-| A — works as-is | `on(tool_call \| tool_result \| before_agent_start \| context \| before_provider_request \| after_provider_response \| agent_* \| turn_* \| message_* \| tool_execution_* \| session_start \| session_shutdown)`, `registerTool`, `registerProvider`, `set/getModel`, `set/getActiveTools`, `sendMessage`, `sendUserMessage`, `appendEntry`, `abort`, `isIdle`, `waitForIdle`, `exec`, `getSystemPrompt`, `getContextUsage`, `compact` | The §6.2 hook table read in reverse: Pi handlers return a patch (`undefined` = no change); a pikit stage returns the next value. Wrapper: `v => ({ ...v, ...(await handler(v)) })`. `tool_call { block }` = `halt`. |
-| B — later, chat-meaningful | `registerCommand` (slash commands from a channel), `ui.notify/select/confirm/input` (routed to the channel, awaiting a reply — overlaps with `approvals`) | Component-level; not in the first adapter cut. |
-| C — no-op with a `doctor` warning | `registerShortcut`, `register*Renderer`, `registerMarkdownTransformer`, `addAutocompleteProvider`, `ui.setWidget/setStatus/setTitle/setFooter/setHeader/theme/editor*`, `navigateTree`, `switchSession`, `fork` | TUI-only or session-tree UI. |
-
-Known facts (checked on pi-coding-agent 0.87.1):
+Known facts (0.87.1):
 - `AgentSession` still drives the legacy `Agent` class (`agent.beforeToolCall`), not
   `AgentHarness`. The compat layer translates Pi's *semantic* extension events onto the harness
   hooks, not Pi's classes, so Pi's own migration lands in the adapter only.
-- `ExtensionAPI` has grown since 0.85: among others `context_with_system`,
-  `cache_warming_decision`, `agent_before_settle` / `agent_settled`, `before_provider_headers`,
-  `input`, `user_bash`, `model_select`, `project_trust`, and results on `message_end` and
-  `turn_end`. The tier table above is re-derived from 0.87.1 when the compat layer is built.
 - Existing extensions import from `@earendil-works/pi-coding-agent`, and not only types:
-  `defineTool` is a value. Running one unmodified means that import resolves to the compat
-  layer (how is part of the design below).
+  `defineTool` is a value.
 
-`[decision]` The compat layer's `ExtensionAPI` is a **vendored subset** in `@pikit/pi-adapter`
-(attributed in `NOTICE`; Pi is MIT), not a dependency on `pi-coding-agent`: 19 MB for types is
-out of proportion, and a subset states exactly what pikit supports. A type test pins it against
-Pi's own shapes on each bump. **No TUI:** the compat object reports `mode: "rpc"` and
-`hasUI: false`, `ui.*` calls are no-ops (tier C, with a `doctor` warning), and extensions that
-guard on `hasUI` take their non-interactive path, as Pi already asks them to.
-`[open]` — how extensions are declared (for the whole runtime or per agent), when their factory
-runs, and how the `@earendil-works/pi-coding-agent` import resolves: decided with the compat
-layer.
+Decisions `[decision]`:
+- **A vendored subset.** The compat layer's `ExtensionAPI` is a subset of Pi's types in
+  `@pikit/pi-adapter/extensions` (attributed in `NOTICE`; Pi is MIT), not a dependency on
+  `pi-coding-agent`: 19 MB for types is out of proportion, and a subset states exactly what pikit
+  supports. Pi's own example extensions, copied byte for byte, compile against it and run in
+  `compat.test.ts`; a Pi bump copies them again.
+- **No TUI.** The compat object reports `mode: "rpc"` and `hasUI: false`. `ui.select` / `ui.input`
+  answer `undefined`, `ui.confirm` answers `false`, and every other `ui.*` call does nothing, so
+  extensions that guard on `hasUI` take their non-interactive path, as Pi already asks them to.
+- **Declared in the composition root.** `createRuntimePi({ extensions: [permissionGate, hello] })`
+  in `pikit.config.ts`, imported statically; never discovered or loaded dynamically. They apply
+  to every conversation of the runtime. Per agent (`defineAgent({ extensions })`) can be added
+  later without breaking this.
+- **Loaded per conversation, as Pi loads them per session.** When a conversation opens, each
+  factory runs and registers handlers, tools and providers; then the host binds them to that
+  conversation's harness and fires `session_start` (`reason: "resume"`). `session_shutdown`
+  (`reason: "quit"`) fires when the conversation closes, idle or at stop. Every action
+  (`pi.sendMessage()`, `pi.setActiveTools()`…) therefore acts on the conversation it was loaded
+  for, with no ambient "current conversation"; calling one while loading throws, as in Pi. A
+  single load for the whole runtime would need exactly that ambient context. The cost: a factory
+  runs each time a conversation opens.
+- **The import resolves by alias.** A project installs `@pikit/pi-extension-shim`, a one-file
+  package that re-exports `@pikit/pi-adapter/extensions`, under the name
+  `@earendil-works/pi-coding-agent` (`"npm:@pikit/pi-extension-shim@…"`). It is ordinary package
+  resolution, so it works in Bun, Node and bundlers, and the coding agent is never installed.
+  This repository does the same with `workspace:@pikit/pi-extension-shim@*`.
+
+Support tiers (on 0.87.1):
+
+| Tier | Surface | How |
+|---|---|---|
+| A — works | `on(...)`: `session_start`, `session_shutdown`, `before_agent_start`, `context`, `before_provider_request`, `after_provider_response`, `agent_start`, `agent_end`, `turn_start`, `turn_end`, `message_start` / `_update` / `_end`, `tool_execution_start` / `_update` / `_end`, `tool_call`, `tool_result`. `registerTool`, `defineTool`, `isToolCallEventType`, `registerProvider`, `sendMessage`, `sendUserMessage`, `appendEntry`, `set/getSessionName`, `setLabel`, `set/getActiveTools`, `getAllTools`, `setModel`, `set/getThinkingLevel`, `events`. On `ctx`: `hasUI`, `mode`, `cwd`, `model`, `signal`, `isIdle`, `abort`, `hasPendingMessages`, `waitForIdle`, `getSystemPrompt`, `compact` | `tool_call` → `before_tool` (`block` blocks; mutating `event.input` in place patches the arguments). `tool_result` → `after_tool`. `before_agent_start` → `before_run` (an added message) and `transform_context` (the system prompt, for that run). `context` → `transform_context`. `before_provider_request` → `before_payload`. `after_provider_response` → `after_response`. Run, turn, message and tool notifications → the harness's events, in Pi's order. `ctx.abort()` → the conversation's `abort()`, which records withdrawn messages (§6.4, gap 4). Tools → harness tools, `replay: "never"` |
+| B — later, with channels | `registerCommand` (slash commands from a channel), `ui.select` / `confirm` / `input` answered by a person (overlaps `approvals`) | Today they are tier C |
+| C — no-op with a warning | Every other event (`input`, `user_bash`, `model_select`, `agent_before_settle`, `context_with_system`, `cache_warming_decision`, `session_before_*`, `resources_discover`, `project_trust`…), `registerShortcut`, `registerFlag` / `getFlag`, `register*Renderer`, `registerMarkdownTransformer`, TUI `ui.*`, `ctx.shutdown()`. Absent: `ctx.sessionManager`, `ctx.modelRegistry`, `newSession`, `fork`, `switchSession` | TUI-only, or owned by pikit (the process, the sessions). The warning is a log line when the extension loads; `pikit doctor` lists it once the CLI exists `[planned]`. `pi.exec()` rejects until extensions are given `execution.shell` |
+
+Where pikit differs from Pi in a way an extension may notice:
+- `sendMessage` / `sendUserMessage` on an idle conversation wait for its next run (`nextRun`):
+  starting a run outside `dispatch` would bypass admission (§6.1).
+- A lane created before an extension was installed gets that extension's tools activated when
+  it opens.
+
+`[planned]` **To test: how a conversation is taken up again with extensions loaded.** Loading per
+conversation means extensions load again each time a conversation reopens, so what the "caches"
+tests of §6.2 prove without extensions must also hold with them:
+- **Reopen after idle:** the extensions load again, `session_start` fires again, their tools are
+  still active, and their handlers act on the next message.
+- **Resume after a crash:** the extensions are bound before the interrupted run continues, so
+  `tool_call`, `tool_result` and `agent_end` fire for the resumed run; their tools are not
+  replayed (`replay: "never"`).
+- **Prompt cache across a reopen:** with extensions installed, the provider still receives the
+  same prefix (system prompt, tools in the same order), so its cache still hits.
+- **Extension state:** state an extension keeps in its closure starts over on each reopen, as in
+  Pi on each session load. What must survive belongs in the session (`pi.appendEntry`).
 
 ### 6.2a Dynamic agents without hooks
 
@@ -1573,7 +1601,9 @@ And the runtime proof:
 
 7. **Pi compat**: an existing Pi extension that uses only tier A of §6.2b (e.g. a
    `tool_call` policy + one `registerTool`) is added to `runtime-pi` unmodified and its
-   handlers fire during scenario 1.
+   handlers fire during scenario 1. The extension half runs today: Pi's own `permission-gate`,
+   `protected-paths` and `hello` examples, byte for byte (`compat.test.ts`). The HTTP half
+   waits for scenario 1.
 
 ---
 
@@ -1684,6 +1714,9 @@ Resolved `[decision]`:
 - Pi extensions run through a vendored subset of `ExtensionAPI` in the adapter, with no TUI
   (`hasUI: false`, `ui.*` no-ops) (§6.2b). Extensibility through Pi's ecosystem is a goal, and a
   19 MB types-only dependency is not.
+- Pi extensions are declared in `createRuntimePi({ extensions })`, loaded per conversation as Pi
+  loads them per session (so their actions need no ambient context), and imported from
+  `@earendil-works/pi-coding-agent` through an alias to `@pikit/pi-extension-shim` (§6.2b).
 - `AgentResult.requestIds` lists every request a run took (§6.1). Without it, a request queued
   into a running run would never learn it was answered, and a channel that replies per message
   (HTTP) would wait forever. The list is read from the transcript; no record is added.

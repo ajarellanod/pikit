@@ -14,6 +14,7 @@ import type { Models } from "@earendil-works/pi-ai";
 import type { Admission, AgentDefinition, AgentRequest, AgentRuntime, AppContext, Context, ConversationRef } from "@pikit/core";
 import { toPi } from "./context.ts";
 import { type HarnessHook, PiConversation, runContext } from "./conversation.ts";
+import type { PiExtension } from "./extensions/api.ts";
 import type { SessionStore } from "./types.ts";
 
 export interface PiRuntimeOptions {
@@ -28,8 +29,13 @@ export interface PiRuntimeOptions {
    * `ctx.derive(() => BACKGROUND_CONTEXT)`, never `start`'s context itself (its deadline).
    */
   events: AppContext;
-  /** Attach Pi hooks to each conversation's harness when it opens (SPEC §6.2b; tests). */
+  /** Attach Pi hooks to each conversation's harness when it opens (tests). */
   onHarness?: HarnessHook;
+  /**
+   * Pi extensions, unmodified (SPEC §6.2b). Each conversation loads them when it opens, as Pi loads
+   * them for each session, and they see every run of it.
+   */
+  extensions?: readonly PiExtension[];
 }
 
 export interface PiRuntime extends AgentRuntime {
@@ -95,6 +101,7 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
         models: options.models,
         host: { serial: (work) => serial(slot, work), events: options.events },
         onHarness: options.onHarness,
+        extensions: options.extensions,
       },
       ctx,
     );
