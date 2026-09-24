@@ -5,6 +5,21 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: `@pikit/pi-adapter/providers/anthropic` exposes pi-ai's Anthropic provider by subpath
+  (SPEC §6.2).
+- adapter: `@pikit/pi-adapter` types `model.credentials` (pi-ai's `CredentialStore`),
+  `modelsFrom(providers, { credentials })` builds models with it, and
+  `createCredentialStoreConformance` in `@pikit/pi-adapter/testing` checks a store, including
+  refreshed OAuth tokens written back (SPEC §4.5, §14).
+- adapter: `@pikit/pi-adapter/node` exposes Pi's JSONL session store (`createJsonlSessionStore`),
+  and `@pikit/pi-adapter/testing` Pi's session conformance suites with `storageOf` (SPEC §7.5).
+- core: `http.route` contract (`HttpRoute`, keyed by `"METHOD /path"`) and its conformance suite
+  (SPEC §9.1, §14).
+- core: `conversations.registry` contract (`ConversationRegistry`), the `conversation.reset` event
+  and its conformance suite (SPEC §7.4, §7.6, §14).
+- core: `secrets` contract (`SecretStore`) and its conformance suite (SPEC §4.5, §14).
+- core: `InboundMessage`, `RouteDecision` and the `inbound.authenticate`, `inbound.normalize` and
+  `route.resolve` pipelines (SPEC §4.4, §5).
 - adapter: Pi extensions see `agent_start` for a run resumed after a crash, and a closing
   conversation waits for their handlers and actions in flight, so an `agent_end` handler's
   `appendEntry` is not lost (SPEC §6.2b).
