@@ -4,7 +4,7 @@
  */
 
 import { expect, test } from "bun:test";
-import { createJsonLogger, type LogLevel } from "./logger.ts";
+import { createJsonLogger, isSecretName, type LogLevel } from "./logger.ts";
 
 const NOW = new Date("2026-01-02T03:04:05.678Z");
 
@@ -116,6 +116,22 @@ test("fields named like secrets are redacted, at any depth", () => {
     credentials: "[redacted]",
     cookieJar: "[redacted]",
   });
+});
+
+test("names are compared word by word: token counts stay readable, tokens do not", () => {
+  const secrets = ["token", "accessToken", "refresh_token", "bearerToken", "PIKIT_HTTP_TOKEN", "apiKey", "api_key", "x-api-key", "privateKey", "clientSecret", "authorization", "cookieJar", "credentials", "Password"];
+  const counts = ["inputTokens", "outputTokens", "cacheReadTokens", "totalTokens", "tokens", "tokenCount", "maxTokens", "key", "conversation", "requestId", "session"];
+
+  expect(secrets.filter((name) => !isSecretName(name))).toEqual([]);
+  expect(counts.filter((name) => isSecretName(name))).toEqual([]);
+});
+
+test("a run's token usage, as log-events writes it, is logged as numbers", () => {
+  const { logger, records } = capture();
+
+  logger.info("agent.settled", { requestId: "m1", inputTokens: 12, outputTokens: 3, totalTokens: 15, cost: 0.001 });
+
+  expect(records()[0]).toMatchObject({ inputTokens: 12, outputTokens: 3, totalTokens: 15, cost: 0.001 });
 });
 
 test("odd fields never make it throw: cycles, bigints, getters that throw, proxies, symbols, buffers", () => {

@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/deployment-docker: the JSON logger compares field names word by word, so token counts
+  (`totalTokens`, `tokenCount`) are logged while tokens (`accessToken`, `PIKIT_HTTP_TOKEN`) stay redacted.
 - samples: `samples/http` installs `log-events`, so it is exactly the `http` preset plus its own agents.
 - registry: every component has a `component.json` and the registry a `registry.json` index.
   `bun run registry generate` writes the fields `setup` declares (`provides`, `requires.capabilities`,

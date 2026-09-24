@@ -7,9 +7,10 @@
  * - `debug` and `info` go to stdout, `warn` and `error` to stderr; Docker keeps both.
  * - A field is data, never interpolated into the message. An `Error` keeps its name, message,
  *   stack and cause, which `JSON.stringify` alone would drop.
- * - A field whose name looks like a secret (`token`, `authorization`, `apiKey`, `password`…) is
- *   written as `"[redacted]"`, at any depth (SPEC §13: logs redact by name). This is a net, not a
- *   guarantee: never put a secret's value in a message or under an innocent name.
+ * - A field whose name looks like a secret (`token`, `accessToken`, `authorization`, `apiKey`,
+ *   `password`…) is written as `"[redacted]"`, at any depth (SPEC §13: logs redact by name). Names
+ *   are compared word by word, so counts such as `totalTokens` or `tokenCount` stay readable. This
+ *   is a net, not a guarantee: never put a secret's value in a message or under an innocent name.
  * - Logging never throws. A field that cannot be serialized (a cycle, a `BigInt`, a throwing
  *   getter) is replaced, and the line is still written: a log call must not fail the code that
  *   made it.
@@ -21,8 +22,27 @@ export type LogLevel = "debug" | "info" | "warn" | "error";
 
 const RANK: Record<LogLevel, number> = { debug: 10, info: 20, warn: 30, error: 40 };
 
-/** Field names that are never written as they are. Matched anywhere in the name, any case. */
-const SECRET_NAME = /token|secret|password|passwd|authorization|api[-_]?key|cookie|credential|private[-_]?key/i;
+/** A word anywhere in the name makes it a secret's name: `clientSecret`, `cookieJar`, `credentials`. */
+const SECRET_WORDS = new Set(["secret", "secrets", "password", "passwd", "authorization", "cookie", "cookies", "credential", "credentials"]);
+
+/**
+ * Whether a field's name looks like a secret's. Compared word by word (camelCase, snake_case,
+ * kebab-case), not as a substring: `token`, `accessToken` and `PIKIT_HTTP_TOKEN` end in the word
+ * `token` and are secrets; `totalTokens` and `tokenCount` are counts. `apiKey` and `privateKey` are
+ * secrets; a bare `key` (a conversation key) is not.
+ */
+export function isSecretName(name: string): boolean {
+  const words = name
+    .replace(/([a-z0-9])([A-Z])/g, "$1 $2")
+    .split(/[^A-Za-z0-9]+/)
+    .filter((word) => word !== "")
+    .map((word) => word.toLowerCase());
+  const last = words.at(-1);
+  const before = words.at(-2);
+  if (words.some((word) => SECRET_WORDS.has(word))) return true;
+  if (last === "token" || last === "apikey") return true;
+  return last === "key" && (before === "api" || before === "private");
+}
 
 /** Keys every line has; a field with the same name is written as `field.<name>` instead. */
 const RESERVED = new Set(["time", "level", "msg"]);
@@ -115,7 +135,7 @@ function sanitize(value: unknown, depth: number, seen: WeakSet<object>): unknown
 
 function sanitizeEntries(entries: [string, unknown][], depth: number, seen: WeakSet<object>): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const [key, item] of entries) out[key] = SECRET_NAME.test(key) ? "[redacted]" : sanitize(item, depth + 1, seen);
+  for (const [key, item] of entries) out[key] = isSecretName(key) ? "[redacted]" : sanitize(item, depth + 1, seen);
   return out;
 }
 
