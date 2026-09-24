@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: `@pikit/pi-adapter/tools` exposes Pi's `read`, `write`, `edit` and `bash` tools and
+  `bindTool(tool, { env, replay })`, which binds a tool to its environment and sets its replay (SPEC §6.3).
 - component/execution-local: provides `execution` and `execution.shell` on the server's filesystem
   and shell, in a working directory; commands start from an allowlist of variables. Not a sandbox
   (SPEC §8.3).

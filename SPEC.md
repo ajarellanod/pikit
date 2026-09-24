@@ -999,6 +999,12 @@ A wrapper adds only what the kit owns:
 - its `replay`. Pi's tools declare none, so they default to `"never"`; a read-only wrapper
   declares `"safe"`.
 
+`@pikit/pi-adapter/tools` re-exports Pi's four factories and `bindTool(tool, { env, replay })`.
+Pi's tools read their environment from the harness's `toolContext.env`, as Pi's own `mini` wires
+them. A bound tool uses the environment of the capability its component declared instead, read
+when it runs. The runtime then passes no tool context, and each tool works on exactly what it
+declared: `read` on `execution`, `bash` on `execution.shell`. `[decision]`
+
 **How an agent gets a tool.** `[decision]`
 - A tool component provides its tool under the keyed capability `agent.tool`, keyed by the name
   the model calls it by.

@@ -8,7 +8,8 @@
     "./testing": "./src/testing/index.ts",
     "./extensions": "./src/extensions/index.ts",
     "./node": "./src/node/index.ts",
-    "./providers/anthropic": "./src/providers/anthropic.ts"
+    "./providers/anthropic": "./src/providers/anthropic.ts",
+    "./tools": "./src/tools/index.ts"
   },
   "files": [
     "src"
