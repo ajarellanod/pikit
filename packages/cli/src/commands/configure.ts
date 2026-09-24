@@ -137,7 +137,10 @@ async function configureModels(
     try {
       there = (await checkModelCredentials(projectDir, exec)).providers;
     } catch (error) {
-      log.warn(`could not check where the app runs, so only \`pikit dev\` can be configured now: ${error instanceof Error ? error.message : String(error)}`);
+      // Docker's own message (not running, no permission) is already on the terminal, above.
+      log.warn(
+        `could not run a command where the app runs (${error instanceof Error ? error.message : String(error)}). A login now would be for \`pikit dev\` only; to log in for \`pikit up\`, fix what the deployment reported above and run \`pikit configure\` again`,
+      );
     }
   }
   for (const id of ids) {
@@ -157,7 +160,7 @@ async function configureModels(
         `\nThe model provider "${id}" has no credentials.`,
         inApp
           ? "  1) log in with your subscription, for `pikit up` (OAuth: open a URL, then paste the page's address back here)"
-          : "  1) log in with your subscription (OAuth, opens a URL)",
+          : `  1) log in with your subscription (OAuth, opens a URL)${exec === undefined ? "" : ", for `pikit dev` only"}`,
         ...(hasKeyVariable ? [`  2) paste an API key (stored in ${ENV_FILE} as ${keyName}; \`pikit up\` and \`pikit dev\` both read it)`] : []),
         ...(inApp ? ["  3) log in with your subscription, for `pikit dev` only (on this machine)"] : []),
         "  s) skip",
