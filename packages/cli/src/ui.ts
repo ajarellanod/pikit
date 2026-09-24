@@ -24,9 +24,10 @@ export async function confirm(question: string): Promise<boolean> {
 
 /** Reads a line without echoing it: for secrets. Ctrl-C aborts the command. */
 export function askSecret(question: string): Promise<string> {
-  process.stdout.write(question);
   const stdin = process.stdin;
+  // Echo off before the question shows: what is pasted the moment it appears is not echoed either.
   stdin.setRawMode(true);
+  process.stdout.write(question);
   stdin.resume();
   stdin.setEncoding("utf8");
   return new Promise((resolve, reject) => {

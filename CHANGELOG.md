@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: a secret prompt turns echo off before it shows, so a value pasted the moment it appears is not
+  echoed.
 - registry: the `telegram` preset (`pikit new my-bot --preset telegram`), the `http` preset with
   `channel-telegram` instead of `channel-http` (SPEC §11).
 - component/channel-telegram: talk to the agent in Telegram. It receives by long polling (no public
