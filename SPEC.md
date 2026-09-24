@@ -347,6 +347,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `workspace` | `WorkspaceProvider` | Resolves a `Workspace` for a conversation/agent. |
 | `execution` | Pi `ExecutionEnv` | Filesystem for the agent's tools; `exec()` may return `shell_unavailable`. |
 | `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
+| `http.route` (keyed by `"METHOD /path"`) | `HttpRoute` | One HTTP endpoint as a standard fetch handler, `(request: Request, ctx: AppContext) => Response \| Promise<Response>`, with no framework type, so it runs behind `Bun.serve` and a Cloudflare Worker alike. Channels and admin components provide routes; one server component serves them all (§9.1). |
 | `network.fetch` | `Fetch` (`typeof fetch`) | Outbound HTTP. A separate capability so policy and tests can replace it. |
 | `agent.runtime` | `AgentRuntime` | See §6. |
 | `model.provider` (keyed by provider id) | pi-ai `Provider` | One per model provider (`anthropic`, `faux` in tests), each its own component importing its pi-ai provider by subpath. The runtime builds its models from all of them, and each agent names its own `provider/modelId`, so agents may use different providers side by side. Typed by `@pikit/pi-adapter` (§6.2). |
@@ -718,7 +719,7 @@ Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest
 For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
 `inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
 `SecretStore` (`secrets`), and `ConversationRegistry` with `ConversationReset` (`conversations.registry`
-and the payload of `conversation.reset`).
+and the payload of `conversation.reset`), and `HttpRoute` (`http.route`).
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`)
 and `model.provider` (pi-ai's `Provider`) by importing it anywhere in the project.
 
@@ -1280,6 +1281,17 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
 - Process: Bun ≥ 1.4 (preferred) or Node ≥ 22.
 - HTTP: a thin `server-bun` component (Hono or `Bun.serve`) exposing `/health`, `/ready`,
   channel webhooks, and admin routes contributed by components.
+- Routes are the keyed capability `http.route` (§4.5) `[decision]`: a standard fetch handler under
+  the key `"METHOD /path"`. `METHOD` is `GET`, `POST`, `PUT`, `PATCH` or `DELETE`. A path segment
+  is literal or a parameter (`:id`) matching exactly one segment, and handlers read parameters
+  from `request.url`. What a server guarantees to every handler is the contract, and
+  `createHttpRouteConformance` checks it:
+  - the request as sent and the response unchanged;
+  - a context of its own, never `start`'s, cancelled when the client goes away or the server
+    stops, and a handler still answers after that cancellation;
+  - concurrent handling;
+  - a `500` that does not reveal a thrown error, and a `404` for no match;
+  - a refusal to start with a key it cannot serve.
 - Storage: `sessions-sqlite` + `storage-sqlite` by default; Postgres optional.
 - Scheduler: `scheduler-cron` (in-process, `Bun.cron` or `croner`), jobs persisted in
   `storage.sql`.
@@ -1615,6 +1627,9 @@ is that the answer is "nothing" for every minor.
   session, old kept, one event) and pointers surviving a new worker. When the fixture lists its
   store's sessions, the suite also checks that pointers name real sessions and that nothing is
   deleted. An in-memory double passes it.
+- **HTTP route conformance** (`createHttpRouteConformance`): every server of `http.route`
+  (§9.1). The suite provides the routes and sends requests through the fixture. An in-memory
+  double that routes a `Request` with no socket passes it.
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
   implementation must pass its suite. Pi's session conformance is reused for

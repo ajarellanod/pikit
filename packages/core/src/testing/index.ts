@@ -11,3 +11,6 @@ export { createSecretStoreConformance } from "./secrets.ts";
 
 export type { ConversationRegistryFixture } from "./conversations.ts";
 export { createConversationRegistryConformance } from "./conversations.ts";
+
+export type { HttpRouteConformanceOptions, HttpRouteFixture } from "./http.ts";
+export { createHttpRouteConformance } from "./http.ts";
