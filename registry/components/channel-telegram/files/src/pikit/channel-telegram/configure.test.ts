@@ -4,7 +4,7 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { type ConfigureIO, configure } from "./configure.ts";
+import { type ConfigureIO, configure, findToken } from "./configure.ts";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
 
 const OWNER = { id: 1001, first_name: "Ada", username: "ada" };
@@ -66,11 +66,47 @@ test("from nothing: it explains BotFather, checks the token, and allows whoever 
 
 test("a mistyped token is caught at once and asked again", async () => {
   const telegram = fake();
-  const t = terminal(telegram, { env: { TELEGRAM_ALLOWED_USERS: "1001" }, answers: ["123:typo", telegram.token] });
+  const t = terminal(telegram, { env: { TELEGRAM_ALLOWED_USERS: "1001" }, answers: ["123456789:AAE-a-typo-in-it", telegram.token] });
 
   expect(await configure(t.io)).toEqual([]);
   expect(t.said.join("\n")).toContain("Telegram does not know that token (401)");
   expect(t.env.get("TELEGRAM_BOT_TOKEN")).toBe(telegram.token);
+});
+
+test("what is pasted around the token (BotFather's message, quotes, spaces) is left out", async () => {
+  const telegram = fake();
+  const message = `Done! Congratulations on your new bot. Use this token to access the HTTP API: "${telegram.token}" Keep your token secure`;
+  const t = terminal(telegram, { env: { TELEGRAM_ALLOWED_USERS: "1001" }, answers: [message] });
+
+  expect(await configure(t.io)).toEqual([]);
+  expect(t.env.get("TELEGRAM_BOT_TOKEN")).toBe(telegram.token);
+});
+
+test("something that is not a token is asked again, never sent to Telegram and never echoed", async () => {
+  const telegram = fake();
+  const t = terminal(telegram, { env: { TELEGRAM_ALLOWED_USERS: "1001" }, answers: ["my secret words", telegram.token] });
+
+  expect(await configure(t.io)).toEqual([]);
+  expect(t.said.join("\n")).toContain("That is not a bot token (15 characters");
+  expect(t.said.join("\n")).not.toContain("my secret words");
+  expect(t.env.get("TELEGRAM_BOT_TOKEN")).toBe(telegram.token);
+});
+
+test("a saved token Telegram cannot parse (404) is asked again, not a failure", async () => {
+  const telegram = fake();
+  // A token of the right shape once cleaned, but saved with a character Telegram's path rejects.
+  const t = terminal(telegram, { env: { TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_BOT_TOKEN: "bad token" }, answers: [telegram.token] });
+
+  expect(await configure(t.io)).toEqual([]);
+  expect(t.said.join("\n")).toContain("Telegram does not know that token (404)");
+  expect(t.env.get("TELEGRAM_BOT_TOKEN")).toBe(telegram.token);
+});
+
+test("findToken takes the bot id and secret out of any text", () => {
+  expect(findToken("123456789:AAEabc_DEF-ghi123")).toBe("123456789:AAEabc_DEF-ghi123");
+  expect(findToken("token: 123456789:AAEabc_DEF-ghi123\nKeep it secure")).toBe("123456789:AAEabc_DEF-ghi123");
+  expect(findToken("HTTP API: nothing here")).toBeUndefined();
+  expect(findToken("")).toBeUndefined();
 });
 
 test("someone who is not you can be refused, and the next person allowed", async () => {

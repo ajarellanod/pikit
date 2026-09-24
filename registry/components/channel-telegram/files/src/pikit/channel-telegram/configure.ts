@@ -59,6 +59,14 @@ export async function configure(io: ConfigureIO): Promise<string[]> {
   return [];
 }
 
+/**
+ * The bot token in what was pasted: BotFather's token is `<bot id>:<secret>`, and people paste it
+ * with its message around it, quotes, or spaces. `undefined` when there is none.
+ */
+export function findToken(text: string): string | undefined {
+  return /\d{3,}:[A-Za-z0-9_-]{10,}/.exec(text)?.[0];
+}
+
 /** A checked token, saved; or `undefined` when there is none. */
 async function token(io: ConfigureIO, apiBase: string): Promise<{ api: TelegramApi; me: TelegramUser } | undefined> {
   let value = io.get(TOKEN);
@@ -70,9 +78,19 @@ async function token(io: ConfigureIO, apiBase: string): Promise<{ api: TelegramA
     io.say("  2. Choose a name and a username ending in \"bot\"");
     io.say("  3. BotFather answers with a token like 123456789:AAE…; paste it here");
   }
-  for (let attempt = 0; attempt < 3; attempt++) {
-    if (value === undefined || value === "") value = (await io.askSecret(`${TOKEN}: `)).trim();
-    if (value === "") return undefined;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    if (value === undefined || value === "") {
+      const pasted = await io.askSecret(`${TOKEN}: `);
+      if (pasted.trim() === "") return undefined;
+      value = findToken(pasted);
+      if (value === undefined) {
+        // Only the length is shown: what was pasted may be the token with something around it.
+        io.say(`✗ That is not a bot token (${pasted.trim().length} characters, no 123456789:AAE… in them). Copy only the token from BotFather's message, then paste it again:`);
+        continue;
+      }
+    } else {
+      value = findToken(value) ?? value;
+    }
     const api = createTelegramApi(value, apiBase);
     try {
       const me = await api.getMe();
@@ -81,8 +99,9 @@ async function token(io: ConfigureIO, apiBase: string): Promise<{ api: TelegramA
       io.say(`✓ ${saved ? `${TOKEN}: ` : ""}bot @${me.username ?? me.first_name} (${botLink(me)})`);
       return { api, me };
     } catch (error) {
-      if (!(error instanceof TelegramError) || error.code !== 401) throw error;
-      io.say(`✗ Telegram does not know that token (401).${io.interactive ? " Paste it again:" : ""}`);
+      // 401: a token of the right shape that Telegram does not know. 404: not a token's shape at all.
+      if (!(error instanceof TelegramError) || (error.code !== 401 && error.code !== 404)) throw error;
+      io.say(`✗ Telegram does not know that token (${error.code}).${io.interactive ? " Paste it again:" : ""}`);
       if (!io.interactive) return undefined;
       value = undefined;
     }

@@ -113,6 +113,8 @@ export function startFakeTelegram(): FakeTelegram {
       const match = /^\/bot([^/]+)\/(\w+)$/.exec(new URL(request.url).pathname);
       if (match === null) return fail(404, "Not Found");
       const [, given, method] = match;
+      // As the real Bot API: a path that is not a token's shape is not found; a wrong token is refused.
+      if (!/^\d+:[A-Za-z0-9_-]+$/.test(given ?? "")) return fail(404, "Not Found");
       if (given !== token) return fail(401, "Unauthorized");
       const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
       switch (method) {

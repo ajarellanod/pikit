@@ -5,6 +5,12 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/channel-telegram: pasting the bot token no longer ends the setup with `getMe: 404`. The
+  token is taken out of whatever is pasted (BotFather's whole message, quotes, spaces), something
+  that is not a token is asked again without calling Telegram, and a 404 (a malformed token) is asked
+  again like a 401. The fake Bot API answers 404 to a malformed token, as Telegram does.
+- cli: a secret prompt drops the terminal's escape sequences (bracketed-paste markers, arrow keys),
+  and a line break inside a paste no longer ends the answer.
 - cli, installer, registry: the guided path. The installer, on a terminal, goes straight into `pikit
   new`, which asks the agent's name and where to talk to it (the presets, by their new `title`), then
   sets up the channel, logs in to the model and starts it. Ctrl-C stops it; `pikit new` with the same
