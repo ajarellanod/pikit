@@ -22,6 +22,7 @@ copy them to `src/pikit/` instead.
 | `router-basic` | every message goes to `assistant` |
 | `channel-http` | `POST /v1/messages`, `POST /v1/conversations/:id/reset` |
 | `server-bun` | HTTP on port 3000, `/health`, `/ready` |
+| `log-events` | one JSON line per event: which agent answered, how the run ended, duration, tokens and cost; never the text |
 | `deployment-docker` | the process (`main.ts`): deadlines, signals, JSON-lines logs; and Docker |
 
 Everything the sample writes is in `samples/http/.pikit/`, which git ignores.

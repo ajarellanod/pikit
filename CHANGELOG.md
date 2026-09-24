@@ -5,6 +5,7 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- samples: `samples/http` installs `log-events`, so it is exactly the `http` preset plus its own agents.
 - registry: every component has a `component.json` and the registry a `registry.json` index.
   `bun run registry generate` writes the fields `setup` declares (`provides`, `requires.capabilities`,
   `optional.capabilities`, the tools' `replay`) from `describe()`; `bun run registry validate` fails on

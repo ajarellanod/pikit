@@ -14,6 +14,7 @@ import conversationsFile from "../../registry/components/conversations-file/file
 import credentialsFile from "../../registry/components/credentials-file/files/src/pikit/credentials-file/index.ts";
 import providerAnthropic from "../../registry/components/provider-anthropic/files/src/pikit/provider-anthropic/index.ts";
 import routerBasic from "../../registry/components/router-basic/files/src/pikit/router-basic/index.ts";
+import logEvents from "../../registry/components/log-events/files/src/pikit/log-events/index.ts";
 import executionLocal from "../../registry/components/execution-local/files/src/pikit/execution-local/index.ts";
 import { createRuntimePi } from "../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import secretsEnv from "../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
@@ -45,6 +46,8 @@ export const config = {
 
 export default defineApp({
   components: [
+    // First, so its lines cover the whole start; it only listens and owns nothing.
+    logEvents,
     secretsEnv,
     sessionsJsonl,
     conversationsFile,
