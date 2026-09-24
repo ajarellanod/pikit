@@ -1,0 +1,40 @@
+{
+  "name": "channel-http",
+  "version": "0.0.0",
+  "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "secrets",
+      "conversations.registry",
+      "agent.runtime"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "http.route"
+  ],
+  "dependencies": {
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "PIKIT_HTTP_TOKEN",
+      "secret": true,
+      "required": true,
+      "description": "Bearer token every request must carry; at least 16 characters (for example `openssl rand -hex 32`)."
+    }
+  ]
+}

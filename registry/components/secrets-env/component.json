@@ -1,0 +1,25 @@
+{
+  "name": "secrets-env",
+  "version": "0.0.0",
+  "description": "Secrets from the process environment.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "secrets"
+  ],
+  "dependencies": {},
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

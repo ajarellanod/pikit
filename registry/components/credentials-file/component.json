@@ -1,0 +1,28 @@
+{
+  "name": "credentials-file",
+  "version": "0.0.0",
+  "description": "The model providers' credentials in one JSON file, readable only by its owner (mode `0600`).",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "model.credentials"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

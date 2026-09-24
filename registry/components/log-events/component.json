@@ -1,0 +1,24 @@
+{
+  "name": "log-events",
+  "version": "0.0.0",
+  "description": "One structured log line per operational event: what reached which agent, how each run ended, how long it took and what it cost.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [],
+  "dependencies": {},
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

@@ -1,0 +1,35 @@
+{
+  "name": "tool-bash",
+  "version": "0.0.0",
+  "description": "Pi's own `bash` tool, for the agents that name it: it runs a shell command in the working directory and returns its output (the last lines when it is long), with an optional timeout.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "execution.shell"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "bash": "never"
+    }
+  },
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

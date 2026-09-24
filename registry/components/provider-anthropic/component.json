@@ -1,0 +1,47 @@
+{
+  "name": "provider-anthropic",
+  "version": "0.0.0",
+  "description": "Anthropic's Claude models for your agents. An agent names one as `anthropic/<modelId>`, for example `anthropic/claude-sonnet-4-6`.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "model.provider"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "ANTHROPIC_API_KEY",
+      "secret": true,
+      "required": false,
+      "description": "Read by pi-ai only when model.credentials stores nothing for anthropic."
+    },
+    {
+      "name": "ANTHROPIC_OAUTH_TOKEN",
+      "secret": true,
+      "required": false,
+      "description": "Read by pi-ai only when model.credentials stores nothing for anthropic."
+    },
+    {
+      "name": "ANTHROPIC_AUTH_TOKEN",
+      "secret": true,
+      "required": false,
+      "description": "Read by pi-ai only when model.credentials stores nothing for anthropic."
+    }
+  ]
+}

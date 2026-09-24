@@ -11,7 +11,8 @@
   },
   "scripts": {
     "test": "bun test",
-    "typecheck": "tsc -p tsconfig.json --noEmit"
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "registry": "bun scripts/registry.ts"
   },
   "devDependencies": {
     "@earendil-works/pi-coding-agent": "workspace:@pikit/pi-extension-shim@*",

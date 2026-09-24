@@ -1,0 +1,30 @@
+{
+  "name": "conversations-file",
+  "version": "0.0.0",
+  "description": "The conversation registry in one JSON file: which Pi session each conversation is in now.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "sessions.store"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "conversations.registry"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

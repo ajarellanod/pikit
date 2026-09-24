@@ -1,0 +1,29 @@
+{
+  "name": "execution-local",
+  "version": "0.0.0",
+  "description": "The agent's tools work on this server: its filesystem and its shell.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "execution",
+    "execution.shell"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

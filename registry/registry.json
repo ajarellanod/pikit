@@ -1,0 +1,140 @@
+{
+  "version": 1,
+  "components": {
+    "channel-http": {
+      "version": "0.0.0",
+      "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/channel-http"
+    },
+    "conversations-file": {
+      "version": "0.0.0",
+      "description": "The conversation registry in one JSON file: which Pi session each conversation is in now.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/conversations-file"
+    },
+    "credentials-file": {
+      "version": "0.0.0",
+      "description": "The model providers' credentials in one JSON file, readable only by its owner (mode `0600`).",
+      "targets": [
+        "server"
+      ],
+      "path": "components/credentials-file"
+    },
+    "deployment-docker": {
+      "version": "0.0.0",
+      "description": "Runs a pikit project in Docker on a server: the image, the container, the process entrypoint, its logs, and the commands `pikit up | down | restart | logs | status` delegate to.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/deployment-docker"
+    },
+    "execution-local": {
+      "version": "0.0.0",
+      "description": "The agent's tools work on this server: its filesystem and its shell.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/execution-local"
+    },
+    "log-events": {
+      "version": "0.0.0",
+      "description": "One structured log line per operational event: what reached which agent, how each run ended, how long it took and what it cost.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/log-events"
+    },
+    "provider-anthropic": {
+      "version": "0.0.0",
+      "description": "Anthropic's Claude models for your agents. An agent names one as `anthropic/<modelId>`, for example `anthropic/claude-sonnet-4-6`.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/provider-anthropic"
+    },
+    "router-basic": {
+      "version": "0.0.0",
+      "description": "Every message goes to one agent: `defaultAgent`.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/router-basic"
+    },
+    "runtime-pi": {
+      "version": "0.0.0",
+      "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/runtime-pi"
+    },
+    "secrets-env": {
+      "version": "0.0.0",
+      "description": "Secrets from the process environment.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/secrets-env"
+    },
+    "server-bun": {
+      "version": "0.0.0",
+      "description": "The HTTP server of the server target: Hono on `Bun.serve`.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/server-bun"
+    },
+    "sessions-jsonl": {
+      "version": "0.0.0",
+      "description": "Each conversation's Pi session is a JSONL file on the server's disk.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/sessions-jsonl"
+    },
+    "tool-bash": {
+      "version": "0.0.0",
+      "description": "Pi's own `bash` tool, for the agents that name it: it runs a shell command in the working directory and returns its output (the last lines when it is long), with an optional timeout.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-bash"
+    },
+    "tool-edit": {
+      "version": "0.0.0",
+      "description": "Pi's own `edit` tool, for the agents that name it: it replaces exact pieces of text in a file, each one unique in it.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-edit"
+    },
+    "tool-read": {
+      "version": "0.0.0",
+      "description": "Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-read"
+    },
+    "tool-write": {
+      "version": "0.0.0",
+      "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-write"
+    }
+  }
+}

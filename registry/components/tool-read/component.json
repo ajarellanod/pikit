@@ -1,0 +1,35 @@
+{
+  "name": "tool-read",
+  "version": "0.0.0",
+  "description": "Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "execution"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "read": "safe"
+    }
+  },
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

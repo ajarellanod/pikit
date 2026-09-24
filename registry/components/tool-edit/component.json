@@ -1,0 +1,35 @@
+{
+  "name": "tool-edit",
+  "version": "0.0.0",
+  "description": "Pi's own `edit` tool, for the agents that name it: it replaces exact pieces of text in a file, each one unique in it.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "execution"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "edit": "never"
+    }
+  },
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

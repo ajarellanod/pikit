@@ -1,0 +1,35 @@
+{
+  "name": "tool-write",
+  "version": "0.0.0",
+  "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "execution"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "write": "never"
+    }
+  },
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

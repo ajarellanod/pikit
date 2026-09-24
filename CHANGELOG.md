@@ -5,6 +5,12 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- registry: every component has a `component.json` and the registry a `registry.json` index.
+  `bun run registry generate` writes the fields `setup` declares (`provides`, `requires.capabilities`,
+  `optional.capabilities`, the tools' `replay`) from `describe()`; `bun run registry validate` fails on
+  drift, naming, layout, install scripts, sibling or Pi imports, runtime imports outside a
+  server-only component, `dependencies` that differ from the files' imports, and a `files` entry that
+  maps a directory other than `files/src` (files outside `src/` are listed one by one).
 - component/runtime-pi: documents and tests agents with `state` and `prepare`: a tool moves the
   conversation's state on and the next run gets the tools `prepare` gives for it. No new wiring:
   the state lives in the Pi session (SPEC §6.2a).

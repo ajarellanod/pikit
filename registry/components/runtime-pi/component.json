@@ -1,0 +1,35 @@
+{
+  "name": "runtime-pi",
+  "version": "0.0.0",
+  "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "sessions.store"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "agent.definition",
+      "model.provider",
+      "model.credentials",
+      "agent.tool"
+    ]
+  },
+  "provides": [
+    "agent.runtime"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
