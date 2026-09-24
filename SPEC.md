@@ -1176,6 +1176,18 @@ re-exports them; components implement them. Every implementation must pass
 `@earendil-works/pi-agent-core/harness/session/testing` (plus the fork/lifecycle sub-suites
 exported alongside them; verified against `pi-agent-core` 0.87.1).
 
+A component does not import Pi (rule 1), so the adapter exposes what a store needs:
+- `@pikit/pi-adapter/testing` re-exports both suites, with `storageOf(session)`, the `Storage` under
+  a session Pi's repositories created, so a store's storage suite runs over the storage it writes.
+- `@pikit/pi-adapter/node` (server only) has `createJsonlSessionStore({ root, cwd })`: Pi's
+  `JsonlSessionRepo` with a default working directory for callers that do not know one.
+
+Known gap (0.87.1): `JsonlSessionRepo` fails one case of `createSessionRepoConformance`, "publishes
+create when it reserves a shared destination id first" (a `create` racing a `fork` for the same new
+id). Pi's own JSONL test does not run its destination-reservation cases. pikit neither forks nor
+chooses session ids, so it does not reach it. JSONL stores register the case as `test.failing`
+(`JSONL_REPO_CONFORMANCE_GAPS`), so a Pi release that fixes it is noticed.
+
 Planned implementations:
 
 | Component | Backing | Target |
