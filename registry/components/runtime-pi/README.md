@@ -16,7 +16,7 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
   refreshes nothing: it only asks whether a credential is stored or an environment variable is
   set.
 - **Target:** `server`. Cloudflare comes in M4, when Durable Object alarms drive runs.
-- **Installs to:** `src/pikit/runtime/pi/`.
+- **Installs to:** `src/pikit/runtime-pi/`.
 - **npm dependencies:** `@pikit/pi-adapter`, which is pinned with Pi.
 
 ## What it does
@@ -50,7 +50,7 @@ Existing Pi extensions run unmodified, except for their terminal UI: `ctx.hasUI`
 and `ctx.ui.*` does nothing. List them where you compose the app:
 
 ```ts
-import { createRuntimePi } from "./src/pikit/runtime/pi";
+import { createRuntimePi } from "./src/pikit/runtime-pi";
 import permissionGate from "./extensions/permission-gate.ts";
 
 const runtimePi = createRuntimePi({ extensions: [permissionGate] });

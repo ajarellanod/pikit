@@ -14,7 +14,7 @@ import conversationsFile from "../../registry/components/conversations-file/file
 import credentialsFile from "../../registry/components/credentials-file/files/src/pikit/credentials-file/index.ts";
 import providerAnthropic from "../../registry/components/provider-anthropic/files/src/pikit/providers/anthropic/index.ts";
 import routerBasic from "../../registry/components/router-basic/files/src/pikit/router/basic/index.ts";
-import runtimePi from "../../registry/components/runtime-pi/files/src/pikit/runtime/pi/index.ts";
+import runtimePi from "../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import secretsEnv from "../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import serverBun from "../../registry/components/server-bun/files/src/pikit/server/bun/index.ts";
 import sessionsJsonl from "../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
