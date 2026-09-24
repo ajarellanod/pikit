@@ -4,7 +4,7 @@ import { CliError, log } from "../ui.ts";
 
 /** With `quiet`, Bun's output is shown only when the install fails. */
 export async function bunInstall(projectDir: string, options: { quiet?: boolean } = {}): Promise<void> {
-  log.step("bun install");
+  if (options.quiet !== true) log.step("bun install");
   const output = options.quiet === true ? "pipe" : "inherit";
   const child = Bun.spawn([process.execPath, "install"], { cwd: projectDir, stdin: "ignore", stdout: output, stderr: output });
   const [code, out, err] = await Promise.all([

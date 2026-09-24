@@ -1915,8 +1915,10 @@ M1 has these commands; the others print "not yet" and name the milestone that br
 ships `src/pikit/<name>/configure.ts`, exporting `configure(io)`: checking a token against its API,
 discovering an id. `pikit configure` runs these steps first, in a child process in the project.
 - `io` gives the step its config from `pikit.config.ts`, `.env` to read and write (mode 0600;
-  what the environment exports wins, as everywhere in `configure`), the terminal to ask with, and
-  whether a person is there at all.
+  what the environment exports wins, as everywhere in `configure`), the terminal to ask with
+  (`ask`, `askSecret`, and `choose` / `confirm` for a menu and a yes/no), and whether a person is
+  there at all. A step declares `choose` and `confirm` optional and falls back to `ask`, so it also
+  runs under a CLI that predates them.
 - The step returns what is still missing.
 - The variables of a component with a step are not asked again one by one: the step owns them. A
   bot token is not a value to generate.
@@ -1924,7 +1926,10 @@ discovering an id. `pikit configure` runs these steps first, in a child process 
 The CLI knows nothing about what a step does, as with `deployment-*`. `channel-telegram`'s step
 checks the bot token with `getMe`, and allows whoever sends the bot a message.
 
-`[decision]` **The guided path.** `pikit new` with no directory, in a terminal, asks the agent's name
+`[decision]` **The guided path.** Its prompts are `@clack/prompts` (menus with the arrow keys,
+yes/no, text with a default, spinners), except secrets: a pasted token must stay one answer even over
+several lines, which clack's password prompt does not keep, so pikit reads secrets itself, masked, and
+draws them the same way. Without a terminal nothing is drawn and nothing changes. **The flow.** `pikit new` with no directory, in a terminal, asks the agent's name
 (its folder) and where to talk to it: one choice per preset of the registry, shown by its `title`.
 Then it runs the same functions as the commands: `new`, `configure` (each component's own step, then
 the model's login) and `up` (the default) or `dev`. It knows no channel: the choices come from the

@@ -3,7 +3,7 @@
  * asks something also takes its answer from a flag, so it can run in a script.
  */
 
-import { createInterface } from "node:readline/promises";
+import * as clack from "@clack/prompts";
 
 export function isInteractive(): boolean {
   return process.stdin.isTTY === true && process.stdout.isTTY === true;
@@ -12,35 +12,83 @@ export function isInteractive(): boolean {
 /** Ctrl-C at a prompt: the command stops with 130, as a shell reports an interrupted command. */
 export class Cancelled extends Error {}
 
-export async function ask(question: string): Promise<string> {
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return (await terminal.question(question)).trim();
-  } catch (error) {
-    // readline rejects the question with an AbortError on Ctrl-C.
-    if (error instanceof Error && error.name === "AbortError") throw new Cancelled("cancelled");
-    throw error;
-  } finally {
-    terminal.close();
-  }
+/** A prompt's answer, or `Cancelled` when the person pressed Ctrl-C (or Esc). */
+function answered<T>(value: T): Exclude<T, symbol> {
+  if (clack.isCancel(value)) throw new Cancelled("cancelled");
+  return value as Exclude<T, symbol>;
 }
 
-export async function confirm(question: string): Promise<boolean> {
-  return /^y(es)?$/i.test(await ask(`${question} [y/N] `));
+export interface AskOptions {
+  /** What Enter gives on an empty answer; shown as the placeholder. */
+  defaultValue?: string;
+  /** A message when the answer is not acceptable; the prompt stays until it is. */
+  validate?: (answer: string) => string | undefined;
 }
 
-/** A question whose Enter means yes. */
-export async function confirmYes(question: string): Promise<boolean> {
-  const answer = await ask(`${question} [Y/n] `);
-  return answer === "" || /^y(es)?$/i.test(answer);
+/** A line of text, trimmed. */
+export async function ask(message: string, options: AskOptions = {}): Promise<string> {
+  const { defaultValue, validate } = options;
+  const answer = answered(
+    await clack.text({
+      message,
+      ...(defaultValue !== undefined && { defaultValue, placeholder: defaultValue }),
+      ...(validate !== undefined && { validate: (value: string | undefined) => validate((value ?? "").trim() || (defaultValue ?? "")) }),
+    }),
+  );
+  return (answer ?? "").trim();
 }
 
-/** Reads a line without echoing it: for secrets. Ctrl-C aborts the command. */
-export function askSecret(question: string): Promise<string> {
+export interface Choice<T extends string> {
+  value: T;
+  label: string;
+  /** Shown next to the option while it is selected. */
+  hint?: string;
+}
+
+/** One of `choices`, picked with the arrow keys and Enter. */
+export async function choose<T extends string>(message: string, choices: Choice<T>[], initialValue?: T): Promise<T> {
+  const options = choices.map((c) => ({ value: c.value, label: c.label, ...(c.hint !== undefined && { hint: c.hint }) }));
+  return answered(await clack.select<T>({ message, options: options as Parameters<typeof clack.select<T>>[0]["options"], ...(initialValue !== undefined && { initialValue }) }));
+}
+
+/** Yes or no; Enter gives `initialValue`. */
+export async function confirm(message: string, initialValue = false): Promise<boolean> {
+  return answered(await clack.confirm({ message, initialValue }));
+}
+
+/** The start and the end of a guided path. */
+export const intro = (title: string): void => clack.intro(title);
+export const outro = (message: string): void => clack.outro(message);
+
+/** A spinner for a long step; `stop` with what was done. */
+export function spinner(message: string): { stop(done: string): void; error(message: string): void } {
+  const s = clack.spinner();
+  s.start(message);
+  return { stop: (done) => s.stop(done), error: (failed) => s.error(failed) };
+}
+
+const CYAN = (text: string) => `\u001b[36m${text}\u001b[39m`;
+const GRAY = (text: string) => `\u001b[90m${text}\u001b[39m`;
+
+/**
+ * Reads a secret, shown as one ▪ per character: for tokens and keys. Ctrl-C aborts the command.
+ *
+ * Not clack's `password`: a paste over several lines (BotFather's whole message) must stay one
+ * answer, and clack keeps only its last line. It is drawn like clack's prompts.
+ */
+export function askSecret(message: string): Promise<string> {
   const stdin = process.stdin;
   // Echo off before the question shows: what is pasted the moment it appears is not echoed either.
   stdin.setRawMode(true);
-  process.stdout.write(question);
+  process.stdout.write(`${GRAY("│")}\n${CYAN("◆")}  ${message.replace(/:\s*$/, "")}\n${CYAN("│")}  `);
+  let shown = 0;
+  const mask = (length: number) => {
+    // At most one line of dots: a long paste does not wrap the terminal.
+    const target = Math.min(length, 48);
+    if (target > shown) process.stdout.write("▪".repeat(target - shown));
+    else if (target < shown) process.stdout.write("\b \b".repeat(shown - target));
+    shown = target;
+  };
   stdin.resume();
   stdin.setEncoding("utf8");
   return new Promise((resolve, reject) => {
@@ -80,6 +128,7 @@ export function askSecret(question: string): Promise<string> {
           continue;
         }
         if (char === "\r" || char === "\n") {
+          mask(value.length);
           // Enter ends the value. A line break inside pasted text does not: a paste arrives in one
           // chunk (or between the markers), so more text after it in the chunk means a paste.
           const rest = chars.slice(i + 1).join("").replace(/\u001b\[201~/g, "");
@@ -93,17 +142,37 @@ export function askSecret(question: string): Promise<string> {
         if (char === "\u007f" || char === "\b") value = value.slice(0, -1);
         else if (char >= " ") value += char;
       }
+      mask(value.length);
     };
     stdin.on("data", onData);
   });
 }
 
+/**
+ * Set by the guided path (`pikit new`, `pikit configure` at a terminal) for its own process and the
+ * steps it runs in child processes: lines are drawn on clack's rail, between its prompts.
+ */
+export const GUIDED = "PIKIT_GUIDED";
+
+export function beginGuided(): void {
+  process.env[GUIDED] = "1";
+}
+
+/** Each line after the rail, when a person is following a guided path on this stream. */
+function railed(stream: NodeJS.WriteStream, text: string): string {
+  if (process.env[GUIDED] !== "1" || stream.isTTY !== true) return text;
+  return text
+    .split("\n")
+    .map((line) => `${GRAY("│")}${line === "" ? "" : `  ${line}`}`)
+    .join("\n");
+}
+
 export const log = {
-  info: (message: string) => console.log(message),
-  step: (message: string) => console.log(`→ ${message}`),
-  ok: (message: string) => console.log(`✓ ${message}`),
-  warn: (message: string) => console.warn(`! ${message}`),
-  problem: (message: string) => console.error(`✗ ${message}`),
+  info: (message: string) => console.log(railed(process.stdout, message)),
+  step: (message: string) => console.log(railed(process.stdout, `→ ${message}`)),
+  ok: (message: string) => console.log(railed(process.stdout, `✓ ${message}`)),
+  warn: (message: string) => console.warn(railed(process.stderr, `! ${message}`)),
+  problem: (message: string) => console.error(railed(process.stderr, `✗ ${message}`)),
 };
 
 /** An error the user can act on: printed without a stack trace. */

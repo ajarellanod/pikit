@@ -16,7 +16,9 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.ts";
+import { DEFAULT_REGISTRY } from "./paths.ts";
 import { setConfigEntry } from "./project/config-file.ts";
+import { openRegistry } from "./project/registry-source.ts";
 
 const E2E = process.env.PIKIT_E2E === "1";
 const MAIN = join(import.meta.dir, "main.ts");
@@ -59,14 +61,20 @@ function wizard(env: Record<string, string> = {}) {
   };
 }
 
-/** Answers the first two questions and returns what the preset menu offered for Telegram. */
+const DOWN = "\x1b[B";
+const RIGHT = "\x1b[C";
+
+/** Answers the name, then picks Telegram in the menu with the arrow keys. */
 async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
   await w.waitFor("Name of your agent");
   w.type("my-bot\r");
-  const menu = await w.waitFor("Choice: ");
-  const telegramChoice = /(\d+)\) Telegram/.exec(w.text().slice(0, menu))?.[1];
-  expect(telegramChoice).toBeDefined();
-  w.type(`${telegramChoice}\r`);
+  await w.waitFor("Where do you want to talk to your agent?");
+  const telegramAt = openRegistry(DEFAULT_REGISTRY).presets().findIndex((p) => p.name === "telegram");
+  expect(telegramAt).toBeGreaterThanOrEqual(0);
+  await Bun.sleep(100);
+  w.type(DOWN.repeat(telegramAt));
+  await Bun.sleep(100);
+  w.type("\r");
 }
 
 test.skipIf(!E2E)(
@@ -76,9 +84,9 @@ test.skipIf(!E2E)(
     await w.waitFor("Name of your agent");
     w.type("my-bot\r");
     await w.waitFor("Where do you want to talk to your agent?");
-    expect(w.text()).toContain("Telegram: chat with your agent from the Telegram app");
+    await w.waitFor("Telegram");
     expect(w.text()).toContain("HTTP API");
-    await w.waitFor("Choice: ");
+    await Bun.sleep(100);
     w.type("\x03");
     expect(await w.exited).toBe(130);
     expect(w.text()).toContain('Stopped. Run `pikit new` again and answer "my-bot" to continue.');
@@ -92,8 +100,12 @@ test.skipIf(!E2E)(
   async () => {
     const w = wizard();
     await nameAndTelegram(w);
-    await w.waitFor("Configure it now");
-    w.type("n\r");
+    await w.waitFor("Created my-bot in");
+    await w.waitFor("Configure it now?");
+    await Bun.sleep(100);
+    w.type(RIGHT);
+    await Bun.sleep(100);
+    w.type("\r");
     expect(await w.exited).toBe(0);
     expect(w.text()).toContain("Later: cd my-bot && pikit configure && pikit up");
     expect(readFileSync(join(project, "pikit.json"), "utf8")).toContain('"channel-telegram"');
@@ -111,16 +123,18 @@ test.skipIf(!E2E)(
     const w = wizard({ ANTHROPIC_API_KEY: DUMMY_KEY });
     await w.waitFor("Name of your agent");
     w.type("my-bot\r");
-    await w.waitFor("my-bot already exists. Continue setting it up? [Y/n]");
+    await w.waitFor("my-bot already exists. Continue setting it up?");
+    await Bun.sleep(100);
     w.type("\r");
-    await w.waitFor("Configure it now");
+    await w.waitFor("Configure it now?");
+    await Bun.sleep(100);
     w.type("\r");
 
     let at = await w.waitFor("open https://t.me/BotFather");
-    at = await w.waitFor("TELEGRAM_BOT_TOKEN: ", at);
+    at = await w.waitFor("TELEGRAM_BOT_TOKEN", at);
     w.type("123456:not-the-token\r");
     at = await w.waitFor("Telegram does not know that token (401). Paste it again:", at);
-    at = await w.waitFor("TELEGRAM_BOT_TOKEN: ", at);
+    at = await w.waitFor("TELEGRAM_BOT_TOKEN", at);
     // What people paste: BotFather's whole message, over several lines, inside the bracketed-paste
     // markers their terminal adds; then Enter.
     w.type(`\x1b[200~Done! Congratulations on your new bot.\nUse this token to access the HTTP API:\n${telegram.token}\nKeep your token secure\x1b[201~`);
@@ -128,11 +142,14 @@ test.skipIf(!E2E)(
     w.type("\r");
     at = await w.waitFor("send it any message now", at);
     telegram.say(OWNER, "hi");
-    at = await w.waitFor("Message from Ada (@ada), id 1001. Allow them to talk to your agent? [Y/n]", at);
+    at = await w.waitFor("Message from Ada (@ada), id 1001. Allow them to talk to your agent?", at);
+    await Bun.sleep(100);
     w.type("\r");
-    at = await w.waitFor("Start it:", at);
-    await w.waitFor("Choice [1]: ", at);
-    w.type("s\r");
+    at = await w.waitFor("Start it?", at);
+    await Bun.sleep(100);
+    w.type(DOWN.repeat(2));
+    await Bun.sleep(100);
+    w.type("\r");
 
     expect(await w.exited).toBe(0);
     expect(w.text()).toContain("Later: cd my-bot && pikit up");

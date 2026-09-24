@@ -17,7 +17,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ENV_FILE, readEnv, writeEnv } from "./env-file.ts";
 import { readProjectManifest } from "./pikit-json.ts";
-import { ask, askSecret, Cancelled, log } from "../ui.ts";
+import { ask, askSecret, Cancelled, choose, confirm, log } from "../ui.ts";
 
 export type ComponentConfigureResult = { ok: true; ran: string[]; missing: string[] } | { ok: false; error: string; cancelled?: true };
 
@@ -30,6 +30,10 @@ export interface ConfigureIO {
   set(name: string, value: string): void;
   ask(question: string): Promise<string>;
   askSecret(question: string): Promise<string>;
+  /** One of `choices`, with the arrow keys. A step written for an older CLI may not use it. */
+  choose(message: string, choices: { value: string; label: string; hint?: string }[]): Promise<string>;
+  /** Yes or no; Enter gives `initialValue`. */
+  confirm(message: string, initialValue: boolean): Promise<boolean>;
   say(line: string): void;
 }
 
@@ -61,9 +65,11 @@ async function run(projectDir: string, interactive: boolean): Promise<ComponentC
         writeEnv(projectDir, new Map([[variable, value]]));
         log.ok(`${ENV_FILE} (mode 0600): set ${variable}`);
       },
-      ask,
+      ask: (question) => ask(question),
       askSecret,
-      say: (line) => console.info(line),
+      choose: (message, choices) => choose(message, choices),
+      confirm,
+      say: (line) => log.info(line),
     };
     missing.push(...(await step.configure(io)));
     ran.push(name);

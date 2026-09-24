@@ -46,7 +46,8 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   for (const component of components) registry.manifest(component);
   const tools = components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {}));
 
-  log.step(`creating ${projectDir}${options.preset ? ` from the preset "${options.preset}"` : ""}`);
+  const step = (message: string) => options.quiet !== true && log.step(message);
+  step(`creating ${projectDir}${options.preset ? ` from the preset "${options.preset}"` : ""}`);
   mkdirSync(join(projectDir, "src", "agents", starter.STARTER_AGENT), { recursive: true });
   mkdirSync(join(projectDir, "src", "extensions"), { recursive: true });
   const kit = vendorKit(projectDir);
@@ -74,11 +75,11 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
 
   await bunInstall(projectDir, { quiet: options.quiet === true });
 
-  log.step("pikit doctor");
+  step("pikit doctor");
   const report = await doctor(projectDir, { quiet: true });
   for (const problem of report.problems) log.problem(problem);
   if (report.problems.length > 0) throw new CliError(`the new project has ${report.problems.length} problem(s)`);
-  log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
+  if (options.quiet !== true) log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
   if (options.next === false) return;
   log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev         # or \`pikit up\` to run it in Docker`);
 }

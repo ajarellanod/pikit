@@ -24,7 +24,7 @@ import { ENV_FILE, readEnv, writeEnv } from "../project/env-file.ts";
 import { apiKeyName, checkModelCredentials, loginModel } from "../project/model-credentials.ts";
 import { readProjectManifest } from "../project/pikit-json.ts";
 import { runScript } from "../project/run.ts";
-import { ask, askSecret, Cancelled, CliError, isInteractive, log } from "../ui.ts";
+import { ask, askSecret, beginGuided, Cancelled, CliError, choose, isInteractive, log } from "../ui.ts";
 
 export interface ConfigureOptions {
   /** Ask nothing, as without a terminal. */
@@ -42,6 +42,7 @@ export interface ConfigureOptions {
 
 export async function configure(projectDir: string, options: ConfigureOptions = {}): Promise<void> {
   const interactive = options.yes !== true && isInteractive();
+  if (interactive) beginGuided();
   const variables = declaredVariables(projectDir);
   const stepMissing = await componentSteps(projectDir, interactive);
   // A component with a step of its own owns its variables: they are not asked for again here.
@@ -108,7 +109,7 @@ async function valueFor(v: EnvironmentVariable, options: ConfigureOptions, inter
   // Optional variables (a provider's API key) are asked for in the model step, not one by one.
   if (!interactive || !v.required) return undefined;
   const generable = v.secret && /_TOKEN$/.test(v.name);
-  const question = `${v.name}${v.description ? ` (${v.description})` : ""}\n  ${generable ? "value, or Enter to generate one" : "value"}: `;
+  const question = `${v.name}${v.description ? ` — ${v.description}` : ""}${generable ? " (Enter generates one)" : ""}`;
   const answer = v.secret ? await askSecret(question) : await ask(question);
   return answer === "" && generable ? randomToken() : answer;
 }
@@ -156,22 +157,18 @@ async function configureModels(
     const keyName = apiKeyName(id);
     const hasKeyVariable = variables.some((v) => v.name === keyName);
     const inApp = there !== undefined;
-    const choice = await ask(
-      [
-        `\nThe model provider "${id}" has no credentials.`,
-        inApp
-          ? "  1) log in with your subscription, for `pikit up` (OAuth: open a URL, then paste the page's address back here)"
-          : `  1) log in with your subscription (OAuth, opens a URL)${exec === undefined ? "" : ", for `pikit dev` only"}`,
-        ...(hasKeyVariable ? [`  2) paste an API key (stored in ${ENV_FILE} as ${keyName}; \`pikit up\` and \`pikit dev\` both read it)`] : []),
-        ...(inApp ? ["  3) log in with your subscription, for `pikit dev` only (on this machine)"] : []),
-        "  s) skip",
-        "Choice: ",
-      ].join("\n"),
-    );
-    if (choice === "1") await login(projectDir, id, here.store, inApp ? exec : undefined);
-    else if (choice === "3" && inApp) await login(projectDir, id, here.store, undefined);
-    else if (choice === "2" && hasKeyVariable) {
-      const key = await askSecret(`${keyName}: `);
+    const choice = await choose<"up" | "key" | "dev" | "skip">(`The model provider "${id}" has no credentials. How should your agent reach it?`, [
+      inApp
+        ? { value: "up", label: "Log in with your subscription, for `pikit up`", hint: "OAuth: open a URL, then paste the page's address back here" }
+        : { value: "dev", label: `Log in with your subscription${exec === undefined ? "" : ", for `pikit dev` only"}`, hint: "OAuth, opens a URL" },
+      ...(hasKeyVariable ? [{ value: "key" as const, label: "Paste an API key", hint: `stored in ${ENV_FILE} as ${keyName}; \`pikit up\` and \`pikit dev\` both read it` }] : []),
+      ...(inApp ? [{ value: "dev" as const, label: "Log in with your subscription, for `pikit dev` only", hint: "on this machine" }] : []),
+      { value: "skip", label: "Skip for now" },
+    ]);
+    if (choice === "up") await login(projectDir, id, here.store, exec);
+    else if (choice === "dev") await login(projectDir, id, here.store, undefined);
+    else if (choice === "key") {
+      const key = await askSecret(keyName);
       if (key === "") left.push(id);
       else {
         writeEnv(projectDir, new Map([[keyName, key]]));

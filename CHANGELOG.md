@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: the guided path and `pikit configure` look like a modern installer (`@clack/prompts`): menus
+  you move through with the arrow keys, yes/no questions, text with a default, a spinner while the
+  project is created, and every line on one rail. A secret shows one ▪ per character. Components'
+  `configure` steps get `choose` and `confirm`; `channel-telegram` asks "Allow them?" as a yes/no.
 - component/channel-telegram: pasting the bot token no longer ends the setup with `getMe: 404`. The
   token is taken out of whatever is pasted (BotFather's whole message, quotes, spaces), something
   that is not a token is asked again without calling Telegram, and a 404 (a malformed token) is asked

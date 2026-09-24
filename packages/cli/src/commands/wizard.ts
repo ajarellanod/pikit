@@ -16,7 +16,7 @@ import { existsSync, readdirSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { openRegistry } from "../project/registry-source.ts";
-import { ask, Cancelled, CliError, confirmYes, log } from "../ui.ts";
+import { ask, beginGuided, Cancelled, CliError, choose, confirm, intro, log, outro, spinner } from "../ui.ts";
 import { configure } from "./configure.ts";
 import { deployment, dev } from "./deployment.ts";
 import { newProject, validProjectName } from "./new.ts";
@@ -25,7 +25,9 @@ const DEFAULT_NAME = "my-agent";
 
 export async function newWizard(parentDir: string, options: { registry?: string } = {}): Promise<number> {
   const registryPath = options.registry ?? DEFAULT_REGISTRY;
-  log.info("\nLet's set up your agent. Ctrl-C stops at any question; `pikit new` continues where you left off.\n");
+  beginGuided();
+  intro("pikit: a new agent");
+  log.info("Ctrl-C stops at any question; `pikit new` continues where you left off.");
   let name = DEFAULT_NAME;
   try {
     const project = await chooseProject(parentDir);
@@ -33,21 +35,28 @@ export async function newWizard(parentDir: string, options: { registry?: string 
     if (project.existing) log.ok(`continuing with ${name}`);
     else {
       const preset = await choosePreset(registryPath);
-      await newProject(project.dir, { preset, registry: registryPath, next: false, quiet: true });
+      const creating = spinner(`Creating ${name}: its components, then \`bun install\``);
+      try {
+        await newProject(project.dir, { preset, registry: registryPath, next: false, quiet: true });
+      } catch (error) {
+        creating.error(`Could not create ${name}`);
+        throw error;
+      }
+      creating.stop(`Created ${name} in ${project.dir}`);
     }
 
-    if (!(await confirmYes("\nConfigure it now (where you talk to it, and the model's login)?"))) return later(name, "configure");
+    if (!(await confirm("Configure it now? (where you talk to it, and the model's login)", true))) return later(name, "configure");
     try {
       await configure(project.dir);
     } catch (error) {
       if (!(error instanceof CliError)) throw error;
       log.problem(error.message);
-      log.info(`\nFix that, then run \`pikit new\` again and answer "${name}": it continues from here.`);
+      outro(`Fix that, then run \`pikit new\` again and answer "${name}": it continues from here.`);
       return 1;
     }
     return await start(project.dir, name);
   } catch (error) {
-    if (error instanceof Cancelled) log.info(`\n\nStopped. Run \`pikit new\` again${name === DEFAULT_NAME ? "" : ` and answer "${name}"`} to continue.`);
+    if (error instanceof Cancelled) outro(`Stopped. Run \`pikit new\` again${name === DEFAULT_NAME ? "" : ` and answer "${name}"`} to continue.`);
     throw error;
   }
 }
@@ -55,15 +64,14 @@ export async function newWizard(parentDir: string, options: { registry?: string 
 /** A new folder, or an existing pikit project to continue with. */
 async function chooseProject(parentDir: string): Promise<{ dir: string; name: string; existing: boolean }> {
   for (;;) {
-    const name = (await ask(`Name of your agent (a new folder in ${parentDir}) [${DEFAULT_NAME}]: `)) || DEFAULT_NAME;
-    if (!validProjectName(name)) {
-      log.problem(`"${name}": use lowercase letters, digits, "-", "." or "_"`);
-      continue;
-    }
+    const name = await ask(`Name of your agent (a new folder in ${parentDir})`, {
+      defaultValue: DEFAULT_NAME,
+      validate: (answer) => (validProjectName(answer) ? undefined : 'Use lowercase letters, digits, "-", "." or "_"'),
+    });
     const dir = resolve(parentDir, name);
     if (!existsSync(dir) || readdirSync(dir).length === 0) return { dir, name, existing: false };
     if (existsSync(join(dir, "pikit.json"))) {
-      if (await confirmYes(`${name} already exists. Continue setting it up?`)) return { dir, name, existing: true };
+      if (await confirm(`${name} already exists. Continue setting it up?`, true)) return { dir, name, existing: true };
       continue;
     }
     log.problem(`${dir} exists and is not a pikit project: choose another name`);
@@ -73,34 +81,35 @@ async function chooseProject(parentDir: string): Promise<{ dir: string; name: st
 async function choosePreset(registryPath: string): Promise<string> {
   const presets = openRegistry(registryPath).presets();
   if (presets.length === 0) throw new CliError(`the registry ${registryPath} has no presets to choose from`);
-  log.info("\nWhere do you want to talk to your agent?");
-  presets.forEach((preset, i) => log.info(`  ${i + 1}) ${preset.title}`));
-  for (;;) {
-    const choice = Number(await ask("Choice: "));
-    const preset = Number.isInteger(choice) ? presets[choice - 1] : undefined;
-    if (preset !== undefined) return preset.name;
-  }
+  // A title is "Name: what it is"; the part after the colon is the option's hint.
+  return await choose(
+    "Where do you want to talk to your agent?",
+    presets.map((preset) => {
+      const [label = preset.name, ...rest] = preset.title.split(": ");
+      return { value: preset.name, label, ...(rest.length > 0 && { hint: rest.join(": ") }) };
+    }),
+  );
 }
 
 async function start(dir: string, name: string): Promise<number> {
-  const choice = await ask(
+  const choice = await choose<"up" | "dev" | "later">(
+    "Start it?",
     [
-      "\nStart it:",
-      "  1) in Docker, in the background (`pikit up`): it keeps running after you log out",
-      "  2) here, in this terminal (`pikit dev`): Ctrl-C stops it",
-      "  s) not now",
-      "Choice [1]: ",
-    ].join("\n"),
+      { value: "up", label: "In Docker, in the background (`pikit up`)", hint: "it keeps running after you log out" },
+      { value: "dev", label: "Here, in this terminal (`pikit dev`)", hint: "Ctrl-C stops it" },
+      { value: "later", label: "Not now" },
+    ],
+    "up",
   );
-  if (choice === "2") return await dev(dir);
-  if (choice !== "" && choice !== "1") return later(name, "up");
+  if (choice === "dev") return await dev(dir);
+  if (choice === "later") return later(name, "up");
   await deployment(dir, "up");
-  log.info(`\nYour agent is running. In its folder (\`cd ${name}\`): \`pikit logs --follow\` to watch it, \`pikit status\`, \`pikit down\` to stop it.`);
+  outro(`Your agent is running. In its folder (\`cd ${name}\`): \`pikit logs --follow\` to watch it, \`pikit status\`, \`pikit down\` to stop it.`);
   return 0;
 }
 
 function later(name: string, from: "configure" | "up"): number {
   const steps = from === "configure" ? "pikit configure && pikit up" : "pikit up";
-  log.info(`\nLater: cd ${name} && ${steps}   (or \`pikit new\` again, answering "${name}")`);
+  outro(`Later: cd ${name} && ${steps}   (or \`pikit new\` again, answering "${name}")`);
   return 0;
 }
