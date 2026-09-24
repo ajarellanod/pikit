@@ -1906,13 +1906,26 @@ M1 has these commands; the others print "not yet" and name the milestone that br
 |---|---|
 | `new`, `add`, `remove` | §10.5 |
 | `doctor` | Creates the app (every setup, no start) and prints the component graph, capability providers, pipelines and config (§4.6). Fails when the app does not compose, when a variable a component marks required is set neither in the environment nor in `.env` (names only, never values), or when a file breaks the Pi import rule (S1: a component imports no `@earendil-works/*`, project code only `@earendil-works/pi-coding-agent`, the Pi extensions' alias). Lists modified and deleted installed files as information. |
-| `configure` | Writes the installed components' variables to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login made on the host lands in the host's `.pikit/`, which `deployment-docker` does not share with its container's volume: in Docker, use an API key or log in inside the container. |
+| `configure` | First runs the components' own steps (below). Then writes the other variables of the installed components to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login made on the host lands in the host's `.pikit/`, which `deployment-docker` does not share with its container's volume: in Docker, use an API key or log in inside the container. |
 | `dev` | After `doctor`, `bun --watch src/pikit/<deployment>/main.ts` (the installed `deployment-*` component's entrypoint) with `.env` loaded. |
 | `up`, `down`, `restart`, `logs`, `status` | Delegate, as above. `up` runs `doctor` first. |
 | `registry validate`, `registry generate` | §10.2, §14. `bun run registry` in this repository calls the same code. |
 
+`[decision]` **A component can own its setup.** A component that needs more than a value typed in
+ships `src/pikit/<name>/configure.ts`, exporting `configure(io)`: checking a token against its API,
+discovering an id. `pikit configure` runs these steps first, in a child process in the project.
+- `io` gives the step its config from `pikit.config.ts`, `.env` to read and write (mode 0600;
+  what the environment exports wins, as everywhere in `configure`), the terminal to ask with, and
+  whether a person is there at all.
+- The step returns what is still missing.
+- The variables of a component with a step are not asked again one by one: the step owns them. A
+  bot token is not a value to generate.
+
+The CLI knows nothing about what a step does, as with `deployment-*`. `channel-telegram`'s step
+checks the bot token with `getMe`, and allows whoever sends the bot a message.
+
 `[decision]` The CLI runs a project's code only in child `bun` processes in the project's directory
-(`doctor`'s app, `configure`'s login), so the project's own `@pikit/core` and components load, never
+(`doctor`'s app, `configure`'s login and the components' steps), so the project's own `@pikit/core` and components load, never
 the CLI's, and every run sees the files as they are now. The exception is the deployment component's
 commands, which are plain functions the CLI calls.
 
@@ -2253,6 +2266,8 @@ Resolved `[decision]`:
   `outbound-direct`, `outbound.prepare` or `channel.transport` until M2's `durable-outbox`: a
   synchronous reply has nothing to retry, and a direct outbound path built now would be replaced
   in M2. A duplicate `messageId` is a `409`, with no stored answer to replay.
+- A component can own its `pikit configure` step (`src/pikit/<name>/configure.ts`, §11): the setup
+  of a platform belongs with the component that talks to it, and the CLI only calls it.
 - `channel-telegram` receives by long polling, acknowledges after admission, relies on the request
   id for duplicates, and lets only allowlisted users reach the agent (§5, §13). No public URL is
   needed, so a bot runs where the project runs; the allowlist is what keeps an agent with tools

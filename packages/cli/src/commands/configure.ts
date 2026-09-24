@@ -1,9 +1,12 @@
 /**
  * `pikit configure`: what a project needs before it runs, and nothing else.
  *
- * 1. The variables the installed components declare (`environment` in their manifests), written to
- *    `.env` with mode 0600. A secret is asked without echo; a required `*_TOKEN` can be generated.
- * 2. Model credentials, for each installed model provider that has none: a login through pi-ai's
+ * 1. The components' own steps: a component that ships `src/pikit/<name>/configure.ts` sets up
+ *    its own variables there (checking a token, discovering an id), and the CLI only calls it.
+ * 2. The other variables the installed components declare (`environment` in their manifests),
+ *    written to `.env` with mode 0600. A secret is asked without echo; a required `*_TOKEN` can be
+ *    generated.
+ * 3. Model credentials, for each installed model provider that has none: a login through pi-ai's
  *    own flow, stored by the project's `model.credentials` component (`credentials-file`), or an
  *    API key in `.env`.
  *
@@ -13,6 +16,7 @@
  */
 
 import type { EnvironmentVariable } from "../registry/manifest.ts";
+import { type ComponentConfigureResult, componentsWithSteps } from "../project/component-configure.ts";
 import type { CredentialsResult } from "../project/credentials.ts";
 import { ENV_FILE, readEnv, writeEnv } from "../project/env-file.ts";
 import { readProjectManifest } from "../project/pikit-json.ts";
@@ -31,11 +35,15 @@ export interface ConfigureOptions {
 export async function configure(projectDir: string, options: ConfigureOptions = {}): Promise<void> {
   const interactive = options.yes !== true && isInteractive();
   const variables = declaredVariables(projectDir);
+  const stepMissing = await componentSteps(projectDir, interactive);
+  // A component with a step of its own owns its variables: they are not asked for again here.
+  const owned = new Set(componentsWithSteps(projectDir).flatMap((name) => readProjectManifest(projectDir).components[name]?.environment.map((v) => v.name) ?? []));
   const current = readEnv(projectDir);
   const updates = new Map<string, string>();
   const missing: string[] = [];
 
   for (const v of variables) {
+    if (owned.has(v.name)) continue;
     if ((current.get(v.name) ?? "") !== "") {
       log.info(`  ${v.name}: already set`);
       continue;
@@ -52,12 +60,21 @@ export async function configure(projectDir: string, options: ConfigureOptions = 
   const unconfigured = await configureModels(projectDir, options, interactive, variables);
 
   const problems = [
+    ...stepMissing,
     ...missing.map((name) => `${name} is required and not set: export it, pass --generate ${name}, or run \`pikit configure\` in a terminal`),
     ...unconfigured.map((id) => `the model provider "${id}" has no credentials: run \`pikit configure --login ${id}\` in a terminal, or set its API key (e.g. ${apiKeyName(id)})`),
   ];
   for (const problem of problems) log.problem(problem);
   if (problems.length > 0) throw new CliError(`pikit configure: ${problems.length} thing(s) left to configure`);
   log.ok("configured");
+}
+
+/** Runs the components' own steps (`component-configure.ts`); returns what they could not set. */
+async function componentSteps(projectDir: string, interactive: boolean): Promise<string[]> {
+  if (componentsWithSteps(projectDir).length === 0) return [];
+  const result = await runScript<ComponentConfigureResult>("component-configure.ts", projectDir, [interactive ? "interactive" : "batch"], { interactive: true });
+  if (!result.ok) throw new CliError(`a component's configure step failed: ${result.error}`);
+  return result.missing;
 }
 
 /** Every installed component's variables, once each; required when any component requires it. */

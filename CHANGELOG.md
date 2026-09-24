@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: `pikit configure` runs the steps components ship in `src/pikit/<name>/configure.ts`, before
+  asking for the other variables; a component's variables are then its own. `channel-telegram`'s
+  step checks the bot and allows you by asking you to message it. An end-to-end test covers
+  `new --preset telegram` → `configure` → `dev` → an answer in the chat (SPEC §11).
 - cli: a secret prompt turns echo off before it shows, so a value pasted the moment it appears is not
   echoed.
 - registry: the `telegram` preset (`pikit new my-bot --preset telegram`), the `http` preset with
