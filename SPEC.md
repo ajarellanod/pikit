@@ -637,6 +637,7 @@ interface AgentResult {
   kind: "completed" | "aborted" | "failed";
   text?: string;
   messages: AgentMessage[];
+  /** What the run cost, in Pi's numbers (tokens and cost). The Pi adapter always sets it. */
   usage?: Usage;
   error?: { code: string; message: string };
 }
@@ -723,6 +724,15 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   the model decides. The replay rules of §8.4 are Pi's.
 - **No `suspended` result.** A run waiting for a retry or a deferred response has not ended: it
   is an open operation that `resume()` (or the host's alarm, §9.2) continues.
+- **`usage` is what Pi recorded for the run.** Every result, settled or failed, carries pi-ai's
+  `Usage` (tokens and cost) summed over the run's own entries: each model response (failed attempts
+  before a retry included), each tool result that reports usage, and a compaction made inside the
+  run. These are the rows of Pi's usage ledger that point to an entry, so the runs of a session add
+  up to the session's `getStats()` totals. Costs are pi-ai's prices; the adapter only adds them up.
+  Pi 0.87.1 ties no other ledger row to an operation (a hook's own model request, an extension's
+  `recordUsage` with no entry), so no run claims them. Pi's durable runtime keeps a completed
+  attempt's usage on its entry, so the reading survives the move (§6.4). A run that called no model
+  reports zero. The field stays optional in the core: another runtime may not know its cost.
 
 Who owns these types `[decision]`: the core owns the *shapes* (`defineAgent`,
 `AgentDefinition`, `TurnConfig`, `AgentRequest`, `AgentResult`, `AgentRuntime`), because they
@@ -1923,6 +1933,9 @@ Resolved `[decision]`:
 - Model providers are components: each provides the keyed capability `model.provider` under its
   id, and the runtime builds its models from all of them (§4.5). Adding a provider is adding a
   component, and a missing one is visible in `doctor`, not a config flag.
+- `AgentResult.usage` is the sum of the usage Pi recorded on the run's own entries (§6.1), not a
+  pikit count and not a scan of the session ledger by position: Pi 0.87.1 ties ledger rows to
+  entries, not to operations, and its durable runtime keeps usage on entries too.
 
 ---
 

@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: every `agent.settled` / `agent.failed` carries `usage`, the run's tokens and cost as Pi
+  recorded them on the run's entries; the runs of a session add up to Pi's session totals (SPEC §6.1).
 - samples: `samples/http`'s agent has Pi's `read`, `write`, `edit` and `bash` tools in its workspace,
   with `permission-gate` loaded; scenario 7 runs against the real `bash`.
 - component/tool-bash: provides Pi's `bash` tool as `agent.tool` `bash`, working on `execution.shell`,

@@ -2,7 +2,8 @@
  * A run's terminal record (what Pi's `run_end` announces) as the core's `AgentResult`.
  */
 
-import type { AgentLane, AgentMessage, Context, OperationResultRecord } from "@earendil-works/pi-agent-core";
+import type { AgentLane, AgentMessage, Context, Entry, OperationResultRecord } from "@earendil-works/pi-agent-core";
+import type { Usage } from "@earendil-works/pi-ai";
 import type { AgentResult, ConversationRef } from "@pikit/core";
 import { requestIdOf } from "./inbound.ts";
 
@@ -12,8 +13,15 @@ export async function toResult(
   record: OperationResultRecord,
   ctx: Context,
 ): Promise<AgentResult> {
-  const messages = await runMessages(lane, record, ctx);
-  const base = { conversation, requestId: record.operationId, requestIds: requestsOf(record.operationId, messages), messages };
+  const entries = await runEntries(lane, record, ctx);
+  const messages = entries.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
+  const base = {
+    conversation,
+    requestId: record.operationId,
+    requestIds: requestsOf(record.operationId, messages),
+    messages,
+    usage: runUsage(entries),
+  };
   if (record.status === "completed") {
     const text = finalText(messages);
     return { ...base, kind: "completed", ...(text !== undefined && { text }) };
@@ -25,19 +33,77 @@ export async function toResult(
 }
 
 /**
- * The entries the run added: its branch from `tipId` back to `fromTipId`, excluded. Pi walks a branch
- * from `start` towards the root only `newestFirst` (`oldestFirst` starts at the root), and includes
- * the `stopAtId` entry; checked on 0.87.1.
+ * The entries the run added, oldest first: its branch from `tipId` back to `fromTipId`, excluded. Pi
+ * walks a branch from `start` towards the root only `newestFirst` (`oldestFirst` starts at the root),
+ * and includes the `stopAtId` entry; checked on 0.87.1.
  */
-async function runMessages(lane: AgentLane, record: OperationResultRecord, ctx: Context): Promise<AgentMessage[]> {
+async function runEntries(lane: AgentLane, record: OperationResultRecord, ctx: Context): Promise<Entry[]> {
   if (record.tipId === null || record.tipId === record.fromTipId) return [];
   const entries = await lane.findEntries(
     { start: record.tipId, ...(record.fromTipId !== null && { stopAtId: record.fromTipId }), order: "newestFirst" },
     ctx,
   );
-  return entries
-    .reverse()
-    .flatMap((entry) => (entry.type === "message" && entry.id !== record.fromTipId ? [entry.message] : []));
+  return entries.reverse().filter((entry) => entry.id !== record.fromTipId);
+}
+
+/**
+ * What the run cost: the sum of the usage Pi recorded on the run's own entries, in Pi's numbers
+ * (pi-ai prices each response; nothing is priced here). That is every model response, failed
+ * attempts before a retry included, every tool result that reports usage, and a compaction or branch
+ * summary made inside the run. They are the rows of Pi's usage ledger that point to an entry.
+ *
+ * Pi 0.87.1 does not tie its other ledger rows to an operation (a hook's own model request, an
+ * extension's `recordUsage` without an entry), so a run cannot claim them; the session's totals
+ * (`getStats`) still count them. Pi's durable runtime keeps a completed attempt's usage on its entry
+ * (SPEC §6.4), so this reading survives the move. A run that called no model reports zero.
+ */
+export function runUsage(entries: readonly Entry[]): Usage {
+  let total = ZERO;
+  for (const entry of entries) {
+    const usage = entry.type === "message" ? messageUsage(entry.message) : "usage" in entry ? entry.usage : undefined;
+    if (usage !== undefined) total = addUsage(total, usage);
+  }
+  return total;
+}
+
+function messageUsage(message: AgentMessage): Usage | undefined {
+  return (message.role === "assistant" || message.role === "toolResult") ? message.usage : undefined;
+}
+
+const ZERO: Usage = {
+  input: 0,
+  output: 0,
+  cacheRead: 0,
+  cacheWrite: 0,
+  totalTokens: 0,
+  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+};
+
+/**
+ * Pi's own `addUsage` (`harness/utils/usage.js`, which 0.87.1 does not export): the optional fields
+ * appear only when one side reports them, so "not reported" stays distinct from zero.
+ */
+function addUsage(left: Usage, right: Usage): Usage {
+  return {
+    input: left.input + right.input,
+    output: left.output + right.output,
+    cacheRead: left.cacheRead + right.cacheRead,
+    cacheWrite: left.cacheWrite + right.cacheWrite,
+    ...((left.cacheWrite1h !== undefined || right.cacheWrite1h !== undefined) && {
+      cacheWrite1h: (left.cacheWrite1h ?? 0) + (right.cacheWrite1h ?? 0),
+    }),
+    ...((left.reasoning !== undefined || right.reasoning !== undefined) && {
+      reasoning: (left.reasoning ?? 0) + (right.reasoning ?? 0),
+    }),
+    totalTokens: left.totalTokens + right.totalTokens,
+    cost: {
+      input: left.cost.input + right.cost.input,
+      output: left.cost.output + right.cost.output,
+      cacheRead: left.cost.cacheRead + right.cost.cacheRead,
+      cacheWrite: left.cost.cacheWrite + right.cost.cacheWrite,
+      total: left.cost.total + right.cost.total,
+    },
+  };
 }
 
 /**
