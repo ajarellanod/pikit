@@ -19,6 +19,9 @@ test("pikit.config.ts composes: every capability a component requires has a prov
   });
   expect(described.capabilities["model.provider"]?.keys).toEqual({ anthropic: "provider-anthropic" });
   expect(described.capabilities["agent.definition"]?.keys).toEqual({ assistant: "agents" });
+  expect(described.capabilities["agent.tool"]?.keys).toEqual({ read: "tool-read", write: "tool-write", edit: "tool-edit", bash: "tool-bash" });
+  expect(described.capabilities.execution?.selected).toBe("execution-local");
+  expect(described.capabilities["execution.shell"]?.selected).toBe("execution-local");
   expect(described.pipelines["inbound.authenticate"]).toEqual([{ id: "channel-http-bearer", priority: 100 }]);
   expect(described.pipelines["route.resolve"]).toEqual([{ id: "router-basic", priority: 0 }]);
   // The server starts last: it serves routes only once everything they use is up.

@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- samples: `samples/http`'s agent has Pi's `read`, `write`, `edit` and `bash` tools in its workspace,
+  with `permission-gate` loaded; scenario 7 runs against the real `bash`.
 - component/tool-bash: provides Pi's `bash` tool as `agent.tool` `bash`, working on `execution.shell`,
   with replay `never`; an agent gets it by naming it (SPEC §6.3).
 - component/tool-edit: provides Pi's `edit` tool as `agent.tool` `edit`, working on `execution`,

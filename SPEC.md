@@ -1788,8 +1788,9 @@ And the runtime proof:
    `tool_call` policy + one `registerTool`) is added to `runtime-pi` unmodified and its
    handlers fire during scenario 1. The extension half runs today: Pi's own `permission-gate`,
    `protected-paths` and `hello` examples, byte for byte (`compat.test.ts`). The HTTP half runs
-   too: `permission-gate`, loaded with `createRuntimePi({ extensions })`, blocks `rm -rf` asked
-   for over HTTP (`samples/http/test/scenario-7.test.ts`).
+   too: `permission-gate`, loaded with `createRuntimePi({ extensions })`, stops Pi's real `bash`
+   (`tool-bash` on `execution-local`) from running `rm -rf` asked for over HTTP
+   (`samples/http/test/scenario-7.test.ts`).
 
 ---
 

@@ -190,9 +190,22 @@ conformance suite and the lifecycle suite, and has a start-failure test.
 - The answer is the HTTP response; `outbound.prepare`, `channel.transport` and the outbox wait for
   M2 (SPEC §5).
 
-Next: prepare/`agent.state`, the `tool-*` components, the http preset (its composition is
-`samples/http`), `deployment-docker`, logs and status, the installer and the CLI
-(`pikit new … && pikit up`).
+✅ **Tools** (SPEC §6.3, §8.3). An agent names the installed tools it uses
+(`tools: ["read", "bash"]`), resolved through `agent.tool`; installing a tool gives no agent
+anything.
+- `tool-read`, `tool-write`, `tool-edit` and `tool-bash` are Pi's own tools, each bound to the
+  capability it declares, with a `replay` (only `read` is `"safe"`).
+- `execution-local` provides `execution` and `execution.shell` over Pi's `NodeExecutionEnv`. Its
+  commands start from an allowlist of variables, so they do not see the server's secrets. It is
+  documented as not a sandbox.
+- Pi ships no suite for `ExecutionEnv`, so `createExecutionConformance` lives in
+  `@pikit/pi-adapter/testing`.
+- In `samples/http`, `assistant` has all four tools with Pi's `permission-gate` loaded:
+  - scenario 7 now runs against the real `bash`;
+  - the live test has Claude write a file in the workspace.
+
+Next: prepare/`agent.state`, the http preset (its composition is `samples/http`),
+`deployment-docker`, logs and status, the installer and the CLI (`pikit new … && pikit up`).
 
 Decided and deferred: token usage in `AgentResult.usage` arrives with logs and status; an idle
 delay before closing a conversation (`idleMs`) is added only if reopening is measured to be slow.

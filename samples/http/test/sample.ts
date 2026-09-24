@@ -1,6 +1,7 @@
 /**
  * The sample's composition for its tests: the same components as `pikit.config.ts`, over real HTTP
- * on a free port, with state in a temporary directory. Two things are swapped, as a test must:
+ * on a free port, with state and the workspace in a temporary directory. Two things are swapped, as
+ * a test must:
  * - the model is Pi's faux provider, scripted by `@pikit/pi-adapter/testing` (no API key);
  * - the token comes from a test environment instead of the process's.
  */
@@ -13,11 +14,16 @@ import type { PiExtension } from "@pikit/pi-adapter";
 import { testComponents } from "@pikit/pi-adapter/testing";
 import channelHttp from "../../../registry/components/channel-http/files/src/pikit/channel-http/index.ts";
 import conversationsFile from "../../../registry/components/conversations-file/files/src/pikit/conversations-file/index.ts";
+import executionLocal from "../../../registry/components/execution-local/files/src/pikit/execution-local/index.ts";
 import routerBasic from "../../../registry/components/router-basic/files/src/pikit/router-basic/index.ts";
 import { createRuntimePi } from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import { createServerBun } from "../../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
 import sessionsJsonl from "../../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
+import toolBash from "../../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
+import toolEdit from "../../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
+import toolRead from "../../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
+import toolWrite from "../../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
 
 export const TOKEN = "sample-test-token-0123456789abcdef";
 
@@ -60,6 +66,11 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
       conversationsFile,
       provider,
       agents,
+      executionLocal,
+      toolRead,
+      toolWrite,
+      toolEdit,
+      toolBash,
       createRuntimePi(options.extensions !== undefined ? { extensions: options.extensions } : {}),
       routerBasic,
       channelHttp,
@@ -69,6 +80,7 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
     config: {
       "sessions-jsonl": { root: join(dataDir, "sessions") },
       "conversations-file": { path: join(dataDir, "conversations.json") },
+      "execution-local": { root: join(dataDir, "workspace") },
       "router-basic": { defaultAgent },
       "server-bun": { port: 0, hostname: "127.0.0.1" },
     },
