@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/tool-write: provides Pi's `write` tool as `agent.tool` `write`, working on `execution`,
+  with replay `never`; an agent gets it by naming it (SPEC §6.3).
 - component/tool-read: provides Pi's `read` tool as `agent.tool` `read`, working on `execution`,
   with replay `safe`; an agent gets it by naming it (SPEC §6.3).
 - adapter: `@pikit/pi-adapter/tools` exposes Pi's `read`, `write`, `edit` and `bash` tools and
