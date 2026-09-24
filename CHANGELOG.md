@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/channel-http: `POST /v1/messages` answers in the response (`200`, or `202` past
+  `replyTimeoutMs`), including messages steered into a busy run; `POST /v1/conversations/:id/reset`;
+  bearer token from `PIKIT_HTTP_TOKEN` (SPEC §5).
 - component/server-bun: serves every `http.route` with Hono on `Bun.serve`, plus `GET /health` and an
   honest `GET /ready`. Stopping cancels the requests in flight (SPEC §9.1).
 - component/router-basic: a `route.resolve` stage that sends every message no earlier stage routed

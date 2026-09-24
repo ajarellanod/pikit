@@ -508,6 +508,24 @@ pipeline outbound.prepare          → OutboundMessage
   else                       → channel.transport[message.channel].send(); emit outbound.delivered/failed
 ```
 
+**M1: the HTTP channel.** `[decision]` for M1, with `channel-http`:
+- **No `conversation.resolve` pipeline yet.** The channel calls
+  `conversations.registry.resolve(key, decision.agent)` directly. The pipeline is added, which is
+  compatible, when a component needs to change which conversation a message goes to.
+- **The answer is the HTTP response.** Delivery does not go through `outbound.prepare` and
+  `channel.transport`. `channel-http` listens to `agent.settled` / `agent.failed` itself and
+  answers every POST waiting for one of the run's `requestIds`, so a message admitted as `queued`
+  gets the answer of the run it joined. The map of waiting POSTs is a cache: the answer is in the
+  session whether or not a POST waits, and a POST that waited longer than `replyTimeoutMs` gets
+  `202 { requestId }`. Reason: a client waiting on its own request has nothing to retry and no
+  transport that can fail. `outbound.prepare`, `channel.transport` and the outbox arrive in M2 with
+  `durable-outbox` and the first channel that sends to a platform. No `outbound-direct` component
+  is built, because M2 would replace it.
+- **Duplicates.** A POST whose `messageId` is already in the conversation gets
+  `409 { requestId, error: "duplicate" }` and does not run. Its answer went to the first POST and
+  is in the session. pikit keeps no copy of answers to return again; Pi's durable runtime will make
+  a submission awaitable until its answer (§6.4).
+
 Core types (abridged):
 
 ```ts
@@ -1825,6 +1843,11 @@ Resolved `[decision]`:
 - `AgentResult.requestIds` lists every request a run took (§6.1). Without it, a request queued
   into a running run would never learn it was answered, and a channel that replies per message
   (HTTP) would wait forever. The list is read from the transcript; no record is added.
+- M1's HTTP channel answers in the response (§5): `channel-http` listens to `agent.settled` /
+  `agent.failed` and answers every waiting POST among the run's `requestIds`. There is no
+  `outbound-direct`, `outbound.prepare` or `channel.transport` until M2's `durable-outbox`: a
+  synchronous reply has nothing to retry, and a direct outbound path built now would be replaced
+  in M2. A duplicate `messageId` is a `409`, with no stored answer to replay.
 - The router is a component (M1). The `route.resolve` pipeline and `RouteDecision` are core; every
   routing strategy is a component that adds a stage. `router-basic` fills in `defaultAgent` when no
   earlier stage decided, so a project stage with a higher priority routes around it without forking
