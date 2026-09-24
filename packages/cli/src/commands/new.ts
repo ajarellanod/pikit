@@ -23,13 +23,22 @@ import * as starter from "./starter.ts";
 export interface NewOptions {
   preset?: string;
   registry?: string;
+  /** Print what to run next. Default: true; the guided path (`wizard.ts`) runs it instead. */
+  next?: boolean;
+  /** Say what is done, not each component's files and `bun install`'s output (the guided path). */
+  quiet?: boolean;
+}
+
+/** A project's directory name is its package name. */
+export function validProjectName(name: string): boolean {
+  return /^[a-z0-9][a-z0-9._-]*$/.test(name);
 }
 
 export async function newProject(dir: string, options: NewOptions = {}): Promise<void> {
   const projectDir = resolve(dir);
   if (existsSync(projectDir) && readdirSync(projectDir).length > 0) throw new CliError(`${projectDir} exists and is not empty`);
   const name = basename(projectDir);
-  if (!/^[a-z0-9][a-z0-9._-]*$/.test(name)) throw new CliError(`"${name}" is not a valid package name: use lowercase letters, digits, "-", "." or "_"`);
+  if (!validProjectName(name)) throw new CliError(`"${name}" is not a valid package name: use lowercase letters, digits, "-", "." or "_"`);
 
   // Everything that can be refused is checked before the first file is written.
   const registry = openRegistry(options.registry ?? DEFAULT_REGISTRY);
@@ -54,7 +63,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
 
   for (const component of components) {
     const wiring = starter.STARTER_WIRING[component];
-    await installComponent(projectDir, component, { yes: true, ...(wiring !== undefined && { wiring }) });
+    await installComponent(projectDir, component, { yes: true, quiet: options.quiet === true, ...(wiring !== undefined && { wiring }) });
   }
   const installed = Object.keys(readProjectManifest(projectDir).components);
   let config = readFileSync(join(projectDir, CONFIG_FILE), "utf8");
@@ -63,12 +72,13 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   }
   write(CONFIG_FILE, config);
 
-  await bunInstall(projectDir);
+  await bunInstall(projectDir, { quiet: options.quiet === true });
 
   log.step("pikit doctor");
   const report = await doctor(projectDir, { quiet: true });
   for (const problem of report.problems) log.problem(problem);
   if (report.problems.length > 0) throw new CliError(`the new project has ${report.problems.length} problem(s)`);
   log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
+  if (options.next === false) return;
   log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev         # or \`pikit up\` to run it in Docker`);
 }

@@ -2,9 +2,18 @@
 
 import { CliError, log } from "../ui.ts";
 
-export async function bunInstall(projectDir: string): Promise<void> {
+/** With `quiet`, Bun's output is shown only when the install fails. */
+export async function bunInstall(projectDir: string, options: { quiet?: boolean } = {}): Promise<void> {
   log.step("bun install");
-  const child = Bun.spawn([process.execPath, "install"], { cwd: projectDir, stdin: "ignore", stdout: "inherit", stderr: "inherit" });
-  const code = await child.exited;
-  if (code !== 0) throw new CliError(`\`bun install\` failed with code ${code} in ${projectDir}`);
+  const output = options.quiet === true ? "pipe" : "inherit";
+  const child = Bun.spawn([process.execPath, "install"], { cwd: projectDir, stdin: "ignore", stdout: output, stderr: output });
+  const [code, out, err] = await Promise.all([
+    child.exited,
+    child.stdout ? new Response(child.stdout).text() : "",
+    child.stderr ? new Response(child.stderr).text() : "",
+  ]);
+  if (code !== 0) {
+    if (options.quiet === true) process.stderr.write(out + err);
+    throw new CliError(`\`bun install\` failed with code ${code} in ${projectDir}`);
+  }
 }

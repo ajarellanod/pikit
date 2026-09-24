@@ -5,6 +5,11 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli, installer, registry: the guided path. The installer, on a terminal, goes straight into `pikit
+  new`, which asks the agent's name and where to talk to it (the presets, by their new `title`), then
+  sets up the channel, logs in to the model and starts it. Ctrl-C stops it; `pikit new` with the same
+  name continues. The installer also adds you to the `docker` group when it installs Docker (with the
+  same consent), and ends with the lines to paste. Ctrl-C at any prompt now exits with 130.
 - cli, component/deployment-docker: an OAuth login made by `pikit configure` now reaches `pikit up`.
   `deployment-docker` exports `exec()` (`docker compose run --rm` of the app), and `configure` logs in
   through it, into the app's volume; `--login <provider> --local` logs in on this machine for `pikit

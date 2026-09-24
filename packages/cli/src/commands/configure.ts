@@ -24,7 +24,7 @@ import { ENV_FILE, readEnv, writeEnv } from "../project/env-file.ts";
 import { apiKeyName, checkModelCredentials, loginModel } from "../project/model-credentials.ts";
 import { readProjectManifest } from "../project/pikit-json.ts";
 import { runScript } from "../project/run.ts";
-import { ask, askSecret, CliError, isInteractive, log } from "../ui.ts";
+import { ask, askSecret, Cancelled, CliError, isInteractive, log } from "../ui.ts";
 
 export interface ConfigureOptions {
   /** Ask nothing, as without a terminal. */
@@ -81,6 +81,7 @@ export async function configure(projectDir: string, options: ConfigureOptions = 
 async function componentSteps(projectDir: string, interactive: boolean): Promise<string[]> {
   if (componentsWithSteps(projectDir).length === 0) return [];
   const result = await runScript<ComponentConfigureResult>("component-configure.ts", projectDir, [interactive ? "interactive" : "batch"], { interactive: true });
+  if (!result.ok && result.cancelled === true) throw new Cancelled("cancelled");
   if (!result.ok) throw new CliError(`a component's configure step failed: ${result.error}`);
   return result.missing;
 }

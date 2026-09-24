@@ -1904,7 +1904,7 @@ M1 has these commands; the others print "not yet" and name the milestone that br
 
 | Command | M1 |
 |---|---|
-| `new`, `add`, `remove` | §10.5 |
+| `new`, `add`, `remove` | §10.5. `pikit new` with no directory, in a terminal, is the guided path (below). |
 | `doctor` | Creates the app (every setup, no start) and prints the component graph, capability providers, pipelines and config (§4.6). Fails when the app does not compose, when a variable a component marks required is set neither in the environment nor in `.env` (names only, never values), or when a file breaks the Pi import rule (S1: a component imports no `@earendil-works/*`, project code only `@earendil-works/pi-coding-agent`, the Pi extensions' alias). Lists modified and deleted installed files as information. |
 | `configure` | First runs the components' own steps (below). Then writes the other variables of the installed components to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login runs where the app will run (below). |
 | `dev` | After `doctor`, `bun --watch src/pikit/<deployment>/main.ts` (the installed `deployment-*` component's entrypoint) with `.env` loaded. |
@@ -1923,6 +1923,15 @@ discovering an id. `pikit configure` runs these steps first, in a child process 
 
 The CLI knows nothing about what a step does, as with `deployment-*`. `channel-telegram`'s step
 checks the bot token with `getMe`, and allows whoever sends the bot a message.
+
+`[decision]` **The guided path.** `pikit new` with no directory, in a terminal, asks the agent's name
+(its folder) and where to talk to it: one choice per preset of the registry, shown by its `title`.
+Then it runs the same functions as the commands: `new`, `configure` (each component's own step, then
+the model's login) and `up` (the default) or `dev`. It knows no channel: the choices come from the
+registry and the questions from the components. Ctrl-C stops it at any question (exit 130); `pikit
+new` again with the same name continues with the project already written, since `configure` asks
+only for what is missing. The installer runs it when it finishes, so pasting the install line is the
+only command a person types. Without a terminal, `pikit new` needs a directory, as before.
 
 `[decision]` **A login lives where the app runs; nothing is copied.** A deployment component may
 export `exec({ command, share, interactive })`: it runs a command where the app runs and resolves
@@ -1944,12 +1953,17 @@ commands, which are plain functions the CLI calls.
 ensures git and Bun >= 1.4, clones pikit into `~/.pikit/pikit` at a ref, and writes the shim
 `~/.pikit/bin/pikit`. It prints the `PATH` line instead of editing shell files, asks before any
 `apt-get` or `sudo`, and installs Docker only with explicit consent (`--install-docker` or a "y";
-on macOS it points to Docker Desktop).
+on macOS it points to Docker Desktop). With the Docker it installed, and the same consent, it adds the
+user to the `docker` group. Then, on a terminal, it runs `pikit new`, the guided path, with that group
+already active (`sg docker`), and ends with the lines this shell still needs (the `PATH` line, and
+`newgrp docker`). `PIKIT_NO_WIZARD=1` skips the guided path.
 
-Presets are lists of `add` calls, nothing more:
+Presets are lists of `add` calls, plus the `title` `pikit new` shows for them; nothing else. Nothing
+reads which preset a project came from:
 
 ```yaml
 # registry/presets/telegram.yaml
+title: "Telegram: chat with your agent from the Telegram app"
 components:
   - secrets-env
   - sessions-jsonl

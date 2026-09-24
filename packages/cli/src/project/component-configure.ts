@@ -17,9 +17,9 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { ENV_FILE, readEnv, writeEnv } from "./env-file.ts";
 import { readProjectManifest } from "./pikit-json.ts";
-import { ask, askSecret, log } from "../ui.ts";
+import { ask, askSecret, Cancelled, log } from "../ui.ts";
 
-export type ComponentConfigureResult = { ok: true; ran: string[]; missing: string[] } | { ok: false; error: string };
+export type ComponentConfigureResult = { ok: true; ran: string[]; missing: string[] } | { ok: false; error: string; cancelled?: true };
 
 /** What a component's `configure(io)` receives. Components declare the same shape; nothing is imported. */
 export interface ConfigureIO {
@@ -77,7 +77,7 @@ if (import.meta.main) {
   try {
     result = await run(projectDir, mode === "interactive");
   } catch (error) {
-    result = { ok: false, error: error instanceof Error ? error.message : String(error) };
+    result = { ok: false, error: error instanceof Error ? error.message : String(error), ...(error instanceof Cancelled && { cancelled: true as const }) };
   }
   writeFileSync(output, JSON.stringify(result));
   process.exit(0);

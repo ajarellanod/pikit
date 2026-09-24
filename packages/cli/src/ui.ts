@@ -9,10 +9,17 @@ export function isInteractive(): boolean {
   return process.stdin.isTTY === true && process.stdout.isTTY === true;
 }
 
+/** Ctrl-C at a prompt: the command stops with 130, as a shell reports an interrupted command. */
+export class Cancelled extends Error {}
+
 export async function ask(question: string): Promise<string> {
   const terminal = createInterface({ input: process.stdin, output: process.stdout });
   try {
     return (await terminal.question(question)).trim();
+  } catch (error) {
+    // readline rejects the question with an AbortError on Ctrl-C.
+    if (error instanceof Error && error.name === "AbortError") throw new Cancelled("cancelled");
+    throw error;
   } finally {
     terminal.close();
   }
@@ -20,6 +27,12 @@ export async function ask(question: string): Promise<string> {
 
 export async function confirm(question: string): Promise<boolean> {
   return /^y(es)?$/i.test(await ask(`${question} [y/N] `));
+}
+
+/** A question whose Enter means yes. */
+export async function confirmYes(question: string): Promise<boolean> {
+  const answer = await ask(`${question} [Y/n] `);
+  return answer === "" || /^y(es)?$/i.test(answer);
 }
 
 /** Reads a line without echoing it: for secrets. Ctrl-C aborts the command. */
@@ -43,7 +56,7 @@ export function askSecret(question: string): Promise<string> {
     const onData = (chunk: string) => {
       for (const char of chunk) {
         if (char === "\r" || char === "\n") return done();
-        if (char === "\u0003") return done(new Error("cancelled"));
+        if (char === "\u0003") return done(new Cancelled("cancelled"));
         if (char === "\u007f" || char === "\b") value = value.slice(0, -1);
         else if (char >= " ") value += char;
       }

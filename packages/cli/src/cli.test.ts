@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyManifest, writeProjectManifest } from "./project/pikit-json.ts";
 import { DEFAULT_REGISTRY } from "./paths.ts";
+import { openRegistry } from "./project/registry-source.ts";
 
 const MAIN = join(import.meta.dir, "main.ts");
 const dirs: string[] = [];
@@ -59,6 +60,18 @@ test("project commands outside a project, and up with no deployment component, s
   const up = pikit(["up"], tinyProject());
   expect(up.code).toBe(1);
   expect(up.err).toContain("no deployment-* component is installed");
+});
+
+test("new with no directory asks only on a terminal; the presets it offers have titles", () => {
+  const parent = temp();
+  const run = pikit(["new"], parent);
+  expect(run.code).toBe(2);
+  expect(run.err).toContain("without <dir>, run it in a terminal: it asks");
+  expect(readdirSync(parent)).toEqual([]);
+
+  const presets = openRegistry(DEFAULT_REGISTRY).presets();
+  expect(presets.map((p) => p.name)).toEqual(["http", "telegram"]);
+  for (const preset of presets) expect(preset.title).not.toBe(preset.name);
 });
 
 test("new refuses a non-empty directory and an unknown preset before writing anything", () => {

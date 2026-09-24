@@ -40,6 +40,8 @@ export interface AddOptions {
    * camelCase name. `pikit new` uses it to load Pi's permission gate into `runtime-pi`.
    */
   wiring?: Omit<ComponentEntry, "name">;
+  /** Do not describe what is installed (files, npm, capabilities): `pikit new`'s guided path. */
+  quiet?: boolean;
 }
 
 export async function add(projectDir: string, name: string, options: AddOptions = {}): Promise<void> {
@@ -74,7 +76,7 @@ export async function installComponent(
   const files = registry.files(name);
   checkConflicts(projectDir, project, name, files, options.force === true);
 
-  describePlan(registry, manifest, files);
+  if (options.quiet !== true) describePlan(registry, manifest, files);
   if (options.yes !== true) {
     if (!isInteractive()) throw new CliError("pikit add asks for confirmation; pass --yes when it runs without a terminal");
     if (!(await confirm(`Install ${name}?`))) throw new CliError("cancelled", 1);

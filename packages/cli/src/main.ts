@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { add } from "./commands/add.ts";
+import { newWizard } from "./commands/wizard.ts";
 import { configure } from "./commands/configure.ts";
 import { DEPLOYMENT_COMMANDS, type DeploymentCommand, deployment, dev } from "./commands/deployment.ts";
 import { doctor } from "./commands/doctor.ts";
@@ -16,11 +17,12 @@ import { newProject } from "./commands/new.ts";
 import { registryCommand } from "./commands/registry.ts";
 import { remove } from "./commands/remove.ts";
 import { PIKIT_ROOT } from "./paths.ts";
-import { CliError, log } from "./ui.ts";
+import { Cancelled, CliError, isInteractive, log } from "./ui.ts";
 
 const USAGE = `pikit: a kit for Pi.
 
 Usage:
+  pikit new                           a new agent, step by step (in a terminal)
   pikit new <dir> [--preset <name>] [--registry <path>]   a new project
   pikit add <component> [--registry <path>] [--force] [--yes]
   pikit remove <component> [--force]
@@ -89,6 +91,10 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case "new":
+      if (rest.length === 0 && values.preset === undefined) {
+        if (!isInteractive()) throw new CliError("usage: pikit new <dir> [--preset <name>] (without <dir>, run it in a terminal: it asks)", 2);
+        return await newWizard(cwd, { ...(values.registry !== undefined && { registry: values.registry }) });
+      }
       await newProject(one("dir"), { ...(values.preset !== undefined && { preset: values.preset }), ...(values.registry !== undefined && { registry: values.registry }) });
       return 0;
     case "add":
@@ -142,7 +148,9 @@ function version(): string {
 try {
   process.exitCode = await main(process.argv.slice(2));
 } catch (error) {
-  if (error instanceof CliError) {
+  if (error instanceof Cancelled) {
+    process.exitCode = 130;
+  } else if (error instanceof CliError) {
     log.problem(error.message);
     process.exitCode = error.exitCode;
   } else if (error instanceof TypeError && "code" in error && String(error.code).startsWith("ERR_PARSE_ARGS")) {
