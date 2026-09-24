@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/log-events: one structured log line per `agent.*`, `conversation.reset`,
+  `pipeline.halted` and `runtime.*` event, with the conversation, agent, request ids, admission and
+  run kinds, duration, tokens, cost and error code; never a message's text (SPEC §9.1, §13).
 - adapter: every `agent.settled` / `agent.failed` carries `usage`, the run's tokens and cost as Pi
   recorded them on the run's entries; the runs of a session add up to Pi's session totals (SPEC §6.1).
 - samples: `samples/http`'s agent has Pi's `read`, `write`, `edit` and `bash` tools in its workspace,

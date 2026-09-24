@@ -1396,6 +1396,13 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
   - Bun closes a connection idle for about twice `idleTimeout`, even while its handler works, so
     `idleTimeoutSeconds` defaults to Bun's maximum, 255, above a channel's reply timeout.
   - Its port, host and limits are values in its config.
+- Operational logs are a component, `log-events` (M1), on both targets `[decision]`: one line per
+  `agent.*`, `conversation.reset`, `pipeline.halted` and `runtime.*` event, through the app's
+  `Logger`. A line carries identifiers, the admission and run kinds, the run's `durationMs`, its
+  tokens and cost (`AgentResult.usage`, §6.1) and an error's code. The format is the logger's (the
+  container's JSON lines come from `deployment-docker`). Without the component there are no such
+  lines, and there is no switch. The start times behind `durationMs` are a cache: a run that ends
+  in another process logs no duration.
 - Storage: `sessions-sqlite` + `storage-sqlite` by default; Postgres optional.
 - Scheduler: `scheduler-cron` (in-process, `Bun.cron` or `croner`), jobs persisted in
   `storage.sql`.
@@ -1704,6 +1711,9 @@ is that the answer is "nothing" for every minor.
   remote sandbox).
 - Secrets never appear in config files or session transcripts; the `secrets` capability is
   the only read path and logs redact by name.
+- Operational logs (`log-events`, §9.1) never carry a message's text, a prompt, an answer or a
+  run's error message: a log line names what happened, the session holds what was said. Each field
+  is picked by name, so a field added to an event is not logged until it is chosen.
 - Model credentials (API keys, OAuth tokens) are not secrets read by name: pi-ai reads, refreshes
   and writes them through `model.credentials`. On a server, `credentials-file` keeps them in a
   file with mode `0600`. It never logs a value, and never quotes the file in an error. It never
@@ -1936,6 +1946,9 @@ Resolved `[decision]`:
 - `AgentResult.usage` is the sum of the usage Pi recorded on the run's own entries (§6.1), not a
   pikit count and not a scan of the session ledger by position: Pi 0.87.1 ties ledger rows to
   entries, not to operations, and its durable runtime keeps usage on entries too.
+- Operational logs are the `log-events` component, not core behaviour (§9.1): installing it is
+  enabling it. Its lines carry no text of a conversation and log an error's code, not its message
+  (§13), because a provider's error message may quote the request.
 
 ---
 
