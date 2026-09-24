@@ -121,7 +121,11 @@ test.skipIf(!E2E)(
     w.type("123456:not-the-token\r");
     at = await w.waitFor("Telegram does not know that token (401). Paste it again:", at);
     at = await w.waitFor("TELEGRAM_BOT_TOKEN: ", at);
-    w.type(`${telegram.token}\r`);
+    // What people paste: BotFather's whole message, over several lines, inside the bracketed-paste
+    // markers their terminal adds; then Enter.
+    w.type(`\x1b[200~Done! Congratulations on your new bot.\nUse this token to access the HTTP API:\n${telegram.token}\nKeep your token secure\x1b[201~`);
+    await Bun.sleep(100);
+    w.type("\r");
     at = await w.waitFor("send it any message now", at);
     telegram.say(OWNER, "hi");
     at = await w.waitFor("Message from Ada (@ada), id 1001. Allow them to talk to your agent? [Y/n]", at);

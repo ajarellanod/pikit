@@ -45,6 +45,11 @@ export function askSecret(question: string): Promise<string> {
   stdin.setEncoding("utf8");
   return new Promise((resolve, reject) => {
     let value = "";
+    // A terminal's escape sequences (ESC [ params final-byte) are never part of the value: arrow keys,
+    // and the bracketed-paste markers ESC[200~ … ESC[201~ some terminals put around a paste.
+    let escape: "" | "esc" | "csi" = "";
+    let params = "";
+    let pasting = false;
     const done = (error?: Error) => {
       stdin.off("data", onData);
       stdin.setRawMode(false);
@@ -54,8 +59,36 @@ export function askSecret(question: string): Promise<string> {
       else resolve(value.trim());
     };
     const onData = (chunk: string) => {
-      for (const char of chunk) {
-        if (char === "\r" || char === "\n") return done();
+      const chars = [...chunk];
+      for (let i = 0; i < chars.length; i++) {
+        const char = chars[i] as string;
+        if (escape === "esc") {
+          escape = char === "[" ? "csi" : "";
+          params = "";
+          continue;
+        }
+        if (escape === "csi") {
+          if (char >= "@" && char <= "~") {
+            escape = "";
+            if (char === "~" && params === "200") pasting = true;
+            if (char === "~" && params === "201") pasting = false;
+          } else params += char;
+          continue;
+        }
+        if (char === "\u001b") {
+          escape = "esc";
+          continue;
+        }
+        if (char === "\r" || char === "\n") {
+          // Enter ends the value. A line break inside pasted text does not: a paste arrives in one
+          // chunk (or between the markers), so more text after it in the chunk means a paste.
+          const rest = chars.slice(i + 1).join("").replace(/\u001b\[201~/g, "");
+          if (pasting || /[^\r\n]/.test(rest)) {
+            value += " ";
+            continue;
+          }
+          return done();
+        }
         if (char === "\u0003") return done(new Cancelled("cancelled"));
         if (char === "\u007f" || char === "\b") value = value.slice(0, -1);
         else if (char >= " ") value += char;
