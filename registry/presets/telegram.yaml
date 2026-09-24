@@ -1,0 +1,22 @@
+# An agent in Telegram, run in Docker (SPEC §11): `pikit new my-agent --preset telegram`.
+# A preset is only the list of `pikit add` calls, in order. Nothing branches on which preset a
+# project came from. The http preset with channel-telegram instead of channel-http; server-bun stays
+# for /health and /ready, which the container's healthcheck and `pikit status` use.
+# The agents (src/agents/, src/extensions/agents.ts) belong to the project, not to the registry.
+components:
+  - secrets-env
+  - sessions-jsonl
+  - conversations-file
+  - credentials-file
+  - provider-anthropic
+  - execution-local
+  - tool-read
+  - tool-write
+  - tool-edit
+  - tool-bash
+  - runtime-pi
+  - router-basic
+  - channel-telegram
+  - server-bun
+  - log-events
+  - deployment-docker

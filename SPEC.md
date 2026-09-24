@@ -1927,20 +1927,28 @@ Presets are lists of `add` calls, nothing more:
 ```yaml
 # registry/presets/telegram.yaml
 components:
-  - runtime-pi
-  - server-bun
-  - channel-telegram
-  - router-basic
-  - storage-sqlite
-  - sessions-sqlite
-  - workspace-local
+  - secrets-env
+  - sessions-jsonl
+  - conversations-file
+  - credentials-file
+  - provider-anthropic
   - execution-local
+  - tool-read
+  - tool-write
+  - tool-edit
+  - tool-bash
+  - runtime-pi
+  - router-basic
+  - channel-telegram
+  - server-bun
+  - log-events
   - deployment-docker
-  - admin-basic
 ```
 
 `registry/presets/http.yaml` (M1) is `samples/http`'s composition, plus `log-events` and
-`deployment-docker`; a test in the sample keeps the two together. The project's own agents
+`deployment-docker`; a test in the sample keeps the two together. `registry/presets/telegram.yaml`
+is the same with `channel-telegram` instead of `channel-http`. `server-bun` stays, for `/health`
+and `/ready`, which the container's healthcheck and `pikit status` use. The project's own agents
 (`src/extensions/`) are not registry components and are not in a preset.
 
 ---

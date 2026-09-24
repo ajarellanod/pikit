@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- registry: the `telegram` preset (`pikit new my-bot --preset telegram`), the `http` preset with
+  `channel-telegram` instead of `channel-http` (SPEC §11).
 - component/channel-telegram: talk to the agent in Telegram. It receives by long polling (no public
   URL), lets only `TELEGRAM_ALLOWED_USERS` reach the agent, and handles `/new`. It shows "typing…",
   formats Markdown, splits long answers and retries sends. It ships its own `pikit configure` step,
