@@ -287,6 +287,19 @@ redeliveries, channel outages, restarts and scheduled work.
 - A channel outage is retried by the outbox without touching the channel component.
 - Scheduled prompts run.
 
+**Started early: `channel-telegram`** (SPEC §5), to measure how easy a chat channel is to set up.
+- It receives by long polling, so it needs no public URL.
+- `pikit configure` runs the component's own step: it checks the bot token, then allows whoever
+  sends the bot a message. Nobody looks up a user id.
+- `pikit new --preset telegram` → `configure` → `dev` → an answer in the chat takes about 2 s
+  (end-to-end test against a fake Bot API). `pikit add channel-telegram` to an HTTP project works
+  alongside `channel-http`.
+- Already covered:
+  - a redelivered update is one request, answered once;
+  - only allowlisted users reach the agent.
+- Left for M2: replies through `channel.transport` and `durable-outbox`, and a run against the real
+  Telegram.
+
 **Scope:** `channel-telegram`, `inbound-dedup`, `durable-outbox`, `scheduler-cron`, the
 telegram preset, `expose`, `config check`. Runtime availability (SPEC §16) is decided here,
 with the first components that can fail while running.

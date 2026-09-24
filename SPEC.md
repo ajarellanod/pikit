@@ -2124,7 +2124,10 @@ The design is considered validated when all five pass without touching the core:
    one-command path runs too: `pikit new --preset http` → `configure` → `dev` answers, and
    `pikit up` / `status` / `down` run it in Docker (`packages/cli/src/e2e.test.ts`,
    `PIKIT_E2E=1 PIKIT_E2E_DOCKER=1`, about 19 s on a warm cache).
-2. **Chat**: `+ channel-telegram + sessions-sqlite` → stateful Telegram bot.
+2. **Chat**: `+ channel-telegram + sessions-sqlite` → stateful Telegram bot. `channel-telegram`
+   exists (long polling, allowlist, its own `configure` step), with `sessions-jsonl` for now.
+   `packages/cli/src/e2e-telegram.test.ts` runs `new --preset telegram` → `configure` → `dev` → an
+   answer in the chat, against a fake Bot API.
 3. **Reliability**: `+ durable-outbox` → delivery retried after simulated channel failure;
    channel component unchanged.
 4. **Swap**: `remove sessions-sqlite`, `add sessions-postgres` → router/channel/agent
