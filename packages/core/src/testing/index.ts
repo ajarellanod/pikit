@@ -8,3 +8,6 @@ export { createAgentRuntimeConformance } from "./agent-runtime.ts";
 
 export type { SecretStoreFixture } from "./secrets.ts";
 export { createSecretStoreConformance } from "./secrets.ts";
+
+export type { ConversationRegistryFixture } from "./conversations.ts";
+export { createConversationRegistryConformance } from "./conversations.ts";

@@ -342,7 +342,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `storage.sql` | `SqlDatabase` | Minimal sync/async SQL surface. Backed by `bun:sqlite`, `node:sqlite`, Postgres driver, or DO `ctx.storage.sql`. |
 | `storage.blob` | `BlobStore` | put/get/delete/list. Local dir, S3, R2. |
 | `sessions.store` | Pi `SessionRepo` + `SessionStorage` | Re-exported from Pi; typed by `@pikit/pi-adapter`. See §7. |
-| `conversations.registry` | `ConversationRegistry` | conversation key → active session id, workspace ref, metadata. |
+| `conversations.registry` | `ConversationRegistry` | Conversation key → active session and agent: `resolve` (creates the session the first time), `get`, `reset` (§7.4, §7.6). Workspace ref and metadata `[planned]`. |
 | `conversations.ownership` | `ConversationOwnership` | `[planned]` Lease per conversation so only one worker has its session open. Needed only with several server replicas (§7.2). |
 | `workspace` | `WorkspaceProvider` | Resolves a `Workspace` for a conversation/agent. |
 | `execution` | Pi `ExecutionEnv` | Filesystem for the agent's tools; `exec()` may return `shell_unavailable`. |
@@ -717,7 +717,8 @@ Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest
 `Usage` with their merge target `AgentPayloads` (each `unknown` until the adapter fills it in).
 For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
 `inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
-`SecretStore` (`secrets`).
+`SecretStore` (`secrets`), and `ConversationRegistry` with `ConversationReset` (`conversations.registry`
+and the payload of `conversation.reset`).
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`)
 and `model.provider` (pi-ai's `Provider`) by importing it anywhere in the project.
 
@@ -1149,7 +1150,20 @@ submission the adapter can await until it is answered (§6.4).
 | **Pi session** | transcript entries, lanes, operation records, queues, usage | `sessions.store` |
 
 A conversation can point to many sessions over time (`/reset` creates a new one and repoints;
-old sessions remain). TTL/eviction of in-memory `AgentHarness` objects **never** deletes the
+old sessions remain).
+
+The registry's contract, `ConversationRegistry` (core, M1) `[decision]`:
+- `resolve(key, agent, ctx)` returns the conversation for a key. The first time, the registry
+  creates its session in `sessions.store` and records the pointer. Concurrent first calls for one
+  key create one session.
+- A conversation **keeps the agent it was created with**. An actor does not change class (§7.1),
+  and a session's transcript belongs to one agent. A route that names another agent for an
+  existing key does not move it; a reset keeps the agent too. Moving a conversation to another
+  agent is `[open]` until a component needs it.
+- `get(key, ctx)` reads without creating. `reset(key, ctx)` is §7.6, and returns `undefined` for a
+  key with no conversation.
+- Keys are opaque strings. The channel builds them (`http:<conversationId>` for `channel-http`);
+  the tenant enters the key when tenants are routed (§16). TTL/eviction of in-memory `AgentHarness` objects **never** deletes the
 registry pointer. A conversation must be restorable long after its `AgentHarness` was
 evicted; this is a hard rule.
 
@@ -1179,7 +1193,11 @@ reset:
   workspace: preserve | recreate
 ```
 
-Emits `conversation.reset { previousSessionId, newSessionId }`.
+Emits `conversation.reset { conversation, previousSessionId, newSessionId }`, where
+`conversation` is the reset conversation on its new session, once the new pointer is durable. The
+registry emits it, in the caller's context. The previous session is kept and nothing is deleted. A
+run still going on the previous session finishes there, and its answer is still delivered. M1
+resets the session only; `workspace` joins with §8.
 
 ---
 
@@ -1591,6 +1609,12 @@ is that the answer is "nothing" for every minor.
   chooses the secrets and the fixture seeds its store with them. A secret reads back exactly
   (spaces, symbols, unicode, 4 KB), an unset or empty one reads `undefined`, and no value appears
   in `describe()` or in a log line. An in-memory double passes it.
+- **Conversation registry conformance** (`createConversationRegistryConformance`): every
+  `conversations.registry`. It covers create once (concurrently too), stable pointers, one session
+  per key, `get` creating nothing, a conversation keeping its agent, opaque keys, reset (new
+  session, old kept, one event) and pointers surviving a new worker. When the fixture lists its
+  store's sessions, the suite also checks that pointers name real sessions and that nothing is
+  deleted. An in-memory double passes it.
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
   implementation must pass its suite. Pi's session conformance is reused for
