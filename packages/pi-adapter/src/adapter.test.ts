@@ -33,6 +33,7 @@ import {
 import { toPi } from "./context.ts";
 import { hasRequest, inboundMessage, LANE } from "./inbound.ts";
 import { createPiRuntime, modelsFrom, type Provider, type SessionStore } from "./index.ts";
+import { createJsonlSessionStore } from "./node/index.ts";
 import { holdTool, killMidRun, type ModelRequest, scriptedAgent, scriptedProvider } from "./testing/index.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -45,7 +46,7 @@ type Result = AppEvents["agent.settled"] | AppEvents["agent.failed"];
 async function setup(
   options: { tools?: AgentTool[]; sessions?: SessionStore; agents?: AgentDefinition[]; providers?: Provider[] } = {},
 ) {
-  const sessions = options.sessions ?? new MemorySessionRepo();
+  const sessions: SessionStore = options.sessions ?? new MemorySessionRepo();
   const results: Result[] = [];
   const waiters: (() => void)[] = [];
   const observer = defineComponent({
@@ -239,6 +240,51 @@ describe("contexts (SPEC §6.2)", () => {
     // Cooperative: abort() returned because the tool honoured its signal.
     expect(inTool.abortSignal?.aborted).toBe(true);
     expect((await s.result("r1")).kind).toBe("aborted");
+    await s.runtime.close(s.app.context());
+  });
+});
+
+describe("opening a conversation's session", () => {
+  /** Counts the store's listings: each one reads every session file it holds. */
+  const countLists = (store: SessionStore): (() => number) => {
+    let lists = 0;
+    const list = store.list.bind(store);
+    store.list = (options, context) => {
+      lists++;
+      return list(options, context);
+    };
+    return () => lists;
+  };
+
+  test("a store with find is never listed, however often a conversation closes and opens again", async () => {
+    const root = mkdtempSync(join(tmpdir(), "pikit-find-"));
+    try {
+      const sessions = createJsonlSessionStore({ root, cwd: root });
+      const lists = countLists(sessions);
+      const s = await setup({ sessions });
+      const conversation = await s.conversation();
+      for (const requestId of ["r1", "r2", "r3"]) {
+        await s.runtime.dispatch({ requestId, conversation, prompt: requestId }, s.app.context());
+        expect((await s.result(requestId)).kind).toBe("completed");
+      }
+      // Idle between messages, so each message opened the conversation again: three opens, no listing.
+      expect(s.opens()).toBe(3);
+      expect(lists()).toBe(0);
+      await s.runtime.close(s.app.context());
+      await sessions.close(BACKGROUND_CONTEXT);
+    } finally {
+      rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  test("a store without find is listed to open a conversation", async () => {
+    const sessions: SessionStore = new MemorySessionRepo();
+    const lists = countLists(sessions);
+    const s = await setup({ sessions });
+    const conversation = await s.conversation();
+    await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "one" }, s.app.context());
+    await s.result("r1");
+    expect(lists()).toBe(1);
     await s.runtime.close(s.app.context());
   });
 });

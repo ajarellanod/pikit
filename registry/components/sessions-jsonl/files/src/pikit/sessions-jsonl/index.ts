@@ -37,6 +37,8 @@ export default defineComponent({
       create: (options, ctx) => current().create(options, ctx),
       open: (metadata, ctx) => current().open(metadata, ctx),
       list: (options, ctx) => current().list(options, ctx),
+      // By id, from the store's index: the runtime opens a conversation's session without listing them all.
+      find: (id, ctx) => current().find(id, ctx),
       delete: (metadata, ctx) => current().delete(metadata, ctx),
       fork: (source, options, ctx) => current().fork(source, options, ctx),
     };

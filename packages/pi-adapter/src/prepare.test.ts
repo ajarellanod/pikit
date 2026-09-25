@@ -69,7 +69,7 @@ const release = defineAgent({
 
 /** A runtime over `sessions` with the `faux` and `other` providers, recording model requests. */
 async function setup(options: { sessions?: SessionStore; agents?: AgentDefinition[]; extensions?: PiExtension[] } = {}) {
-  const sessions = options.sessions ?? new MemorySessionRepo();
+  const sessions: SessionStore = options.sessions ?? new MemorySessionRepo();
   const requests: ModelRequest[] = [];
   const errors: string[] = [];
   const results: Result[] = [];

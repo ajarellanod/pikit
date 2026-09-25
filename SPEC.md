@@ -1337,6 +1337,15 @@ id). Pi's own JSONL test does not run its destination-reservation cases. pikit n
 chooses session ids, so it does not reach it. JSONL stores register the case as `test.failing`
 (`JSONL_REPO_CONFORMANCE_GAPS`), so a Pi release that fixes it is noticed.
 
+`[decision]` **Opening a session by id.** Pi's repos open a session from its metadata, which only a
+listing gives, and a JSONL file's name holds a timestamp besides the id. So `SessionStore` (typed by
+`@pikit/pi-adapter`) adds an optional `find(id, ctx)`, and the runtime opens every conversation with
+it, falling back to listing a store without it. The JSONL store keeps an index, filled by its own
+`create` and `fork` and by one listing the first time an id is missing after a restart; one process
+owns the root (§7.2), so nothing changes the files behind it. A SQL store answers `find` with one
+query. Without it, every message to an idle conversation read the first line of every session file
+ever written (about 350 ms at 5,000 sessions); with it, 0.02 ms.
+
 Planned implementations:
 
 | Component | Backing | Target |

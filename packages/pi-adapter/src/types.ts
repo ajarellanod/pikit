@@ -4,7 +4,7 @@
  * makes them precise everywhere, by declaration merging, as `AppEvents` is extended.
  */
 
-import type { AgentHarnessTool, AgentMessage, ExecutionEnv, SessionRepo } from "@earendil-works/pi-agent-core";
+import type { AgentHarnessTool, AgentMessage, Context, ExecutionEnv, SessionMetadata, SessionRepo } from "@earendil-works/pi-agent-core";
 import type { CredentialStore, Provider, Usage } from "@earendil-works/pi-ai";
 
 /**
@@ -12,7 +12,15 @@ import type { CredentialStore, Provider, Usage } from "@earendil-works/pi-ai";
  * lists, opens and creates, so it accepts them all.
  */
 // biome-ignore lint/suspicious/noExplicitAny: the repo's metadata type is the store's own
-export type SessionStore = SessionRepo<any, any, any>;
+export interface SessionStore extends SessionRepo<any, any, any> {
+  /**
+   * The metadata `open` needs for the session `id`, or `undefined` when there is none. Pi's repos
+   * open a session from its metadata and can only find it by listing every session; a store that can
+   * look one up by id (an index, a SQL `WHERE id = ?`) offers `find`, and the runtime uses it for
+   * every conversation it opens. Optional: without it, the runtime lists.
+   */
+  find?(id: string, context: Context): Promise<SessionMetadata | undefined>;
+}
 
 declare module "@pikit/core" {
   interface AgentPayloads {

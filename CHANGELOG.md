@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter, component/sessions-jsonl: a message to an idle conversation no longer reads every
+  session file. The runtime opens a conversation's session with the store's new `find(id)`, which
+  `sessions-jsonl` answers from an index (one listing after a restart, then about 0.02 ms instead
+  of 350 ms at 5,000 sessions). A store without `find` is listed, as before.
 - cli: the guided path and `pikit configure` look like a modern installer (`@clack/prompts`): menus
   you move through with the arrow keys, yes/no questions, text with a default, a spinner while the
   project is created, and every line on one rail. A secret shows one ▪ per character. Components'

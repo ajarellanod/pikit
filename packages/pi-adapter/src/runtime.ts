@@ -160,12 +160,16 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
 }
 
 /**
- * Pi's repos open a session from its metadata, and the conversation knows only its id. Listing is
- * what the store offers; a registry that keeps the metadata can remove the scan.
+ * Pi's repos open a session from its metadata, and the conversation knows only its id. A store with
+ * `find` looks it up (`sessions-jsonl` keeps an index); any other store is listed, which reads every
+ * session it holds, on every conversation opened.
  */
 async function openSession(sessions: SessionStore, sessionId: string, ctx: Context) {
   const pi = toPi(ctx);
-  const metadata = (await sessions.list(undefined, pi)).find((candidate: { id: string }) => candidate.id === sessionId);
+  const metadata =
+    sessions.find !== undefined
+      ? await sessions.find(sessionId, pi)
+      : (await sessions.list(undefined, pi)).find((candidate: { id: string }) => candidate.id === sessionId);
   if (metadata === undefined) throw new Error(`session ${sessionId} not found in sessions.store`);
   return sessions.open(metadata, pi);
 }
