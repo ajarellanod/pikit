@@ -288,6 +288,34 @@ delay before closing a conversation (`idleMs`) is added only if reopening is mea
 
 **Evidence:** scenarios 1 and 7.
 
+### M1.5 — Many agents
+
+**Proves:** one pikit runs several agents side by side: each with its own prompt, model, tools,
+Pi extensions and workspace, each reached from the channels and chats its rules give it. All of it
+by adding components, and removed the same way.
+
+**Done when** (scenario 8, SPEC §15):
+- Two agents with different tools and extensions answer two different conversations, chosen by
+  rules in config.
+- Each agent's tools work in its own directory.
+- A channel serves several accounts (two Telegram bots in one project), each its own instance.
+- Removing `router-rules` routes everything to one agent again, with nothing else changed (S3).
+
+**Decided first** (SPEC §5): channel instances (`telegram`, `telegram:support`) and conversation
+keys (`<instance>:<conversation>[:<thread>]`), because the outbox delivers by instance. Existing
+keys do not change.
+
+**Scope:** `router-rules`, extensions per agent (`agent.extension`, SPEC §6.2b), `workspace-local`
+(SPEC §8.2), accounts in `channel-telegram`.
+
+**Not in scope:** isolation. A directory per agent is order, not a sandbox (SPEC §8.2); running
+each agent's tools in a container of its own (`execution-docker`) comes after M2. `pikit create
+agent` stays in M3.
+
+**Order of work:** `router-rules` first: it is small, depends on nothing new, and shows many agents
+at once. Then M2's outbox (designed and approved, SPEC §5 "Outbound delivery"), then the rest of
+M1.5, so channels are touched once for both. The key format above is what joins them.
+
 ### M2 — It survives the real world
 
 **Proves:** the harness is reliable as a service in front of real platforms. It survives
@@ -313,11 +341,18 @@ redeliveries, channel outages, restarts and scheduled work.
 - Run against the real Telegram (M1's VPS run): the owner's messages answered, OAuth in Docker.
 - Left for M2: replies through `channel.transport` and `durable-outbox`.
 
-**Scope:** `channel-telegram`, `inbound-dedup`, `durable-outbox`, `scheduler-cron`, the
-telegram preset, `expose`, `config check`. Runtime availability (SPEC §16) is decided here,
-with the first components that can fail while running.
+**Scope:** `channel-telegram`, `storage-sqlite`, `durable-outbox` (SPEC §5 "Outbound delivery"),
+`scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided
+here, with the first components that can fail while running.
 
-**Evidence:** scenarios 2 and 3, plus a redelivery scenario for `inbound-dedup`.
+**Order of work:** (M1.5's `router-rules`) → `storage-sqlite` → the outbound contracts and their
+conformance suite → `durable-outbox`, with a test that kills the process mid-send →
+`channel-telegram` on it (real bot) → the rest of M1.5 → health → `scheduler-cron`.
+
+**Moved:** `inbound-dedup` and `expose` come with the first webhook channel: Google Chat, by
+webhook, moves up from M5 to follow M1.5, as the channel where an agent per space matters.
+
+**Evidence:** scenarios 2 and 3, plus a process killed mid-send whose reply still arrives.
 
 ### M3 — Ownership survives upstream change
 
@@ -361,11 +396,10 @@ a server.
 built as removable components:
 - approvals that wait for days and bind to the surface where a human can answer;
 - real shells;
-- workspace snapshots;
-- Google Chat.
+- workspace snapshots.
 
 **Scope:** `execution-cloudflare-container`, `workspace-container`,
-`workspace-r2-snapshot`, `approvals` on Workflows, `channel-google-chat`.
+`workspace-r2-snapshot`, `approvals` on Workflows. (`channel-google-chat` moved up: see M2.)
 
 ### 1.0 — The promise
 
