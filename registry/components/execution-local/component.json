@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schema/component.schema.json",
   "name": "execution-local",
   "version": "0.0.0",
   "description": "The agent's tools work on this server: its filesystem and its shell.",

@@ -1,6 +1,6 @@
 /**
  * The guided path, in a real pseudo-terminal, as the installer runs it: `pikit new` with no
- * arguments asks the agent's name and where to talk to it (the registry's presets), writes the
+ * arguments asks the agent's name and where to talk to it (the registry's channel-* components), writes the
  * project, then runs the channel's own setup and the model's step, and offers to start it.
  *
  * Telegram is channel-telegram's `fake-telegram.ts`. Ctrl-C stops the wizard with nothing written;
@@ -69,8 +69,11 @@ async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
   await w.waitFor("Name of your agent");
   w.type("my-bot\r");
   await w.waitFor("Where do you want to talk to your agent?");
-  const telegramAt = openRegistry(DEFAULT_REGISTRY).presets().findIndex((p) => p.name === "telegram");
+  const [channels] = openRegistry(DEFAULT_REGISTRY).slots("http");
+  const telegramAt = channels?.options.findIndex((o) => o.name === "channel-telegram") ?? -1;
+  const defaultAt = channels?.options.findIndex((o) => o.name === channels.default) ?? -1;
   expect(telegramAt).toBeGreaterThanOrEqual(0);
+  expect(defaultAt).toBe(0); // the menu starts on the default, so the arrow count is from the top
   await Bun.sleep(100);
   w.type(DOWN.repeat(telegramAt));
   await Bun.sleep(100);
@@ -101,6 +104,8 @@ test.skipIf(!E2E)(
     const w = wizard();
     await nameAndTelegram(w);
     await w.waitFor("Created my-bot in");
+    // What was answered, as the command that answers it without a terminal.
+    await w.waitFor("The same, in a script: pikit new my-bot --preset http --with channel-telegram");
     await w.waitFor("Configure it now?");
     await Bun.sleep(100);
     w.type(RIGHT);

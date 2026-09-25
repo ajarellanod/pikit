@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schema/component.schema.json",
   "name": "credentials-file",
   "version": "0.0.0",
   "description": "The model providers' credentials in one JSON file, readable only by its owner (mode `0600`).",

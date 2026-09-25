@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schema/component.schema.json",
   "name": "deployment-docker",
   "version": "0.0.0",
   "description": "Runs a pikit project in Docker on a server: the image, the container, the process entrypoint, its logs, and the commands `pikit up | down | restart | logs | status` delegate to.",

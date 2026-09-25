@@ -1,6 +1,8 @@
 {
+  "$schema": "../../schema/component.schema.json",
   "name": "channel-telegram",
   "version": "0.0.0",
+  "title": "Telegram: chat with your agent from the Telegram app",
   "description": "Talk to your agent in Telegram: send your bot a message, get the answer in the chat.",
   "targets": [
     "server"

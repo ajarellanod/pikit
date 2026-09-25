@@ -1,9 +1,10 @@
+# yaml-language-server: $schema=../schema/preset.schema.json
 # An agent over HTTP, run in Docker (SPEC §11): `pikit new my-agent --preset http`.
 # A preset is only the list of `pikit add` calls, in order. Nothing branches on which preset a
 # project came from. Its composition is samples/http's, plus the deployment and the log lines.
 # The agents (src/agents/, src/extensions/agents.ts) belong to the project, not to the registry.
-# `title` is what `pikit new` shows when it asks where to talk to the agent.
-title: "HTTP API: call your agent from your own code (POST /v1/messages)"
+# `title` is what `pikit new` shows if it asks which preset to start from (only with several bases).
+title: "An agent, run in Docker"
 components:
   - secrets-env
   - sessions-jsonl
@@ -21,3 +22,9 @@ components:
   - server-bun
   - log-events
   - deployment-docker
+# One question of `pikit new` per entry: every registry component of that kind is an answer (its
+# `title` in component.json is the label), and the one listed above is the default. A new channel-*
+# component is an answer without touching this file. `--with <component>` answers it in a script.
+choose:
+  - kind: channel
+    question: "Where do you want to talk to your agent?"

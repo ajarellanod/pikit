@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schema/component.schema.json",
   "name": "tool-write",
   "version": "0.0.0",
   "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",

@@ -1630,8 +1630,10 @@ project.
 
 ```json
 {
+  "$schema": "../../schema/component.schema.json",
   "name": "channel-telegram",
   "version": "1.4.0",
+  "title": "Telegram: chat with your agent from the Telegram app",
   "description": "Telegram bot channel (webhook ingress + Bot API transport)",
   "license": "MIT",
   "targets": ["server", "cloudflare"],
@@ -1654,6 +1656,14 @@ project.
 
 Rules:
 
+- `[decision]` **The shape is one schema.** `ManifestSchema` (typebox, in
+  `packages/cli/src/registry/manifest.ts`) is the only definition of the fields: the CLI's `Manifest`
+  type is derived from it; `validate` checks every `component.json` against it before any other rule;
+  `pikit add` and `pikit new` check a component against it before installing it, whatever registry it
+  comes from; and `generate` writes it as JSON Schema to the registry's `schema/component.schema.json`,
+  which every `component.json` names in `$schema` (a generated field), so an editor completes and
+  checks it. A field the schema does not know is an error, not silence: `generate` keeps it (nothing
+  written by hand is lost) and `validate` names it.
 - `dependencies` are real npm deps (SDKs, crypto). They are added to the project's
   `package.json`. Behavior is copied; protocols and crypto are depended on.
 - No install scripts. Ever. `[decision]`
@@ -1690,6 +1700,9 @@ Rules:
   no tool has no `replay`. `[decision]`
 - Every other field is written by hand, and the generator never changes it:
   - `name` is the directory's name; `version` is semver.
+  - `title` is what `pikit new` shows when the component answers a preset's question (§11):
+    `"Name: what it is"`, the part after the colon being the hint. Optional, and required for every
+    component of a kind some preset lets people choose (`validate` checks it).
   - `requires.pikit` must accept the `@pikit/core` of the registry's own commit.
   - `targets` is `server`, `cloudflare` or both.
   - `dependencies` lists exactly the npm packages the component's files import, tests included
@@ -1710,8 +1723,14 @@ Rules:
   - A component with no default export in `src/pikit/<name>/index.ts` is not an app component
   (a `deployment-*`, which runs the app, §9.1): it has no `setup`, so its generated fields are
   empty. A default export that is not a component is an error. `[decision]`
-- `bun run registry validate` checks every component and exits non-zero with one line per
+- `bun run registry validate` checks every component, every preset (§11) and that the JSON
+    Schemas under `schema/` are what `generate` would write, and exits non-zero with one line per
     problem (§14).
+- `bun run registry capabilities` prints the capability catalogue: each capability's mode (single or
+  keyed), the package whose declaration merging defines its contract, one line on what it is, and the
+  components that provide and use it. The line lives in `packages/cli/src/registry/capabilities.ts`,
+  typed over `AppCapabilities` / `AppKeyedCapabilities`: a capability defined without an entry, or with
+  the wrong mode, fails `tsc`, and `validate` rejects a component that names one with no entry.
 - The fields are derived without starting anything:
   1. a recording `Pikit` runs `setup` to learn its single uses and its tools;
   2. an app of the component plus a stub provider per single use is created, and its
@@ -1771,6 +1790,8 @@ A registry is a Git repository (or static HTTP root) with:
 ```
 registry.json                index: name → { version, description, targets, path }
 components/<name>/           component packages as in §10.1
+presets/<name>.yaml          presets (§11)
+schema/                      component.schema.json and preset.schema.json, generated (§10.2)
 ```
 
 ```json
@@ -1833,7 +1854,9 @@ with `doctor`. `remove` also:
 Adding and then removing a component leaves `git status` clean (S3). The CLI's end-to-end test checks
 it on a generated project.
 
-`pikit new <dir> [--preset <name>]` writes the project's own files first: an agent (`assistant`,
+`pikit new <dir> [--preset <name> [--with <component>]...]` resolves the preset (§11) and checks every
+component against the new project's targets and core before it writes anything, so a component that
+cannot be installed never leaves half a project. Then it writes the project's own files: an agent (`assistant`,
 `src/agents/assistant/agent.ts`, naming the tools the preset installs), `src/extensions/agents.ts`,
 Pi's `permission-gate` example unmodified, `package.json`, `tsconfig.json`, `.gitignore` and a
 README. Then it runs steps 1–10 for each component of the preset, and `bun install` and `doctor`
@@ -1887,7 +1910,7 @@ mechanism that makes source-ownership survivable for fast-moving integrations.
 ## 11. CLI
 
 ```
-pikit new <dir> [--preset <name>] [--target server|cloudflare]
+pikit new <dir> [--preset <name> [--with <component>]...] [--target server|cloudflare]
 pikit init                                   # in an existing project
 pikit add <component>[@version] [--registry] [--force]
 pikit remove <component>
@@ -1918,7 +1941,7 @@ M1 has these commands; the others print "not yet" and name the milestone that br
 | `configure` | First runs the components' own steps (below). Then writes the other variables of the installed components to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login runs where the app will run (below). |
 | `dev` | After `doctor`, `bun --watch src/pikit/<deployment>/main.ts` (the installed `deployment-*` component's entrypoint) with `.env` loaded. |
 | `up`, `down`, `restart`, `logs`, `status` | Delegate, as above. `up` runs `doctor` first, then checks the model credentials where the app runs (through the deployment's `exec`), and refuses to start an agent that has none. |
-| `registry validate`, `registry generate` | §10.2, §14. `bun run registry` in this repository calls the same code. |
+| `registry validate`, `registry generate`, `registry capabilities` | §10.2, §14. `bun run registry` in this repository calls the same code. |
 
 `[decision]` **A component can own its setup.** A component that needs more than a value typed in
 ships `src/pikit/<name>/configure.ts`, exporting `configure(io)`: checking a token against its API,
@@ -1939,8 +1962,11 @@ checks the bot token with `getMe`, and allows whoever sends the bot a message.
 yes/no, text with a default, spinners), except secrets: a pasted token must stay one answer even over
 several lines, which clack's password prompt does not keep, so pikit reads secrets itself, masked, and
 draws them the same way. Without a terminal nothing is drawn and nothing changes. **The flow.** `pikit new` with no directory, in a terminal, asks the agent's name
-(its folder) and where to talk to it: one choice per preset of the registry, shown by its `title`.
-Then it runs the same functions as the commands: `new`, `configure` (each component's own step, then
+(its folder), the preset to start from (only when the registry has several base presets, by their
+`title`), and each of that preset's questions (`choose`, below): where to talk to it is "which
+`channel-*` component", answered by every one in the registry that runs on the new project's targets,
+shown by its `title`. It prints the `pikit new … --preset … --with …` command that makes the same
+project without a terminal. Then it runs the same functions as the commands: `new`, `configure` (each component's own step, then
 the model's login) and `up` (the default) or `dev`. It knows no channel: the choices come from the
 registry and the questions from the components. Ctrl-C stops it at any question (exit 130); `pikit
 new` again with the same name continues with the project already written, since `configure` asks
@@ -1972,12 +1998,23 @@ user to the `docker` group. Then, on a terminal, it runs `pikit new`, the guided
 already active (`sg docker`), and ends with the lines this shell still needs (the `PATH` line, and
 `newgrp docker`). `PIKIT_NO_WIZARD=1` skips the guided path.
 
-Presets are lists of `add` calls, plus the `title` `pikit new` shows for them; nothing else. Nothing
-reads which preset a project came from:
+`[decision]` **Presets.** A preset is the list of `add` calls `pikit new` makes, and nothing reads
+which preset a project came from. Its shape is `PresetSchema` (in
+`packages/cli/src/project/registry-source.ts`), written by `generate` to `schema/preset.schema.json`,
+which each preset names in a `yaml-language-server` comment; an unknown key is an error. A preset is
+either:
+
+- **a base**: `components`, in install order, and optionally `choose`, one question per component
+  kind. Every registry component of that kind answers it (`title` in its `component.json` is the
+  label), and the one the base lists is the default. So a new `channel-*` component is an answer as
+  soon as it is in the registry, with no preset edited, and presets do not multiply per channel.
+- **an alias**: `extends` a base and answers some of its questions with `with`. An alias of an alias
+  is refused.
 
 ```yaml
-# registry/presets/telegram.yaml
-title: "Telegram: chat with your agent from the Telegram app"
+# yaml-language-server: $schema=../schema/preset.schema.json
+# registry/presets/http.yaml
+title: "An agent, run in Docker"
 components:
   - secrets-env
   - sessions-jsonl
@@ -1991,17 +2028,41 @@ components:
   - tool-bash
   - runtime-pi
   - router-basic
-  - channel-telegram
+  - channel-http
   - server-bun
   - log-events
   - deployment-docker
+choose:
+  - kind: channel
+    question: "Where do you want to talk to your agent?"
 ```
+
+```yaml
+# yaml-language-server: $schema=../schema/preset.schema.json
+# registry/presets/telegram.yaml
+title: "Telegram: chat with your agent from the Telegram app"
+extends: http
+with:
+  - channel-telegram
+```
+
+- `--with <component>` answers a question without a terminal: it replaces the preset's component of
+  the same kind, in place, so install order is kept. On an alias it answers again (the command line
+  wins). A component of a kind the preset does not `choose` is refused (`pikit add` it after), as are
+  two of one kind and `--with` without `--preset`.
+- A base's `choose` kind must have exactly one component of that kind in `components` (the default),
+  and each kind is asked once.
+- `validate` resolves every preset, and every answer to every question, and requires a `title` of
+  each component that answers one.
+- A question has one answer per component, not per combination: combinations that need more than
+  one component per answer, or rules between answers, are added when a real case needs them.
 
 `registry/presets/http.yaml` (M1) is `samples/http`'s composition, plus `log-events` and
 `deployment-docker`; a test in the sample keeps the two together. `registry/presets/telegram.yaml`
-is the same with `channel-telegram` instead of `channel-http`. `server-bun` stays, for `/health`
-and `/ready`, which the container's healthcheck and `pikit status` use. The project's own agents
-(`src/extensions/`) are not registry components and are not in a preset.
+is an alias: `pikit new my-bot --preset telegram` is `pikit new my-bot --preset http --with
+channel-telegram`. `server-bun` stays, for `/health` and `/ready`, which the container's healthcheck
+and `pikit status` use. The project's own agents (`src/extensions/`) are not registry components
+and are not in a preset.
 
 ---
 

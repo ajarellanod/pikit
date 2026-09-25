@@ -4,25 +4,39 @@
  * added later needs no change here.
  */
 
-import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
-import { checkDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
+import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, readPreset } from "../project/registry-source.ts";
+import { checkCapabilities, checkDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeSetup, loadComponent } from "./describe.ts";
 import {
   buildIndex,
+  COMPONENT_SCHEMA_FILE,
+  COMPONENT_SCHEMA_REF,
   formatIndex,
   formatManifest,
+  formatSchema,
   type Generated,
   type Manifest,
+  ManifestSchema,
   manifestPath,
   readManifest,
+  SCHEMA_DIR,
+  schemaProblems,
   TARGETS,
   withGenerated,
   writeManifest,
 } from "./manifest.ts";
 
+/** The JSON Schemas a registry carries, for editors: its path under the root → its text. */
+function schemaFiles(): Map<string, string> {
+  return new Map([
+    [COMPONENT_SCHEMA_FILE, formatSchema(ManifestSchema)],
+    [PRESET_SCHEMA_FILE, formatSchema(PresetSchema)],
+  ]);
+}
 
 /** The `@pikit/core` a registry at this commit is built with; `requires.pikit` must accept it. */
 export function coreVersion(): string {
@@ -85,6 +99,11 @@ export async function generate(root: string): Promise<Outcome> {
     writeFileSync(join(root, "registry.json"), formatIndex(buildIndex(manifests)));
     written.push(join(root, "registry.json"));
   }
+  mkdirSync(join(root, SCHEMA_DIR), { recursive: true });
+  for (const [file, text] of schemaFiles()) {
+    writeFileSync(join(root, file), text);
+    written.push(join(root, file));
+  }
   return { written, problems };
 }
 
@@ -115,18 +134,21 @@ export async function validate(root: string, options: { coreVersion?: string } =
     }
     manifests.push(manifest);
     checkManifest(manifest, dir, name, core).forEach(report);
+    // Every rule below reads the manifest's fields: a malformed one was reported, and that is all.
+    if (schemaProblems(ManifestSchema, manifest).length > 0) continue;
 
-    const targets = Array.isArray(manifest.targets) ? manifest.targets : [];
-    const scan = checkImports(dir, name, targets);
+    const scan = checkImports(dir, name, manifest.targets);
     scan.problems.forEach(report);
-    if (typeof manifest.dependencies === "object" && manifest.dependencies !== null) {
-      checkDependencies(manifest.dependencies, scan.packages).forEach(report);
-    }
+    checkDependencies(manifest.dependencies, scan.packages).forEach(report);
 
     try {
       const drift = checkDrift(manifest, await generatedFor(dir, name, manifest));
       drift.forEach(report);
-      if (drift.length === 0) checkFormat(dir, manifest).forEach(report);
+      if (drift.length === 0) {
+        checkFormat(dir, manifest).forEach(report);
+        // Only on an up-to-date manifest: a drifted one would report names setup no longer uses.
+        checkCapabilities(manifest).forEach(report);
+      }
     } catch (error) {
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
     }
@@ -137,8 +159,56 @@ export async function validate(root: string, options: { coreVersion?: string } =
   if (!existsSync(indexPath)) problems.push("registry.json is missing: run `bun run registry generate`");
   else if (readFileSync(indexPath, "utf8") !== expected) {
     problems.push("registry.json does not match the components' manifests: run `bun run registry generate`");
+  } else {
+    // Presets resolve through registry.json, so only once it is right.
+    problems.push(...checkPresets(root));
   }
+  problems.push(...checkSchemaFiles(root));
   return { written: [], problems };
+}
+
+/** The registry's JSON Schemas are exactly what this CLI would generate. */
+export function checkSchemaFiles(root: string): string[] {
+  return [...schemaFiles()]
+    .filter(([file, text]) => !existsSync(join(root, file)) || readFileSync(join(root, file), "utf8") !== text)
+    .map(([file]) => `${file} is missing or out of date: run \`bun run registry generate\``);
+}
+
+/**
+ * Every preset resolves: its components exist, once each; an alias extends a base and chooses what
+ * that base lets it choose; and every answer to a question resolves too and has a `title` to show.
+ */
+export function checkPresets(root: string): string[] {
+  const dir = join(root, "presets");
+  if (!existsSync(dir)) return [];
+  const registry = openRegistry(root);
+  const problems = new Set<string>();
+  for (const name of readdirSync(dir).filter((f) => f.endsWith(".yaml")).map((f) => f.slice(0, -".yaml".length)).sort()) {
+    const report = (message: string) => problems.add(`presets/${name}.yaml: ${message}`);
+    try {
+      const isAlias = readPreset(root, name).extends !== undefined;
+      const components = registry.preset(name);
+      for (const component of components) registry.manifest(component);
+      if (new Set(components).size !== components.length) report("lists a component twice");
+      // An alias asks its base's questions: they are checked once, with the base.
+      for (const slot of isAlias ? [] : registry.slots(name)) {
+        for (const option of slot.options) {
+          registry.preset(name, [option.name]);
+          if (registry.manifest(option.name).title === undefined) {
+            report(`${option.name} answers "${slot.question}" but its component.json has no title to show`);
+          }
+        }
+      }
+    } catch (error) {
+      report(error instanceof Error ? error.message : String(error));
+    }
+  }
+  return [...problems];
+}
+
+/** Every component's manifest, by listing `components/`. A missing one is skipped; invalid JSON throws. */
+export function readManifests(root: string): Manifest[] {
+  return componentNames(root).flatMap((name) => readManifest(join(root, "components", name)) ?? []);
 }
 
 /** S14: the generated fields are exactly what setup declares. S10: every tool states its replay. */
@@ -146,6 +216,7 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
   const problems: string[] = [];
   const expected = withGenerated(manifest, generated);
   const fields: [string, unknown, unknown][] = [
+    ["$schema", manifest.$schema, COMPONENT_SCHEMA_REF],
     ["provides", manifest.provides, expected.provides],
     ["requires.capabilities", manifest.requires?.capabilities, expected.requires.capabilities],
     ["optional.capabilities", manifest.optional?.capabilities, expected.optional.capabilities],

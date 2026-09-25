@@ -1,4 +1,5 @@
 {
+  "$schema": "../../schema/component.schema.json",
   "name": "runtime-pi",
   "version": "0.0.0",
   "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",

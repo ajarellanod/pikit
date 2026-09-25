@@ -9,6 +9,24 @@ line names its area (AGENTS.md, "Git and docs").
   session file. The runtime opens a conversation's session with the store's new `find(id)`, which
   `sessions-jsonl` answers from an index (one listing after a restart, then about 0.02 ms instead
   of 350 ms at 5,000 sessions). A store without `find` is listed, as before.
+- cli, registry: presets ask, instead of multiplying. A base preset lists its components and may
+  `choose` one per kind: `pikit new` asks "Where do you want to talk to your agent?" and offers every
+  `channel-*` component in the registry that runs on the new project, by the new `title` in its
+  `component.json`; a new channel shows up there without editing any preset. `--with <component>`
+  answers in a script (`pikit new my-bot --preset http --with channel-telegram`), and the guided
+  path prints that command. `telegram` is now an alias (`extends: http`, `with: [channel-telegram]`),
+  so `--preset telegram` works as before. `pikit new` checks every component against the project's
+  target before writing anything.
+- registry: `component.json` and presets have JSON Schemas (`registry/schema/`), generated from the
+  CLI's own definitions. Every `component.json` names its schema in `$schema` and each preset in a
+  `yaml-language-server` comment, so editors complete and check them. `registry validate` checks both
+  against them, and now rejects fields it does not know (a typo was silently ignored);
+  `pikit add` checks a component's manifest before installing it.
+- cli: `pikit registry capabilities` prints each capability (single or keyed, who defines its
+  contract, what it is) and the components that provide and use it. A capability defined without an
+  entry in the catalogue fails the type check, and `registry validate` rejects a component that uses
+  one.
+
 - cli: the guided path and `pikit configure` look like a modern installer (`@clack/prompts`): menus
   you move through with the arrow keys, yes/no questions, text with a default, a spinner while the
   project is created, and every line on one rail. A secret shows one ▪ per character. Components'

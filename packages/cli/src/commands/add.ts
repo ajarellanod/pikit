@@ -70,7 +70,7 @@ export async function installComponent(
   if (name in project.components && options.force !== true) {
     throw new CliError(`${name} is already installed; \`pikit upgrade\` arrives in M3 (or pass --force to reinstall it)`);
   }
-  checkCompatible(project, manifest);
+  checkCompatible(project.targets, manifest);
   warnUnprovided(project, registry, manifest);
 
   const files = registry.files(name);
@@ -137,8 +137,9 @@ function registryKey(project: ProjectManifest, path: string | undefined): string
   return key;
 }
 
-function checkCompatible(project: ProjectManifest, manifest: Manifest): void {
-  const unsupported = project.targets.filter((t) => !manifest.targets.includes(t));
+/** Refuses a component that does not run on `targets` or does not accept this CLI's core. */
+export function checkCompatible(targets: readonly string[], manifest: Manifest): void {
+  const unsupported = targets.filter((t) => !manifest.targets.includes(t));
   if (unsupported.length > 0) {
     throw new CliError(`${manifest.name} runs on ${manifest.targets.join(", ")}, not on this project's ${unsupported.join(", ")} target`);
   }

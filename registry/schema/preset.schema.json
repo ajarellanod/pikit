@@ -1,0 +1,83 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "components"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "What `pikit new` shows if it asks which preset to start from."
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "description": "The `pikit add` calls, in order."
+        },
+        "choose": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "kind"
+            ],
+            "properties": {
+              "kind": {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*$",
+                "description": "Every registry component of this kind answers; the one in `components` is the default."
+              },
+              "question": {
+                "type": "string",
+                "pattern": "\\S",
+                "description": "What `pikit new` asks. Default: \"Which <kind>?\"."
+              }
+            },
+            "additionalProperties": false
+          },
+          "minItems": 1,
+          "description": "One question of `pikit new` per entry; `--with <component>` answers it in a script."
+        }
+      },
+      "additionalProperties": false
+    },
+    {
+      "type": "object",
+      "required": [
+        "extends",
+        "with"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "pattern": "\\S",
+          "description": "What `pikit new` shows if it asks which preset to start from."
+        },
+        "extends": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+          "description": "The base preset: an alias of an alias is refused."
+        },
+        "with": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "description": "Answers to the base's questions, as `--with` gives them."
+        }
+      },
+      "additionalProperties": false
+    }
+  ],
+  "title": "pikit preset",
+  "description": "A preset of a pikit registry (SPEC §11): a base, or an alias of one."
+}

@@ -52,6 +52,14 @@ test("pikit registry validate runs the repository's registry checks", () => {
   expect(run.code).toBe(0);
 });
 
+test("pikit registry capabilities prints what each capability is and who provides and uses it", () => {
+  const run = pikit(["registry", "capabilities"], temp());
+  expect(run.code).toBe(0);
+  expect(run.out).toContain("sessions.store  (single, @pikit/pi-adapter)");
+  expect(run.out).toContain("provided by: sessions-jsonl");
+  expect(pikit(["registry", "bogus"], temp()).code).toBe(2);
+});
+
 test("project commands outside a project, and up with no deployment component, say what to do", () => {
   const outside = pikit(["doctor"], temp());
   expect(outside.code).toBe(1);
@@ -83,6 +91,37 @@ test("new refuses a non-empty directory and an unknown preset before writing any
   const unknown = pikit(["new", "fresh", "--preset", "nope"], parent);
   expect(unknown.code).toBe(1);
   expect(unknown.err).toContain('no preset "nope"');
+  expect(existsSync(join(parent, "fresh"))).toBe(false);
+
+  const notAsked = pikit(["new", "fresh", "--preset", "http", "--with", "tool-bash"], parent);
+  expect(notAsked.code).toBe(1);
+  expect(notAsked.err).toContain("has no choice of tool-* components; add tool-bash after");
+  const noPreset = pikit(["new", "fresh", "--with", "channel-telegram"], parent);
+  expect(noPreset.code).toBe(1);
+  expect(noPreset.err).toContain("--with answers a preset's questions: it needs --preset");
+  expect(existsSync(join(parent, "fresh"))).toBe(false);
+});
+
+test("new refuses a preset component that does not run on a new project's target, before writing anything", () => {
+  const registry = temp();
+  const manifest = (name: string, targets: string[]) => ({
+    name, version: "0.0.0", description: name, targets, requires: { pikit: "0.0.0", capabilities: [] },
+    optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }],
+  });
+  const index: Record<string, unknown> = {};
+  for (const [name, targets] of [["secrets-env", ["server"]], ["channel-edge", ["cloudflare"]]] as const) {
+    mkdirSync(join(registry, "components", name), { recursive: true });
+    writeFileSync(join(registry, "components", name, "component.json"), JSON.stringify(manifest(name, [...targets])));
+    index[name] = { version: "0.0.0", description: name, targets, path: `components/${name}` };
+  }
+  writeFileSync(join(registry, "registry.json"), JSON.stringify({ version: 1, components: index }));
+  mkdirSync(join(registry, "presets"));
+  writeFileSync(join(registry, "presets", "edge.yaml"), "components: [secrets-env, channel-edge]\n");
+
+  const parent = temp();
+  const run = pikit(["new", "fresh", "--preset", "edge", "--registry", registry], parent);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("channel-edge runs on cloudflare, not on this project's server target");
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 

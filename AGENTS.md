@@ -291,7 +291,16 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **Cloudflare limits are design inputs:** no `child_process`, no `eval`, no dynamic
   imports, a 10 MB bundle, 128 MB of memory, about 6 concurrent outbound connections,
   15-minute alarms, and in-memory state that is lost on hibernation.
-- **Presets are shortcuts, not modes.** Never branch behavior on which preset was used.
+- **Presets are shortcuts, not modes.** Never branch behavior on which preset was used. A preset
+  resolves to a list of `add` calls: a base's `components` with its `choose` questions answered
+  (`--with`, the guided path), or an alias's `extends` + `with`. Never add a preset per channel: a
+  `channel-*` component with a `title` is already an answer to the base's question (SPEC §11).
+- **A new capability needs a catalogue line.** Declaring one on `AppCapabilities` /
+  `AppKeyedCapabilities` fails `tsc` until `packages/cli/src/registry/capabilities.ts` describes it
+  (`bun run registry capabilities` prints the catalogue). Test-only capabilities are named `test.*`.
+- **`component.json` and presets have a schema.** Change their shape in `ManifestSchema`
+  (`packages/cli/src/registry/manifest.ts`) or `PresetSchema` (`packages/cli/src/project/registry-source.ts`),
+  then `bun run registry generate` rewrites `registry/schema/`; `validate` fails while it is stale.
 
 ## Git and docs
 

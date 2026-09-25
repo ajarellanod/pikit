@@ -78,7 +78,7 @@ test("a fixture made like a real component validates", async () => {
   expect((await validate((await fixture()).root)).problems).toEqual([]);
 });
 
-test("generate writes what setup declares and keeps every hand-written field", async () => {
+test("generate writes what setup declares and keeps every hand-written field, even one validate refuses", async () => {
   const f = await fixture();
   expect(f.manifest()).toMatchObject({
     requires: { capabilities: ["sessions.store"] },
@@ -95,14 +95,16 @@ test("generate writes what setup declares and keeps every hand-written field", a
   await generate(f.root);
   expect(readFileSync(join(f.dir, "component.json"), "utf8")).toBe(once);
   expect(Object.keys(f.manifest())).toEqual([
-    "name", "version", "description", "license", "targets", "requires", "optional", "provides", "dependencies", "files", "custom",
+    "$schema", "name", "version", "description", "license", "targets", "requires", "optional", "provides", "dependencies", "files", "custom",
   ]);
+  // Kept, so nothing written by hand is lost; refused, so a typo is not silence.
+  expect(await problems(f)).toContain("component.json /custom: is not a known field");
 });
 
 test("a new component's skeleton is rejected until its targets are written by hand", async () => {
   const f = await fixture({ fill: false });
   expect(f.manifest().description).toBe("A fixture component.");
-  expect(await problems(f)).toContain("targets must list at least one of server, cloudflare");
+  expect(await problems(f)).toContain("component.json /targets: must not have fewer than 1 items");
 });
 
 test("drift: generated fields that differ from setup (S14)", async () => {
@@ -188,7 +190,7 @@ test("dependencies: exactly the npm packages the files import", async () => {
 test("manifest: no requires.components (SPEC §10.2)", async () => {
   const f = await fixture();
   f.writeManifest({ ...f.manifest(), requires: { ...f.manifest().requires, components: ["router-basic"] } as Manifest["requires"] });
-  expect(await problems(f)).toContain("requires.components is not a manifest field");
+  expect(await problems(f)).toContain("component.json /requires/components: is not a known field: components depend on capabilities only");
 });
 
 test("files: only files/src maps as a directory; a file outside src is listed on its own (SPEC §10.2)", async () => {

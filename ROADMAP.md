@@ -261,8 +261,8 @@ up` refuses to start an agent with no credentials there. The Docker end-to-end t
 the login was run in a pseudo-terminal up to pi-ai's URL and paste prompt, inside the container.
 
 ✅ **The guided path** (SPEC §11). The installer goes straight into `pikit new`, which asks the name
-and the channel (the registry's presets), runs the channel's own setup and the model's login, and
-starts the agent. `e2e-wizard.test.ts` drives it in a real pseudo-terminal against the fake Bot API:
+and the channel (every `channel-*` component of the registry, the `http` preset's `choose`), runs the
+channel's own setup and the model's login, and starts the agent. `e2e-wizard.test.ts` drives it in a real pseudo-terminal against the fake Bot API:
 Ctrl-C with nothing written, configuring later, and `pikit new` continuing.
 
 ✅ **Five minutes on a real, clean VPS** (GCE `e2-small`, Debian 12, 2 GB).

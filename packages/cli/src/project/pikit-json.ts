@@ -38,8 +38,11 @@ export interface ProjectManifest {
   components: Record<string, InstalledComponent>;
 }
 
+/** A new project's targets (M1 has one; `--target` arrives with the cloudflare target). */
+export const NEW_PROJECT_TARGETS: readonly string[] = ["server"];
+
 export function emptyManifest(registry: string): ProjectManifest {
-  return { version: 1, targets: ["server"], registries: { default: registry }, components: {} };
+  return { version: 1, targets: [...NEW_PROJECT_TARGETS], registries: { default: registry }, components: {} };
 }
 
 export function readProjectManifest(projectDir: string): ProjectManifest {

@@ -1,0 +1,197 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "name",
+    "version",
+    "description",
+    "targets",
+    "requires",
+    "optional",
+    "provides",
+    "dependencies",
+    "files"
+  ],
+  "properties": {
+    "$schema": {
+      "type": "string",
+      "description": "Generated: this schema, relative to the component.json."
+    },
+    "name": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$",
+      "description": "kebab-case, prefixed by its kind (`channel-telegram`); equal to its directory."
+    },
+    "version": {
+      "type": "string",
+      "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$",
+      "description": "semver."
+    },
+    "title": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "What `pikit new` shows when the component answers a preset's question (`choose`): \"Name: what it is\". Required for those components."
+    },
+    "description": {
+      "type": "string",
+      "pattern": "\\S",
+      "description": "One sentence: what the component does for the project."
+    },
+    "license": {
+      "type": "string"
+    },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "server",
+          "cloudflare"
+        ]
+      },
+      "minItems": 1,
+      "uniqueItems": true,
+      "description": "Where it runs. node:* and bun:* imports need exactly [\"server\"] (S5)."
+    },
+    "requires": {
+      "type": "object",
+      "required": [
+        "pikit",
+        "capabilities"
+      ],
+      "properties": {
+        "pikit": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The @pikit/core versions it works with (a semver range)."
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Generated from setup's use() calls."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A component depends on capabilities, never on components (SPEC §10.2)."
+    },
+    "optional": {
+      "type": "object",
+      "required": [
+        "capabilities"
+      ],
+      "properties": {
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "description": "Generated from setup's useOptional() and useKeyed() calls."
+        }
+      },
+      "additionalProperties": false
+    },
+    "provides": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Generated from setup's provide() and provideKeyed() calls."
+    },
+    "replay": {
+      "type": "object",
+      "required": [
+        "tools"
+      ],
+      "properties": {
+        "tools": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "string"
+            }
+          },
+          "description": "Generated: each agent.tool's replay (S10, SPEC §8.4)."
+        }
+      },
+      "additionalProperties": false
+    },
+    "dependencies": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "string",
+          "minLength": 1
+        }
+      },
+      "description": "Exactly the npm packages its files import, pinned (package → version)."
+    },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "source",
+          "target"
+        ],
+        "properties": {
+          "source": {
+            "type": "string",
+            "minLength": 1
+          },
+          "target": {
+            "type": "string",
+            "minLength": 1
+          }
+        },
+        "additionalProperties": false
+      },
+      "minItems": 1,
+      "description": "Component-relative source → project-relative target. Only files/src → src maps a directory."
+    },
+    "environment": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "name",
+          "secret",
+          "required"
+        ],
+        "properties": {
+          "name": {
+            "type": "string",
+            "pattern": "^[A-Z][A-Z0-9_]*$",
+            "description": "UPPER_SNAKE_CASE."
+          },
+          "secret": {
+            "type": "boolean",
+            "description": "Asked without echo by `pikit configure`, never printed."
+          },
+          "required": {
+            "type": "boolean",
+            "description": "`pikit configure` fails without it."
+          },
+          "description": {
+            "type": "string",
+            "description": "What it is and where to get it."
+          }
+        },
+        "additionalProperties": false
+      },
+      "description": "Variables `pikit configure` sets in .env."
+    },
+    "config": {
+      "type": "string",
+      "description": "A component-relative path."
+    },
+    "migrations": {
+      "type": "string",
+      "description": "A component-relative path."
+    }
+  },
+  "additionalProperties": false,
+  "title": "pikit component.json",
+  "description": "A component of a pikit registry (SPEC §10.2)."
+}

@@ -1,5 +1,5 @@
 /**
- * `pikit new <dir> [--preset <name>] [--registry <path>]`: a new project.
+ * `pikit new <dir> [--preset <name> [--with <component>]...] [--registry <path>]`: a new project.
  *
  * It writes the project's own part (`starter.ts`), vendors the kit packages into `vendor/`, adds
  * every component of the preset through the same install flow as `pikit add` (SPEC §10.5), runs
@@ -11,17 +11,19 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 
 import { basename, join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
-import { emptyManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { openRegistry } from "../project/registry-source.ts";
 import { vendorKit } from "../project/vendor.ts";
 import { CliError, log } from "../ui.ts";
-import { installComponent } from "./add.ts";
+import { checkCompatible, installComponent } from "./add.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
 import * as starter from "./starter.ts";
 
 export interface NewOptions {
   preset?: string;
+  /** Answers to the preset's questions (`choose`): each replaces the preset's component of its kind. */
+  with?: readonly string[];
   registry?: string;
   /** Print what to run next. Default: true; the guided path (`wizard.ts`) runs it instead. */
   next?: boolean;
@@ -42,8 +44,10 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
 
   // Everything that can be refused is checked before the first file is written.
   const registry = openRegistry(options.registry ?? DEFAULT_REGISTRY);
-  const components = options.preset === undefined ? [] : registry.preset(options.preset);
-  for (const component of components) registry.manifest(component);
+  if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions: it needs --preset");
+  const components = options.preset === undefined ? [] : registry.preset(options.preset, options.with ?? []);
+  // Each component is installed after the project's files are written: refuse one that cannot be first.
+  for (const component of components) checkCompatible(NEW_PROJECT_TARGETS, registry.manifest(component));
   const tools = components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {}));
 
   const step = (message: string) => options.quiet !== true && log.step(message);
