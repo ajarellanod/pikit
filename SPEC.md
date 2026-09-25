@@ -339,7 +339,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 
 | Capability | Contract | Notes |
 |---|---|---|
-| `storage.sql` | `SqlDatabase` | Minimal sync/async SQL surface. Backed by `bun:sqlite`, `node:sqlite`, Postgres driver, or DO `ctx.storage.sql`. |
+| `storage.sql` | `SqlDatabase` | Async `query` / `run` / `transaction` (§16: decided async). One database per app; each component owns its own tables, prefixed with its name. Backed by `node:sqlite` (`storage-sqlite`, M2), a Postgres driver, or DO `ctx.storage.sql`. |
 | `storage.blob` | `BlobStore` | put/get/delete/list. Local dir, S3, R2. |
 | `sessions.store` | Pi `SessionRepo` + `SessionStorage` | Re-exported from Pi; typed by `@pikit/pi-adapter`. See §7. |
 | `conversations.registry` | `ConversationRegistry` | Conversation key → active session and agent: `resolve` (creates the session the first time), `get`, `reset` (§7.4, §7.6). Workspace ref and metadata `[planned]`. |
@@ -354,10 +354,11 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `model.credentials` | pi-ai `CredentialStore` | Credentials of the model providers, one per provider id (API key or OAuth tokens). pi-ai refreshes OAuth tokens inside the store's `modify` and writes them back, and reads the environment (`ANTHROPIC_API_KEY`) only when nothing is stored. Optional: without it, providers read their environment variables only. Typed by `@pikit/pi-adapter`; its conformance suite is in `@pikit/pi-adapter/testing` (§14), because the contract is pi-ai's. |
 | `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
 | `agent.tool` (keyed by tool name) | `AgentTool` | One per tool, provided by `tool-*` components. An agent names the tools it uses in `AgentDefinition.tools`; the runtime resolves the names (§6.3). |
+| `agent.extension` (keyed by extension name) | Pi `ExtensionFactory` | `[planned]` (M1.5) One per Pi extension, provided by a component. An agent names the extensions it uses in `AgentDefinition.extensions`, as it names tools; the runtime loads them per conversation (§6.2b). Typed by `@pikit/pi-adapter`, so the core sees only names. |
 | `agent.state` | `AgentState` | Per-conversation JSON state read by `prepare` and updated by tools. Not a capability today: the runtime puts the conversation's `AgentState` in the context of each run (`AGENT_STATE`), stored in the Pi session (§6.2a, §6.4); no separate store. A capability for components that act outside a run (an admin route, a scheduler) is `[planned]`, with the first one that needs it. |
-| `channel.transport` (keyed by channel name) | `ChannelTransport` | Send/edit/delete messages for one channel. Each channel component provides its transport under its own key; delivery uses `transports.get(message.channel)`. A missing key is an `outbound.failed`, and `doctor` checks that every installed channel provides its own. |
+| (no capability) | `ChannelTransport` | How a channel sends to its platform: `idempotent`, `split`, `send` (§5, "Outbound delivery"). Not in the registry: a channel attaches its transport to `outbound.queue` while it runs, since a keyed `channel.transport` used by the queue, and a queue used by the channel, would be a dependency cycle. Without a queue, the channel sends through its own transport. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
-| `outbound.queue` | `OutboundQueue` | Durable enqueue + worker. Optional; without it delivery is direct. |
+| `outbound.queue` | `OutboundQueue` | `enqueue`, `attach`, `detach` (§5, "Outbound delivery"). Optional: without it a channel sends directly, best effort, as in M1. `durable-outbox` (M2) provides it on `storage.sql`. |
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
 | `approvals` | `ApprovalStore` | Decision lifecycle persistence. |
 | `secrets` | `SecretStore` | `get(name)`: the value, or `undefined` when it is not set; an empty value is not set. The process environment (`secrets-env`, which never reads `.env` files itself), Worker bindings, an external vault. |
@@ -552,6 +553,108 @@ pipeline outbound.prepare          → OutboundMessage
   - Until then, a reply lost to a crash while sending is not sent again; the answer is in the
     session.
 
+**Channels, accounts and keys.** `[decision]` (M1.5)
+- A channel component may serve several accounts of its platform: two Telegram bots, two Google
+  Chat apps. Each account is a **channel instance**, named `<kind>` for the default account
+  (`telegram`) and `<kind>:<account>` for a named one (`telegram:support`).
+  `InboundMessage.channel`, `OutboundMessage.channel` and the key a transport is attached under are
+  the instance name.
+- A conversation key is `<instance>:<conversation id>[:<thread id>]`: `telegram:12345`,
+  `telegram:support:12345`, `googlechat:spaces/AAA:threads/BBB`. Only the channel that made a key
+  reads it back. Routers, the outbox and tools read `InboundMessage` fields and never parse keys; the
+  registry's conformance already treats keys as opaque.
+- The default account keeps the keys channels use today, so existing conversations keep their
+  sessions.
+- Whether a thread is a conversation of its own is a value in the channel's config.
+
+**Routing to many agents.** `[decision]` (M1.5)
+- `router-rules` adds a `route.resolve` stage that runs before `router-basic`'s. Its config is a list
+  of rules; the first that matches wins. A rule matches on any of `channel` (an instance, or a kind to
+  match all its accounts), `conversation`, `thread` and `actor`, and gives `agent: "<name>"` or
+  `deny`. A message no rule matches is left to the next stage: `router-basic`'s `defaultAgent`, or
+  `route.failed` when nothing else routes it.
+- Rules are values; a different strategy is a different component (S7). Choosing the agent from the
+  chat itself (`/agent support`) is such a component, built when someone needs it.
+- It refuses to start when a rule names an agent that is not an `agent.definition`, as
+  `router-basic` does.
+- A conversation keeps the agent it was created with (§7.1). A changed rule applies to new
+  conversations, and to an existing one after a reset (`/new`).
+
+**Outbound delivery.** `[decision]` (M2) The shape `durable-outbox` implements. It follows Hermes'
+delivery ledger, with what NanoClaw and OpenClaw lack: backoff, per-conversation order, per-piece
+progress, and one send path.
+
+```ts
+interface OutboundMessage {
+  idempotencyKey: string;      // one per answer: `${sessionId}:${runId}`
+  channel: string;             // the channel instance
+  conversationKey: string;
+  text: string;
+}
+
+interface ChannelTransport {
+  /** The platform drops a repeated send with the same key (Google Chat `requestId`). */
+  readonly idempotent: boolean;
+  /** `text` in pieces the platform accepts, in order. */
+  split(text: string): string[];
+  send(piece: OutboundPiece, signal: AbortSignal): Promise<{ platformMessageId: string }>;
+}
+
+interface OutboundPiece {
+  key: string;                 // `${idempotencyKey}#${index}`: the platform's key when idempotent
+  conversationKey: string;
+  text: string;
+  possibleDuplicate: boolean;  // it may have been sent before: a non-idempotent transport marks it
+}
+
+/** What a transport throws; anything else counts as transient. */
+class DeliveryError extends Error {
+  kind: "transient" | "rate_limited" | "permanent";
+  retryAfterMs?: number;       // rate_limited: what the platform asked for
+  maybeSent?: boolean;         // the platform may have received it (a timeout)
+}
+
+interface OutboundQueue {
+  /** Resolves once the message is stored; the same idempotencyKey again changes nothing. */
+  enqueue(message: OutboundMessage): Promise<void>;
+  /** A channel hands its transport while it runs, and takes it back when it stops. */
+  attach(channel: string, transport: ChannelTransport): void;
+  detach(channel: string): Promise<void>;
+}
+```
+
+- **Stored before sent.** `enqueue` splits the text with the channel's transport and stores one row
+  per piece, keyed `${idempotencyKey}#${index}`, in one transaction. Storing a key again changes
+  nothing.
+- **States:** `pending` → `sending` → `delivered` | `abandoned`. `sending` is written before the
+  platform call, and `delivered` stores the platform's message id (what an edit or a delete needs).
+  On start, a `sending` row goes back to `pending` as a possible duplicate: the process died during
+  its send.
+- **Order.** One conversation's pieces go out one at a time, in order. A piece waiting to be retried
+  holds the ones behind it; other conversations do not wait for it (bounded concurrency).
+- **Errors.** The transport classifies, the queue acts:
+  - `transient` (and any error that is not a `DeliveryError`): retried after 5 s, 30 s, 2 min and
+    10 min, then abandoned after the fifth attempt;
+  - `rate_limited`: retried after `retryAfterMs`, not counted as an attempt. The queue waits, never
+    the transport: a long flood wait inside a send froze every platform in Hermes;
+  - `permanent` (a chat that blocked the bot, a bad request): abandoned at once;
+  - `maybeSent`: the retry is a possible duplicate;
+  - any piece older than 24 hours is abandoned.
+- **Possible duplicates** (option (a)): an idempotent transport sends again with the same key and
+  the platform drops the copy; a non-idempotent one (Telegram) sends again with a visible marker it
+  chooses (`↻`). Losing an answer is worse than receiving it twice.
+- Abandoned pieces stay readable for status and `doctor`; delivered rows are pruned after 7 days.
+- "Typing…" and previews never go through the queue: losing one costs nothing.
+- **Why `attach`.** A keyed `channel.transport` capability used by the queue, and the queue used by
+  the channel, would be a cycle. With `attach`, the queue starts before the channels and stops after
+  them, so a send in flight ends, or is aborted by the stop deadline, before its transport goes.
+- **Known gap** `[upstream]`: between the run's answer being recorded in Pi's session and `enqueue`
+  storing it there is a window (an `agent.settled` listener, milliseconds). A crash in it loses that
+  delivery; the answer stays in the session. Pi's durable runtime has the same gap, with no commit
+  hook at turn completion (§6.4); closed when it gains one.
+- Each transport states its semantics (rule 7): Telegram is at-least-once with the marker; a
+  platform with idempotent sends is effectively once.
+
 Core types (abridged):
 
 ```ts
@@ -581,16 +684,13 @@ interface ConversationRef {
   workspaceRef?: WorkspaceRef;        // [planned] with `workspace` (§8.2); not in the core yet
 }
 
-interface OutboundMessage {
-  id: string;
-  channel: string;
-  conversationId: string;
-  threadId?: string;
-  text?: string;
-  blocks?: unknown;                   // channel-specific rich content
-  attachments?: Attachment[];
-  correlation?: { requestId?: string; runId?: string; decisionId?: string };
+interface OutboundMessage {        // M2, "Outbound delivery" above
   idempotencyKey: string;
+  channel: string;
+  conversationKey: string;
+  text: string;
+  // [planned], each optional, with the component that needs it:
+  // threadId, blocks (channel-specific rich content), attachments, correlation
 }
 ```
 
@@ -903,8 +1003,12 @@ Decisions `[decision]`:
   extensions that guard on `hasUI` take their non-interactive path, as Pi already asks them to.
 - **Declared in the composition root.** `createRuntimePi({ extensions: [permissionGate, hello] })`
   in `pikit.config.ts`, imported statically; never discovered or loaded dynamically. They apply
-  to every conversation of the runtime. Per agent (`defineAgent({ extensions })`) can be added
-  later without breaking this.
+  to every conversation of the runtime.
+- **Per agent** `[decision]` (M1.5). An agent names the extensions it uses, as it names its tools:
+  `defineAgent({ extensions: ["permission-gate"] })`. A component installs an extension by providing
+  it under the keyed capability `agent.extension` (its name → the factory), typed by the adapter, so
+  the core only sees names. A conversation loads the runtime's extensions and its agent's, once each;
+  a name nothing provides fails as an unknown tool does.
 - **Loaded per conversation, as Pi loads them per session.** When a conversation opens, each
   factory runs and registers handlers, tools and providers; then the host binds them to that
   conversation's harness and fires `session_start` (`reason: "resume"`). `session_shutdown`
@@ -1417,6 +1521,13 @@ Planned implementations:
 | `workspace-container` | Cloudflare Container FS | yes | ephemeral + checkpoint | cloudflare |
 
 \* requires an `execution` provider that has a real filesystem.
+
+**One workspace per agent** `[planned]` (M1.5). Each agent's tools work in a directory of their own
+(`workspace-local`: `<root>/<agent>/`); without a `workspace` provider every agent shares
+`execution`, as today. How a run's tools get their agent's `ExecutionEnv` is settled with the
+component. A directory per agent is order, not isolation: a tool with `bash` runs as the same user
+as pikit and can leave it, and read the model credentials in `.pikit/`. Isolation needs each agent's
+tools in a separate sandbox (`execution-docker`, planned after M2).
 
 ### 8.3 `execution` capability
 
@@ -2248,13 +2359,18 @@ And the runtime proof:
    too: `permission-gate`, loaded with `createRuntimePi({ extensions })`, stops Pi's real `bash`
    (`tool-bash` on `execution-local`) from running `rm -rf` asked for over HTTP
    (`samples/http/test/scenario-7.test.ts`).
+8. **Many agents** (M1.5): two agents with different system prompts, tools, Pi extensions and
+   workspaces. `router-rules` sends two conversations (two Telegram chats, or two accounts) to one
+   agent each; each answers with only its own tools and extensions, in its own directory. Removing
+   `router-rules` routes everything to `router-basic`'s default agent, with nothing else changed (S3).
 
 ---
 
 ## 16. Open questions `[open]`
 
-- Sync vs async `SqlDatabase` contract. DO SQL is sync; Postgres is async. Likely: async
-  contract, sync implementations wrap. Pi's SQLite backend expects sync — needs an adapter.
+- `[decision]` `SqlDatabase` is async (M2). Postgres cannot be sync; SQLite (`node:sqlite`) and
+  Durable Object SQL wrap in promises at no cost. A transaction runs statements only, never other
+  I/O, so a sync store can run it as one step.
 - Where the conversation registry lives on Cloudflare when a *global* view is needed (list
   all conversations): D1 index vs per-DO only. Probably per-DO + optional D1 index component.
 - Config format: YAML vs TypeScript-only. TS gives types for free; YAML is friendlier for
