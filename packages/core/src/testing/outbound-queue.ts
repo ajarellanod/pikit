@@ -11,6 +11,7 @@
  */
 
 import { type App, type ComponentDefinition, defineApp, defineComponent } from "../app.ts";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "../context.ts";
 import { silentLogger } from "../contracts/logger.ts";
 import {
   type ChannelTransport,
@@ -320,7 +321,7 @@ interface Subject {
   clock: ManualClock;
   /** Starts a new app (a process) over the fixture's records. */
   open(): Promise<Worker>;
-  /** Stops every app started so far, as a process that exits. */
+  /** Stops every app started so far, as a process that exits: within a short stop deadline. */
   stopAll(): Promise<void>;
 }
 
@@ -362,7 +363,9 @@ function createSubject(fixture: OutboundQueueFixture, clock: ManualClock, apps: 
       return { queue: tracked, delivered, abandoned, attempts: () => attached.reduce((n, t) => n + t.calls.length, 0) };
     },
     async stopAll() {
-      for (const app of apps.splice(0)) await app.stop();
+      // A process that exits has a stop deadline (SPEC §9.1): a send still hanging is aborted, and
+      // the stop is reported as late. The process exits all the same.
+      for (const app of apps.splice(0)) await app.stop(withAbortSignal(AbortSignal.timeout(200), BACKGROUND_CONTEXT)).catch(() => {});
     },
   };
 }
