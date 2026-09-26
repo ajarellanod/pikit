@@ -211,7 +211,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
 | Thing | Convention | Examples |
 |---|---|---|
-| Components | kebab-case, prefixed by kind | `channel-*`, `router-*`, `sessions-*`, `storage-*`, `workspace-*`, `execution-*`, `scheduler-*`, `deployment-*`, `tool-*`, `policy-*`, `admin-*`, `inbound-*`, `log-*`, `conversations-*`, `credentials-*`, `provider-*`, `runtime-*`, `secrets-*`, `server-*`. `bun run registry validate` enforces the list (`KINDS` in `packages/cli/src/registry/checks.ts`) |
+| Components | kebab-case, prefixed by kind | `channel-*`, `router-*`, `sessions-*`, `storage-*`, `workspace-*`, `execution-*`, `scheduler-*`, `deployment-*`, `tool-*`, `policy-*`, `admin-*`, `inbound-*`, `outbound-*`, `log-*`, `conversations-*`, `credentials-*`, `provider-*`, `runtime-*`, `secrets-*`, `server-*`. `bun run registry validate` enforces the list (`KINDS` in `packages/cli/src/registry/checks.ts`) |
 | Reserved component names | never used | `capabilities` (it is a core config key) |
 | Capabilities | `dotted.lowercase`; keyed ones take a key per implementation | `sessions.store`, `execution.shell`, `channel.transport` (key `telegram`) |
 | Events (notifications) | `namespace.verb`, past tense | `outbound.delivered` |
@@ -307,6 +307,10 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **A new capability needs a catalogue line.** Declaring one on `AppCapabilities` /
   `AppKeyedCapabilities` fails `tsc` until `packages/cli/src/registry/capabilities.ts` describes it
   (`bun run registry capabilities` prints the catalogue). Test-only capabilities are named `test.*`.
+- **Test support is `*.test-support.ts`.** A fake, a fixture script or a test double a component's
+  tests share lives in `<name>.test-support.ts`: `registry validate` holds it like a test (it may import
+  `node:*` in a component that also targets Cloudflare, S5), and rejects a shipped file that imports it.
+  `bun test` does not run it.
 - **`component.json` and presets have a schema.** Change their shape in `ManifestSchema`
   (`packages/cli/src/registry/manifest.ts`) or `PresetSchema` (`packages/cli/src/project/registry-source.ts`),
   then `bun run registry generate` rewrites `registry/schema/`; `validate` fails while it is stale.

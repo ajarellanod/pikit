@@ -177,6 +177,18 @@ test("imports: node:* only when targets are exactly [\"server\"]; tests are exem
   expect(found).not.toContain("node:fs");
 });
 
+test("imports: test support (*.test-support.ts) is held like tests, and only tests may import it (S5)", async () => {
+  const f = await fixture();
+  f.writeManifest({ ...f.manifest(), targets: ["server", "cloudflare"] });
+  writeFileSync(join(f.own, "storage.test-support.ts"), `import "node:sqlite";\n`);
+  f.append("sample.test.ts", `import "./storage.test-support.ts";`);
+  await generate(f.root);
+  expect((await validate(f.root)).problems).toEqual([]);
+
+  f.append("index.ts", `import "./storage.test-support.ts";`);
+  expect(await problems(f)).toContain(`index.ts imports "./storage.test-support.ts", which is test support: only tests may import it`);
+});
+
 test("dependencies: exactly the npm packages the files import", async () => {
   const f = await fixture();
   f.append("index.ts", `import type { Hono } from "hono";`);

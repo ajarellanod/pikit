@@ -17,13 +17,16 @@ import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
 /** The component kinds of the AGENTS.md naming table; keep the two lists equal. */
 export const KINDS = [
   "channel", "router", "sessions", "storage", "workspace", "execution", "scheduler", "deployment",
-  "tool", "policy", "admin", "inbound", "log",
+  "tool", "policy", "admin", "inbound", "outbound", "log",
   "conversations", "credentials", "provider", "runtime", "secrets", "server",
 ];
 
 const KEBAB = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const SOURCE = /\.[cm]?[jt]sx?$/;
 const TEST = /\.test\.[cm]?[jt]sx?$/;
+/** Test support (fakes, fixtures, doubles): held like tests, and never imported by a shipped file. */
+const TEST_SUPPORT = /\.test-support\.[cm]?[jt]sx?$/;
+const forTests = (file: string): boolean => TEST.test(file) || TEST_SUPPORT.test(file);
 
 /** Packages that are the kit itself: `requires.pikit` covers them, so `dependencies` does not. */
 const KIT_PACKAGES = new Set(["@pikit/core"]);
@@ -110,6 +113,8 @@ export function checkImports(componentDir: string, name: string, targets: readon
           problems.push(`${at} imports "${specifier}", outside the component's files`);
         } else if (sibling !== undefined && sibling !== name) {
           problems.push(`${at} imports "${specifier}", a file of the component "${sibling}": depend on its capability instead (S4)`);
+        } else if (TEST_SUPPORT.test(target) && !forTests(file)) {
+          problems.push(`${at} imports "${specifier}", which is test support: only tests may import it`);
         }
         continue;
       }
@@ -117,7 +122,7 @@ export function checkImports(componentDir: string, name: string, targets: readon
       if (scheme !== undefined) {
         // Tests run under Bun's test runner in the project (they import bun:test), never in a
         // deployed bundle, so only shipped files are held to the targets (S5).
-        if (TEST.test(file)) continue;
+        if (forTests(file)) continue;
         if ((scheme === "node" || scheme === "bun") && !serverOnly) {
           problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: node:* and bun:* need targets ["server"] (S5)`);
         }
