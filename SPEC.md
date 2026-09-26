@@ -2025,14 +2025,14 @@ the project depends on the tarballs:
 
 ```json
 "dependencies": {
-  "@earendil-works/pi-coding-agent": "file:vendor/pikit-pi-extension-shim-0.0.0.tgz",
-  "@pikit/core": "file:vendor/pikit-core-0.0.0.tgz",
-  "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0.tgz"
+  "@earendil-works/pi-coding-agent": "file:vendor/pikit-pi-extension-shim-0.0.0-<hash>.tgz",
+  "@pikit/core": "file:vendor/pikit-core-0.0.0-<hash>.tgz",
+  "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0-<hash>.tgz"
 },
 "overrides": {
-  "@pikit/core": "file:vendor/pikit-core-0.0.0.tgz",
-  "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0.tgz",
-  "@pikit/pi-extension-shim": "file:vendor/pikit-pi-extension-shim-0.0.0.tgz"
+  "@pikit/core": "file:vendor/pikit-core-0.0.0-<hash>.tgz",
+  "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0-<hash>.tgz",
+  "@pikit/pi-extension-shim": "file:vendor/pikit-pi-extension-shim-0.0.0-<hash>.tgz"
 }
 ```
 
@@ -2043,6 +2043,12 @@ the project depends on the tarballs:
 - Everything resolves inside the project, so `bun install --frozen-lockfile` works in
   `deployment-docker`'s image build, which copies `vendor/` before the install.
 - A tarball already in `vendor/` is never repacked: `bun.lock` records its integrity.
+- **Its name carries a hash of the package's files** (`-<hash>`), since the version stays `0.0.0`
+  until the kit is published. `pikit add` refreshes a project whose tarballs are another checkout's
+  (`refreshKit`): new tarballs, `dependencies` and `overrides` rewritten, the old tarballs deleted,
+  then `bun install`. A component and the core it needs come from the same checkout; the components
+  already installed keep working, since the core only grows within a major (§12a). Found on the M1
+  VPS: a project made before `outbound-durable` could not add it, its core lacking `DeliveryError`.
 - `vendor/` is committed with the project. When the packages are on npm, each `file:vendor/…`
   becomes a version, and `overrides` and `vendor/` go.
 

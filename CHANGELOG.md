@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: `pikit add` brings a project made by an older checkout onto this CLI's kit (`@pikit/core`,
+  `@pikit/pi-adapter`, the shim): vendored tarballs are named with a hash of their files, and a
+  project on other ones gets new tarballs, `package.json` rewritten and `bun install`. Adding a
+  component that needs a newer core used to fail with "Export named … not found".
 - component/channel-telegram: several bots in one project. `accounts: ["ops"]` adds the bot
   `telegram:ops` (`TELEGRAM_OPS_BOT_TOKEN`, `TELEGRAM_OPS_ALLOWED_USERS`), with its own users,
   conversations (`telegram:ops:<chat>`) and transport; `router-rules` can give it its own agent.
