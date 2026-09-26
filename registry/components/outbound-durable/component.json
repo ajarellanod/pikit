@@ -1,0 +1,31 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "outbound-durable",
+  "version": "0.0.0",
+  "description": "Every answer is stored before it is sent, then delivered in order per conversation, retried, and sent again after a crash.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "storage.sql"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "outbound.queue"
+  ],
+  "dependencies": {
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

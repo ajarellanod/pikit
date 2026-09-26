@@ -5,6 +5,16 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/outbound-durable: every answer is stored before it is sent (`outbound.queue` on
+  `storage.sql`), then delivered in order per conversation. Transient failures are retried after 5 s,
+  30 s, 2 min and 10 min and abandoned at the fifth; rate limits wait what the platform asked; permanent
+  failures and anything older than 24 hours are abandoned. A send the process died during is sent
+  again as a possible duplicate. A test kills a process with SIGKILL mid-send (SPEC §5).
+- core: the outbound contracts (`OutboundMessage`, `ChannelTransport`, `DeliveryError`,
+  `outbound.queue`, the `outbound.delivered` / `outbound.abandoned` events), their conformance suite, and
+  `createManualClock` for tests of components that wait.
+- registry: the `outbound` kind, and `*.test-support.ts` for a component's shared test fakes and
+  fixtures (held like tests for S5, never imported by a shipped file).
 - core, component/storage-sqlite: the `storage.sql` contract, an async `SqlDatabase` (`query`, `run`,
   `transaction`), and its conformance suite (`createSqlDatabaseConformance`). `storage-sqlite`
   provides it in one SQLite file (`.pikit/pikit.db`) through `node:sqlite`, in WAL mode, one statement
