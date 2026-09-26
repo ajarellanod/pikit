@@ -9,12 +9,13 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
   - `model.provider`: the providers your agents name as `provider/modelId`;
   - `agent.tool`: the installed tools (`tool-read`, `tool-bash`…) that your agents name in their
     `tools`;
+  - `agent.extension`: the installed Pi extensions that your agents name in their `extensions`;
   - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth
     tokens). pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read
     only their environment variables (`ANTHROPIC_API_KEY`).
 
   It refuses to start without an agent, when an agent names a model that no provider has, when an
-  agent names a tool that no component provides, or when an agent's provider has no credentials at
+  agent names a tool or an extension that no component provides, or when an agent's provider has no credentials at
   all. That last check makes no network call and
   refreshes nothing: it only asks whether a credential is stored or an environment variable is
   set.
@@ -50,7 +51,34 @@ unfinished runs open in their sessions, and the next process resumes them.
 ## Pi extensions
 
 Existing Pi extensions run unmodified, except for their terminal UI: `ctx.hasUI` is `false`,
-and `ctx.ui.*` does nothing. List them where you compose the app:
+and `ctx.ui.*` does nothing.
+
+An agent names the extensions it uses, as it names its tools. A component of yours installs each
+one under its name, as `agent.extension`:
+
+```ts
+// src/extensions/permission-gate.ts
+import { defineComponent } from "@pikit/core";
+import permissionGate from "../../extensions/permission-gate.ts";
+
+export default defineComponent({
+  name: "permission-gate",
+  setup(pikit) {
+    pikit.provideKeyed("agent.extension", "permission-gate", permissionGate);
+  },
+});
+```
+
+```ts
+// src/agents/coder/agent.ts
+import { defineAgent } from "@pikit/core";
+
+export default defineAgent({ name: "coder", model: "anthropic/claude-sonnet", tools: ["bash"], extensions: ["permission-gate"] });
+```
+
+Only the conversations of `coder` load it; an agent that does not name it never sees it.
+
+An extension for every agent goes where you compose the app instead:
 
 ```ts
 import { createRuntimePi } from "./src/pikit/runtime-pi";
@@ -66,8 +94,9 @@ under that name, so the import resolves without the coding agent itself:
 "@earendil-works/pi-coding-agent": "npm:@pikit/pi-extension-shim@…"
 ```
 
-Each conversation loads the extensions when it opens. What pikit supports is listed in
-SPEC §6.2b; anything else logs a warning and does nothing.
+Each conversation loads the extensions when it opens: those given to `createRuntimePi` first, then
+the ones its agent names, in that order, each once. What pikit supports is listed in SPEC §6.2b;
+anything else logs a warning and does nothing.
 
 ## Your agents
 

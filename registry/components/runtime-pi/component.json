@@ -17,7 +17,8 @@
       "agent.definition",
       "model.provider",
       "model.credentials",
-      "agent.tool"
+      "agent.tool",
+      "agent.extension"
     ]
   },
   "provides": [

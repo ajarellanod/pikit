@@ -34,10 +34,15 @@ export interface PiRuntimeOptions {
   /** Attach Pi hooks to each conversation's harness when it opens (tests). */
   onHarness?: HarnessHook;
   /**
-   * Pi extensions, unmodified (SPEC §6.2b). Each conversation loads them when it opens, as Pi loads
-   * them for each session, and they see every run of it.
+   * Pi extensions, unmodified (SPEC §6.2b), for every agent. Each conversation loads them when it
+   * opens, as Pi loads them for each session, and they see every run of it.
    */
   extensions?: readonly PiExtension[];
+  /**
+   * An installed extension by name (`agent.extension`), for the extensions agents name. A
+   * conversation loads them after `extensions`. Without it, an agent that names one cannot open.
+   */
+  extension?(name: string): PiExtension | undefined;
 }
 
 export interface PiRuntime extends AgentRuntime {
@@ -94,6 +99,8 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
     if (slot.conversation !== undefined) return slot.conversation;
     const agent = options.agent(ref.agent);
     if (agent === undefined) throw new Error(`no agent.definition "${ref.agent}" for conversation ${ref.key}`);
+    // Resolved before the session opens: a name nothing provides fails the open with nothing to undo.
+    const extensions = extensionsOf(agent, options);
     const session = await openSession(options.sessions, ref.sessionId, ctx);
     const conversation = await PiConversation.open(
       {
@@ -104,7 +111,7 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
         models: options.models,
         host: { serial: (work) => serial(slot, work), events: options.events },
         onHarness: options.onHarness,
-        extensions: options.extensions,
+        extensions,
       },
       ctx,
     );
@@ -157,6 +164,20 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
       ]);
     },
   };
+}
+
+/**
+ * The extensions a conversation of `agent` loads: the runtime's, then the ones the agent names, in
+ * that order. A factory in both lists loads once, where it first appears. The agent of a conversation
+ * is fixed while it is open, so this is decided once, when it opens.
+ */
+function extensionsOf(agent: AgentDefinition, options: PiRuntimeOptions): PiExtension[] {
+  const named = (agent.extensions ?? []).map((name) => {
+    const extension = options.extension?.(name);
+    if (extension === undefined) throw new Error(`agent "${agent.name}" names the extension "${name}", which no agent.extension provides`);
+    return extension;
+  });
+  return [...new Set([...(options.extensions ?? []), ...named])];
 }
 
 /**

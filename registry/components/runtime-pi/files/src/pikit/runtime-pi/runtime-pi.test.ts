@@ -34,7 +34,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(described).toMatchObject({
     provides: ["agent.runtime"],
     requires: ["sessions.store"],
-    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool"],
+    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "agent.extension"],
   });
 });
 
@@ -79,6 +79,61 @@ test("Pi extensions given to createRuntimePi see the conversation's tool calls",
   expect(await answer).toBe("answer: hold");
   expect(calls).toEqual(["hold"]);
   await app.stop();
+});
+
+test("a Pi extension provided as agent.extension reaches only the agent that names it", async () => {
+  const calls: string[] = [];
+  // Stands for a project component installing an extension under its name.
+  const gate = defineComponent({
+    name: "extension-test",
+    setup: (pikit) =>
+      pikit.provideKeyed("agent.extension", "record-calls", (pi) => void pi.on("tool_call", (event) => void calls.push(event.toolName))),
+  });
+  const { sessions, agents, provider } = testComponents({
+    agents: [
+      defineAgent({ name: "named", model: "faux/scripted", tools: ["bash"], extensions: ["record-calls"] }),
+      defineAgent({ name: "plain", model: "faux/scripted", tools: ["bash"] }),
+    ],
+  });
+  const answers = new Map<string, (text: string | undefined) => void>();
+  let channel!: { runtime: AgentRuntime; sessions: SessionStore };
+  const observer = defineComponent({
+    name: "channel-test",
+    setup(pikit) {
+      const runtimeHandle = pikit.use("agent.runtime");
+      const sessionsHandle = pikit.use("sessions.store");
+      pikit.on("agent.settled", (result) => answers.get(result.requestId)?.(result.text));
+      return { start: () => void (channel = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
+    },
+  });
+  const app = await defineApp({
+    components: [sessions, agents, provider, bashComponent([]), gate, runtimePi, observer],
+    logger: silentLogger,
+  }).create();
+  await app.start();
+  const ctx = app.context();
+  const ask = async (agent: string, prompt: string) => {
+    const session = await channel.sessions.create({}, ctx);
+    await session.close(ctx);
+    const answer = new Promise<string | undefined>((resolve) => answers.set(agent, resolve));
+    await channel.runtime.dispatch({ requestId: agent, conversation: { key: `test:${agent}`, agent, sessionId: session.metadata.id }, prompt }, ctx);
+    return answer;
+  };
+
+  await ask("plain", "bash: ls");
+  await ask("named", "bash: pwd");
+
+  expect(calls).toEqual(["bash"]);
+  await app.stop();
+});
+
+test("it refuses to start when an agent names an extension no agent.extension provides", async () => {
+  const { sessions, agents, provider } = testComponents({
+    agents: [defineAgent({ name: "scripted", model: "faux/scripted", extensions: ["permission-gate"] })],
+  });
+  const app = await defineApp({ components: [sessions, agents, provider, runtimePi], logger: silentLogger }).create();
+
+  expect(await startFailure(app)).toContain('agent "scripted" names the extension "permission-gate", which no agent.extension provides');
 });
 
 test("it refuses to start without an agent", async () => {

@@ -354,7 +354,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `model.credentials` | pi-ai `CredentialStore` | Credentials of the model providers, one per provider id (API key or OAuth tokens). pi-ai refreshes OAuth tokens inside the store's `modify` and writes them back, and reads the environment (`ANTHROPIC_API_KEY`) only when nothing is stored. Optional: without it, providers read their environment variables only. Typed by `@pikit/pi-adapter`; its conformance suite is in `@pikit/pi-adapter/testing` (§14), because the contract is pi-ai's. |
 | `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
 | `agent.tool` (keyed by tool name) | `AgentTool` | One per tool, provided by `tool-*` components. An agent names the tools it uses in `AgentDefinition.tools`; the runtime resolves the names (§6.3). |
-| `agent.extension` (keyed by extension name) | Pi `ExtensionFactory` | `[planned]` (M1.5) One per Pi extension, provided by a component. An agent names the extensions it uses in `AgentDefinition.extensions`, as it names tools; the runtime loads them per conversation (§6.2b). Typed by `@pikit/pi-adapter`, so the core sees only names. |
+| `agent.extension` (keyed by extension name) | Pi `ExtensionFactory` | Built (M1.5). One per Pi extension, provided by a component. An agent names the extensions it uses in `AgentDefinition.extensions`, as it names tools; the runtime loads them per conversation (§6.2b). Typed by `@pikit/pi-adapter`, so the core sees only names. |
 | `agent.state` | `AgentState` | Per-conversation JSON state read by `prepare` and updated by tools. Not a capability today: the runtime puts the conversation's `AgentState` in the context of each run (`AGENT_STATE`), stored in the Pi session (§6.2a, §6.4); no separate store. A capability for components that act outside a run (an admin route, a scheduler) is `[planned]`, with the first one that needs it. |
 | (no capability) | `ChannelTransport` | How a channel sends to its platform: `idempotent`, `split`, `send` (§5, "Outbound delivery"). Not in the registry: a channel attaches its transport to `outbound.queue` while it runs, since a keyed `channel.transport` used by the queue, and a queue used by the channel, would be a dependency cycle. Without a queue, the channel sends through its own transport. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
@@ -1043,8 +1043,11 @@ Decisions `[decision]`:
 - **Per agent** `[decision]` (M1.5). An agent names the extensions it uses, as it names its tools:
   `defineAgent({ extensions: ["permission-gate"] })`. A component installs an extension by providing
   it under the keyed capability `agent.extension` (its name → the factory), typed by the adapter, so
-  the core only sees names. A conversation loads the runtime's extensions and its agent's, once each;
-  a name nothing provides fails as an unknown tool does.
+  the core only sees names. A conversation loads the runtime's extensions and its agent's, once each
+  (a factory in both loads once, where it first appears): the runtime's first, then the agent's in
+  the order it names them. The agent of a conversation is fixed while it is open, so they are decided
+  when it opens; `prepare` does not change them. A name nothing provides fails the open as an unknown
+  tool does, and `runtime-pi` refuses to start with it.
 - **Loaded per conversation, as Pi loads them per session.** When a conversation opens, each
   factory runs and registers handlers, tools and providers; then the host binds them to that
   conversation's harness and fires `session_start` (`reason: "resume"`). `session_shutdown`

@@ -6,6 +6,7 @@
  * - `agent.definition`: your agents, one per name (a project component provides them);
  * - `model.provider`: the model providers your agents name as `provider/modelId`;
  * - `agent.tool`: the installed tools (`tool-*` components) that agents name in their `tools`;
+ * - `agent.extension`: the installed Pi extensions that agents name in their `extensions`;
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
  *   read only their environment variables (`ANTHROPIC_API_KEY`).
  *
@@ -23,9 +24,10 @@ import { createPiRuntime, type HarnessHook, modelsFrom, type PiExtension, type P
 
 export interface RuntimePiOptions {
   /**
-   * Pi extensions, unmodified: `createRuntimePi({ extensions: [permissionGate] })` in
-   * `pikit.config.ts`. Each conversation loads them when it opens, as Pi loads them per session.
-   * There is no terminal UI: `ctx.hasUI` is false and `ctx.ui.*` does nothing (SPEC §6.2b).
+   * Pi extensions, unmodified, for every agent: `createRuntimePi({ extensions: [permissionGate] })`
+   * in `pikit.config.ts`. Each conversation loads them when it opens, as Pi loads them per session,
+   * then the extensions its agent names (`agent.extension`). There is no terminal UI: `ctx.hasUI` is
+   * false and `ctx.ui.*` does nothing (SPEC §6.2b).
    */
   extensions?: readonly PiExtension[];
   /** Attach Pi hooks to each conversation's harness when it opens (tests). */
@@ -41,6 +43,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const providers = pikit.useKeyed("model.provider");
       const credentials = pikit.useOptional("model.credentials");
       const tools = pikit.useKeyed("agent.tool");
+      const extensions = pikit.useKeyed("agent.extension");
 
       // Created in start, when the capabilities can be read; consumers start after this component.
       let runtime: PiRuntime | undefined;
@@ -75,6 +78,11 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
                 throw new Error(`runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides (install tool-${tool}?)`);
               }
             }
+            for (const extension of agents.get(name)?.extensions ?? []) {
+              if (extensions.get(extension) === undefined) {
+                throw new Error(`runtime-pi: agent "${name}" names the extension "${extension}", which no agent.extension provides`);
+              }
+            }
             const model = agents.get(name)?.model ?? "";
             const slash = model.indexOf("/");
             if (models.getModel(model.slice(0, slash), model.slice(slash + 1)) === undefined) {
@@ -93,6 +101,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             sessions: sessions.get(),
             agent: (name) => agents.get(name),
             tool: (name) => tools.get(name),
+            extension: (name) => extensions.get(name),
             models,
             // Runs outlive the calls that admit them; never keep start's context (its deadline).
             events: ctx.derive(() => BACKGROUND_CONTEXT),

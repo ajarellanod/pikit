@@ -29,6 +29,11 @@ line names its area (AGENTS.md, "Git and docs").
   config, matching the channel (an instance, or a kind for all its accounts), the conversation and
   the sender; a rule can also deny. What no rule matches goes to `router-basic`'s `defaultAgent`, and
   removing it sends everything there. It refuses to start when a rule names an unknown agent.
+- core, adapter, component/runtime-pi: an agent names the Pi extensions it uses,
+  `defineAgent({ extensions: ["permission-gate"] })`, and a component provides each one under the keyed
+  capability `agent.extension` (SPEC §6.2b). A conversation loads the extensions given to
+  `createRuntimePi({ extensions })` for every agent, then the ones its agent names, each factory once;
+  a name nothing provides fails the conversation's open, and `runtime-pi` refuses to start with it.
 - core: `admitInbound` runs the inbound path every channel takes (`inbound.normalize`,
   `route.resolve`, the conversation, `dispatch`) and returns what happened (`admitted`, `duplicate`,
   `halted`, `denied`, `no_route`); a stage that changes which message or conversation it is now

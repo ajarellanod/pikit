@@ -105,6 +105,11 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/pi-adapter",
     summary: "One pi-ai model provider per id (anthropic…); agents name its models as provider/modelId.",
   },
+  "agent.extension": {
+    mode: "keyed",
+    definedIn: "@pikit/pi-adapter",
+    summary: "One Pi extension per name, unmodified; an agent loads only the extensions it names.",
+  },
 };
 
 /** The catalogue entry for `name`, or `undefined` when the name is not a known capability. */
