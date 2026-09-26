@@ -17,7 +17,8 @@
  * installed keep working.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PACKAGES_DIR } from "../paths.ts";
 import { readPackageJson, writePackageJson } from "./package-json.ts";
@@ -86,23 +87,31 @@ export function vendorKitPackage(projectDir: string, name: string): string {
   const tarball = join(projectDir, specifier.slice("file:".length));
   if (existsSync(tarball)) return specifier;
   mkdirSync(join(projectDir, VENDOR_DIR), { recursive: true });
-  const packed = Bun.spawnSync([process.execPath, "pm", "pack", "--destination", join(projectDir, VENDOR_DIR), "--quiet"], {
-    cwd: join(PACKAGES_DIR, KIT_PACKAGES[name] as string),
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const plain = join(projectDir, VENDOR_DIR, `${packedName(name)}.tgz`);
-  if (packed.exitCode !== 0 || !existsSync(plain)) {
-    throw new Error(`could not pack ${name} into ${VENDOR_DIR}/: ${packed.stderr.toString().trim() || `expected ${plain}`}`);
+  // Packed elsewhere: `bun pm pack` names the tarball without the hash, which may be an older kit's
+  // tarball still in vendor/ (and still named in bun.lock until the next install).
+  const staging = mkdtempSync(join(tmpdir(), "pikit-pack-"));
+  try {
+    const packed = Bun.spawnSync([process.execPath, "pm", "pack", "--destination", staging, "--quiet"], {
+      cwd: join(PACKAGES_DIR, KIT_PACKAGES[name] as string),
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const plain = join(staging, `${packedName(name)}.tgz`);
+    if (packed.exitCode !== 0 || !existsSync(plain)) {
+      throw new Error(`could not pack ${name} into ${VENDOR_DIR}/: ${packed.stderr.toString().trim() || `expected ${plain}`}`);
+    }
+    copyFileSync(plain, tarball);
+  } finally {
+    rmSync(staging, { recursive: true, force: true });
   }
-  renameSync(plain, tarball);
   return specifier;
 }
 
 /**
  * Points the project at this checkout's kit when it has another one (older, or from another
- * checkout): new tarballs in `vendor/`, `dependencies` and `overrides` rewritten, the tarballs no
- * longer named deleted. Returns the packages refreshed; `bun install` must run after.
+ * checkout): new tarballs in `vendor/`, `dependencies` and `overrides` rewritten. Returns the
+ * packages refreshed; `bun install` must run after, then `pruneVendor`: `bun.lock` still names the old
+ * tarballs until the install rewrites it.
  */
 export function refreshKit(projectDir: string): string[] {
   const pkg = readPackageJson(projectDir);
@@ -123,11 +132,18 @@ export function refreshKit(projectDir: string): string[] {
   rewrite(pkg.overrides);
   if (refreshed.length === 0) return [];
   writePackageJson(projectDir, pkg);
-  const named = new Set([...Object.values(pkg.dependencies ?? {}), ...Object.values(pkg.overrides ?? {})].map((s) => s.slice("file:".length)));
-  for (const file of readdirSync(join(projectDir, VENDOR_DIR))) {
-    if (file.endsWith(".tgz") && !named.has(`${VENDOR_DIR}/${file}`)) rmSync(join(projectDir, VENDOR_DIR, file));
-  }
   return refreshed;
+}
+
+/** Deletes the tarballs in `vendor/` that `package.json` no longer names (after a refresh and its install). */
+export function pruneVendor(projectDir: string): string[] {
+  const pkg = readPackageJson(projectDir);
+  const named = new Set([...Object.values(pkg.dependencies ?? {}), ...Object.values(pkg.overrides ?? {})].map((s) => s.slice("file:".length)));
+  const dir = join(projectDir, VENDOR_DIR);
+  if (!existsSync(dir)) return [];
+  const pruned = readdirSync(dir).filter((file) => file.endsWith(".tgz") && !named.has(`${VENDOR_DIR}/${file}`));
+  for (const file of pruned) rmSync(join(dir, file));
+  return pruned;
 }
 
 /** Every kit package vendored, and the `overrides` that point each one at its tarball. */

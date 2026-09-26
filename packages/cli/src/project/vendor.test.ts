@@ -8,7 +8,7 @@ import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { readPackageJson } from "./package-json.ts";
-import { EXTENSION_ALIAS, kitSpecifier, refreshKit } from "./vendor.ts";
+import { EXTENSION_ALIAS, kitSpecifier, pruneVendor, refreshKit } from "./vendor.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -42,12 +42,14 @@ test("a project on another kit gets this CLI's: tarballs, dependencies and overr
     "@pikit/pi-adapter": kitSpecifier("@pikit/pi-adapter"),
     "@pikit/pi-extension-shim": kitSpecifier("@pikit/pi-extension-shim"),
   });
+  // The old tarballs stay until the install rewrote bun.lock; then they go.
+  for (const specifier of Object.values(old)) expect(existsSync(join(project, specifier.slice("file:".length)))).toBe(true);
+  expect(pruneVendor(project).sort()).toEqual(["pikit-core-0.0.0.tgz", "pikit-pi-adapter-0.0.0.tgz", "pikit-pi-extension-shim-0.0.0.tgz"]);
   expect(readdirSync(join(project, "vendor")).sort()).toEqual(
     Object.values(pkg.overrides ?? {})
       .map((s) => s.slice("file:vendor/".length))
       .sort(),
   );
-  for (const specifier of Object.values(old)) expect(existsSync(join(project, specifier.slice("file:".length)))).toBe(false);
 
   // Already on this kit: nothing to do.
   expect(refreshKit(project)).toEqual([]);

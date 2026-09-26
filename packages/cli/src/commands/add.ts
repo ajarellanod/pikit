@@ -24,7 +24,7 @@ import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-fi
 import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
 import { hashFile, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
-import { refreshKit } from "../project/vendor.ts";
+import { pruneVendor, refreshKit } from "../project/vendor.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
@@ -51,6 +51,8 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   if (refreshed.length > 0) log.step(`the project's kit packages (${refreshed.join(", ")}) are refreshed to this CLI's, in vendor/`);
   const { dependenciesChanged } = await installComponent(projectDir, name, options);
   if (dependenciesChanged || refreshed.length > 0) await bunInstall(projectDir);
+  // Only now: until the install rewrote bun.lock, it named the old tarballs.
+  if (refreshed.length > 0) pruneVendor(projectDir);
   const report = await doctor(projectDir, { quiet: true });
   if (report.problems.length > 0) {
     for (const problem of report.problems) log.problem(problem);
