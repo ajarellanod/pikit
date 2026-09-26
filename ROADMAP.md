@@ -339,7 +339,11 @@ redeliveries, channel outages, restarts and scheduled work.
   - a redelivered update is one request, answered once;
   - only allowlisted users reach the agent.
 - Run against the real Telegram (M1's VPS run): the owner's messages answered, OAuth in Docker.
-- Left for M2: replies through `channel.transport` and `outbound-durable`.
+- ✅ Replies through `outbound-durable` (SPEC §5 "Outbound delivery"): the channel attaches its
+  transport, answers are stored before they are sent, and a process killed mid-send has its answer
+  delivered by the next one (`crash.test.ts`, SIGKILL). The base preset installs `storage-sqlite` and
+  `outbound-durable`, so a new Telegram project has it; the Telegram end-to-end test checks the
+  answer's row reached `delivered`. Left: a run against the real bot.
 
 **Scope:** `channel-telegram`, `storage-sqlite`, `outbound-durable` (SPEC §5 "Outbound delivery"),
 `scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided

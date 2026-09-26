@@ -14,6 +14,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.ts";
 import { setConfigEntry } from "./project/config-file.ts";
 
@@ -127,6 +128,12 @@ test.skipIf(!E2E)(
     expect(logs).toContain('"msg":"channel-telegram: receiving messages"');
     expect(logs).toContain('"msg":"agent.failed"');
     expect(logs).not.toContain(telegram.token);
+
+    // The answers went through the preset's outbox: stored, then delivered (SPEC §5).
+    const db = new DatabaseSync(join(project, ".pikit", "pikit.db"), { readOnly: true });
+    const pieces = db.prepare("SELECT conversation_key, state FROM outbound_pieces ORDER BY seq").all();
+    db.close();
+    expect(pieces).toContainEqual({ conversation_key: `telegram:${OWNER.id}`, state: "delivered" });
     console.info(
       `e2e telegram timings: new ${ms(timings.new)}, configure ${ms(timings.configure)}, dev to polling ${ms(timings.polling)}, to the answer in the chat ${ms(timings.answered)}`,
     );

@@ -5,6 +5,12 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/channel-telegram: answers go through `outbound.queue` when it is installed: the channel
+  attaches its transport (`transport.ts`: HTML or plain text, failures classified for the queue) and
+  enqueues each answer once per run. A piece sent again after a crash starts with `↻ `. Without a
+  queue it sends directly, as before.
+- registry: the base preset installs `storage-sqlite` and `outbound-durable`, so a new chat project
+  delivers durably from the start; with `channel-http` they stay idle.
 - component/outbound-durable: every answer is stored before it is sent (`outbound.queue` on
   `storage.sql`), then delivered in order per conversation. Transient failures are retried after 5 s,
   30 s, 2 min and 10 min and abandoned at the fifth; rate limits wait what the platform asked; permanent
