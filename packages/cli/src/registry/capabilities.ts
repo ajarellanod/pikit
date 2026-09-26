@@ -55,6 +55,11 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/core",
     summary: "The only way a component reads a secret (environment, Worker bindings, a vault).",
   },
+  "outbound.queue": {
+    mode: "single",
+    definedIn: "@pikit/core",
+    summary: "Stores each answer before sending it and delivers it through the channel's transport, retrying.",
+  },
   "storage.sql": {
     mode: "single",
     definedIn: "@pikit/core",

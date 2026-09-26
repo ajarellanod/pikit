@@ -15,6 +15,12 @@ export { createConversationRegistryConformance } from "./conversations.ts";
 export type { HttpRouteConformanceOptions, HttpRouteFixture } from "./http.ts";
 export { createHttpRouteConformance } from "./http.ts";
 
+export type { ManualClock } from "./manual-clock.ts";
+export { createManualClock } from "./manual-clock.ts";
+
+export type { OutboundQueueFixture } from "./outbound-queue.ts";
+export { createOutboundQueueConformance } from "./outbound-queue.ts";
+
 export type { SqlDatabaseFixture } from "./storage-sql.ts";
 export { createSqlDatabaseConformance } from "./storage-sql.ts";
 
