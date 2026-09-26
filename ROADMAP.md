@@ -348,9 +348,9 @@ redeliveries, channel outages, restarts and scheduled work.
 - Run against the real Telegram (M1's VPS run): the owner's messages answered, OAuth in Docker.
 - ✅ Replies through `outbound-durable` (SPEC §5 "Outbound delivery"): the channel attaches its
   transport, answers are stored before they are sent, and a process killed mid-send has its answer
-  delivered by the next one (`crash.test.ts`, SIGKILL). The base preset installs `storage-sqlite` and
-  `outbound-durable`, so a new Telegram project has it; the Telegram end-to-end test checks the
-  answer's row reached `delivered`.
+  delivered by the next one (`crash.test.ts`, SIGKILL). A chat channel brings `outbound-durable` and
+  `storage-sqlite` along (offered providers, SPEC §10.5), so a new Telegram project has it and an HTTP
+  one does not; the Telegram end-to-end test checks the answer's row reached `delivered`.
 - ✅ Run against the real Telegram (the M1 VPS bot, upgraded in place with `pikit add`): a piece put in
   the outbox was delivered to the owner's chat at its first attempt, with Telegram's message id.
   Upgrading found that `pikit add` could not bring a newer core to an older project; it does now

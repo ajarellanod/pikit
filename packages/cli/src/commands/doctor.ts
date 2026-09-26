@@ -50,6 +50,7 @@ export async function doctor(projectDir: string, options: { quiet?: boolean } = 
       const listable = existsSync(join(projectDir, "src", "pikit", name, "index.ts")) && !name.startsWith("deployment-");
       if (listable && !result.listed.includes(name)) notes.push(`${name} is installed but not listed in pikit.config.ts`);
     }
+    notes.push(...unusedProviders(result.description.components));
   }
 
   const env = projectEnv(projectDir);
@@ -72,6 +73,14 @@ export async function doctor(projectDir: string, options: { quiet?: boolean } = 
     if (problems.length === 0 && unconfigured.length === 0) log.ok("pikit doctor: green");
   }
   return { problems, unconfigured, notes, probe: result };
+}
+
+/** Components that provide capabilities no other component uses: installed, and doing nothing. */
+function unusedProviders(components: Extract<ProbeResult, { ok: true }>["description"]["components"]): string[] {
+  const used = new Set(components.flatMap((c) => [...c.requires, ...c.optional]));
+  return components
+    .filter((c) => c.provides.length > 0 && c.provides.every((capability) => !used.has(capability)))
+    .map((c) => `${c.name} provides ${c.provides.join(", ")}, which no component uses: \`pikit remove ${c.name}\` if you do not need it`);
 }
 
 function printGraph(result: Extract<ProbeResult, { ok: true }>): void {

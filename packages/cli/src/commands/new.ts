@@ -12,6 +12,7 @@ import { basename, join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { withOffers } from "../project/offers.ts";
 import { openRegistry } from "../project/registry-source.ts";
 import { vendorKit } from "../project/vendor.ts";
 import { CliError, log } from "../ui.ts";
@@ -45,7 +46,10 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   // Everything that can be refused is checked before the first file is written.
   const registry = openRegistry(options.registry ?? DEFAULT_REGISTRY);
   if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions: it needs --preset");
-  const components = options.preset === undefined ? [] : registry.preset(options.preset, options.with ?? []);
+  const chosen = options.preset === undefined ? [] : registry.preset(options.preset, options.with ?? []);
+  // What the chosen components bring (SPEC §10.5, "Offered providers"): durable delivery for a chat
+  // channel, and the storage it needs. A preset lists only what every project of it uses.
+  const { order: components, installedFor } = withOffers(registry, chosen);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
   for (const component of components) checkCompatible(NEW_PROJECT_TARGETS, registry.manifest(component));
   const tools = components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {}));
@@ -68,7 +72,14 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
 
   for (const component of components) {
     const wiring = starter.STARTER_WIRING[component];
-    await installComponent(projectDir, component, { yes: true, quiet: options.quiet === true, ...(wiring !== undefined && { wiring }) });
+    const forComponent = installedFor.get(component);
+    if (forComponent !== undefined) step(`${component}, for ${forComponent}`);
+    await installComponent(projectDir, component, {
+      yes: true,
+      quiet: options.quiet === true,
+      ...(wiring !== undefined && { wiring }),
+      ...(forComponent !== undefined && { installedFor: forComponent }),
+    });
   }
   const installed = Object.keys(readProjectManifest(projectDir).components);
   let config = readFileSync(join(projectDir, CONFIG_FILE), "utf8");

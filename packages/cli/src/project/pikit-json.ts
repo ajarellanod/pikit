@@ -27,6 +27,11 @@ export interface InstalledComponent {
   dependencies: Record<string, string>;
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
+  /**
+   * The components it was installed for, when it was offered rather than asked for (SPEC §10.5,
+   * "Offered providers"): it leaves with the last of them, when nothing else uses it.
+   */
+  installedFor?: string[];
 }
 
 export interface ProjectManifest {

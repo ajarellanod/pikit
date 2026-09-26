@@ -24,7 +24,9 @@ import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-fi
 import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
 import { hashFile, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
+import { type Offer, offeredProviders } from "../project/offers.ts";
 import { pruneVendor, refreshKit } from "../project/vendor.ts";
+import { capabilityEntry } from "../registry/capabilities.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
@@ -43,13 +45,19 @@ export interface AddOptions {
   wiring?: Omit<ComponentEntry, "name">;
   /** Do not describe what is installed (files, npm, capabilities): `pikit new`'s guided path. */
   quiet?: boolean;
+  /** It is installed as an offer for this component (`offers.ts`), not asked for. */
+  installedFor?: string;
 }
 
 export async function add(projectDir: string, name: string, options: AddOptions = {}): Promise<void> {
   // The component comes from this CLI's registry: the core it needs is this CLI's kit (vendor.ts).
   const refreshed = refreshKit(projectDir);
   if (refreshed.length > 0) log.step(`the project's kit packages (${refreshed.join(", ")}) are refreshed to this CLI's, in vendor/`);
-  const { dependenciesChanged } = await installComponent(projectDir, name, options);
+  let { dependenciesChanged } = await installComponent(projectDir, name, options);
+  for (const offer of await acceptedOffers(projectDir, name, options)) {
+    const installed = await installComponent(projectDir, offer.component, { ...options, yes: true, installedFor: offer.for });
+    dependenciesChanged ||= installed.dependenciesChanged;
+  }
   if (dependenciesChanged || refreshed.length > 0) await bunInstall(projectDir);
   // Only now: until the install rewrote bun.lock, it named the old tarballs.
   if (refreshed.length > 0) pruneVendor(projectDir);
@@ -60,6 +68,34 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   }
   for (const missing of report.unconfigured) log.warn(missing);
   log.ok(`${name} installed; \`pikit doctor\` is green${report.unconfigured.length > 0 ? " (run `pikit configure` for the variables above)" : ""}`);
+}
+
+/**
+ * The providers `name` brings (`offers.ts`), each asked about (Enter is yes), or all of them with
+ * `--yes`. A declined provider takes what only it needed with it.
+ */
+async function acceptedOffers(projectDir: string, name: string, options: AddOptions): Promise<Offer[]> {
+  const project = readProjectManifest(projectDir);
+  const registry = openRegistry(project.registries[registryKey(project, options.registry)] as string);
+  const accepted: Offer[] = [];
+  const declined = new Set<string>();
+  for (const offer of offeredProviders(registry, [name], Object.keys(project.components)).reverse()) {
+    if (declined.has(offer.for)) {
+      declined.add(offer.component);
+      continue;
+    }
+    const what = (capabilityEntry(offer.capability)?.summary ?? offer.capability).replace(/\.$/, "");
+    const question =
+      offer.why === "recommended"
+        ? `${offer.for} can use ${offer.capability} (${what}). Install ${offer.component}?`
+        : `${offer.for} requires ${offer.capability}. Install ${offer.component}?`;
+    if (options.yes === true || (isInteractive() && (await confirm(question, true)))) {
+      log.step(`${offer.component}, for ${offer.for} (${offer.capability})`);
+      accepted.push(offer);
+    } else declined.add(offer.component);
+  }
+  // Providers before what uses them.
+  return accepted.reverse();
 }
 
 /** Steps 1–6 and 8–10: everything but `bun install` and `doctor`, which `pikit new` runs once for all. */
@@ -116,7 +152,9 @@ export async function installComponent(
     if (next !== example) writeFileSync(examplePath, next);
   }
 
+  const installedFor = options.installedFor === undefined ? undefined : [...new Set([...(project.components[name]?.installedFor ?? []), options.installedFor])];
   project.components[name] = {
+    ...(installedFor !== undefined && { installedFor }),
     registry: registryName,
     version: manifest.version,
     ...(registry.commit !== undefined && { commit: registry.commit }),

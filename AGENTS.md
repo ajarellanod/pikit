@@ -291,6 +291,11 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **Cloudflare limits are design inputs:** no `child_process`, no `eval`, no dynamic
   imports, a 10 MB bundle, 128 MB of memory, about 6 concurrent outbound connections,
   15-minute alarms, and in-memory state that is lost on hibernation.
+- **What a component is better with is offered, not preset.** A preset lists only what every
+  project of it uses. A provider a component can use comes with it when the catalogue marks the
+  capability `offer` (`packages/cli/src/registry/capabilities.ts`), recorded as `installedFor` and
+  removed with it (SPEC §10.5, "Offered providers"). Mark a capability `offer` only when installing its
+  provider changes nothing else.
 - **Presets are shortcuts, not modes.** Never branch behavior on which preset was used. A preset
   resolves to a list of `add` calls: a base's `components` with its `choose` questions answered
   (`--with`, the guided path), or an alias's `extends` + `with`. Never add a preset per channel: a

@@ -18,10 +18,8 @@ components:
   - tool-bash
   - runtime-pi
   - router-basic
-  # Durable delivery for the channel chosen below: every answer stored before it is sent. A chat
-  # channel (channel-telegram) uses it; channel-http answers in the HTTP response and leaves it idle.
-  - storage-sqlite
-  - outbound-durable
+  # A chat channel chosen instead brings durable delivery with it (`outbound.queue` is offered, SPEC
+  # §10.5): channel-http answers in the HTTP response and needs none.
   - channel-http
   - server-bun
   - log-events

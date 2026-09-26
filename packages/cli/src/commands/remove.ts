@@ -6,6 +6,10 @@
  * of; losing the provider of an optional capability is allowed and `doctor` reports it. The answer
  * comes from the app itself (`describe()`), not from manifests, so project components count too.
  * It never deletes a file the user modified without `--force`.
+ *
+ * What was installed *for* it (an offered provider, SPEC §10.5) goes with it when nothing else uses
+ * it, so `add` then `remove` leaves no trace even when `add` brought a provider along. When another
+ * component uses it now, it stays, installed for that one.
  */
 
 import { existsSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
@@ -71,6 +75,36 @@ export async function remove(projectDir: string, name: string, options: RemoveOp
   const report = await doctor(projectDir, { quiet: true });
   for (const problem of report.problems) log.problem(problem);
   if (report.problems.length > 0) throw new CliError(`\`pikit doctor\` found ${report.problems.length} problem(s) after removing ${name}`);
+
+  for (const leftover of await installedOnlyFor(projectDir, name)) {
+    log.step(`${leftover} was installed for ${name}, and nothing uses it now`);
+    await remove(projectDir, leftover, options);
+  }
+}
+
+/**
+ * The components installed for `name` (after it is gone) that nothing uses: the ones to remove.
+ * Another installed for `name` that something still uses stays, installed for its users now.
+ */
+async function installedOnlyFor(projectDir: string, name: string): Promise<string[]> {
+  const project = readProjectManifest(projectDir);
+  const candidates = Object.entries(project.components).filter(([, c]) => c.installedFor?.includes(name));
+  if (candidates.length === 0) return [];
+  const result = await probe(projectDir);
+  const components = result.ok ? result.description.components : [];
+  const usersOf = (component: string): string[] => {
+    const provides = new Set(components.find((c) => c.name === component)?.provides ?? []);
+    return components.filter((c) => c.name !== component && [...c.requires, ...c.optional].some((cap) => provides.has(cap))).map((c) => c.name);
+  };
+  const leftovers: string[] = [];
+  for (const [component, installed] of candidates) {
+    const others = (installed.installedFor ?? []).filter((n) => n !== name);
+    const users = result.ok ? usersOf(component) : others;
+    if (others.length === 0 && users.length === 0) leftovers.push(component);
+    else installed.installedFor = [...new Set([...others, ...users])];
+  }
+  writeProjectManifest(projectDir, project);
+  return leftovers;
 }
 
 /** Refuses when a remaining component requires a capability only this component provides. */

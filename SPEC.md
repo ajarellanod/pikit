@@ -2049,6 +2049,29 @@ once. Two lines depend on what gets installed, never on the preset's name: `runt
 `createRuntimePi({ extensions: [permissionGate] })`, and `router-basic` gets
 `defaultAgent: "assistant"`.
 
+#### Offered providers `[decision]`
+
+A preset lists only what every project made from it uses. What a component is better with comes
+with the component, decided by capabilities, never by naming other components (S4):
+- A capability the component can use (`useOptional`) that the catalogue marks `offer`, and that
+  nothing installed provides: its provider is offered. Today only `outbound.queue` is marked: a chat
+  channel brings `outbound-durable`. A per-agent `workspace` is not: it changes where agents work, so
+  it is a choice, never an offer.
+- A capability an offered component requires (`use`), and nothing provides: its provider comes too
+  (`outbound-durable` needs `storage.sql`: `storage-sqlite`).
+- Only when the registry has exactly one provider; with several, choosing is the user's, and `doctor`
+  says what is missing.
+
+`pikit add` asks about each (Enter is yes; `--yes` accepts them all; a declined provider takes what only
+it needed with it). `pikit new` installs them, each right before the component it came for. Each is
+recorded in `pikit.json` as `installedFor` that component. `pikit remove` takes an offered component
+with the last component it was installed for, when nothing else uses it; one another component uses
+stays, installed for that one. So `add` then `remove` leaves no trace (S3) even when `add` brought
+providers along. `doctor` notes a component whose capabilities nothing uses.
+
+Rationale: the base preset used to list `storage-sqlite` and `outbound-durable` for the chat channel a
+project might choose, so an HTTP project installed a queue nothing used.
+
 #### Vendored kit packages (M1 interim) `[decision]`
 
 `@pikit/core`, `@pikit/pi-adapter` and `@pikit/pi-extension-shim` are not published yet. Until they

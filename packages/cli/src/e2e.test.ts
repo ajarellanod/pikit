@@ -62,6 +62,8 @@ test.skipIf(!E2E)(
     const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
     expect(config).toContain("createRuntimePi({ extensions: [permissionGate] }),");
     expect(config).not.toContain("deploymentDocker");
+    // HTTP answers in the response: nothing offers it durable delivery, so none is installed.
+    expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components)).not.toContain("outbound-durable");
   },
   TIMEOUT,
 );
@@ -175,6 +177,18 @@ test.skipIf(!E2E)(
     expect(kept.err).toContain("src/pikit/log-events/fields.ts");
     expect((await pikit(["doctor"])).out).toContain("modified: src/pikit/log-events/fields.ts");
     git("checkout", "--", ".");
+    expect(git("status", "--porcelain").out).toBe("");
+
+    // A component that brings providers (SPEC §10.5): they are installed for it, and leave with it.
+    const brought = await pikit(["add", "channel-telegram", "--yes"]);
+    expect(brought.code).toBe(0);
+    const components = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components;
+    expect(components["outbound-durable"].installedFor).toEqual(["channel-telegram"]);
+    expect(components["storage-sqlite"].installedFor).toEqual(["outbound-durable"]);
+    const removedWith = await pikit(["remove", "channel-telegram"]);
+    expect(removedWith.code).toBe(0);
+    expect(removedWith.out).toContain("outbound-durable was installed for channel-telegram, and nothing uses it now");
+    expect(git("status", "--porcelain").out).toBe("");
   },
   TIMEOUT,
 );

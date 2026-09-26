@@ -5,6 +5,11 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli, registry: offered providers. A component brings the providers of what it can use when the
+  catalogue marks the capability `offer` (today `outbound.queue`): `pikit add channel-telegram` offers
+  `outbound-durable` and the `storage-sqlite` it needs, `pikit new` installs them, and `pikit remove`
+  takes them away with it when nothing else uses them (`installedFor` in `pikit.json`). `pikit doctor`
+  notes a component nothing uses. The base preset no longer installs a queue an HTTP project never uses.
 - samples: scenario 8, many agents (`samples/http/test/scenario-8.test.ts`): `router-rules`, extensions
   named per agent and `workspace-local` together, with Pi's real `bash`; and the same project without
   `router-rules`.
@@ -34,8 +39,6 @@ line names its area (AGENTS.md, "Git and docs").
   attaches its transport (`transport.ts`: HTML or plain text, failures classified for the queue) and
   enqueues each answer once per run. A piece sent again after a crash starts with `↻ `. Without a
   queue it sends directly, as before.
-- registry: the base preset installs `storage-sqlite` and `outbound-durable`, so a new chat project
-  delivers durably from the start; with `channel-http` they stay idle.
 - component/outbound-durable: every answer is stored before it is sent (`outbound.queue` on
   `storage.sql`), then delivered in order per conversation. Transient failures are retried after 5 s,
   30 s, 2 min and 10 min and abandoned at the fifth; rate limits wait what the platform asked; permanent

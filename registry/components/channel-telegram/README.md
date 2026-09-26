@@ -58,7 +58,7 @@ You never look up a user id, set a webhook, open a port or buy a domain.
 - **A message is acknowledged to Telegram only once its conversation has it.** A message delivered
   again after a crash is recognised by its id (`telegram:<chat>:<message>`) and answered once.
 - **Sending:**
-  - With `outbound-durable` installed (the presets install it), every answer is stored before it
+  - With `outbound-durable` installed (`pikit add channel-telegram` and `pikit new` offer it, with the `storage-sqlite` it needs), every answer is stored before it
     is sent and delivered even across crashes, outages and rate limits: see its README. A piece sent
     again after a crash starts with `↻ `, since Telegram cannot tell a repeated send apart.
   - Without it, answers are sent directly, retried in the process: after `retry_after` for

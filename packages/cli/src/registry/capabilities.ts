@@ -26,6 +26,12 @@ export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
   definedIn: "@pikit/core" | "@pikit/pi-adapter";
   /** One line: what a consumer gets from it. */
   summary: string;
+  /**
+   * Offered: when a component that can use it (`useOptional`) is added and nothing provides it,
+   * `pikit add` and `pikit new` offer its provider (SPEC §10.5, "Offered providers"). For what a
+   * component is better with and changes nothing else; not for a choice like a per-agent workspace.
+   */
+  offer?: true;
 }
 
 /**
@@ -59,6 +65,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/core",
     summary: "Stores each answer before sending it and delivers it through the channel's transport, retrying.",
+    offer: true,
   },
   "storage.sql": {
     mode: "single",
