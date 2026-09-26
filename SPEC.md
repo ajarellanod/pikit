@@ -344,7 +344,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `sessions.store` | Pi `SessionRepo` + `SessionStorage` | Re-exported from Pi; typed by `@pikit/pi-adapter`. See §7. |
 | `conversations.registry` | `ConversationRegistry` | Conversation key → active session and agent: `resolve` (creates the session the first time), `get`, `reset` (§7.4, §7.6). Workspace ref and metadata `[planned]`. |
 | `conversations.ownership` | `ConversationOwnership` | `[planned]` Lease per conversation so only one worker has its session open. Needed only with several server replicas (§7.2). |
-| `workspace` | `WorkspaceProvider` | Resolves a `Workspace` for a conversation/agent. |
+| `workspace` | `WorkspaceProvider` | Resolves the `Workspace` (its Pi `ExecutionEnv`) of a run's conversation; the tool components work in it when it is installed. Typed by `@pikit/pi-adapter` (§8.2). |
 | `execution` | Pi `ExecutionEnv` | Filesystem for the agent's tools; `exec()` may return `shell_unavailable`. |
 | `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
 | `http.route` (keyed by `"METHOD /path"`) | `HttpRoute` | One HTTP endpoint as a standard fetch handler, `(request: Request, ctx: AppContext) => Response \| Promise<Response>`, with no framework type, so it runs behind `Bun.serve` and a Cloudflare Worker alike. Channels and admin components provide routes; one server component serves them all (§9.1). |
@@ -470,7 +470,9 @@ importing it.
 - Cancelling a child never cancels its parent.
 
 Conversation data is not a context value: it arrives in the payloads of the events and
-pipelines that concern it.
+pipelines that concern it. One exception, scoped to a run: a tool call has no payload of its own, so
+the runtime puts the run's `ConversationRef` in the run's context (`CONVERSATION`, §6.3), next to its
+`AGENT_STATE` (§6.2a).
 
 ---
 
@@ -913,7 +915,7 @@ Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest
 For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
 `inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
 `SecretStore` (`secrets`), and `ConversationRegistry` with `ConversationReset` (`conversations.registry`
-and the payload of `conversation.reset`), and `HttpRoute` (`http.route`). For agent state (§6.2a): `AgentState` and the context key `AGENT_STATE`;
+and the payload of `conversation.reset`), and `HttpRoute` (`http.route`). For agent state (§6.2a): `AgentState` and the context key `AGENT_STATE`; for the run's conversation (§6.3), the context key `CONVERSATION`;
 `@pikit/core/testing` has its suite, `createAgentStateConformance`.
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`),
 `model.provider` (pi-ai's `Provider`) and `model.credentials` (pi-ai's `CredentialStore`) by
@@ -1234,15 +1236,25 @@ own session worker (`mini`) uses them. Following Pi first, `tool-read`, `tool-wr
 `tool-edit` and `tool-bash` wrap Pi's factories and do not reimplement them. `[decision]` Built in M1.
 
 A wrapper adds only what the kit owns:
-- the capability the tool requires (`execution`, or `execution.shell` for `bash`);
+- the capability the tool requires (`execution`, or `execution.shell` for `bash`), and the agent's
+  `workspace` it uses instead when one is installed (§8.2);
 - its `replay`. Pi's tools declare none, so they default to `"never"`; a read-only wrapper
   declares `"safe"`.
 
 `@pikit/pi-adapter/tools` re-exports Pi's four factories and `bindTool(tool, { env, replay })`.
 Pi's tools read their environment from the harness's `toolContext.env`, as Pi's own `mini` wires
-them. A bound tool uses the environment of the capability its component declared instead, read
-when it runs. The runtime then passes no tool context, and each tool works on exactly what it
-declared: `read` on `execution`, `bash` on `execution.shell`. `[decision]`
+them. A bound tool asks its own `env(context)` for an environment on every call instead, with the
+context Pi gives the call. The runtime then passes no tool context, and each tool works on exactly
+what its component declared: in a run, the agent's `workspace` when one is installed (§8.2);
+otherwise, and outside a run, `read` on `execution`, `bash` on `execution.shell`. `[decision]`
+
+**Which conversation a call belongs to.** `[decision]` The runtime puts the run's `ConversationRef`
+in the context of every run under the core's key `CONVERSATION`, next to `AGENT_STATE` (§6.2a), and
+Pi passes that context to each tool call: `context.value(CONVERSATION)`. It is `undefined` outside a
+run (a test calling a tool directly). The tool components read it to resolve the agent's
+`workspace`; a project's tools may read it too. A context value for the reasons `AGENT_STATE` is
+one: a tool object has no `ConversationRef` of its own and cannot `use()` anything, and the value is
+scoped to one run. Pi extensions do not see it yet, as they do not see `AGENT_STATE` (§6.2a).
 
 **How an agent gets a tool.** `[decision]`
 - A tool component provides its tool under the keyed capability `agent.tool`, keyed by the name
@@ -1541,22 +1553,31 @@ interface WorkspaceRef {
 ### 8.2 `workspace` capability
 
 ```ts
+// Typed by @pikit/pi-adapter, like `execution`. Built (M1.5): `resolve` and `env`.
 interface WorkspaceProvider {
-  resolve(conversation: ConversationRef, agent: AgentDefinition): Promise<Workspace>;
+  resolve(conversation: ConversationRef, context: Context): Promise<Workspace>;
 }
 interface Workspace {
-  ref: WorkspaceRef;
   env: ExecutionEnv;                       // Pi contract: FileSystem + Shell
-  checkpoint?(): Promise<WorkspaceRef>;    // snapshot / commit
-  release(): Promise<void>;
+  // [planned], with the providers that need them (snapshots, git):
+  // ref: WorkspaceRef;                    // kept in the conversation registry (§8.1)
+  // checkpoint?(): Promise<WorkspaceRef>; // snapshot / commit
+  // release(): Promise<void>;
 }
 ```
 
-Planned implementations:
+`resolve` takes the conversation and the call's context, not the `AgentDefinition`: the reference
+names the agent, and a tool call has no definition at hand. The context comes last, as in every
+contract, for cancellation and values. A provider decides what a workspace is keyed by
+(`workspace-local`: the agent). Its suite is `createWorkspaceConformance`
+(`@pikit/pi-adapter/testing`): a conversation's workspace keeps what its tools write, and two agents'
+workspaces are apart; its `env` also passes `createExecutionConformance` (§8.3).
+
+Implementations:
 
 | Component | Filesystem | Shell | Persistence | Target |
 |---|---|---|---|---|
-| `workspace-local` | real dir under `~/.pikit/workspaces/{agent}` | yes | disk | server |
+| `workspace-local` | real dir `<root>/{agent}` (default root `.pikit/workspaces`). Built (M1.5) | yes | disk | server |
 | `workspace-virtual` | table in `storage.sql` | no (`shell_unavailable`) | SQL | both |
 | `workspace-git` | clone/checkout per session | via `execution` | Git remote | both* |
 | `workspace-r2-snapshot` | tar in `storage.blob` | via `execution` | R2/S3 | both* |
@@ -1564,10 +1585,21 @@ Planned implementations:
 
 \* requires an `execution` provider that has a real filesystem.
 
-**One workspace per agent** `[planned]` (M1.5). Each agent's tools work in a directory of their own
-(`workspace-local`: `<root>/<agent>/`); without a `workspace` provider every agent shares
-`execution`, as today. How a run's tools get their agent's `ExecutionEnv` is settled with the
-component. A directory per agent is order, not isolation: a tool with `bash` runs as the same user
+**One workspace per agent** `[decision]` Built (M1.5). Each agent's tools work in a directory of
+their own (`workspace-local`: `<root>/<agent>/`, created on the agent's first call; every conversation
+of one agent shares it). Without a `workspace` provider every agent shares `execution`, as before.
+How a run's tools get their agent's `ExecutionEnv`:
+- The tool components declare `useOptional("workspace")`. On every call, `bindTool`'s
+  `env(context)` resolves `workspace.resolve(context.value(CONVERSATION), context).env` (§6.3). With
+  no provider, or outside a run, it is `execution` (`execution.shell` for `bash`), which the tools
+  still require.
+- `workspace-local` refuses an agent name that is not kebab-case (`..`, `a/b`, empty): the call
+  fails, and nothing is created outside its root.
+- A workspace whose `env` has no shell makes every `bash` call fail (Pi's `bash` returns the
+  `shell_unavailable` error). `workspace-local` always has one; a provider without a shell must not
+  be installed with `tool-bash`.
+
+A directory per agent is order, not isolation: a tool with `bash` runs as the same user
 as pikit and can leave it, and read the model credentials in `.pikit/`. Isolation needs each agent's
 tools in a separate sandbox (`execution-docker`, planned after M2).
 

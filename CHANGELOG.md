@@ -13,6 +13,20 @@ line names its area (AGENTS.md, "Git and docs").
   `telegram:ops` (`TELEGRAM_OPS_BOT_TOKEN`, `TELEGRAM_OPS_ALLOWED_USERS`), with its own users,
   conversations (`telegram:ops:<chat>`) and transport; `router-rules` can give it its own agent.
   `pikit configure` sets up each bot. The default bot and its keys are unchanged.
+- component/workspace-local: each agent's tools work in a directory of their own, `<root>/<agent>/`
+  (default root `.pikit/workspaces`), created on the agent's first call; commands start from an
+  allowlist of variables, as with `execution-local`. An agent name that could leave the root is
+  refused. Order, not isolation: `bash` can still `cd ..` and read `.pikit/credentials.json`
+  (SPEC §8.2). Not in any preset.
+- component/tool-read, tool-write, tool-edit, tool-bash: in a run, they work in the agent's
+  `workspace` when one is installed (`useOptional("workspace")`); without one, or outside a run, on
+  `execution` / `execution.shell` as before.
+- adapter: the `workspace` capability (`WorkspaceProvider`, `Workspace { env }`; `ref`, `checkpoint`
+  and `release` stay planned) and its suite, `createWorkspaceConformance`. `bindTool`'s `env` is now
+  `(context) => ExecutionEnv | Promise<ExecutionEnv>`, asked on every call with the call's context.
+  Every run's context carries its conversation.
+- core: the context key `CONVERSATION`: the runtime puts the run's `ConversationRef` in every run's
+  context, and tools read it with `context.value(CONVERSATION)` (SPEC §6.3).
 - component/channel-telegram: answers go through `outbound.queue` when it is installed: the channel
   attaches its transport (`transport.ts`: HTML or plain text, failures classified for the queue) and
   enqueues each answer once per run. A piece sent again after a crash starts with `↻ `. Without a

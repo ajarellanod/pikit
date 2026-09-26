@@ -297,7 +297,8 @@ by adding components, and removed the same way.
 **Done when** (scenario 8, SPEC §15):
 - Two agents with different tools and extensions answer two different conversations, chosen by
   rules in config.
-- Each agent's tools work in its own directory.
+- ✅ Each agent's tools work in its own directory: `workspace-local` (SPEC §8.2), whose tests run two
+  agents' real runs. Scenario 8 as a whole is still to run.
 - A channel serves several accounts (two Telegram bots in one project), each its own instance.
 - Removing `router-rules` routes everything to one agent again, with nothing else changed (S3).
 
