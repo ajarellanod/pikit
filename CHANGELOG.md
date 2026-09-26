@@ -25,6 +25,10 @@ line names its area (AGENTS.md, "Git and docs").
   `transaction`), and its conformance suite (`createSqlDatabaseConformance`). `storage-sqlite`
   provides it in one SQLite file (`.pikit/pikit.db`) through `node:sqlite`, in WAL mode, one statement
   at a time (SPEC §4.5, §16).
+- component/router-rules: routes each conversation to an agent by an ordered list of rules in
+  config, matching the channel (an instance, or a kind for all its accounts), the conversation and
+  the sender; a rule can also deny. What no rule matches goes to `router-basic`'s `defaultAgent`, and
+  removing it sends everything there. It refuses to start when a rule names an unknown agent.
 - core: `admitInbound` runs the inbound path every channel takes (`inbound.normalize`,
   `route.resolve`, the conversation, `dispatch`) and returns what happened (`admitted`, `duplicate`,
   `halted`, `denied`, `no_route`); a stage that changes which message or conversation it is now

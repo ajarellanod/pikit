@@ -85,6 +85,15 @@
       ],
       "path": "components/router-basic"
     },
+    "router-rules": {
+      "version": "0.0.0",
+      "description": "Each conversation goes to the agent of the first rule in config it matches.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/router-rules"
+    },
     "runtime-pi": {
       "version": "0.0.0",
       "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
