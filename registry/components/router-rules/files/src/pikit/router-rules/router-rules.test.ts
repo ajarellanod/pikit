@@ -163,12 +163,13 @@ test("it refuses to start when a rule names an agent that does not exist", async
   expect(String((error as Error).cause)).toContain('rules name "billing", not an agent.definition (agents: "assistant", "support", "sales")');
 });
 
-test("an invalid rule is rejected by config validation", () => {
+test("an invalid rule is rejected by config validation; no rules at all is valid", () => {
   const invalid = (rules: unknown) => () =>
     defineApp({ components: [agents, routerRules], config: { "router-rules": { rules } }, logger: silentLogger });
 
-  expect(() => defineApp({ components: [agents, routerRules], logger: silentLogger })).toThrow("invalid config");
-  expect(invalid([])).toThrow("invalid config");
+  // Just installed (`pikit add router-rules`), with no rules yet: it composes, and routes nothing.
+  expect(() => defineApp({ components: [agents, routerRules], logger: silentLogger })).not.toThrow();
+  expect(invalid([])).not.toThrow();
   // Exactly one of `agent` and `deny`.
   expect(invalid([{ channel: "telegram" }])).toThrow("invalid config");
   expect(invalid([{ agent: "support", deny: true }])).toThrow("invalid config");

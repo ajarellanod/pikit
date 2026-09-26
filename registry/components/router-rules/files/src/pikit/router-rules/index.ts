@@ -46,7 +46,9 @@ type Rule = Static<typeof Rule>;
 
 const Config = Type.Object({
   /** In order: the first rule that matches decides. */
-  rules: Type.Array(Rule, { minItems: 1 }),
+  // Empty by default: installed with no rules, it routes nothing, and router-basic answers everything
+  // until rules are written.
+  rules: Type.Array(Rule, { default: [] }),
 });
 
 function matches(rule: Rule, message: InboundMessage): boolean {

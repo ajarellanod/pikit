@@ -48,7 +48,7 @@ user is denied, and everything else falls through to `router-basic`:
 
 ```ts
 "router-rules": {
-  rules: [ // required, at least one
+  rules: [ // empty by default: until you write rules, router-basic answers everything
     { actor: "666", deny: true, reason: "blocked" },
     { channel: "telegram:support", agent: "support" },
     { channel: "telegram", conversation: "12345", agent: "sales" },
