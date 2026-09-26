@@ -57,4 +57,5 @@ export { AGENT_STATE } from "./contracts/agent-state.ts";
 export type { ConversationRegistry, ConversationReset } from "./contracts/conversations.ts";
 export type { HttpRoute } from "./contracts/http.ts";
 export type { SecretStore } from "./contracts/secrets.ts";
+export type { SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./contracts/storage.ts";
 export { consoleLogger, silentLogger } from "./contracts/logger.ts";

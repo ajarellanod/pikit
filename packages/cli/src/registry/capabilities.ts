@@ -55,6 +55,11 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/core",
     summary: "The only way a component reads a secret (environment, Worker bindings, a vault).",
   },
+  "storage.sql": {
+    mode: "single",
+    definedIn: "@pikit/core",
+    summary: "An async SQL database for records that outlive the process; each component owns its own tables.",
+  },
   "sessions.store": {
     mode: "single",
     definedIn: "@pikit/pi-adapter",

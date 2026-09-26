@@ -15,6 +15,9 @@ export { createConversationRegistryConformance } from "./conversations.ts";
 export type { HttpRouteConformanceOptions, HttpRouteFixture } from "./http.ts";
 export { createHttpRouteConformance } from "./http.ts";
 
+export type { SqlDatabaseFixture } from "./storage-sql.ts";
+export { createSqlDatabaseConformance } from "./storage-sql.ts";
+
 export type { AgentStateFixture } from "./agent-state.ts";
 export { createAgentStateConformance } from "./agent-state.ts";
 
