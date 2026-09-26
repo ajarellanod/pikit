@@ -599,11 +599,16 @@ returns what happened:
 - Whether a thread is a conversation of its own is a value in the channel's config.
 
 **Routing to many agents.** `[decision]` (M1.5)
-- `router-rules` adds a `route.resolve` stage that runs before `router-basic`'s. Its config is a list
-  of rules; the first that matches wins. A rule matches on any of `channel` (an instance, or a kind to
-  match all its accounts), `conversation`, `thread` and `actor`, and gives `agent: "<name>"` or
-  `deny`. A message no rule matches is left to the next stage: `router-basic`'s `defaultAgent`, or
-  `route.failed` when nothing else routes it.
+- `router-rules` adds a `route.resolve` stage that runs before `router-basic`'s (priority 1, below
+  the project stages at 10 that route around both). Its config is a list of rules; the first that
+  matches wins. A rule matches on any of `channel` (an instance, or a kind to match all its
+  accounts), `conversation` and `actor`, and gives `agent: "<name>"` or `deny`. A message no rule
+  matches is left to the next stage: `router-basic`'s `defaultAgent`, or `route.failed` when nothing
+  else routes it.
+  - `thread` is `[planned]`, with `InboundMessage.threadId`; until then a rule naming it is invalid
+    config, not a rule that matches every thread.
+  - A `deny` decides `{ agent: "", access: "deny" }`: a denied message has no agent, and
+    `admitInbound` does not read it.
 - Rules are values; a different strategy is a different component (S7). Choosing the agent from the
   chat itself (`/agent support`) is such a component, built when someone needs it.
 - It refuses to start when a rule names an agent that is not an `agent.definition`, as
