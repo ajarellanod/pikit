@@ -92,6 +92,14 @@ export interface AgentDefinition<S extends object = object> {
    */
   tools?: readonly (AgentTool | string)[];
   /**
+   * The Pi extensions this agent's conversations load, by name: each is provided by a component under
+   * the keyed capability `agent.extension` (SPEC §6.2b). Like tools, installing an extension gives no
+   * agent anything until it names it. A conversation loads them when it opens, after the extensions
+   * the runtime loads for every agent; they stay for as long as it is open, since its agent is fixed.
+   * The runtime refuses a name with no provider.
+   */
+  extensions?: readonly string[];
+  /**
    * The initial state of each conversation: a JSON object. Tools update it through `AGENT_STATE`;
    * it is stored in the conversation's Pi session and starts again from here after a reset. Absent,
    * it is `{}`.
@@ -124,6 +132,11 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
   for (const [index, name] of named.entries()) {
     if (!TOOL_NAME.test(name)) throw new Error(`agent "${definition.name}": tool name "${name}" is not a tool name`);
     if (named.indexOf(name) !== index) throw new Error(`agent "${definition.name}": tool "${name}" is named twice`);
+  }
+  const extensions = definition.extensions ?? [];
+  for (const [index, name] of extensions.entries()) {
+    if (name === "") throw new Error(`agent "${definition.name}": an extension name is empty`);
+    if (extensions.indexOf(name) !== index) throw new Error(`agent "${definition.name}": extension "${name}" is named twice`);
   }
   // Checked here, not at the first update: the state is stored in the session as JSON.
   if (definition.state !== undefined && !isJsonObject(definition.state)) {

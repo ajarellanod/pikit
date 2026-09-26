@@ -36,6 +36,14 @@ test("an agent names installed tools by name, next to tools of its own", () => {
   expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: [""] })).toThrow("is not a tool name");
 });
 
+test("an agent names the Pi extensions it uses, each once", () => {
+  const gated = defineAgent({ name: "coder", model: "faux/scripted", extensions: ["permission-gate", "hello"] });
+
+  expect(gated.extensions).toEqual(["permission-gate", "hello"]);
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", extensions: ["hello", "hello"] })).toThrow('extension "hello" is named twice');
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", extensions: [""] })).toThrow("an extension name is empty");
+});
+
 test("prepare is a plain function from state to what changes for the run", () => {
   const deploy = { name: "deploy" } as unknown as AgentTool;
   const release = defineAgent({
