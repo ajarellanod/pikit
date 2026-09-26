@@ -11,3 +11,5 @@ export { createCredentialStoreConformance } from "./credentials.ts";
 export type { CredentialStoreFixture } from "./credentials.ts";
 export { createExecutionConformance } from "./execution.ts";
 export type { ExecutionFixture } from "./execution.ts";
+export { createWorkspaceConformance } from "./workspace.ts";
+export type { WorkspaceFixture } from "./workspace.ts";

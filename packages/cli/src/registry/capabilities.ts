@@ -85,6 +85,11 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/pi-adapter",
     summary: "The same ExecutionEnv, provided only when it really runs commands; shell tools require it.",
   },
+  workspace: {
+    mode: "single",
+    definedIn: "@pikit/pi-adapter",
+    summary: "Each agent's own ExecutionEnv, resolved per run from its conversation; the file and shell tools use it when installed.",
+  },
   "agent.definition": {
     mode: "keyed",
     definedIn: "@pikit/core",

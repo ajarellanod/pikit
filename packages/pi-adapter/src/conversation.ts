@@ -7,8 +7,9 @@
  * `dispatch`, or a run a dead worker left open, which is resumed as soon as the conversation opens.
  * That is why a run's end always reaches `agent.settled`, with or without a caller waiting.
  *
- * Every run's context carries the conversation's `agent.state` (`AGENT_STATE`), and Pi hands that
- * context to each tool call: that is how a tool reaches the state of the conversation it runs in.
+ * Every run's context carries the conversation (`CONVERSATION`) and its `agent.state` (`AGENT_STATE`),
+ * and Pi hands that context to each tool call: that is how a tool knows the conversation it runs in
+ * (a `workspace` picks the agent's directory from it) and reaches its state.
  */
 
 import {
@@ -30,6 +31,7 @@ import {
   type AgentTool,
   type AppContext,
   type Context,
+  CONVERSATION,
   type ConversationRef,
   withContextValue,
 } from "@pikit/core";
@@ -206,9 +208,9 @@ export class PiConversation {
     );
   }
 
-  /** The context a run is driven in: the caller's values, no cancellation, and the conversation's state. */
+  /** The context a run is driven in: the caller's values, no cancellation, the conversation and its state. */
   private runScope(ctx: AppContext): Context {
-    return withContextValue(AGENT_STATE, this.state, detached(ctx));
+    return withContextValue(CONVERSATION, this.ref, withContextValue(AGENT_STATE, this.state, detached(ctx)));
   }
 
   /**

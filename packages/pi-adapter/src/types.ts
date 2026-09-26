@@ -6,6 +6,7 @@
 
 import type { AgentHarnessTool, AgentMessage, Context, ExecutionEnv, SessionMetadata, SessionRepo } from "@earendil-works/pi-agent-core";
 import type { CredentialStore, Provider, Usage } from "@earendil-works/pi-ai";
+import type { ConversationRef, Context as PikitContext } from "@pikit/core";
 import type { PiExtension } from "./extensions/api.ts";
 
 /**
@@ -21,6 +22,31 @@ export interface SessionStore extends SessionRepo<any, any, any> {
    * every conversation it opens. Optional: without it, the runtime lists.
    */
   find?(id: string, context: Context): Promise<SessionMetadata | undefined>;
+}
+
+/**
+ * The `workspace` capability (SPEC §8.2): where an agent's tools work. The tool components ask it for
+ * the workspace of the conversation a run belongs to (`CONVERSATION` in the run's context); without a
+ * provider they work on `execution`, as every agent did before.
+ *
+ * Built so far: `resolve` and `env`. `ref` (the `WorkspaceRef` kept in the conversation registry),
+ * `checkpoint` and `release` are `[planned]` with the providers that need them (snapshots, git).
+ */
+export interface WorkspaceProvider {
+  /**
+   * The workspace of `conversation`. A provider decides what it is keyed by (`workspace-local`: the
+   * agent, one directory each) and may create it on the first call. It fails, and the tool call with
+   * it, rather than hand out a workspace it cannot keep apart from the others.
+   */
+  resolve(conversation: ConversationRef, context: PikitContext): Promise<Workspace>;
+}
+
+export interface Workspace {
+  /**
+   * Pi's `ExecutionEnv`: files and shell. A provider without a real shell answers `exec` with
+   * `shell_unavailable`, and Pi's `bash` then fails every call: do not give `bash` to its agents.
+   */
+  env: ExecutionEnv;
 }
 
 declare module "@pikit/core" {
@@ -47,6 +73,11 @@ declare module "@pikit/core" {
     execution: ExecutionEnv;
     /** The same contract, provided only when `exec` really runs commands. Shell tools require it. */
     "execution.shell": ExecutionEnv;
+    /**
+     * Where each agent's tools work (SPEC §8.2): the file and shell tools resolve it per run, from the
+     * run's conversation. Optional for them: without it they work on `execution`.
+     */
+    workspace: WorkspaceProvider;
   }
   interface AppKeyedCapabilities {
     /** One pi-ai model provider per key (its id): `anthropic`, `openai`, `faux` in tests. */
