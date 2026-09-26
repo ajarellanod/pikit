@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core, component/channel-telegram: `answerKey(conversation, requestId)`, the one formula for a run's
+  answer key (`${sessionId}:${requestId}`, SPEC §5). The channel enqueues answers under it; a tool finds
+  its run's answer with `answerKey(context.value(CONVERSATION), invocation.operationId)`. Keys are
+  unchanged.
 - core: feeds (SPEC §4.8), for what must not be missed. `Feed<T>`, `FeedPage` and `FeedItem`: facts a
   component records in the same commit as the change they describe, read by others in commit order
   after a cursor of their own, with `gap` when facts were pruned before they were read. Events stay

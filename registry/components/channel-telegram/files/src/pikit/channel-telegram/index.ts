@@ -24,7 +24,7 @@
  * Target: `server`: long polling needs a process that keeps running.
  */
 
-import { type AgentResult, type AppContext, BACKGROUND_CONTEXT, defineComponent, type OutboundQueue } from "@pikit/core";
+import { type AgentResult, type AppContext, answerKey, BACKGROUND_CONTEXT, defineComponent, type OutboundQueue } from "@pikit/core";
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, chatIn } from "./account.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, TelegramError } from "./api.ts";
@@ -95,7 +95,7 @@ export default defineComponent({
       // One key per run (the request that started it): a run resumed after a crash is not answered twice.
       await now.queue
         .enqueue({
-          idempotencyKey: `${result.conversation.sessionId}:${result.requestId}`,
+          idempotencyKey: answerKey(result.conversation, result.requestId),
           channel: bot.account.instance,
           conversationKey: result.conversation.key,
           text,

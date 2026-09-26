@@ -15,9 +15,24 @@
  * than receiving it twice.
  */
 
+import type { ConversationRef } from "../agent.ts";
+
+/**
+ * The key of a run's answer: `${sessionId}:${requestId}`, where `requestId` is the request that started
+ * the run. Stable across retries and restarts, so a run resumed after a crash is not answered twice.
+ *
+ * One formula for everyone who names that answer: the channel that enqueues it (from `AgentResult`),
+ * and whoever waits for its delivery, a tool included (from `CONVERSATION` and Pi's
+ * `invocation.operationId`, which is the same request). Its receipts (`OutboundQueue.receipts`) carry
+ * it as their `idempotencyKey`.
+ */
+export function answerKey(conversation: Pick<ConversationRef, "sessionId">, requestId: string): string {
+  return `${conversation.sessionId}:${requestId}`;
+}
+
 /** One answer to deliver. */
 export interface OutboundMessage {
-  /** One per answer, stable across retries and restarts: `${sessionId}:${runId}`. Enqueued twice, sent once. */
+  /** One per answer, stable across retries and restarts: `answerKey(...)` for a run's answer. Enqueued twice, sent once. */
   idempotencyKey: string;
   /** The channel instance whose transport sends it (`telegram`, `telegram:support`). */
   channel: string;
