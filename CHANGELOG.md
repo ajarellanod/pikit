@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core, component/storage-sqlite: the `storage.sql` contract, an async `SqlDatabase` (`query`, `run`,
+  `transaction`), and its conformance suite (`createSqlDatabaseConformance`). `storage-sqlite`
+  provides it in one SQLite file (`.pikit/pikit.db`) through `node:sqlite`, in WAL mode, one statement
+  at a time (SPEC §4.5, §16).
 - core: `admitInbound` runs the inbound path every channel takes (`inbound.normalize`,
   `route.resolve`, the conversation, `dispatch`) and returns what happened (`admitted`, `duplicate`,
   `halted`, `denied`, `no_route`); a stage that changes which message or conversation it is now

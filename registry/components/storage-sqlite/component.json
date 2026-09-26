@@ -1,0 +1,28 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "storage-sqlite",
+  "version": "0.0.0",
+  "description": "The app's SQL database (storage.sql) in one SQLite file, through node:sqlite: records components keep across restarts.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "storage.sql"
+  ],
+  "dependencies": {
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
