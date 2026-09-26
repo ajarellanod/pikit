@@ -4,6 +4,7 @@ Pi's own `bash` tool, for the agents that name it: it runs a shell command in th
 
 - **Provides:** `agent.tool`, under the key `bash`.
 - **Requires:** `execution.shell` (for example `execution-local`).
+- **Optional:** `workspace` (for example `workspace-local`): each agent's own directory.
 - **Targets:** any target with an `execution.shell` provider (`server` with `execution-local`).
 - **Installs to:** `src/pikit/tool-bash/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi).
@@ -17,7 +18,9 @@ defineAgent({ name: "ops", model: "anthropic/claude-sonnet-4-6", tools: ["bash"]
 ```
 
 pikit does not reimplement the tool; it is Pi's. The component adds only two things:
-- the environment it works on: `execution.shell`, read when the tool runs;
+- the environment it works on, read when the tool runs: in a run, the agent's own `workspace` when
+  one is installed (`workspace-local` gives each agent a directory); otherwise `execution.shell`.
+  A `workspace` without a shell makes every `bash` call fail (`workspace-local` has one);
 - It needs a real shell, so it requires `execution.shell`. An environment without one
   (`execution` only) cannot install it, and `pikit doctor` says so.
 - its replay: `"never"`: a command can do anything, so after a crash Pi reports the call as interrupted and the model decides whether to run it again.
@@ -35,7 +38,8 @@ A shell can do anything the environment's OS user can, outside the working direc
 ## Tests
 
 `tool-bash.test.ts` is copied with the component and runs in your project, in a temporary directory.
-It covers the tool under its name, its replay, and what it does.
+It covers the tool under its name, its replay, what it does, and that a call in a run works in its
+agent's workspace when one is installed.
 
 `component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
 exists, the test "what setup declares" pins it.

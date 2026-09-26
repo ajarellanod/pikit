@@ -4,8 +4,11 @@
  * an optional timeout.
  *
  * pikit does not reimplement it (SPEC §6.3). This component adds only what the kit owns:
- * - the environment it works on: `execution.shell`, read when the tool runs. It needs a real shell,
- *   so an environment with `execution` only cannot install it, and `pikit doctor` says so;
+ * - the environment it works on, read when the tool runs: the agent's own `workspace` when one is
+ *   installed (`workspace-local`: a directory per agent, with a shell, SPEC §8.2), otherwise
+ *   `execution.shell`. It needs a real shell, so an environment with `execution` only cannot install
+ *   it, and `pikit doctor` says so. A `workspace` without a shell fails every call: do not install
+ *   one with `bash`;
  * - its replay, `"never"`: a command can do anything, so after a crash Pi reports the call as
  *   interrupted, and the model decides whether to run it again (SPEC §8.4).
  *
@@ -16,14 +19,25 @@
  * Targets: wherever an `execution.shell` provider is installed (`server` with `execution-local`).
  */
 
-import { defineComponent } from "@pikit/core";
+import { CONVERSATION, defineComponent } from "@pikit/core";
 import { bindTool, createBashTool } from "@pikit/pi-adapter/tools";
 
 export default defineComponent({
   name: "tool-bash",
   setup(pikit) {
     const environment = pikit.use("execution.shell");
-    const tool = bindTool(createBashTool(), { env: () => environment.get(), replay: "never" });
+    const workspace = pikit.useOptional("workspace");
+    const tool = bindTool(createBashTool(), {
+      // In a run, the agent's own workspace when one is installed; otherwise, and outside a run,
+      // `execution.shell` as before.
+      async env(context) {
+        const conversation = context.value(CONVERSATION);
+        const workspaces = workspace.get();
+        if (workspaces === undefined || conversation === undefined) return environment.get();
+        return (await workspaces.resolve(conversation, context)).env;
+      },
+      replay: "never",
+    });
     // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
     pikit.provideKeyed("agent.tool", "bash", tool);
   },

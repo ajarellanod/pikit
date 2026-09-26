@@ -5,10 +5,18 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AgentTool, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import {
+  type AgentTool,
+  BACKGROUND_CONTEXT,
+  CONVERSATION,
+  defineApp,
+  defineComponent,
+  silentLogger,
+  withContextValue,
+} from "@pikit/core";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
 import toolUnderTest from "./index.ts";
 
@@ -30,8 +38,14 @@ function textOf(result: { content: { type: string; text?: string }[] }): string 
   return result.content.flatMap((part) => (part.type === "text" && part.text !== undefined ? [part.text] : [])).join("");
 }
 
-/** The tool as installed in a started app, over a temporary working directory. */
-async function installed(): Promise<{ tool: AgentTool; dir: string; stop(): Promise<void> }> {
+/** The context Pi gives a tool call in a run of the `support` agent: it names the run's conversation. */
+const supportRun = withContextValue(CONVERSATION, { key: "test:1", agent: "support", sessionId: "session-1" }, BACKGROUND_CONTEXT);
+
+/**
+ * The tool as installed in a started app, over a temporary working directory. With `workspace`, a
+ * test `workspace` is installed too: each agent works in `<dir>/agents/<agent>`.
+ */
+async function installed(options: { workspace?: boolean } = {}): Promise<{ tool: AgentTool; dir: string; stop(): Promise<void> }> {
   const dir = mkdtempSync(join(tmpdir(), "pikit-tool-bash-"));
   directories.push(dir);
   const env = createLocalExecution({ cwd: dir, env: { PATH: process.env.PATH ?? "" } });
@@ -42,6 +56,15 @@ async function installed(): Promise<{ tool: AgentTool; dir: string; stop(): Prom
       pikit.provide("execution.shell", env);
     },
   });
+  const workspace = defineComponent({
+    name: "workspace-test",
+    setup: (pikit) =>
+      pikit.provide("workspace", {
+        resolve: async (conversation) => ({
+          env: createLocalExecution({ cwd: join(dir, "agents", conversation.agent), env: { PATH: process.env.PATH ?? "" } }),
+        }),
+      }),
+  });
   let tool: AgentTool | undefined;
   const reader = defineComponent({
     name: "tool-reader",
@@ -50,7 +73,7 @@ async function installed(): Promise<{ tool: AgentTool; dir: string; stop(): Prom
       return { start: () => void (tool = tools.get("bash")) };
     },
   });
-  const app = await defineApp({ components: [execution, toolUnderTest, reader], logger: silentLogger }).create();
+  const app = await defineApp({ components: [execution, ...(options.workspace === true ? [workspace] : []), toolUnderTest, reader], logger: silentLogger }).create();
   await app.start();
   if (tool === undefined) throw new Error("agent.tool bash was not provided");
   return { tool, dir, stop: () => app.stop() };
@@ -70,7 +93,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "tool-bash")).toMatchObject({
     provides: ["agent.tool"],
     requires: ["execution.shell"],
-    optional: [],
+    optional: ["workspace"],
   });
   expect(app.describe().capabilities["agent.tool"]?.keys).toEqual({ bash: "tool-bash" });
 });
@@ -97,4 +120,18 @@ test("an environment without a shell cannot install it", async () => {
   const onlyFiles = defineComponent({ name: "files-only", setup: (pikit) => pikit.provide("execution", createLocalExecution({ cwd: tmpdir(), env: {} })) });
 
   await expect(defineApp({ components: [onlyFiles, toolUnderTest], logger: silentLogger }).create()).rejects.toThrow("execution.shell");
+});
+
+test("with a workspace, a command in a run runs in its agent's workspace, and one outside a run in execution", async () => {
+  const s = await installed({ workspace: true });
+  mkdirSync(join(s.dir, "agents/support"), { recursive: true });
+  writeFileSync(join(s.dir, "agents/support/a.txt"), "support's\n");
+  writeFileSync(join(s.dir, "a.txt"), "shared\n");
+
+  const inRun = await s.tool.execute("call-1", { command: "cat a.txt" }, () => {}, undefined, invocation, supportRun);
+  const outside = await s.tool.execute("call-2", { command: "cat a.txt" }, () => {}, undefined, invocation, BACKGROUND_CONTEXT);
+
+  expect(textOf(inRun)).toContain("support's");
+  expect(textOf(outside)).toContain("shared");
+  await s.stop();
 });

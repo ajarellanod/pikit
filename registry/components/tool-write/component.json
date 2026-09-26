@@ -14,7 +14,9 @@
     ]
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "workspace"
+    ]
   },
   "provides": [
     "agent.tool"
