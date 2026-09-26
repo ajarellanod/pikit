@@ -5,6 +5,13 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core, component/outbound-durable: delivery receipts. `OutboundQueue.receipts` is a feed of
+  `DeliveryReceipt`s: one per piece that settled, delivered (with the platform's message id) or
+  abandoned (with its reason), in the order they settled (SPEC §5). `outbound-durable` writes each in
+  the same transaction as the piece's state (`outbound_receipts`), prunes them with their pieces, and
+  now versions its tables (`outbound_meta`): an existing database gains the receipts table, and one
+  written by a newer outbox is refused at start. The queue suite checks receipts, and runs the feed
+  suite over them.
 - core, component/channel-telegram: `answerKey(conversation, requestId)`, the one formula for a run's
   answer key (`${sessionId}:${requestId}`, SPEC §5). The channel enqueues answers under it; a tool finds
   its run's answer with `answerKey(context.value(CONVERSATION), invocation.operationId)`. Keys are

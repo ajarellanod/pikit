@@ -8,6 +8,9 @@
  * The suite owns the clock (`createManualClock`), so retries are checked to the millisecond without
  * waiting, and the transport, which it scripts: a piece's send succeeds, fails with a given kind, or
  * hangs until aborted. It observes only the capability and the `outbound.*` events.
+ *
+ * The queue's `receipts` are checked here too (SPEC §4.8): what they record, and the feed suite
+ * (`createFeedConformance`) over them, restarts included.
  */
 
 import { type App, type ComponentDefinition, defineApp, defineComponent } from "../app.ts";
@@ -16,12 +19,14 @@ import { silentLogger } from "../contracts/logger.ts";
 import {
   type ChannelTransport,
   DeliveryError,
+  type DeliveryReceipt,
   type OutboundMessage,
   type OutboundPiece,
   type OutboundQueue,
 } from "../contracts/outbound.ts";
 import type { AppEvents } from "../events.ts";
 import { checker, expecter } from "./assert.ts";
+import { createFeedConformance } from "./feed.ts";
 import type { ConformanceCase } from "./lifecycle.ts";
 import { createManualClock, type ManualClock } from "./manual-clock.ts";
 
@@ -64,7 +69,7 @@ export function createOutboundQueueConformance(factory: () => OutboundQueueFixtu
     },
   });
 
-  return [
+  const cases: ConformanceCase[] = [
     queueCase("a message is stored, then its pieces are sent in order, each once", async (s) => {
       const w = await s.open();
       const transport = scripted();
@@ -254,7 +259,111 @@ export function createOutboundQueueConformance(factory: () => OutboundQueueFixtu
       await eventually(() => w.delivered.length === 1, "the aborted piece delivered after attach");
       expect(transport.calls.map((p) => [p.key, p.possibleDuplicate]), [["m1#0", true]], "sent again as a possible duplicate");
     }),
+
+    queueCase("receipts: one per settled piece, in the order pieces settled, with what became of it", async (s) => {
+      const w = await s.open();
+      const transport = scripted({ "m2#0": [new DeliveryError("permanent", "the chat blocked the bot")] });
+      w.queue.attach("chat", transport);
+      await w.queue.enqueue(message("m1", "chat:1", "one|two"));
+      await w.queue.enqueue(message("m2", "chat:1", "lost"));
+      await w.queue.enqueue(message("m3", "chat:1", "three"));
+      await eventually(() => w.delivered.length === 3 && w.abandoned.length === 1, "three pieces delivered and one abandoned");
+      const page = await w.queue.receipts.read(undefined, 100);
+      expect(
+        page.items.map(({ fact }) => [fact.idempotencyKey, fact.index, fact.outcome.kind]),
+        [
+          ["m1", 0, "delivered"],
+          ["m1", 1, "delivered"],
+          ["m2", 0, "abandoned"],
+          ["m3", 0, "delivered"],
+        ],
+        "each piece's receipt, in the order it settled",
+      );
+      const sent = new Map(transport.calls.map((p, i) => [p.key, `platform-${i + 1}`]));
+      expect(
+        page.items[0]?.fact,
+        {
+          idempotencyKey: "m1",
+          index: 0,
+          channel: "chat",
+          conversationKey: "chat:1",
+          attempts: 1,
+          outcome: { kind: "delivered", platformMessageId: sent.get("m1#0"), possibleDuplicate: false },
+          at: s.clock.now(),
+        },
+        "a delivered piece's receipt, with the platform's message id",
+      );
+      const abandoned = page.items[2]?.fact.outcome;
+      check(abandoned?.kind === "abandoned" && abandoned.reason !== "", "the abandoned piece's receipt to give its reason");
+      expect(page.gap, false, "gap");
+    }),
+
+    queueCase("receipts: a piece being retried has none until it settles, and then says it may be a duplicate", async (s) => {
+      const w = await s.open();
+      const transport = scripted({ "m1#0": [new DeliveryError("transient", "timed out after sending", { maybeSent: true })] });
+      w.queue.attach("chat", transport);
+      await w.queue.enqueue(message("m1", "chat:1", "hello"));
+      await eventually(() => transport.calls.length === 1, "the first attempt");
+      expect((await w.queue.receipts.read(undefined, 100)).items, [], "receipts while the piece waits for its retry");
+      await s.clock.advance(BACKOFF[0] as number);
+      await eventually(() => w.delivered.length === 1, "the retry delivered");
+      const [receipt] = (await w.queue.receipts.read(undefined, 100)).items;
+      expect(receipt?.fact.attempts, 2, "attempts on the receipt");
+      expect(receipt?.fact.outcome, { kind: "delivered", platformMessageId: "platform-2", possibleDuplicate: true }, "the receipt of a retried send");
+    }),
+
+    queueCase("receipts survive the process", async (s) => {
+      const first = await s.open();
+      first.queue.attach("chat", scripted());
+      await first.queue.enqueue(message("m1", "chat:1", "one|two"));
+      await eventually(() => first.delivered.length === 2, "both pieces delivered");
+      const before = await first.queue.receipts.read(undefined, 100);
+      await s.stopAll();
+
+      const second = await s.open();
+      const after = await second.queue.receipts.read(undefined, 100);
+      expect(after.items, before.items, "the receipts, read by the next process");
+      expect((await second.queue.receipts.read(before.items.at(-1)?.cursor, 100)).items, [], "nothing after the last cursor");
+    }),
   ];
+
+  // The receipts are a feed: the feed suite holds them to §4.8, across restarts of the queue.
+  const receipts = createFeedConformance<DeliveryReceipt>(
+    async () => {
+      const fixture = await factory();
+      const apps: App[] = [];
+      const subject = createSubject(fixture, createManualClock(), apps);
+      const open = async () => {
+        const w = await subject.open();
+        w.queue.attach("chat", scripted());
+        return w;
+      };
+      let w = await open();
+      let n = 0;
+      return {
+        feed: () => w.queue.receipts,
+        async commit() {
+          const key = `fact-${++n}`;
+          await w.queue.enqueue(message(key, "chat:1", `fact ${n}`));
+          await eventually(() => w.delivered.some((d) => d.key === `${key}#0`), `${key} delivered`);
+          return key;
+        },
+        identify: (receipt) => receipt.idempotencyKey,
+        async restart() {
+          await subject.stopAll();
+          w = await open();
+        },
+        async dispose() {
+          for (const app of apps) await app.stop().catch(() => {});
+          await fixture.dispose?.();
+        },
+      };
+    },
+    { restarts: true },
+  );
+  for (const c of receipts) cases.push({ group: GROUP, name: `receipts as a feed: ${c.name}`, run: c.run });
+
+  return cases;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -353,6 +462,7 @@ function createSubject(fixture: OutboundQueueFixture, clock: ManualClock, apps: 
       const attached: Scripted[] = [];
       const original = queue;
       const tracked: OutboundQueue = {
+        receipts: original.receipts,
         enqueue: (m) => original.enqueue(m),
         attach(channel, transport) {
           attached.push(transport as Scripted);

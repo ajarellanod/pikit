@@ -89,6 +89,7 @@ export function createQueue(options: QueueOptions) {
       await Promise.all(sends.map((s) => s.done));
       signal?.removeEventListener("abort", abort);
     },
+    receipts: { read: (after, limit) => store.readReceipts(after, limit) },
   };
 
   /** One send of `piece` and what comes of it. Never rejects. */
@@ -105,7 +106,7 @@ export function createQueue(options: QueueOptions) {
         { key: piece.key, conversationKey: piece.conversationKey, text: piece.text, possibleDuplicate: piece.possibleDuplicate },
         controller.signal,
       );
-      await store.markDelivered(piece.key, sent.platformMessageId, clock.now());
+      if (!(await store.markDelivered(piece, attempts, sent.platformMessageId, clock.now()))) return;
       await options.emit("outbound.delivered", {
         channel: piece.channel,
         conversationKey: piece.conversationKey,
@@ -149,7 +150,7 @@ export function createQueue(options: QueueOptions) {
   };
 
   const abandon = async (piece: Piece, attempts: number, reason: string): Promise<void> => {
-    await store.abandon(piece.key, reason, clock.now());
+    if (!(await store.abandon(piece, attempts, reason, clock.now()))) return;
     logger.warn("outbound-durable: a piece was abandoned", { channel: piece.channel, key: piece.key, attempts, reason });
     await options.emit("outbound.abandoned", { channel: piece.channel, conversationKey: piece.conversationKey, key: piece.key, attempts, reason });
   };

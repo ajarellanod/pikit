@@ -39,6 +39,33 @@ Known gap: an answer is enqueued by the channel right after the run ends. A cras
 milliseconds loses its delivery (the answer is still in the conversation's session). Pi's durable
 runtime has the same gap; it closes when Pi can enqueue in the same commit as the answer.
 
+## Receipts: for what must not miss a delivery
+
+Every piece that settles, delivered or abandoned, gets one receipt, written in the same transaction
+as its new state (`outbound_receipts`). Components that must not miss a delivery read them through
+`outbound.queue`'s `receipts`, a feed (SPEC §4.8), from a cursor of their own. A decision bound to the
+message that carries it, a reply that quotes an answer, an alert on an abandoned one: each reads
+the receipts when it starts and whenever `outbound.delivered` wakes it, so a crash only delays it.
+
+```ts
+const page = await queue.receipts.read(savedCursor, 100);
+for (const { cursor, fact } of page.items) {
+  // fact.idempotencyKey is the answer's key (`answerKey(conversation, requestId)`), fact.index its piece;
+  // fact.outcome is { kind: "delivered", platformMessageId, possibleDuplicate } or { kind: "abandoned", reason }.
+}
+if (page.gap) {
+  // Receipts after savedCursor were pruned before you read them: say so.
+}
+```
+
+Receipts are kept as long as their pieces (7 days delivered, 30 abandoned).
+
+## Schema versions
+
+The tables carry a schema version (`outbound_meta`). Starting this component on a database made by
+an older one adds what is missing (the receipts table came in version 2); a database written by a
+newer one is refused at start.
+
 ## Seeing what happened
 
 Everything is in the table `outbound_pieces` of the database (`.pikit/pikit.db`):

@@ -16,6 +16,7 @@
  */
 
 import type { ConversationRef } from "../agent.ts";
+import type { Feed } from "./feed.ts";
 
 /**
  * The key of a run's answer: `${sessionId}:${requestId}`, where `requestId` is the request that started
@@ -106,6 +107,30 @@ export interface OutboundQueue {
    * as a possible duplicate, once a transport is attached again.
    */
   detach(channel: string, signal?: AbortSignal): Promise<void>;
+  /**
+   * Every piece that settled, delivered or abandoned, in the order it settled (SPEC §4.8): one receipt
+   * per piece, committed with its new state. Kept as long as the pieces are. What a component that
+   * must not miss a delivery reads; `outbound.delivered` and `outbound.abandoned` are only notices.
+   */
+  readonly receipts: Feed<DeliveryReceipt>;
+}
+
+/** What became of one piece. The answer it belongs to is `idempotencyKey`; its thread is in `conversationKey`. */
+export interface DeliveryReceipt {
+  /** The message's `idempotencyKey`: `answerKey(...)` for a run's answer. */
+  idempotencyKey: string;
+  /** Which of the message's pieces: 0 is the first. */
+  index: number;
+  channel: string;
+  conversationKey: string;
+  /** Sends tried, whatever came of them. */
+  attempts: number;
+  outcome:
+    /** `platformMessageId` is what an edit, a delete or a reply to it needs. */
+    | { kind: "delivered"; platformMessageId: string; possibleDuplicate: boolean }
+    | { kind: "abandoned"; reason: string };
+  /** When it settled, on the app's clock. */
+  at: number;
 }
 
 declare module "../capabilities.ts" {

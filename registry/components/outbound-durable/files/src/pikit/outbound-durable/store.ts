@@ -1,12 +1,14 @@
 /**
  * The outbox's records in `storage.sql`: one row per piece of an answer, from stored to delivered or
- * abandoned. All SQL of the component is here; the rest reads and writes `Piece`s.
+ * abandoned, and one receipt per piece that settled. All SQL of the component is here; the rest reads
+ * and writes `Piece`s.
  *
- * The dialect is SQLite's (`INTEGER PRIMARY KEY` as the order of arrival, `ON CONFLICT DO NOTHING`).
- * A Postgres port changes this file only.
+ * The dialect is SQLite's (`INTEGER PRIMARY KEY` as the order of arrival, `AUTOINCREMENT`,
+ * `ON CONFLICT`). A Postgres port changes this file only; its receipts need a cursor that follows
+ * commit order, which a sequence under concurrent writers does not (SPEC §4.8).
  */
 
-import type { SqlDatabase, SqlRow } from "@pikit/core";
+import type { DeliveryReceipt, FeedPage, SqlDatabase, SqlRow, SqlStatements } from "@pikit/core";
 
 /** `pending` → `sending` → `delivered` | `abandoned` (SPEC §5, "Outbound delivery"). */
 export type PieceState = "pending" | "sending" | "delivered" | "abandoned";
@@ -45,28 +47,130 @@ interface PieceRow extends SqlRow {
   created_at: number;
 }
 
+interface ReceiptRow extends SqlRow {
+  seq: number;
+  message_key: string;
+  piece_index: number;
+  channel: string;
+  conversation_key: string;
+  outcome: string;
+  platform_message_id: string | null;
+  possible_duplicate: number;
+  reason: string | null;
+  attempts: number;
+  at: number;
+}
+
 const COLUMNS = "seq, key, channel, conversation_key, text, state, attempts, failures, next_attempt_at, possible_duplicate, created_at";
 
+/**
+ * The schema, one step per version. `outbound_meta.schema_version` says how many have run; each runs
+ * in its own transaction with the version it reaches. `CREATE TABLE IF NOT EXISTS` alone cannot add a
+ * table or a column to a database that already exists (the outbox of a deployed bot), and
+ * `PRAGMA user_version` is shared by every component of the app's one database.
+ */
+const MIGRATIONS: readonly ((tx: SqlStatements) => Promise<void>)[] = [
+  // 1. The pieces. `IF NOT EXISTS`: databases from before versioning already have them.
+  async (tx) => {
+    await tx.run(`CREATE TABLE IF NOT EXISTS outbound_pieces (
+      seq INTEGER PRIMARY KEY,
+      key TEXT NOT NULL UNIQUE,
+      channel TEXT NOT NULL,
+      conversation_key TEXT NOT NULL,
+      text TEXT NOT NULL,
+      state TEXT NOT NULL,
+      attempts INTEGER NOT NULL DEFAULT 0,
+      failures INTEGER NOT NULL DEFAULT 0,
+      next_attempt_at INTEGER NOT NULL,
+      possible_duplicate INTEGER NOT NULL DEFAULT 0,
+      platform_message_id TEXT,
+      last_error TEXT,
+      created_at INTEGER NOT NULL,
+      settled_at INTEGER
+    )`);
+    await tx.run("CREATE INDEX IF NOT EXISTS outbound_pieces_open ON outbound_pieces (state, conversation_key, seq)");
+  },
+  // 2. The receipts (SPEC §4.8, §5). A table of their own: a piece's `seq` is given when it is stored,
+  // not when it settles (an older piece may settle later), and SQLite reuses the highest rowid once
+  // that row is pruned. `AUTOINCREMENT` never reuses one, so `seq` follows the order pieces settled.
+  async (tx) => {
+    await tx.run(`CREATE TABLE outbound_receipts (
+      seq INTEGER PRIMARY KEY AUTOINCREMENT,
+      message_key TEXT NOT NULL,
+      piece_index INTEGER NOT NULL,
+      channel TEXT NOT NULL,
+      conversation_key TEXT NOT NULL,
+      outcome TEXT NOT NULL,
+      platform_message_id TEXT,
+      possible_duplicate INTEGER NOT NULL DEFAULT 0,
+      reason TEXT,
+      attempts INTEGER NOT NULL,
+      at INTEGER NOT NULL
+    )`);
+  },
+];
+
+export const SCHEMA_VERSION = MIGRATIONS.length;
+
+/** The piece's receipt, committed in the same transaction as the state it settled in. */
+type Settlement = { kind: "delivered"; platformMessageId: string } | { kind: "abandoned"; reason: string };
+
 export function createStore(db: SqlDatabase) {
+  const meta = async (sql: SqlStatements, name: string): Promise<number | undefined> =>
+    (await sql.query<{ value: number }>("SELECT value FROM outbound_meta WHERE name = ?", [name]))[0]?.value;
+  const setMeta = (sql: SqlStatements, name: string, value: number) =>
+    sql.run("INSERT INTO outbound_meta (name, value) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET value = excluded.value", [name, value]);
+
+  /** Marks `piece` settled, if it still is where `from` says, and records its receipt with it. */
+  const settle = (piece: Piece, from: readonly PieceState[], attempts: number, settlement: Settlement, now: number): Promise<boolean> =>
+    db.transaction(async (tx) => {
+      const states = from.map(() => "?").join(", ");
+      const changed =
+        settlement.kind === "delivered"
+          ? await tx.run(
+              `UPDATE outbound_pieces SET state = 'delivered', platform_message_id = ?, last_error = NULL, settled_at = ? WHERE key = ? AND state IN (${states})`,
+              [settlement.platformMessageId, now, piece.key, ...from],
+            )
+          : await tx.run(
+              `UPDATE outbound_pieces SET state = 'abandoned', last_error = ?, settled_at = ? WHERE key = ? AND state IN (${states})`,
+              [settlement.reason, now, piece.key, ...from],
+            );
+      // Settled already (by a process that no longer owns it): its receipt exists, and stays the only one.
+      if (changed.changes !== 1) return false;
+      const { idempotencyKey, index } = splitKey(piece.key);
+      await tx.run(
+        `INSERT INTO outbound_receipts (message_key, piece_index, channel, conversation_key, outcome, platform_message_id, possible_duplicate, reason, attempts, at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+        [
+          idempotencyKey,
+          index,
+          piece.channel,
+          piece.conversationKey,
+          settlement.kind,
+          settlement.kind === "delivered" ? settlement.platformMessageId : null,
+          piece.possibleDuplicate ? 1 : 0,
+          settlement.kind === "abandoned" ? settlement.reason : null,
+          attempts,
+          now,
+        ],
+      );
+      return true;
+    });
+
   return {
+    /** Brings the tables to `SCHEMA_VERSION`. Refuses a database written by a newer outbox. */
     async migrate(): Promise<void> {
-      await db.run(`CREATE TABLE IF NOT EXISTS outbound_pieces (
-        seq INTEGER PRIMARY KEY,
-        key TEXT NOT NULL UNIQUE,
-        channel TEXT NOT NULL,
-        conversation_key TEXT NOT NULL,
-        text TEXT NOT NULL,
-        state TEXT NOT NULL,
-        attempts INTEGER NOT NULL DEFAULT 0,
-        failures INTEGER NOT NULL DEFAULT 0,
-        next_attempt_at INTEGER NOT NULL,
-        possible_duplicate INTEGER NOT NULL DEFAULT 0,
-        platform_message_id TEXT,
-        last_error TEXT,
-        created_at INTEGER NOT NULL,
-        settled_at INTEGER
-      )`);
-      await db.run("CREATE INDEX IF NOT EXISTS outbound_pieces_open ON outbound_pieces (state, conversation_key, seq)");
+      await db.run("CREATE TABLE IF NOT EXISTS outbound_meta (name TEXT PRIMARY KEY, value INTEGER NOT NULL)");
+      const version = (await meta(db, "schema_version")) ?? 0;
+      if (version > SCHEMA_VERSION) {
+        throw new Error(`outbound-durable: the database is at schema version ${version}, newer than this component's ${SCHEMA_VERSION}; upgrade the component`);
+      }
+      for (let next = version; next < SCHEMA_VERSION; next++) {
+        await db.transaction(async (tx) => {
+          await (MIGRATIONS[next] as (tx: SqlStatements) => Promise<void>)(tx);
+          await setMeta(tx, "schema_version", next + 1);
+        });
+      }
     },
 
     /** Stores a message's pieces in one transaction; keys already stored are left as they are. */
@@ -106,8 +210,9 @@ export function createStore(db: SqlDatabase) {
       return (await db.run("UPDATE outbound_pieces SET state = 'sending', attempts = attempts + 1 WHERE key = ? AND state = 'pending'", [key])).changes === 1;
     },
 
-    async markDelivered(key: string, platformMessageId: string, now: number): Promise<void> {
-      await db.run("UPDATE outbound_pieces SET state = 'delivered', platform_message_id = ?, last_error = NULL, settled_at = ? WHERE key = ?", [platformMessageId, now, key]);
+    /** The send succeeded. False when the piece was no longer being sent: nothing changed. */
+    markDelivered(piece: Piece, attempts: number, platformMessageId: string, now: number): Promise<boolean> {
+      return settle(piece, ["sending"], attempts, { kind: "delivered", platformMessageId }, now);
     },
 
     /** Back to `pending`, to be tried at `nextAttemptAt`. */
@@ -119,19 +224,70 @@ export function createStore(db: SqlDatabase) {
       );
     },
 
-    async abandon(key: string, reason: string, now: number): Promise<void> {
-      await db.run("UPDATE outbound_pieces SET state = 'abandoned', last_error = ?, settled_at = ? WHERE key = ?", [reason, now, key]);
+    /** Given up, while it waited or was being sent. False when it had settled already: nothing changed. */
+    abandon(piece: Piece, attempts: number, reason: string, now: number): Promise<boolean> {
+      return settle(piece, ["pending", "sending"], attempts, { kind: "abandoned", reason }, now);
     },
 
-    /** Delivered rows go after `deliveredMs`; abandoned ones stay readable for `abandonedMs`. */
+    /**
+     * Delivered rows and their receipts go after `deliveredMs`; abandoned ones stay readable for
+     * `abandonedMs`. The highest receipt pruned is remembered, so a reader behind it learns it missed
+     * some (`gap`).
+     */
     async prune(now: number, deliveredMs: number, abandonedMs: number): Promise<void> {
       await db.run("DELETE FROM outbound_pieces WHERE state = 'delivered' AND settled_at < ?", [now - deliveredMs]);
       await db.run("DELETE FROM outbound_pieces WHERE state = 'abandoned' AND settled_at < ?", [now - abandonedMs]);
+      const expired = "(outcome = 'delivered' AND at < ?) OR (outcome = 'abandoned' AND at < ?)";
+      const bounds = [now - deliveredMs, now - abandonedMs];
+      await db.transaction(async (tx) => {
+        const [row] = await tx.query<{ last: number | null }>(`SELECT MAX(seq) AS last FROM outbound_receipts WHERE ${expired}`, bounds);
+        if (row?.last == null) return;
+        await tx.run(`DELETE FROM outbound_receipts WHERE ${expired}`, bounds);
+        const through = (await meta(tx, "receipts_pruned_through")) ?? 0;
+        await setMeta(tx, "receipts_pruned_through", Math.max(through, row.last));
+      });
+    },
+
+    /** `OutboundQueue.receipts.read`: receipts after `after`, and whether some after it were pruned. */
+    async readReceipts(after: string | undefined, limit: number): Promise<FeedPage<DeliveryReceipt>> {
+      if (!Number.isInteger(limit) || limit < 1) throw new Error(`outbound-durable: limit must be an integer of at least 1, got ${limit}`);
+      if (after !== undefined && !/^\d+$/.test(after)) throw new Error(`outbound-durable: "${after}" is not a receipt cursor`);
+      const from = after === undefined ? 0 : Number(after);
+      // One snapshot: a prune between the two reads would otherwise hide a gap.
+      return db.transaction(async (tx) => {
+        const rows = await tx.query<ReceiptRow>("SELECT * FROM outbound_receipts WHERE seq > ? ORDER BY seq LIMIT ?", [from, limit]);
+        const prunedThrough = (await meta(tx, "receipts_pruned_through")) ?? 0;
+        return {
+          items: rows.map((row) => ({ cursor: String(row.seq), fact: toReceipt(row) })),
+          gap: after !== undefined && from < prunedThrough,
+        };
+      });
     },
   };
 }
 
 export type Store = ReturnType<typeof createStore>;
+
+/** `${idempotencyKey}#${index}` back into its parts; the key itself may contain `#`. */
+function splitKey(key: string): { idempotencyKey: string; index: number } {
+  const hash = key.lastIndexOf("#");
+  return { idempotencyKey: key.slice(0, hash), index: Number(key.slice(hash + 1)) };
+}
+
+function toReceipt(row: ReceiptRow): DeliveryReceipt {
+  return {
+    idempotencyKey: row.message_key,
+    index: row.piece_index,
+    channel: row.channel,
+    conversationKey: row.conversation_key,
+    attempts: row.attempts,
+    outcome:
+      row.outcome === "delivered"
+        ? { kind: "delivered", platformMessageId: row.platform_message_id ?? "", possibleDuplicate: row.possible_duplicate === 1 }
+        : { kind: "abandoned", reason: row.reason ?? "" },
+    at: row.at,
+  };
+}
 
 function toPiece(row: PieceRow): Piece {
   return {

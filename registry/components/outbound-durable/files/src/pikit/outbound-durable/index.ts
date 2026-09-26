@@ -10,6 +10,9 @@
  * - A send the process died during is sent again, as a possible duplicate: the platform drops it
  *   (idempotent transports) or the reader sees a marker. At-least-once.
  * - Abandoned pieces stay in `outbound_pieces` for 30 days, with their reason; delivered ones for 7.
+ * - Every piece that settles gets one receipt, in the same transaction (`outbound_receipts`), read as a
+ *   feed through `receipts` (SPEC §4.8): what a component that must not miss a delivery reads.
+ * - Its tables carry a schema version (`outbound_meta`), so an existing database gains new tables.
  *
  * It follows Hermes' delivery ledger, with what NanoClaw and OpenClaw lack: backoff, order per
  * conversation, progress per piece, one send path.
@@ -49,6 +52,7 @@ export default defineComponent({
       enqueue: (message) => running().enqueue(message),
       attach: (channel, transport) => running().attach(channel, transport),
       detach: (channel, signal) => (queue === undefined ? Promise.resolve() : queue.api.detach(channel, signal)),
+      receipts: { read: (after, limit) => running().receipts.read(after, limit) },
     });
 
     return {

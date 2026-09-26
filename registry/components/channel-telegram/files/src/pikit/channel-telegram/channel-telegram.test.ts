@@ -18,13 +18,14 @@ import {
   type ConversationRegistry,
   type ChannelTransport,
   DeliveryError,
+  type DeliveryReceipt,
   defineApp,
   defineComponent,
   type OutboundMessage,
   type OutboundQueue,
   silentLogger,
 } from "@pikit/core";
-import { createLifecycleConformance } from "@pikit/core/testing";
+import { createLifecycleConformance, createMemoryFeed } from "@pikit/core/testing";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
 import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";
@@ -136,6 +137,8 @@ function recordingQueue() {
       detached.push(channel);
       transports.delete(channel);
     },
+    // The channel never reads receipts; an empty feed stands in for them.
+    receipts: createMemoryFeed<DeliveryReceipt>().feed,
   };
   const component = defineComponent({ name: "queue-test", setup: (pikit) => pikit.provide("outbound.queue", queue) });
   return { component, enqueued, attached, detached };
