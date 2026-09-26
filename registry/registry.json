@@ -169,6 +169,14 @@
         "cloudflare"
       ],
       "path": "components/tool-write"
+    },
+    "workspace-local": {
+      "version": "0.0.0",
+      "description": "Each agent's tools work in a directory of their own on this server: order, not isolation.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/workspace-local"
     }
   }
 }
