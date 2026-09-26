@@ -528,6 +528,32 @@ pipeline outbound.prepare          → OutboundMessage
   is in the session. pikit keeps no copy of answers to return again; Pi's durable runtime will make
   a submission awaitable until its answer (§6.4).
 
+**The inbound path in code.** `[decision]` The steps after authentication are one function in
+`@pikit/core`, `admitInbound(ctx, message, { conversations, runtime, key, beforeDispatch? })`, the
+same for every producer of messages (a channel, a scheduler). It runs `inbound.normalize`, checks
+that no stage changed which message or conversation it is (`id`, `channel`, `conversationId`;
+changing one throws), runs `route.resolve`, resolves the conversation `key` and dispatches, and
+returns what happened:
+
+| Outcome | When | `channel-telegram` | `channel-http` |
+|---|---|---|---|
+| `admitted` | durable in its conversation (`started` or `queued`) | "typing…", then the answer | waits for the answer (`200` / `202`) |
+| `duplicate` | the conversation already has the message | nothing | `409 duplicate` |
+| `halted` | a stage of `inbound.normalize` or `route.resolve` stopped it | "I can't take that message." | `422` (normalize) / `403` (route) |
+| `denied` | the router decided no agent answers | "Sorry, I can't answer that here." | `403 denied` |
+| `no_route` | no stage of `route.resolve` decided (logged as an error) | "This bot is not set up to answer yet." | `500 no_route` |
+
+- It is the protocol, not a strategy (rule 2): what varies is a pipeline stage (normalizing,
+  routing, dedup), and what is a platform's stays in the channel: authentication, the conversation
+  key, commands, replies, "typing…", HTTP's wait for the answer. It registers nothing, keeps no
+  state and is no capability; a channel may still run the path itself.
+- `beforeDispatch(conversation)` is called after the conversation resolves and right before
+  `dispatch`: the last moment to start waiting for the run's events, which may arrive before
+  `dispatch` returns. `channel-http` registers its reply waiter there.
+- The `conversation.resolve` pipeline and the `inbound.*` / `route.*` events of the diagram above
+  land in this function when a component needs them, with no channel changed.
+- `createChannelConformance` (§14) holds every channel to it, whether it calls `admitInbound` or not.
+
 **Telegram, before M2.** `[decision]` `channel-telegram`, the first chat channel:
 - **Long polling, not a webhook.** The bot asks Telegram for updates (`getUpdates`), so it needs no
   public URL, certificate or open port, and runs the same on a laptop and on a VPS without a
@@ -2273,6 +2299,15 @@ is that the answer is "nothing" for every minor.
   session, old kept, one event) and pointers surviving a new worker. When the fixture lists its
   store's sessions, the suite also checks that pointers name real sessions and that nothing is
   deleted. An in-memory double passes it.
+- **Channel conformance** (`createChannelConformance`): every channel (§5, "The inbound path in
+  code"). The suite provides the runtime and the conversation registry (fakes that record what
+  reaches them and answer every run), a router, and stages that halt, deny or move a message; the
+  fixture delivers messages as the platform does and reports what each sender was told. A message
+  reaches the routed agent in its own conversation and its sender gets the answer; a message
+  delivered twice runs once; a message halted by a stage, denied, or sent with no router installed
+  is not dispatched and its sender is told (the missing router is logged); a stage that moves a
+  message to another conversation gets nothing dispatched. `channel-http` and `channel-telegram`
+  pass it.
 - **HTTP route conformance** (`createHttpRouteConformance`): every server of `http.route`
   (§9.1). The suite provides the routes and sends requests through the fixture. An in-memory
   double that routes a `Request` with no socket passes it.

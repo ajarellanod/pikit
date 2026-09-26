@@ -95,8 +95,10 @@ It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 charac
 `channel-http.test.ts` is copied with the component and runs in your project. It calls the routes
 as a server would, with small doubles for the runtime, the registry and the secrets. It covers the
 statuses above, a message steered into a busy run with both POSTs answered, per-conversation
-duplicates, cancellation, reset, the lifecycle conformance suite and the start failures. The
-`samples/http` tests run the same channel with Pi, over real HTTP.
+duplicates, cancellation, reset, the lifecycle conformance suite and the start failures.
+`conformance.test.ts` runs the channel conformance suite from `@pikit/core/testing`: what every
+channel does with a message (routed, deduplicated, stopped, denied, no router), over these routes.
+The `samples/http` tests run the same channel with Pi, over real HTTP.
 
 `component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
 exists, the test "what setup declares" pins it.

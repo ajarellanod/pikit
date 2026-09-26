@@ -9,15 +9,16 @@
  * 3. Commands the channel answers itself: `/start` and `/help` explain, `/new` starts the
  *    conversation over (a reset: a new session, the old one kept, SPEC §7.6). Other commands go to
  *    the agent as text.
- * 4. Everything else goes through `inbound.normalize` and `route.resolve` like any channel, to the
- *    conversation `telegram:<chat id>`, as `dispatch`. The request id is
- *    `telegram:<chat id>:<message id>`: a message Telegram delivers twice is one request.
+ * 4. Everything else takes the inbound path every channel takes (`admitInbound`: `inbound.normalize`,
+ *    `route.resolve`, the conversation `telegram:<chat id>`, `dispatch`), and the sender is told what
+ *    happened when the agent will not answer. The request id is `telegram:<chat id>:<message id>`: a
+ *    message Telegram delivers twice is one request.
  *
  * With polling there is no HTTP request to authenticate: the updates come from Telegram's own API,
  * over TLS, with the bot's token. What is left to check is the sender, which step 2 does.
  */
 
-import { type AgentRuntime, type AppContext, type ConversationRegistry, Halt, type InboundMessage } from "@pikit/core";
+import { type AgentRuntime, type AppContext, admitInbound, type ConversationRegistry, type InboundMessage } from "@pikit/core";
 import type { TelegramMessage, TelegramUpdate, TelegramUser } from "./api.ts";
 import type { Delivery } from "./replies.ts";
 
@@ -97,25 +98,24 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
     raw: message satisfies TelegramMessage,
     receivedAt: ctx.clock.now(),
   };
-  const normalized = await ctx.run("inbound.normalize", inbound);
-  if (normalized instanceof Halt) return;
-  const routed = await ctx.run("route.resolve", { message: normalized });
-  if (routed instanceof Halt) return;
-  const decision = routed.decision;
-  if (decision === undefined) {
-    ctx.logger.error("channel-telegram: no route.resolve stage decided; install a router", { chat: chatId });
-    await delivery.send(chatId, "This bot is not set up to answer yet.");
-    return;
+  const outcome = await admitInbound(ctx, inbound, { conversations: deps.conversations, runtime: deps.runtime, key: conversationKey(chatId) });
+  switch (outcome.kind) {
+    case "admitted":
+      // A new run shows "typing…" from `agent.started`; a message joining a run already shows it.
+      delivery.typingStarted(chatId);
+      return;
+    case "duplicate":
+      return;
+    case "halted":
+      await delivery.send(chatId, "I can't take that message.");
+      return;
+    case "denied":
+      await delivery.send(chatId, "Sorry, I can't answer that here.");
+      return;
+    case "no_route":
+      await delivery.send(chatId, "This bot is not set up to answer yet.");
+      return;
   }
-  if (decision.access === "deny") {
-    await delivery.send(chatId, "Sorry, I can't answer that here.");
-    return;
-  }
-
-  const conversation = await deps.conversations.resolve(conversationKey(chatId), decision.agent, ctx);
-  const admission = await deps.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text }, ctx);
-  // A new run shows "typing…" from `agent.started`; a message joining a run already shows it.
-  if (admission.kind !== "duplicate") delivery.typingStarted(chatId);
 }
 
 /** `/new` or `/new@this_bot` → `new`; a command for another bot, or no command, → `undefined`. */

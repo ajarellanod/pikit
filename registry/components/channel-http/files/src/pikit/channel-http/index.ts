@@ -8,11 +8,12 @@
  *
  * A message goes through the inbound path of SPEC §5:
  * 1. `inbound.authenticate`: this channel's stage checks the bearer token.
- * 2. `inbound.normalize`: the body becomes an `InboundMessage`.
- * 3. `route.resolve`: a router picks the agent.
- * 4. `conversations.registry`: the conversation `http:<conversationId>` and its session.
- * 5. `agent.runtime.dispatch`: Pi takes the message. An idle conversation starts a run. A busy one
- *    steers the run in progress, and that run answers this message too.
+ * 2. The body becomes an `InboundMessage`, and `admitInbound` takes it the way every channel does:
+ *    `inbound.normalize`, `route.resolve` (a router picks the agent), the conversation
+ *    `http:<conversationId>`, and `agent.runtime.dispatch`: Pi takes the message. An idle
+ *    conversation starts a run. A busy one steers the run in progress, and that run answers this
+ *    message too. A message a stage stops gets `422` (a policy in `inbound.normalize`) or `403`
+ *    (`route.resolve`, or the router's deny); no router installed is `500 no_route`.
  *
  * The POST then waits for the answer, up to `replyTimeoutMs`:
  * - `200 { requestId, text }`: the run answered it.
@@ -32,7 +33,7 @@
  * Targets: `server` and `cloudflare` (fetch handlers and Web Crypto only).
  */
 
-import { type Admission, type AgentResult, type AppContext, defineComponent, Halt, type InboundMessage } from "@pikit/core";
+import { type AgentResult, type AppContext, admitInbound, defineComponent, Halt, type InboundMessage } from "@pikit/core";
 import Type from "typebox";
 import { bearerToken, type Digest, digest, matches, MIN_TOKEN_LENGTH, TOKEN_SECRET } from "./auth.ts";
 import { CONVERSATION_ID, readMessageBody } from "./body.ts";
@@ -105,38 +106,37 @@ export default defineComponent({
         raw: read.body,
         receivedAt: ctx.clock.now(),
       };
-      const normalized = await ctx.run("inbound.normalize", message);
-      if (normalized instanceof Halt) return json(422, { requestId, error: "rejected", message: normalized.reason });
-      if (normalized.id !== requestId || normalized.channel !== CHANNEL || normalized.conversationId !== conversationId) {
-        throw new Error("channel-http: an inbound.normalize stage changed the message's id, channel or conversation");
-      }
-
-      const routed = await ctx.run("route.resolve", { message: normalized });
-      if (routed instanceof Halt) return json(403, { requestId, error: "rejected", message: routed.reason });
-      const decision = routed.decision;
-      if (decision === undefined) {
-        ctx.logger.error("channel-http: no route.resolve stage decided; install a router", { requestId });
-        return json(500, { requestId, error: "no_route" });
-      }
-      if (decision.access === "deny") return json(403, { requestId, error: "denied", ...(decision.reason !== undefined && { message: decision.reason }) });
-
-      const conversation = await conversations.get().resolve(conversationKey(conversationId), decision.agent, ctx);
-      const waiter = replies.expect(conversation.sessionId, requestId);
-      let admission: Admission;
-      try {
-        admission = await runtime.get().dispatch({ requestId, conversation, prompt: normalized.text }, ctx);
-      } catch (error) {
-        waiter.cancel();
+      // The answer may come before dispatch returns: wait for it from right before dispatch.
+      let waiter: ReturnType<Replies["expect"]> | undefined;
+      const outcome = await admitInbound(ctx, message, {
+        conversations: conversations.get(),
+        runtime: runtime.get(),
+        key: conversationKey(conversationId),
+        beforeDispatch: (conversation) => {
+          waiter = replies.expect(conversation.sessionId, requestId);
+        },
+      }).catch((error: unknown) => {
+        waiter?.cancel();
         throw error;
+      });
+      if (outcome.kind !== "admitted") waiter?.cancel();
+      switch (outcome.kind) {
+        case "halted":
+          return json(outcome.pipeline === "inbound.normalize" ? 422 : 403, { requestId, error: "rejected", message: outcome.reason });
+        case "denied":
+          return json(403, { requestId, error: "denied", ...(outcome.reason !== undefined && { message: outcome.reason }) });
+        case "no_route":
+          return json(500, { requestId, error: "no_route" });
+        case "duplicate":
+          return json(409, { requestId, error: "duplicate" });
+        case "admitted":
+          break;
       }
-      if (admission.kind === "duplicate") {
-        waiter.cancel();
-        return json(409, { requestId, error: "duplicate" });
-      }
+      if (waiter === undefined) throw new Error("channel-http: admitted without waiting for the answer");
 
-      const outcome = await waiter.wait(config.replyTimeoutMs, ctx.abortSignal);
-      if (outcome.kind !== "answered") return json(202, { requestId });
-      const { result } = outcome;
+      const answer = await waiter.wait(config.replyTimeoutMs, ctx.abortSignal);
+      if (answer.kind !== "answered") return json(202, { requestId });
+      const { result } = answer;
       if (result.kind === "completed") return json(200, { requestId, text: result.text ?? "" });
       if (result.kind === "aborted") return json(409, { requestId, error: "aborted" });
       return json(502, { requestId, error: result.error?.code ?? "failed" });

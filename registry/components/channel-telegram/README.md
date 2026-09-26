@@ -44,6 +44,11 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   run's answer covers them all.
 - **Commands:** `/new` starts a new conversation; the old one is kept in its session. `/start` and
   `/help` explain. Any other command goes to the agent as text.
+- **The way to the agent** is the inbound path every channel takes (`admitInbound`: your stages in
+  `inbound.normalize`, the router, the conversation). When the agent will not answer, the chat is
+  told: "I can't take that message." when a stage stops it (a policy, a routing rule), "Sorry, I
+  can't answer that here." when the router denies it, and "This bot is not set up to answer yet."
+  when no router is installed.
 - **While the agent works**, the chat shows "typing…".
 - **Answers:**
   - Markdown is converted to Telegram's formatting (bold, italics, code, links); if Telegram
@@ -78,6 +83,8 @@ local stand-in of the Bot API: no bot, token or network needed.
 - `channel-telegram.test.ts` covers the whole conversation: allowed and refused users, commands,
   "typing…", formatting and splitting, retries, a redelivered message answered once, the
   acknowledgement at stop, the lifecycle conformance suite and the start failures.
+- `conformance.test.ts` runs the channel conformance suite from `@pikit/core/testing`: what every
+  channel does with a message (routed, deduplicated, stopped, denied, no router), through Telegram.
 - `configure.test.ts` covers the setup: a checked token, allowing whoever messages the bot, and
   the same without a terminal.
 

@@ -17,3 +17,6 @@ export { createHttpRouteConformance } from "./http.ts";
 
 export type { AgentStateFixture } from "./agent-state.ts";
 export { createAgentStateConformance } from "./agent-state.ts";
+
+export type { ChannelConformanceOptions, ChannelFixture, ChannelMessage, ChannelSetup } from "./channel.ts";
+export { CONFORMANCE_AGENT, CONFORMANCE_ANSWER, createChannelConformance } from "./channel.ts";

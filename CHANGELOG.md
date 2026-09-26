@@ -5,6 +5,15 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core: `admitInbound` runs the inbound path every channel takes (`inbound.normalize`,
+  `route.resolve`, the conversation, `dispatch`) and returns what happened (`admitted`, `duplicate`,
+  `halted`, `denied`, `no_route`); a stage that changes which message or conversation it is now
+  fails the path in every channel. `@pikit/core/testing` adds `createChannelConformance`, which
+  `channel-http` and `channel-telegram` pass.
+- component/channel-telegram: a message a stage stops (a policy in `inbound.normalize`, a rule in
+  `route.resolve`) is answered "I can't take that message." instead of nothing, and a stage that
+  moves a message to another conversation no longer gets it dispatched to the original one.
+- component/channel-http: runs the inbound path through `admitInbound`; its responses are unchanged.
 - repo: the packages' import boundaries are checked on every `bun test` (`scripts/boundaries.test.ts`):
   core and every package export not marked server-only run on every target (no `node:*`, `bun:*`,
   `cloudflare:*` or Pi's Node subpath, through everything they import), only the adapter imports

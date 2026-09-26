@@ -295,6 +295,11 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   resolves to a list of `add` calls: a base's `components` with its `choose` questions answered
   (`--with`, the guided path), or an alias's `extends` + `with`. Never add a preset per channel: a
   `channel-*` component with a `title` is already an answer to the base's question (SPEC §11).
+- **A channel takes the inbound path with `admitInbound`.** It authenticates, builds the
+  `InboundMessage` and the conversation key, calls `admitInbound`, and answers every outcome
+  (`admitted`, `duplicate`, `halted`, `denied`, `no_route`) in its platform's terms: a sender whose
+  message does not reach the agent is told, never left without an answer. Its tests run
+  `createChannelConformance` (SPEC §5, §14).
 - **A new package export is neutral.** `scripts/boundaries.test.ts` (run by `bun test`) holds every
   export of `packages/*` to rule 5 through everything it imports, unless `SERVER_ONLY` in
   `scripts/boundaries.ts` names it (today the adapter's `./node` and `./testing`). It also fails on
