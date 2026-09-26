@@ -51,7 +51,8 @@ meet live in `ROADMAP.md`.
 | **Component** | An installable unit of source: files + manifest + optional migrations, tests, config schema. Copied into the project. |
 | **Extension** | Runtime behavior registered against the app lifecycle (`pikit.on`, `pikit.pipeline`, `pikit.provide`). Usually the entry point of a component; may also be a standalone project file. |
 | **Capability** | A named, typed service that exactly one component provides and others consume (`sessions.store`, `execution.shell`). |
-| **Event** | A typed notification. All listeners receive it; none can change its outcome. |
+| **Event** | A typed notification. All listeners receive it; none can change its outcome. It can be missed. |
+| **Feed** | Facts a component records and others read with a cursor of their own (§4.8): what must not be missed. |
 | **Pipeline** | A typed, ordered transformation chain. Each stage receives the previous stage's output. |
 | **Registry** | A source of components: official, third-party, private, or local. |
 | **Runtime target** | Where the app runs: `server` or `cloudflare`. |
@@ -202,6 +203,10 @@ await ctx.emit("outbound.delivered", payload);                    // in start or
 
 `emit` awaits all listeners in registration order. A listener that throws is logged and does
 not stop the others (mirrors Pi's extension error handling).
+
+An event can be missed: a listener that throws, or a process that dies between a commit and the
+event about it, loses it. A reaction that must not be lost reads a feed (§4.8) and uses the event
+only to wake up sooner.
 
 `[decision]` `on()` returns nothing: there is no unsubscribe. Listeners are registered in
 `setup` and live as long as the app, so the graph `pikit doctor` prints is the one that
@@ -358,7 +363,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `agent.state` | `AgentState` | Per-conversation JSON state read by `prepare` and updated by tools. Not a capability today: the runtime puts the conversation's `AgentState` in the context of each run (`AGENT_STATE`), stored in the Pi session (§6.2a, §6.4); no separate store. A capability for components that act outside a run (an admin route, a scheduler) is `[planned]`, with the first one that needs it. |
 | (no capability) | `ChannelTransport` | How a channel sends to its platform: `idempotent`, `split`, `send` (§5, "Outbound delivery"). Not in the registry: a channel attaches its transport to `outbound.queue` while it runs, since a keyed `channel.transport` used by the queue, and a queue used by the channel, would be a dependency cycle. Without a queue, the channel sends through its own transport. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
-| `outbound.queue` | `OutboundQueue` | `enqueue`, `attach`, `detach` (§5, "Outbound delivery"). Optional: without it a channel sends directly, best effort, as in M1. `outbound-durable` (M2) provides it on `storage.sql`. |
+| `outbound.queue` | `OutboundQueue` | `enqueue`, `attach`, `detach`, and the `receipts` feed (§5, "Outbound delivery"; §4.8). Optional: without it a channel sends directly, best effort, as in M1. `outbound-durable` (M2) provides it on `storage.sql`. |
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
 | `approvals` | `ApprovalStore` | Decision lifecycle persistence. |
 | `secrets` | `SecretStore` | `get(name)`: the value, or `undefined` when it is not set; an empty value is not set. The process environment (`secrets-env`, which never reads `.env` files itself), Worker bindings, an external vault. |
@@ -473,6 +478,54 @@ Conversation data is not a context value: it arrives in the payloads of the even
 pipelines that concern it. One exception, scoped to a run: a tool call has no payload of its own, so
 the runtime puts the run's `ConversationRef` in the run's context (`CONVERSATION`, §6.3), next to its
 `AGENT_STATE` (§6.2a).
+
+### 4.8 Feeds `[decision]`
+
+Some facts must reach another component across crashes: an answer was delivered, so a decision binds
+to the message that carries it; a run ended, so a watchdog counts it. Events cannot carry them
+(§4.3). Pi's durable runtime made the same choice: it has "no volatile publication path", what
+matters is committed state, and observers converge to it (`packages/durable/docs/pico-v5.md` §1,
+§7.1, §9, checked at `d6af72e1`).
+
+```ts
+interface Feed<T> {
+  /** Facts committed after `after` (the oldest retained when `undefined`), in commit order, at most `limit`. */
+  read(after: string | undefined, limit: number): Promise<FeedPage<T>>;
+}
+
+interface FeedPage<T> {
+  items: readonly FeedItem<T>[];
+  /** Facts after `after` were pruned before this read: the reader missed some. */
+  gap: boolean;
+}
+
+interface FeedItem<T> {
+  cursor: string;
+  fact: T;
+}
+```
+
+- **The producer owns its facts.** It records each one in the same commit as the change it
+  describes, and exposes them as a `Feed` inside its own capability contract (`outbound.queue`'s
+  `receipts`, §5). A feed is a contract type, not a capability: there is no feed registry, no bus,
+  and the core stores nothing.
+- **Order.** `read` returns facts in commit order, and a fact committed after a read never appears
+  before a cursor that read returned: a reader that saved cursor `c` misses nothing by reading after
+  `c`. A store whose ids can commit out of order (Postgres sequences under concurrent writers) needs
+  another cursor than its ids.
+- **Cursors are opaque** and stable across restarts. A malformed cursor rejects.
+- **Retention.** A producer prunes old facts. `gap: true` says that facts after `after` were pruned
+  before this read. The page still holds what is left, and the reader says what it missed (S9).
+  Reading from `undefined` starts at what is retained and is never a gap.
+- **The consumer owns its cursor.** It reads from its saved cursor when it starts and whenever an
+  event wakes it, applies what it reads idempotently, and saves the new cursor in the same
+  transaction as what it did. A crash, a missed event or a failed listener only delay it; a fact
+  applied twice changes nothing. No transaction spans two components.
+- **Rejected: a durable event bus.** Persisting every event and replaying it to every listener would
+  turn events into a queue, make every listener idempotent, and put one component at the centre of
+  all the others. Pi has none either.
+- `createFeedConformance` (§14) holds every feed to this; `createMemoryFeed` is its in-memory
+  double, for tests. Core exports: `Feed`, `FeedPage`, `FeedItem`.
 
 ---
 
@@ -627,7 +680,7 @@ progress, and one send path.
 
 ```ts
 interface OutboundMessage {
-  idempotencyKey: string;      // one per answer: `${sessionId}:${requestId}` (the run's first request)
+  idempotencyKey: string;      // one per answer: `answerKey(conversation, requestId)`, the run's first request
   channel: string;             // the channel instance
   conversationKey: string;
   text: string;
@@ -661,7 +714,24 @@ interface OutboundQueue {
   /** A channel hands its transport while it runs, and takes it back when it stops. */
   attach(channel: string, transport: ChannelTransport): void;
   detach(channel: string): Promise<void>;
+  /** Every piece that settled, delivered or abandoned, in the order it settled (§4.8). */
+  readonly receipts: Feed<DeliveryReceipt>;
 }
+
+interface DeliveryReceipt {
+  idempotencyKey: string;      // the answer's key
+  index: number;               // which of its pieces: 0 is the first
+  channel: string;
+  conversationKey: string;
+  attempts: number;
+  outcome:
+    | { kind: "delivered"; platformMessageId: string; possibleDuplicate: boolean }
+    | { kind: "abandoned"; reason: string };
+  at: number;                  // when it settled, on the app's clock
+}
+
+/** The key of a run's answer: `${sessionId}:${requestId}`, the request that started the run. */
+function answerKey(conversation: Pick<ConversationRef, "sessionId">, requestId: string): string;
 ```
 
 - **Stored before sent.** `enqueue` splits the text with the channel's transport and stores one row
@@ -685,6 +755,17 @@ interface OutboundQueue {
   the platform drops the copy; a non-idempotent one (Telegram) sends again with a visible marker it
   chooses (`↻`). Losing an answer is worse than receiving it twice.
 - Abandoned pieces stay readable for status and `doctor`; delivered rows are pruned after 7 days.
+- **Receipts.** `[decision]` Every piece that settles, delivered or abandoned, gets one receipt,
+  committed with its new state: a receipt exists exactly when its piece settled. `receipts` reads them
+  as a feed (§4.8), kept as long as the pieces they describe. A component that must not miss a
+  delivery reads them: a decision bound to the message that carries it, a reply that quotes an
+  answer, an alert on an abandoned one. `outbound.delivered` and `outbound.abandoned` stay notices.
+- **Correlation from identities that exist.** `[decision]` A tool that needs to know where its run's
+  answer landed computes `answerKey(context.value(CONVERSATION), invocation.operationId)`: Pi gives
+  every tool call the `operationId` of its run, which pikit makes the request that started it
+  (§6.1), and the channel enqueues the answer under the same key. The receipts with that
+  `idempotencyKey` say where it landed: the thread is in `conversationKey`, the message is
+  `platformMessageId`. `OutboundMessage` needs no `correlation` or `threadId` field.
 - "Typing…" and previews never go through the queue: losing one costs nothing.
 - **Why `attach`.** A keyed `channel.transport` capability used by the queue, and the queue used by
   the channel, would be a cycle. With `attach`, the queue starts before the channels and stops after
@@ -708,7 +789,7 @@ interface InboundMessage {
   raw: unknown;                       // channel-specific payload, never inspected by core
   receivedAt: number;
   // [planned], each optional, with the component that produces it:
-  // tenant, threadId, actor.displayName / roles, attachments
+  // tenant, threadId, actor.displayName / roles, attachments, replyTo ("Rich content" below)
 }
 
 interface RouteDecision {
@@ -730,10 +811,40 @@ interface OutboundMessage {        // M2, "Outbound delivery" above
   channel: string;
   conversationKey: string;
   text: string;
-  // [planned], each optional, with the component that needs it:
-  // threadId, blocks (channel-specific rich content), attachments, correlation
+  // [planned], optional, with the component that needs it:
+  // parts: buttons, forms, attachments ("Rich content" below)
 }
 ```
+
+**Rich content.** `[decision]` for the shape; `[planned]` for the code, which arrives with the
+first component that produces a part (the first channel that draws cards, or the first
+`interaction-*`, §6.2b), since a field is added with its producer. Not a field per platform feature
+(`blocks`, `buttons`, `attachments`…), and not an opaque `blocks: unknown`:
+
+```ts
+// Declared by the component that introduces a kind of part, as events are (§4.3):
+declare module "@pikit/core" {
+  interface AppMessageParts {
+    choice: { prompt: string; options: { id: string; label: string }[] };
+  }
+}
+
+type MessagePart = {
+  [K in keyof AppMessageParts]: { type: K; fallback: string } & AppMessageParts[K];
+}[keyof AppMessageParts];
+
+interface OutboundMessage { /* … */ parts?: readonly MessagePart[] }
+interface ChannelTransport { /* … */ readonly draws?: readonly string[] }   // the part types it draws
+interface InboundMessage { /* … */ replyTo?: { platformMessageId: string; value?: string } }
+```
+
+- Every part carries a `fallback` text. A transport draws the types it lists in `draws`; every other
+  part is folded into the text as its fallback before the text is split. A message never needs a
+  channel that supports it, and no flag says which channels do (S3).
+- The core declares no part type. The component that needs one declares it; without that component
+  the type does not exist.
+- An answer to a drawn part (a button pressed, a quoted reply) arrives as an `InboundMessage` with
+  `replyTo`. The receipt of the message it answers (above) says which run sent it.
 
 Inbound deduplication is **not core**. `[decision]` Platforms redeliver (webhook retries,
 polling restarts), and both what identifies a redelivery (Telegram `update_id`, Slack
@@ -916,7 +1027,9 @@ For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipel
 `inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
 `SecretStore` (`secrets`), and `ConversationRegistry` with `ConversationReset` (`conversations.registry`
 and the payload of `conversation.reset`), and `HttpRoute` (`http.route`). For agent state (§6.2a): `AgentState` and the context key `AGENT_STATE`; for the run's conversation (§6.3), the context key `CONVERSATION`;
-`@pikit/core/testing` has its suite, `createAgentStateConformance`.
+`@pikit/core/testing` has the state's suite, `createAgentStateConformance`. For feeds (§4.8): `Feed`,
+`FeedPage` and `FeedItem`, with `createFeedConformance` and `createMemoryFeed` in `@pikit/core/testing`.
+For delivery (§5): `answerKey` and `DeliveryReceipt`, next to the outbound contracts.
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`),
 `model.provider` (pi-ai's `Provider`) and `model.credentials` (pi-ai's `CredentialStore`) by
 importing it anywhere in the project.
@@ -1080,6 +1193,32 @@ Where pikit differs from Pi in a way an extension may notice:
   starting a run outside `dispatch` would bypass admission (§6.1).
 - A lane created before an extension was installed gets that extension's tools activated when
   it opens.
+
+**Questions from extensions, in the chat.** `[planned]` (tier B), with the first `interaction-*`
+component. Pi's `ctx.ui.select` / `confirm` / `input` / `notify` are how an extension asks its user
+something. pikit answers them in the conversation's chat rather than inventing an `ask_user` of its
+own, so an unmodified extension that asks (Pi's `permission-gate`) works from Telegram:
+
+```ts
+interface Interaction {           // capability `interaction`; runtime-pi uses it optionally
+  ask(conversation: ConversationRef, question: Question, ctx: Context): Promise<string | undefined>;
+  notify(conversation: ConversationRef, text: string, level: "info" | "warning" | "error", ctx: Context): Promise<void>;
+}
+
+type Question =
+  | { kind: "select"; title: string; options: string[] }
+  | { kind: "confirm"; title: string; message: string }
+  | { kind: "input"; title: string; placeholder?: string };
+```
+
+- With `interaction` installed, the adapter gives extensions `hasUI: true` and a `ui` backed by it.
+  Without it they get today's no-op UI (absence, S3), and `permission-gate` blocks as it does now.
+- A question wants an answer now: the run waits for it, with a deadline, and the question waits in
+  the worker's memory. If the process dies the run dies with it, and the resumed run asks again.
+  An answer that may take days is not a question: it is a decision recorded by a component
+  (`approvals`, §18) that resumes the work when the answer arrives.
+- The question goes out as a message with a `choice` part, and the answer comes back with `replyTo`
+  (§5, "Rich content").
 
 **Taking a conversation up again with extensions loaded.** Loading per conversation means
 extensions load again each time a conversation reopens. Tested in `compat.test.ts`:
@@ -1255,6 +1394,8 @@ run (a test calling a tool directly). The tool components read it to resolve the
 `workspace`; a project's tools may read it too. A context value for the reasons `AGENT_STATE` is
 one: a tool object has no `ConversationRef` of its own and cannot `use()` anything, and the value is
 scoped to one run. Pi extensions do not see it yet, as they do not see `AGENT_STATE` (§6.2a).
+Which run a call belongs to is Pi's: every call gets `invocation.operationId`, the request that
+started the run (§6.1). With the conversation it gives the run's answer key, `answerKey` (§5).
 
 **How an agent gets a tool.** `[decision]`
 - A tool component provides its tool under the keyed capability `agent.tool`, keyed by the name
@@ -2405,8 +2546,25 @@ is that the answer is "nothing" for every minor.
   conversation waiting behind a retry while others move, the backoff and the abandonment at the fifth
   transient failure, rate limits not counted, the 24-hour limit, possible duplicates (`maybeSent`, a
   send in flight when the process stopped, a send aborted by `detach`), and records that survive a
-  restart. It has no in-memory double: one would be a second outbox. `outbound-durable` is its first
+  restart. Receipts: one per settled piece, none for a piece still being retried, in the order pieces
+  settled, with their fields, surviving a restart; and the `receipts` feed passes the feed suite. It
+  has no in-memory double: one would be a second outbox. `outbound-durable` is its first
   implementation, and also runs a SIGKILL-during-a-send test in a real process.
+- **Feed conformance** (`createFeedConformance`): every `Feed` (§4.8). The fixture commits facts,
+  and prunes and restarts when it can; the suite checks commit order, `after` and `limit`, paging
+  that returns each fact once, facts committed after a read landing after its last cursor, reads
+  that change nothing, cursors that survive a restart, a malformed cursor rejected, and `gap`
+  exactly when facts after the cursor were pruned. `createMemoryFeed` is the in-memory double and
+  passes it.
+- **Convergence** (`createConvergenceConformance`): for components that react through records
+  (§4.8). The fixture gives the records (a `storage.sql` database that outlives processes), the
+  components of one process, a scenario (what the outside world does) and an invariant. The suite
+  runs the scenario with the process killed after each commit in turn: after commit `k` the
+  database refuses every call, as it would for a dead process, and the fixture's fakes of the
+  outside world stop answering it. Then a new process starts over the same records, the world
+  repeats the scenario (it retries what went unacknowledged), and the invariant must hold. It also
+  runs the scenario twice with no crash. Its own test proves that a consumer reading a feed passes
+  and one reacting to events alone fails. `outbound-durable` passes it, next to its SIGKILL test.
 - **Execution conformance** (`createExecutionConformance` in `@pikit/pi-adapter/testing`): every
   `execution` and `execution.shell`. It checks what Pi's tools rely on:
   - paths relative to `cwd`, and reading, writing, appending, listing, renaming and removing;
@@ -2417,7 +2575,7 @@ is that the answer is "nothing" for every minor.
 
   Pi's `NodeExecutionEnv` is the double, with and without a shell.
 - Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
-  `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`
+  `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue` and `Feed`
   implementation must pass its suite. Pi's session conformance is reused for
   `sessions.store`.
 - Components ship their own tests inside `files/` so they are copied into the user's project
@@ -2689,6 +2847,15 @@ Resolved `[decision]`:
   problems; `pikit new` expects it, because `pikit configure` comes next (§11).
 - The CLI runs project code in child processes, in the project's directory (§11): the project's own
   `@pikit/core` loads, and nothing is cached from an earlier version of the file.
+- Events stay notices; what must not be missed is a feed its producer records and each consumer
+  reads with a cursor of its own (§4.8). A durable event bus was rejected: it would make every
+  listener idempotent and one component the centre of all the others.
+- An answer and what reacts to its delivery are joined by `answerKey` and Pi's `operationId`, not by
+  a `correlation` field (§5): one truth per fact (S14).
+- Rich content is one `parts` field, typed by declaration merging, with a fallback text per part,
+  not a field per platform feature (§5). Its code comes with its first producer.
+- Questions from Pi extensions are answered in the chat through an optional `interaction`
+  capability, not by a pikit `ask_user` (§6.2b); answers that take days belong to `approvals`.
 
 ---
 
@@ -2706,9 +2873,9 @@ value. Each one is built contracts-first against the core in §4–§5 and must 
 
 | Component | What it encodes |
 |---|---|
-| `approvals` | Deterministic decision lifecycle: proposed → approved/rejected → executed → verified, with retries, reminders, stalled escalation, TTL/abandonment, and **delivery-time binding** of a decision to the message/thread where a human can answer it (a decision created by a scheduled job cannot know its answer surface until the result is sent). |
+| `approvals` | Deterministic decision lifecycle: proposed → approved/rejected → executed → verified, with retries, reminders, stalled escalation, TTL/abandonment, and **delivery-time binding** of a decision to the message/thread where a human can answer it (a decision created by a scheduled job cannot know its answer surface until the result is sent). It binds by reading `outbound.queue`'s receipts (§4.8, §5). |
 | `inbound-dedup` | Transport deduplication (§5): claim / commit / release of platform delivery ids, duplicates halted, retries of crashed attempts allowed, stale claims expired. At-least-once by contract. Logical deduplication is Pi's. |
-| `outbound-durable` | Outbound intents persisted before send, retried with backoff, dead-lettered, and recorded so later replies can quote or thread against them. |
+| `outbound-durable` | Outbound intents persisted before send, retried with backoff, dead-lettered, and recorded so later replies can quote or thread against them (its `receipts`, §5). |
 | `conversations.registry` | Conversation key → active session + workspace ref, with TTL eviction of memory that never drops the pointer, and explicit `/reset` semantics. |
 | `routines` | File-defined scheduled prompts (`src/agents/{name}/routines/*.yaml`) synced into `scheduler`, with target fan-out by route tags and previous-run context injection. |
 | `policy-tools` | Role-based interception of `agent.tool.call`: shell command and path rules, allow/deny lists, hot-reloadable. Policy mediation, not a sandbox. |

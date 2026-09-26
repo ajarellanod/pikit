@@ -333,6 +333,8 @@ redeliveries, channel outages, restarts and scheduled work.
 - A redelivered update is answered once, and a crashed attempt is retried rather than
   dropped.
 - A channel outage is retried by the outbox without touching the channel component.
+- A reaction that must not be lost survives a crash at any point: it reads a feed with its own
+  cursor instead of trusting an event (SPEC §4.8).
 - Scheduled prompts run.
 
 **Started early: `channel-telegram`** (SPEC §5), to measure how easy a chat channel is to set up.
@@ -356,18 +358,32 @@ redeliveries, channel outages, restarts and scheduled work.
   Upgrading found that `pikit add` could not bring a newer core to an older project; it does now
   (SPEC §10.5, `refreshKit`).
 
+**Reactions that must not be lost** (SPEC §4.8), the base that `approvals`, quoted replies and
+alerts build on later. Only the architecture is built here, not those components:
+- `Feed`, its suite (`createFeedConformance`) and its in-memory double (`createMemoryFeed`);
+- `answerKey`, the one formula for a run's answer key, used by `channel-telegram`;
+- `outbound.queue`'s `receipts`: `outbound-durable` versions its schema and records one receipt per
+  settled piece, in the same commit;
+- `createConvergenceConformance`: the process killed after every commit in turn, and the records
+  must still converge. `outbound-durable` passes it.
+
+Rich content (`parts`, `replyTo`) and questions from extensions in a chat (`interaction`) are
+decided in SPEC §5 and §6.2b; their code comes with the first component that produces them.
+
 **Scope:** `channel-telegram`, `storage-sqlite`, `outbound-durable` (SPEC §5 "Outbound delivery"),
-`scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided
+feeds and receipts (SPEC §4.8), the convergence suite, `scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided
 here, with the first components that can fail while running.
 
 **Order of work:** (M1.5's `router-rules`) → `storage-sqlite` → the outbound contracts and their
 conformance suite → `outbound-durable`, with a test that kills the process mid-send →
-`channel-telegram` on it (real bot) → the rest of M1.5 → health → `scheduler-cron`.
+`channel-telegram` on it (real bot) → the rest of M1.5 → feeds, receipts and convergence → health →
+`scheduler-cron`.
 
 **Moved:** `inbound-dedup` and `expose` come with the first webhook channel: Google Chat, by
 webhook, moves up from M5 to follow M1.5, as the channel where an agent per space matters.
 
-**Evidence:** scenarios 2 and 3, plus a process killed mid-send whose reply still arrives.
+**Evidence:** scenarios 2 and 3, plus a process killed mid-send whose reply still arrives, and
+`outbound-durable` converging after a crash at each of its commits.
 
 ### M3 — Ownership survives upstream change
 
