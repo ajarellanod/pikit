@@ -2462,9 +2462,13 @@ And the runtime proof:
    (`tool-bash` on `execution-local`) from running `rm -rf` asked for over HTTP
    (`samples/http/test/scenario-7.test.ts`).
 8. **Many agents** (M1.5): two agents with different system prompts, tools, Pi extensions and
-   workspaces. `router-rules` sends two conversations (two Telegram chats, or two accounts) to one
-   agent each; each answers with only its own tools and extensions, in its own directory. Removing
-   `router-rules` routes everything to `router-basic`'s default agent, with nothing else changed (S3).
+   workspaces. `router-rules` sends each of two conversations to its agent; each answers with only its
+   own tools and extensions, in its own directory. Removing `router-rules` routes everything to
+   `router-basic`'s default agent, with nothing else changed (S3). Runs in
+   `samples/http/test/scenario-8.test.ts`, with Pi's real `bash`: `ops` names `permission-gate` and
+   has `rm -rf` blocked, `support` does not and runs it, each `pwd` is its own `workspace-local`
+   directory, and a conversation no rule names reaches the default agent. Several accounts of one
+   channel (two Telegram bots) are covered by `channel-telegram`'s tests.
 
 ---
 

@@ -288,19 +288,25 @@ delay before closing a conversation (`idleMs`) is added only if reopening is mea
 
 **Evidence:** scenarios 1 and 7.
 
-### M1.5 — Many agents
+### M1.5 — Many agents ✅
 
 **Proves:** one pikit runs several agents side by side: each with its own prompt, model, tools,
 Pi extensions and workspace, each reached from the channels and chats its rules give it. All of it
 by adding components, and removed the same way.
 
-**Done when** (scenario 8, SPEC §15):
-- Two agents with different tools and extensions answer two different conversations, chosen by
-  rules in config.
-- ✅ Each agent's tools work in its own directory: `workspace-local` (SPEC §8.2), whose tests run two
-  agents' real runs. Scenario 8 as a whole is still to run.
-- A channel serves several accounts (two Telegram bots in one project), each its own instance.
-- Removing `router-rules` routes everything to one agent again, with nothing else changed (S3).
+**Done when** (scenario 8, SPEC §15), all ✅:
+- ✅ Two agents with different tools and extensions answer two different conversations, chosen by
+  rules in config: `router-rules`, and extensions named per agent (`agent.extension`).
+- ✅ Each agent's tools work in its own directory: `workspace-local` (SPEC §8.2), through the run's
+  `CONVERSATION` in its context.
+- ✅ A channel serves several accounts: `channel-telegram`'s `accounts` (two bots in one project, each
+  its own instance, allowlist and transport).
+- ✅ Removing `router-rules` routes everything to one agent again, with nothing else changed (S3), and
+  adding then removing `router-rules` or `workspace-local` leaves `git status` empty.
+
+`samples/http/test/scenario-8.test.ts` runs it with Pi's real `bash`: `ops` (with Pi's
+`permission-gate`) and `support` (without it) in their own directories, a third conversation on the
+default agent, and the same project without `router-rules`.
 
 **Decided first** (SPEC §5): channel instances (`telegram`, `telegram:support`) and conversation
 keys (`<instance>:<conversation>[:<thread>]`), because the outbox delivers by instance. Existing
@@ -344,7 +350,11 @@ redeliveries, channel outages, restarts and scheduled work.
   transport, answers are stored before they are sent, and a process killed mid-send has its answer
   delivered by the next one (`crash.test.ts`, SIGKILL). The base preset installs `storage-sqlite` and
   `outbound-durable`, so a new Telegram project has it; the Telegram end-to-end test checks the
-  answer's row reached `delivered`. Left: a run against the real bot.
+  answer's row reached `delivered`.
+- ✅ Run against the real Telegram (the M1 VPS bot, upgraded in place with `pikit add`): a piece put in
+  the outbox was delivered to the owner's chat at its first attempt, with Telegram's message id.
+  Upgrading found that `pikit add` could not bring a newer core to an older project; it does now
+  (SPEC §10.5, `refreshKit`).
 
 **Scope:** `channel-telegram`, `storage-sqlite`, `outbound-durable` (SPEC §5 "Outbound delivery"),
 `scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided
