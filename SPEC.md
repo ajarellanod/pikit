@@ -570,14 +570,19 @@ returns what happened:
   `secrets`, like the token, because it lives in `.env` next to it and `pikit configure` fills it.
 - **Private chats only**, one conversation each (`telegram:<chat id>`). Groups need the bot's privacy
   mode and mention rules; later.
-- **Replies as for HTTP.** The channel listens to `agent.settled` / `agent.failed` and sends the run's
-  answer to the chat once per run, with "typing…" while it runs. It converts Markdown to Telegram's
-  HTML (plain text when Telegram refuses it) and splits answers at 4096 characters. It retries in
-  the process: after `retry_after` on a 429, with backoff on network errors and 5xx.
-  - This is the platform-sending case M2's `outbound-durable` is for. When the outbox exists, the
-    sending moves behind `channel.transport`, and ingress does not change.
-  - Until then, a reply lost to a crash while sending is not sent again; the answer is in the
-    session.
+- **Replies.** The channel listens to `agent.settled` / `agent.failed` and answers the chat once per
+  run, with "typing…" while it runs. Its transport (`transport.ts`, a `ChannelTransport`) converts
+  Markdown to Telegram's HTML (plain text when Telegram refuses it), splits answers into pieces of at
+  most 3500 characters, and classifies failures: a 429 is `rate_limited` with Telegram's
+  `retry_after`, no answer and a 5xx are `transient` (a timeout `maybeSent`), any other refusal is
+  `permanent`.
+  - **With `outbound.queue`** (`outbound-durable`, M2): the channel attaches its transport in `start`,
+    enqueues each answer keyed `${sessionId}:${requestId}`, and detaches in `stop`. Delivery is
+    at-least-once: a piece sent again after a crash starts with `↻ `, because Telegram's `sendMessage`
+    has no idempotency key.
+  - **Without it:** the answer is sent directly through the same transport, retried in the process;
+    a reply lost to a crash while sending is not sent again (the answer is in the session).
+  - The channel's own short replies (commands, a refused stranger, "typing…") are always direct.
 
 **Channels, accounts and keys.** `[decision]` (M1.5)
 - A channel component may serve several accounts of its platform: two Telegram bots, two Google
@@ -612,7 +617,7 @@ progress, and one send path.
 
 ```ts
 interface OutboundMessage {
-  idempotencyKey: string;      // one per answer: `${sessionId}:${runId}`
+  idempotencyKey: string;      // one per answer: `${sessionId}:${requestId}` (the run's first request)
   channel: string;             // the channel instance
   conversationKey: string;
   text: string;

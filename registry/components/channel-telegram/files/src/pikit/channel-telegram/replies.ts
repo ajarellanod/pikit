@@ -1,20 +1,22 @@
 /**
- * Sending the agent's answers to Telegram chats, and "typing…" while it works.
+ * Sending the agent's answers to Telegram chats directly, and "typing…" while it works.
  *
+ * - Used when no `outbound.queue` is installed; with one (`outbound-durable`), answers are enqueued
+ *   instead (`index.ts`) and only "typing…" and the channel's own short replies (commands, a refused
+ *   stranger) go through here.
  * - One chat's messages go out one at a time, in order; chats do not wait for each other.
- * - An answer is split (`format.ts`) and each piece is sent as Telegram HTML, or as plain text when
- *   Telegram refuses the HTML.
- * - A piece that fails is retried in this process: after `retry_after` for a 429, with backoff for a
- *   network error or a 5xx. Other refusals (a chat that blocked the bot) are logged and dropped.
+ * - Each piece goes through the channel's transport (`transport.ts`: HTML or plain text, failures
+ *   classified), retried in this process: a rate limit after Telegram's wait (at most a minute), a
+ *   transient failure with backoff. A permanent one is logged and dropped.
  *
- * Delivery guarantee (M1): best effort within the process. The answer is always in the
- * conversation's session; a reply lost to a crash while sending is not sent again. Durable delivery
- * with retries across restarts is `outbound-durable`'s job (M2), through `channel.transport`.
+ * Delivery guarantee: best effort within the process. The answer is always in the conversation's
+ * session; a reply lost to a crash while sending is not sent again. `outbound-durable` is the durable
+ * delivery.
  */
 
-import type { Logger } from "@pikit/core";
-import { type TelegramApi, TelegramError } from "./api.ts";
-import { MAX_MESSAGE_LENGTH, splitMessage, toTelegramHtml } from "./format.ts";
+import { type ChannelTransport, DeliveryError, type Logger } from "@pikit/core";
+import type { TelegramApi } from "./api.ts";
+import { conversationKey } from "./inbound.ts";
 
 /** How often "typing…" is renewed: Telegram shows it for about 5 seconds. */
 const TYPING_EVERY_MS = 4_000;
@@ -33,7 +35,7 @@ export interface Delivery {
   close(): Promise<void>;
 }
 
-export function createDelivery(api: TelegramApi, logger: Logger): Delivery {
+export function createDelivery(api: TelegramApi, transport: ChannelTransport, logger: Logger): Delivery {
   const closing = new AbortController();
   const lines = new Map<number, Promise<void>>();
   const typing = new Map<number, ReturnType<typeof setInterval>>();
@@ -50,25 +52,15 @@ export function createDelivery(api: TelegramApi, logger: Logger): Delivery {
       closing.signal.addEventListener("abort", done, { once: true });
     });
 
-  const sendPiece = async (chatId: number, piece: string): Promise<void> => {
-    const html = toTelegramHtml(piece);
-    let asHtml = html.length <= MAX_MESSAGE_LENGTH;
+  const sendPiece = async (chatId: number, text: string, index: number): Promise<void> => {
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
-        await api.sendMessage(chatId, asHtml ? html : piece, { html: asHtml }, closing.signal);
+        await transport.send({ key: `direct:${chatId}:${index}`, conversationKey: conversationKey(chatId), text, possibleDuplicate: false }, closing.signal);
         return;
       } catch (error) {
         if (closing.signal.aborted) throw error;
-        if (!(error instanceof TelegramError)) throw error;
-        if (error.code === 400 && asHtml) {
-          // Telegram could not parse the HTML: the same words, as plain text.
-          asHtml = false;
-          attempt--;
-          continue;
-        }
-        const retryable = error.code === 0 || error.code === 429 || error.code >= 500;
-        if (!retryable || attempt === ATTEMPTS) throw error;
-        await wait(error.retryAfter !== undefined ? Math.min(error.retryAfter * 1000, LONGEST_WAIT_MS) : 1000 * 2 ** (attempt - 1));
+        if (!(error instanceof DeliveryError) || error.kind === "permanent" || attempt === ATTEMPTS) throw error;
+        await wait(error.kind === "rate_limited" ? Math.min(error.retryAfterMs ?? 1_000, LONGEST_WAIT_MS) : 1000 * 2 ** (attempt - 1));
       }
     }
   };
@@ -93,9 +85,9 @@ export function createDelivery(api: TelegramApi, logger: Logger): Delivery {
     send(chatId, text) {
       const previous = lines.get(chatId) ?? Promise.resolve();
       const next = previous.then(async () => {
-        for (const piece of splitMessage(text)) {
+        for (const [index, piece] of transport.split(text).entries()) {
           try {
-            await sendPiece(chatId, piece);
+            await sendPiece(chatId, piece, index);
           } catch (error) {
             logger.error("channel-telegram: a reply could not be sent", { chat: chatId, error: String(error) });
             return;

@@ -16,13 +16,19 @@ import {
   BACKGROUND_CONTEXT,
   type ConversationRef,
   type ConversationRegistry,
+  type ChannelTransport,
+  DeliveryError,
   defineApp,
   defineComponent,
+  type OutboundMessage,
+  type OutboundQueue,
   silentLogger,
 } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
+import { createTelegramApi } from "./api.ts";
 import channelTelegram from "./index.ts";
+import { createTelegramTransport, POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
 
 const OWNER = { id: 1001, first_name: "Ada", username: "ada" };
 const STRANGER = { id: 2002, first_name: "Eve" };
@@ -106,7 +112,35 @@ interface Subject {
   app: App;
 }
 
-async function started(options: { secrets?: Record<string, string>; telegram?: FakeTelegram; seen?: Set<string> } = {}): Promise<Subject> {
+/** A queue that records what the channel does with it, and delivers each enqueued piece at once through the attached transport. */
+function recordingQueue() {
+  const enqueued: OutboundMessage[] = [];
+  const attached: string[] = [];
+  const detached: string[] = [];
+  const transports = new Map<string, ChannelTransport>();
+  const queue: OutboundQueue = {
+    async enqueue(message) {
+      enqueued.push(message);
+      const transport = transports.get(message.channel);
+      if (transport === undefined) throw new Error("no transport");
+      for (const [index, text] of transport.split(message.text).entries()) {
+        await transport.send({ key: `${message.idempotencyKey}#${index}`, conversationKey: message.conversationKey, text, possibleDuplicate: false }, new AbortController().signal);
+      }
+    },
+    attach(channel, transport) {
+      attached.push(channel);
+      transports.set(channel, transport);
+    },
+    async detach(channel) {
+      detached.push(channel);
+      transports.delete(channel);
+    },
+  };
+  const component = defineComponent({ name: "queue-test", setup: (pikit) => pikit.provide("outbound.queue", queue) });
+  return { component, enqueued, attached, detached };
+}
+
+async function started(options: { secrets?: Record<string, string>; telegram?: FakeTelegram; seen?: Set<string>; queue?: ReturnType<typeof recordingQueue> } = {}): Promise<Subject> {
   const telegram = options.telegram ?? startFakeTelegram();
   if (options.telegram === undefined) fakes.push(telegram);
   const runtime = scriptedRuntime(options.seen);
@@ -117,6 +151,7 @@ async function started(options: { secrets?: Record<string, string>; telegram?: F
       memoryRegistry(resets),
       router,
       runtime.component,
+      ...(options.queue === undefined ? [] : [options.queue.component]),
       channelTelegram,
     ],
     config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
@@ -150,7 +185,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "channel-telegram")).toMatchObject({
     provides: [],
     requires: ["secrets", "conversations.registry", "agent.runtime"],
-    optional: [],
+    optional: ["outbound.queue"],
   });
 });
 
@@ -286,3 +321,81 @@ test("it refuses to start without a valid token, without allowed users, or with 
   expect(await startFailure({ TELEGRAM_BOT_TOKEN: "1:wrong", TELEGRAM_ALLOWED_USERS: "1" })).toContain("is not valid (Telegram answered 401)");
   expect(await startFailure({ TELEGRAM_BOT_TOKEN: token, TELEGRAM_ALLOWED_USERS: "1" }, (t) => (t.webhookUrl = "https://example.com/hook"))).toContain("has a webhook");
 });
+
+// ---------------------------------------------------------------------------------------------
+// Durable delivery: the transport, and the channel with an outbound.queue (SPEC §5).
+
+function transportOver(telegram: FakeTelegram) {
+  return createTelegramTransport(createTelegramApi(telegram.token, telegram.url));
+}
+
+test("the transport sends a piece as HTML and returns Telegram's message id; a possible duplicate is marked", async () => {
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  const transport = transportOver(telegram);
+  const signal = new AbortController().signal;
+  expect(transport.idempotent).toBe(false);
+
+  const sent = await transport.send({ key: "k#0", conversationKey: `telegram:${OWNER.id}`, text: "**hi**", possibleDuplicate: false }, signal);
+  await transport.send({ key: "k#1", conversationKey: `telegram:${OWNER.id}`, text: "again", possibleDuplicate: true }, signal);
+
+  expect(sent.platformMessageId).toMatch(/^\d+$/);
+  expect(telegram.sent).toEqual([
+    { chatId: OWNER.id, text: "<b>hi</b>", html: true },
+    { chatId: OWNER.id, text: `${POSSIBLE_DUPLICATE_MARK}again`, html: true },
+  ]);
+});
+
+test("the transport falls back to plain text when Telegram refuses the HTML", async () => {
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  telegram.rejectHtml = true;
+  await transportOver(telegram).send({ key: "k#0", conversationKey: `telegram:${OWNER.id}`, text: "**hi**", possibleDuplicate: false }, new AbortController().signal);
+  expect(telegram.sent).toEqual([{ chatId: OWNER.id, text: "**hi**", html: false }]);
+});
+
+test("the transport classifies Telegram's refusals for the queue", async () => {
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  const transport = transportOver(telegram);
+  const piece = { key: "k#0", conversationKey: `telegram:${OWNER.id}`, text: "hi", possibleDuplicate: false };
+  const failure = (): Promise<DeliveryError> =>
+    transport.send(piece, new AbortController().signal).then(
+      () => {
+        throw new Error("expected the send to fail");
+      },
+      (error: unknown) => error as DeliveryError,
+    );
+
+  telegram.rateLimitNextSend = 7;
+  const limited = await failure();
+  expect([limited.kind, limited.retryAfterMs]).toEqual(["rate_limited", 7000]);
+
+  telegram.failNextSend = { code: 403, description: "Forbidden: bot was blocked by the user" };
+  expect((await failure()).kind).toBe("permanent");
+
+  telegram.failNextSend = { code: 500, description: "Internal Server Error" };
+  const transient = await failure();
+  expect([transient.kind, transient.maybeSent]).toEqual(["transient", false]);
+
+  const foreign = await transport.send({ ...piece, conversationKey: "http:abc" }, new AbortController().signal).catch((error: unknown) => error as DeliveryError);
+  expect(foreign).toBeInstanceOf(DeliveryError);
+  expect((foreign as DeliveryError).kind).toBe("permanent");
+});
+
+test("with an outbound.queue, the answer is enqueued once per run and delivered through the attached transport", async () => {
+  const queue = recordingQueue();
+  const { telegram, app } = await started({ queue });
+  expect(queue.attached).toEqual(["telegram"]);
+
+  telegram.say(OWNER, "hello");
+  await telegram.sentCount(1);
+  expect(queue.enqueued).toEqual([
+    { idempotencyKey: `s1:telegram:${OWNER.id}:1`, channel: "telegram", conversationKey: `telegram:${OWNER.id}`, text: "answer: **hello**" },
+  ]);
+  expect(telegram.sent[0]).toEqual({ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true });
+
+  await app.stop();
+  expect(queue.detached).toEqual(["telegram"]);
+});
+

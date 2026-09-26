@@ -16,7 +16,9 @@
     ]
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "outbound.queue"
+    ]
   },
   "provides": [],
   "dependencies": {

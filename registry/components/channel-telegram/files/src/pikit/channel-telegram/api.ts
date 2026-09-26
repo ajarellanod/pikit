@@ -55,7 +55,8 @@ export interface TelegramApi {
   /** Long polling: waits up to `timeout` seconds for updates after `offset`, and confirms the ones before it. */
   getUpdates(options: { offset?: number; timeout: number }, signal?: AbortSignal): Promise<TelegramUpdate[]>;
   getWebhookInfo(signal?: AbortSignal): Promise<{ url: string }>;
-  sendMessage(chatId: number, text: string, options?: { html?: boolean }, signal?: AbortSignal): Promise<void>;
+  /** The message Telegram created: its `message_id` is what an edit or a delete needs. */
+  sendMessage(chatId: number, text: string, options?: { html?: boolean }, signal?: AbortSignal): Promise<{ message_id: number }>;
   sendChatAction(chatId: number, action: "typing", signal?: AbortSignal): Promise<void>;
 }
 
@@ -91,7 +92,7 @@ export function createTelegramApi(token: string, apiBase: string, fetcher: typeo
       call("getUpdates", { timeout, allowed_updates: ["message"], ...(offset !== undefined && { offset }) }, signal),
     getWebhookInfo: (signal) => call("getWebhookInfo", {}, signal),
     sendMessage: (chatId, text, options = {}, signal) =>
-      call("sendMessage", { chat_id: chatId, text, ...(options.html === true && { parse_mode: "HTML" }), link_preview_options: { is_disabled: true } }, signal),
+      call<{ message_id: number }>("sendMessage", { chat_id: chatId, text, ...(options.html === true && { parse_mode: "HTML" }), link_preview_options: { is_disabled: true } }, signal),
     sendChatAction: (chatId, action, signal) => call("sendChatAction", { chat_id: chatId, action }, signal),
   };
 }

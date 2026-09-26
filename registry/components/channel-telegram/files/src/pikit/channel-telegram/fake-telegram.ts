@@ -29,6 +29,8 @@ export interface FakeTelegram {
   webhookUrl: string;
   rejectHtml: boolean;
   rateLimitNextSend?: number;
+  /** The next `sendMessage` fails with this Telegram error (403 blocked, 500…). */
+  failNextSend?: { code: number; description: string };
   /** Updates Telegram still holds (not confirmed by an offset). */
   pending(): TelegramUpdate[];
   /**
@@ -126,6 +128,11 @@ export function startFakeTelegram(): FakeTelegram {
           fake.actions.push({ chatId: Number(body.chat_id), action: String(body.action) });
           return ok(true);
         case "sendMessage": {
+          if (fake.failNextSend !== undefined) {
+            const { code, description } = fake.failNextSend;
+            delete fake.failNextSend;
+            return fail(code, description);
+          }
           if (fake.rateLimitNextSend !== undefined) {
             const retryAfter = fake.rateLimitNextSend;
             delete fake.rateLimitNextSend;
