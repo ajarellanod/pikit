@@ -358,14 +358,15 @@ redeliveries, channel outages, restarts and scheduled work.
   Upgrading found that `pikit add` could not bring a newer core to an older project; it does now
   (SPEC §10.5, `refreshKit`).
 
-**Reactions that must not be lost** (SPEC §4.8), the base that `approvals`, quoted replies and
+✅ **Reactions that must not be lost** (SPEC §4.8), the base that `approvals`, quoted replies and
 alerts build on later. Only the architecture is built here, not those components:
 - `Feed`, its suite (`createFeedConformance`) and its in-memory double (`createMemoryFeed`);
 - `answerKey`, the one formula for a run's answer key, used by `channel-telegram`;
 - `outbound.queue`'s `receipts`: `outbound-durable` versions its schema and records one receipt per
   settled piece, in the same commit;
 - `createConvergenceConformance`: the process killed after every commit in turn, and the records
-  must still converge. `outbound-durable` passes it.
+  must still converge. `outbound-durable` passes it (18 crash points); the suite's own test shows a
+  consumer that reacts to events alone fails it, and one that reads a feed passes.
 
 Rich content (`parts`, `replyTo`) and questions from extensions in a chat (`interaction`) are
 decided in SPEC §5 and §6.2b; their code comes with the first component that produces them.
