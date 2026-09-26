@@ -34,8 +34,12 @@ export interface SampleOptions {
   extensions?: PiExtension[];
   /** Reuse a previous sample's state: a restart. Default: a new temporary directory. */
   dataDir?: string;
-  /** Components added after the sample's own (tests that watch the lifecycle). */
+  /** Components added after the sample's own (tests that watch the lifecycle, scenario 8's). */
   extra?: ComponentDefinition[];
+  /** Config for the extra components, or over the sample's own. */
+  config?: Record<string, unknown>;
+  /** `workspace-local` (in `extra`) keeps the agents' directories in the data directory's `workspaces/`. */
+  workspaces?: boolean;
 }
 
 export interface Sample {
@@ -83,6 +87,8 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
       "execution-local": { root: join(dataDir, "workspace") },
       "router-basic": { defaultAgent },
       "server-bun": { port: 0, hostname: "127.0.0.1" },
+      ...(options.workspaces === true && { "workspace-local": { root: join(dataDir, "workspaces") } }),
+      ...options.config,
     },
     logger: silentLogger,
   }).create();

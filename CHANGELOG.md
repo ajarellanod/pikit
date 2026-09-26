@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- samples: scenario 8, many agents (`samples/http/test/scenario-8.test.ts`): `router-rules`, extensions
+  named per agent and `workspace-local` together, with Pi's real `bash`; and the same project without
+  `router-rules`.
 - cli: `pikit add` brings a project made by an older checkout onto this CLI's kit (`@pikit/core`,
   `@pikit/pi-adapter`, the shim): vendored tarballs are named with a hash of their files, and a
   project on other ones gets new tarballs, `package.json` rewritten and `bun install`. Adding a
