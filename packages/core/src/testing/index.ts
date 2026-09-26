@@ -24,6 +24,9 @@ export { createOutboundQueueConformance } from "./outbound-queue.ts";
 export type { FeedConformanceOptions, FeedFixture, MemoryFeed } from "./feed.ts";
 export { createFeedConformance, createMemoryFeed } from "./feed.ts";
 
+export type { ConvergenceFixture, ConvergenceProcess, ProcessLife } from "./convergence.ts";
+export { createConvergenceConformance, SimulatedCrash } from "./convergence.ts";
+
 export type { SqlDatabaseFixture } from "./storage-sql.ts";
 export { createSqlDatabaseConformance } from "./storage-sql.ts";
 

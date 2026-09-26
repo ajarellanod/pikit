@@ -2559,9 +2559,11 @@ is that the answer is "nothing" for every minor.
 - **Convergence** (`createConvergenceConformance`): for components that react through records
   (§4.8). The fixture gives the records (a `storage.sql` database that outlives processes), the
   components of one process, a scenario (what the outside world does) and an invariant. The suite
-  runs the scenario with the process killed after each commit in turn: after commit `k` the
-  database refuses every call, as it would for a dead process, and the fixture's fakes of the
-  outside world stop answering it. Then a new process starts over the same records, the world
+  runs the scenario with the process killed after each commit in turn: `k` commits go through, and
+  at the next one the database refuses it and every later call, as it would for a dead process,
+  and the fixture's fakes of the outside world stop answering it. What the process did between
+  commit `k` and its death happened, as in a real crash: a send after a commit whose outcome is
+  lost is where duplicates come from. Then a new process starts over the same records, the world
   repeats the scenario (it retries what went unacknowledged), and the invariant must hold. It also
   runs the scenario twice with no crash. Its own test proves that a consumer reading a feed passes
   and one reacting to events alone fails. `outbound-durable` passes it, next to its SIGKILL test.

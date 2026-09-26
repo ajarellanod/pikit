@@ -95,5 +95,8 @@ not sent by anyone; empty the table first if that matters.
 ## Tests
 
 Copied with the component, they run in your project: the `outbound.queue` conformance suite (order,
-each retry to the millisecond, rate limits, abandonment, restarts, detach), the lifecycle suite, and
-a test that kills a process with SIGKILL during a send and checks the next process delivers it.
+each retry to the millisecond, rate limits, abandonment, restarts, detach, receipts), the lifecycle
+suite, the feed suite over the receipts with their pruning, a database from before receipts, the
+convergence suite (the process killed after each of its commits in turn: every piece still delivered,
+in order, with one receipt, and every repeated send marked a possible duplicate), and a test that kills
+a process with SIGKILL during a send and checks the next process delivers it.

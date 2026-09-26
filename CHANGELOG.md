@@ -5,6 +5,13 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core, component/outbound-durable: the convergence suite, `createConvergenceConformance` in
+  `@pikit/core/testing` (SPEC §14). It kills the process after each of its commits in turn (its
+  `storage.sql` refuses the next commit and everything after it), starts a new one over the same
+  records, repeats the scenario as a retrying world would, and checks an invariant. Its own test shows
+  a consumer reading a feed passes and one reacting to events alone fails. `outbound-durable` passes
+  it: after a crash at any of its commits, every piece is delivered in order with one receipt, and
+  every repeated send is marked a possible duplicate.
 - core, component/outbound-durable: delivery receipts. `OutboundQueue.receipts` is a feed of
   `DeliveryReceipt`s: one per piece that settled, delivered (with the platform's message id) or
   abandoned (with its reason), in the order they settled (SPEC §5). `outbound-durable` writes each in
