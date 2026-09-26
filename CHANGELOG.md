@@ -5,6 +5,11 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core: feeds (SPEC §4.8), for what must not be missed. `Feed<T>`, `FeedPage` and `FeedItem`: facts a
+  component records in the same commit as the change they describe, read by others in commit order
+  after a cursor of their own, with `gap` when facts were pruned before they were read. Events stay
+  notices. `@pikit/core/testing` has the suite, `createFeedConformance`, and the in-memory double,
+  `createMemoryFeed`.
 - cli, registry: offered providers. A component brings the providers of what it can use when the
   catalogue marks the capability `offer` (today `outbound.queue`): `pikit add channel-telegram` offers
   `outbound-durable` and the `storage-sqlite` it needs, `pikit new` installs them, and `pikit remove`

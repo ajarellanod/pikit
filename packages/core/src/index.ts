@@ -59,6 +59,7 @@ export type { ConversationRegistry, ConversationReset } from "./contracts/conver
 export type { HttpRoute } from "./contracts/http.ts";
 export type { SecretStore } from "./contracts/secrets.ts";
 export type { SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./contracts/storage.ts";
+export type { Feed, FeedItem, FeedPage } from "./contracts/feed.ts";
 export type { ChannelTransport, DeliveryErrorKind, OutboundMessage, OutboundPiece, OutboundQueue } from "./contracts/outbound.ts";
 export { DeliveryError } from "./contracts/outbound.ts";
 export { consoleLogger, silentLogger } from "./contracts/logger.ts";

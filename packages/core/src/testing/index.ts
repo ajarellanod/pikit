@@ -21,6 +21,9 @@ export { createManualClock } from "./manual-clock.ts";
 export type { OutboundQueueFixture } from "./outbound-queue.ts";
 export { createOutboundQueueConformance } from "./outbound-queue.ts";
 
+export type { FeedConformanceOptions, FeedFixture, MemoryFeed } from "./feed.ts";
+export { createFeedConformance, createMemoryFeed } from "./feed.ts";
+
 export type { SqlDatabaseFixture } from "./storage-sql.ts";
 export { createSqlDatabaseConformance } from "./storage-sql.ts";
 
