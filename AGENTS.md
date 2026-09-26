@@ -295,6 +295,10 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   resolves to a list of `add` calls: a base's `components` with its `choose` questions answered
   (`--with`, the guided path), or an alias's `extends` + `with`. Never add a preset per channel: a
   `channel-*` component with a `title` is already an answer to the base's question (SPEC §11).
+- **A new package export is neutral.** `scripts/boundaries.test.ts` (run by `bun test`) holds every
+  export of `packages/*` to rule 5 through everything it imports, unless `SERVER_ONLY` in
+  `scripts/boundaries.ts` names it (today the adapter's `./node` and `./testing`). It also fails on
+  an import the package's `package.json` does not declare, and on Pi imported outside the adapter.
 - **A new capability needs a catalogue line.** Declaring one on `AppCapabilities` /
   `AppKeyedCapabilities` fails `tsc` until `packages/cli/src/registry/capabilities.ts` describes it
   (`bun run registry capabilities` prints the catalogue). Test-only capabilities are named `test.*`.

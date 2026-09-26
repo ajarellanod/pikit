@@ -5,6 +5,12 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- repo: the packages' import boundaries are checked on every `bun test` (`scripts/boundaries.test.ts`):
+  core and every package export not marked server-only run on every target (no `node:*`, `bun:*`,
+  `cloudflare:*` or Pi's Node subpath, through everything they import), only the adapter imports
+  Pi, and a package imports only what its `package.json` declares.
+- registry: `registry validate` no longer mistakes a method named `require` (`capabilities.require("x")`)
+  for an import.
 - adapter, component/sessions-jsonl: a message to an idle conversation no longer reads every
   session file. The runtime opens a conversation's session with the store's new `find(id)`, which
   `sessions-jsonl` answers from an index (one listing after a restart, then about 0.02 ms instead

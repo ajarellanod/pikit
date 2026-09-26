@@ -16,8 +16,8 @@ export function scanImports(source: string): string[] {
     /\b(?:import|export)\b[^;'"`]*?\bfrom\s*(["'])([^"'\n]+)\1/g,
     // import "m" (side effect)
     /\bimport\s*(["'])([^"'\n]+)\1/g,
-    // import("m") · require("m")
-    /\b(?:import|require)\s*\(\s*(["'])([^"'\n]+)\1\s*\)/g,
+    // import("m") · require("m"), but not a method of that name (`capabilities.require("x")`)
+    /(?<![.$\w])(?:import|require)\s*\(\s*(["'])([^"'\n]+)\1\s*\)/g,
   ];
   const hits: { at: number; specifier: string }[] = [];
   for (const pattern of patterns) {

@@ -244,6 +244,9 @@ test("scanImports: type-only, re-exports, side effects and dynamic imports; comm
     `const url = "https://example.com // not a comment";`,
     `const re = /"from "regex"/;`,
     `const lazy = await import("dynamic");`,
+    `const legacy = require("common-js");`,
+    `const store = capabilities.require("sessions.store");`,
   ].join("\n");
-  expect(scanImports(source)).toEqual(["type-only", "mixed", "re-export", "side-effect", "dynamic"]);
+  // A method named require (the capability registry's) is not an import.
+  expect(scanImports(source)).toEqual(["type-only", "mixed", "re-export", "side-effect", "dynamic", "common-js"]);
 });
