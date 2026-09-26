@@ -15,7 +15,7 @@
 import { type ChannelTransport, DeliveryError } from "@pikit/core";
 import { type TelegramApi, TelegramError } from "./api.ts";
 import { MAX_MESSAGE_LENGTH, splitMessage, toTelegramHtml } from "./format.ts";
-import { chatOf } from "./inbound.ts";
+import { chatIn } from "./account.ts";
 
 /** What a piece sent again as a possible duplicate starts with. */
 export const POSSIBLE_DUPLICATE_MARK = "↻ ";
@@ -23,13 +23,14 @@ export const POSSIBLE_DUPLICATE_MARK = "↻ ";
 /** A rate limit without a `retry_after`: wait this long. */
 const DEFAULT_RETRY_AFTER_S = 30;
 
-export function createTelegramTransport(api: TelegramApi): ChannelTransport {
+/** The transport of one bot: `instance` is its account's (`telegram`, `telegram:<name>`). */
+export function createTelegramTransport(api: TelegramApi, instance: string): ChannelTransport {
   return {
     idempotent: false,
     split: (text) => splitMessage(text),
     async send(piece, signal) {
-      const chatId = chatOf(piece.conversationKey);
-      if (chatId === undefined) throw new DeliveryError("permanent", `channel-telegram: "${piece.conversationKey}" is not a Telegram conversation`);
+      const chatId = chatIn(instance, piece.conversationKey);
+      if (chatId === undefined) throw new DeliveryError("permanent", `channel-telegram: "${piece.conversationKey}" is not a conversation of ${instance}`);
       const text = piece.possibleDuplicate ? `${POSSIBLE_DUPLICATE_MARK}${piece.text}` : piece.text;
       try {
         const sent = await sendHtmlOrPlain(api, chatId, text, signal);

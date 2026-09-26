@@ -77,8 +77,31 @@ It refuses to start:
 "channel-telegram": {
   apiBase: "https://api.telegram.org", // default; a local Bot API server, or a test double
   pollTimeoutSeconds: 30,              // default; how long one getUpdates waits
+  accounts: [],                        // more bots besides the default one, by name
 }
 ```
+
+## Several bots
+
+Each Telegram bot is an identity, so a team that wants one bot per agent runs several. The default
+bot is `TELEGRAM_BOT_TOKEN` / `TELEGRAM_ALLOWED_USERS`, and its conversations are `telegram:<chat>`.
+Each name in `accounts` adds a bot of its own:
+
+| `accounts: ["ops"]` | |
+|---|---|
+| instance | `telegram:ops` (what routers match and the outbox delivers by) |
+| token | `TELEGRAM_OPS_BOT_TOKEN` |
+| allowed users | `TELEGRAM_OPS_ALLOWED_USERS` |
+| conversations | `telegram:ops:<chat>` |
+
+`pikit configure` sets up each bot in turn. To give each bot its own agent, install `router-rules`:
+
+```ts
+"router-rules": { rules: [{ channel: "telegram:ops", agent: "ops" }] }, // the rest: router-basic's
+```
+
+If one bot cannot start (a missing token, a webhook), the channel does not start, and no bot keeps
+polling.
 
 ## Tests
 

@@ -26,6 +26,7 @@ import {
 } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
+import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";
 import channelTelegram from "./index.ts";
 import { createTelegramTransport, POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
@@ -326,7 +327,7 @@ test("it refuses to start without a valid token, without allowed users, or with 
 // Durable delivery: the transport, and the channel with an outbound.queue (SPEC §5).
 
 function transportOver(telegram: FakeTelegram) {
-  return createTelegramTransport(createTelegramApi(telegram.token, telegram.url));
+  return createTelegramTransport(createTelegramApi(telegram.token, telegram.url), "telegram");
 }
 
 test("the transport sends a piece as HTML and returns Telegram's message id; a possible duplicate is marked", async () => {
@@ -397,5 +398,86 @@ test("with an outbound.queue, the answer is enqueued once per run and delivered 
 
   await app.stop();
   expect(queue.detached).toEqual(["telegram"]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Accounts: several bots in one channel, each its own instance (SPEC §5, "Channels, accounts and keys").
+
+test("accounts: the default bot keeps its keys and secrets; a named one gets its own", () => {
+  expect(accountsOf(["ops", "customer-care"])).toEqual([
+    { name: undefined, instance: "telegram", tokenSecret: "TELEGRAM_BOT_TOKEN", allowedSecret: "TELEGRAM_ALLOWED_USERS" },
+    { name: "ops", instance: "telegram:ops", tokenSecret: "TELEGRAM_OPS_BOT_TOKEN", allowedSecret: "TELEGRAM_OPS_ALLOWED_USERS" },
+    { name: "customer-care", instance: "telegram:customer-care", tokenSecret: "TELEGRAM_CUSTOMER_CARE_BOT_TOKEN", allowedSecret: "TELEGRAM_CUSTOMER_CARE_ALLOWED_USERS" },
+  ]);
+  expect(conversationKeyOf("telegram:ops", 42)).toBe("telegram:ops:42");
+  expect(chatIn("telegram", "telegram:42")).toBe(42);
+  expect(chatIn("telegram", "telegram:ops:42")).toBeUndefined();
+  expect(chatIn("telegram:ops", "telegram:ops:-42")).toBe(-42);
+  expect(chatIn("telegram:ops", "telegram:42")).toBeUndefined();
+});
+
+const OPS_BOT = { id: 5353, is_bot: true, first_name: "Ops Bot", username: "acme_ops_bot" };
+const OPS_TOKEN = "555555:ops-token-for-tests";
+const OPERATOR = { id: 3003, first_name: "Olga" };
+
+async function twoBots(secrets: Record<string, string>) {
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  const ops = telegram.addBot(OPS_TOKEN, OPS_BOT);
+  const runtime = scriptedRuntime();
+  const app = await defineApp({
+    components: [secretsWith(secrets), memoryRegistry([]), router, runtime.component, channelTelegram],
+    config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1, accounts: ["ops"] } },
+    logger: silentLogger,
+  }).create();
+  apps.push(app);
+  return { telegram, ops, runtime, app };
+}
+
+test("accounts: two bots run side by side, each with its own users, conversations and answers", async () => {
+  const { telegram, ops, runtime, app } = await twoBots({
+    TELEGRAM_BOT_TOKEN: "123456789:fake-token-for-tests",
+    TELEGRAM_ALLOWED_USERS: String(OWNER.id),
+    TELEGRAM_OPS_BOT_TOKEN: OPS_TOKEN,
+    TELEGRAM_OPS_ALLOWED_USERS: String(OPERATOR.id),
+  });
+  await app.start();
+
+  telegram.say(OWNER, "to the default bot");
+  ops.say(OPERATOR, "to the ops bot");
+  await telegram.sentCount(1);
+  await ops.sentCount(1);
+
+  expect(runtime.dispatched.map((d) => [d.key, d.requestId]).sort()).toEqual(
+    [
+      [`telegram:${OWNER.id}`, `telegram:${OWNER.id}:1`],
+      [`telegram:ops:${OPERATOR.id}`, `telegram:ops:${OPERATOR.id}:1`],
+    ].sort(),
+  );
+  expect(telegram.sent).toEqual([{ chatId: OWNER.id, text: "answer: <b>to the default bot</b>", html: true }]);
+  expect(ops.sent).toEqual([{ chatId: OPERATOR.id, text: "answer: <b>to the ops bot</b>", html: true }]);
+
+  // Each bot has its own allowlist: the owner is a stranger to the ops bot.
+  ops.say(OWNER, "let me in");
+  const [, refused] = await ops.sentCount(2);
+  expect(refused?.text).toContain(`Your Telegram user id is ${OWNER.id}`);
+  expect(runtime.dispatched).toHaveLength(2);
+});
+
+test("accounts: a named bot without its token fails the start, and leaves no bot polling", async () => {
+  const { telegram, app } = await twoBots({
+    TELEGRAM_BOT_TOKEN: "123456789:fake-token-for-tests",
+    TELEGRAM_ALLOWED_USERS: String(OWNER.id),
+  });
+  const error = await app.start().then(
+    () => undefined,
+    (thrown: unknown) => thrown as Error,
+  );
+  expect(String((error?.cause as Error | undefined)?.message)).toContain("TELEGRAM_OPS_BOT_TOKEN is not set");
+  // The default bot's first poll may have been in flight when the start failed; none follows it.
+  await Bun.sleep(300);
+  const polls = telegram.offsets.length;
+  await Bun.sleep(1_500);
+  expect(telegram.offsets.length).toBe(polls);
 });
 

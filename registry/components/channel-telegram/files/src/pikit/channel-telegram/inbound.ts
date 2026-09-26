@@ -10,9 +10,10 @@
  *    conversation over (a reset: a new session, the old one kept, SPEC §7.6). Other commands go to
  *    the agent as text.
  * 4. Everything else takes the inbound path every channel takes (`admitInbound`: `inbound.normalize`,
- *    `route.resolve`, the conversation `telegram:<chat id>`, `dispatch`), and the sender is told what
- *    happened when the agent will not answer. The request id is `telegram:<chat id>:<message id>`: a
- *    message Telegram delivers twice is one request.
+ *    `route.resolve`, the conversation `<instance>:<chat id>`, `dispatch`), and the sender is told what
+ *    happened when the agent will not answer. The request id is `<instance>:<chat id>:<message id>`: a
+ *    message Telegram delivers twice is one request. The instance is the bot's account (`account.ts`):
+ *    `telegram`, or `telegram:<name>`.
  *
  * With polling there is no HTTP request to authenticate: the updates come from Telegram's own API,
  * over TLS, with the bot's token. What is left to check is the sender, which step 2 does.
@@ -20,20 +21,12 @@
 
 import { type AgentRuntime, type AppContext, admitInbound, type ConversationRegistry, type InboundMessage } from "@pikit/core";
 import type { TelegramMessage, TelegramUpdate, TelegramUser } from "./api.ts";
+import { conversationKeyOf } from "./account.ts";
 import type { Delivery } from "./replies.ts";
 
-export const CHANNEL = "telegram";
-
-/** The conversation of a Telegram chat. */
-export const conversationKey = (chatId: number): string => `${CHANNEL}:${chatId}`;
-
-/** The chat of a conversation this channel made, or `undefined` for another channel's. */
-export function chatOf(conversationKey: string): number | undefined {
-  const match = /^telegram:(-?\d+)$/.exec(conversationKey);
-  return match === null ? undefined : Number(match[1]);
-}
-
 export interface InboundDeps {
+  /** The bot's channel instance: `telegram`, or `telegram:<account>`. */
+  instance: string;
   bot: TelegramUser;
   allowed: ReadonlySet<number>;
   delivery: Delivery;
@@ -84,21 +77,21 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
     return;
   }
   if (command === "new") {
-    const reset = await deps.conversations.reset(conversationKey(chatId), ctx);
+    const reset = await deps.conversations.reset(conversationKeyOf(deps.instance, chatId), ctx);
     await delivery.send(chatId, reset === undefined ? "This is already a new conversation." : "Started a new conversation.");
     return;
   }
 
   const inbound: InboundMessage = {
-    id: `${CHANNEL}:${chatId}:${message.message_id}`,
-    channel: CHANNEL,
+    id: `${deps.instance}:${chatId}:${message.message_id}`,
+    channel: deps.instance,
     conversationId: String(chatId),
     actor: { id: String(from.id) },
     text,
     raw: message satisfies TelegramMessage,
     receivedAt: ctx.clock.now(),
   };
-  const outcome = await admitInbound(ctx, inbound, { conversations: deps.conversations, runtime: deps.runtime, key: conversationKey(chatId) });
+  const outcome = await admitInbound(ctx, inbound, { conversations: deps.conversations, runtime: deps.runtime, key: conversationKeyOf(deps.instance, chatId) });
   switch (outcome.kind) {
     case "admitted":
       // A new run shows "typing…" from `agent.started`; a message joining a run already shows it.

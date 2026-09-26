@@ -16,7 +16,7 @@
 
 import { type ChannelTransport, DeliveryError, type Logger } from "@pikit/core";
 import type { TelegramApi } from "./api.ts";
-import { conversationKey } from "./inbound.ts";
+import { conversationKeyOf } from "./account.ts";
 
 /** How often "typing…" is renewed: Telegram shows it for about 5 seconds. */
 const TYPING_EVERY_MS = 4_000;
@@ -35,7 +35,8 @@ export interface Delivery {
   close(): Promise<void>;
 }
 
-export function createDelivery(api: TelegramApi, transport: ChannelTransport, logger: Logger): Delivery {
+/** Direct delivery through one bot: `instance` is its account's. */
+export function createDelivery(api: TelegramApi, transport: ChannelTransport, logger: Logger, instance: string): Delivery {
   const closing = new AbortController();
   const lines = new Map<number, Promise<void>>();
   const typing = new Map<number, ReturnType<typeof setInterval>>();
@@ -55,7 +56,7 @@ export function createDelivery(api: TelegramApi, transport: ChannelTransport, lo
   const sendPiece = async (chatId: number, text: string, index: number): Promise<void> => {
     for (let attempt = 1; attempt <= ATTEMPTS; attempt++) {
       try {
-        await transport.send({ key: `direct:${chatId}:${index}`, conversationKey: conversationKey(chatId), text, possibleDuplicate: false }, closing.signal);
+        await transport.send({ key: `direct:${chatId}:${index}`, conversationKey: conversationKeyOf(instance, chatId), text, possibleDuplicate: false }, closing.signal);
         return;
       } catch (error) {
         if (closing.signal.aborted) throw error;

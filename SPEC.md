@@ -596,6 +596,9 @@ returns what happened:
   registry's conformance already treats keys as opaque.
 - The default account keeps the keys channels use today, so existing conversations keep their
   sessions.
+- `channel-telegram` (M1.5): its `accounts` config names more bots; `ops` is the instance
+  `telegram:ops`, with `TELEGRAM_OPS_BOT_TOKEN` and `TELEGRAM_OPS_ALLOWED_USERS`. Each bot polls, keeps
+  its allowlist and attaches its transport on its own; one that cannot start fails the channel's start.
 - Whether a thread is a conversation of its own is a value in the channel's config.
 
 **Routing to many agents.** `[decision]` (M1.5)

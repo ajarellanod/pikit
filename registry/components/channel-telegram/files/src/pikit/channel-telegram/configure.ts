@@ -13,6 +13,7 @@
  * token is still checked. It never prints the token.
  */
 
+import { type Account, accountsOf } from "./account.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, type TelegramApi, TelegramError, type TelegramUser } from "./api.ts";
 
 /** What `pikit configure` gives a component's step. Structural, so this file imports nothing from the CLI. */
@@ -33,31 +34,41 @@ export interface ConfigureIO {
   say(line: string): void;
 }
 
-const TOKEN = "TELEGRAM_BOT_TOKEN";
-const ALLOWED = "TELEGRAM_ALLOWED_USERS";
 /** How long to wait for the first message to the bot. */
 const WAIT_FOR_MESSAGE_SECONDS = 120;
 
-/** Configures the channel; returns what is still missing (empty when done). */
+/** Configures the channel, one bot after the other; returns what is still missing (empty when done). */
 export async function configure(io: ConfigureIO): Promise<string[]> {
   const apiBase = typeof io.config.apiBase === "string" ? io.config.apiBase : "https://api.telegram.org";
-  const bot = await token(io, apiBase);
-  if (bot === undefined) return [`${TOKEN}: create a bot with @BotFather and give its token to \`pikit configure\` (or set ${TOKEN})`];
+  const names = Array.isArray(io.config.accounts) ? io.config.accounts.filter((name): name is string => typeof name === "string") : [];
+  const missing: string[] = [];
+  for (const account of accountsOf(names)) {
+    if (account.name !== undefined) io.say(`\nTelegram bot "${account.name}" (${account.instance}): ${account.tokenSecret}, ${account.allowedSecret}`);
+    missing.push(...(await configureBot(io, apiBase, account)));
+  }
+  return missing;
+}
 
-  const given = io.get(ALLOWED);
+/** One bot: its token, then who may talk to it. */
+async function configureBot(io: ConfigureIO, apiBase: string, account: Account): Promise<string[]> {
+  const { tokenSecret, allowedSecret } = account;
+  const bot = await token(io, apiBase, tokenSecret);
+  if (bot === undefined) return [`${tokenSecret}: create a bot with @BotFather and give its token to \`pikit configure\` (or set ${tokenSecret})`];
+
+  const given = io.get(allowedSecret);
   const current = parseAllowedUsers(given);
   if (current instanceof Error) io.say(`✗ ${current.message}`);
   else if (current.size > 0 && given !== undefined) {
     // Saved to .env even when it came from the environment: the app reads .env.
-    io.set(ALLOWED, given);
-    io.say(`  ${ALLOWED}: ${current.size} user(s) allowed`);
+    io.set(allowedSecret, given);
+    io.say(`  ${allowedSecret}: ${current.size} user(s) allowed`);
     return [];
   }
-  if (!io.interactive) return [`${ALLOWED}: set the Telegram user ids allowed to talk to the bot, or run \`pikit configure\` in a terminal`];
-  const allowed = await allow(io, bot.api, bot.me);
-  if (allowed === undefined) return [`${ALLOWED}: nobody is allowed to talk to the bot yet; run \`pikit configure\` again`];
-  io.set(ALLOWED, allowed);
-  io.say(`✓ ${ALLOWED} set: only they can talk to your agent (add more ids to that line in .env)`);
+  if (!io.interactive) return [`${allowedSecret}: set the Telegram user ids allowed to talk to the bot, or run \`pikit configure\` in a terminal`];
+  const allowed = await allow(io, bot.api, bot.me, allowedSecret);
+  if (allowed === undefined) return [`${allowedSecret}: nobody is allowed to talk to the bot yet; run \`pikit configure\` again`];
+  io.set(allowedSecret, allowed);
+  io.say(`✓ ${allowedSecret} set: only they can talk to your agent (add more ids to that line in .env)`);
   return [];
 }
 
@@ -70,8 +81,8 @@ export function findToken(text: string): string | undefined {
 }
 
 /** A checked token, saved; or `undefined` when there is none. */
-async function token(io: ConfigureIO, apiBase: string): Promise<{ api: TelegramApi; me: TelegramUser } | undefined> {
-  let value = io.get(TOKEN);
+async function token(io: ConfigureIO, apiBase: string, tokenSecret: string): Promise<{ api: TelegramApi; me: TelegramUser } | undefined> {
+  let value = io.get(tokenSecret);
   const saved = value !== undefined && value !== "";
   if (!saved && !io.interactive) return undefined;
   if (!saved) {
@@ -82,7 +93,7 @@ async function token(io: ConfigureIO, apiBase: string): Promise<{ api: TelegramA
   }
   for (let attempt = 0; attempt < 5; attempt++) {
     if (value === undefined || value === "") {
-      const pasted = await io.askSecret(`${TOKEN}: `);
+      const pasted = await io.askSecret(`${tokenSecret}: `);
       if (pasted.trim() === "") return undefined;
       value = findToken(pasted);
       if (value === undefined) {
@@ -97,8 +108,8 @@ async function token(io: ConfigureIO, apiBase: string): Promise<{ api: TelegramA
     try {
       const me = await api.getMe();
       // Saved to .env even when it came from the environment: the app reads .env.
-      io.set(TOKEN, value);
-      io.say(`✓ ${saved ? `${TOKEN}: ` : ""}bot @${me.username ?? me.first_name} (${botLink(me)})`);
+      io.set(tokenSecret, value);
+      io.say(`✓ ${saved ? `${tokenSecret}: ` : ""}bot @${me.username ?? me.first_name} (${botLink(me)})`);
       return { api, me };
     } catch (error) {
       // 401: a token of the right shape that Telegram does not know. 404: not a token's shape at all.
@@ -112,9 +123,9 @@ async function token(io: ConfigureIO, apiBase: string): Promise<{ api: TelegramA
 }
 
 /** The ids to allow, as `TELEGRAM_ALLOWED_USERS` holds them; `undefined` when nobody was allowed. */
-async function allow(io: ConfigureIO, api: TelegramApi, bot: TelegramUser): Promise<string | undefined> {
+async function allow(io: ConfigureIO, api: TelegramApi, bot: TelegramUser, allowedSecret: string): Promise<string | undefined> {
   io.say(`\nWho may talk to the bot? Open ${botLink(bot)} and send it any message now.`);
-  io.say(`  (waiting up to ${WAIT_FOR_MESSAGE_SECONDS / 60} minutes; or press Ctrl-C and set ${ALLOWED} in .env yourself)`);
+  io.say(`  (waiting up to ${WAIT_FOR_MESSAGE_SECONDS / 60} minutes; or press Ctrl-C and set ${allowedSecret} in .env yourself)`);
   const deadline = Date.now() + WAIT_FOR_MESSAGE_SECONDS * 1000;
   let offset: number | undefined;
   while (Date.now() < deadline) {

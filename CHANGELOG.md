@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/channel-telegram: several bots in one project. `accounts: ["ops"]` adds the bot
+  `telegram:ops` (`TELEGRAM_OPS_BOT_TOKEN`, `TELEGRAM_OPS_ALLOWED_USERS`), with its own users,
+  conversations (`telegram:ops:<chat>`) and transport; `router-rules` can give it its own agent.
+  `pikit configure` sets up each bot. The default bot and its keys are unchanged.
 - component/channel-telegram: answers go through `outbound.queue` when it is installed: the channel
   attaches its transport (`transport.ts`: HTML or plain text, failures classified for the queue) and
   enqueues each answer once per run. A piece sent again after a crash starts with `↻ `. Without a

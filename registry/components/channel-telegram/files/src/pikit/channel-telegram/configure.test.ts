@@ -16,7 +16,10 @@ afterEach(async () => {
 });
 
 /** A terminal where a person gives `answers` in order, and a `.env` in memory. */
-function terminal(telegram: FakeTelegram, options: { interactive?: boolean; env?: Record<string, string>; answers?: (string | (() => string))[] } = {}) {
+function terminal(
+  telegram: FakeTelegram,
+  options: { interactive?: boolean; env?: Record<string, string>; answers?: (string | (() => string))[]; config?: Record<string, unknown> } = {},
+) {
   const env = new Map(Object.entries(options.env ?? {}));
   const answers = [...(options.answers ?? [])];
   const said: string[] = [];
@@ -29,7 +32,7 @@ function terminal(telegram: FakeTelegram, options: { interactive?: boolean; env?
   };
   const io: ConfigureIO = {
     interactive: options.interactive ?? true,
-    config: { apiBase: telegram.url },
+    config: { apiBase: telegram.url, ...options.config },
     get: (name) => env.get(name),
     set: (name, value) => void env.set(name, value),
     ask: next,
@@ -167,3 +170,22 @@ test("a bot with a webhook is explained, not waited on", async () => {
   expect((await configure(t.io))[0]).toContain("TELEGRAM_ALLOWED_USERS");
   expect(t.said.join("\n")).toContain("The bot has a webhook");
 });
+
+test("accounts: each bot is configured with its own variables; a missing one is named", async () => {
+  const telegram = fake();
+  const ops = telegram.addBot("555555:ops-token-for-tests", { id: 5353, is_bot: true, first_name: "Ops Bot", username: "acme_ops_bot" });
+  const done = terminal(telegram, {
+    interactive: false,
+    config: { accounts: ["ops"] },
+    env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_OPS_BOT_TOKEN: ops.token, TELEGRAM_OPS_ALLOWED_USERS: "3003" },
+  });
+  expect(await configure(done.io)).toEqual([]);
+  expect(done.said.join("\n")).toContain('Telegram bot "ops" (telegram:ops)');
+  expect(done.said.join("\n")).toContain("bot @acme_ops_bot");
+
+  const missing = terminal(telegram, { interactive: false, config: { accounts: ["ops"] }, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001" } });
+  const left = await configure(missing.io);
+  expect(left).toHaveLength(1);
+  expect(left[0]).toContain("TELEGRAM_OPS_BOT_TOKEN");
+});
+

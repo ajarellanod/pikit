@@ -38,12 +38,61 @@ export interface FakeTelegram {
    * restart asks without the offset it had reached).
    */
   redeliver(): void;
+  /**
+   * Another bot on the same server (the same `apiBase`, as every account of the channel uses): its
+   * own token, updates and sent messages. `stop()` on any bot stops the server.
+   */
+  addBot(token: string, bot: TelegramUser): FakeTelegram;
   stop(): Promise<void>;
 }
 
+type Handler = (method: string, request: Request) => Promise<Response>;
+
 export function startFakeTelegram(): FakeTelegram {
-  const token = "123456789:fake-token-for-tests";
-  const bot: TelegramUser = { id: 4242, is_bot: true, first_name: "Test Bot", username: "pikit_test_bot" };
+  const handlers = new Map<string, Handler>();
+  const endPolls: (() => void)[] = [];
+  const server = Bun.serve({
+    port: 0,
+    hostname: "127.0.0.1",
+    async fetch(request) {
+      const match = /^\/bot([^/]+)\/(\w+)$/.exec(new URL(request.url).pathname);
+      if (match === null) return fail(404, "Not Found");
+      const [, given = "", method = ""] = match;
+      // As the real Bot API: a path that is not a token's shape is not found; a wrong token is refused.
+      if (!/^\d+:[A-Za-z0-9_-]+$/.test(given)) return fail(404, "Not Found");
+      const handle = handlers.get(given);
+      if (handle === undefined) return fail(401, "Unauthorized");
+      return await handle(method, request);
+    },
+  });
+  const shared: Shared = {
+    url: `http://127.0.0.1:${server.port}`,
+    stop: async () => {
+      for (const end of endPolls) end();
+      await server.stop(true);
+    },
+    add(token, bot) {
+      const { fake, handle, endPoll } = fakeBot(token, bot, shared);
+      handlers.set(token, handle);
+      endPolls.push(endPoll);
+      return fake;
+    },
+  };
+  return shared.add("123456789:fake-token-for-tests", { id: 4242, is_bot: true, first_name: "Test Bot", username: "pikit_test_bot" });
+}
+
+interface Shared {
+  url: string;
+  stop(): Promise<void>;
+  add(token: string, bot: TelegramUser): FakeTelegram;
+}
+
+const ok = (result: unknown) => Response.json({ ok: true, result });
+const fail = (code: number, description: string, extra: Record<string, unknown> = {}) =>
+  Response.json({ ok: false, error_code: code, description, ...extra }, { status: code });
+
+/** One bot's state, and the handler of its requests. */
+function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: FakeTelegram; handle: Handler; endPoll(): void } {
   const updates: TelegramUpdate[] = [];
   const history: TelegramUpdate[] = [];
   let nextUpdate = 1;
@@ -53,12 +102,8 @@ export function startFakeTelegram(): FakeTelegram {
   let polling: ((conflict: Response) => void) | undefined;
   const sentWaiters = new Set<() => void>();
 
-  const ok = (result: unknown) => Response.json({ ok: true, result });
-  const fail = (code: number, description: string, extra: Record<string, unknown> = {}) =>
-    Response.json({ ok: false, error_code: code, description, ...extra }, { status: code });
-
   const fake: FakeTelegram = {
-    url: "",
+    url: shared.url,
     token,
     bot,
     sent: [],
@@ -102,77 +147,64 @@ export function startFakeTelegram(): FakeTelegram {
       for (const update of history) updates.push({ ...update, update_id: nextUpdate++ });
       wake?.();
     },
-    stop: async () => {
-      polling?.(fail(409, "Conflict: server stopped"));
-      await server.stop(true);
-    },
+    addBot: (otherToken, otherBot) => shared.add(otherToken, otherBot),
+    stop: () => shared.stop(),
   };
 
-  const server = Bun.serve({
-    port: 0,
-    hostname: "127.0.0.1",
-    async fetch(request) {
-      const match = /^\/bot([^/]+)\/(\w+)$/.exec(new URL(request.url).pathname);
-      if (match === null) return fail(404, "Not Found");
-      const [, given, method] = match;
-      // As the real Bot API: a path that is not a token's shape is not found; a wrong token is refused.
-      if (!/^\d+:[A-Za-z0-9_-]+$/.test(given ?? "")) return fail(404, "Not Found");
-      if (given !== token) return fail(401, "Unauthorized");
-      const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-      switch (method) {
-        case "getMe":
-          return ok(bot);
-        case "getWebhookInfo":
-          return ok({ url: fake.webhookUrl, pending_update_count: updates.length });
-        case "sendChatAction":
-          fake.actions.push({ chatId: Number(body.chat_id), action: String(body.action) });
-          return ok(true);
-        case "sendMessage": {
-          if (fake.failNextSend !== undefined) {
-            const { code, description } = fake.failNextSend;
-            delete fake.failNextSend;
-            return fail(code, description);
-          }
-          if (fake.rateLimitNextSend !== undefined) {
-            const retryAfter = fake.rateLimitNextSend;
-            delete fake.rateLimitNextSend;
-            return fail(429, "Too Many Requests: retry later", { parameters: { retry_after: retryAfter } });
-          }
-          const html = body.parse_mode === "HTML";
-          if (html && fake.rejectHtml) return fail(400, "Bad Request: can't parse entities");
-          fake.sent.push({ chatId: Number(body.chat_id), text: String(body.text), html });
-          for (const resolve of sentWaiters) resolve();
-          sentWaiters.clear();
-          return ok({ message_id: nextMessage++ });
+  const handle: Handler = async (method, request) => {
+    const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
+    switch (method) {
+      case "getMe":
+        return ok(bot);
+      case "getWebhookInfo":
+        return ok({ url: fake.webhookUrl, pending_update_count: updates.length });
+      case "sendChatAction":
+        fake.actions.push({ chatId: Number(body.chat_id), action: String(body.action) });
+        return ok(true);
+      case "sendMessage": {
+        if (fake.failNextSend !== undefined) {
+          const { code, description } = fake.failNextSend;
+          delete fake.failNextSend;
+          return fail(code, description);
         }
-        case "getUpdates": {
-          if (fake.webhookUrl !== "") return fail(409, "Conflict: can't use getUpdates method while webhook is active");
-          polling?.(fail(409, "Conflict: terminated by other getUpdates request"));
-          const offset = typeof body.offset === "number" ? body.offset : undefined;
-          fake.offsets.push(offset);
-          // An offset confirms every update before it: Telegram forgets them.
-          if (offset !== undefined) while (updates[0] !== undefined && updates[0].update_id < offset) updates.shift();
-          const ready = () => updates.filter((u) => offset === undefined || u.update_id >= offset);
-          const timeout = Math.min(Number(body.timeout ?? 0), 2);
-          if (ready().length > 0 || timeout === 0) return ok(ready());
-          return new Promise<Response>((resolve) => {
-            const finish = (response: Response) => {
-              clearTimeout(timer);
-              wake = undefined;
-              polling = undefined;
-              resolve(response);
-            };
-            const timer = setTimeout(() => finish(ok(ready())), timeout * 1000);
-            wake = () => finish(ok(ready()));
-            polling = finish;
-            request.signal.addEventListener("abort", () => finish(ok([])), { once: true });
-          });
+        if (fake.rateLimitNextSend !== undefined) {
+          const retryAfter = fake.rateLimitNextSend;
+          delete fake.rateLimitNextSend;
+          return fail(429, "Too Many Requests: retry later", { parameters: { retry_after: retryAfter } });
         }
-        default:
-          return fail(404, `Not Found: method ${method}`);
+        const html = body.parse_mode === "HTML";
+        if (html && fake.rejectHtml) return fail(400, "Bad Request: can't parse entities");
+        fake.sent.push({ chatId: Number(body.chat_id), text: String(body.text), html });
+        for (const resolve of sentWaiters) resolve();
+        sentWaiters.clear();
+        return ok({ message_id: nextMessage++ });
       }
-    },
-  });
-  fake.url = `http://127.0.0.1:${server.port}`;
-  return fake;
+      case "getUpdates": {
+        if (fake.webhookUrl !== "") return fail(409, "Conflict: can't use getUpdates method while webhook is active");
+        polling?.(fail(409, "Conflict: terminated by other getUpdates request"));
+        const offset = typeof body.offset === "number" ? body.offset : undefined;
+        fake.offsets.push(offset);
+        // An offset confirms every update before it: Telegram forgets them.
+        if (offset !== undefined) while (updates[0] !== undefined && updates[0].update_id < offset) updates.shift();
+        const ready = () => updates.filter((u) => offset === undefined || u.update_id >= offset);
+        const timeout = Math.min(Number(body.timeout ?? 0), 2);
+        if (ready().length > 0 || timeout === 0) return ok(ready());
+        return new Promise<Response>((resolve) => {
+          const finish = (response: Response) => {
+            clearTimeout(timer);
+            wake = undefined;
+            polling = undefined;
+            resolve(response);
+          };
+          const timer = setTimeout(() => finish(ok(ready())), timeout * 1000);
+          wake = () => finish(ok(ready()));
+          polling = finish;
+          request.signal.addEventListener("abort", () => finish(ok([])), { once: true });
+        });
+      }
+      default:
+        return fail(404, `Not Found: method ${method}`);
+    }
+  };
+  return { fake, handle, endPoll: () => polling?.(fail(409, "Conflict: server stopped")) };
 }
