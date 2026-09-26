@@ -132,7 +132,7 @@ keys (`capabilities`) at the same level.
 import { defineComponent } from "@pikit/core";
 
 export default defineComponent({
-  name: "durable-outbox",
+  name: "outbound-durable",
   version: "1.2.0",
 
   config: OutboxConfigSchema,        // typebox; merged into the global config schema
@@ -233,7 +233,7 @@ declare module "@pikit/core" {
 
 For events that cross a process or persistence boundary (queues, webhooks, restored state) a
 runtime schema is also registered. `[planned]` — built with the first component that
-persists an event (`durable-outbox`):
+persists an event (`outbound-durable`):
 
 ```ts
 pikit.registerEvent({
@@ -358,7 +358,7 @@ Core-defined capability contracts (interfaces only; no implementations in core):
 | `agent.state` | `AgentState` | Per-conversation JSON state read by `prepare` and updated by tools. Not a capability today: the runtime puts the conversation's `AgentState` in the context of each run (`AGENT_STATE`), stored in the Pi session (§6.2a, §6.4); no separate store. A capability for components that act outside a run (an admin route, a scheduler) is `[planned]`, with the first one that needs it. |
 | (no capability) | `ChannelTransport` | How a channel sends to its platform: `idempotent`, `split`, `send` (§5, "Outbound delivery"). Not in the registry: a channel attaches its transport to `outbound.queue` while it runs, since a keyed `channel.transport` used by the queue, and a queue used by the channel, would be a dependency cycle. Without a queue, the channel sends through its own transport. |
 | `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
-| `outbound.queue` | `OutboundQueue` | `enqueue`, `attach`, `detach` (§5, "Outbound delivery"). Optional: without it a channel sends directly, best effort, as in M1. `durable-outbox` (M2) provides it on `storage.sql`. |
+| `outbound.queue` | `OutboundQueue` | `enqueue`, `attach`, `detach` (§5, "Outbound delivery"). Optional: without it a channel sends directly, best effort, as in M1. `outbound-durable` (M2) provides it on `storage.sql`. |
 | `scheduler` | `Scheduler` | Register/cancel timed jobs. |
 | `approvals` | `ApprovalStore` | Decision lifecycle persistence. |
 | `secrets` | `SecretStore` | `get(name)`: the value, or `undefined` when it is not set; an empty value is not set. The process environment (`secrets-env`, which never reads `.env` files itself), Worker bindings, an external vault. |
@@ -521,7 +521,7 @@ pipeline outbound.prepare          → OutboundMessage
   session whether or not a POST waits, and a POST that waited longer than `replyTimeoutMs` gets
   `202 { requestId }`. Reason: a client waiting on its own request has nothing to retry and no
   transport that can fail. `outbound.prepare`, `channel.transport` and the outbox arrive in M2 with
-  `durable-outbox` and the first channel that sends to a platform. No `outbound-direct` component
+  `outbound-durable` and the first channel that sends to a platform. No `outbound-direct` component
   is built, because M2 would replace it.
 - **Duplicates.** A POST whose `messageId` is already in the conversation gets
   `409 { requestId, error: "duplicate" }` and does not run. Its answer went to the first POST and
@@ -574,7 +574,7 @@ returns what happened:
   answer to the chat once per run, with "typing…" while it runs. It converts Markdown to Telegram's
   HTML (plain text when Telegram refuses it) and splits answers at 4096 characters. It retries in
   the process: after `retry_after` on a 429, with backoff on network errors and 5xx.
-  - This is the platform-sending case M2's `durable-outbox` is for. When the outbox exists, the
+  - This is the platform-sending case M2's `outbound-durable` is for. When the outbox exists, the
     sending moves behind `channel.transport`, and ingress does not change.
   - Until then, a reply lost to a crash while sending is not sent again; the answer is in the
     session.
@@ -606,7 +606,7 @@ returns what happened:
 - A conversation keeps the agent it was created with (§7.1). A changed rule applies to new
   conversations, and to an existing one after a reset (`/new`).
 
-**Outbound delivery.** `[decision]` (M2) The shape `durable-outbox` implements. It follows Hermes'
+**Outbound delivery.** `[decision]` (M2) The shape `outbound-durable` implements. It follows Hermes'
 delivery ledger, with what NanoClaw and OpenClaw lack: backoff, per-conversation order, per-piece
 progress, and one send path.
 
@@ -2317,6 +2317,19 @@ is that the answer is "nothing" for every minor.
   credential when its function returns nothing, failed `modify`, `delete` and persistence. It also
   checks what pikit relies on: an OAuth refresh and a login by pi-ai are written back through the
   store. pi-ai's `InMemoryCredentialStore` is the double.
+- **SQL database conformance** (`createSqlDatabaseConformance`): every `storage.sql`. Values of each
+  type read back as written, parameters bound (never interpolated), `run`'s change counts,
+  transactions that commit or roll back whole and reject with the work's own error, concurrent
+  transactions that lose no update, statements outside a transaction that never see half of one, and
+  data that survives a new app. A `node:sqlite` in-memory double in the suite's own test passes it.
+- **Outbound queue conformance** (`createOutboundQueueConformance`): every `outbound.queue`. The suite
+  owns the clock (`createManualClock`, also exported for components that wait) and a scripted
+  transport, and checks §5 "Outbound delivery" to the millisecond: order per conversation, one
+  conversation waiting behind a retry while others move, the backoff and the abandonment at the fifth
+  transient failure, rate limits not counted, the 24-hour limit, possible duplicates (`maybeSent`, a
+  send in flight when the process stopped, a send aborted by `detach`), and records that survive a
+  restart. It has no in-memory double: one would be a second outbox. `outbound-durable` is its first
+  implementation, and also runs a SIGKILL-during-a-send test in a real process.
 - **Execution conformance** (`createExecutionConformance` in `@pikit/pi-adapter/testing`): every
   `execution` and `execution.shell`. It checks what Pi's tools rely on:
   - paths relative to `cwd`, and reading, writing, appending, listing, renaming and removing;
@@ -2374,7 +2387,7 @@ The design is considered validated when all five pass without touching the core:
    exists (long polling, allowlist, its own `configure` step), with `sessions-jsonl` for now.
    `packages/cli/src/e2e-telegram.test.ts` runs `new --preset telegram` → `configure` → `dev` → an
    answer in the chat, against a fake Bot API.
-3. **Reliability**: `+ durable-outbox` → delivery retried after simulated channel failure;
+3. **Reliability**: `+ outbound-durable` → delivery retried after simulated channel failure;
    channel component unchanged.
 4. **Swap**: `remove sessions-sqlite`, `add sessions-postgres` → router/channel/agent
    untouched; conformance suite green.
@@ -2517,7 +2530,7 @@ Resolved `[decision]`:
   (HTTP) would wait forever. The list is read from the transcript; no record is added.
 - M1's HTTP channel answers in the response (§5): `channel-http` listens to `agent.settled` /
   `agent.failed` and answers every waiting POST among the run's `requestIds`. There is no
-  `outbound-direct`, `outbound.prepare` or `channel.transport` until M2's `durable-outbox`: a
+  `outbound-direct`, `outbound.prepare` or `channel.transport` until M2's `outbound-durable`: a
   synchronous reply has nothing to retry, and a direct outbound path built now would be replaced
   in M2. A duplicate `messageId` is a `409`, with no stored answer to replay.
 - A component can own its `pikit configure` step (`src/pikit/<name>/configure.ts`, §11): the setup
@@ -2614,7 +2627,7 @@ value. Each one is built contracts-first against the core in §4–§5 and must 
 |---|---|
 | `approvals` | Deterministic decision lifecycle: proposed → approved/rejected → executed → verified, with retries, reminders, stalled escalation, TTL/abandonment, and **delivery-time binding** of a decision to the message/thread where a human can answer it (a decision created by a scheduled job cannot know its answer surface until the result is sent). |
 | `inbound-dedup` | Transport deduplication (§5): claim / commit / release of platform delivery ids, duplicates halted, retries of crashed attempts allowed, stale claims expired. At-least-once by contract. Logical deduplication is Pi's. |
-| `durable-outbox` | Outbound intents persisted before send, retried with backoff, dead-lettered, and recorded so later replies can quote or thread against them. |
+| `outbound-durable` | Outbound intents persisted before send, retried with backoff, dead-lettered, and recorded so later replies can quote or thread against them. |
 | `conversations.registry` | Conversation key → active session + workspace ref, with TTL eviction of memory that never drops the pointer, and explicit `/reset` semantics. |
 | `routines` | File-defined scheduled prompts (`src/agents/{name}/routines/*.yaml`) synced into `scheduler`, with target fan-out by route tags and previous-run context injection. |
 | `policy-tools` | Role-based interception of `agent.tool.call`: shell command and path rules, allow/deny lists, hot-reloadable. Policy mediation, not a sandbox. |

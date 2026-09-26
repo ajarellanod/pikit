@@ -78,7 +78,7 @@ is in the session whether or not anyone waits.
 Delivery guarantee: once a message is accepted, it is in the conversation's session and is
 answered there. If the process dies, the next one resumes the run. The HTTP response is the only
 delivery; a client that got a `202` finds the answer in the session. Sending answers to platforms,
-with retries, comes with `durable-outbox` (M2).
+with retries, comes with `outbound-durable` (M2).
 
 It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 characters.
 

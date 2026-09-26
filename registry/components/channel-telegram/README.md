@@ -59,7 +59,7 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   again after a crash is recognised by its id (`telegram:<chat>:<message>`) and answered once.
 - **Sending** retries in the process: after `retry_after` for Telegram's 429, and with backoff for
   network errors and 5xx. A reply lost to a crash while sending is not sent again, but the answer
-  is in the conversation's session. Durable delivery comes with `durable-outbox` (M2).
+  is in the conversation's session. Durable delivery comes with `outbound-durable` (M2).
 
 It refuses to start:
 - without a token, or with a token Telegram does not know;

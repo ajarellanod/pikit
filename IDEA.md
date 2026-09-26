@@ -70,7 +70,7 @@ your repository as code you own.
 Then, as needs grow:
 
 ```bash
-pikit add durable-outbox        # reliable delivery with retries
+pikit add outbound-durable        # reliable delivery with retries
 pikit add scheduler             # cron-style routines
 pikit add approvals             # human-in-the-loop decisions
 pikit add sessions-postgres     # swap SQLite for Postgres

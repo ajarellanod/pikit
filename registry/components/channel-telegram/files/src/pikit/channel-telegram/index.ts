@@ -10,7 +10,7 @@
  *   conversation durably accepted it; a redelivery is a duplicate request, answered once.
  * - Replies (`replies.ts`): the channel listens to `agent.settled` / `agent.failed` and answers the
  *   chat once per run, whichever messages the run took. Best effort in M1, retried in the process;
- *   durable delivery through `channel.transport` and `durable-outbox` comes in M2, as for
+ *   durable delivery through `channel.transport` and `outbound-durable` comes in M2, as for
  *   `channel-http` (SPEC §5, "M1: the HTTP channel").
  *
  * It refuses to start without a valid token, without at least one allowed user, or when the bot has

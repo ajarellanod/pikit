@@ -24,7 +24,7 @@
  * - `502 { requestId, error }`: the run failed. `409 { error: "aborted" }`: it was stopped.
  *
  * Delivery `[decision]` for M1: the answer is returned in the HTTP response, not sent through
- * `outbound.prepare` and `channel.transport`, which arrive in M2 with `durable-outbox`. The channel
+ * `outbound.prepare` and `channel.transport`, which arrive in M2 with `outbound-durable`. The channel
  * listens to `agent.settled` / `agent.failed` itself and answers every POST waiting for one of the
  * run's `requestIds`. The map of waiting POSTs is a cache: the answer is in the session anyway.
  * Guarantee: a message accepted by `dispatch` (any answer but 4xx/5xx before it) is in the session

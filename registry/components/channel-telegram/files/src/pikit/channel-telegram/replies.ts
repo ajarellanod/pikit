@@ -9,7 +9,7 @@
  *
  * Delivery guarantee (M1): best effort within the process. The answer is always in the
  * conversation's session; a reply lost to a crash while sending is not sent again. Durable delivery
- * with retries across restarts is `durable-outbox`'s job (M2), through `channel.transport`.
+ * with retries across restarts is `outbound-durable`'s job (M2), through `channel.transport`.
  */
 
 import type { Logger } from "@pikit/core";

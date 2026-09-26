@@ -339,14 +339,14 @@ redeliveries, channel outages, restarts and scheduled work.
   - a redelivered update is one request, answered once;
   - only allowlisted users reach the agent.
 - Run against the real Telegram (M1's VPS run): the owner's messages answered, OAuth in Docker.
-- Left for M2: replies through `channel.transport` and `durable-outbox`.
+- Left for M2: replies through `channel.transport` and `outbound-durable`.
 
-**Scope:** `channel-telegram`, `storage-sqlite`, `durable-outbox` (SPEC §5 "Outbound delivery"),
+**Scope:** `channel-telegram`, `storage-sqlite`, `outbound-durable` (SPEC §5 "Outbound delivery"),
 `scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided
 here, with the first components that can fail while running.
 
 **Order of work:** (M1.5's `router-rules`) → `storage-sqlite` → the outbound contracts and their
-conformance suite → `durable-outbox`, with a test that kills the process mid-send →
+conformance suite → `outbound-durable`, with a test that kills the process mid-send →
 `channel-telegram` on it (real bot) → the rest of M1.5 → health → `scheduler-cron`.
 
 **Moved:** `inbound-dedup` and `expose` come with the first webhook channel: Google Chat, by
