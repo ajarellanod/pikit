@@ -161,7 +161,10 @@ function serialize(all: Map<string, Credential>): string {
 
 let temporaries = 0;
 
-/** Temporary file (0600), flush, rename: never a half-written file of secrets. */
+/**
+ * Temporary file (0600), flush, rename, flush the directory: never a half-written file of secrets,
+ * and a refreshed OAuth token that survives a crash right after it was written.
+ */
 async function writeAtomically(file: string, text: string): Promise<void> {
   const temporary = `${file}.${process.pid}.${++temporaries}.tmp`;
   try {
@@ -176,6 +179,16 @@ async function writeAtomically(file: string, text: string): Promise<void> {
   } catch (error) {
     await rm(temporary, { force: true });
     throw error;
+  }
+  // The rename lives in the directory: flush it too, where the platform allows it. Without it, a
+  // crash can bring back the old file, and with it a refresh token the provider already revoked.
+  const directory = await open(dirname(file), "r");
+  try {
+    await directory.sync();
+  } catch {
+    // Some platforms refuse fsync on a directory; the rename is still atomic there.
+  } finally {
+    await directory.close();
   }
 }
 

@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/credentials-file: a write flushes the directory after its rename, as
+  `conversations-file` does. Before, a crash right after a token refresh could bring the old file
+  back, with a refresh token the provider had already revoked.
 - core, contracts: **breaking.** `@pikit/core` is now only the kernel: `defineApp`,
   `defineComponent`, the capability, event and pipeline machinery, the context, clock and logger.
   The vocabulary the components share moved to a new package, `@pikit/contracts`, which versions on

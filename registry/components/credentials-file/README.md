@@ -27,7 +27,8 @@ shape as Pi's own `auth.json`:
 
 Every read opens the file again, so a login written by another process takes effect at the next
 request. Writes run one at a time and replace the file atomically: a temporary file is created with
-mode `0600`, flushed, and renamed over the old one.
+mode `0600`, flushed, and renamed over the old one, and the directory is flushed too, so a crash
+right after a token refresh does not bring the old token back.
 
 It creates the file (and its directory, mode `0700`) at start if they do not exist. It refuses to
 start when the file is not valid JSON or holds something that is not a credential. The error names
