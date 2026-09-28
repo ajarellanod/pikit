@@ -11,12 +11,13 @@
  *   7. add its npm dependencies; `bun install`
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not)
  *   9. append its variables to `.env.example`
- *  10. record the registry, version, commit and file hashes in `pikit.json`
+ *  10. record the registry, version, commit and file hashes in `pikit.json`, and keep each file as
+ *      installed, its base, in `pikit-bases/` (`bases.ts`)
  *  11. `pikit doctor`
  *
  * Every refusal (steps 1–5, for the component and the providers it brings) comes before the first
  * write. A step that fails after it puts back what was written: `package.json`, `bun.lock`,
- * `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files and the new tarballs.
+ * `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files, the bases and the new tarballs.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -24,6 +25,7 @@ import { dirname, join } from "node:path";
 import { stripComments } from "../registry/imports.ts";
 import { coreVersion } from "../registry/commands.ts";
 import type { Manifest } from "../registry/manifest.ts";
+import { basePath, unreferencedBases } from "../project/bases.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry } from "../project/config-file.ts";
 import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-file.ts";
 import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
@@ -258,12 +260,18 @@ function alsoWrites(name: string, files: Map<string, string>): string {
   return others.length === 0 ? "" : ` It also writes, outside ${ownDir(name)}: ${others.join(", ")}`;
 }
 
-/** Steps 6–10 for the confirmed plans: files, npm dependencies, then the draft's three files. */
+/** Steps 6–10 for the confirmed plans: files and their bases, npm dependencies, then the draft's three files. */
 function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], undo: Undo): { dependenciesChanged: boolean } {
   for (const plan of plans) {
+    const recorded = draft.project.components[plan.name]?.files ?? {};
     for (const [target, source] of plan.files) {
       undo.keep(target);
       copyFileSync(source, undo.mkdirFor(target));
+      // The base is named by the hash pikit.json records: the source's, which the copy has.
+      const base = basePath(recorded[target]?.hash ?? hashFile(source));
+      if (existsSync(join(projectDir, base))) continue;
+      undo.keep(base);
+      copyFileSync(source, undo.mkdirFor(base));
     }
   }
 
@@ -287,6 +295,11 @@ function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], un
   }
   undo.keep(PIKIT_JSON);
   writeProjectManifest(projectDir, draft.project);
+  // A reinstall (--force) replaces the component's hashes: the bases of the old ones may be nobody's now.
+  for (const base of unreferencedBases(projectDir, draft.project)) {
+    undo.keep(base);
+    rmSync(join(projectDir, base));
+  }
   return { dependenciesChanged };
 }
 
@@ -403,6 +416,9 @@ function checkConflicts(projectDir: string, project: ProjectManifest, name: stri
 
 function describePlan({ registry, manifest, files }: Plan): void {
   log.step(`${manifest.name} ${manifest.version} from ${registry.root}${registry.commit ? ` at ${registry.commit}` : ""}`);
+  if (registry.commit?.endsWith("-dirty")) {
+    log.warn(`the registry has uncommitted changes: its commit does not name these files (pikit-bases/ keeps them as installed, for \`pikit upgrade\`)`);
+  }
   // A registry may be anyone's: a file outside the component's directory is shown by its path, marked.
   const others = outside(manifest.name, files);
   log.info(`  files: ${files.size - others.length} in ${ownDir(manifest.name)}`);

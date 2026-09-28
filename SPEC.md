@@ -2218,11 +2218,22 @@ Rules:
   `--registry` was given, so these are the CLI's registry by construction. Another path inside the
   project becomes relative, and any other stays as it was.
 - `commit` is the registry's Git commit when the component was installed, ending in `-dirty` when the
-  registry had uncommitted changes; absent when the registry is not in Git.
+  registry had uncommitted changes (`add` says so in its plan); absent when the registry is not in Git.
 - `files` holds each installed file's hash. `[decision]` Whether a file is modified is computed by
   comparing hashes and never stored: a stored flag goes stale as soon as someone edits the file.
   `doctor` lists modified files as information, `remove` refuses to delete them without `--force`,
   and M3's three-way `upgrade` takes the hash as its base.
+- **Bases.** `[decision]` Each file a component installs is also kept, as installed, in the project's
+  `pikit-bases/`, named by the hash `files` records for it (`sha256:<hex>` → `pikit-bases/<hex>`). It
+  is what M3's three-way `upgrade` diffs against, and the registry cannot always give it back: its
+  commit may be `-dirty`, it may not be in Git, or its path may be gone. Content-addressed, so two
+  components installing the same bytes share one base. No extension, so `tsc`, `bun test` and
+  `doctor`'s source scan never read a base as code. Committed with the project, so not under
+  `.pikit/`, which is ignored because it holds credentials; like `vendor/`, no component may write
+  under it (§10.2). `remove` deletes the bases no remaining component names, and a failed `add` puts
+  them back as they were. A project installed before bases existed has none for what it had then:
+  nothing is lost, since those files had no base before either; reinstalling a component
+  (`add --force`) stores its bases, and M3's `upgrade` falls back to the recorded `commit` for it.
 - `dependencies` and `environment` are the manifest's fields at install time: `remove` deletes the
   npm packages nothing else needs, and `doctor` and `configure` know the variables, from this file
   alone.
@@ -2277,7 +2288,8 @@ pikit add channel-http [--registry <path>] [--force] [--yes]
   8. edit pikit.config.ts: append the import and the `components` entry
      (a component with no default export, a `deployment-*`, is not listed)
   9. append its variables to .env.example, one block per component
- 10. record registry, version, commit, file hashes, dependencies and environment in pikit.json
+ 10. record registry, version, commit, file hashes, dependencies and environment in pikit.json;
+     keep each file as installed in pikit-bases/ (§10.3)
  11. run `pikit doctor`
 ```
 
@@ -2286,8 +2298,8 @@ provider it brings (asked after the confirmation), and the edits of steps 8–10
 `pikit.config.ts` of another shape refuses too. A refused `add` (installed, incompatible, a file
 conflict, a "no") leaves the project byte for byte as it was, `package.json`, `vendor/` and `bun.lock`
 included. A step that fails once writing began (`bun install`, say) puts back what it wrote:
-`package.json`, `bun.lock`, `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files and the new
-tarballs; only `node_modules` is not. Rationale: a `package.json` that `bun.lock` does not match fails
+`package.json`, `bun.lock`, `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files, the bases
+and the new tarballs; only `node_modules` is not. Rationale: a `package.json` that `bun.lock` does not match fails
 the next `bun install --frozen-lockfile`, in `deployment-docker`'s image build.
 
 `[decision]` The CLI edits `pikit.config.ts` as text, on one shape: one import line per component
@@ -2311,7 +2323,8 @@ with `doctor`. `remove` also:
   checked only at start;
 - refuses to delete a file whose hash differs from `pikit.json` without `--force`;
 - removes the component's import, its `components` entry and its `config` key, its `.env.example`
-  block, and the npm dependencies no remaining component declares and no project file imports.
+  block, the bases no remaining component names, and the npm dependencies no remaining component
+  declares and no project file imports.
 
 Adding and then removing a component leaves `git status` clean (S3). The CLI's end-to-end test checks
 it on a generated project.

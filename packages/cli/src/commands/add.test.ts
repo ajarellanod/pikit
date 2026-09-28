@@ -10,10 +10,10 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { emptyManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { emptyManifest, hashOf, writeProjectManifest } from "../project/pikit-json.ts";
 import { EXTENSION_ALIAS, KIT_PACKAGES } from "../project/vendor.ts";
 
 const MAIN = join(import.meta.dir, "..", "main.ts");
@@ -163,7 +163,46 @@ test("an add that fails once writing began puts back what it wrote: files, tarba
   expect(run.err).toContain("nothing was added");
   expect(run.out).toContain("refreshed to this CLI's");
   expect(snapshot(dir)).toEqual(before);
+  expect(existsSync(join(dir, "pikit-bases"))).toBe(false);
 }, 120_000);
+
+test("a reinstall that fails puts back the bases it replaced, and removes those it wrote", () => {
+  const dir = otherKitProject();
+  // log-events, installed by an older registry: one file, with its base.
+  const file = "src/pikit/log-events/index.ts";
+  const hash = hashOf("the older log-events\n");
+  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
+  manifest.components["log-events"] = { registry: "default", version: "0.0.0", files: { [file]: { hash } }, dependencies: {}, environment: [] };
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
+  mkdirSync(join(dir, "src", "pikit", "log-events"), { recursive: true });
+  writeFileSync(join(dir, file), "the older log-events\n");
+  mkdirSync(join(dir, "pikit-bases"));
+  writeFileSync(join(dir, "pikit-bases", hash.slice("sha256:".length)), "the older log-events\n");
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const before = snapshot(dir);
+  const run = pikit(["add", "log-events", "--yes", "--force"], dir);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("nothing was added");
+  expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
+test("the plan says when the registry has uncommitted changes", () => {
+  const dir = otherKitProject();
+  const registry = fakeRegistry({});
+  const git = (...args: string[]) => Bun.spawnSync(["git", "-C", registry, "-c", "user.email=t@pikit.test", "-c", "user.name=t", ...args], { stdout: "pipe", stderr: "pipe" });
+  expect(git("init", "-q").exitCode).toBe(0);
+  git("add", "-A");
+  expect(git("commit", "-qm", "registry").exitCode).toBe(0);
+  const clean = pikit(["add", "tool-fake", "--registry", registry], dir);
+  expect(clean.out).toMatch(/tool-fake 0\.0\.0 from .* at [0-9a-f]{40}\n/);
+  expect(clean.err).not.toContain("uncommitted changes");
+
+  writeFileSync(join(registry, "components", "tool-fake", "files", "src", "pikit", "tool-fake", "index.ts"), "export default { edited: true };\n");
+  const dirty = pikit(["add", "tool-fake", "--registry", registry], dir);
+  expect(dirty.out).toMatch(/at [0-9a-f]{40}-dirty\n/);
+  expect(dirty.err).toContain("the registry has uncommitted changes: its commit does not name these files");
+  expect(dirty.err).toContain("pass --yes");
+}, 60_000);
 
 test("the plan and the confirmation name each file written outside the component's directory", async () => {
   const dir = otherKitProject();

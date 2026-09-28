@@ -190,6 +190,31 @@ test("a project cloned on another machine resolves its registry: a v1 checkout p
   expect(Object.keys(manifest.components)).toEqual(["log-events"]);
 }, 60_000);
 
+test("add keeps each installed file's base, named by its hash; remove deletes the bases no component names", () => {
+  const dir = clonedProject();
+  expect(pikit(["add", "log-events", "--yes"], dir).code).toBe(0);
+  const files: Record<string, { hash: string }> = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8")).components["log-events"].files;
+  expect(Object.keys(files).length).toBeGreaterThan(0);
+  const base = (hash: string) => join(dir, "pikit-bases", hash.slice("sha256:".length));
+  for (const [file, { hash }] of Object.entries(files)) {
+    expect(hashOf(readFileSync(base(hash)))).toBe(hash);
+    expect(readFileSync(base(hash), "utf8")).toBe(readFileSync(join(dir, file), "utf8"));
+  }
+  expect(readdirSync(join(dir, "pikit-bases")).length).toBe(Object.keys(files).length);
+
+  // Another component installed a file with the same content: its base stays with it.
+  const [shared, { hash: sharedHash }] = Object.entries(files)[0] as [string, { hash: string }];
+  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
+  manifest.components["log-copy"] = { registry: "default", version: "0.0.0", files: { "src/copy.ts": { hash: sharedHash } }, dependencies: {}, environment: [] };
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
+  writeFileSync(join(dir, "src", "copy.ts"), readFileSync(join(dir, shared)));
+
+  expect(pikit(["remove", "log-events"], dir).code).toBe(0);
+  expect(readdirSync(join(dir, "pikit-bases"))).toEqual([sharedHash.slice("sha256:".length)]);
+  expect(pikit(["remove", "log-copy"], dir).code).toBe(0);
+  expect(existsSync(join(dir, "pikit-bases"))).toBe(false);
+}, 60_000);
+
 test("add from a registry outside the project says the project is not portable; the builtin one and one inside it do not", () => {
   const dir = tinyProject();
   expect(pikit(["add", "log-events", "--registry", DEFAULT_REGISTRY], dir).err).not.toContain("is a path on this machine");
