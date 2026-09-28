@@ -17,6 +17,7 @@ import { type AppEvents, defineApp, defineComponent, type Logger, silentLogger }
 import { type AgentDefinition, defineAgent } from "@pikit/contracts";
 import { createPiRuntime, type ExtensionAPI, modelsFrom, type PiExtension, type SessionStore } from "../index.ts";
 import { holdTool, killMidRun, scriptedAgent, scriptedProvider } from "../testing/index.ts";
+import { TOOL_POLICY_FAILED } from "./host.ts";
 import hello from "./pi-examples/hello.ts";
 import permissionGate from "./pi-examples/permission-gate.ts";
 import protectedPaths from "./pi-examples/protected-paths.ts";
@@ -233,6 +234,27 @@ describe("the mapping of Pi's extension events (SPEC §6.2b)", () => {
       "agent_end",
       "session_shutdown",
     ]);
+  });
+
+  test("a tool_call handler that throws blocks the call, and the reason does not carry its error", async () => {
+    const errors: string[] = [];
+    const logger: Logger = { ...silentLogger, error: (message) => void errors.push(message) };
+    // A permission gate whose policy service is down.
+    const gate: PiExtension = (pi) =>
+      void pi.on("tool_call", async () => {
+        throw new Error("policy service unreachable: token=secret");
+      });
+    const s = await setup([gate], { logger });
+
+    const result = await s.say("bash: rm -rf /");
+
+    expect(s.ran).toEqual([]);
+    expect(result.text).toBe(`tool said: ${TOOL_POLICY_FAILED}`);
+    const toolResult = result.messages.find((message) => message.role === "toolResult");
+    expect(toolResult?.role === "toolResult" && toolResult.isError).toBe(true);
+    expect(JSON.stringify(result.messages)).not.toContain("secret");
+    expect(errors).toEqual(["a Pi extension's tool_call handler failed; the call is blocked"]);
+    await s.close();
   });
 
   test("tool_call can patch arguments in place, and tool_result can rewrite the result", async () => {
