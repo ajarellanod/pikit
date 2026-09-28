@@ -6,9 +6,8 @@ natural language).
 
 **Specified:** partly (moved from SPEC §18 and §9.1; the `scheduler` capability is named in SPEC §4.5)
 
-**Needed by:** ROADMAP M2 lists "Scheduled prompts run" and `scheduler-cron` in its scope, and M4
-lists `scheduler-cloudflare`. SPEC-CORE §4 does not name a scheduler in Cloudflare's required set.
-Whether M2 and M4 still require it is a question for the owner.
+**Needed by:** nothing required. Decided by the owner: scheduled work is a feature, so M2 (reliability)
+and M4 (Cloudflare) do not require it.
 
 ## What it gives
 Prompts that run on a schedule, in a conversation, with the answer delivered to the chat. Routines
@@ -35,7 +34,6 @@ me in two hours" inside one conversation: pikit must not build that. A schedule 
 across conversations is the host's.
 
 ## Open questions
-- Should M2 still require scheduled prompts, and M4 `scheduler-cloudflare`?
 - The agent creating a job from natural language: a `tool-schedule` (`replay: "never"`), or a
   routine file proposed through the self-change gate (SPEC-CORE §6)?
 - Previous-run context injection needs the `agent.prepare` pipeline ([pipeline anchors](pipeline-anchors.md)).

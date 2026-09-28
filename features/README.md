@@ -26,7 +26,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [pairing](pairing.md) | ⭐ | Unknown senders approved by the owner from the chat | No |
 | [rich-content](rich-content.md) | ⭐ | Images, files and buttons; the shape is decided in SPEC §5 | No |
 | [sandboxed-execution](sandboxed-execution.md) | ⭐ | Commands in a container, VM or remote host | Partly: track S requires `execution-cloudflare-sandbox`, specified there |
-| [scheduler](scheduler.md) | ⭐ | Scheduled prompts and file-defined routines, answered in the chat | Question: ROADMAP M2 and M4 list it |
+| [scheduler](scheduler.md) | ⭐ | Scheduled prompts and file-defined routines, answered in the chat | No |
 | [skills-hub](skills-hub.md) | ⭐ | Install shared skills as owned source | No |
 | [streaming-replies](streaming-replies.md) | ⭐ | A preview message edited as the answer is written | No |
 | [subagents](subagents.md) | ⭐ | Delegation to helpers (Pi's) and to other agents (pikit's) | No |
