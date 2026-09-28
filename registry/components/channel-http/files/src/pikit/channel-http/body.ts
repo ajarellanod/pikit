@@ -15,7 +15,8 @@ import Value from "typebox/value";
 
 /** URL-safe characters, 1 to 128 of them. */
 export const CONVERSATION_ID = "^[A-Za-z0-9._~-]{1,128}$";
-const MESSAGE_ID = "^[A-Za-z0-9._~:-]{1,128}$";
+/** URL-safe characters and `:`, 1 to 128 of them: it goes in `GET /v1/conversations/:id/messages/:messageId`. */
+export const MESSAGE_ID = "^[A-Za-z0-9._~:-]{1,128}$";
 
 export const MessageBody = Type.Object(
   {

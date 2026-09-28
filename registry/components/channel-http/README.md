@@ -2,10 +2,13 @@
 
 Talk to an agent over HTTP: send a message, get the answer in the response.
 
-- **Provides:** `http.route`: `POST /v1/messages` and `POST /v1/conversations/:id/reset`. It also
-  adds the stage `channel-http-bearer` to `http.authenticate`.
+- **Provides:** `http.route`: `POST /v1/messages`, `GET /v1/conversations/:id/messages/:messageId`
+  and `POST /v1/conversations/:id/reset`. It also adds the stage `channel-http-bearer` to
+  `http.authenticate`.
 - **Requires:** `secrets` (the token), `conversations.registry`, `agent.runtime`. A server (such as
   `server-bun`) serves the routes, and a router (such as `router-basic`) picks the agent.
+- **Uses, if installed:** `agent.submissions` (`submissions-sql`, which `pikit add runtime-pi`
+  offers): a message's outcome can be read later, and sending it again returns it.
 - **Targets:** `server` and `cloudflare` (fetch handlers and Web Crypto only).
 - **Installs to:** `src/pikit/channel-http/`.
 - **npm dependencies:** `typebox`.
@@ -39,7 +42,7 @@ The POST waits for the answer, up to `replyTimeoutMs` (120 s by default):
 | `400` | `{ error: "invalid_request", message }` | The body is not a message. |
 | `401` | `{ error: "unauthorized" }` | Missing or wrong token. |
 | `403` | `{ requestId, error: "denied" \| "rejected", message? }` | The router denied it. |
-| `409` | `{ requestId, error: "duplicate" }` | This `messageId` is already in the conversation. It does not run again, and its answer went to the first POST. |
+| `409` | `{ requestId, error: "duplicate" }` | This `messageId` is already in the conversation, and nothing records its outcome. It does not run again. With `agent.submissions`, the POST answers with its outcome instead (`200`, `202` while it runs, `502`, `409 aborted`). |
 | `409` | `{ requestId, error: "aborted" }` | The run was stopped before answering. |
 | `422` | `{ requestId, error: "rejected", message }` | A stage of `inbound.normalize` refused it. |
 | `500` | `{ requestId, error: "no_route" }` | No router decided. Install one. |
@@ -48,6 +51,23 @@ The POST waits for the answer, up to `replyTimeoutMs` (120 s by default):
 **A message sent while the agent is working changes its course.** It goes to Pi's inbox as a
 steer, and the run in progress takes it after its current tool calls. That run answers both
 messages, so both POSTs receive the same answer.
+
+### `GET /v1/conversations/:id/messages/:messageId`
+
+What became of a message, for a client whose POST answered `202` (the agent took longer than
+`replyTimeoutMs`, or the server restarted):
+
+| Status | Body | When |
+|---|---|---|
+| `200` | `{ requestId, text }` | The agent answered. |
+| `202` | `{ requestId }` | Still running. |
+| `409` | `{ requestId, error: "aborted" }` | The run was stopped before answering. |
+| `502` | `{ requestId, error: <code> }` | The run failed. |
+| `404` | `{ requestId, error: "not_found" }` | No such message in the conversation's current session: never sent, sent before a reset, or settled longer ago than `submissions-sql` keeps them (7 days). |
+| `501` | `{ error: "not_supported", message }` | `agent.submissions` is not installed: nothing keeps a message's outcome outside its session. |
+
+Sending the same POST again (same `conversationId` and `messageId`) answers the same way, and never
+runs it again.
 
 ### `POST /v1/conversations/:id/reset`
 
@@ -76,9 +96,10 @@ the run and each message queued into it. The waiting POSTs are an in-memory cach
 is in the session whether or not anyone waits.
 
 Delivery guarantee: once a message is accepted, it is in the conversation's session and is
-answered there. If the process dies, the next one resumes the run. The HTTP response is the only
-delivery; a client that got a `202` finds the answer in the session. Sending answers to platforms,
-with retries, comes with `outbound-durable` (M2).
+answered there. The HTTP response is the only push. With `agent.submissions` installed, a message
+is also recorded before the POST returns, the next process resumes its run at start if this one
+died, and a client that got a `202` reads the answer with `GET`. Without it, a run a dead process
+left waits for the next message to its conversation, and the answer is only in the session.
 
 It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 characters.
 
@@ -95,7 +116,9 @@ It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 charac
 `channel-http.test.ts` is copied with the component and runs in your project. It calls the routes
 as a server would, with small doubles for the runtime, the registry and the secrets. It covers the
 statuses above, a message steered into a busy run with both POSTs answered, per-conversation
-duplicates, cancellation, reset, the lifecycle conformance suite and the start failures.
+duplicates, cancellation, reset, the lifecycle conformance suite and the start failures; with
+`agent.submissions`, a `202` answered later by `GET` and by the same POST sent again, a failed run and
+unknown messages; without it, `GET`'s `501`.
 `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
 channel does with a message (routed, deduplicated, stopped, denied, no router), over these routes.
 The `samples/http` tests run the same channel with Pi, over real HTTP.

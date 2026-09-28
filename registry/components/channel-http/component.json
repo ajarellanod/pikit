@@ -17,7 +17,9 @@
     ]
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "agent.submissions"
+    ]
   },
   "provides": [
     "http.route"

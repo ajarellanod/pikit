@@ -24,8 +24,11 @@ test("what is already installed is not offered again", () => {
   expect(offeredProviders(registry, ["channel-telegram"], ["outbound-durable", "submissions-sql"])).toEqual([]);
 });
 
-test("HTTP brings nothing; tools do not bring a per-agent workspace, which is a choice, not an offer", () => {
-  expect(offeredProviders(registry, ["channel-http"])).toEqual([]);
+test("HTTP brings only the record of submissions (its GET); tools do not bring a per-agent workspace, which is a choice, not an offer", () => {
+  expect(offeredProviders(registry, ["channel-http"])).toEqual([
+    { component: "storage-sqlite", capability: "storage.sql", for: "submissions-sql", why: "required" },
+    { component: "submissions-sql", capability: "agent.submissions", for: "channel-http", why: "recommended" },
+  ]);
   for (const tool of ["tool-read", "tool-write", "tool-edit", "tool-bash"]) expect(offeredProviders(registry, [tool])).toEqual([]);
 });
 

@@ -12,11 +12,13 @@ import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger,
 import {
   type Admission,
   type AgentRuntime,
+  type AgentSubmissions,
   type ConversationRef,
   type ConversationRegistry,
   type HttpRoute,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
+import { createMemorySubmissions } from "@pikit/contracts/testing";
 import channelHttp from "./index.ts";
 
 const TOKEN = "test-token-0123456789abcdef";
@@ -62,8 +64,11 @@ const router = defineComponent({
   },
 });
 
-/** An agent runtime double: one run per session at a time; messages to a busy session join it. */
-function scriptedRuntime() {
+/**
+ * An agent runtime double: one run per session at a time; messages to a busy session join it. With
+ * `submissions`, it records admissions and run ends there, as runtime-pi does.
+ */
+function scriptedRuntime(submissions?: AgentSubmissions) {
   const dispatched: { requestId: string; key: string; agent: string; prompt: string }[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
@@ -85,9 +90,13 @@ function scriptedRuntime() {
         runs.delete(conversation.sessionId);
         const base = { conversation, requestId, requestIds: current.requestIds, messages: [] };
         if (current.prompts[0] === "fail") {
-          await events.emit("agent.failed", { ...base, kind: "failed", error: { code: "provider_error", message: "the model failed" } });
+          const error = { code: "provider_error", message: "the model failed" };
+          await submissions?.settled({ conversation, requestId, requestIds: current.requestIds, kind: "failed", error }, events);
+          await events.emit("agent.failed", { ...base, kind: "failed", error });
         } else {
-          await events.emit("agent.settled", { ...base, kind: "completed", text: `answer: ${current.prompts.at(-1)}` });
+          const text = `answer: ${current.prompts.at(-1)}`;
+          await submissions?.settled({ conversation, requestId, requestIds: current.requestIds, kind: "completed", text }, events);
+          await events.emit("agent.settled", { ...base, kind: "completed", text });
         }
       };
       const runtime: AgentRuntime = {
@@ -110,6 +119,7 @@ function scriptedRuntime() {
               void run(conversation, requestId);
               admission = { kind: "started", requestId };
             }
+            await submissions?.admitted(conversation, requestId, events);
           }
           return admission;
         },
@@ -137,10 +147,12 @@ interface Options {
   /** The router stage; `null` for an app with no router. */
   router?: ReturnType<typeof defineComponent> | null;
   extra?: ReturnType<typeof defineComponent>[];
+  /** Installs `agent.submissions`, where the runtime double records. */
+  submissions?: AgentSubmissions;
 }
 
 async function started(options: Options = {}): Promise<Subject> {
-  const runtime = scriptedRuntime();
+  const runtime = scriptedRuntime(options.submissions);
   let routes: { get(key: string): HttpRoute | undefined } | undefined;
   const server = defineComponent({
     name: "server-test",
@@ -157,6 +169,7 @@ async function started(options: Options = {}): Promise<Subject> {
       runtime.component,
       channelHttp,
       server,
+      ...(options.submissions === undefined ? [] : [defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", options.submissions as AgentSubmissions) })]),
       ...(options.extra ?? []),
     ],
     ...(options.config !== undefined && { config: options.config }),
@@ -190,10 +203,11 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "channel-http")).toMatchObject({
     provides: ["http.route"],
     requires: ["secrets", "conversations.registry", "agent.runtime"],
-    optional: [],
+    optional: ["agent.submissions"],
   });
   expect(app.describe().capabilities["http.route"]?.keys).toEqual({
     "POST /v1/messages": "channel-http",
+    "GET /v1/conversations/:id/messages/:messageId": "channel-http",
     "POST /v1/conversations/:id/reset": "channel-http",
   });
   expect(app.describe().pipelines["http.authenticate"]).toEqual([{ id: "channel-http-bearer", priority: 100 }]);
@@ -394,4 +408,47 @@ async function startFailure(secrets: Record<string, string>): Promise<string> {
 test("it refuses to start without PIKIT_HTTP_TOKEN, or with a short one", async () => {
   expect(await startFailure({})).toContain("PIKIT_HTTP_TOKEN is not set");
   expect(await startFailure({ PIKIT_HTTP_TOKEN: "short" })).toContain("shorter than 16 characters");
+});
+
+// ---------------------------------------------------------------------------------------------
+// With agent.submissions (submissions-sql): a message's outcome, later.
+
+const get = (s: Subject, conversationId: string, messageId: string, headers: Record<string, string> = AUTH) =>
+  s.call("GET /v1/conversations/:id/messages/:messageId", `/v1/conversations/${conversationId}/messages/${messageId}`, { method: "GET", headers });
+
+test("with agent.submissions: a POST that answered 202 gets its answer with GET later, and sending it again returns it", async () => {
+  const { submissions } = createMemorySubmissions();
+  const s = await started({ submissions, config: { "channel-http": { replyTimeoutMs: 20 } } });
+
+  expect(await send(s, { conversationId: "c1", text: "hold", messageId: "m1" })).toEqual({ status: 202, body: { requestId: "m1" } });
+  expect(await get(s, "c1", "m1")).toEqual({ status: 202, body: { requestId: "m1" } });
+  expect(await send(s, { conversationId: "c1", text: "hold", messageId: "m1" })).toEqual({ status: 202, body: { requestId: "m1" } });
+  s.runtime.hold.release();
+  while ((await get(s, "c1", "m1")).status === 202) await Bun.sleep(1);
+
+  expect(await get(s, "c1", "m1")).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hold" } });
+  expect(await send(s, { conversationId: "c1", text: "hold", messageId: "m1" })).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hold" } });
+  expect(s.runtime.dispatched.map((d) => d.requestId)).toEqual(["m1", "m1", "m1"]);
+  await s.app.stop();
+});
+
+test("with agent.submissions: GET says a failed run is 502, and an unknown message or conversation is 404", async () => {
+  const s = await started({ submissions: createMemorySubmissions().submissions });
+  await send(s, { conversationId: "c1", text: "fail", messageId: "m1" });
+
+  expect(await get(s, "c1", "m1")).toEqual({ status: 502, body: { requestId: "m1", error: "provider_error" } });
+  expect(await send(s, { conversationId: "c1", text: "fail", messageId: "m1" })).toEqual({ status: 502, body: { requestId: "m1", error: "provider_error" } });
+  expect(await get(s, "c1", "nothing-here")).toEqual({ status: 404, body: { requestId: "nothing-here", error: "not_found" } });
+  expect(await get(s, "nobody", "m1")).toEqual({ status: 404, body: { requestId: "m1", error: "not_found" } });
+  expect((await get(s, "c1", "m1", {})).status).toBe(401);
+  await s.app.stop();
+});
+
+test("without agent.submissions, GET is 501: nothing keeps a message's outcome outside its session", async () => {
+  const s = await started();
+  await send(s, { conversationId: "c1", text: "hello", messageId: "m1" });
+
+  expect((await get(s, "c1", "m1")).status).toBe(501);
+  expect((await get(s, "c1", "m1", {})).status).toBe(401);
+  await s.app.stop();
 });

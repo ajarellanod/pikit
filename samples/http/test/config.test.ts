@@ -15,6 +15,7 @@ test("pikit.config.ts composes: every capability a component requires has a prov
   expect(missing).toEqual([]);
   expect(described.capabilities["http.route"]?.keys).toEqual({
     "POST /v1/messages": "channel-http",
+    "GET /v1/conversations/:id/messages/:messageId": "channel-http",
     "POST /v1/conversations/:id/reset": "channel-http",
   });
   expect(described.capabilities["model.provider"]?.keys).toEqual({ anthropic: "provider-anthropic" });
