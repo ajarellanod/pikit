@@ -40,28 +40,10 @@ import type {
   ToolDefinition,
   ToolResultEventResult,
 } from "./api.ts";
+import { SUPPORTED_EVENTS } from "./surface.ts";
 
 /** Events pikit fires. Anything else an extension registers never fires (tier C). */
-const SUPPORTED = new Set([
-  "session_start",
-  "session_shutdown",
-  "context",
-  "before_provider_request",
-  "after_provider_response",
-  "before_agent_start",
-  "agent_start",
-  "agent_end",
-  "turn_start",
-  "turn_end",
-  "message_start",
-  "message_update",
-  "message_end",
-  "tool_execution_start",
-  "tool_execution_update",
-  "tool_execution_end",
-  "tool_call",
-  "tool_result",
-]);
+const SUPPORTED: ReadonlySet<string> = new Set(SUPPORTED_EVENTS);
 
 // biome-ignore lint/suspicious/noExplicitAny: handlers of every event share one table
 type AnyHandler = ExtensionHandler<any, any>;
