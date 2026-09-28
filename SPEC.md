@@ -286,7 +286,6 @@ earlier stages decided. `[decision]` — this is Pi's patch model and makes §6.
 Contract pipelines (value types defined with the components that first run them):
 
 ```
-inbound.authenticate   { channel, request: Request, verdict?: authenticated { actor } | rejected { reason } }
 inbound.normalize      InboundMessage
 route.resolve          { message: InboundMessage, decision?: RouteDecision }
 conversation.resolve   { decision: RouteDecision, conversation?: ConversationRef }   [planned]
@@ -294,11 +293,13 @@ agent.prepare          AgentRequest                 (system prompt, tools, conte
 outbound.prepare       OutboundMessage                                               [planned] M2
 ```
 
-The first three are typed in `@pikit/contracts` since M1 (`inbound.ts`), with the first channel that
-runs them (`channel-http`). `inbound.authenticate` is shared by every channel: each channel adds its
-own stage, which acts only on requests whose `channel` is its own. A request is authenticated
-only when a stage returns the `authenticated` verdict; no verdict is a rejection, so a missing
-stage fails closed.
+The first two are typed in `@pikit/contracts` since M1 (`inbound.ts`), with the first channel that
+runs them (`channel-http`). Authentication is not among them: each platform proves a sender its own
+way (a bearer token, a signed webhook, a bot API that delivers only real users), so it is not a
+shared contract (§4.9). `channel-http` declares its own `http.authenticate` pipeline
+(`{ channel, request: Request, verdict?: authenticated { actor } | rejected { reason } }`): a request
+is authenticated only when a stage returns the `authenticated` verdict; no verdict is a rejection,
+so a missing stage fails closed.
 
 A stage may short-circuit by returning `pikit.halt(reason)`; the pipeline stops, `run`
 returns the `Halt` (with the stage id) and `pipeline.halted { pipeline, stage, reason }` is
@@ -567,8 +568,8 @@ be built on.
    pipeline name, or a protocol function: never policy, always runtime neutral, its suite written
    first (rule 12). A contract whose type is Pi's goes to the adapter instead.
 4. **Otherwise it stays in its component.** A name only one component uses (its events, its
-   pipeline) is declared in that component by declaration merging. The project sees it all the
-   same, and it leaves with the component.
+   pipeline) is declared in that component by declaration merging, as `channel-http` declares
+   `http.authenticate`. The project sees it all the same, and it leaves with the component.
 
 **Shared code that is not a contract.** Ask whether two copies drifting apart would be a bug:
 - yes: it is an identity or a protocol, so a contract (`answerKey`);
@@ -605,7 +606,8 @@ fallback), is customised only through pipelines, and has its own suite. `admitIn
 Channel ingress (HTTP/webhook/WebSocket)
   │  emit inbound.received
   ▼
-pipeline inbound.authenticate      (channel verifies signature / JWT / token)
+channel authenticates              (its own way: signature / JWT / token; channel-http's
+  │                                 http.authenticate pipeline, §4.4)
   │  emit inbound.authenticated | inbound.rejected
   ▼
 pipeline inbound.normalize         → InboundMessage
@@ -1095,7 +1097,8 @@ from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-
 `AgentResult`, `AgentRuntime`, `ConversationRef`, `PrepareContext`, and the opaque `AgentMessage`, `AgentTool` and
 `Usage` with their merge target `AgentPayloads` (each `unknown` until the adapter fills it in).
 For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
-`inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
+`inbound.normalize` and `route.resolve` typed on `AppPipelines` (`http.authenticate` is
+`channel-http`'s own, §4.4). Contracts:
 `SecretStore` (`secrets`), and `ConversationRegistry` with `ConversationReset` (`conversations.registry`
 and the payload of `conversation.reset`), and `HttpRoute` (`http.route`). For agent state (§6.2a): `AgentState` and the context key `AGENT_STATE`; for the run's conversation (§6.3), the context key `CONVERSATION`;
 `@pikit/contracts/testing` has the state's suite, `createAgentStateConformance`. For feeds (§4.8): `Feed`,
@@ -2535,8 +2538,9 @@ is that the answer is "nothing" for every minor.
 - Components execute in-process with full privileges of the app. Installing one is
   running code. The CLI shows provenance (registry, commit, files, deps, env, capabilities)
   and pins commits; it never runs install scripts.
-- Inbound authentication is a pipeline stage every channel that receives requests must implement
-  (an HTTP API, a webhook). A channel with no `inbound.authenticate` stage fails `doctor`.
+- Every channel that receives requests (an HTTP API, a webhook) authenticates them, its own way:
+  how a sender proves who it is depends on the platform (§4.4). `channel-http` runs its
+  `http.authenticate` pipeline, which fails closed: no stage, no verdict, no request.
   - A channel that pulls from a platform's API (Telegram long polling) has no request to
     authenticate: it reached the platform over TLS with its own token.
   - Such a channel still authorizes senders: `channel-telegram` lets only the Telegram users in its
@@ -2947,6 +2951,9 @@ Resolved `[decision]`:
 - Shared code that is not a contract is copied, unless a divergence would be a bug (then it is a
   contract) or it is about Pi (then it is an adapter helper). No shared library of registry code:
   it would loosen rule 4 for code that has no reason to be the same.
+- `http.authenticate` (formerly the core's `inbound.authenticate`) is `channel-http`'s own pipeline,
+  named after its channel (§4.3), not a contract (§4.4): each platform
+  authenticates differently, and Telegram does not use it.
 
 ---
 

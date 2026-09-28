@@ -209,7 +209,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 | Composition mechanism the kernel runs itself (lifecycle, capabilities, pipelines, context) | `@pikit/core` (a `[decision]`, SPEC §4.9) |
 | A type, identity, event name, pipeline name or capability contract two components share | `@pikit/contracts` (SPEC §4.9) |
 | A conformance suite for a contract | `@pikit/contracts/testing`; for a contract whose type is Pi's, `@pikit/pi-adapter/testing` |
-| An event or pipeline name only one component uses | that component, by declaration merging |
+| An event or pipeline name only one component uses | that component, by declaration merging (`channel-http`'s `http.authenticate`) |
 | A timing, limit or strategy | the component that has it; a suite may only hold it to what it declares |
 | Anything importing `@earendil-works/pi-*` | `@pikit/pi-adapter` |
 | A channel, router, store, queue, dedup, scheduler, tool, executor, workspace, deployment target | a component in `registry/components/<name>/` |

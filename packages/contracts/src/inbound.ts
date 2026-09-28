@@ -2,9 +2,12 @@
  * The inbound path (SPEC §5): what a channel makes of a platform request, and the pipelines it
  * runs before handing the message to its conversation.
  *
- *   inbound.authenticate   is this request from who it claims to be?        (the channel's stage)
  *   inbound.normalize      the platform's payload as an `InboundMessage`
  *   route.resolve          which agent answers it                          (a router component)
+ *
+ * Authentication comes first and is the channel's own: each platform proves a sender its way (a
+ * bearer token, a signed webhook, a bot API that only delivers real users), so it is not a shared
+ * contract. `channel-http` declares its own pipeline for it (SPEC §4.9).
  *
  * The shapes start with what the first channel needs. A field is added, optional, with the
  * component that produces it (threads, attachments, tenants): adding one is compatible, removing
@@ -52,15 +55,6 @@ export interface RouteDecision {
 
 declare module "@pikit/core" {
   interface AppPipelines {
-    /**
-     * Every channel authenticates its requests with a stage here, and acts only on its own
-     * (`channel`). A request is authenticated only when a stage says so: no verdict is a rejection.
-     */
-    "inbound.authenticate": {
-      channel: string;
-      request: Request;
-      verdict?: { kind: "authenticated"; actor: InboundMessage["actor"] } | { kind: "rejected"; reason: string };
-    };
     /** The message as the channel built it; stages may rewrite it, and must keep `id` and `channel`. */
     "inbound.normalize": InboundMessage;
     /** A router fills in `decision`; a stage that finds one already there leaves it. */

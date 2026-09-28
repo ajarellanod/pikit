@@ -7,7 +7,9 @@
  * Both need `Authorization: Bearer <PIKIT_HTTP_TOKEN>`, read from `secrets` at start.
  *
  * A message goes through the inbound path of SPEC §5:
- * 1. `inbound.authenticate`: this channel's stage checks the bearer token.
+ * 1. `http.authenticate`: this channel's stage checks the bearer token. The pipeline is this
+ *    component's own (declared below): how a sender proves who it is depends on the platform, so it
+ *    is not a shared contract (SPEC §4.9). A project extension adds a stage to it, as to any pipeline.
  * 2. The body becomes an `InboundMessage`, and `admitInbound` takes it the way every channel does:
  *    `inbound.normalize`, `route.resolve` (a router picks the agent), the conversation
  *    `http:<conversationId>`, and `agent.runtime.dispatch`: Pi takes the message. An idle
@@ -42,6 +44,21 @@ import { Replies } from "./replies.ts";
 
 export const CHANNEL = "http";
 
+declare module "@pikit/core" {
+  interface AppPipelines {
+    /**
+     * Authenticates a request to this channel. A stage acts only on its own `channel` and leaves a
+     * rejection alone. A request is authenticated only when a stage says so: no verdict is a
+     * rejection.
+     */
+    "http.authenticate": {
+      channel: string;
+      request: Request;
+      verdict?: { kind: "authenticated"; actor: InboundMessage["actor"] } | { kind: "rejected"; reason: string };
+    };
+  }
+}
+
 const Config = Type.Object({
   /** How long a POST waits for the agent's answer before `202`. */
   replyTimeoutMs: Type.Integer({ minimum: 1, default: 120_000 }),
@@ -67,7 +84,7 @@ export default defineComponent({
 
     // This channel's authentication: it acts on its own requests and leaves a rejection alone.
     pikit.pipeline(
-      "inbound.authenticate",
+      "http.authenticate",
       async (value) => {
         if (value.channel !== CHANNEL || value.verdict?.kind === "rejected") return value;
         const presented = bearerToken(value.request.headers.get("authorization"));
@@ -84,9 +101,9 @@ export default defineComponent({
     pikit.on("agent.settled", deliver);
     pikit.on("agent.failed", deliver);
 
-    /** Who sent `request`, if `inbound.authenticate` says it is authenticated. */
+    /** Who sent `request`, if `http.authenticate` says it is authenticated. */
     const authenticated = async (request: Request, ctx: AppContext): Promise<InboundMessage["actor"] | undefined> => {
-      const checked = await ctx.run("inbound.authenticate", { channel: CHANNEL, request });
+      const checked = await ctx.run("http.authenticate", { channel: CHANNEL, request });
       return !(checked instanceof Halt) && checked.verdict?.kind === "authenticated" ? checked.verdict.actor : undefined;
     };
 

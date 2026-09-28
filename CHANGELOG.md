@@ -22,6 +22,10 @@ line names its area (AGENTS.md, "Git and docs").
   moved by hand.
 - registry: every component that imports `@pikit/contracts` lists it in `component.json`'s
   `dependencies`, with its own version; `requires.pikit` covers the kernel only.
+- component/channel-http: **breaking.** `inbound.authenticate` is now `http.authenticate`, and
+  `channel-http`, its only user, declares it instead of the core. A component's own names carry its
+  prefix (SPEC §4.3). Its value, its stage (`channel-http-bearer`) and failing closed are unchanged.
+  A project extension that adds a stage to it changes the pipeline's name.
 
 - core, component/outbound-durable: the convergence suite, `createConvergenceConformance` in
   `@pikit/core/testing` (SPEC §14). It kills the process after each of its commits in turn (its

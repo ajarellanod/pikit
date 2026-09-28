@@ -372,6 +372,7 @@ alerts build on later. Only the architecture is built here, not those components
 ✅ **The kernel and the vocabulary apart** (SPEC §4.9), before M2 adds the contracts its fixes need:
 - `@pikit/core` keeps only the kernel; the shared contracts, `admitInbound` and their suites moved to
   `@pikit/contracts`, which versions on its own. Components declare it in `dependencies`.
+- `inbound.authenticate` moved into `channel-http`, its only user, as `http.authenticate`.
 - Guards: the kernel's exports, the kit's layers and the kernel's single dependency.
 
 Rich content (`parts`, `replyTo`) and questions from extensions in a chat (`interaction`) are

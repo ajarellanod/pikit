@@ -196,7 +196,15 @@ test("what setup declares: component.json's provides / requires / optional come 
     "POST /v1/messages": "channel-http",
     "POST /v1/conversations/:id/reset": "channel-http",
   });
-  expect(app.describe().pipelines["inbound.authenticate"]).toEqual([{ id: "channel-http-bearer", priority: 100 }]);
+  expect(app.describe().pipelines["http.authenticate"]).toEqual([{ id: "channel-http-bearer", priority: 100 }]);
+});
+
+test("no stage in http.authenticate leaves no verdict: the request is not authenticated", async () => {
+  const app = await defineApp({ components: [], logger: silentLogger }).create();
+
+  const checked = await app.context().run("http.authenticate", { channel: "test", request: new Request("http://localhost/") });
+
+  expect("verdict" in checked && checked.verdict).toBeFalsy();
 });
 
 for (const c of createLifecycleConformance(() => ({
@@ -367,7 +375,7 @@ test("reset points the conversation to a new session; an unknown one is a 404", 
 test("its authentication stage leaves other channels' requests alone", async () => {
   const s = await started();
 
-  const checked = await s.app.context().run("inbound.authenticate", { channel: "telegram", request: new Request("http://pikit.test/", { headers: AUTH }) });
+  const checked = await s.app.context().run("http.authenticate", { channel: "telegram", request: new Request("http://pikit.test/", { headers: AUTH }) });
 
   expect("verdict" in checked ? checked.verdict : undefined).toBeUndefined();
   await s.app.stop();

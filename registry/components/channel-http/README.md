@@ -3,7 +3,7 @@
 Talk to an agent over HTTP: send a message, get the answer in the response.
 
 - **Provides:** `http.route`: `POST /v1/messages` and `POST /v1/conversations/:id/reset`. It also
-  adds the stage `channel-http-bearer` to `inbound.authenticate`.
+  adds the stage `channel-http-bearer` to `http.authenticate`.
 - **Requires:** `secrets` (the token), `conversations.registry`, `agent.runtime`. A server (such as
   `server-bun`) serves the routes, and a router (such as `router-basic`) picks the agent.
 - **Targets:** `server` and `cloudflare` (fetch handlers and Web Crypto only).
@@ -60,7 +60,7 @@ answer.
 
 ## How it works
 
-1. `inbound.authenticate`: this channel's stage checks the token. Tokens are compared as SHA-256
+1. `http.authenticate`: this channel's stage checks the token. Tokens are compared as SHA-256
    digests, in constant time. The stage acts only on `http` requests and never overrides a
    rejection by another stage.
 2. `inbound.normalize`: the body becomes an `InboundMessage` (`id` = request id). Your stages may

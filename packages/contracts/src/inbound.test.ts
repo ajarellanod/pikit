@@ -35,14 +35,6 @@ test("a router fills in route.resolve's decision; a channel reads it", async () 
   expect(resolved).toEqual({ message, decision: { agent: "support", access: "allow" } });
 });
 
-test("no stage in inbound.authenticate leaves no verdict: the request is not authenticated", async () => {
-  const app = await defineApp({ components: [], logger: silentLogger }).create();
-
-  const checked = await app.context().run("inbound.authenticate", { channel: "test", request: new Request("http://localhost/") });
-
-  expect("verdict" in checked && checked.verdict).toBeFalsy();
-});
-
 /** The path's other ends, recording what reaches them. */
 function ends() {
   const steps: string[] = [];
