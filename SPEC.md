@@ -577,6 +577,12 @@ be built on.
 - no: each component keeps its own copy. Source ownership means a component may change it
   (`writeAtomically`). There is no shared library of registry code.
 
+A copy that falls behind (an improvement made in one copy and not in the others) is `pikit
+upgrade`'s to fix (M3), with the tests each copy carries; not a shared package's, which would take
+the code away from its owner to spare a few lines. So the tool components each resolve their own
+environment (`workspace`, else `execution`): a shell may one day run somewhere the file tools do
+not.
+
 **The life of a contract.**
 - It is born with two real parties and its suite.
 - It starts `experimental`, and may become `stable` once two independent implementations in the
@@ -2956,7 +2962,8 @@ Resolved `[decision]`:
   (§4.9): one implementation cannot show that the contract is not shaped by it.
 - Shared code that is not a contract is copied, unless a divergence would be a bug (then it is a
   contract) or it is about Pi (then it is an adapter helper). No shared library of registry code:
-  it would loosen rule 4 for code that has no reason to be the same.
+  it would loosen rule 4 for code that has no reason to be the same. A copy that falls behind is
+  `upgrade`'s to fix (M3).
 - `http.authenticate` (formerly the core's `inbound.authenticate`) is `channel-http`'s own pipeline,
   named after its channel (§4.3), not a contract (§4.4): each platform
   authenticates differently, and Telegram does not use it.
