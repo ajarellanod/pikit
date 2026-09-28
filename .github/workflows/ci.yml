@@ -1,0 +1,32 @@
+# The control of ROADMAP S12 and S15: every pull request and every push to main runs the tests,
+# the typecheck and the registry's checks. Slow and live suites are opt-in (see nightly.yml and
+# installer/README.md, samples/http/README.md): a plain `bun test` never reaches a paid API.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      # The Bun the installer pins (installer/install.sh); scripts/require-bun.ts enforces >= 1.4.0.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      # shellcheck is preinstalled on ubuntu-latest, so installer/install.test.ts lints install.sh too.
+      - run: bun test
+      - run: bun run typecheck
+      - run: bun run registry validate
