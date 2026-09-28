@@ -131,8 +131,8 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
    `@pikit/pi-adapter` is the only package that imports `@earendil-works/pi-*`. It exposes pikit-shaped types, and components import Pi
    contract types (`ExecutionEnv`, `SessionRepo`) from the adapter's re-exports. Import
    `pi-ai` providers by subpath, never through the barrel, because of the Cloudflare bundle
-   limit. Existing non-TUI Pi extensions must run unmodified (SPEC §6.2b). That compatibility
-   lives in the adapter; never bend core names to Pi's `snake_case`.
+   limit. Pi extensions that use only tier A must run unmodified; `pikit doctor` explains the
+   rest (SPEC §6.2b). That compatibility lives in the adapter; never bend core names to Pi's `snake_case`.
 2. **The kernel stays small; the vocabulary lives apart** (S2, SPEC §4.9). Four questions, in
    order, decide where something new goes:
    - Pi does it, or is about to: the adapter.
@@ -273,6 +273,14 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
 ## Things that are easy to get wrong
 
+- **Pi's extension surface has two copies.** The events pikit fires live in
+  `packages/pi-adapter/src/extensions/surface.ts`; the CLI reads a generated copy. After changing
+  `packages/pi-adapter/src/extensions`, run `bun scripts/pi-extension-surface.ts` (a test fails while
+  the copy is stale). Before a Pi bump, run `bun scripts/pi-extension-drift.ts <tag>` to see how
+  Pi's extension API moved.
+- **Extension source in a test trips the boundary check.** A test that writes extension source with
+  a literal `@earendil-works/pi-coding-agent` import is read by `boundaries.test.ts` as an import.
+  Build the specifier through a template (`${ALIAS}`).
 - **Pi is single-process by contract.** Pi serializes writes and opens a session exclusively
   inside one process, and calls a second process "unsupported". Conversation ownership
   exists to keep that true across processes.

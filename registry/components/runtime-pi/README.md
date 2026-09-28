@@ -50,8 +50,10 @@ unfinished runs open in their sessions, and the next process resumes them.
 
 ## Pi extensions
 
-Existing Pi extensions run unmodified, except for their terminal UI: `ctx.hasUI` is `false`,
-and `ctx.ui.*` does nothing.
+A Pi extension that uses only what pikit promises (tier A in SPEC §6.2b: tool policy, the run's
+lifecycle and notifications, its own tools) runs unmodified. Its terminal UI is inert: `ctx.hasUI`
+is `false`, and `ctx.ui.*` does nothing. `pikit doctor` fails on an import pikit does not provide,
+and notes anything else an extension uses that never fires or does nothing here.
 
 An agent names the extensions it uses, as it names its tools. A component of yours installs each
 one under its name, as `agent.extension`:

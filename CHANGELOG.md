@@ -5,6 +5,13 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- spec, adapter: pikit promises the tested tier A of Pi's extension API (tool policy, the run's
+  lifecycle and notifications, tools), not every extension; the rest is best-effort or absent
+  (SPEC §6.2b). `bun scripts/pi-extension-drift.ts <tag>` lists how Pi's extension API differs from
+  pikit's before a bump.
+- cli: `pikit doctor` fails on a Pi extension importing a name the shim does not export, and notes
+  what each extension uses that pikit does not provide (events it never fires, inert `ctx.*` and
+  `pi.*` members, terminal UI).
 - repository: **correction.** pikit runs on Bun only; no `package.json` lists `node` in `engines`
   any more. The kit ships TypeScript source that Node does not run. Node ≥ 22 is a 1.0 requirement
   (SPEC §9.1).
