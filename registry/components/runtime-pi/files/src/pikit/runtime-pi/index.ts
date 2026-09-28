@@ -9,19 +9,26 @@
  * - `agent.extension`: the installed Pi extensions that agents name in their `extensions`;
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
  *   read only their environment variables (`ANTHROPIC_API_KEY`).
+ * - `agent.submissions`, if installed (`submissions-sql`): where each admitted message and each run's
+ *   end are recorded. At start, the conversations holding a message nobody answered are resumed in the
+ *   background (`resume.ts`), with no new message needed; channels deliver answers from its feed.
  *
  * Everything that talks to Pi is in `@pikit/pi-adapter`, an npm dependency pinned with Pi: it
  * changes when Pi changes, and this file does not. What is here is the wiring, which is yours to
  * edit: which capabilities the runtime reads, and what it refuses to start without.
  *
- * Delivery: `dispatch` resolves once the message is durable in the conversation's session (the
- * point where a channel may acknowledge it); the answer arrives as `agent.settled`, also for a run
- * resumed after a crash. At-least-once: a crash can repeat an answer, never lose an accepted message.
+ * Delivery: `dispatch` resolves once the message is durable in the conversation's session, and in
+ * `agent.submissions` when installed (the point where a channel may acknowledge it); the answer
+ * arrives as `agent.settled`, also for a run resumed after a crash. At-least-once: a crash can repeat
+ * an answer, never lose an accepted message. Without `agent.submissions`, a crash leaves a run for the
+ * next message to that conversation to resume, and an answer that ends while its channel is stopped
+ * reaches nobody but the session.
  */
 
-import { BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
 import { type AgentRuntime } from "@pikit/contracts";
 import { createPiRuntime, type HarnessHook, modelsFrom, type PiExtension, type PiRuntime } from "@pikit/pi-adapter";
+import { resumePending } from "./resume.ts";
 
 export interface RuntimePiOptions {
   /**
@@ -45,9 +52,13 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const credentials = pikit.useOptional("model.credentials");
       const tools = pikit.useKeyed("agent.tool");
       const extensions = pikit.useKeyed("agent.extension");
+      // Optional: with it, admitted messages and run ends are recorded, and resumed at start.
+      const submissions = pikit.useOptional("agent.submissions");
 
       // Created in start, when the capabilities can be read; consumers start after this component.
       let runtime: PiRuntime | undefined;
+      /** The resumption started by `start`, which `stop` cancels and waits for. */
+      let resuming: { controller: AbortController; done: Promise<void> } | undefined;
       const current = (): PiRuntime => {
         if (runtime === undefined) throw new Error("runtime-pi: agent.runtime used while the app is not running");
         return runtime;
@@ -98,26 +109,50 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
               );
             }
           }
-          runtime = createPiRuntime({
+          const recorded = submissions.get();
+          // Runs outlive the calls that admit them; never keep start's context (its deadline).
+          const background = ctx.derive(() => BACKGROUND_CONTEXT);
+          const created = createPiRuntime({
             sessions: sessions.get(),
             agent: (name) => agents.get(name),
             tool: (name) => tools.get(name),
             extension: (name) => extensions.get(name),
             models,
-            // Runs outlive the calls that admit them; never keep start's context (its deadline).
-            events: ctx.derive(() => BACKGROUND_CONTEXT),
+            events: background,
             ...(options.onHarness !== undefined && { onHarness: options.onHarness }),
             ...(options.extensions !== undefined && { extensions: options.extensions }),
+            ...(recorded !== undefined && { submissions: recorded }),
           });
+          runtime = created;
+          if (recorded !== undefined) {
+            // In the background: start does not wait for runs to resume, and stop cancels it.
+            const controller = new AbortController();
+            const done = resumePending(created, recorded, background.derive((inner) => withAbortSignal(controller.signal, inner)));
+            resuming = { controller, done };
+          }
         },
         async stop(ctx) {
           // Runs in progress stay open in their sessions; the next process resumes them.
           const stopping = runtime;
           runtime = undefined;
+          const resumed = resuming;
+          resuming = undefined;
+          resumed?.controller.abort(new Error("runtime-pi: stopping"));
           await stopping?.close(ctx);
+          // Settles once `close` ended the conversations it opened; bounded by the stop deadline all the same.
+          if (resumed !== undefined) await Promise.race([resumed.done, aborted(ctx.abortSignal)]);
         },
       };
     },
+  });
+}
+
+/** Resolves when `signal` aborts; never, without one. */
+function aborted(signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal === undefined) return;
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", () => resolve(), { once: true });
   });
 }
 

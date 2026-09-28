@@ -18,7 +18,8 @@
       "model.provider",
       "model.credentials",
       "agent.tool",
-      "agent.extension"
+      "agent.extension",
+      "agent.submissions"
     ]
   },
   "provides": [

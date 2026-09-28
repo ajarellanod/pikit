@@ -12,7 +12,9 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
   - `agent.extension`: the installed Pi extensions that your agents name in their `extensions`;
   - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth
     tokens). pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read
-    only their environment variables (`ANTHROPIC_API_KEY`).
+    only their environment variables (`ANTHROPIC_API_KEY`);
+  - `agent.submissions`, if installed (`submissions-sql`, which `pikit add runtime-pi` offers): where
+    each admitted message and each run's end are recorded ("Nothing admitted goes unanswered" below).
 
   It refuses to start without an agent, when an agent names a model that no provider has, when an
   agent names a tool or an extension that no component provides, or when an agent's provider has no credentials at
@@ -47,6 +49,23 @@ providers. Install one `model.provider` component per provider.
 
 A conversation's session is open only while a run is being driven. Stopping the app leaves
 unfinished runs open in their sessions, and the next process resumes them.
+
+## Nothing admitted goes unanswered
+
+With `agent.submissions` installed (`submissions-sql`):
+- `dispatch` records each message once Pi holds it and before it resolves, so a channel tells its
+  platform "received" only once both hold it;
+- every run's end is recorded before its `agent.settled` / `agent.failed` (a failed record is tried
+  again in the background), and a message `abort()` withdrew is recorded as aborted;
+- **at start**, in the background, the conversations holding a message nobody answered are resumed,
+  four at a time (`RESUME_AT_ONCE` in `resume.ts`): a run the last process left open continues, a
+  message waiting in Pi's inbox gets a run, and a run that ended without its end being recorded is
+  settled from the session and announced. Start does not wait for them; stop cancels what has not
+  started. Progress and failures are logged.
+
+Channels deliver from its `answers` feed, so an answer that ends while they are stopped (a deploy) is
+delivered when they start again. Without it, a run the last process left open waits for the next
+message to its conversation, and an answer that ends while its channel is stopped stays in the session.
 
 ## Pi extensions
 
@@ -154,8 +173,10 @@ tool or a model nothing provides, that run gets the static definition and the er
 
 `runtime-pi.test.ts` is copied with the component and runs in your project. It uses a scripted model
 from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
-- the `agent.runtime` conformance suite, including a worker killed mid-run;
-- the lifecycle conformance suite;
+- the `agent.runtime` conformance suite, including a worker killed mid-run, with and without
+  `agent.submissions`;
+- the lifecycle conformance suite, with and without it;
+- a run killed mid-way resumed at start, with no new message, from what `agent.submissions` holds;
 - the start failures above, and a stored credential reaching the provider;
 - an agent whose `prepare` gives it a tool once another tool has moved its state on.
 
