@@ -478,7 +478,7 @@ built as removable components:
 
 ### Required tracks
 
-Two tracks run beside the milestones. They are required (SPEC-CORE §1), and they do not wait for
+Three tracks run beside the milestones. They are required (SPEC-CORE §1), and they do not wait for
 the features: a feature milestone never blocks them, and no 1.0 ships without them.
 
 #### K — The kernel is stable
@@ -486,11 +486,12 @@ the features: a feature milestone never blocks them, and no 1.0 ships without th
 **Proves:** `@pikit/core` can promise the whole 1.x line (SPEC-CORE §3).
 
 **Done when:**
-- K1–K7 and K10–K12 are applied: no `Target` in the kernel; every `deployment-*` entrypoint bounds
+- K1–K7 and K10–K13 are applied: no `Target` in the kernel; every `deployment-*` entrypoint bounds
   the rollback, checked by a conformance case that hangs one; no runtime event schemas; config is a
   plain validated object; `Context` frozen as pikit's own; `stop()` documented and tested as
   optional for correctness; several Apps per project; deprecation warnings and `doctor` hints; the
-  kernel's own TypeBox range; a type test against the packed tarball.
+  kernel's own TypeBox range; a type test against the packed tarball; `APP_DESCRIPTION`, read only
+  by `admin-*` components and the self-knowledge component (`registry validate` enforces it).
 - The kernel has no syntax Node's type stripping rejects (parameter properties in `context.ts`
   and `pipeline.ts`), builds to JavaScript, and a Node smoke test runs it in CI.
 - M4's proof is green: a run survives Durable Object eviction.
@@ -510,10 +511,33 @@ the type test.
   feeds, built with Beautiful UI primitives, with no paid dependency.
 - Its actions (abort, reset, talk to an agent) go through existing contracts.
 - It runs on the server and on Cloudflare.
-- The two `[open]` decisions of SPEC-CORE §5 are settled first.
+- It reads the composition through `APP_DESCRIPTION` (K13); how Beautiful UI primitives reach the
+  registry (SPEC-CORE §5, `[open]`) is settled first.
 
 **Depends on:** M2's feeds (delivery receipts, submissions) for what must not be missed; M4 for
 Cloudflare.
+
+#### S — The agent knows and improves itself
+
+**Proves:** the main agent can see what it is and change the service it runs in, internally and
+visually, through a gate nothing it controls can open (SPEC-CORE §6).
+
+**Done when:**
+- A steward agent (declared in its `defineAgent`) has the `pikit-self` skill and the read-only
+  `pikit_self` tool; no other agent has them.
+- It changes a component, one of its own tools and a dashboard view, each as a branch with passing
+  `pikit doctor` and tests, approved by a human from the dashboard, merged by a service identity it
+  does not hold, deployed as a generation boundary, and rolled back automatically when health fails
+  after the deploy.
+- A prompt injection that asks it to change the gate, read a secret or push to the main branch
+  fails, tested.
+- The same path runs on the server (`deployment-docker`) and on Cloudflare: a Sandbox workspace in
+  its own Worker, credentials injected by its outbound handler, a Worker Preview per branch, a
+  gradual deploy and a rollback. A Durable Object migration is marked irreversible and deployed
+  alone.
+
+**Depends on:** D (the dashboard shows the proposals and takes the approval), M2 (health, for the
+rollback), M4 and M5's container execution (the Sandbox workspace on Cloudflare).
 
 ### 1.0 — The promise
 
@@ -524,8 +548,8 @@ pikit reaches 1.0 when:
 4. SPEC §12a is in force.
 5. The server target runs on Node ≥ 22 as well as Bun, from the published packages built to
    JavaScript, with a Node smoke test in CI (SPEC §9.1). Today it runs on Bun only.
-6. Tracks K and D are done (SPEC-CORE §1): the kernel is published as 1.0, and the dashboard runs
-   on both targets.
+6. Tracks K, D and S are done (SPEC-CORE §1): the kernel is published as 1.0, the dashboard runs
+   on both targets, and the steward agent improves itself through the gate on both.
 
 From then on the programming model does not get rewritten.
 

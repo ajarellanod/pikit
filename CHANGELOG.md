@@ -5,6 +5,13 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- docs: SPEC-CORE adds a fourth required outcome, **the main agent knows and improves itself** (§6):
+  a steward agent with a `pikit-self` skill and a read-only `pikit_self` tool changes its own
+  project through git (a branch, `pikit doctor` and tests, a human's approval, a merge by a service
+  identity it never holds, a deploy as a generation boundary, an automatic rollback), internally and
+  in its dashboard, on the server and on Cloudflare (Sandbox workspace, Worker Previews, gradual
+  deploys). K13: the kernel's `APP_DESCRIPTION` context key describes the running app, read only by
+  the dashboard and the self-knowledge component. `ROADMAP.md` gains track S.
 - samples: the http sample has the storage and submissions `runtime-pi` brings; a POST sent again
   answers with its outcome instead of `409 duplicate`.
 - component/channel-http: `GET /v1/conversations/:id/messages/:messageId` returns what became of a
