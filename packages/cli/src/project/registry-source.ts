@@ -12,6 +12,7 @@ import { kindOf, type Manifest, ManifestSchema, readManifest, type RegistryIndex
 import { BASES_DIR } from "./bases.ts";
 import { CONFIG_FILE } from "./config-file.ts";
 import { ENV_EXAMPLE, ENV_FILE } from "./env-file.ts";
+import { gitCommit } from "./git.ts";
 import { PIKIT_JSON } from "./pikit-json.ts";
 import { VENDOR_DIR } from "./vendor.ts";
 
@@ -173,14 +174,6 @@ function listFiles(dir: string): string[] {
     .map((f) => f.split("\\").join("/"))
     .filter((f) => !f.split("/").includes("node_modules") && statSync(join(dir, f)).isFile())
     .sort();
-}
-
-function gitCommit(root: string): string | undefined {
-  const head = Bun.spawnSync(["git", "-C", root, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "ignore" });
-  if (head.exitCode !== 0) return undefined;
-  const status = Bun.spawnSync(["git", "-C", root, "status", "--porcelain", "--", "."], { stdout: "pipe", stderr: "ignore" });
-  const dirty = status.stdout.toString().trim() !== "";
-  return `${head.stdout.toString().trim()}${dirty ? "-dirty" : ""}`;
 }
 
 const KEBAB = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";

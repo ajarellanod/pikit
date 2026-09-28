@@ -2175,6 +2175,7 @@ Rules:
 // pikit.json
 {
   "version": 2,
+  "kit": { "commit": "9b1c0de…" },
   "targets": ["server"],
   "registries": {
     "default": "builtin"
@@ -2217,6 +2218,9 @@ Rules:
   project, not necessarily here). Version 1 recorded the checkout the CLI ran from unless
   `--registry` was given, so these are the CLI's registry by construction. Another path inside the
   project becomes relative, and any other stays as it was.
+- `kit` is the kit vendored in `vendor/`: the commit of the pikit checkout it was packed from, ending
+  in `-dirty` when a kit package had uncommitted changes (§10.5, "Vendored kit packages"). Absent when
+  unknown: a project made before version 2, or by a CLI that is not in Git.
 - `commit` is the registry's Git commit when the component was installed, ending in `-dirty` when the
   registry had uncommitted changes (`add` says so in its plan); absent when the registry is not in Git.
 - `files` holds each installed file's hash. `[decision]` Whether a file is modified is computed by
@@ -2278,7 +2282,8 @@ No server-side logic. Private registries use the user's existing Git credentials
 pikit add channel-http [--registry <path>] [--force] [--yes]
   1. resolve the registry and the component's version (and the registry's commit)
   2. read the component package
-  3. check targets and requires.pikit; warn for each required capability nothing installed provides
+  3. check targets and requires.pikit, and that the CLI's kit is not older than the project's
+     ("Vendored kit packages" below); warn for each required capability nothing installed provides
   4. show: files to write (each one outside src/pikit/<name>/ by its path, marked), npm deps to add,
      env vars, capabilities provided and required, source
   5. confirm, naming the files outside src/pikit/<name>/ (--yes when there is no terminal;
@@ -2397,6 +2402,24 @@ the project depends on the tarballs:
   `overrides` rewritten, then `bun install`, and only then are the old tarballs deleted. A component and the core it needs come from the same checkout; the components
   already installed keep working, since the core only grows within a major (§12a). Found on the M1
   VPS: a project made before `outbound-durable` could not add it, its core lacking `DeliveryError`.
+- **Never an older kit.** `[decision]` The versions stay `0.0.0` until the kit is published, and a hash
+  says two kits differ, not which is newer. Meanwhile the kit's identity is the commit of the checkout
+  it was packed from, recorded in `pikit.json` as `kit.commit` (§10.3) by `new`, and by `add` when it
+  refreshes the kit. Before any write, `add` compares the project's commit with its own checkout's, in
+  that checkout (`git merge-base --is-ancestor`, `-dirty` set aside):
+  - the project's commit is the CLI's or comes before it: the refresh goes ahead, as above;
+  - it does not (the CLI is older, or on another branch): `add` refuses, and says to update pikit or
+    pass `--force`, which replaces the kit anyway. Rationale: an older CLI used to "refresh" a newer
+    project's kit, downgrading it without a word, and the components installed with the newer kit may
+    need what only it has;
+  - unknown (no `kit` recorded, a commit the CLI's checkout does not have, both on one commit with the
+    project's `-dirty`, or a CLI not in Git): the refresh goes ahead with a warning that names why.
+    A CLI older than the project usually lacks its commit, so this is where an old installer's checkout
+    lands: warned, not refused.
+
+  A project whose tarballs are already this CLI's is not refreshed and not compared; one that does not
+  record its kit records this CLI's commit then. When the kit is published, versions order it, and
+  `kit` goes with `vendor/`.
 - `vendor/` is committed with the project. When the packages are on npm, each `file:vendor/…`
   becomes a version, and `overrides` and `vendor/` go.
 

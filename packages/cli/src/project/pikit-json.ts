@@ -42,6 +42,12 @@ export interface InstalledComponent {
 export interface ProjectManifest {
   /** Schema version of `pikit.json` (SPEC §12a). */
   version: 2;
+  /**
+   * The kit in `vendor/`: the commit of the pikit checkout it was packed from (`vendor.ts`, `kitCommit`),
+   * `-dirty` when its packages had uncommitted changes. Absent when unknown: made before version 2, or
+   * by a CLI not in Git.
+   */
+  kit?: { commit: string };
   targets: string[];
   /** Name → location: `builtin`, a path inside the project (`./…`), or an absolute path (`registry-location.ts`). */
   registries: Record<string, string>;
@@ -51,9 +57,9 @@ export interface ProjectManifest {
 /** A new project's targets (M1 has one; `--target` arrives with the cloudflare target). */
 export const NEW_PROJECT_TARGETS: readonly string[] = ["server"];
 
-/** A new project's manifest; `registry` is a recorded location (`recordedLocation`). */
-export function emptyManifest(registry: string = BUILTIN_REGISTRY): ProjectManifest {
-  return { version: 2, targets: [...NEW_PROJECT_TARGETS], registries: { default: registry }, components: {} };
+/** A new project's manifest; `registry` is a recorded location (`recordedLocation`), `kit` the vendored kit's commit. */
+export function emptyManifest(registry: string = BUILTIN_REGISTRY, kit?: string): ProjectManifest {
+  return { version: 2, ...(kit !== undefined && { kit: { commit: kit } }), targets: [...NEW_PROJECT_TARGETS], registries: { default: registry }, components: {} };
 }
 
 export function readProjectManifest(projectDir: string): ProjectManifest {
@@ -89,8 +95,8 @@ export function writeProjectManifest(projectDir: string, manifest: ProjectManife
     components[name] = { ...c, files };
   }
   // Keys in one order, whatever order the object was built in.
-  const { version, targets, registries } = manifest;
-  writeFileSync(join(projectDir, PIKIT_JSON), `${JSON.stringify({ version, targets, registries, components }, null, 2)}\n`);
+  const { version, kit, targets, registries } = manifest;
+  writeFileSync(join(projectDir, PIKIT_JSON), `${JSON.stringify({ version, ...(kit !== undefined && { kit }), targets, registries, components }, null, 2)}\n`);
 }
 
 export function hashOf(content: string | Uint8Array): string {

@@ -3,7 +3,8 @@
  *
  *   1. resolve the registry (`builtin`, or a local path in M1) and the component's version and commit
  *   2. read the component's package
- *   3. check its targets and `requires.pikit`; warn for each required capability nothing provides
+ *   3. check its targets and `requires.pikit`, and that this CLI's kit is not older than the
+ *      project's (`checkKit`); warn for each required capability nothing provides
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies,
  *      environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
@@ -33,7 +34,7 @@ import { hashFile, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeP
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import { type Offer, offeredProviders } from "../project/offers.ts";
-import { pruneVendor, refreshKit, VENDOR_DIR } from "../project/vendor.ts";
+import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit, VENDOR_DIR } from "../project/vendor.ts";
 import { capabilityEntry } from "../registry/capabilities.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
@@ -45,7 +46,7 @@ const BUN_LOCK = "bun.lock";
 export interface AddOptions {
   /** A registry path other than the project's default one. */
   registry?: string;
-  /** Overwrite files that differ, and reinstall an installed component. */
+  /** Overwrite files that differ, reinstall an installed component, and replace a newer kit with this CLI's. */
   force?: boolean;
   /** Skip the confirmation (step 5). */
   yes?: boolean;
@@ -64,6 +65,7 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   // Steps 1–5 for the component and the providers it brings, before anything is written: a refusal
   // (installed, incompatible, a conflict, a config shape, a "no") leaves the project as it was.
   const draft = readDraft(projectDir);
+  checkKit(projectDir, draft.project, options.force === true);
   const registryName = registryKey(projectDir, draft.project, options.registry);
   const location = draft.project.registries[registryName] as string;
   const registry = openRegistry(registryPath(projectDir, location));
@@ -235,6 +237,38 @@ function planInstall(
     environment: manifest.environment ?? [],
   };
   return { name, registry, manifest, files };
+}
+
+/**
+ * The kit `add` will point the project at is this CLI's (`refreshKit`, in the apply phase). Refused,
+ * before any write, when that replaces a newer kit: the components installed with it may need what
+ * it has. `--force` replaces it anyway. When the order cannot be told, it is said, and it goes ahead.
+ * The draft records the kit the project will have.
+ */
+function checkKit(projectDir: string, project: ProjectManifest, force: boolean): void {
+  const { vendored, stale } = staleKit(projectDir);
+  const cli = kitCommit();
+  if (stale.length === 0) {
+    // Already this CLI's packages, byte for byte: a project that does not say which kit it has now does.
+    if (vendored && project.kit === undefined && cli !== undefined) project.kit = { commit: cli };
+    return;
+  }
+  const current = project.kit?.commit;
+  const order = kitOrder(current);
+  if (order.verdict === "downgrade") {
+    const what = `this project's kit (vendor/) comes from pikit ${current}, which this CLI's checkout (${cli}) does not include: this CLI is older, or on another branch`;
+    if (!force) {
+      throw new CliError(
+        `${what}. Adding a component replaces the project's kit with this CLI's, and the components installed with the newer kit may need what only it has.\n` +
+          "Update pikit (run the installer again, or `git pull` in its checkout), or pass --force to replace the kit anyway (then check with `pikit doctor`).",
+      );
+    }
+    log.warn(`${what}; --force: replacing it with this older kit`);
+  } else if (order.verdict === "unknown") {
+    log.warn(`the project's kit is replaced with this CLI's (${cli ?? "not in Git"}), which may be older: ${order.why}`);
+  }
+  if (cli === undefined) delete project.kit;
+  else project.kit = { commit: cli };
 }
 
 /** Step 5: `--yes`, or a "yes" at a terminal. */

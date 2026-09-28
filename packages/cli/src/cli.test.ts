@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { emptyManifest, hashOf, writeProjectManifest } from "./project/pikit-json.ts";
 import { DEFAULT_REGISTRY } from "./paths.ts";
 import { openRegistry } from "./project/registry-source.ts";
-import { kitSpecifier } from "./project/vendor.ts";
+import { kitCommit, kitSpecifier } from "./project/vendor.ts";
 
 const MAIN = join(import.meta.dir, "main.ts");
 const dirs: string[] = [];
@@ -150,6 +150,8 @@ test("new records the builtin registry, not this machine's path to it", () => {
   const manifest = JSON.parse(readFileSync(join(parent, "fresh", "pikit.json"), "utf8"));
   expect(manifest.version).toBe(2);
   expect(manifest.registries).toEqual({ default: "builtin" });
+  // The kit it vendored, by the commit it was packed from.
+  expect(manifest.kit).toEqual(kitCommit() === undefined ? undefined : { commit: kitCommit() });
 }, 60_000);
 
 /**
@@ -188,6 +190,8 @@ test("a project cloned on another machine resolves its registry: a v1 checkout p
   expect(manifest.version).toBe(2);
   expect(manifest.registries).toEqual({ default: "builtin" });
   expect(Object.keys(manifest.components)).toEqual(["log-events"]);
+  // Its tarballs are this CLI's: the kit it did not record is this CLI's now.
+  expect(manifest.kit).toEqual(kitCommit() === undefined ? undefined : { commit: kitCommit() });
 }, 60_000);
 
 test("add keeps each installed file's base, named by its hash; remove deletes the bases no component names", () => {

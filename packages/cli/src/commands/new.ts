@@ -15,7 +15,7 @@ import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectMa
 import { withOffers } from "../project/offers.ts";
 import { openRegistry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
-import { vendorKit } from "../project/vendor.ts";
+import { kitCommit, vendorKit } from "../project/vendor.ts";
 import { CliError, log } from "../ui.ts";
 import { checkCompatible, installComponent, notPortable } from "./add.ts";
 import { doctor } from "./doctor.ts";
@@ -72,7 +72,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   // `builtin` for this CLI's registry: the project resolves it wherever it is cloned (SPEC §10.3).
   const location = recordedLocation(projectDir, registry.root);
   if (!isPortable(location)) log.warn(notPortable(location));
-  writeProjectManifest(projectDir, emptyManifest(location));
+  writeProjectManifest(projectDir, emptyManifest(location, kitCommit()));
 
   for (const component of components) {
     const wiring = starter.STARTER_WIRING[component];

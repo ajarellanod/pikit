@@ -13,6 +13,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PIKIT_ROOT } from "../paths.ts";
 import { emptyManifest, hashOf, writeProjectManifest } from "../project/pikit-json.ts";
 import { EXTENSION_ALIAS, KIT_PACKAGES } from "../project/vendor.ts";
 
@@ -49,10 +50,10 @@ async function pikitAnsweringEnter(args: string[], cwd: string, question: string
   return { code, text: text() };
 }
 
-/** A project whose kit tarballs are another checkout's, with a lockfile naming them. */
-function otherKitProject(installed: string[] = []): string {
+/** A project whose kit tarballs are another checkout's, with a lockfile naming them; `kit` is that checkout's commit. */
+function otherKitProject(installed: string[] = [], kit?: string): string {
   const dir = temp();
-  const manifest = emptyManifest();
+  const manifest = emptyManifest(undefined, kit);
   for (const name of installed) manifest.components[name] = { registry: "default", version: "0.0.0", files: {}, dependencies: {}, environment: [] };
   writeProjectManifest(dir, manifest);
   mkdirSync(join(dir, "vendor"));
@@ -233,4 +234,42 @@ test("a component that would write the project's own records is refused, --force
     expect(run.err).toContain(`tool-fake: the file target "${target}" is the project's own`);
     expect(snapshot(dir)).toEqual(before);
   }
+}, 60_000);
+
+/** This CLI's checkout, when it is a Git repository: the kit's commits are its commits. */
+const cliGit = (...args: string[]) => Bun.spawnSync(["git", "-C", PIKIT_ROOT, ...args], { stdout: "pipe", stderr: "pipe" });
+const CLI_IN_GIT = cliGit("rev-parse", "HEAD").exitCode === 0;
+
+test.skipIf(!CLI_IN_GIT)("a project whose kit is newer than this CLI's is refused before any write; --force replaces it", () => {
+  // A commit after this checkout's HEAD, as a newer pikit would have: an object only, no ref moves.
+  const newer = cliGit("-c", "user.email=t@pikit.test", "-c", "user.name=t", "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "a newer kit").stdout.toString().trim();
+  expect(newer).toMatch(/^[0-9a-f]{40}$/);
+  const dir = otherKitProject([], newer);
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const before = snapshot(dir);
+
+  const refused = pikit(["add", "log-events", "--yes"], dir);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain(`this project's kit (vendor/) comes from pikit ${newer}, which this CLI's checkout`);
+  expect(refused.err).toContain("pass --force to replace the kit anyway");
+  expect(refused.out).not.toContain("log-events 0.0.0 from");
+  expect(snapshot(dir)).toEqual(before);
+
+  // Forced, it goes on to the kit refresh (the install then fails here, and everything is put back).
+  const forced = pikit(["add", "log-events", "--yes", "--force"], dir);
+  expect(forced.err).toContain("--force: replacing it with this older kit");
+  expect(forced.out).toContain("refreshed to this CLI's");
+  expect(forced.err).toContain("nothing was added");
+  expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
+test.skipIf(!CLI_IN_GIT)("an older kit is replaced without a word; an unrecorded one with a warning", () => {
+  const head = cliGit("rev-parse", "HEAD").stdout.toString().trim();
+  const older = pikit(["add", "log-events"], otherKitProject([], head));
+  expect(older.err).toContain("pass --yes");
+  expect(older.err).not.toContain("project's kit");
+
+  const unrecorded = pikit(["add", "log-events"], otherKitProject());
+  expect(unrecorded.err).toContain("the project's kit is replaced with this CLI's");
+  expect(unrecorded.err).toContain("pikit.json does not record the project's kit");
 }, 60_000);
