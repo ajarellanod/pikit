@@ -7,6 +7,12 @@
  * resumed, a message waiting in Pi's inbox gets a run, and a run that ended without its end recorded is
  * settled from the session (`recover`, in the adapter). A few at a time, in the background: start does
  * not wait for them, and stop aborts what has not started.
+ *
+ * A message nothing can answer is abandoned (`runtime.abandon`): its channel tells the user to send it
+ * again, and it stops being retried at every start. At once when its agent or session is gone
+ * (`recover` does it); and when its conversation's oldest pending message is older than
+ * `abandonAfterMs` (runtime-pi's `abandonPendingAfterHours`), for the messages resuming did not
+ * answer: no run and no inbox entry holds them, or the conversation fails to resume.
  */
 
 import type { AppContext } from "@pikit/core";
@@ -16,8 +22,13 @@ import type { PiRuntime } from "@pikit/pi-adapter";
 /** Conversations resumed at once: each may run the model, and a restart should not flood the provider. */
 export const RESUME_AT_ONCE = 4;
 
+export interface ResumeOptions {
+  /** How old a conversation's oldest pending message may be before what resuming leaves is abandoned. */
+  abandonAfterMs: number;
+}
+
 /** Resumes every pending conversation; `ctx`'s cancellation stops taking new ones. Never rejects. */
-export async function resumePending(runtime: PiRuntime, submissions: AgentSubmissions, ctx: AppContext): Promise<void> {
+export async function resumePending(runtime: PiRuntime, submissions: AgentSubmissions, ctx: AppContext, options: ResumeOptions): Promise<void> {
   const logger = ctx.logger;
   let pending: Awaited<ReturnType<AgentSubmissions["pending"]>> | undefined;
   try {
@@ -35,20 +46,33 @@ export async function resumePending(runtime: PiRuntime, submissions: AgentSubmis
   const list = pending;
   let next = 0;
   let failed = 0;
+  const abandonBefore = ctx.clock.now() - options.abandonAfterMs;
   const worker = async (): Promise<void> => {
     while (next < list.length && !stopped()) {
-      const { conversation, requestIds } = list[next++] as (typeof list)[number];
+      const { conversation, requestIds, oldestAdmittedAt } = list[next++] as (typeof list)[number];
+      const expired = oldestAdmittedAt < abandonBefore;
       try {
         await runtime.recover(conversation, requestIds, ctx);
       } catch (error) {
         if (stopped()) return;
+        if (!expired) failed++;
+        logger.error(
+          expired
+            ? "runtime-pi: a conversation with unanswered messages could not be resumed; they waited too long and are abandoned"
+            : "runtime-pi: a conversation with unanswered messages could not be resumed; it is tried again at the next start",
+          { conversation: conversation.key, requests: requestIds, error: error instanceof Error ? error.message : String(error) },
+        );
+      }
+      if (!expired || stopped()) continue;
+      // Only those still pending are abandoned: the ones resuming answered are settled by now.
+      await runtime.abandon(conversation, requestIds, "unanswered_too_long", ctx).catch((error: unknown) => {
         failed++;
-        logger.error("runtime-pi: a conversation with unanswered messages could not be resumed; it is tried again at the next start", {
+        logger.error("runtime-pi: abandoning messages that waited too long failed; they are tried again at the next start", {
           conversation: conversation.key,
           requests: requestIds,
           error: error instanceof Error ? error.message : String(error),
         });
-      }
+      });
     }
   };
   await Promise.all(Array.from({ length: Math.min(RESUME_AT_ONCE, list.length) }, worker));

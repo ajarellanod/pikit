@@ -9,8 +9,8 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { AGENT_STATE, type AgentRuntime, type AgentSubmissions, type AgentTool, defineAgent } from "@pikit/contracts";
-import { createLifecycleConformance } from "@pikit/core/testing";
+import { AGENT_STATE, type AgentRuntime, type AgentSubmissions, type AgentTool, type ConversationRef, defineAgent } from "@pikit/contracts";
+import { createLifecycleConformance, createManualClock } from "@pikit/core/testing";
 import { createAgentRuntimeConformance, createMemorySubmissions } from "@pikit/contracts/testing";
 import type { Credential, CredentialStore, SessionStore } from "@pikit/pi-adapter";
 import { createJsonlSessionStore } from "@pikit/pi-adapter/node";
@@ -76,6 +76,49 @@ test("at start, a conversation agent.submissions holds pending is resumed, with 
       expect(settled.map((r) => [r.requestId, r.kind])).toEqual([["r-killed", "completed"]]);
       expect((await submissions.get(conversation, "r-killed", app.context()))?.kind).toBe("settled");
       expect(await submissions.pending(app.context())).toEqual([]);
+    } finally {
+      await app.stop();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
+
+test("at start, messages still unanswered after abandonPendingAfterHours are abandoned; younger ones are kept", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pikit-runtime-pi-abandon-"));
+  try {
+    const store = createJsonlSessionStore({ root, cwd: root });
+    const { submissions } = createMemorySubmissions();
+    const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
+    const twoHoursAgo = (await defineApp({ components: [], logger: silentLogger, clock: createManualClock(Date.now() - 2 * 60 * 60 * 1_000) }).create()).context();
+    const conversations = [];
+    for (const name of ["old", "young"]) {
+      const session = await store.create({ cwd: root }, ctx);
+      await session.close(ctx);
+      conversations.push({ key: `test:${name}`, agent: "scripted", sessionId: session.metadata.id });
+    }
+    const [old, young] = conversations as [ConversationRef, ConversationRef];
+    // Admitted, and then lost: no run and no inbox entry holds them (a reset, a lost write).
+    await submissions.admitted(old, "r-old", twoHoursAgo);
+    await submissions.admitted(young, "r-young", ctx);
+
+    const { agents, provider, sessions } = testComponents({ sessions: store });
+    const failed: AppEvents["agent.failed"][] = [];
+    const observer = defineComponent({ name: "observer", setup: (pikit) => pikit.on("agent.failed", (result) => void failed.push(result)) });
+    const app = await defineApp({
+      components: [sessions, agents, provider, memorySubmissions(submissions), runtimePi, observer],
+      config: { "runtime-pi": { abandonPendingAfterHours: 1 } },
+      logger: silentLogger,
+    }).create();
+    await app.start();
+    try {
+      const deadline = Date.now() + 10_000;
+      while (failed.length === 0) {
+        if (Date.now() > deadline) throw new Error("the old message was never abandoned");
+        await Bun.sleep(10);
+      }
+      expect(failed.map((r) => [r.requestIds, r.error])).toEqual([[["r-old"], { code: "abandoned", message: "unanswered_too_long" }]]);
+      expect((await submissions.pending(app.context())).map((p) => p.requestIds)).toEqual([["r-young"]]);
     } finally {
       await app.stop();
     }
