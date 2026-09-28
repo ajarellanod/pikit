@@ -23,6 +23,8 @@
  * - `202 { requestId }`: no answer in time, or the server is stopping. The answer still lands in
  *   the conversation's session; nothing is lost.
  * - `502 { requestId, error }`: the run failed. `409 { error: "aborted" }`: it was stopped.
+ *   `502 { requestId, error: "abandoned" }`: the runtime gave up on it (its agent or session is gone,
+ *   or it waited too long): it was never answered and never will be; send it again.
  * - A `messageId` already in the conversation does not run again. With `agent.submissions` installed
  *   (`submissions-sql`), the POST answers with its outcome, as above (`202` while it is still
  *   running). Without it, `409 { requestId, error: "duplicate" }`: its answer went to the POST that

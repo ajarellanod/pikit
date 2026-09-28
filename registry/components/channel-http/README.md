@@ -63,6 +63,7 @@ What became of a message, for a client whose POST answered `202` (the agent took
 | `202` | `{ requestId }` | Still running. |
 | `409` | `{ requestId, error: "aborted" }` | The run was stopped before answering. |
 | `502` | `{ requestId, error: <code> }` | The run failed. |
+| `502` | `{ requestId, error: "abandoned" }` | The runtime gave up on the message (its agent or session is gone, or it waited too long): it was never answered; send it again. |
 | `404` | `{ requestId, error: "not_found" }` | No such message in the conversation's current session: never sent, sent before a reset, or settled longer ago than `submissions-sql` keeps them (7 days). |
 | `501` | `{ error: "not_supported", message }` | `agent.submissions` is not installed: nothing keeps a message's outcome outside its session. |
 
