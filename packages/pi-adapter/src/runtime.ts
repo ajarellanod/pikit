@@ -55,9 +55,15 @@ export interface PiRuntime extends AgentRuntime {
 }
 
 interface Slot {
+  readonly sessionId: string;
   line: Promise<unknown>;
+  /** Steps queued on `line` and not finished. At zero, with no conversation open, the slot is dropped. */
+  queued: number;
   conversation?: PiConversation;
 }
+
+/** How many slots a runtime holds, for tests; not exported from the package. */
+export const slotCount = new WeakMap<PiRuntime, () => number>();
 
 export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
   /** By session id: a session is Pi's single-writer unit, and a reset points a key to a new one. */
@@ -67,14 +73,19 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
   const slotOf = (sessionId: string): Slot => {
     let slot = slots.get(sessionId);
     if (slot === undefined) {
-      slot = { line: Promise.resolve() };
+      slot = { sessionId, line: Promise.resolve(), queued: 0 };
       slots.set(sessionId, slot);
     }
     return slot;
   };
 
-  /** Run `work` in the conversation's line, then close the conversation if it became idle. */
+  /**
+   * Run `work` in the conversation's line, then close the conversation if it became idle. The last
+   * step of a closed conversation drops its slot, so the map holds only conversations in use: a new
+   * call makes a new slot, and nothing is left on the old one's line to run beside it.
+   */
   const serial = <T>(slot: Slot, work: () => Promise<T>): Promise<T> => {
+    slot.queued++;
     const next = slot.line.then(async () => {
       try {
         return await work();
@@ -82,7 +93,12 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
         await closeIfIdle(slot);
       }
     });
-    slot.line = next.catch(() => {});
+    slot.line = next
+      .catch(() => {})
+      .then(() => {
+        slot.queued--;
+        if (slot.queued === 0 && slot.conversation === undefined && slots.get(slot.sessionId) === slot) slots.delete(slot.sessionId);
+      });
     return next;
   };
 
@@ -103,6 +119,12 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
     // Resolved before the session opens: a name nothing provides fails the open with nothing to undo.
     const extensions = extensionsOf(agent, options);
     const session = await openSession(options.sessions, ref.sessionId, ctx);
+    // `close()` may have run while this opened: what opens after it is closed at once, before
+    // anything runs (`close()` waits for this line).
+    if (closed) {
+      await session.close(toPi(ctx)).catch(() => {});
+      throw new Error("agent.runtime is closed");
+    }
     const conversation = await PiConversation.open(
       {
         ref,
@@ -116,18 +138,30 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
       },
       ctx,
     );
+    if (closed) {
+      await conversation.close(ctx).catch(() => {});
+      throw new Error("agent.runtime is closed");
+    }
     slot.conversation = conversation;
     return conversation;
   };
 
-  return {
+  const runtime: PiRuntime = {
     async dispatch(request: AgentRequest, ctx: AppContext): Promise<Admission> {
       const slot = slotOf(request.conversation.sessionId);
-      const admission = await serial(slot, async () => (await ensureOpen(slot, request.conversation, ctx)).admit(request, ctx));
-      await ctx.emit("agent.dispatched", { conversation: request.conversation, admission });
-      if (admission.kind === "started") {
-        const started = { conversation: request.conversation, requestId: request.requestId, resumed: false };
-        await runContext(ctx).emit("agent.started", started);
+      const { admission, announced } = await serial(slot, async () =>
+        (await ensureOpen(slot, request.conversation, ctx)).admit(request, ctx),
+      );
+      // The run is already going; its end is reported only after `announced()`, so
+      // `agent.dispatched`, `agent.started` and its result arrive in that order.
+      try {
+        await ctx.emit("agent.dispatched", { conversation: request.conversation, admission });
+        if (admission.kind === "started") {
+          const started = { conversation: request.conversation, requestId: request.requestId, resumed: false };
+          await runContext(ctx).emit("agent.started", started);
+        }
+      } finally {
+        announced?.();
       }
       return admission;
     },
@@ -150,7 +184,10 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
         delete slot.conversation;
         return [conversation.close(ctx)];
       });
-      const all = Promise.allSettled(open);
+      // And the steps in the lines: a conversation still opening closes itself there (`ensureOpen`),
+      // so none is left open, driving a run, after this returns.
+      const lines = [...slots.values()].map((slot) => slot.line);
+      const all = Promise.allSettled([...open, ...lines]);
       const signal = ctx.abortSignal;
       if (signal === undefined) {
         await all;
@@ -165,6 +202,8 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
       ]);
     },
   };
+  slotCount.set(runtime, () => slots.size);
+  return runtime;
 }
 
 /**

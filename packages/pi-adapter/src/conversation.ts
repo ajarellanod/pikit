@@ -4,7 +4,8 @@
  * session, and closing it never resets the conversation.
  *
  * Every run of the conversation is driven by this worker, whoever admitted it: a run started by a
- * `dispatch`, or a run a dead worker left open, which is resumed as soon as the conversation opens.
+ * `dispatch`, a run a dead worker left open, which is resumed as soon as the conversation opens, or
+ * a run started for the messages another run left in Pi's inbox (`reconcile`).
  * That is why a run's end always reaches `agent.settled`, with or without a caller waiting.
  *
  * Every run's context carries the conversation (`CONVERSATION`) and its `agent.state` (`AGENT_STATE`),
@@ -36,7 +37,7 @@ import {
 import { detached, toPi } from "./context.ts";
 import type { PiExtension } from "./extensions/api.ts";
 import { type BoundExtensions, loadExtensions } from "./extensions/host.ts";
-import { hasRequest, inboundMessage, LANE, recordWithdrawn } from "./inbound.ts";
+import { hasRequest, inboundMessage, LANE, queuedRequest, recordWithdrawn } from "./inbound.ts";
 import { toResult } from "./result.ts";
 import { sessionState } from "./state.ts";
 import { Turns } from "./turns.ts";
@@ -64,9 +65,20 @@ export interface OpenOptions {
   extensions?: readonly PiExtension[] | undefined;
 }
 
+/** What `admit` did, and for a run it started, how the caller lets that run report its end. */
+export interface Admitted {
+  admission: Admission;
+  /**
+   * Call once `agent.started` is emitted. The run is already going; only the event of its end waits
+   * for this, so `agent.started` always comes first. Present when `admission` is `started`.
+   */
+  announced?: () => void;
+}
+
 export class PiConversation {
   /** Runs this worker is driving right now. At zero the conversation is idle and may close. */
   private driving = 0;
+  private closed = false;
   private extensions: BoundExtensions | undefined;
 
   private constructor(
@@ -132,6 +144,8 @@ export class PiConversation {
         pi,
       );
       if (interrupted !== undefined) conversation.resumeOpen(interrupted.operationId, interrupted.kind === "run", ctx);
+      // A message a dead worker queued and never started (it died between `steer` and `accept`).
+      else await conversation.reconcile(ctx);
       return conversation;
     } catch (error) {
       await harness.close(pi).catch(() => {});
@@ -146,30 +160,71 @@ export class PiConversation {
   /**
    * Admit one message (SPEC §6.1): duplicate check, then enqueue as `steer`, then `accept()`. On an
    * idle lane Pi starts a run that drains the inbox; on a busy one it answers `LaneBusy` and the run
-   * in progress takes the message at a boundary, the last one included (gap 2). The caller runs
+   * in progress takes the message at a boundary. A message that run does not take (it failed, or the
+   * message landed after its last boundary: gap 2) gets the next run from `reconcile`. The caller runs
    * this in the conversation's line, so two deliveries of one request never both pass the check.
    */
-  async admit(request: AgentRequest, ctx: AppContext): Promise<Admission> {
+  async admit(request: AgentRequest, ctx: AppContext): Promise<Admitted> {
     const { requestId } = request;
     const pi = toPi(ctx);
-    if (await hasRequest(this.session, this.lane, requestId, pi)) return { kind: "duplicate", requestId };
+    if (await hasRequest(this.session, this.lane, requestId, pi)) {
+      // It may be a duplicate only because it waits in the inbox with no run to take it.
+      await this.reconcile(ctx);
+      return { admission: { kind: "duplicate", requestId } };
+    }
 
     const queued = await this.lane.steer(inboundMessage(requestId, request.prompt), undefined, pi);
     if (!queued.ok) throw queued.error;
 
     const accepted = await this.lane.accept({ kind: "prompt", operationId: requestId, prompt: [] }, pi);
     if (!accepted.ok) {
-      if (LaneBusy.is(accepted.error)) return { kind: "queued", requestId };
+      if (LaneBusy.is(accepted.error)) return { admission: { kind: "queued", requestId } };
       throw accepted.error;
     }
-    this.drive(requestId, runContext(ctx), () =>
-      this.lane.drive({ operationId: requestId, waitForRetry: true }, this.runScope(ctx)).then((driven) => {
-        if (!driven.ok) throw driven.error;
-        if (driven.value.kind !== "settled") return undefined;
-        return driven.value.outcome;
-      }),
+    let announced!: () => void;
+    const started = new Promise<void>((resolve) => (announced = resolve));
+    this.driveAccepted(requestId, ctx, started);
+    return { admission: { kind: "started", requestId }, announced };
+  }
+
+  /** Drive the run `accept()` just started as `operationId`; its end is reported after `started`. */
+  private driveAccepted(operationId: string, ctx: AppContext, started: Promise<void>): void {
+    this.drive(
+      operationId,
+      runContext(ctx),
+      () =>
+        this.lane.drive({ operationId, waitForRetry: true }, this.runScope(ctx)).then((driven) => {
+          if (!driven.ok) throw driven.error;
+          if (driven.value.kind !== "settled") return undefined;
+          return driven.value.outcome;
+        }),
+      started,
     );
-    return { kind: "started", requestId };
+  }
+
+  /**
+   * Start a run for the inbound messages waiting in Pi's inbox when no run is going to take them
+   * (SPEC §6.4, gap 2). Pi 0.87.1 leaves the inbox as it is when a run ends: a message queued behind
+   * a run that failed, or steered after the run's last boundary, or steered by a worker that died
+   * before its `accept()`, would wait for the next message. `accept()` with an empty prompt takes
+   * them out of the inbox into the new run, which is named after the oldest one and answers them all
+   * (`AgentResult.requestIds`). Nothing is queued here: this only asks Pi's inbox. A run that fails
+   * again cannot loop, since its messages are in the transcript by then, no longer in the inbox.
+   * Called in the conversation's line.
+   */
+  private async reconcile(ctx: AppContext): Promise<void> {
+    if (this.closed) return;
+    const pi = toPi(ctx);
+    const requestId = await queuedRequest(this.session, pi);
+    if (requestId === undefined) return;
+    const accepted = await this.lane.accept({ kind: "prompt", operationId: requestId, prompt: [] }, pi);
+    if (!accepted.ok) {
+      // A run is going: it takes the messages at a boundary, and this runs again when it ends.
+      if (LaneBusy.is(accepted.error)) return;
+      throw accepted.error;
+    }
+    const started = runContext(ctx).emit("agent.started", { conversation: this.ref, requestId, resumed: false });
+    this.driveAccepted(requestId, ctx, started);
   }
 
   /**
@@ -177,6 +232,9 @@ export class PiConversation {
    * the queued messages out of the inbox; they are recorded as withdrawn (gap 4).
    */
   async abort(ctx: AppContext): Promise<void> {
+    // An extension's `ctx.abort()` can reach the line after the conversation closed (host.ts): a
+    // closed conversation drives no run, so there is nothing to stop.
+    if (this.closed) return;
     const pi = toPi(ctx);
     const aborted = await this.lane.abort(pi);
     if (!aborted.ok) {
@@ -191,18 +249,23 @@ export class PiConversation {
    * in the session, for the next owner to resume: eviction is never a reset.
    */
   async close(ctx: AppContext): Promise<void> {
+    this.closed = true;
     await this.extensions?.close(toPi(ctx));
     await this.harness.close(toPi(ctx));
   }
 
   private resumeOpen(operationId: string, isRun: boolean, ctx: AppContext): void {
     const runCtx = runContext(ctx);
-    if (isRun) void runCtx.emit("agent.started", { conversation: this.ref, requestId: operationId, resumed: true });
-    this.drive(isRun ? operationId : undefined, runCtx, () =>
-      this.lane.resume(this.runScope(ctx)).then((resumed) => {
-        if (!resumed.ok) throw resumed.error;
-        return "kind" in resumed.value ? resumed.value : undefined;
-      }),
+    const started = isRun ? runCtx.emit("agent.started", { conversation: this.ref, requestId: operationId, resumed: true }) : undefined;
+    this.drive(
+      isRun ? operationId : undefined,
+      runCtx,
+      () =>
+        this.lane.resume(this.runScope(ctx)).then((resumed) => {
+          if (!resumed.ok) throw resumed.error;
+          return "kind" in resumed.value ? resumed.value : undefined;
+        }),
+      started,
     );
   }
 
@@ -214,9 +277,14 @@ export class PiConversation {
   /**
    * Drive one run in the background and report its end. The settlement runs in the conversation's
    * line, so the result is read before an idle conversation closes; the event is emitted after, so
-   * slow listeners never hold admissions back.
+   * slow listeners never hold admissions back, and after `started` (the run's `agent.started`).
    */
-  private drive(runId: string | undefined, runCtx: AppContext, work: () => Promise<OperationResultRecord | undefined>): void {
+  private drive(
+    runId: string | undefined,
+    runCtx: AppContext,
+    work: () => Promise<OperationResultRecord | undefined>,
+    started: Promise<void> = Promise.resolve(),
+  ): void {
     this.driving++;
     void work()
       .then(
@@ -233,8 +301,9 @@ export class PiConversation {
             return undefined;
           }),
       )
-      .then((result) => {
+      .then(async (result) => {
         if (result === undefined) return;
+        await started;
         if (result.kind === "failed") void runCtx.emit("agent.failed", { ...result, kind: "failed" });
         else void runCtx.emit("agent.settled", { ...result, kind: result.kind });
       })
@@ -259,6 +328,13 @@ export class PiConversation {
       return await toResult(this.lane, this.ref, record, toPi(runCtx));
     } finally {
       this.driving--;
+      // Before the line sees the conversation idle and closes it: what this run left in the inbox.
+      await this.reconcile(this.host.events).catch((error: unknown) => {
+        this.host.events.logger.error("starting a run for queued messages failed; they wait for the next one", {
+          conversation: this.ref.key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
   }
 }

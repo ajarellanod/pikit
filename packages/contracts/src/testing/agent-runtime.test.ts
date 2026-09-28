@@ -28,6 +28,8 @@ interface Conversation {
 interface Script {
   hold(signal: AbortSignal): Promise<void>;
   atEnd(): Promise<void>;
+  /** Before each answer: rejects when the model call fails. */
+  answer(): Promise<void>;
 }
 
 function memoryRuntime(records: Map<string, Conversation>, script: Script) {
@@ -49,7 +51,9 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
         record.open = { requestId };
         /** The requests this run took: its starter, then what joined it. */
         const taken = [requestId];
-        const run = async (): Promise<{ kind: "completed" | "aborted"; text?: string }> => {
+        const run = async (): Promise<
+          { kind: "completed" | "aborted"; text?: string } | { kind: "failed"; error: { code: string; message: string } }
+        > => {
           if (entry !== undefined) record.transcript.push({ kind: "tool", text: entry.text });
           for (;;) {
             for (const e of record.inbox.splice(0)) {
@@ -65,6 +69,13 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
               }
               record.transcript.push({ kind: "tool", text: "held" });
               continue;
+            }
+            try {
+              await script.answer();
+            } catch (error) {
+              // The inbox stays as it is: what was queued is not taken by a run that failed.
+              end();
+              return { kind: "failed", error: { code: "provider", message: String(error) } };
             }
             const newest = [...record.transcript].reverse().find((e) => e.kind === "in");
             const text = `answer: ${newest?.text}`;
@@ -85,7 +96,17 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
         const done = run().then(async (result) => {
           end();
           const ctx = background ?? notStarted();
-          await ctx.emit("agent.settled", { conversation: ref, requestId, requestIds: taken, messages: [], ...result });
+          const base = { conversation: ref, requestId, requestIds: taken, messages: [] };
+          if (result.kind === "failed") await ctx.emit("agent.failed", { ...base, ...result });
+          else await ctx.emit("agent.settled", { ...base, ...result });
+          // What the run left queued gets a run of its own, named after the oldest message. Not
+          // awaited: `abort()` waits for `done` in the line.
+          void serial(async () => {
+            const next = record.inbox.find((e) => e.requestId !== undefined)?.requestId;
+            if (next === undefined || live.has(ref.sessionId)) return;
+            drive(ref, record, next);
+            await background?.emit("agent.started", { conversation: ref, requestId: next, resumed: false });
+          });
         });
         live.set(ref.sessionId, { controller, done });
       };
@@ -160,8 +181,17 @@ function memoryFixture(): AgentRuntimeFixture {
   const released = new Promise<void>((resolve) => (release = resolve));
   const holdStarted = new Promise<void>((resolve) => (started = resolve));
   let end: { reach(): void; released: Promise<void> } | undefined;
+  let failing: { reach(): void; released: Promise<void> } | undefined;
 
   const script: Script = {
+    async answer() {
+      const armed = failing;
+      failing = undefined;
+      if (armed === undefined) return;
+      armed.reach();
+      await armed.released;
+      throw new Error("scripted failure");
+    },
     hold(signal) {
       started();
       return new Promise((resolve, reject) => {
@@ -192,6 +222,13 @@ function memoryFixture(): AgentRuntimeFixture {
       let resume!: () => void;
       const reached = new Promise<void>((resolve) => (reach = resolve));
       end = { reach, released: new Promise<void>((resolve) => (resume = resolve)) };
+      return { reached, release: () => resume() };
+    },
+    failNext() {
+      let reach!: () => void;
+      let resume!: () => void;
+      const reached = new Promise<void>((resolve) => (reach = resolve));
+      failing = { reach, released: new Promise<void>((resolve) => (resume = resolve)) };
       return { reached, release: () => resume() };
     },
     async interrupted() {

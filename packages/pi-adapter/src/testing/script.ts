@@ -35,6 +35,11 @@ export interface ScriptedProviderOptions {
    * a real provider without credentials. Default: always configured, with no credentials at all.
    */
   apiKey?: string;
+  /**
+   * Asked before each answer. A promise makes that model call wait for it, then fail with its text as
+   * a provider error Pi does not retry. `undefined` answers as usual.
+   */
+  fail?(): Promise<string> | undefined;
 }
 
 /**
@@ -45,6 +50,8 @@ export function scriptedProvider(options: ScriptedProviderOptions = {}): Provide
   const faux = fauxProvider({ provider: options.id ?? "faux", models: [{ id: "scripted" }] });
   const step: FauxResponseFactory = (context) => {
     options.onRequest?.(context);
+    const failing = options.fail?.();
+    if (failing !== undefined) return failing.then((errorMessage) => fauxAssistantMessage("", { stopReason: "error", errorMessage }));
     const last = context.messages.at(-1);
     if (last?.role === "user" && textOf(last) === "hold") {
       return fauxAssistantMessage(fauxToolCall("hold", {}), { stopReason: "toolUse" });

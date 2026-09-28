@@ -11,7 +11,9 @@
  *    harness hooks and events of `AgentHarness`, the class pikit runs (Pi's coding agent still
  *    runs the legacy `Agent`), and actions reach the conversation's lane.
  *
- * Handlers that throw are logged and skipped, as in Pi: an extension cannot fail a run.
+ * A notification handler that throws is logged and skipped: an extension cannot fail a run. A
+ * `tool_call` handler that throws blocks the call, as in Pi (its `beforeToolCall` rethrows, and the
+ * call ends as an error result): a policy that cannot answer must not let the tool run.
  */
 
 import {
@@ -81,7 +83,10 @@ export interface BindTarget {
   lane: AgentLane;
   cwd: string;
   systemPrompt: string | undefined;
-  /** The conversation's abort, so an extension's `ctx.abort()` withdraws queued messages too. */
+  /**
+   * The conversation's abort, so an extension's `ctx.abort()` withdraws queued messages too. It must
+   * be a no-op once the conversation is closed: it may run after `close()`.
+   */
   abort(): Promise<void>;
 }
 
@@ -301,7 +306,13 @@ class Bound {
       model: this.model,
       signal,
       isIdle: () => this.idle,
-      abort: () => void this.act(() => this.target.abort()),
+      // Not an action `drain()` waits for: the conversation's abort runs in its line, and the step
+      // holding the line may be the one closing this conversation (a settled run closes it once idle),
+      // which waits for `drain()`. A closed conversation has no run to abort, so it is a no-op there.
+      abort: () =>
+        void this.target.abort().catch((error: unknown) => {
+          this.registry.logger.warn("a Pi extension's abort failed", { error: String(error) });
+        }),
       hasPendingMessages: () => this.pending > 0,
       waitForIdle: () => this.lane.waitForIdle(this.pi),
       getSystemPrompt: () => this.systemPromptOverride ?? this.target.systemPrompt ?? "",
@@ -389,7 +400,14 @@ class Bound {
               break;
             }
           } catch (error) {
-            this.registry.logger.warn("a Pi extension handler failed; it is skipped", { event: "tool_call", error: String(error) });
+            // Fail closed. The error's text stays in the log: it may carry what the policy service
+            // said, which the model must not see.
+            this.registry.logger.error("a Pi extension's tool_call handler failed; the call is blocked", {
+              tool: event.toolName,
+              error: String(error),
+            });
+            block = { block: true, reason: TOOL_POLICY_FAILED };
+            break;
           }
         }
         if (block !== undefined) {
@@ -543,6 +561,9 @@ class Bound {
     );
   }
 }
+
+/** The reason a call is blocked when an extension's `tool_call` handler throws. */
+export const TOOL_POLICY_FAILED = "Blocked: an extension's tool_call policy failed, so the call was not allowed";
 
 /** The text of the prompt that starts a run: its last user or inbound message. */
 function promptText(prompt: readonly AgentMessage[]): string {

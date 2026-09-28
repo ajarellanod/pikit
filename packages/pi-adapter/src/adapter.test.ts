@@ -32,6 +32,7 @@ import { toPi } from "./context.ts";
 import { hasRequest, inboundMessage, LANE } from "./inbound.ts";
 import { createPiRuntime, modelsFrom, type Provider, type SessionStore } from "./index.ts";
 import { createJsonlSessionStore } from "./node/index.ts";
+import { slotCount } from "./runtime.ts";
 import { holdTool, killMidRun, type ModelRequest, scriptedAgent, scriptedProvider } from "./testing/index.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -133,6 +134,90 @@ describe("conversations", () => {
     expect(await stats(a.sessionId)).toBe(4);
     expect(await stats(b.sessionId)).toBe(0);
     await s.runtime.close(s.app.context());
+  });
+
+  test("a closed conversation leaves nothing behind in the runtime", async () => {
+    const s = await setup();
+    const conversations = await Promise.all([1, 2, 3].map(() => s.conversation()));
+
+    for (const [i, conversation] of conversations.entries()) {
+      await s.runtime.dispatch({ requestId: `r${i}`, conversation, prompt: "hello" }, s.app.context());
+      await s.result(`r${i}`);
+    }
+    // A duplicate opens and closes the conversation again, with no run.
+    const [first] = conversations;
+    if (first === undefined) throw new Error("expected conversations");
+    await s.runtime.dispatch({ requestId: "r0", conversation: first, prompt: "hello" }, s.app.context());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(slotCount.get(s.runtime)?.()).toBe(0);
+    await s.runtime.close(s.app.context());
+  });
+});
+
+describe("closing and event order", () => {
+  test("close() while a dispatch is opening its conversation: nothing is left open, no run is driven", async () => {
+    const store = new MemorySessionRepo();
+    let open = 0;
+    const openSession = store.open.bind(store);
+    store.open = async (metadata, context) => {
+      // Slow, so close() runs while the conversation opens.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const session = await openSession(metadata, context);
+      open++;
+      const closeSession = session.close.bind(session);
+      session.close = (closeContext) => {
+        open--;
+        return closeSession(closeContext);
+      };
+      return session;
+    };
+    let requests = 0;
+    const s = await setup({ sessions: store, providers: [scriptedProvider({ onRequest: () => void requests++ })] });
+    const conversation = await s.conversation();
+
+    const dispatched = s.runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, s.app.context());
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await s.runtime.close(s.app.context());
+
+    expect(open).toBe(0);
+    await expect(dispatched).rejects.toThrow("agent.runtime is closed");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(requests).toBe(0);
+    expect(open).toBe(0);
+  });
+
+  test("agent.started comes before the run's result, even when agent.dispatched is slow to listen", async () => {
+    const order: string[] = [];
+    const observer = defineComponent({
+      name: "order",
+      setup(pikit) {
+        pikit.on("agent.dispatched", async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          order.push("dispatched");
+        });
+        pikit.on("agent.started", () => void order.push("started"));
+        pikit.on("agent.settled", () => void order.push("settled"));
+      },
+    });
+    const app = await defineApp({ components: [observer], logger: silentLogger }).create();
+    const sessions: SessionStore = new MemorySessionRepo();
+    const agent = scriptedAgent(holdTool(async () => "unused"));
+    const runtime = createPiRuntime({
+      sessions,
+      agent: (name) => (name === agent.name ? agent : undefined),
+      models: modelsFrom([scriptedProvider()]),
+      events: app.context(),
+    });
+    const session = await sessions.create({ cwd: "/" }, ctx);
+    await session.close(ctx);
+    const conversation = { key: "test:order", agent: agent.name, sessionId: session.metadata.id };
+
+    await runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context());
+    for (let i = 0; i < 50 && !order.includes("settled"); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(order).toEqual(["dispatched", "started", "settled"]);
+    await runtime.close(app.context());
   });
 });
 
@@ -329,6 +414,69 @@ describe("a killed worker (SPEC §8.4: replay is Pi's)", () => {
       rmSync(root, { recursive: true, force: true });
     }
   }, 20_000);
+});
+
+describe("messages left in Pi's inbox (SPEC §6.4, gap 2)", () => {
+  /** A conversation whose worker died after `steer` and before `accept`: its message waits in the inbox. */
+  async function steeredAndDied(s: Awaited<ReturnType<typeof setup>>) {
+    const conversation = await s.conversation();
+    const metadata = (await s.sessions.list(undefined, ctx)).find((m: { id: string }) => m.id === conversation.sessionId);
+    const session = await s.sessions.open(metadata, ctx);
+    const models = modelsFrom([scriptedProvider()]);
+    const model = models.getModel("faux", "scripted");
+    if (model === undefined) throw new Error("faux/scripted missing");
+    const { harness } = await AgentHarness.create({ session, models, model }, ctx);
+    const lane = await harness.lane(LANE, ctx);
+    const steered = await lane.steer(inboundMessage("r1", "lost"), undefined, ctx);
+    if (!steered.ok) throw steered.error;
+    await harness.close(ctx);
+    return conversation;
+  }
+
+  test("a message steered by a worker that died before accept() is answered on redelivery", async () => {
+    const s = await setup();
+    const conversation = await steeredAndDied(s);
+
+    const again = await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "lost" }, s.app.context());
+
+    expect(again.kind).toBe("duplicate");
+    const result = await s.result("r1");
+    expect([result.kind, result.text, result.requestIds]).toEqual(["completed", "answer: lost", ["r1"]]);
+    await s.runtime.close(s.app.context());
+  });
+
+  test("... and when its conversation is resumed, with no message at all", async () => {
+    const s = await setup();
+    const conversation = await steeredAndDied(s);
+
+    await s.runtime.resume(conversation, s.app.context());
+
+    expect((await s.result("r1")).text).toBe("answer: lost");
+    await s.runtime.close(s.app.context());
+  });
+
+  test("a queued run that fails too is not started again: its messages left the inbox", async () => {
+    let requests = 0;
+    let release!: () => void;
+    const released = new Promise<string>((resolve) => (release = () => resolve("scripted failure")));
+    // Every model call fails; the first one only once released.
+    const fail = () => (requests === 1 ? released : Promise.resolve("scripted failure"));
+    const s = await setup({ providers: [scriptedProvider({ onRequest: () => void requests++, fail })] });
+    const conversation = await s.conversation();
+
+    await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "one" }, s.app.context());
+    while (requests === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+    const queued = await s.runtime.dispatch({ requestId: "r2", conversation, prompt: "two" }, s.app.context());
+    release();
+
+    expect(queued.kind).toBe("queued");
+    expect((await s.result("r1")).requestIds).toEqual(["r1"]);
+    const second = await s.result("r2");
+    expect([second.kind, second.requestIds]).toEqual(["failed", ["r2"]]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requests).toBe(2);
+    await s.runtime.close(s.app.context());
+  });
 });
 
 describe("inbound messages", () => {

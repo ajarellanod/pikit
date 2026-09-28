@@ -15,6 +15,7 @@
  *   `fixture.hold.release()`. The tool honours cancellation. Once it returns, the turn answers the
  *   newest inbound message as usual (`answer: hold`, or a message that arrived meanwhile).
  * - `holdAtEnd()` pauses the next run after its final answer, before it ends.
+ * - `failNext()` makes the next model call wait, then fail: the run in progress fails.
  */
 
 import {
@@ -51,6 +52,11 @@ export interface AgentRuntimeFixture {
   };
   /** Pause the next run that ends after its final answer, until `release()`. */
   holdAtEnd(): { reached: Promise<void>; release(): void };
+  /**
+   * Make the next model call wait until `release()`, then fail as a provider error that is not
+   * retried, so its run ends failed. `reached` resolves once that call has started.
+   */
+  failNext(): { reached: Promise<void>; release(): void };
   /**
    * A conversation whose previous worker died in the middle of a `hold` run: its records say the
    * run is open, and no process drives it. When resumed, the tool must not block again (a tool that
@@ -144,6 +150,26 @@ export function createAgentRuntimeConformance(
       expect(result.requestIds, ["r1", "r2"], "the requests the run answered");
       await s.quiet();
       w.none((e) => e.name !== "agent.dispatched" && requestIdOf(e) === "r2", "a run of its own for the late message");
+    }),
+
+    runtimeCase("a message queued behind a run that fails gets a run of its own, and its answer", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const failing = s.fixture.failNext();
+      await w.dispatch("r1", "hello", conversation);
+      await s.within(failing.reached, "the model call to start");
+
+      // Queued while the model answers: no boundary takes it before the run fails.
+      expect(await w.dispatch("r2", "are you there?", conversation), { kind: "queued", requestId: "r2" }, "admission");
+      failing.release();
+
+      const failed = await w.result("r1");
+      expect([failed.kind, failed.requestIds], ["failed", ["r1"]], "result of the failed run");
+      // No third message: the runtime starts the run for what the failed one left queued.
+      expect(await w.event("agent.started", (e) => e.requestId === "r2"), { conversation, requestId: "r2", resumed: false }, "agent.started");
+      const answered = await w.result("r2");
+      expect([answered.kind, answered.text, answered.requestIds], ["completed", "answer: are you there?", ["r2"]], "its result");
+      expect(await w.dispatch("r2", "are you there?", conversation), { kind: "duplicate", requestId: "r2" }, "a redelivery");
     }),
 
     runtimeCase("a repeated requestId is a duplicate: settled, running, queued, and concurrent", async (s) => {

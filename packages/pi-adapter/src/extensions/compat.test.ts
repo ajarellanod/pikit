@@ -17,6 +17,7 @@ import { type AppEvents, defineApp, defineComponent, type Logger, silentLogger }
 import { type AgentDefinition, defineAgent } from "@pikit/contracts";
 import { createPiRuntime, type ExtensionAPI, modelsFrom, type PiExtension, type SessionStore } from "../index.ts";
 import { holdTool, killMidRun, scriptedAgent, scriptedProvider } from "../testing/index.ts";
+import { TOOL_POLICY_FAILED } from "./host.ts";
 import hello from "./pi-examples/hello.ts";
 import permissionGate from "./pi-examples/permission-gate.ts";
 import protectedPaths from "./pi-examples/protected-paths.ts";
@@ -72,6 +73,15 @@ function recordingTool(name: "bash" | "write", ran: string[]): AgentHarnessTool<
       return { content: [{ type: "text", text: "ran" }], details: undefined };
     },
   };
+}
+
+/** `promise`, or a failure after two seconds: a deadlock fails the test instead of hanging it. */
+function within<T>(promise: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), 2000);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
 }
 
 async function newSession(sessions: SessionStore): Promise<string> {
@@ -235,6 +245,27 @@ describe("the mapping of Pi's extension events (SPEC §6.2b)", () => {
     ]);
   });
 
+  test("a tool_call handler that throws blocks the call, and the reason does not carry its error", async () => {
+    const errors: string[] = [];
+    const logger: Logger = { ...silentLogger, error: (message) => void errors.push(message) };
+    // A permission gate whose policy service is down.
+    const gate: PiExtension = (pi) =>
+      void pi.on("tool_call", async () => {
+        throw new Error("policy service unreachable: token=secret");
+      });
+    const s = await setup([gate], { logger });
+
+    const result = await s.say("bash: rm -rf /");
+
+    expect(s.ran).toEqual([]);
+    expect(result.text).toBe(`tool said: ${TOOL_POLICY_FAILED}`);
+    const toolResult = result.messages.find((message) => message.role === "toolResult");
+    expect(toolResult?.role === "toolResult" && toolResult.isError).toBe(true);
+    expect(JSON.stringify(result.messages)).not.toContain("secret");
+    expect(errors).toEqual(["a Pi extension's tool_call handler failed; the call is blocked"]);
+    await s.close();
+  });
+
   test("tool_call can patch arguments in place, and tool_result can rewrite the result", async () => {
     const patcher: PiExtension = (pi) => {
       pi.on("tool_call", (event) => {
@@ -393,6 +424,25 @@ describe("taking a conversation up again, with extensions loaded (SPEC §6.2b)",
       // In a real deployment the same extensions ran before the crash, so the call was checked.
       expect(runs()).toBe(1);
     }, 20_000);
+  });
+
+  test("ctx.abort() from an agent_end handler neither deadlocks the conversation nor loses the result", async () => {
+    let aborts = 0;
+    const aborter: PiExtension = (pi) =>
+      void pi.on("agent_end", async (_event, ctx) => {
+        // Late, as a handler that does I/O first: the run has settled and the conversation is closing.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        aborts++;
+        ctx.abort();
+      });
+    const s = await setup([aborter]);
+
+    const first = await within(s.say("one"), "the first result");
+    const second = await within(s.say("two"), "the result of a message after the abort");
+    await within(s.close(), "close()");
+
+    expect([first.text, second.text]).toEqual(["answer: one", "answer: two"]);
+    expect(aborts).toBe(2);
   });
 
   test("reopening keeps the provider's prompt cache: same system prompt, same tools, same prefix", async () => {

@@ -1025,8 +1025,10 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   own.
   - On an idle conversation, Pi starts a run and drains its inbox into it.
   - On a busy one, `accept()` fails with `LaneBusy`, and the run in progress takes the message
-    at its next boundary. Pi re-reads its inbox inside the commit that ends a run, so a message
-    enqueued before that commit is never left behind.
+    at its next boundary. Pi re-reads its inbox at the final boundary of a run that completes; a
+    run that fails leaves its inbox as it is. So when a run ends, before the conversation can
+    close, the adapter starts a run for the inbound messages still queued (§6.4, gap 2): a
+    message admitted as `queued` is always answered, by the run it joined or by the next one.
 
   Deciding "busy, so steer" first and enqueuing afterwards would race the end of the run
   (§6.4, gap 2). That is why the contract has no `steer()`: `dispatch` is the only way in. It
@@ -1081,7 +1083,9 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   no `run_start` for a resumed run). `agent.settled` / `agent.failed` from the run's terminal
   record, the one Pi's `run_end` announces: the adapter drives every run of a conversation it has
   open, a started one with `drive()` and an interrupted one with `lane.resume()`, so every end
-  reaches it. Run events carry the admitting call's values without its cancellation.
+  reaches it. Run events carry the admitting call's values without its cancellation. A run's
+  `agent.started` always comes before its `agent.settled` / `agent.failed`: the run is not held
+  back, only the event of its end waits for `agent.started` to be emitted.
 - **`resume()`** continues the operations `AgentHarness.create()` reports as `open`, with
   `lane.resume()`; their outcomes arrive as `agent.settled` like any other run. Tools declared
   `replay: "safe"` run again; for any other tool Pi records an "interrupted" error result and
@@ -1273,7 +1277,7 @@ Support tiers (on 0.87.1):
 
 | Tier | Surface | How |
 |---|---|---|
-| A — works | `on(...)`: `session_start`, `session_shutdown`, `before_agent_start`, `context`, `before_provider_request`, `after_provider_response`, `agent_start`, `agent_end`, `turn_start`, `turn_end`, `message_start` / `_update` / `_end`, `tool_execution_start` / `_update` / `_end`, `tool_call`, `tool_result`. `registerTool`, `defineTool`, `isToolCallEventType`, `registerProvider`, `sendMessage`, `sendUserMessage`, `appendEntry`, `set/getSessionName`, `setLabel`, `set/getActiveTools`, `getAllTools`, `setModel`, `set/getThinkingLevel`, `events`. On `ctx`: `hasUI`, `mode`, `cwd`, `model`, `signal`, `isIdle`, `abort`, `hasPendingMessages`, `waitForIdle`, `getSystemPrompt`, `compact` | `tool_call` → `before_tool` (`block` blocks; mutating `event.input` in place patches the arguments). `tool_result` → `after_tool`. `before_agent_start` → `before_run` (an added message) and `transform_context` (the system prompt, for that run). `context` → `transform_context`. `before_provider_request` → `before_payload`. `after_provider_response` → `after_response`. Run, turn, message and tool notifications → the harness's events, in Pi's order. `ctx.abort()` → the conversation's `abort()`, which records withdrawn messages (§6.4, gap 4). Tools → harness tools, `replay: "never"` |
+| A — works | `on(...)`: `session_start`, `session_shutdown`, `before_agent_start`, `context`, `before_provider_request`, `after_provider_response`, `agent_start`, `agent_end`, `turn_start`, `turn_end`, `message_start` / `_update` / `_end`, `tool_execution_start` / `_update` / `_end`, `tool_call`, `tool_result`. `registerTool`, `defineTool`, `isToolCallEventType`, `registerProvider`, `sendMessage`, `sendUserMessage`, `appendEntry`, `set/getSessionName`, `setLabel`, `set/getActiveTools`, `getAllTools`, `setModel`, `set/getThinkingLevel`, `events`. On `ctx`: `hasUI`, `mode`, `cwd`, `model`, `signal`, `isIdle`, `abort`, `hasPendingMessages`, `waitForIdle`, `getSystemPrompt`, `compact` | `tool_call` → `before_tool` (`block` blocks; mutating `event.input` in place patches the arguments; a handler that throws blocks the call with a fixed reason, as Pi's `beforeToolCall` does, and its error goes only to the log). `tool_result` → `after_tool`. `before_agent_start` → `before_run` (an added message) and `transform_context` (the system prompt, for that run). `context` → `transform_context`. `before_provider_request` → `before_payload`. `after_provider_response` → `after_response`. Run, turn, message and tool notifications → the harness's events, in Pi's order. `ctx.abort()` → the conversation's `abort()`, which records withdrawn messages (§6.4, gap 4); it is queued in the conversation's line without the close waiting for it, and is a no-op once the conversation has closed (an idle conversation has no run to stop). Tools → harness tools, `replay: "never"` |
 | B — later, with channels | `registerCommand` (slash commands from a channel), `ui.select` / `confirm` / `input` answered by a person (overlaps `approvals`) | Today they are tier C |
 | C — no-op with a warning | Every other event (`input`, `user_bash`, `model_select`, `agent_before_settle`, `context_with_system`, `cache_warming_decision`, `session_before_*`, `resources_discover`, `project_trust`…), `registerShortcut`, `registerFlag` / `getFlag`, `register*Renderer`, `registerMarkdownTransformer`, TUI `ui.*`, `ctx.shutdown()`. Absent: `ctx.sessionManager`, `ctx.modelRegistry`, `newSession`, `fork`, `switchSession` | TUI-only, or owned by pikit (the process, the sessions). The warning is a log line when the extension loads; `pikit doctor` lists it once the CLI exists `[planned]`. `pi.exec()` rejects until extensions are given `execution.shell` |
 
@@ -1534,7 +1538,7 @@ contracts so the move happens inside the adapter. `[upstream]`
 
 | pikit need | Pi durable runtime | Until it ships (verified by the spike on 0.87.1) |
 |---|---|---|
-| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | Enqueue first (`steer()`), then `accept()`. Pi drains its inbox into a new run, or the run in progress takes the message at a boundary. Bridges gap 2 |
+| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | Enqueue first (`steer()`), then `accept()`. Pi drains its inbox into a new run, or the run in progress takes the message at a boundary; what a run leaves queued gets the next run. Bridges gap 2 |
 | Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | The `requestId` travels inside the message (a Pi `custom` message) and is found in Pi's inbox or transcript. Bridges gaps 1 and 3 |
 | `agent.state` | Conversation-scoped document (a JSON object with an `initial()`). It can declare `history: "rewindable"` and `fork: "asOf"`, so the state follows a fork or a rewind of the transcript (`pico-v5.md` §3, checked at `cbe7cf00`) | Session value `pikit` / `agent.state` (`state.ts`), holding the updated keys; `get()` merges them over the agent's initial state. It is committed apart from the transcript, so a tool's state change and its result are two commits. A session value belongs to the whole session, not to a branch: correct while pikit never forks or rewinds a conversation. Passes `createAgentStateConformance` on memory and JSONL sessions |
 | Continue a killed run | Tasks resume from their records | `AgentHarness.create()` reports `open` operations; `lane.resume()` continues them; tool `replay` is Pi's |
@@ -1553,7 +1557,7 @@ conformance suite and `adapter.test.ts` prove each bridge. The bridges live in
 | # | Gap in `pi-agent-core` 0.87.1 | Bridge in the adapter | Pi durable runtime |
 |---|---|---|---|
 | 1 | `accept()` does not reject a reused `operationId`: an idle lane runs the same request again | Duplicate check before admission, and one admission at a time per conversation in its worker. One worker owns a conversation (§7.2) | `requestId` deduplicates before any write |
-| 2 | No atomic "run if idle, otherwise queue": a `steer()` that lands after the run's last boundary waits in the inbox for the next run | Enqueue first, then `accept()`. Pi re-reads its inbox in the commit that ends a run, and `accept()` drains it on an idle lane | Admission decides idle or busy in one transaction; an idle input first drains older queued items |
+| 2 | No atomic "run if idle, otherwise queue": a `steer()` that lands after the run's last boundary waits in the inbox for the next run. A run that fails leaves its inbox as it is, and nothing starts a run for it (`main` at `e1787702` does not either) | Enqueue first, then `accept()`, which drains the inbox on an idle lane. And `reconcile` (`conversation.ts`): when a run ends, when a conversation opens with no open run (a worker that died between `steer()` and `accept()`), and when a duplicate is found only in the inbox, an `accept()` with no prompt starts a run for the queued inbound messages, named after the oldest (`agent.started`, `resumed: false`); its result lists them all in `requestIds`. It takes them out of the inbox, so a run that fails again is not retried | Admission decides idle or busy in one transaction; an idle input first drains older queued items; a failed turn marks its inputs `unanswered` and clears or hands off the turn controller (`pico-v5.md` §6) |
 | 3 | `steer()`, `followUp()` and `nextRun()` take no request id | The message is a Pi `custom` message with `details: { requestId }`, committed with it | Queued submissions carry their `requestId` |
 | 4 | `abort()` takes the queued steers and follow-ups out of the inbox and returns them only in memory: a redelivery looks new | After `abort()`, a `custom` entry `pikit.withdrawn { requestIds }`, which the duplicate check reads | `Conversation.abort()` withdraws queued submissions and records them `unanswered` |
 
