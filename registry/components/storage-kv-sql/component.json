@@ -1,0 +1,31 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "storage-kv-sql",
+  "version": "0.0.0",
+  "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "storage.sql"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "storage.kv"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
