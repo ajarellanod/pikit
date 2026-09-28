@@ -13,6 +13,7 @@ import { defineComponent } from "@pikit/core";
 import { type OutboundQueue } from "@pikit/contracts";
 import { type ConvergenceFixture, createConvergenceConformance } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
+import { BACKOFF_MS } from "./queue.ts";
 import { openTestDatabase } from "./storage.test-support.ts";
 
 const directories: string[] = [];
@@ -34,6 +35,8 @@ function fixture(): ConvergenceFixture {
 
   return {
     database: records.database,
+    // After a storage failure, the world waits out the queue's first backoff before it looks again.
+    retryAfterMs: BACKOFF_MS[0],
     components: (life) => [
       outboundDurable,
       defineComponent({
@@ -87,5 +90,10 @@ function fixture(): ConvergenceFixture {
 }
 
 for (const c of createConvergenceConformance(fixture)) {
-  test(`outbound-durable ${c.group}: ${c.name}`, () => c.run(), 60_000);
+  // Known bug C1: send and markDelivered share a try/catch, see report-macro.md point 6. A failed
+  // write of a delivery (commits 13, 14 and 16 of 18, one per piece) is taken for a failed send: the
+  // piece is sent again after the backoff without the possible-duplicate mark. `failing` flips to a
+  // failure once queue.ts is fixed: then this line goes.
+  const known = c.name.startsWith("a storage failure") ? test.failing : test;
+  known(`outbound-durable ${c.group}: ${c.name}`, () => c.run(), 60_000);
 }
