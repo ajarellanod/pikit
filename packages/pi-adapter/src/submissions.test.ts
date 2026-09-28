@@ -327,3 +327,40 @@ test("recover does not wait for a run a new message started in the conversation"
   await s.result("r1");
   await s.runtime.close(s.ctx);
 });
+
+test("recover abandons, and announces, the requests of a conversation whose agent or session is gone", async () => {
+  const { submissions } = createMemorySubmissions();
+  const s = await setup({ submissions });
+  const removed = { ...(await s.conversation()), agent: "removed" };
+  const missing = { key: "test:missing", agent: "scripted", sessionId: "no-such-session" };
+  await submissions.admitted(removed, "r1", s.ctx);
+  await submissions.admitted(missing, "r2", s.ctx);
+
+  await s.runtime.recover(removed, ["r1"], s.ctx);
+  await s.runtime.recover(missing, ["r2"], s.ctx);
+
+  expect([(await s.result("r1")).error, (await s.result("r2")).error]).toEqual([
+    { code: "abandoned", message: "agent_removed" },
+    { code: "abandoned", message: "session_missing" },
+  ]);
+  expect(await submissions.pending(s.ctx)).toEqual([]);
+  // At the next start nothing is pending: recovering again announces nothing.
+  await s.runtime.recover(removed, ["r1"], s.ctx);
+  expect(s.results).toHaveLength(2);
+  await s.runtime.close(s.ctx);
+});
+
+test("abandon leaves the requests a run of this worker may still take", async () => {
+  const { submissions } = createMemorySubmissions();
+  const s = await setup({ submissions });
+  const conversation = await s.conversation();
+  await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "hold" }, s.ctx);
+  await s.hold.started;
+
+  await s.runtime.abandon(conversation, ["r1"], "unanswered_too_long", s.ctx);
+
+  expect((await submissions.get(conversation, "r1", s.ctx))?.kind).toBe("pending");
+  s.hold.release();
+  expect((await s.result("r1")).kind).toBe("completed");
+  await s.runtime.close(s.ctx);
+});
