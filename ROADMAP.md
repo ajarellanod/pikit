@@ -373,6 +373,8 @@ alerts build on later. Only the architecture is built here, not those components
 - `@pikit/core` keeps only the kernel; the shared contracts, `admitInbound` and their suites moved to
   `@pikit/contracts`, which versions on its own. Components declare it in `dependencies`.
 - `inbound.authenticate` moved into `channel-http`, its only user, as `http.authenticate`.
+  `outbound-durable` declares its retry policy to the `outbound.queue` suite instead of the suite
+  fixing it.
 - Guards: the kernel's exports, the kit's layers and the kernel's single dependency.
 
 Rich content (`parts`, `replyTo`) and questions from extensions in a chat (`interaction`) are

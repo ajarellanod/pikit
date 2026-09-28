@@ -584,7 +584,8 @@ be built on.
   count: they share their author's assumptions. A contract the project provides (`agent.definition`)
   is promoted by a `[decision]`. 1.0 needs every contract `stable` (ROADMAP).
 - Its suite checks what every provider must do, never the policy of the provider it was written
-  with. It may hold a provider to a policy the provider declares, not to one the suite chose.
+  with. It may hold a provider to a policy the provider declares (`outbound.queue`'s `retry`), not
+  to one the suite chose.
 - It goes back to its component when only one party is left.
 - A `stable` contract changes additively; a breaking change is a `[decision]` and a major of
   `@pikit/contracts`, never of the kernel (§12a).
@@ -815,7 +816,9 @@ function answerKey(conversation: Pick<ConversationRef, "sessionId">, requestId: 
   its send.
 - **Order.** One conversation's pieces go out one at a time, in order. A piece waiting to be retried
   holds the ones behind it; other conversations do not wait for it (bounded concurrency).
-- **Errors.** The transport classifies, the queue acts:
+- **Errors.** The transport classifies, the queue acts. How long it waits and when it gives up is
+  the queue's policy, not the contract's (§4.9): a provider declares it to the suite
+  (`createOutboundQueueConformance(fixture, { retry })`), which holds it to it. `outbound-durable`'s:
   - `transient` (and any error that is not a `DeliveryError`): retried after 5 s, 30 s, 2 min and
     10 min, then abandoned after the fifth attempt;
   - `rate_limited`: retried after `retryAfterMs`, not counted as an attempt. The queue waits, never
@@ -2954,6 +2957,8 @@ Resolved `[decision]`:
 - `http.authenticate` (formerly the core's `inbound.authenticate`) is `channel-http`'s own pipeline,
   named after its channel (§4.3), not a contract (§4.4): each platform
   authenticates differently, and Telegram does not use it.
+- The outbox's retry waits are `outbound-durable`'s policy, declared to the suite, not the
+  contract's (§5, §4.9).
 
 ---
 

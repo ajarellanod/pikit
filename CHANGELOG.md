@@ -26,6 +26,10 @@ line names its area (AGENTS.md, "Git and docs").
   `channel-http`, its only user, declares it instead of the core. A component's own names carry its
   prefix (SPEC §4.3). Its value, its stage (`channel-http-bearer`) and failing closed are unchanged.
   A project extension that adds a stage to it changes the pipeline's name.
+- contracts, component/outbound-durable: `createOutboundQueueConformance(fixture, { retry })` takes
+  the provider's retry policy and holds it to it. The waits and the maximum age are no longer fixed
+  by the suite, so a copy of `outbound-durable` can change them and still pass. `outbound-durable`'s
+  policy is unchanged.
 
 - core, component/outbound-durable: the convergence suite, `createConvergenceConformance` in
   `@pikit/core/testing` (SPEC §14). It kills the process after each of its commits in turn (its

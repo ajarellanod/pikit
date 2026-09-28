@@ -14,7 +14,7 @@ export { createConversationRegistryConformance } from "./conversations.ts";
 export type { HttpRouteConformanceOptions, HttpRouteFixture } from "./http.ts";
 export { createHttpRouteConformance } from "./http.ts";
 
-export type { OutboundQueueFixture } from "./outbound-queue.ts";
+export type { OutboundQueueConformanceOptions, OutboundQueueFixture } from "./outbound-queue.ts";
 export { createOutboundQueueConformance } from "./outbound-queue.ts";
 
 export type { FeedConformanceOptions, FeedFixture, MemoryFeed } from "./feed.ts";

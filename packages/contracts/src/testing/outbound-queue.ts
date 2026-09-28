@@ -2,8 +2,13 @@
  * `outbound.queue` conformance (SPEC §5 "Outbound delivery", §14): what every queue must do, wherever
  * it keeps its records. Runner-independent, like the lifecycle suite:
  *
- *   for (const c of createOutboundQueueConformance(() => myFixture()))
+ *   for (const c of createOutboundQueueConformance(() => myFixture(), { retry: MY_RETRY }))
  *     test(`${c.group}: ${c.name}`, () => c.run());
+ *
+ * How long to wait and when to give up is the provider's policy, not the contract's (SPEC §4.9):
+ * the provider declares it (`retry`), and the suite holds it to what it declared. What every queue
+ * must do is the rest: order, retry after a transient failure, no retry after a permanent one, rate
+ * limits that do not count as failures, possible duplicates marked, receipts.
  *
  * The suite owns the clock (`createManualClock`), so retries are checked to the millisecond without
  * waiting, and the transport, which it scripts: a piece's send succeeds, fails with a given kind, or
@@ -53,11 +58,40 @@ const check = checker(GROUP);
 
 const SECOND = 1_000;
 const MINUTE = 60 * SECOND;
-/** SPEC §5: the waits after each transient failure; the fifth failure abandons. */
-const BACKOFF = [5 * SECOND, 30 * SECOND, 2 * MINUTE, 10 * MINUTE];
-const DAY = 24 * 60 * MINUTE;
+export interface OutboundQueueConformanceOptions {
+  /** The provider's own retry policy, which the suite holds it to. */
+  retry: {
+    /**
+     * The wait after each transient failure, in order; at least one. A transient failure after the
+     * last wait abandons the piece, so a piece gets `waitsMs.length + 1` attempts.
+     */
+    waitsMs: readonly number[];
+    /** A piece not delivered this long after it was enqueued is abandoned, whatever the reason. */
+    maxAgeMs: number;
+  };
+}
 
-export function createOutboundQueueConformance(factory: () => OutboundQueueFixture | Promise<OutboundQueueFixture>): readonly ConformanceCase[] {
+/** `90_000` → `1.5 min`: for the cases' names. */
+function duration(ms: number): string {
+  const units: [number, string][] = [
+    [60 * MINUTE, "h"],
+    [MINUTE, "min"],
+    [SECOND, "s"],
+  ];
+  const [size, unit] = units.find(([size]) => ms >= size) ?? [1, "ms"];
+  return `${Number((ms / size).toFixed(2))} ${unit}`;
+}
+
+export function createOutboundQueueConformance(
+  factory: () => OutboundQueueFixture | Promise<OutboundQueueFixture>,
+  options: OutboundQueueConformanceOptions,
+): readonly ConformanceCase[] {
+  const { waitsMs, maxAgeMs } = options.retry;
+  if (waitsMs.length === 0 || waitsMs.some((wait) => !(wait > 0)) || !(maxAgeMs > 0)) {
+    throw new Error("outbound.queue conformance: retry.waitsMs needs at least one positive wait, and retry.maxAgeMs must be positive");
+  }
+  const firstWait = waitsMs[0] as number;
+  const attempts = waitsMs.length + 1;
   const queueCase = (name: string, run: (s: Subject) => Promise<void>): ConformanceCase => ({
     group: GROUP,
     name,
@@ -123,7 +157,7 @@ export function createOutboundQueueConformance(factory: () => OutboundQueueFixtu
       await w.queue.enqueue(message("a2", "chat:a", "second in a"));
       await w.queue.enqueue(message("b1", "chat:b", "only in b"));
       await eventually(() => w.delivered.some((d) => d.key === "b1#0"), "b's message delivered while a waits");
-      await s.clock.advance(BACKOFF[0] as number);
+      await s.clock.advance(firstWait);
       await eventually(() => w.delivered.some((d) => d.key === "a2#0"), "a's messages delivered after the wait");
       expect(
         transport.calls.filter((p) => p.conversationKey === "chat:a").map((p) => p.key),
@@ -132,22 +166,22 @@ export function createOutboundQueueConformance(factory: () => OutboundQueueFixtu
       );
     }),
 
-    queueCase("transient failures are retried after 5 s, 30 s, 2 min and 10 min, then abandoned", async (s) => {
+    queueCase(`transient failures are retried after the declared waits (${waitsMs.map(duration).join(", ")}), then abandoned`, async (s) => {
       const w = await s.open();
-      const transport = scripted({ "m1#0": Array.from({ length: 10 }, () => transient()) });
+      const transport = scripted({ "m1#0": Array.from({ length: attempts + 5 }, () => transient()) });
       w.queue.attach("chat", transport);
       await w.queue.enqueue(message("m1", "chat:1", "hello"));
       await eventually(() => transport.calls.length === 1, "the first attempt");
-      for (const [i, wait] of BACKOFF.entries()) {
+      for (const [i, wait] of waitsMs.entries()) {
         await s.clock.advance(wait - 1);
         expect(transport.calls.length, i + 1, `attempts 1 ms before the wait of ${wait} ms ends`);
         await s.clock.advance(1);
         await eventually(() => transport.calls.length === i + 2, `attempt ${i + 2} once the wait ends`);
       }
-      await eventually(() => w.abandoned.length === 1, "the piece abandoned after its fifth failure");
-      expect(w.abandoned[0]?.attempts, 5, "attempts of the abandoned piece");
-      await s.clock.advance(DAY);
-      expect(transport.calls.length, 5, "no attempt after it was abandoned");
+      await eventually(() => w.abandoned.length === 1, `the piece abandoned after failure ${attempts}`);
+      expect(w.abandoned[0]?.attempts, attempts, "attempts of the abandoned piece");
+      await s.clock.advance(maxAgeMs);
+      expect(transport.calls.length, attempts, "no attempt after it was abandoned");
     }),
 
     queueCase("a permanent failure is abandoned at once, and its conversation moves on", async (s) => {
@@ -178,14 +212,16 @@ export function createOutboundQueueConformance(factory: () => OutboundQueueFixtu
       expect(w.abandoned, [], "nothing abandoned");
     }),
 
-    queueCase("a piece still undelivered after 24 hours is abandoned", async (s) => {
+    queueCase(`a piece still undelivered after the declared age (${duration(maxAgeMs)}) is abandoned`, async (s) => {
       const w = await s.open();
-      const limited = () => new DeliveryError("rate_limited", "too many requests", { retryAfterMs: 5 * 60 * MINUTE });
+      // Rate limits never count as failures, so only the age can end it: five steps reach it.
+      const step = Math.ceil(maxAgeMs / 5);
+      const limited = () => new DeliveryError("rate_limited", "too many requests", { retryAfterMs: step });
       const transport = scripted({ "m1#0": Array.from({ length: 20 }, limited) });
       w.queue.attach("chat", transport);
       await w.queue.enqueue(message("m1", "chat:1", "hello"));
       await eventually(() => transport.calls.length === 1, "the first attempt");
-      for (let hours = 5; hours <= 30 && w.abandoned.length === 0; hours += 5) await s.clock.advance(5 * 60 * MINUTE);
+      for (let waited = step; waited <= maxAgeMs + 2 * step && w.abandoned.length === 0; waited += step) await s.clock.advance(step);
       await eventually(() => w.abandoned.length === 1, "the piece abandoned for its age");
       expect(w.delivered, [], "never delivered");
     }),
@@ -196,7 +232,7 @@ export function createOutboundQueueConformance(factory: () => OutboundQueueFixtu
       w.queue.attach("chat", transport);
       await w.queue.enqueue(message("m1", "chat:1", "hello"));
       await eventually(() => transport.calls.length === 1, "the first attempt");
-      await s.clock.advance(BACKOFF[0] as number);
+      await s.clock.advance(firstWait);
       await eventually(() => w.delivered.length === 1, "the retry delivered");
       expect(transport.calls.map((p) => p.possibleDuplicate), [false, true], "the retry marked as a possible duplicate");
       expect(w.delivered[0]?.possibleDuplicate, true, "outbound.delivered says so");
@@ -234,7 +270,7 @@ export function createOutboundQueueConformance(factory: () => OutboundQueueFixtu
       const second = await s.open();
       const transport = scripted();
       second.queue.attach("chat", transport);
-      await s.clock.advance(BACKOFF[0] as number);
+      await s.clock.advance(firstWait);
       await eventually(() => second.delivered.length === 1, "delivered by the next process after its wait");
       expect(transport.calls.map((p) => p.possibleDuplicate), [false], "a failure that never reached the platform is no duplicate");
     }),
@@ -310,7 +346,7 @@ export function createOutboundQueueConformance(factory: () => OutboundQueueFixtu
       await w.queue.enqueue(message("m1", "chat:1", "hello"));
       await eventually(() => transport.calls.length === 1, "the first attempt");
       expect((await w.queue.receipts.read(undefined, 100)).items, [], "receipts while the piece waits for its retry");
-      await s.clock.advance(BACKOFF[0] as number);
+      await s.clock.advance(firstWait);
       await eventually(() => w.delivered.length === 1, "the retry delivered");
       const [receipt] = (await w.queue.receipts.read(undefined, 100)).items;
       expect(receipt?.fact.attempts, 2, "attempts on the receipt");
