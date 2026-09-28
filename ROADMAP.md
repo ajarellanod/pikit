@@ -57,7 +57,7 @@ nobody can check is only a wish.
 
 | # | Standard | Check |
 |---|---|---|
-| S12 | **Contracts first.** Every capability has an interface and a conformance suite before its first implementation. It starts `experimental`, and is `stable` only when two independent implementations in the registry pass the same suite; a test double does not count (SPEC §4.9). A suite checks what every provider must do, never one provider's policy. Session stores also pass Pi's `createSessionRepoConformance` and `createStorageConformance`. | The suite exists and runs in CI for every implementation. |
+| S12 | **Contracts first.** Every capability has an interface and a conformance suite before its first implementation. It starts `experimental`, and is `stable` only when two independent implementations in the registry pass the same suite; a test double does not count (SPEC §4.9). A suite checks what every provider must do, never one provider's policy. Session stores also pass Pi's `createSessionRepoConformance` and `createStorageConformance`. | The suite exists and runs in CI for every implementation. `capabilities.test.ts` fails a `stable` capability with fewer than two providers. |
 | S13 | **Readable source.** Copied components are small files with comments on the *why*. They ship their tests inside `files/`, so the tests keep running in the user's project, and they have no install scripts, ever. | Registry validation; review. |
 | S14 | **One truth per fact.** A component's dependencies are what its `setup` does (`provide`/`use`), never a separate declaration. `component.json`'s `provides`/`requires`/`optional` are generated from `setup` and never edited by hand. | `describe()` in `pikit registry validate` and `pikit doctor` fails on drift. |
 | S15 | **Always green.** `bun test` and `tsc --noEmit` pass on `main`. Every change leaves exactly one runnable check. A milestone ends with its scenarios running, not described. | CI. |
@@ -375,7 +375,11 @@ alerts build on later. Only the architecture is built here, not those components
 - `inbound.authenticate` moved into `channel-http`, its only user, as `http.authenticate`.
   `outbound-durable` declares its retry policy to the `outbound.queue` suite instead of the suite
   fixing it.
-- Guards: the kernel's exports, the kit's layers and the kernel's single dependency.
+- Every capability has a level in the catalogue. All are `experimental` but `agent.definition`
+  (`stable` by decision): none has two providers yet, which is what M3 (Postgres) and M4
+  (Cloudflare) bring.
+- Guards: the kernel's exports, the kit's layers and the kernel's single dependency, and `stable`
+  backed by two providers.
 
 Rich content (`parts`, `replyTo`) and questions from extensions in a chat (`interaction`) are
 decided in SPEC §5 and §6.2b; their code comes with the first component that produces them.

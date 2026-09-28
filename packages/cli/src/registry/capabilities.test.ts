@@ -1,6 +1,14 @@
 import { expect, test } from "bun:test";
 import { DEFAULT_REGISTRY } from "../paths.ts";
-import { CAPABILITIES, type CapabilityEntry, capabilityUsage, formatCapabilities } from "./capabilities.ts";
+import {
+  CAPABILITIES,
+  type CapabilityEntry,
+  type CapabilityUsage,
+  capabilityEntry,
+  capabilityUsage,
+  checkStability,
+  formatCapabilities,
+} from "./capabilities.ts";
 import { checkCapabilities } from "./checks.ts";
 import { readManifests } from "./commands.ts";
 import type { Manifest } from "./manifest.ts";
@@ -19,7 +27,7 @@ const manifest = (name: string, fields: { provides?: string[]; requires?: string
 
 // Checked by tsc, not at run time: `agent.runtime` is a single capability, so a keyed entry is a type error.
 // @ts-expect-error the catalogue's mode must match how the capability is defined
-const wrongMode: (typeof CAPABILITIES)["agent.runtime"] = { mode: "keyed", definedIn: "@pikit/contracts", summary: "" };
+const wrongMode: (typeof CAPABILITIES)["agent.runtime"] = { mode: "keyed", definedIn: "@pikit/contracts", stability: "experimental", summary: "" };
 void wrongMode;
 
 test("validate rejects a capability the catalogue does not describe, once per name", () => {
@@ -45,7 +53,8 @@ test("usage lists every catalogued capability, its providers and its consumers, 
   expect(byName.get("made.up")?.entry).toBeUndefined();
 
   const text = formatCapabilities(usage);
-  expect(text).toContain("sessions.store  (single, @pikit/pi-adapter)");
+  expect(text).toContain("sessions.store  (single, @pikit/pi-adapter, experimental)");
+  expect(text).toContain("agent.definition  (keyed, @pikit/contracts, stable)\n  One agent per name (model, prompt, tools); provided by the project, not the registry.\n  provided by: the project");
   expect(text).toContain("used by:     runtime-x (optional)");
   expect(text).toContain("made.up  (not in the catalogue)");
 });
@@ -54,4 +63,21 @@ test("every capability the repository's registry names is catalogued", () => {
   const unknown = capabilityUsage(readManifests(DEFAULT_REGISTRY)).filter((u) => u.entry === undefined);
   expect(unknown.map((u) => u.name)).toEqual([]);
   for (const entry of Object.values(CAPABILITIES) as CapabilityEntry[]) expect(entry.summary.length).toBeGreaterThan(0);
+});
+
+test("a stable contract needs two providers in the registry; one the project provides is promoted by decision", () => {
+  const usage = (name: string, providers: string[]): CapabilityUsage => {
+    const entry = capabilityEntry(name);
+    if (entry === undefined) throw new Error(`${name} is not in the catalogue`);
+    return { name, entry: { ...entry, stability: "stable" }, providers, consumers: [] };
+  };
+  expect(checkStability([usage("storage.sql", ["storage-sqlite"])])).toEqual([
+    "storage.sql is stable with 1 provider(s) in the registry; a stable contract needs two",
+  ]);
+  expect(checkStability([usage("storage.sql", ["storage-sqlite", "storage-postgres"])])).toEqual([]);
+  expect(checkStability([usage("agent.definition", [])])).toEqual([]);
+});
+
+test("the repository's registry backs every stable contract (SPEC §4.9)", () => {
+  expect(checkStability(capabilityUsage(readManifests(DEFAULT_REGISTRY)))).toEqual([]);
 });

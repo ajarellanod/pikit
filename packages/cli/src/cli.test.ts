@@ -55,7 +55,7 @@ test("pikit registry validate runs the repository's registry checks", () => {
 test("pikit registry capabilities prints what each capability is and who provides and uses it", () => {
   const run = pikit(["registry", "capabilities"], temp());
   expect(run.code).toBe(0);
-  expect(run.out).toContain("sessions.store  (single, @pikit/pi-adapter)");
+  expect(run.out).toContain("sessions.store  (single, @pikit/pi-adapter, experimental)");
   expect(run.out).toContain("provided by: sessions-jsonl");
   expect(pikit(["registry", "bogus"], temp()).code).toBe(2);
 });

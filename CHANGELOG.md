@@ -30,6 +30,9 @@ line names its area (AGENTS.md, "Git and docs").
   the provider's retry policy and holds it to it. The waits and the maximum age are no longer fixed
   by the suite, so a copy of `outbound-durable` can change them and still pass. `outbound-durable`'s
   policy is unchanged.
+- cli: the capability catalogue gives each capability a level (`experimental` or `stable`), shown by
+  `pikit registry capabilities`. A `stable` one needs two providers in the registry. Every capability
+  is `experimental` except `agent.definition`, which the project provides and which is shown so.
 
 - core, component/outbound-durable: the convergence suite, `createConvergenceConformance` in
   `@pikit/core/testing` (SPEC §14). It kills the process after each of its commits in turn (its

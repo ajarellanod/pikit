@@ -1,6 +1,7 @@
 // Public surface of @pikit/contracts (SPEC §4.9): the vocabulary components share. Types, identities,
 // names of events and pipelines, capability interfaces, and one protocol function (`admitInbound`).
-// No implementation, no policy. Each contract has a stability level (SPEC §12a).
+// No implementation, no policy. Each contract has a stability level (SPEC §12a); the capabilities'
+// levels are in the catalogue (`packages/cli/src/registry/capabilities.ts`).
 
 export { defineAgent } from "./agent.ts";
 export type {

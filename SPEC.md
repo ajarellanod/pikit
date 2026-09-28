@@ -582,7 +582,9 @@ be built on.
 - It starts `experimental`, and may become `stable` once two independent implementations in the
   registry pass the same suite, preferably on different backends or targets. Test doubles do not
   count: they share their author's assumptions. A contract the project provides (`agent.definition`)
-  is promoted by a `[decision]`. 1.0 needs every contract `stable` (ROADMAP).
+  is promoted by a `[decision]`. The capability catalogue
+  (`packages/cli/src/registry/capabilities.ts`) records each capability's level, and a test holds
+  `stable` to this rule. 1.0 needs every contract `stable` (ROADMAP).
 - Its suite checks what every provider must do, never the policy of the provider it was written
   with. It may hold a provider to a policy the provider declares (`outbound.queue`'s `retry`), not
   to one the suite chose.
@@ -597,7 +599,8 @@ fallback), is customised only through pipelines, and has its own suite. `admitIn
 
 **Guards**, run by `bun test`:
 - the kernel's export list (`packages/core/src/exports.test.ts`): a change is a `[decision]`;
-- the layers and the kernel's single dependency (`scripts/boundaries.ts`).
+- the layers and the kernel's single dependency (`scripts/boundaries.ts`);
+- every `stable` capability backed by two providers in the registry (`capabilities.test.ts`).
 
 ---
 
@@ -2132,8 +2135,8 @@ Rules:
     Schemas under `schema/` are what `generate` would write, and exits non-zero with one line per
     problem (§14).
 - `bun run registry capabilities` prints the capability catalogue: each capability's mode (single or
-  keyed), the package whose declaration merging defines its contract, one line on what it is, and the
-  components that provide and use it. The line lives in `packages/cli/src/registry/capabilities.ts`,
+  keyed), the package whose declaration merging defines its contract, its level (`experimental` or
+  `stable`, §4.9), one line on what it is, and the components that provide and use it. The line lives in `packages/cli/src/registry/capabilities.ts`,
   typed over `AppCapabilities` / `AppKeyedCapabilities`: a capability defined without an entry, or with
   the wrong mode, fails `tsc`, and `validate` rejects a component that names one with no entry.
 - The fields are derived without starting anything:

@@ -325,6 +325,8 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **A new capability needs a catalogue line.** Declaring one on `AppCapabilities` /
   `AppKeyedCapabilities` fails `tsc` until `packages/cli/src/registry/capabilities.ts` describes it
   (`bun run registry capabilities` prints the catalogue). Test-only capabilities are named `test.*`.
+  Its line says where it is defined (`@pikit/contracts` or the adapter) and its level: `experimental`
+  until two providers in the registry pass its suite (`capabilities.test.ts` holds `stable` to it).
 - **Components declare `@pikit/contracts`.** It versions apart from the kernel, so a component that
   imports it lists it in `component.json`'s `dependencies`, like `@pikit/pi-adapter`;
   `requires.pikit` covers only `@pikit/core`.
