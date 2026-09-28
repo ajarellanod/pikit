@@ -50,3 +50,13 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation | Open: track S's git workspace |
 
 Other channels (Signal, iMessage, Matrix, Home Assistant…) get a file when someone needs one.
+
+## Completed
+
+Features already built, one file each in [`completed/`](completed/): what was built, its contract,
+how it fits pikit, what Pi already does, where the code and its tests are, and what is still open.
+
+| Feature | One line |
+|---|---|
+| [storage-kv](completed/storage-kv.md) | `storage.kv`: small JSON values per component, by key; `storage-kv-sql` provides it, `channel-telegram` keeps its cursor there |
+| [tool-component](completed/tool-component.md) | `toolComponent`: a tool in the shape of Pi's `defineTool` as a component providing `agent.tool`, with its `replay` |
