@@ -10,18 +10,19 @@ import { openRegistry } from "./registry-source.ts";
 
 const registry = openRegistry(DEFAULT_REGISTRY);
 
-test("a chat channel brings durable delivery, the record of submissions, and the storage they require; providers first", () => {
+test("a chat channel brings durable delivery, the record of submissions, a place for its cursor, and the storage they require; providers first", () => {
   expect(offeredProviders(registry, ["channel-telegram"])).toEqual([
     { component: "storage-sqlite", capability: "storage.sql", for: "outbound-durable", why: "required" },
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram", why: "recommended" },
     { component: "submissions-sql", capability: "agent.submissions", for: "channel-telegram", why: "recommended" },
+    { component: "storage-kv-sql", capability: "storage.kv", for: "channel-telegram", why: "recommended" },
   ]);
 });
 
 test("what is already installed is not offered again", () => {
-  expect(offeredProviders(registry, ["channel-telegram"], ["outbound-durable", "storage-sqlite", "submissions-sql"])).toEqual([]);
-  // The queue and the record are there but not their storage: the storage is the user's to add (doctor says so).
-  expect(offeredProviders(registry, ["channel-telegram"], ["outbound-durable", "submissions-sql"])).toEqual([]);
+  expect(offeredProviders(registry, ["channel-telegram"], ["outbound-durable", "storage-sqlite", "submissions-sql", "storage-kv-sql"])).toEqual([]);
+  // The queue, the record and the key-value store are there but not their storage: the storage is the user's to add (doctor says so).
+  expect(offeredProviders(registry, ["channel-telegram"], ["outbound-durable", "submissions-sql", "storage-kv-sql"])).toEqual([]);
 });
 
 test("HTTP brings only the record of submissions (its GET); tools do not bring a per-agent workspace, which is a choice, not an offer", () => {
@@ -47,15 +48,16 @@ test("pikit new places what a component brings right before it; a provider alrea
   expect(withHttp.order.filter((c) => !http.includes(c))).toEqual(["storage-sqlite", "submissions-sql"]);
   expect(Object.fromEntries(withHttp.installedFor)).toEqual({ "storage-sqlite": "submissions-sql", "submissions-sql": "runtime-pi" });
 
-  // The runtime's storage serves the outbox too: the chat channel brings only the outbox.
+  // The runtime's storage serves the outbox and the key-value store too: the chat channel brings only those two.
   const telegram = registry.preset("http", ["channel-telegram"]);
   const { order, installedFor } = withOffers(registry, telegram);
   const at = order.indexOf("channel-telegram");
-  expect(order.slice(at - 1, at + 1)).toEqual(["outbound-durable", "channel-telegram"]);
-  expect(order.filter((c) => !telegram.includes(c))).toEqual(["storage-sqlite", "submissions-sql", "outbound-durable"]);
+  expect(order.slice(at - 2, at + 1)).toEqual(["outbound-durable", "storage-kv-sql", "channel-telegram"]);
+  expect(order.filter((c) => !telegram.includes(c))).toEqual(["storage-sqlite", "submissions-sql", "outbound-durable", "storage-kv-sql"]);
   expect(Object.fromEntries(installedFor)).toEqual({
     "storage-sqlite": "submissions-sql",
     "submissions-sql": "runtime-pi",
     "outbound-durable": "channel-telegram",
+    "storage-kv-sql": "channel-telegram",
   });
 });

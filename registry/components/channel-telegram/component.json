@@ -19,7 +19,7 @@
     "capabilities": [
       "outbound.queue",
       "agent.submissions",
-      "storage.sql"
+      "storage.kv"
     ]
   },
   "provides": [],

@@ -6,7 +6,7 @@ Talk to your agent in Telegram: send your bot a message, get the answer in the c
 - **Requires:** `secrets` (the bot token and the allowed users), `conversations.registry`,
   `agent.runtime`. A router (such as `router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (durable sending), and `agent.submissions` with
-  `storage.sql` (no answer lost while the channel is stopped): "Sending" below.
+  `storage.kv` (no answer lost while the channel is stopped): "Sending" below.
 - **Target:** `server`: it receives messages by long polling, which needs a process that keeps
   running.
 - **Installs to:** `src/pikit/channel-telegram/`.
@@ -69,9 +69,10 @@ You never look up a user id, set a webhook, open a port or buy a domain.
     sending is not sent again, but the answer is in the conversation's session.
 - **Answers that end while the channel is stopped.** A deploy stops the channel before the runtime,
   so a long answer can end in between.
-  - With `submissions-sql` installed (`pikit add runtime-pi` offers it, with `storage-sqlite`), the
-    channel reads every run's outcome from its `answers` feed, from a cursor it keeps in
-    `storage.sql` (the table `channel_telegram_cursors`): when it starts, whenever a run ends, and
+  - With `submissions-sql` installed (`pikit add runtime-pi` offers it, with `storage-sqlite`) and
+    `storage-kv-sql` (`pikit add channel-telegram` offers it), the channel reads every run's outcome
+    from its `answers` feed, from a cursor it keeps in `storage.kv` (the key `answers-cursor` of its
+    namespace, `channel-telegram`): when it starts, whenever a run ends, and
     every 30 seconds. That answer is sent when the channel starts again; one the outbox could not
     store, or Telegram could not take, is tried again (after 1 s, 5 s, 30 s, then every minute)
     instead of being dropped, and logged as an error with its conversation from the 3rd failure.
@@ -81,8 +82,8 @@ You never look up a user id, set a webhook, open a port or buy a domain.
     twice (one sent just before a crash, or those other chats got past a stuck one). The first time
     the channel reads the feed it starts at its end: installing it in a project that already had
     `submissions-sql` does not send old answers again.
-  - Without it, answers come from the runtime's events only: one that ends while the channel is
-    stopped is not sent, and a warning says so.
+  - Without either of them, answers come from the runtime's events only: one that ends while the
+    channel is stopped is not sent, and a warning says so.
 
 It refuses to start:
 - without a token, or with a token Telegram does not know;

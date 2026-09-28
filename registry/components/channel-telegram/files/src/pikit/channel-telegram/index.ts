@@ -13,8 +13,8 @@
  * - Ingress (`poller.ts`, `inbound.ts`): a message is acknowledged to Telegram only once its
  *   conversation durably accepted it; a redelivery is a duplicate request, answered once.
  * - Replies: the chat gets one answer per run, whichever messages the run took.
- *   - With `agent.submissions` and `storage.sql` installed (`submissions-sql`), answers are read from
- *     its feed with a cursor of this channel's own (`answers.ts`), and `agent.settled` /
+ *   - With `agent.submissions` (`submissions-sql`) and `storage.kv` (`storage-kv-sql`) installed,
+ *     answers are read from its feed with a cursor of this channel's own (`answers.ts`), and `agent.settled` /
  *     `agent.failed` only wake the reader: an answer that ended while the channel was stopped (a
  *     deploy), or whose delivery failed, is delivered when it reads again. Its cursor moves only past
  *     answers delivered: stored in the outbox, or sent to Telegram.
@@ -72,9 +72,9 @@ export default defineComponent({
     // Optional: with it, answers are stored before they are sent (SPEC §5, "Outbound delivery").
     const outbound = pikit.useOptional("outbound.queue");
     // Optional, together: with them, answers are delivered from the record of every run's end, from a
-    // cursor kept in storage.sql, so none is lost while the channel is stopped (`answers.ts`).
+    // cursor kept in storage.kv, so none is lost while the channel is stopped (`answers.ts`).
     const submissions = pikit.useOptional("agent.submissions");
-    const storage = pikit.useOptional("storage.sql");
+    const storage = pikit.useOptional("storage.kv");
 
     let running: { bots: RunningBot[]; queue: OutboundQueue | undefined; background: AppContext; reader: AnswerReader | undefined } | undefined;
     /**
@@ -170,11 +170,11 @@ export default defineComponent({
         const background: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
         const queue = outbound.get();
         const recorded = submissions.get();
-        const sql = storage.get();
-        if (recorded !== undefined && sql === undefined) {
-          background.logger.warn("channel-telegram: agent.submissions is installed but storage.sql is not, so answers come from events only: one that ends while the channel is stopped is not sent");
+        const kv = storage.get();
+        if (recorded !== undefined && kv === undefined) {
+          background.logger.warn("channel-telegram: agent.submissions is installed but storage.kv is not, so answers come from events only: one that ends while the channel is stopped is not sent; install storage-kv-sql");
         }
-        const cursors = recorded !== undefined && sql !== undefined ? await openCursors(sql, recorded.answers) : undefined;
+        const cursors = recorded !== undefined && kv !== undefined ? await openCursors(kv.namespace("channel-telegram"), recorded.answers) : undefined;
         const bots: RunningBot[] = [];
         try {
           for (const account of accountsOf(config.accounts)) {

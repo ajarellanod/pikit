@@ -7,10 +7,7 @@
  * answers 9000 characters). The samples run the same channel with Pi.
  */
 
-import { afterAll, afterEach, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { afterEach, expect, test } from "bun:test";
 import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import {
   type Admission,
@@ -21,18 +18,18 @@ import {
   type ConversationRegistry,
   DeliveryError,
   type DeliveryReceipt,
+  type KeyValueStorage,
   type OutboundMessage,
   type OutboundQueue,
   type PendingConversation,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createMemoryFeed, createMemorySubmissions } from "@pikit/contracts/testing";
+import { createMemoryFeed, createMemoryKeyValueStorage, createMemorySubmissions } from "@pikit/contracts/testing";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
 import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";
 import channelTelegram from "./index.ts";
 import { createTelegramTransport, POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
-import { openTestDatabase, testStorage } from "./storage.test-support.ts";
 
 const OWNER = { id: 1001, first_name: "Ada", username: "ada" };
 const STRANGER = { id: 2002, first_name: "Eve" };
@@ -165,9 +162,10 @@ interface StartOptions {
   telegram?: FakeTelegram;
   seen?: Set<string>;
   queue?: ReturnType<typeof recordingQueue>;
-  /** Installs `agent.submissions` (the runtime records there) and a `storage.sql` over `database`. */
+  /** Installs `agent.submissions` (the runtime records there). */
   submissions?: AgentSubmissions;
-  database?: string;
+  /** Installs `storage.kv`: the channel keeps its cursor there. */
+  kv?: KeyValueStorage;
   logger?: Logger;
   /** Components that start after the runtime and before the channel. */
   before?: ComponentDefinition[];
@@ -186,7 +184,7 @@ async function started(options: StartOptions = {}): Promise<Subject> {
       runtime.component,
       ...(options.queue === undefined ? [] : [options.queue.component]),
       ...(options.submissions === undefined ? [] : [submissionsWith(options.submissions)]),
-      ...(options.database === undefined ? [] : [testStorage(options.database)]),
+      ...(options.kv === undefined ? [] : [kvWith(options.kv)]),
       ...(options.before ?? []),
       channelTelegram,
     ],
@@ -221,7 +219,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "channel-telegram")).toMatchObject({
     provides: [],
     requires: ["secrets", "conversations.registry", "agent.runtime"],
-    optional: ["outbound.queue", "agent.submissions", "storage.sql"],
+    optional: ["outbound.queue", "agent.submissions", "storage.kv"],
   });
 });
 
@@ -518,35 +516,23 @@ test("accounts: a named bot without its token fails the start, and leaves no bot
 
 
 // ---------------------------------------------------------------------------------------------
-// Answers from agent.submissions (SPEC §4.8): delivered from its feed, with a cursor in storage.sql.
+// Answers from agent.submissions (SPEC §4.8): delivered from its feed, with a cursor in storage.kv.
 
-const directories: string[] = [];
-afterAll(() => {
-  for (const dir of directories) rmSync(dir, { recursive: true, force: true });
-});
-
-function temporaryDatabase(): string {
-  const dir = mkdtempSync(join(tmpdir(), "pikit-telegram-answers-"));
-  directories.push(dir);
-  return join(dir, "pikit.db");
+function kvWith(storage: KeyValueStorage) {
+  return defineComponent({ name: "kv-test", setup: (pikit) => pikit.provide("storage.kv", storage) });
 }
 
 /**
  * Resolves once the channel saved `cursor` as its place in the answers' feed. A test stops the app
  * only then: a stop while a send is in flight aborts it, and the answer is sent again at the next start.
  */
-async function cursorSaved(database: string, cursor: string): Promise<void> {
-  const db = openTestDatabase(database);
-  try {
-    const deadline = Date.now() + 3_000;
-    for (;;) {
-      const [row] = await db.database.query<{ cursor: string }>("SELECT cursor FROM channel_telegram_cursors WHERE reader = 'answers'");
-      if (row?.cursor === cursor) return;
-      if (Date.now() > deadline) throw new Error(`the cursor is ${row?.cursor}, not ${cursor}`);
-      await Bun.sleep(5);
-    }
-  } finally {
-    await db.close();
+async function cursorSaved(kv: KeyValueStorage, cursor: string): Promise<void> {
+  const deadline = Date.now() + 3_000;
+  for (;;) {
+    const saved = await kv.namespace("channel-telegram").get("answers-cursor");
+    if (saved === cursor) return;
+    if (Date.now() > deadline) throw new Error(`the cursor is ${saved}, not ${cursor}`);
+    await Bun.sleep(5);
   }
 }
 
@@ -570,7 +556,7 @@ for (const c of createLifecycleConformance(() => {
       memoryRegistry([]),
       scriptedRuntime().component,
       submissionsWith(createMemorySubmissions().submissions),
-      testStorage(temporaryDatabase()),
+      kvWith(createMemoryKeyValueStorage()),
     ],
     config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
   };
@@ -581,7 +567,7 @@ for (const c of createLifecycleConformance(() => {
 test("with agent.submissions, the answer comes from its feed, once, with and without an outbound.queue", async () => {
   const { submissions } = createMemorySubmissions();
   const queue = recordingQueue();
-  const s = await started({ submissions, database: temporaryDatabase(), queue });
+  const s = await started({ submissions, kv: createMemoryKeyValueStorage(), queue });
 
   s.telegram.say(OWNER, "hello");
   await s.telegram.sentCount(1);
@@ -590,14 +576,14 @@ test("with agent.submissions, the answer comes from its feed, once, with and wit
   expect(s.telegram.sent).toEqual([{ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true }]);
   expect(queue.enqueued.map((m) => m.idempotencyKey)).toEqual([`s1:telegram:${OWNER.id}:1`]);
 
-  const direct = await started({ submissions: createMemorySubmissions().submissions, database: temporaryDatabase() });
+  const direct = await started({ submissions: createMemorySubmissions().submissions, kv: createMemoryKeyValueStorage() });
   direct.telegram.say(OWNER, "fail");
   expect((await direct.telegram.sentCount(1))[0]?.text).toContain("something went wrong while answering (provider_error)");
 });
 
 test("a message the runtime abandoned gets a clear reply, not the generic failure", async () => {
   const { submissions } = createMemorySubmissions();
-  const s = await started({ submissions, database: temporaryDatabase() });
+  const s = await started({ submissions, kv: createMemoryKeyValueStorage() });
   s.telegram.say(OWNER, "hold");
   let pending: PendingConversation | undefined;
   while ((pending = (await submissions.pending(s.app.context()))[0]) === undefined) await Bun.sleep(5);
@@ -611,10 +597,10 @@ test("a message the runtime abandoned gets a clear reply, not the generic failur
 
 test("an answer that ended while the channel was stopped is delivered when it starts again, and only then", async () => {
   const { submissions } = createMemorySubmissions();
-  const database = temporaryDatabase();
+  const kv = createMemoryKeyValueStorage();
   const telegram = startFakeTelegram();
   fakes.push(telegram);
-  const first = await started({ submissions, database, telegram });
+  const first = await started({ submissions, kv, telegram });
   telegram.say(OWNER, "hold");
   while (first.runtime.dispatched.length === 0) await Bun.sleep(5);
 
@@ -625,20 +611,20 @@ test("an answer that ended while the channel was stopped is delivered when it st
   while ((await submissions.get(conversation, `telegram:${OWNER.id}:1`, first.app.context()))?.kind !== "settled") await Bun.sleep(5);
   expect(telegram.sent).toEqual([]);
 
-  const next = await started({ submissions, database, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
+  const next = await started({ submissions, kv, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
   expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: "answer: <b>hold</b>", html: true }]);
 
   // Its cursor is saved: the next start sends nothing again.
-  await cursorSaved(database, "1");
+  await cursorSaved(kv, "1");
   await next.app.stop();
-  await started({ submissions, database, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
+  await started({ submissions, kv, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
   await Bun.sleep(200);
   expect(telegram.sent).toHaveLength(1);
 });
 
 test("an answer the outbox could not store is tried again, not dropped", async () => {
   const queue = recordingQueue({ failures: 1 });
-  const s = await started({ submissions: createMemorySubmissions().submissions, database: temporaryDatabase(), queue });
+  const s = await started({ submissions: createMemorySubmissions().submissions, kv: createMemoryKeyValueStorage(), queue });
 
   s.telegram.say(OWNER, "hello");
 
@@ -663,7 +649,7 @@ test("without agent.submissions, an answer that ends while the channel is stoppe
 });
 
 test("without an outbox, an answer Telegram could not take is not lost: it is sent once Telegram is back", async () => {
-  const s = await started({ submissions: createMemorySubmissions().submissions, database: temporaryDatabase() });
+  const s = await started({ submissions: createMemorySubmissions().submissions, kv: createMemoryKeyValueStorage() });
   const outage = { code: 502, description: "Bad Gateway", attempts: 0 };
   s.telegram.failSends = outage;
 
@@ -677,10 +663,10 @@ test("without an outbox, an answer Telegram could not take is not lost: it is se
 
 test("without an outbox, an answer whose send the stop aborted is sent at the next start", async () => {
   const { submissions } = createMemorySubmissions();
-  const database = temporaryDatabase();
+  const kv = createMemoryKeyValueStorage();
   const telegram = startFakeTelegram();
   fakes.push(telegram);
-  const first = await started({ submissions, database, telegram });
+  const first = await started({ submissions, kv, telegram });
   const outage = { code: 500, description: "Internal Server Error", attempts: 0 };
   telegram.failSends = outage;
   telegram.say(OWNER, "hello");
@@ -691,16 +677,16 @@ test("without an outbox, an answer whose send the stop aborted is sent at the ne
   delete telegram.failSends;
   expect(telegram.sent).toEqual([]);
 
-  await started({ submissions, database, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
+  await started({ submissions, kv, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
   expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true }]);
 });
 
 test("answers of another channel or of a bot this channel does not run are skipped, and the cursor moves past them", async () => {
   const { submissions } = createMemorySubmissions();
-  const database = temporaryDatabase();
+  const kv = createMemoryKeyValueStorage();
   const telegram = startFakeTelegram();
   fakes.push(telegram);
-  const first = await started({ submissions, database, telegram });
+  const first = await started({ submissions, kv, telegram });
   const ctx = first.app.context();
   const settle = async (key: string, requestId: string) => {
     const run = { conversation: { key, agent: "assistant", sessionId: `s-${key}` }, requestId, requestIds: [requestId], kind: "completed" as const, text: `to ${key}` };
@@ -712,20 +698,20 @@ test("answers of another channel or of a bot this channel does not run are skipp
   await settle(`telegram:${OWNER.id}`, "t1");
 
   expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: `to telegram:${OWNER.id}`, html: true }]);
-  await cursorSaved(database, "3");
+  await cursorSaved(kv, "3");
   await first.app.stop();
-  await started({ submissions, database, telegram });
+  await started({ submissions, kv, telegram });
   await Bun.sleep(200);
   expect(telegram.sent).toHaveLength(1);
 });
 
 test("with agent.submissions, a run that ends before the channel starts is delivered from the feed, with no warning that it was not", async () => {
   const { submissions } = createMemorySubmissions();
-  const database = temporaryDatabase();
+  const kv = createMemoryKeyValueStorage();
   const telegram = startFakeTelegram();
   fakes.push(telegram);
   // A first start opens the channel's cursor.
-  await (await started({ submissions, database, telegram })).app.stop();
+  await (await started({ submissions, kv, telegram })).app.stop();
 
   // runtime-pi resumes runs in its start, before the channel's: one ends there.
   const resumed = defineComponent({
@@ -743,7 +729,7 @@ test("with agent.submissions, a run that ends before the channel starts is deliv
     },
   });
   const logger = recordingLogger();
-  await started({ submissions, database, telegram, logger, before: [resumed] });
+  await started({ submissions, kv, telegram, logger, before: [resumed] });
 
   expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: "resumed", html: true }]);
   expect(logger.warnings).toEqual([]);

@@ -1,11 +1,11 @@
 /**
  * Delivering answers from `agent.submissions`' feed (SPEC §4.8), with `submissions-sql` and
- * `storage.sql` installed.
+ * `storage.kv` installed.
  *
  * An answer used to reach the chat only through `agent.settled`, an event: one that ended while the
  * channel was stopped (a deploy stops the channels before the runtime), or whose delivery failed, or
  * whose process died in between, was lost. The runtime now records every run's end in
- * `agent.submissions`, and this reader delivers each one from a cursor it keeps in `storage.sql`:
+ * `agent.submissions`, and this reader delivers each one from a cursor it keeps in `storage.kv`:
  *
  * - it reads when the channel starts, whenever `agent.settled` / `agent.failed` wakes it, and every
  *   30 seconds (a wake the runtime could not give, after a record it wrote late);
@@ -26,7 +26,7 @@
  */
 
 import type { Logger } from "@pikit/core";
-import type { Feed, FeedItem, RunSettlement, SqlDatabase } from "@pikit/contracts";
+import type { Feed, FeedItem, KeyValueStore, RunSettlement } from "@pikit/contracts";
 
 const PAGE = 50;
 /** How far the reader goes past an answer not delivered yet: what other chats may get meanwhile. */
@@ -43,33 +43,30 @@ const LOOK_EVERY_MS = 30_000;
  */
 const FROM_START = "";
 
-/** Where the reader's place in the feed is kept: one row of this channel's own table. */
+/** The key of the reader's place in the feed, in this channel's namespace of `storage.kv`. */
+const CURSOR_KEY = "answers-cursor";
+
+/** Where the reader's place in the feed is kept: one key of this channel's namespace. */
 export interface Cursors {
   get(): Promise<string | undefined>;
   save(cursor: string): Promise<void>;
 }
 
 /**
- * The channel's table in `storage.sql`, created if missing. With no row yet (the channel reads this
- * feed for the first time), its place is set at the feed's end.
+ * The channel's cursor in its namespace of `storage.kv`. With none yet (the channel reads this feed
+ * for the first time), its place is set at the feed's end.
  */
-export async function openCursors(sql: SqlDatabase, answers: Feed<RunSettlement>): Promise<Cursors> {
-  await sql.run("CREATE TABLE IF NOT EXISTS channel_telegram_cursors (reader TEXT PRIMARY KEY, cursor TEXT NOT NULL)");
-  const reader = "answers";
+export async function openCursors(store: KeyValueStore, answers: Feed<RunSettlement>): Promise<Cursors> {
   const cursors: Cursors = {
     async get() {
-      const saved = (await sql.query<{ cursor: string }>("SELECT cursor FROM channel_telegram_cursors WHERE reader = ?", [reader]))[0]?.cursor;
+      const saved = await store.get<string>(CURSOR_KEY);
       return saved === FROM_START ? undefined : saved;
     },
     async save(cursor) {
-      await sql.run("INSERT INTO channel_telegram_cursors (reader, cursor) VALUES (?, ?) ON CONFLICT (reader) DO UPDATE SET cursor = excluded.cursor", [
-        reader,
-        cursor,
-      ]);
+      await store.set(CURSOR_KEY, cursor);
     },
   };
-  const rows = await sql.query("SELECT 1 FROM channel_telegram_cursors WHERE reader = ?", [reader]);
-  if (rows.length === 0) {
+  if ((await store.get(CURSOR_KEY)) === undefined) {
     let end: string | undefined;
     for (;;) {
       const page = await answers.read(end, 500);
@@ -77,7 +74,7 @@ export async function openCursors(sql: SqlDatabase, answers: Feed<RunSettlement>
       if (page.items.length < 500) break;
     }
     // Only if still missing: another process may have set it meanwhile.
-    await sql.run("INSERT INTO channel_telegram_cursors (reader, cursor) VALUES (?, ?) ON CONFLICT (reader) DO NOTHING", [reader, end ?? FROM_START]);
+    await store.setIfAbsent(CURSOR_KEY, end ?? FROM_START);
   }
   return cursors;
 }
