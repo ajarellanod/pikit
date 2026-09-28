@@ -32,8 +32,11 @@ before, from events only.
   `answers` in the same transaction (`submissions_answers`): what it said (its final text, or its
   error), not its transcript, which stays in the conversation's Pi session. Settling a run twice
   changes nothing.
-- **Pending.** At start, `runtime-pi` reads the conversations with pending requests and resumes them,
-  a few at a time, in the background.
+- **Pending.** At start, `runtime-pi` reads the conversations with pending requests (and when the
+  oldest was admitted) and resumes them, a few at a time, in the background.
+- **Abandoned.** Requests nothing can answer are settled unanswered by one `failed` run with error
+  code `abandoned` and the reason as its message, appended to `answers` in the same transaction; a
+  request already settled keeps its run. No schema change: `admitted_at` and `error_code` hold it.
 - **Answers** are a feed (SPEC §4.8): a channel reads them from a cursor of its own, whenever
   `agent.settled` wakes it and when it starts, so a crash only delays a delivery.
 
