@@ -98,12 +98,13 @@ export async function queuedRequest(session: Session, ctx: Context): Promise<str
 }
 
 /**
- * Record the requests an abort took out of the inbox. Pi returns them only in memory; without this
- * entry a redelivery would run as new. A crash between Pi's abort and this write loses the record,
+ * Record the requests an abort took out of the inbox, and return their ids. Pi returns them only in
+ * memory; without this entry a redelivery would run as new. A crash between Pi's abort and this write loses the record,
  * not a message: the message was already withdrawn.
  */
-export async function recordWithdrawn(lane: AgentLane, messages: readonly AgentMessage[], ctx: Context): Promise<void> {
+export async function recordWithdrawn(lane: AgentLane, messages: readonly AgentMessage[], ctx: Context): Promise<string[]> {
   const requestIds = messages.map(requestIdOf).filter((id): id is string => id !== undefined);
-  if (requestIds.length === 0) return;
+  if (requestIds.length === 0) return [];
   await lane.appendCustomEntry(WITHDRAWN, { requestIds }, ctx);
+  return requestIds;
 }

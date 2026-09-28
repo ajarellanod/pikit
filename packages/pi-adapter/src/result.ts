@@ -4,7 +4,7 @@
 
 import type { AgentLane, AgentMessage, Context, Entry, OperationResultRecord } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
-import type { AgentResult, ConversationRef } from "@pikit/contracts";
+import type { AgentResult, ConversationRef, RunSettlement } from "@pikit/contracts";
 import { requestIdOf } from "./inbound.ts";
 
 export async function toResult(
@@ -30,6 +30,22 @@ export async function toResult(
   // `declined` belongs to compactions and navigations; a run that reports it did not answer.
   const error = record.error ?? { code: record.status, message: `run ended as ${record.status}` };
   return { ...base, kind: "failed", error: { code: error.code, message: error.message } };
+}
+
+/**
+ * What `agent.submissions` keeps of a result: everything but the transcript and the usage, which stay
+ * in the session. The final text is what a channel delivers after a restart.
+ */
+export function settlementOf(result: AgentResult): RunSettlement {
+  const { conversation, requestId, requestIds, kind, text, error } = result;
+  return {
+    conversation: { key: conversation.key, agent: conversation.agent, sessionId: conversation.sessionId },
+    requestId,
+    requestIds,
+    kind,
+    ...(text !== undefined && { text }),
+    ...(error !== undefined && { error: { code: error.code, message: error.message } }),
+  };
 }
 
 /**

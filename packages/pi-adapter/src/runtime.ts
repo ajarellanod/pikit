@@ -12,7 +12,16 @@
 
 import type { Models } from "@earendil-works/pi-ai";
 import type { AppContext, Context } from "@pikit/core";
-import type { Admission, AgentDefinition, AgentRequest, AgentRuntime, AgentTool, ConversationRef } from "@pikit/contracts";
+import type {
+  Admission,
+  AgentDefinition,
+  AgentRequest,
+  AgentRuntime,
+  AgentSubmissions,
+  AgentTool,
+  ConversationRef,
+  RunSettlement,
+} from "@pikit/contracts";
 import { toPi } from "./context.ts";
 import { type HarnessHook, PiConversation, runContext } from "./conversation.ts";
 import type { PiExtension } from "./extensions/api.ts";
@@ -44,9 +53,27 @@ export interface PiRuntimeOptions {
    * conversation loads them after `extensions`. Without it, an agent that names one cannot open.
    */
   extension?(name: string): PiExtension | undefined;
+  /**
+   * Where admissions and run ends are recorded (`agent.submissions`), when it is installed (SPEC §6.1).
+   * `dispatch` records a message once Pi holds it and before it resolves; every run's end is recorded
+   * before its `agent.settled` / `agent.failed`, and a request `abort()` withdrew as aborted. Without
+   * it, nothing is recorded and the runtime behaves exactly as before.
+   */
+  submissions?: AgentSubmissions;
 }
 
+/** How long to wait before recording a run's end again, after `agent.submissions` failed to. */
+const SETTLED_RETRY_MS = [1_000, 5_000, 30_000, 120_000] as const;
+
 export interface PiRuntime extends AgentRuntime {
+  /**
+   * Open a conversation that has requests admitted and never settled (`agent.submissions`' pending),
+   * as a host does at start (SPEC §7): a run a dead worker left open is resumed, messages waiting in
+   * Pi's inbox get a run, and a request whose run ended but whose end was never recorded is settled
+   * from the result Pi stored, with its `agent.settled` / `agent.failed`. Resolves once the runs it
+   * resumed ended (so a caller bounds how many run at once), or when `ctx` is cancelled.
+   */
+  recover(conversation: ConversationRef, requestIds: readonly string[], ctx: AppContext): Promise<void>;
   /**
    * Close every open conversation. Runs in progress stop being driven and stay open in their
    * sessions; the next worker resumes them. Bounded by `ctx`'s cancellation.
@@ -69,6 +96,34 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
   /** By session id: a session is Pi's single-writer unit, and a reset points a key to a new one. */
   const slots = new Map<string, Slot>();
   let closed = false;
+  /** Retries of run ends `agent.submissions` failed to record; cleared on close. */
+  const retries = new Set<ReturnType<typeof setTimeout>>();
+
+  /**
+   * Records a run's end, and retries a few times in the background when that fails: until it is
+   * recorded, a channel reading the answers does not see it. Given up, it stays pending, and the next
+   * start settles it from the session (`recover`). Never rejects.
+   */
+  const recordSettled = async (run: RunSettlement, ctx: AppContext, attempt = 0): Promise<void> => {
+    const submissions = options.submissions;
+    if (submissions === undefined) return;
+    try {
+      await submissions.settled(run, ctx);
+    } catch (error) {
+      const wait = SETTLED_RETRY_MS[attempt];
+      const fields = { conversation: run.conversation.key, run: run.requestId, error: error instanceof Error ? error.message : String(error) };
+      if (closed || wait === undefined) {
+        ctx.logger.error("a run's end could not be recorded in agent.submissions; the next start settles it from the session", fields);
+        return;
+      }
+      ctx.logger.warn("recording a run's end in agent.submissions failed; trying again", { ...fields, inMs: wait });
+      const timer = setTimeout(() => {
+        retries.delete(timer);
+        void recordSettled(run, ctx, attempt + 1);
+      }, wait);
+      retries.add(timer);
+    }
+  };
 
   const slotOf = (sessionId: string): Slot => {
     let slot = slots.get(sessionId);
@@ -132,7 +187,11 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
         agent,
         tool: options.tool,
         models: options.models,
-        host: { serial: (work) => serial(slot, work), events: options.events },
+        host: {
+          serial: (work) => serial(slot, work),
+          events: options.events,
+          ...(options.submissions !== undefined && { settled: recordSettled }),
+        },
         onHarness: options.onHarness,
         extensions,
       },
@@ -154,7 +213,17 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
       );
       // The run is already going; its end is reported only after `announced()`, so
       // `agent.dispatched`, `agent.started` and its result arrive in that order.
+      let unrecorded: unknown;
       try {
+        // Recorded before `dispatch` resolves, so a channel acknowledges its platform only once Pi and
+        // `agent.submissions` both hold the message. Outside the line: a run that ends first has
+        // settled it already, and a settled request stays settled. A failure fails the dispatch (the
+        // platform delivers it again, a duplicate); the message is in Pi, and its run goes on.
+        if (admission.kind !== "duplicate" && options.submissions !== undefined) {
+          await options.submissions.admitted(request.conversation, request.requestId, ctx).catch((error: unknown) => {
+            unrecorded = error;
+          });
+        }
         await ctx.emit("agent.dispatched", { conversation: request.conversation, admission });
         if (admission.kind === "started") {
           const started = { conversation: request.conversation, requestId: request.requestId, resumed: false };
@@ -163,6 +232,7 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
       } finally {
         announced?.();
       }
+      if (unrecorded !== undefined) throw unrecorded;
       return admission;
     },
 
@@ -176,8 +246,26 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
       await serial(slot, async () => void (await ensureOpen(slot, conversation, ctx)));
     },
 
+    async recover(conversation: ConversationRef, requestIds: readonly string[], ctx: AppContext): Promise<void> {
+      const slot = slotOf(conversation.sessionId);
+      const { open, results } = await serial(slot, async () => {
+        const opened = await ensureOpen(slot, conversation, ctx);
+        return { open: opened, results: await opened.settleFinished(requestIds, ctx) };
+      });
+      // Their ends were never announced: the process that drove them died first. No `agent.started`
+      // precedes them, since that process announced it.
+      const events = runContext(ctx);
+      for (const result of results) {
+        if (result.kind === "failed") await events.emit("agent.failed", { ...result, kind: "failed" });
+        else await events.emit("agent.settled", { ...result, kind: result.kind });
+      }
+      await untilAborted(open.whenIdle(), ctx.abortSignal);
+    },
+
     async close(ctx: AppContext): Promise<void> {
       closed = true;
+      for (const timer of retries) clearTimeout(timer);
+      retries.clear();
       const open = [...slots.values()].flatMap((slot) => {
         const conversation = slot.conversation;
         if (conversation === undefined) return [];
@@ -187,23 +275,30 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
       // And the steps in the lines: a conversation still opening closes itself there (`ensureOpen`),
       // so none is left open, driving a run, after this returns.
       const lines = [...slots.values()].map((slot) => slot.line);
-      const all = Promise.allSettled([...open, ...lines]);
-      const signal = ctx.abortSignal;
-      if (signal === undefined) {
-        await all;
-        return;
-      }
-      await Promise.race([
-        all,
-        new Promise<void>((resolve) => {
-          if (signal.aborted) resolve();
-          signal.addEventListener("abort", () => resolve(), { once: true });
-        }),
-      ]);
+      await untilAborted(Promise.allSettled([...open, ...lines]), ctx.abortSignal);
     },
   };
   slotCount.set(runtime, () => slots.size);
   return runtime;
+}
+
+/** Resolves when `work` settles or `signal` aborts, whichever comes first. */
+async function untilAborted(work: Promise<unknown>, signal: AbortSignal | undefined): Promise<void> {
+  const settled = work.then(
+    () => {},
+    () => {},
+  );
+  if (signal === undefined) return settled;
+  let onAbort: (() => void) | undefined;
+  await Promise.race([
+    settled,
+    new Promise<void>((resolve) => {
+      onAbort = resolve;
+      if (signal.aborted) resolve();
+      else signal.addEventListener("abort", onAbort, { once: true });
+    }),
+  ]);
+  if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
 }
 
 /**
