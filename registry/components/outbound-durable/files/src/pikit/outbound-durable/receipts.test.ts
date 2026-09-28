@@ -14,8 +14,9 @@ import { type DeliveryReceipt, type OutboundQueue } from "@pikit/contracts";
 import { createManualClock, type ManualClock } from "@pikit/core/testing";
 import { createFeedConformance } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
-import { SCHEMA_VERSION } from "./store.ts";
-import { testStorage } from "./storage.test-support.ts";
+import type { SqlDatabase, SqlStatements } from "@pikit/contracts";
+import { createStore, SCHEMA_VERSION } from "./store.ts";
+import { openTestDatabase, testStorage } from "./storage.test-support.ts";
 
 const DAY = 24 * 60 * 60 * 1_000;
 const directories: string[] = [];
@@ -122,6 +123,34 @@ test("a database from before receipts gains them, and its pending pieces are sti
   const check = new DatabaseSync(database);
   expect(check.prepare("SELECT value FROM outbound_meta WHERE name = 'schema_version'").get()).toEqual({ value: SCHEMA_VERSION });
   check.close();
+});
+
+test("two processes migrating at once: the one that waited for the lock finds the schema done", async () => {
+  const database = temporaryDatabase();
+  const first = openTestDatabase(database);
+  const second = openTestDatabase(database);
+  try {
+    // The second process migrates just before the first's transaction takes the lock.
+    let raced = false;
+    const racing: SqlDatabase = {
+      ...first.database,
+      transaction: async <T>(work: (tx: SqlStatements) => Promise<T>): Promise<T> => {
+        if (!raced) {
+          raced = true;
+          await createStore(second.database).migrate();
+        }
+        return first.database.transaction(work);
+      },
+    };
+
+    await createStore(racing).migrate();
+
+    expect(raced).toBe(true);
+    expect(await first.database.query("SELECT value FROM outbound_meta WHERE name = 'schema_version'")).toEqual([{ value: SCHEMA_VERSION }]);
+  } finally {
+    await first.close();
+    await second.close();
+  }
 });
 
 test("a database written by a newer outbox is refused at start", async () => {

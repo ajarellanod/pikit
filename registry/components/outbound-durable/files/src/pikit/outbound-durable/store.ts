@@ -161,14 +161,19 @@ export function createStore(db: SqlDatabase) {
     /** Brings the tables to `SCHEMA_VERSION`. Refuses a database written by a newer outbox. */
     async migrate(): Promise<void> {
       await db.run("CREATE TABLE IF NOT EXISTS outbound_meta (name TEXT PRIMARY KEY, value INTEGER NOT NULL)");
-      const version = (await meta(db, "schema_version")) ?? 0;
-      if (version > SCHEMA_VERSION) {
-        throw new Error(`outbound-durable: the database is at schema version ${version}, newer than this component's ${SCHEMA_VERSION}; upgrade the component`);
-      }
-      for (let next = version; next < SCHEMA_VERSION; next++) {
-        await db.transaction(async (tx) => {
-          await (MIGRATIONS[next] as (tx: SqlStatements) => Promise<void>)(tx);
-          await setMeta(tx, "schema_version", next + 1);
+      // The version is read inside each step's transaction, which holds the write lock: two
+      // processes starting at once would otherwise both see version 0 and both run step 1.
+      let done = false;
+      while (!done) {
+        done = await db.transaction(async (tx) => {
+          const version = (await meta(tx, "schema_version")) ?? 0;
+          if (version > SCHEMA_VERSION) {
+            throw new Error(`outbound-durable: the database is at schema version ${version}, newer than this component's ${SCHEMA_VERSION}; upgrade the component`);
+          }
+          if (version === SCHEMA_VERSION) return true;
+          await (MIGRATIONS[version] as (tx: SqlStatements) => Promise<void>)(tx);
+          await setMeta(tx, "schema_version", version + 1);
+          return false;
         });
       }
     },
