@@ -64,6 +64,16 @@ export interface OpenOptions {
   extensions?: readonly PiExtension[] | undefined;
 }
 
+/** What `admit` did, and for a run it started, how the caller lets that run report its end. */
+export interface Admitted {
+  admission: Admission;
+  /**
+   * Call once `agent.started` is emitted. The run is already going; only the event of its end waits
+   * for this, so `agent.started` always comes first. Present when `admission` is `started`.
+   */
+  announced?: () => void;
+}
+
 export class PiConversation {
   /** Runs this worker is driving right now. At zero the conversation is idle and may close. */
   private driving = 0;
@@ -150,27 +160,38 @@ export class PiConversation {
    * in progress takes the message at a boundary, the last one included (gap 2). The caller runs
    * this in the conversation's line, so two deliveries of one request never both pass the check.
    */
-  async admit(request: AgentRequest, ctx: AppContext): Promise<Admission> {
+  async admit(request: AgentRequest, ctx: AppContext): Promise<Admitted> {
     const { requestId } = request;
     const pi = toPi(ctx);
-    if (await hasRequest(this.session, this.lane, requestId, pi)) return { kind: "duplicate", requestId };
+    if (await hasRequest(this.session, this.lane, requestId, pi)) return { admission: { kind: "duplicate", requestId } };
 
     const queued = await this.lane.steer(inboundMessage(requestId, request.prompt), undefined, pi);
     if (!queued.ok) throw queued.error;
 
     const accepted = await this.lane.accept({ kind: "prompt", operationId: requestId, prompt: [] }, pi);
     if (!accepted.ok) {
-      if (LaneBusy.is(accepted.error)) return { kind: "queued", requestId };
+      if (LaneBusy.is(accepted.error)) return { admission: { kind: "queued", requestId } };
       throw accepted.error;
     }
-    this.drive(requestId, runContext(ctx), () =>
-      this.lane.drive({ operationId: requestId, waitForRetry: true }, this.runScope(ctx)).then((driven) => {
-        if (!driven.ok) throw driven.error;
-        if (driven.value.kind !== "settled") return undefined;
-        return driven.value.outcome;
-      }),
+    let announced!: () => void;
+    const started = new Promise<void>((resolve) => (announced = resolve));
+    this.driveAccepted(requestId, ctx, started);
+    return { admission: { kind: "started", requestId }, announced };
+  }
+
+  /** Drive the run `accept()` just started as `operationId`; its end is reported after `started`. */
+  private driveAccepted(operationId: string, ctx: AppContext, started: Promise<void>): void {
+    this.drive(
+      operationId,
+      runContext(ctx),
+      () =>
+        this.lane.drive({ operationId, waitForRetry: true }, this.runScope(ctx)).then((driven) => {
+          if (!driven.ok) throw driven.error;
+          if (driven.value.kind !== "settled") return undefined;
+          return driven.value.outcome;
+        }),
+      started,
     );
-    return { kind: "started", requestId };
   }
 
   /**
@@ -202,12 +223,16 @@ export class PiConversation {
 
   private resumeOpen(operationId: string, isRun: boolean, ctx: AppContext): void {
     const runCtx = runContext(ctx);
-    if (isRun) void runCtx.emit("agent.started", { conversation: this.ref, requestId: operationId, resumed: true });
-    this.drive(isRun ? operationId : undefined, runCtx, () =>
-      this.lane.resume(this.runScope(ctx)).then((resumed) => {
-        if (!resumed.ok) throw resumed.error;
-        return "kind" in resumed.value ? resumed.value : undefined;
-      }),
+    const started = isRun ? runCtx.emit("agent.started", { conversation: this.ref, requestId: operationId, resumed: true }) : undefined;
+    this.drive(
+      isRun ? operationId : undefined,
+      runCtx,
+      () =>
+        this.lane.resume(this.runScope(ctx)).then((resumed) => {
+          if (!resumed.ok) throw resumed.error;
+          return "kind" in resumed.value ? resumed.value : undefined;
+        }),
+      started,
     );
   }
 
@@ -219,9 +244,14 @@ export class PiConversation {
   /**
    * Drive one run in the background and report its end. The settlement runs in the conversation's
    * line, so the result is read before an idle conversation closes; the event is emitted after, so
-   * slow listeners never hold admissions back.
+   * slow listeners never hold admissions back, and after `started` (the run's `agent.started`).
    */
-  private drive(runId: string | undefined, runCtx: AppContext, work: () => Promise<OperationResultRecord | undefined>): void {
+  private drive(
+    runId: string | undefined,
+    runCtx: AppContext,
+    work: () => Promise<OperationResultRecord | undefined>,
+    started: Promise<void> = Promise.resolve(),
+  ): void {
     this.driving++;
     void work()
       .then(
@@ -238,8 +268,9 @@ export class PiConversation {
             return undefined;
           }),
       )
-      .then((result) => {
+      .then(async (result) => {
         if (result === undefined) return;
+        await started;
         if (result.kind === "failed") void runCtx.emit("agent.failed", { ...result, kind: "failed" });
         else void runCtx.emit("agent.settled", { ...result, kind: result.kind });
       })

@@ -155,6 +155,72 @@ describe("conversations", () => {
   });
 });
 
+describe("closing and event order", () => {
+  test("close() while a dispatch is opening its conversation: nothing is left open, no run is driven", async () => {
+    const store = new MemorySessionRepo();
+    let open = 0;
+    const openSession = store.open.bind(store);
+    store.open = async (metadata, context) => {
+      // Slow, so close() runs while the conversation opens.
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      const session = await openSession(metadata, context);
+      open++;
+      const closeSession = session.close.bind(session);
+      session.close = (closeContext) => {
+        open--;
+        return closeSession(closeContext);
+      };
+      return session;
+    };
+    let requests = 0;
+    const s = await setup({ sessions: store, providers: [scriptedProvider({ onRequest: () => void requests++ })] });
+    const conversation = await s.conversation();
+
+    const dispatched = s.runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, s.app.context());
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    await s.runtime.close(s.app.context());
+
+    expect(open).toBe(0);
+    await expect(dispatched).rejects.toThrow("agent.runtime is closed");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    expect(requests).toBe(0);
+    expect(open).toBe(0);
+  });
+
+  test("agent.started comes before the run's result, even when agent.dispatched is slow to listen", async () => {
+    const order: string[] = [];
+    const observer = defineComponent({
+      name: "order",
+      setup(pikit) {
+        pikit.on("agent.dispatched", async () => {
+          await new Promise((resolve) => setTimeout(resolve, 30));
+          order.push("dispatched");
+        });
+        pikit.on("agent.started", () => void order.push("started"));
+        pikit.on("agent.settled", () => void order.push("settled"));
+      },
+    });
+    const app = await defineApp({ components: [observer], logger: silentLogger }).create();
+    const sessions: SessionStore = new MemorySessionRepo();
+    const agent = scriptedAgent(holdTool(async () => "unused"));
+    const runtime = createPiRuntime({
+      sessions,
+      agent: (name) => (name === agent.name ? agent : undefined),
+      models: modelsFrom([scriptedProvider()]),
+      events: app.context(),
+    });
+    const session = await sessions.create({ cwd: "/" }, ctx);
+    await session.close(ctx);
+    const conversation = { key: "test:order", agent: agent.name, sessionId: session.metadata.id };
+
+    await runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context());
+    for (let i = 0; i < 50 && !order.includes("settled"); i++) await new Promise((resolve) => setTimeout(resolve, 5));
+
+    expect(order).toEqual(["dispatched", "started", "settled"]);
+    await runtime.close(app.context());
+  });
+});
+
 describe("models", () => {
   test("each agent runs on the provider its model names", async () => {
     const support = defineAgent({ name: "support", model: "faux/scripted" });

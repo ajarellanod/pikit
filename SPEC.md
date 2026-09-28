@@ -1078,7 +1078,9 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   no `run_start` for a resumed run). `agent.settled` / `agent.failed` from the run's terminal
   record, the one Pi's `run_end` announces: the adapter drives every run of a conversation it has
   open, a started one with `drive()` and an interrupted one with `lane.resume()`, so every end
-  reaches it. Run events carry the admitting call's values without its cancellation.
+  reaches it. Run events carry the admitting call's values without its cancellation. A run's
+  `agent.started` always comes before its `agent.settled` / `agent.failed`: the run is not held
+  back, only the event of its end waits for `agent.started` to be emitted.
 - **`resume()`** continues the operations `AgentHarness.create()` reports as `open`, with
   `lane.resume()`; their outcomes arrive as `agent.settled` like any other run. Tools declared
   `replay: "safe"` run again; for any other tool Pi records an "interrupted" error result and
