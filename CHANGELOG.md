@@ -5,6 +5,23 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/channel-telegram: an answer read from the feed that Telegram could not take, or whose
+  send a stop aborted, is sent again later instead of being dropped; the cursor moves only past a
+  delivered answer. Chats no longer wait for each other, a stuck answer is logged as an error, and
+  every feed gap is logged. Installing it where `submissions-sql` already runs no longer resends old
+  answers.
+- component/channel-http: a malformed escape in a path id gets 400 instead of 500.
+- adapter: a redelivered duplicate whose run's end `agent.submissions` never recorded (two crashes)
+  is settled from the session. `recover` settles requests steered into another request's run and
+  requests an abort withdrew (as `aborted`), never re-announces a settled request, and no longer
+  waits for runs of new messages.
+- component/runtime-pi: `stop` no longer waits on an `agent.submissions` whose `pending()` never
+  answers.
+- component/submissions-sql: `keepSettledDays` is at least 1 (0 pruned answers that ended during a
+  deploy before the channels could deliver them); `migrate` reads the schema version inside each
+  step's transaction, so two processes starting at once no longer both run migration 0.
+- contracts: `agent.submissions`' settlement is idempotent within the provider's retention; the
+  suite checks `pending`'s order by oldest pending request and re-settling after a restart.
 - docs: features move out of SPEC.md into `features/`, one file each, with no order; ⭐ marks what
   makes OpenClaw or Hermes attractive.
 - docs: SPEC-CORE adds a fourth required outcome, **the main agent knows and improves itself** (§6):

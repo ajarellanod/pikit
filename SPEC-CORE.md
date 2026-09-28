@@ -1,8 +1,9 @@
 # pikit — Core Specification
 
 What must hold, whatever else pikit becomes. Everything in this file is required; everything
-else is a feature (a component, a preset, a CLI command) specified in `SPEC.md` and scheduled in
-`ROADMAP.md`.
+else is a feature (a component, a preset, a CLI command) described in `features/` (one file each,
+with no order); its contracts are written in `SPEC.md` when it is built, and what is built is
+tracked in `ROADMAP.md`.
 
 **Authority.** This file comes first. `SPEC.md`, the code and the other documents must fit it;
 when one of them contradicts it, that one is wrong. Changing this file is a decision of the
@@ -279,8 +280,10 @@ the running composition; a gate the agent can edit.
 
 ## 7. What is a feature
 
-Everything not in §1–§6 is a feature. Features are components or CLI commands, specified in
-`SPEC.md` and scheduled in `ROADMAP.md` when a user needs them: more channels, the scheduler,
+Everything not in §1–§6 is a feature. Features are components or CLI commands, one file each in
+`features/`, with no order: each is built when a user needs it, and its contracts go into
+`SPEC.md` then. `features/README.md` marks with ⭐ those that make agents like OpenClaw or Hermes
+attractive to the public. Examples: more channels, the scheduler,
 approvals, Postgres, several replicas, sandboxes and tenant isolation, open registries, LLM-assisted
 merges, a second agent runtime. A feature may never require changing §1–§6; if one seems to, the
 change is proposed here first.

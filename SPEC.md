@@ -538,7 +538,10 @@ interface FeedItem<T> {
   runtime records every run's end before its `agent.settled`, and a chat channel delivers the answer
   from `answers` with its own cursor; the event only wakes it. An answer that ends while the channel
   is stopped (a deploy stops channels before the runtime), whose `enqueue` fails, or whose process
-  dies between the event and the enqueue, is delivered when the channel reads again.
+  dies between the event and the enqueue, is delivered when the channel reads again. The channel's
+  cursor moves only past an answer it delivered (sent, or stored in the outbox); a send that fails
+  or that a stop aborts is tried again. A reader that meets the feed for the first time starts at
+  its end, so installing a channel does not resend old answers.
 - **Rejected: a durable event bus.** Persisting every event and replaying it to every listener would
   turn events into a queue, make every listener idempotent, and put one component at the centre of
   all the others. Pi has none either.
@@ -1139,7 +1142,7 @@ interface AgentSubmissions {
   admitted(conversation: ConversationRef, requestId: string, ctx: AppContext): Promise<void>;
   /** A run ended: every id in `run.requestIds` is settled by it, and `run` appended to `answers`, in one commit. Idempotent. */
   settled(run: RunSettlement, ctx: AppContext): Promise<void>;
-  /** Conversations with requests admitted and not settled, the oldest first. */
+  /** Conversations with requests admitted and not settled, by their oldest pending request. */
   pending(ctx: AppContext): Promise<{ conversation: ConversationRef; requestIds: string[] }[]>;
   /** One request in a session: pending, settled with its run, or undefined. */
   get(conversation: Pick<ConversationRef, "sessionId">, requestId: string, ctx: AppContext): Promise<SubmissionStatus | undefined>;
@@ -1167,15 +1170,19 @@ type SubmissionStatus =
   reconciled and a resumed run alike. A channel the event wakes finds it in `answers`. Messages
   `abort()` withdraws are settled `aborted` in a settlement of their own, as Pi's durable runtime
   records them `unanswered`. A failed record is tried again in the background (1 s, 5 s, 30 s,
-  2 min), then left pending for the next start.
+  2 min), then left pending for the next start. The runtime never calls `admitted` for a duplicate:
+  a duplicate whose end was never recorded is settled from the session. A request is settled by the
+  run that took it (named after it, or the nearest earlier run whose requests include it, within the
+  dedup window), or as `aborted` with the abort that withdrew it.
 - **Resumed at start** (§7). `runtime-pi` reads `pending()` in the background once it has started,
   and opens each of those conversations with the adapter's `PiRuntime.recover(conversation,
   requestIds, ctx)`, four at a time: a run a dead worker left open is resumed, messages in Pi's inbox
   get a run (gap 2), and a request whose run ended without its end recorded (the process died between
   Pi's commit and `settled`) is settled from the result Pi stored (`lane.getResult`) and announced
   with `agent.settled`, with no `agent.started` before it. `recover` resolves once the runs it resumed
-  ended, which is what bounds the runs at once. Start does not wait for it; stop cancels what has not
-  started; progress and failures are logged. A pending request no run can settle is logged and
+  ended, which is what bounds the runs at once; it waits only for the runs opening the conversation
+  resumed or started, and skips requests already settled. Start does not wait for it; stop cancels
+  what has not started, reading `pending()` included; progress and failures are logged. A pending request no run can settle is logged and
   looked at again at the next start.
 - **Answers.** `answers` is a feed (§4.8): `channel-telegram` delivers from it (§5), `channel-http`
   answers `GET` and a repeated POST from `get`. A settlement carries the run's final text, not its
