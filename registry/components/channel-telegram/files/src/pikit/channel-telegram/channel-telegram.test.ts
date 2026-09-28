@@ -11,7 +11,7 @@ import { afterAll, afterEach, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, type AppContext, BACKGROUND_CONTEXT, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import {
   type Admission,
   type AgentRuntime,
@@ -31,7 +31,7 @@ import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";
 import channelTelegram from "./index.ts";
 import { createTelegramTransport, POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
-import { testStorage } from "./storage.test-support.ts";
+import { openTestDatabase, testStorage } from "./storage.test-support.ts";
 
 const OWNER = { id: 1001, first_name: "Ada", username: "ada" };
 const STRANGER = { id: 2002, first_name: "Eve" };
@@ -168,6 +168,8 @@ interface StartOptions {
   submissions?: AgentSubmissions;
   database?: string;
   logger?: Logger;
+  /** Components that start after the runtime and before the channel. */
+  before?: ComponentDefinition[];
 }
 
 async function started(options: StartOptions = {}): Promise<Subject> {
@@ -184,6 +186,7 @@ async function started(options: StartOptions = {}): Promise<Subject> {
       ...(options.queue === undefined ? [] : [options.queue.component]),
       ...(options.submissions === undefined ? [] : [submissionsWith(options.submissions)]),
       ...(options.database === undefined ? [] : [testStorage(options.database)]),
+      ...(options.before ?? []),
       channelTelegram,
     ],
     config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
@@ -527,6 +530,25 @@ function temporaryDatabase(): string {
   return join(dir, "pikit.db");
 }
 
+/**
+ * Resolves once the channel saved `cursor` as its place in the answers' feed. A test stops the app
+ * only then: a stop while a send is in flight aborts it, and the answer is sent again at the next start.
+ */
+async function cursorSaved(database: string, cursor: string): Promise<void> {
+  const db = openTestDatabase(database);
+  try {
+    const deadline = Date.now() + 3_000;
+    for (;;) {
+      const [row] = await db.database.query<{ cursor: string }>("SELECT cursor FROM channel_telegram_cursors WHERE reader = 'answers'");
+      if (row?.cursor === cursor) return;
+      if (Date.now() > deadline) throw new Error(`the cursor is ${row?.cursor}, not ${cursor}`);
+      await Bun.sleep(5);
+    }
+  } finally {
+    await db.close();
+  }
+}
+
 function submissionsWith(submissions: AgentSubmissions) {
   return defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", submissions) });
 }
@@ -592,6 +614,7 @@ test("an answer that ended while the channel was stopped is delivered when it st
   expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: "answer: <b>hold</b>", html: true }]);
 
   // Its cursor is saved: the next start sends nothing again.
+  await cursorSaved(database, "1");
   await next.app.stop();
   await started({ submissions, database, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
   await Bun.sleep(200);
@@ -622,4 +645,91 @@ test("without agent.submissions, an answer that ends while the channel is stoppe
     await Bun.sleep(5);
   }
   expect(s.telegram.sent).toEqual([]);
+});
+
+test("without an outbox, an answer Telegram could not take is not lost: it is sent once Telegram is back", async () => {
+  const s = await started({ submissions: createMemorySubmissions().submissions, database: temporaryDatabase() });
+  const outage = { code: 502, description: "Bad Gateway", attempts: 0 };
+  s.telegram.failSends = outage;
+
+  s.telegram.say(OWNER, "hello");
+  // Past the send's own retries (1 s, 2 s, 4 s): before, the answer was given up here, and the cursor moved past it.
+  while (outage.attempts < 5) await Bun.sleep(20);
+  delete s.telegram.failSends;
+
+  expect(await s.telegram.sentCount(1, 8_000)).toEqual([{ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true }]);
+}, 20_000);
+
+test("without an outbox, an answer whose send the stop aborted is sent at the next start", async () => {
+  const { submissions } = createMemorySubmissions();
+  const database = temporaryDatabase();
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  const first = await started({ submissions, database, telegram });
+  const outage = { code: 500, description: "Internal Server Error", attempts: 0 };
+  telegram.failSends = outage;
+  telegram.say(OWNER, "hello");
+  while (outage.attempts < 1) await Bun.sleep(5);
+
+  // The stop aborts the send between its retries: before, the cursor was saved all the same.
+  await first.app.stop();
+  delete telegram.failSends;
+  expect(telegram.sent).toEqual([]);
+
+  await started({ submissions, database, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
+  expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true }]);
+});
+
+test("answers of another channel or of a bot this channel does not run are skipped, and the cursor moves past them", async () => {
+  const { submissions } = createMemorySubmissions();
+  const database = temporaryDatabase();
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  const first = await started({ submissions, database, telegram });
+  const ctx = first.app.context();
+  const settle = async (key: string, requestId: string) => {
+    const run = { conversation: { key, agent: "assistant", sessionId: `s-${key}` }, requestId, requestIds: [requestId], kind: "completed" as const, text: `to ${key}` };
+    await submissions.settled(run, ctx);
+    await ctx.emit("agent.settled", { ...run, messages: [] });
+  };
+  await settle("http:c1", "h1");
+  await settle("telegram:ops:3003", "o1");
+  await settle(`telegram:${OWNER.id}`, "t1");
+
+  expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: `to telegram:${OWNER.id}`, html: true }]);
+  await cursorSaved(database, "3");
+  await first.app.stop();
+  await started({ submissions, database, telegram });
+  await Bun.sleep(200);
+  expect(telegram.sent).toHaveLength(1);
+});
+
+test("with agent.submissions, a run that ends before the channel starts is delivered from the feed, with no warning that it was not", async () => {
+  const { submissions } = createMemorySubmissions();
+  const database = temporaryDatabase();
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  // A first start opens the channel's cursor.
+  await (await started({ submissions, database, telegram })).app.stop();
+
+  // runtime-pi resumes runs in its start, before the channel's: one ends there.
+  const resumed = defineComponent({
+    name: "resumed-before-the-channel",
+    setup(pikit) {
+      pikit.use("agent.runtime");
+      return {
+        async start(ctx) {
+          const conversation = { key: `telegram:${OWNER.id}`, agent: "assistant", sessionId: "s1" };
+          const run = { conversation, requestId: "r1", requestIds: ["r1"], kind: "completed" as const, text: "resumed" };
+          await submissions.settled(run, ctx);
+          await ctx.emit("agent.settled", { ...run, messages: [] });
+        },
+      };
+    },
+  });
+  const logger = recordingLogger();
+  await started({ submissions, database, telegram, logger, before: [resumed] });
+
+  expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: "resumed", html: true }]);
+  expect(logger.warnings).toEqual([]);
 });

@@ -72,8 +72,14 @@ You never look up a user id, set a webhook, open a port or buy a domain.
     channel reads every run's outcome from its `answers` feed, from a cursor it keeps in
     `storage.sql` (the table `channel_telegram_cursors`): when it starts, whenever a run ends, and
     every 30 seconds. That answer is sent when the channel starts again; one the outbox could not
-    store is tried again (after 1 s, 5 s, 30 s, then every minute) instead of being dropped. With the
-    outbox, an answer read twice after a crash is stored once; without it, it may be sent twice.
+    store, or Telegram could not take, is tried again (after 1 s, 5 s, 30 s, then every minute)
+    instead of being dropped, and logged as an error with its conversation from the 3rd failure.
+    Each chat's answers go in order, and chats do not wait for each other; the cursor never moves
+    past an answer not delivered, so other chats go on for at most 200 answers past a stuck one.
+    With the outbox, an answer read twice after a crash is stored once; without it, it may be sent
+    twice (one sent just before a crash, or those other chats got past a stuck one). The first time
+    the channel reads the feed it starts at its end: installing it in a project that already had
+    `submissions-sql` does not send old answers again.
   - Without it, answers come from the runtime's events only: one that ends while the channel is
     stopped is not sent, and a warning says so.
 
@@ -123,8 +129,10 @@ local stand-in of the Bot API: no bot, token or network needed.
   "typing…", formatting and splitting, retries, a redelivered message answered once, the
   acknowledgement at stop, the lifecycle conformance suite and the start failures; with
   `agent.submissions`, answers from its feed, one that ended while the channel was stopped delivered
-  at the next start (and only then), and a failed enqueue tried again; without it, the warning for an
-  answer that could not be sent.
+  at the next start (and only then), a failed enqueue or send tried again, answers of other channels
+  skipped; without it, the warning for an answer that could not be sent.
+- `answers.test.ts` covers the feed's reader alone: a stuck chat holds up only itself and the cursor,
+  each gap reported, backoff when storage fails, and where a new cursor starts.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
   channel does with a message (routed, deduplicated, stopped, denied, no router), through Telegram.
 - `configure.test.ts` covers the setup: a checked token, allowing whoever messages the bot, and

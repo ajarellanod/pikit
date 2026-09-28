@@ -31,6 +31,8 @@ export interface FakeTelegram {
   rateLimitNextSend?: number;
   /** The next `sendMessage` fails with this Telegram error (403 blocked, 500…). */
   failNextSend?: { code: number; description: string };
+  /** Every `sendMessage` fails with this Telegram error while it is set: an outage. `attempts` counts them. */
+  failSends?: { code: number; description: string; attempts: number };
   /** Updates Telegram still holds (not confirmed by an offset). */
   pending(): TelegramUpdate[];
   /**
@@ -162,6 +164,10 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
         fake.actions.push({ chatId: Number(body.chat_id), action: String(body.action) });
         return ok(true);
       case "sendMessage": {
+        if (fake.failSends !== undefined) {
+          fake.failSends.attempts++;
+          return fail(fake.failSends.code, fake.failSends.description);
+        }
         if (fake.failNextSend !== undefined) {
           const { code, description } = fake.failNextSend;
           delete fake.failNextSend;

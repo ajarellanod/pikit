@@ -81,6 +81,15 @@ const json = (status: number, body: unknown): Response => Response.json(body, { 
 const UNAUTHORIZED = (): Response =>
   Response.json({ error: "unauthorized" }, { status: 401, headers: { "www-authenticate": 'Bearer realm="pikit"' } });
 
+/** A path segment, decoded; `""` (never a valid id) when its escapes are malformed (`%E0`): a 400, not a 500. */
+function segment(raw: string | undefined): string {
+  try {
+    return decodeURIComponent(raw ?? "");
+  } catch {
+    return "";
+  }
+}
+
 /** What a run's end means for one of its messages, as HTTP: the POST's answer, and the GET's. */
 function outcome(requestId: string, run: Pick<RunSettlement, "kind" | "text" | "error">): Response {
   if (run.kind === "completed") return json(200, { requestId, text: run.text ?? "" });
@@ -187,8 +196,8 @@ export default defineComponent({
         return json(501, { error: "not_supported", message: "this app keeps no record of messages' outcomes; install submissions-sql" });
       }
       const [, , , id = "", , message = ""] = new URL(request.url).pathname.split("/");
-      const conversationId = decodeURIComponent(id);
-      const requestId = decodeURIComponent(message);
+      const conversationId = segment(id);
+      const requestId = segment(message);
       if (!new RegExp(CONVERSATION_ID).test(conversationId) || !new RegExp(MESSAGE_ID).test(requestId)) {
         return json(400, { error: "invalid_request", message: "the conversation id or the message id is not valid" });
       }
@@ -200,7 +209,7 @@ export default defineComponent({
 
     pikit.provideKeyed("http.route", "POST /v1/conversations/:id/reset", async (request, ctx) => {
       if ((await authenticated(request, ctx)) === undefined) return UNAUTHORIZED();
-      const conversationId = decodeURIComponent(new URL(request.url).pathname.split("/")[3] ?? "");
+      const conversationId = segment(new URL(request.url).pathname.split("/")[3]);
       if (!new RegExp(CONVERSATION_ID).test(conversationId)) {
         return json(400, { error: "invalid_request", message: "the conversation id is not valid" });
       }
