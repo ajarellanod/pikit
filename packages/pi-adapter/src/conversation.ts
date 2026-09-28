@@ -33,12 +33,13 @@ import {
   type AgentTool,
   CONVERSATION,
   type ConversationRef,
+  type RunSettlement,
 } from "@pikit/contracts";
 import { detached, toPi } from "./context.ts";
 import type { PiExtension } from "./extensions/api.ts";
 import { type BoundExtensions, loadExtensions } from "./extensions/host.ts";
 import { hasRequest, inboundMessage, LANE, queuedRequest, recordWithdrawn } from "./inbound.ts";
-import { toResult } from "./result.ts";
+import { settlementOf, toResult } from "./result.ts";
 import { sessionState } from "./state.ts";
 import { Turns } from "./turns.ts";
 
@@ -50,6 +51,11 @@ export interface ConversationHost {
   serial<T>(work: () => Promise<T>): Promise<T>;
   /** Where a run ends up when no caller context is known. */
   events: AppContext;
+  /**
+   * Records that a run ended, with `agent.submissions` installed (SPEC §6.1). Never rejects: a failure
+   * is the host's to retry and log. Called in the conversation's line, before the run's event.
+   */
+  settled?(run: RunSettlement, ctx: AppContext): Promise<void>;
 }
 
 export interface OpenOptions {
@@ -78,6 +84,10 @@ export interface Admitted {
 export class PiConversation {
   /** Runs this worker is driving right now. At zero the conversation is idle and may close. */
   private driving = 0;
+  /** The ids of the runs among them; their ends are reported by `drive`. */
+  private readonly runs = new Set<string>();
+  /** Waiting for `driving` to reach zero, or for the conversation to close (`whenIdle`). */
+  private idleWaiters: (() => void)[] = [];
   private closed = false;
   private extensions: BoundExtensions | undefined;
 
@@ -241,7 +251,57 @@ export class PiConversation {
       if (NoActiveOperation.is(aborted.error)) return;
       throw aborted.error;
     }
-    await recordWithdrawn(this.lane, [...aborted.value.steer, ...aborted.value.followUp], pi);
+    const withdrawn = await recordWithdrawn(this.lane, [...aborted.value.steer, ...aborted.value.followUp], pi);
+    // Withdrawn requests end unanswered, as Pi's durable runtime records them: settled as aborted, in
+    // a settlement of their own, since the aborted run did not take them.
+    const [first] = withdrawn;
+    if (first !== undefined) await this.host.settled?.({ conversation: this.ref, requestId: first, requestIds: withdrawn, kind: "aborted" }, ctx);
+  }
+
+  /**
+   * Settle, from the results Pi stored, the requests among `requestIds` whose runs ended and were never
+   * reported: the process died between Pi's commit of the run's end and its record in
+   * `agent.submissions`. A run this worker drives is left to report its own end. Returns the results
+   * it settled, for the caller to announce. Called in the conversation's line, once it is open (a run a
+   * dead worker left open is being resumed by then, and the inbox reconciled).
+   */
+  async settleFinished(requestIds: readonly string[], ctx: AppContext): Promise<AgentResult[]> {
+    const pi = toPi(ctx);
+    const results: AgentResult[] = [];
+    const unresolved: string[] = [];
+    for (const requestId of requestIds) {
+      if (this.runs.has(requestId) || results.some((result) => result.requestIds.includes(requestId))) continue;
+      // Only a run's first request names an operation; the others are settled with it.
+      const record = await this.lane.getResult(requestId, pi);
+      if (record === undefined) {
+        unresolved.push(requestId);
+        continue;
+      }
+      const result = await toResult(this.lane, this.ref, record, pi);
+      await this.host.settled?.(settlementOf(result), ctx);
+      results.push(result);
+    }
+    const stuck = unresolved.filter((id) => !results.some((result) => result.requestIds.includes(id)));
+    if (stuck.length > 0 && this.idle) {
+      // No run is going to settle them: not in the inbox, not open, no result of their own. They stay
+      // pending, and are looked at again at the next start.
+      ctx.logger.warn("pending requests have no run to settle them; their answers, if any, are in the session", {
+        conversation: this.ref.key,
+        requests: stuck,
+      });
+    }
+    return results;
+  }
+
+  /** Resolves once this worker drives no run of the conversation, or the conversation closed. */
+  whenIdle(): Promise<void> {
+    if (this.driving === 0 || this.closed) return Promise.resolve();
+    return new Promise((resolve) => this.idleWaiters.push(resolve));
+  }
+
+  private notifyIdle(): void {
+    if (this.driving > 0 && !this.closed) return;
+    for (const resolve of this.idleWaiters.splice(0)) resolve();
   }
 
   /**
@@ -250,6 +310,7 @@ export class PiConversation {
    */
   async close(ctx: AppContext): Promise<void> {
     this.closed = true;
+    this.notifyIdle();
     await this.extensions?.close(toPi(ctx));
     await this.harness.close(toPi(ctx));
   }
@@ -286,12 +347,15 @@ export class PiConversation {
     started: Promise<void> = Promise.resolve(),
   ): void {
     this.driving++;
+    if (runId !== undefined) this.runs.add(runId);
     void work()
       .then(
         (record) => this.host.serial(() => this.settle(runId, record, runCtx)),
         (error: unknown) =>
           this.host.serial(async () => {
             this.driving--;
+            if (runId !== undefined) this.runs.delete(runId);
+            this.notifyIdle();
             // A closed harness (stop, eviction) leaves the run open for the next owner: not a failure.
             runCtx.logger.warn("a run stopped being driven; it stays open in its session", {
               conversation: this.ref.key,
@@ -325,9 +389,13 @@ export class PiConversation {
     try {
       // `undefined` record: suspended on a deferred response; it stays open. No runId: not a run.
       if (record === undefined || runId === undefined) return undefined;
-      return await toResult(this.lane, this.ref, record, toPi(runCtx));
+      const result = await toResult(this.lane, this.ref, record, toPi(runCtx));
+      // Before the event: a channel the event wakes reads it from `agent.submissions`' answers.
+      await this.host.settled?.(settlementOf(result), runCtx);
+      return result;
     } finally {
       this.driving--;
+      if (runId !== undefined) this.runs.delete(runId);
       // Before the line sees the conversation idle and closes it: what this run left in the inbox.
       await this.reconcile(this.host.events).catch((error: unknown) => {
         this.host.events.logger.error("starting a run for queued messages failed; they wait for the next one", {
@@ -335,6 +403,7 @@ export class PiConversation {
           error: error instanceof Error ? error.message : String(error),
         });
       });
+      this.notifyIdle();
     }
   }
 }

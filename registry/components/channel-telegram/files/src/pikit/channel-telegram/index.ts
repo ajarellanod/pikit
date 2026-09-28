@@ -12,11 +12,17 @@
  *   "Routing to many agents").
  * - Ingress (`poller.ts`, `inbound.ts`): a message is acknowledged to Telegram only once its
  *   conversation durably accepted it; a redelivery is a duplicate request, answered once.
- * - Replies: the channel listens to `agent.settled` / `agent.failed` and answers the chat once per
- *   run, whichever messages the run took. With an `outbound.queue` installed (`outbound-durable`),
- *   the answer is enqueued, stored before it is sent, and delivered through the bot's transport
- *   (`transport.ts`), which the channel attaches while it runs: it survives crashes and outages.
- *   Without one, it is sent directly (`replies.ts`), retried in the process: best effort.
+ * - Replies: the chat gets one answer per run, whichever messages the run took.
+ *   - With `agent.submissions` and `storage.sql` installed (`submissions-sql`), answers are read from
+ *     its feed with a cursor of this channel's own (`answers.ts`), and `agent.settled` /
+ *     `agent.failed` only wake the reader: an answer that ended while the channel was stopped (a
+ *     deploy), or whose delivery failed, is delivered when it reads again.
+ *   - Without them, the channel answers from `agent.settled` / `agent.failed` directly. An answer that
+ *     arrives while it is stopped is not sent, and is logged as such.
+ *   With an `outbound.queue` installed (`outbound-durable`), the answer is enqueued, stored before it
+ *   is sent, and delivered through the bot's transport (`transport.ts`), which the channel attaches
+ *   while it runs: it survives crashes and outages. Without one, it is sent directly (`replies.ts`),
+ *   retried in the process: best effort.
  *
  * It refuses to start when a bot has no valid token, no allowed user, or a webhook (Telegram
  * delivers to the webhook or by polling, never both).
@@ -25,9 +31,10 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type AgentResult, answerKey, type OutboundQueue } from "@pikit/contracts";
+import { type AgentResult, answerKey, type OutboundQueue, type RunSettlement } from "@pikit/contracts";
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, chatIn } from "./account.ts";
+import { type AnswerReader, openCursors, startAnswerReader } from "./answers.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, TelegramError } from "./api.ts";
 import { handleUpdate, type InboundDeps } from "./inbound.ts";
 import { type Poller, startPolling } from "./poller.ts";
@@ -63,45 +70,89 @@ export default defineComponent({
     const runtime = pikit.use("agent.runtime");
     // Optional: with it, answers are stored before they are sent (SPEC §5, "Outbound delivery").
     const outbound = pikit.useOptional("outbound.queue");
+    // Optional, together: with them, answers are delivered from the record of every run's end, from a
+    // cursor kept in storage.sql, so none is lost while the channel is stopped (`answers.ts`).
+    const submissions = pikit.useOptional("agent.submissions");
+    const storage = pikit.useOptional("storage.sql");
 
-    let running: { bots: RunningBot[]; queue: OutboundQueue | undefined; background: AppContext } | undefined;
+    let running: { bots: RunningBot[]; queue: OutboundQueue | undefined; background: AppContext; reader: AnswerReader | undefined } | undefined;
+    /** Whether answers come from the feed, as decided at the last start: kept after stop, for its warnings. */
+    let fromFeed = false;
+    /** Every instance this channel serves, from config: a key of theirs is this channel's, running or not. */
+    const instances = accountsOf(config.accounts).map((account) => account.instance);
+    const ours = (key: string): boolean => instances.some((instance) => chatIn(instance, key) !== undefined);
 
     /** The bot and chat of a conversation this channel made, or `undefined` for another channel's. */
-    const find = (key: string): { bot: RunningBot; chatId: number } | undefined => {
-      for (const bot of running?.bots ?? []) {
+    const find = (bots: readonly RunningBot[], key: string): { bot: RunningBot; chatId: number } | undefined => {
+      for (const bot of bots) {
         const chatId = chatIn(bot.account.instance, key);
         if (chatId !== undefined) return { bot, chatId };
       }
       return undefined;
     };
 
-    pikit.on("agent.started", ({ conversation }) => {
-      const found = find(conversation.key);
-      found?.bot.delivery.typingStarted(found.chatId);
-    });
-    const answer = async (result: AgentResult): Promise<void> => {
-      const found = find(result.conversation.key);
-      const now = running;
-      if (found === undefined || now === undefined) return;
+    /**
+     * Hands one run's answer to its chat: enqueued with the outbox, else sent directly. Rejects when
+     * the outbox could not store it. A run that answered nothing (aborted, or an empty text) sends
+     * nothing.
+     */
+    const deliver = async (answer: RunSettlement, bots: readonly RunningBot[], queue: OutboundQueue | undefined): Promise<void> => {
+      const found = find(bots, answer.conversation.key);
+      if (found === undefined) return;
       const { bot, chatId } = found;
       bot.delivery.typingStopped(chatId);
-      let text: string | undefined;
-      if (result.kind === "failed") text = `Sorry, something went wrong while answering (${result.error?.code ?? "error"}). Try again in a moment.`;
-      else if (result.kind === "completed" && (result.text ?? "").trim() !== "") text = result.text ?? "";
+      const text = replyText(answer);
       if (text === undefined) return;
-      if (now.queue === undefined) {
-        void bot.delivery.send(chatId, text);
+      if (queue === undefined) {
+        await bot.delivery.send(chatId, text);
         return;
       }
       // One key per run (the request that started it): a run resumed after a crash is not answered twice.
-      await now.queue
-        .enqueue({
-          idempotencyKey: answerKey(result.conversation, result.requestId),
-          channel: bot.account.instance,
-          conversationKey: result.conversation.key,
-          text,
-        })
-        .catch((error: unknown) => now.background.logger.error("channel-telegram: an answer could not be stored for delivery", { chat: chatId, error: String(error) }));
+      await queue.enqueue({
+        idempotencyKey: answerKey(answer.conversation, answer.requestId),
+        channel: bot.account.instance,
+        conversationKey: answer.conversation.key,
+        text,
+      });
+    };
+
+    pikit.on("agent.started", ({ conversation }) => {
+      const found = find(running?.bots ?? [], conversation.key);
+      found?.bot.delivery.typingStarted(found.chatId);
+    });
+    const answer = async (result: AgentResult, ctx: AppContext): Promise<void> => {
+      if (!ours(result.conversation.key)) return;
+      const now = running;
+      if (fromFeed) {
+        // The answer is in the feed: the reader delivers it now, or when the channel starts again.
+        if (now === undefined) return;
+        const found = find(now.bots, result.conversation.key);
+        found?.bot.delivery.typingStopped(found.chatId);
+        now.reader?.wake();
+        return;
+      }
+      if (now === undefined) {
+        ctx.logger.warn("channel-telegram: an answer ended while the channel was stopped, and is not sent; install submissions-sql to deliver it when the channel starts again", {
+          conversation: result.conversation.key,
+          run: result.requestId,
+        });
+        return;
+      }
+      if (find(now.bots, result.conversation.key) === undefined) {
+        ctx.logger.warn("channel-telegram: an answer for a bot that is not running is not sent", { conversation: result.conversation.key, run: result.requestId });
+        return;
+      }
+      if (now.queue === undefined) {
+        void deliver(result, now.bots, undefined);
+        return;
+      }
+      await deliver(result, now.bots, now.queue).catch((error: unknown) =>
+        now.background.logger.error("channel-telegram: an answer could not be stored for delivery, and is not sent; install submissions-sql to try it again", {
+          conversation: result.conversation.key,
+          run: result.requestId,
+          error: String(error),
+        }),
+      );
     };
     pikit.on("agent.settled", answer);
     pikit.on("agent.failed", answer);
@@ -111,6 +162,12 @@ export default defineComponent({
         // Updates and replies outlive start: they get the app's context, not start's (SPEC §4.7).
         const background: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
         const queue = outbound.get();
+        const recorded = submissions.get();
+        const sql = storage.get();
+        if (recorded !== undefined && sql === undefined) {
+          background.logger.warn("channel-telegram: agent.submissions is installed but storage.sql is not, so answers come from events only: one that ends while the channel is stopped is not sent");
+        }
+        const cursors = recorded !== undefined && sql !== undefined ? await openCursors(sql) : undefined;
         const bots: RunningBot[] = [];
         try {
           for (const account of accountsOf(config.accounts)) {
@@ -121,13 +178,23 @@ export default defineComponent({
           await stopBots(bots, queue, undefined);
           throw error;
         }
-        running = { bots, queue, background };
+        // Once the bots run: the first read delivers what ended while the channel was stopped.
+        const reader =
+          recorded !== undefined && cursors !== undefined
+            ? startAnswerReader({ answers: recorded.answers, cursors, deliver: (fact) => deliver(fact, bots, queue), logger: background.logger })
+            : undefined;
+        fromFeed = reader !== undefined;
+        running = { bots, queue, background, reader };
       },
 
       async stop(ctx) {
         const stopping = running;
         running = undefined;
-        if (stopping !== undefined) await stopBots(stopping.bots, stopping.queue, ctx.abortSignal);
+        if (stopping === undefined) return;
+        // The reader stops at the answer it is applying; a direct send in flight ends with the bots.
+        const reading = stopping.reader?.halt();
+        await stopBots(stopping.bots, stopping.queue, ctx.abortSignal);
+        if (reading !== undefined) await Promise.race([reading, aborted(ctx.abortSignal)]);
       },
     };
 
@@ -189,4 +256,20 @@ async function stopBots(bots: RunningBot[], queue: OutboundQueue | undefined, si
       await delivery.close();
     }),
   );
+}
+
+/** Resolves when `signal` aborts; never, without one. */
+function aborted(signal: AbortSignal | undefined): Promise<void> {
+  return new Promise((resolve) => {
+    if (signal === undefined) return;
+    if (signal.aborted) resolve();
+    else signal.addEventListener("abort", () => resolve(), { once: true });
+  });
+}
+
+/** What the chat is told about a run: its answer, or that it failed. Nothing for an aborted or empty one. */
+function replyText(answer: Pick<RunSettlement, "kind" | "text" | "error">): string | undefined {
+  if (answer.kind === "failed") return `Sorry, something went wrong while answering (${answer.error?.code ?? "error"}). Try again in a moment.`;
+  if (answer.kind === "completed" && (answer.text ?? "").trim() !== "") return answer.text;
+  return undefined;
 }

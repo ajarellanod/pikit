@@ -1,33 +1,25 @@
 {
   "$schema": "../../schema/component.schema.json",
-  "name": "runtime-pi",
+  "name": "submissions-sql",
   "version": "0.0.0",
-  "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
+  "description": "No admitted message ends without its answer: unanswered conversations resume at start, and channels deliver every answer from a feed, even one that ended while they were stopped.",
   "targets": [
     "server"
   ],
   "requires": {
     "pikit": "0.0.0",
     "capabilities": [
-      "sessions.store"
+      "storage.sql"
     ]
   },
   "optional": {
-    "capabilities": [
-      "agent.definition",
-      "model.provider",
-      "model.credentials",
-      "agent.tool",
-      "agent.extension",
-      "agent.submissions"
-    ]
+    "capabilities": []
   },
   "provides": [
-    "agent.runtime"
+    "agent.submissions"
   ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",
-    "@pikit/pi-adapter": "0.0.0",
     "typebox": "1.3.27"
   },
   "files": [

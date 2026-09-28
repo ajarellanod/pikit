@@ -20,6 +20,9 @@ export { createOutboundQueueConformance } from "./outbound-queue.ts";
 export type { FeedConformanceOptions, FeedFixture, MemoryFeed } from "./feed.ts";
 export { createFeedConformance, createMemoryFeed } from "./feed.ts";
 
+export type { MemorySubmissions, SubmissionsConformanceOptions, SubmissionsFixture } from "./submissions.ts";
+export { createMemorySubmissions, createSubmissionsConformance } from "./submissions.ts";
+
 export type { ConvergenceFixture, ConvergenceProcess, ProcessLife } from "./convergence.ts";
 export { createConvergenceConformance, SimulatedCrash, SimulatedStorageFailure } from "./convergence.ts";
 

@@ -89,8 +89,15 @@ curl -s -X POST localhost:3000/v1/conversations/c1/reset -H "authorization: Bear
 ```
 
 A message sent to `c1` while the agent is still answering changes its course: Pi takes it as a
-steer, and both requests receive the same answer. All statuses are listed in
-`registry/components/channel-http/README.md`.
+steer, and both requests receive the same answer. A request that answered `202` (the agent took
+longer than two minutes) reads its answer later, from `.pikit/pikit.db`, which `submissions-sql` keeps:
+
+```sh
+curl -s localhost:3000/v1/conversations/c1/messages/<requestId> -H "authorization: Bearer $PIKIT_HTTP_TOKEN"
+```
+
+If the process dies mid-answer, the next one resumes the run when it starts. All statuses are listed
+in `registry/components/channel-http/README.md`.
 
 Ask it to work with files: *"Create notes.md with a summary of …"*, *"How many lines does notes.md
 have?"*. It works in `samples/http/.pikit/workspace/`.

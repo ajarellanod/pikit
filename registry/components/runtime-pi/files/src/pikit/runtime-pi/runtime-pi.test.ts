@@ -5,12 +5,16 @@
  */
 
 import { expect, test } from "bun:test";
-import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { AGENT_STATE, type AgentRuntime, type AgentTool, defineAgent } from "@pikit/contracts";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { AGENT_STATE, type AgentRuntime, type AgentSubmissions, type AgentTool, defineAgent } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createAgentRuntimeConformance } from "@pikit/contracts/testing";
+import { createAgentRuntimeConformance, createMemorySubmissions } from "@pikit/contracts/testing";
 import type { Credential, CredentialStore, SessionStore } from "@pikit/pi-adapter";
-import { createPiRuntimeFixture, recordingBash, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
+import { createJsonlSessionStore } from "@pikit/pi-adapter/node";
+import { createPiRuntimeFixture, killMidRun, recordingBash, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
 import Type from "typebox";
 import runtimePi, { createRuntimePi } from "./index.ts";
 
@@ -19,13 +23,66 @@ for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture(({ on
   test(`runtime-pi ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
 
-// Start and stop honour their deadline and leave nothing open.
+/** `agent.submissions` in memory, outliving the apps of a test as a database would. */
+function memorySubmissions(submissions: AgentSubmissions = createMemorySubmissions().submissions) {
+  return defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", submissions) });
+}
+
+// The same contract with agent.submissions installed: recording changes nothing a channel sees.
+for (const c of createAgentRuntimeConformance(() =>
+  createPiRuntimeFixture(({ onHarness }) => [memorySubmissions(), createRuntimePi({ onHarness })]),
+)) {
+  test(`runtime-pi with agent.submissions ${c.group}: ${c.name}`, () => c.run(), 30_000);
+}
+
+// Start and stop honour their deadline and leave nothing open, with and without agent.submissions.
 for (const c of createLifecycleConformance(() => {
   const { sessions, agents, provider } = testComponents();
   return { component: runtimePi, providers: [sessions, agents, provider] };
 })) {
   test(`runtime-pi ${c.group}: ${c.name}`, () => c.run());
 }
+for (const c of createLifecycleConformance(() => {
+  const { sessions, agents, provider } = testComponents();
+  return { component: runtimePi, providers: [sessions, agents, provider, memorySubmissions()] };
+})) {
+  test(`runtime-pi with agent.submissions ${c.group}: ${c.name}`, () => c.run());
+}
+
+test("at start, a conversation agent.submissions holds pending is resumed, with no new message", async () => {
+  const root = mkdtempSync(join(tmpdir(), "pikit-runtime-pi-resume-"));
+  try {
+    const store = createJsonlSessionStore({ root, cwd: root });
+    const { submissions } = createMemorySubmissions();
+    const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
+    const session = await store.create({ cwd: root }, ctx);
+    await session.close(ctx);
+    const conversation = { key: "test:resume", agent: "scripted", sessionId: session.metadata.id };
+    // A process admitted the message, told its platform, and was killed mid-run.
+    await killMidRun(root, conversation.sessionId, "r-killed", "never");
+    await submissions.admitted(conversation, "r-killed", ctx);
+
+    const { agents, provider, sessions } = testComponents({ sessions: store });
+    const settled: AppEvents["agent.settled"][] = [];
+    const observer = defineComponent({ name: "observer", setup: (pikit) => pikit.on("agent.settled", (result) => void settled.push(result)) });
+    const app = await defineApp({ components: [sessions, agents, provider, memorySubmissions(submissions), runtimePi, observer], logger: silentLogger }).create();
+    await app.start();
+    try {
+      const deadline = Date.now() + 10_000;
+      while (settled.length === 0) {
+        if (Date.now() > deadline) throw new Error("the interrupted run was never resumed");
+        await Bun.sleep(10);
+      }
+      expect(settled.map((r) => [r.requestId, r.kind])).toEqual([["r-killed", "completed"]]);
+      expect((await submissions.get(conversation, "r-killed", app.context()))?.kind).toBe("settled");
+      expect(await submissions.pending(app.context())).toEqual([]);
+    } finally {
+      await app.stop();
+    }
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 30_000);
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const { sessions, agents, provider } = testComponents();
@@ -36,7 +93,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(described).toMatchObject({
     provides: ["agent.runtime"],
     requires: ["sessions.store"],
-    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "agent.extension"],
+    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "agent.extension", "agent.submissions"],
   });
 });
 

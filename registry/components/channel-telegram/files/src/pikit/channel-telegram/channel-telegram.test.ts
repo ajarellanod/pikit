@@ -7,11 +7,15 @@
  * answers 9000 characters). The samples run the same channel with Pi.
  */
 
-import { afterEach, expect, test } from "bun:test";
-import { type App, type AppContext, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { afterAll, afterEach, expect, test } from "bun:test";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type App, type AppContext, BACKGROUND_CONTEXT, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import {
   type Admission,
   type AgentRuntime,
+  type AgentSubmissions,
   type ChannelTransport,
   type ConversationRef,
   type ConversationRegistry,
@@ -21,12 +25,13 @@ import {
   type OutboundQueue,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createMemoryFeed } from "@pikit/contracts/testing";
+import { createMemoryFeed, createMemorySubmissions } from "@pikit/contracts/testing";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
 import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";
 import channelTelegram from "./index.ts";
 import { createTelegramTransport, POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
+import { testStorage } from "./storage.test-support.ts";
 
 const OWNER = { id: 1001, first_name: "Ada", username: "ada" };
 const STRANGER = { id: 2002, first_name: "Eve" };
@@ -69,8 +74,11 @@ const router = defineComponent({
   setup: (pikit) => pikit.pipeline("route.resolve", (value) => (value.decision !== undefined ? value : { ...value, decision: { agent: "assistant", access: "allow" } })),
 });
 
-/** Records every dispatch; one run per session at a time; a request seen before is a duplicate. */
-function scriptedRuntime(seen: Set<string> = new Set()) {
+/**
+ * Records every dispatch; one run per session at a time; a request seen before is a duplicate. With
+ * `submissions`, it records admissions and run ends there, as runtime-pi does.
+ */
+function scriptedRuntime(seen: Set<string> = new Set(), submissions?: AgentSubmissions) {
   const dispatched: { requestId: string; key: string; prompt: string }[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
@@ -83,13 +91,21 @@ function scriptedRuntime(seen: Set<string> = new Set()) {
           dispatched.push({ requestId, key: conversation.key, prompt });
           if (seen.has(requestId)) return { kind: "duplicate", requestId } satisfies Admission;
           seen.add(requestId);
+          const ctx = (events ?? BACKGROUND_CONTEXT) as AppContext;
+          await submissions?.admitted(conversation, requestId, ctx);
           void (async () => {
-            const ctx = events ?? BACKGROUND_CONTEXT;
-            await (ctx as AppContext).emit("agent.started", { conversation, requestId, resumed: false });
+            await ctx.emit("agent.started", { conversation, requestId, resumed: false });
             if (prompt === "hold") await released;
             const base = { conversation, requestId, requestIds: [requestId], messages: [] };
-            if (prompt === "fail") await (ctx as AppContext).emit("agent.failed", { ...base, kind: "failed", error: { code: "provider_error", message: "no" } });
-            else await (ctx as AppContext).emit("agent.settled", { ...base, kind: "completed", text: prompt === "long" ? "word ".repeat(1800) : `answer: **${prompt}**` });
+            if (prompt === "fail") {
+              const error = { code: "provider_error", message: "no" };
+              await submissions?.settled({ conversation, requestId, requestIds: [requestId], kind: "failed", error }, ctx);
+              await ctx.emit("agent.failed", { ...base, kind: "failed", error });
+            } else {
+              const text = prompt === "long" ? "word ".repeat(1800) : `answer: **${prompt}**`;
+              await submissions?.settled({ conversation, requestId, requestIds: [requestId], kind: "completed", text }, ctx);
+              await ctx.emit("agent.settled", { ...base, kind: "completed", text });
+            }
           })();
           return { kind: "started", requestId };
         },
@@ -111,7 +127,8 @@ interface Subject {
 }
 
 /** A queue that records what the channel does with it, and delivers each enqueued piece at once through the attached transport. */
-function recordingQueue() {
+function recordingQueue(options: { failures?: number } = {}) {
+  let failures = options.failures ?? 0;
   const enqueued: OutboundMessage[] = [];
   const attached: string[] = [];
   const detached: string[] = [];
@@ -119,6 +136,8 @@ function recordingQueue() {
   const queue: OutboundQueue = {
     async enqueue(message) {
       enqueued.push(message);
+      // As a full disk would: it throws, and stores nothing.
+      if (failures-- > 0) throw new Error("disk full");
       const transport = transports.get(message.channel);
       if (transport === undefined) throw new Error("no transport");
       for (const [index, text] of transport.split(message.text).entries()) {
@@ -140,10 +159,21 @@ function recordingQueue() {
   return { component, enqueued, attached, detached };
 }
 
-async function started(options: { secrets?: Record<string, string>; telegram?: FakeTelegram; seen?: Set<string>; queue?: ReturnType<typeof recordingQueue> } = {}): Promise<Subject> {
+interface StartOptions {
+  secrets?: Record<string, string>;
+  telegram?: FakeTelegram;
+  seen?: Set<string>;
+  queue?: ReturnType<typeof recordingQueue>;
+  /** Installs `agent.submissions` (the runtime records there) and a `storage.sql` over `database`. */
+  submissions?: AgentSubmissions;
+  database?: string;
+  logger?: Logger;
+}
+
+async function started(options: StartOptions = {}): Promise<Subject> {
   const telegram = options.telegram ?? startFakeTelegram();
   if (options.telegram === undefined) fakes.push(telegram);
-  const runtime = scriptedRuntime(options.seen);
+  const runtime = scriptedRuntime(options.seen, options.submissions);
   const resets: string[] = [];
   const app = await defineApp({
     components: [
@@ -152,10 +182,12 @@ async function started(options: { secrets?: Record<string, string>; telegram?: F
       router,
       runtime.component,
       ...(options.queue === undefined ? [] : [options.queue.component]),
+      ...(options.submissions === undefined ? [] : [submissionsWith(options.submissions)]),
+      ...(options.database === undefined ? [] : [testStorage(options.database)]),
       channelTelegram,
     ],
     config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
-    logger: silentLogger,
+    logger: options.logger ?? silentLogger,
   }).create();
   apps.push(app);
   await app.start();
@@ -185,7 +217,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "channel-telegram")).toMatchObject({
     provides: [],
     requires: ["secrets", "conversations.registry", "agent.runtime"],
-    optional: ["outbound.queue"],
+    optional: ["outbound.queue", "agent.submissions", "storage.sql"],
   });
 });
 
@@ -480,3 +512,114 @@ test("accounts: a named bot without its token fails the start, and leaves no bot
   expect(telegram.offsets.length).toBe(polls);
 });
 
+
+// ---------------------------------------------------------------------------------------------
+// Answers from agent.submissions (SPEC §4.8): delivered from its feed, with a cursor in storage.sql.
+
+const directories: string[] = [];
+afterAll(() => {
+  for (const dir of directories) rmSync(dir, { recursive: true, force: true });
+});
+
+function temporaryDatabase(): string {
+  const dir = mkdtempSync(join(tmpdir(), "pikit-telegram-answers-"));
+  directories.push(dir);
+  return join(dir, "pikit.db");
+}
+
+function submissionsWith(submissions: AgentSubmissions) {
+  return defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", submissions) });
+}
+
+/** A logger that keeps the warnings. */
+function recordingLogger(): Logger & { warnings: string[] } {
+  const warnings: string[] = [];
+  return { debug() {}, info() {}, warn: (message) => void warnings.push(message), error: (message) => void warnings.push(message), warnings };
+}
+
+for (const c of createLifecycleConformance(() => {
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  return {
+    component: channelTelegram,
+    providers: [
+      secretsWith({ TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1" }),
+      memoryRegistry([]),
+      scriptedRuntime().component,
+      submissionsWith(createMemorySubmissions().submissions),
+      testStorage(temporaryDatabase()),
+    ],
+    config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
+  };
+})) {
+  test(`channel-telegram with agent.submissions ${c.group}: ${c.name}`, () => c.run());
+}
+
+test("with agent.submissions, the answer comes from its feed, once, with and without an outbound.queue", async () => {
+  const { submissions } = createMemorySubmissions();
+  const queue = recordingQueue();
+  const s = await started({ submissions, database: temporaryDatabase(), queue });
+
+  s.telegram.say(OWNER, "hello");
+  await s.telegram.sentCount(1);
+  await Bun.sleep(50);
+
+  expect(s.telegram.sent).toEqual([{ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true }]);
+  expect(queue.enqueued.map((m) => m.idempotencyKey)).toEqual([`s1:telegram:${OWNER.id}:1`]);
+
+  const direct = await started({ submissions: createMemorySubmissions().submissions, database: temporaryDatabase() });
+  direct.telegram.say(OWNER, "fail");
+  expect((await direct.telegram.sentCount(1))[0]?.text).toContain("something went wrong while answering (provider_error)");
+});
+
+test("an answer that ended while the channel was stopped is delivered when it starts again, and only then", async () => {
+  const { submissions } = createMemorySubmissions();
+  const database = temporaryDatabase();
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  const first = await started({ submissions, database, telegram });
+  telegram.say(OWNER, "hold");
+  while (first.runtime.dispatched.length === 0) await Bun.sleep(5);
+
+  // A deploy: the channel stops before the runtime, and the run ends in between.
+  await first.app.stop();
+  first.runtime.release();
+  const conversation = { key: `telegram:${OWNER.id}`, agent: "assistant", sessionId: "s1" };
+  while ((await submissions.get(conversation, `telegram:${OWNER.id}:1`, first.app.context()))?.kind !== "settled") await Bun.sleep(5);
+  expect(telegram.sent).toEqual([]);
+
+  const next = await started({ submissions, database, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
+  expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: "answer: <b>hold</b>", html: true }]);
+
+  // Its cursor is saved: the next start sends nothing again.
+  await next.app.stop();
+  await started({ submissions, database, telegram, seen: new Set([`telegram:${OWNER.id}:1`]) });
+  await Bun.sleep(200);
+  expect(telegram.sent).toHaveLength(1);
+});
+
+test("an answer the outbox could not store is tried again, not dropped", async () => {
+  const queue = recordingQueue({ failures: 1 });
+  const s = await started({ submissions: createMemorySubmissions().submissions, database: temporaryDatabase(), queue });
+
+  s.telegram.say(OWNER, "hello");
+
+  expect((await s.telegram.sentCount(1, 8_000))[0]?.text).toBe("answer: <b>hello</b>");
+  expect(queue.enqueued).toHaveLength(2);
+}, 15_000);
+
+test("without agent.submissions, an answer that ends while the channel is stopped is logged, never silently dropped", async () => {
+  const logger = recordingLogger();
+  const s = await started({ logger });
+  s.telegram.say(OWNER, "hold");
+  while (s.runtime.dispatched.length === 0) await Bun.sleep(5);
+
+  await s.app.stop();
+  s.runtime.release();
+  const deadline = Date.now() + 2_000;
+  while (!logger.warnings.some((w) => w.includes("while the channel was stopped"))) {
+    if (Date.now() > deadline) throw new Error(`no warning: ${JSON.stringify(logger.warnings)}`);
+    await Bun.sleep(5);
+  }
+  expect(s.telegram.sent).toEqual([]);
+});

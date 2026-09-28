@@ -338,6 +338,8 @@ redeliveries, channel outages, restarts and scheduled work.
 - A channel outage is retried by the outbox without touching the channel component.
 - A reaction that must not be lost survives a crash at any point: it reads a feed with its own
   cursor instead of trusting an event (SPEC §4.8).
+- No admitted message ends without an answer reaching its user, across crashes, restarts and
+  deploys.
 - Scheduled prompts run.
 
 **Started early: `channel-telegram`** (SPEC §5), to measure how easy a chat channel is to set up.
@@ -371,6 +373,28 @@ alerts build on later. Only the architecture is built here, not those components
   must still converge. `outbound-durable` passes it (18 crash points); the suite's own test shows a
   consumer that reacts to events alone fails it, and one that reads a feed passes.
 
+✅ **No admitted message goes unanswered** (SPEC §4.8, §6.1, §7), the last reliability gap of M2.
+Before, an answer that ended while its channel was stopped (a deploy stops channels before the
+runtime) reached nobody, and a run interrupted after the platform's ack waited until the user wrote
+again. Now:
+- `agent.submissions` (`@pikit/contracts`, `experimental`), shaped like the submissions of Pi's
+  durable runtime so the move to `pi-durable` is the adapter's: `admitted`, `settled`, `pending()`
+  across sessions, `get`, and the `answers` feed. Its suite, `createSubmissionsConformance`, and its
+  double, `createMemorySubmissions`.
+- `submissions-sql` on `storage.sql` (new kind `submissions`), offered with `runtime-pi`: it passes
+  the suite, the feed suite and all three cuts of the convergence suite; settled runs are kept 7 days.
+- The adapter records each message before `dispatch` resolves (so before the platform's ack) and each
+  run's end before its event; `recover()` settles from Pi's stored result a run whose end was never
+  recorded. `runtime-pi` resumes the pending conversations at start, four at a time, in the
+  background.
+- `channel-telegram` delivers from `answers` with its own cursor in `storage.sql`; without them, it
+  logs every answer it cannot send. `channel-http` answers `GET /v1/conversations/:id/messages/:messageId`
+  and a repeated POST with the message's outcome.
+- Proven in real processes (`samples/http/test/answers.test.ts`): a process killed with SIGKILL after
+  Telegram's ack answers at the next start with no new message; an answer that ends while the app
+  stops reaches the chat at the next start; an HTTP `202` is read later with `GET`. Both Telegram
+  tests fail without `submissions-sql`.
+
 ✅ **The kernel and the vocabulary apart** (SPEC §4.9), before M2 adds the contracts its fixes need:
 - `@pikit/core` keeps only the kernel; the shared contracts, `admitInbound` and their suites moved to
   `@pikit/contracts`, which versions on its own. Components declare it in `dependencies`.
@@ -387,7 +411,7 @@ Rich content (`parts`, `replyTo`) and questions from extensions in a chat (`inte
 decided in SPEC §5 and §6.2b; their code comes with the first component that produces them.
 
 **Scope:** `channel-telegram`, `storage-sqlite`, `outbound-durable` (SPEC §5 "Outbound delivery"),
-feeds and receipts (SPEC §4.8), the convergence suite, `scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided
+feeds and receipts (SPEC §4.8), the convergence suite, `agent.submissions` and `submissions-sql`, `scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided
 here, with the first components that can fail while running.
 
 **Order of work:** (M1.5's `router-rules`) → `storage-sqlite` → the outbound contracts and their
@@ -398,8 +422,9 @@ conformance suite → `outbound-durable`, with a test that kills the process mid
 **Moved:** `inbound-dedup` and `expose` come with the first webhook channel: Google Chat, by
 webhook, moves up from M5 to follow M1.5, as the channel where an agent per space matters.
 
-**Evidence:** scenarios 2 and 3, plus a process killed mid-send whose reply still arrives, and
-`outbound-durable` converging after a crash at each of its commits.
+**Evidence:** scenarios 2 and 3, plus a process killed mid-send whose reply still arrives,
+`outbound-durable` converging after a crash at each of its commits, and a process killed after
+Telegram's ack whose answer arrives with no new message.
 
 ### M3 — Ownership survives upstream change
 

@@ -17,7 +17,9 @@
   },
   "optional": {
     "capabilities": [
-      "outbound.queue"
+      "outbound.queue",
+      "agent.submissions",
+      "storage.sql"
     ]
   },
   "provides": [],

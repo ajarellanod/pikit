@@ -132,8 +132,11 @@ test.skipIf(!E2E)(
     // The answers went through the preset's outbox: stored, then delivered (SPEC §5).
     const db = new DatabaseSync(join(project, ".pikit", "pikit.db"), { readOnly: true });
     const pieces = db.prepare("SELECT conversation_key, state FROM outbound_pieces ORDER BY seq").all();
+    // And from the record of every run's end, which the runtime brought (SPEC §4.8, §6.1).
+    const answers = db.prepare("SELECT conversation_key, kind FROM submissions_answers ORDER BY seq").all();
     db.close();
     expect(pieces).toContainEqual({ conversation_key: `telegram:${OWNER.id}`, state: "delivered" });
+    expect(answers).toContainEqual({ conversation_key: `telegram:${OWNER.id}`, kind: "failed" });
     console.info(
       `e2e telegram timings: new ${ms(timings.new)}, configure ${ms(timings.configure)}, dev to polling ${ms(timings.polling)}, to the answer in the chat ${ms(timings.answered)}`,
     );

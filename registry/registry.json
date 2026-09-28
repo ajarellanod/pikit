@@ -134,6 +134,14 @@
       ],
       "path": "components/storage-sqlite"
     },
+    "submissions-sql": {
+      "version": "0.0.0",
+      "description": "No admitted message ends without its answer: unanswered conversations resume at start, and channels deliver every answer from a feed, even one that ended while they were stopped.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/submissions-sql"
+    },
     "tool-bash": {
       "version": "0.0.0",
       "description": "Pi's own `bash` tool, for the agents that name it: it runs a shell command in the working directory and returns its output (the last lines when it is long), with an optional timeout.",

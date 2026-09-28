@@ -133,7 +133,8 @@ test("reset starts the conversation over on a new session and keeps the old one"
   // The same message id is new again: it is in the old session, not in the new one.
   const again = await sample.post("/v1/messages", { conversationId: "c1", text: "hello again", messageId: "m1" });
 
-  expect(duplicate).toEqual({ status: 409, body: { requestId: "m1", error: "duplicate" } });
+  // Sent again, it does not run again: it answers with what the first one got (submissions-sql).
+  expect(duplicate).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hello" } });
   expect(reset.status).toBe(200);
   expect(reset.body.sessionId).not.toBe(reset.body.previousSessionId);
   expect(again).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hello again" } });
@@ -157,10 +158,11 @@ test("a conversation outlives the process: after a restart it is the same conver
   samples.push(second);
   await second.app.start();
 
-  // The registry and Pi's session were on disk: the message is known, the conversation continues.
+  // The registry and Pi's session were on disk: the message is known, and answered with its outcome
+  // (submissions-sql), not run again; the conversation continues.
   expect(await second.post("/v1/messages", { conversationId: "c1", text: "hello", messageId: "m1" })).toEqual({
-    status: 409,
-    body: { requestId: "m1", error: "duplicate" },
+    status: 200,
+    body: { requestId: "m1", text: "answer: hello" },
   });
   expect(await second.post("/v1/messages", { conversationId: "c1", text: "still there?", messageId: "m2" })).toEqual({
     status: 200,

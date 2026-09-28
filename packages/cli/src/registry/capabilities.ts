@@ -68,6 +68,13 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Runs the agents: dispatch a message to its conversation, abort or resume a run.",
   },
+  "agent.submissions": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "What became of each admitted message: resumes unanswered conversations at start, and feeds every run's outcome to the channels.",
+    offer: true,
+  },
   "conversations.registry": {
     mode: "single",
     definedIn: "@pikit/contracts",

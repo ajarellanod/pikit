@@ -65,9 +65,12 @@ test.skipIf(!E2E)(
     const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
     expect(config).toContain("createRuntimePi({ extensions: [permissionGate] }),");
     expect(config).not.toContain("deploymentDocker");
-    // HTTP answers in the response: nothing offers it durable delivery, so none is installed.
+    // HTTP answers in the response: nothing offers it durable delivery, so none is installed. The
+    // runtime brings its record of submissions, and the storage it needs (SPEC §10.5).
     const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
     expect(Object.keys(manifest.components)).not.toContain("outbound-durable");
+    expect(manifest.components["submissions-sql"].installedFor).toEqual(["runtime-pi"]);
+    expect(manifest.components["storage-sqlite"].installedFor).toEqual(["submissions-sql"]);
     // Portable: the registry is this CLI's, by name, not by this machine's path (SPEC §10.3).
     expect(manifest.registries).toEqual({ default: "builtin" });
   },
@@ -170,6 +173,22 @@ test.skipIf(!E2E)(
       sh([process.execPath, "install"]);
     }
 
+    // submissions-sql, which runtime-pi brought: removed, it takes its storage along and the runtime
+    // and the channel work without them; added back with its storage, green; removed again, no trace.
+    expect((await pikit(["remove", "submissions-sql"])).out).toContain("storage-sqlite was installed for submissions-sql, and nothing uses it now");
+    expect((await pikit(["doctor"])).code).toBe(0);
+    git("add", "-A");
+    git("commit", "-qm", "without submissions-sql");
+    expect((await pikit(["add", "storage-sqlite", "--yes"])).code).toBe(0);
+    const submissions = await pikit(["add", "submissions-sql", "--yes"]);
+    expect(submissions.code).toBe(0);
+    expect(submissions.out).toContain("`pikit doctor` is green");
+    expect((await pikit(["remove", "submissions-sql"])).code).toBe(0);
+    expect((await pikit(["remove", "storage-sqlite"])).code).toBe(0);
+    expect(git("status", "--porcelain").out).toBe("");
+    git("reset", "-q", "--hard", "HEAD~1");
+    sh([process.execPath, "install"]);
+
     const refused = await pikit(["remove", "sessions-jsonl"]);
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("conversations-file requires sessions.store");
@@ -190,7 +209,8 @@ test.skipIf(!E2E)(
     expect(brought.code).toBe(0);
     const components = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components;
     expect(components["outbound-durable"].installedFor).toEqual(["channel-telegram"]);
-    expect(components["storage-sqlite"].installedFor).toEqual(["outbound-durable"]);
+    // The storage the runtime's submissions brought serves the outbox too.
+    expect(components["storage-sqlite"].installedFor).toEqual(["submissions-sql"]);
     const removedWith = await pikit(["remove", "channel-telegram"]);
     expect(removedWith.code).toBe(0);
     expect(removedWith.out).toContain("outbound-durable was installed for channel-telegram, and nothing uses it now");

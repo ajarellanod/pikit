@@ -20,6 +20,8 @@ import { createRuntimePi } from "../../registry/components/runtime-pi/files/src/
 import secretsEnv from "../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import serverBun from "../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
 import sessionsJsonl from "../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
+import storageSqlite from "../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
+import submissionsSql from "../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
 import toolBash from "../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
 import toolEdit from "../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
 import toolRead from "../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
@@ -38,6 +40,7 @@ export const config = {
   "sessions-jsonl": { root: state("sessions") },
   "conversations-file": { path: state("conversations.json") },
   "credentials-file": { path: state("credentials.json") },
+  "storage-sqlite": { path: state("pikit.db") },
   "execution-local": { root: state("workspace") },
   "router-basic": { defaultAgent: "assistant" },
   "server-bun": { port: 3000 },
@@ -59,6 +62,10 @@ export default defineApp({
     toolWrite,
     toolEdit,
     toolBash,
+    // Brought by runtime-pi (offered providers, SPEC §10.5): no accepted message goes unanswered
+    // across restarts, and a POST that answered 202 reads its answer with GET.
+    storageSqlite,
+    submissionsSql,
     createRuntimePi({ extensions: [permissionGate] }),
     routerBasic,
     channelHttp,

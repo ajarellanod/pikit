@@ -1,10 +1,11 @@
 /**
  * channel-http: talk to an agent over HTTP (SPEC §5, §15 scenario 1).
  *
- *   POST /v1/messages                    { conversationId, text, messageId? }
+ *   POST /v1/messages                              { conversationId, text, messageId? }
+ *   GET  /v1/conversations/:id/messages/:messageId  the outcome of a message, later
  *   POST /v1/conversations/:id/reset
  *
- * Both need `Authorization: Bearer <PIKIT_HTTP_TOKEN>`, read from `secrets` at start.
+ * All need `Authorization: Bearer <PIKIT_HTTP_TOKEN>`, read from `secrets` at start.
  *
  * A message goes through the inbound path of SPEC §5:
  * 1. `http.authenticate`: this channel's stage checks the bearer token. The pipeline is this
@@ -21,14 +22,23 @@
  * - `200 { requestId, text }`: the run answered it.
  * - `202 { requestId }`: no answer in time, or the server is stopping. The answer still lands in
  *   the conversation's session; nothing is lost.
- * - `409 { requestId, error: "duplicate" }`: this `messageId` is already in the conversation. It
- *   does not run again, and its answer went to the POST that sent it first.
  * - `502 { requestId, error }`: the run failed. `409 { error: "aborted" }`: it was stopped.
+ * - A `messageId` already in the conversation does not run again. With `agent.submissions` installed
+ *   (`submissions-sql`), the POST answers with its outcome, as above (`202` while it is still
+ *   running). Without it, `409 { requestId, error: "duplicate" }`: its answer went to the POST that
+ *   sent it first.
+ *
+ * `GET /v1/conversations/:id/messages/:messageId`, with `agent.submissions` installed: what became of
+ * a message, as its POST would have answered (`200` / `202` / `502` / `409 aborted`), or `404` when
+ * the conversation's current session has no such message (never sent, sent before a reset, or
+ * settled longer ago than `submissions-sql` keeps them). Without it: `501`, since nothing keeps the
+ * outcome of a message outside its session.
  *
  * Delivery `[decision]` for M1: the answer is returned in the HTTP response, not sent through
  * `outbound.prepare` and `channel.transport`, which arrive in M2 with `outbound-durable`. The channel
  * listens to `agent.settled` / `agent.failed` itself and answers every POST waiting for one of the
- * run's `requestIds`. The map of waiting POSTs is a cache: the answer is in the session anyway.
+ * run's `requestIds`. The map of waiting POSTs is a cache: the answer is in the session anyway, and
+ * in `agent.submissions` when installed.
  * Guarantee: a message accepted by `dispatch` (any answer but 4xx/5xx before it) is in the session
  * and will be answered there, at least once.
  *
@@ -36,10 +46,10 @@
  */
 
 import { type AppContext, defineComponent, Halt } from "@pikit/core";
-import { admitInbound, type AgentResult, type InboundMessage } from "@pikit/contracts";
+import { admitInbound, type AgentResult, type InboundMessage, type RunSettlement } from "@pikit/contracts";
 import Type from "typebox";
 import { bearerToken, type Digest, digest, matches, MIN_TOKEN_LENGTH, TOKEN_SECRET } from "./auth.ts";
-import { CONVERSATION_ID, readMessageBody } from "./body.ts";
+import { CONVERSATION_ID, MESSAGE_ID, readMessageBody } from "./body.ts";
 import { Replies } from "./replies.ts";
 
 export const CHANNEL = "http";
@@ -71,6 +81,13 @@ const json = (status: number, body: unknown): Response => Response.json(body, { 
 const UNAUTHORIZED = (): Response =>
   Response.json({ error: "unauthorized" }, { status: 401, headers: { "www-authenticate": 'Bearer realm="pikit"' } });
 
+/** What a run's end means for one of its messages, as HTTP: the POST's answer, and the GET's. */
+function outcome(requestId: string, run: Pick<RunSettlement, "kind" | "text" | "error">): Response {
+  if (run.kind === "completed") return json(200, { requestId, text: run.text ?? "" });
+  if (run.kind === "aborted") return json(409, { requestId, error: "aborted" });
+  return json(502, { requestId, error: run.error?.code ?? "failed" });
+}
+
 export default defineComponent({
   name: "channel-http",
   config: Config,
@@ -78,6 +95,8 @@ export default defineComponent({
     const secrets = pikit.use("secrets");
     const conversations = pikit.use("conversations.registry");
     const runtime = pikit.use("agent.runtime");
+    // Optional: with it, a message's outcome can be read later (GET), and a repeated POST answers it.
+    const submissions = pikit.useOptional("agent.submissions");
     const replies = new Replies();
     /** The token's digest, from start to stop. No token, no requests. */
     let token: Digest | undefined;
@@ -126,7 +145,7 @@ export default defineComponent({
       };
       // The answer may come before dispatch returns: wait for it from right before dispatch.
       let waiter: ReturnType<Replies["expect"]> | undefined;
-      const outcome = await admitInbound(ctx, message, {
+      const inbound = await admitInbound(ctx, message, {
         conversations: conversations.get(),
         runtime: runtime.get(),
         key: conversationKey(conversationId),
@@ -137,16 +156,20 @@ export default defineComponent({
         waiter?.cancel();
         throw error;
       });
-      if (outcome.kind !== "admitted") waiter?.cancel();
-      switch (outcome.kind) {
+      if (inbound.kind !== "admitted") waiter?.cancel();
+      switch (inbound.kind) {
         case "halted":
-          return json(outcome.pipeline === "inbound.normalize" ? 422 : 403, { requestId, error: "rejected", message: outcome.reason });
+          return json(inbound.pipeline === "inbound.normalize" ? 422 : 403, { requestId, error: "rejected", message: inbound.reason });
         case "denied":
-          return json(403, { requestId, error: "denied", ...(outcome.reason !== undefined && { message: outcome.reason }) });
+          return json(403, { requestId, error: "denied", ...(inbound.reason !== undefined && { message: inbound.reason }) });
         case "no_route":
           return json(500, { requestId, error: "no_route" });
-        case "duplicate":
-          return json(409, { requestId, error: "duplicate" });
+        case "duplicate": {
+          // The client sent it again (a retry after a timeout): what became of it, when it is known.
+          const known = await submissions.get()?.get(inbound.conversation, requestId, ctx);
+          if (known === undefined) return json(409, { requestId, error: "duplicate" });
+          return known.kind === "pending" ? json(202, { requestId }) : outcome(requestId, known.run);
+        }
         case "admitted":
           break;
       }
@@ -154,10 +177,25 @@ export default defineComponent({
 
       const answer = await waiter.wait(config.replyTimeoutMs, ctx.abortSignal);
       if (answer.kind !== "answered") return json(202, { requestId });
-      const { result } = answer;
-      if (result.kind === "completed") return json(200, { requestId, text: result.text ?? "" });
-      if (result.kind === "aborted") return json(409, { requestId, error: "aborted" });
-      return json(502, { requestId, error: result.error?.code ?? "failed" });
+      return outcome(requestId, answer.result);
+    });
+
+    pikit.provideKeyed("http.route", "GET /v1/conversations/:id/messages/:messageId", async (request, ctx) => {
+      if ((await authenticated(request, ctx)) === undefined) return UNAUTHORIZED();
+      const record = submissions.get();
+      if (record === undefined) {
+        return json(501, { error: "not_supported", message: "this app keeps no record of messages' outcomes; install submissions-sql" });
+      }
+      const [, , , id = "", , message = ""] = new URL(request.url).pathname.split("/");
+      const conversationId = decodeURIComponent(id);
+      const requestId = decodeURIComponent(message);
+      if (!new RegExp(CONVERSATION_ID).test(conversationId) || !new RegExp(MESSAGE_ID).test(requestId)) {
+        return json(400, { error: "invalid_request", message: "the conversation id or the message id is not valid" });
+      }
+      const conversation = await conversations.get().get(conversationKey(conversationId), ctx);
+      const known = conversation === undefined ? undefined : await record.get(conversation, requestId, ctx);
+      if (known === undefined) return json(404, { requestId, error: "not_found" });
+      return known.kind === "pending" ? json(202, { requestId }) : outcome(requestId, known.run);
     });
 
     pikit.provideKeyed("http.route", "POST /v1/conversations/:id/reset", async (request, ctx) => {

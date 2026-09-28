@@ -5,6 +5,31 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- samples: the http sample has the storage and submissions `runtime-pi` brings; a POST sent again
+  answers with its outcome instead of `409 duplicate`.
+- component/channel-http: `GET /v1/conversations/:id/messages/:messageId` returns what became of a
+  message (`200` / `202` / `502` / `409 aborted`, `404` unknown), and a POST whose `messageId` is
+  already in the conversation answers with its outcome, with `agent.submissions` installed. Without
+  it, `GET` is `501` and a repeated POST is `409 duplicate`, as before.
+- component/channel-telegram: with `agent.submissions` and `storage.sql`, answers are delivered from
+  the `answers` feed with a cursor of the channel's own, so an answer that ends while the channel is
+  stopped (a deploy) reaches the chat at the next start, and one the outbox could not store is tried
+  again. Without them, every answer the channel cannot send is logged; before, it was dropped
+  silently.
+- component/runtime-pi: records in `agent.submissions` when installed, and resumes at start, in the
+  background and four at a time, every conversation holding a message nobody answered. A message
+  acknowledged to Telegram before a crash is answered with no new message. `pikit add runtime-pi`
+  (and so `pikit new`) offers `submissions-sql`.
+- adapter: with `submissions`, `createPiRuntime` records each message before `dispatch` resolves and
+  each run's end before its event (retried when the record fails), and settles withdrawn messages as
+  aborted. `PiRuntime.recover()` opens a conversation with pending requests and settles, from the
+  result Pi stored, a run whose end was never recorded.
+- component/submissions-sql: new, kind `submissions`. `agent.submissions` on `storage.sql`: pending
+  requests, idempotent settlements, and the `answers` feed, kept 7 days (`keepSettledDays`). Passes
+  the submissions, feed, lifecycle and convergence suites.
+- contracts: `agent.submissions` (`AgentSubmissions`, `RunSettlement`, `SubmissionStatus`,
+  `PendingConversation`), shaped like the submissions of Pi's durable runtime; its suite
+  `createSubmissionsConformance` and its double `createMemorySubmissions`.
 - docs: **`SPEC-CORE.md`**, what must hold whatever else pikit becomes, comes before every other
   document: the kernel's twelve decisions (no `Target` in the kernel, no persisted events, config as
   a plain object, a frozen `Context`, `stop()` never needed for correctness, several Apps per
