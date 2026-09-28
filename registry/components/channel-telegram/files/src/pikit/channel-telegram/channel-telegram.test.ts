@@ -23,6 +23,7 @@ import {
   type DeliveryReceipt,
   type OutboundMessage,
   type OutboundQueue,
+  type PendingConversation,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createMemoryFeed, createMemorySubmissions } from "@pikit/contracts/testing";
@@ -592,6 +593,20 @@ test("with agent.submissions, the answer comes from its feed, once, with and wit
   const direct = await started({ submissions: createMemorySubmissions().submissions, database: temporaryDatabase() });
   direct.telegram.say(OWNER, "fail");
   expect((await direct.telegram.sentCount(1))[0]?.text).toContain("something went wrong while answering (provider_error)");
+});
+
+test("a message the runtime abandoned gets a clear reply, not the generic failure", async () => {
+  const { submissions } = createMemorySubmissions();
+  const s = await started({ submissions, database: temporaryDatabase() });
+  s.telegram.say(OWNER, "hold");
+  let pending: PendingConversation | undefined;
+  while ((pending = (await submissions.pending(s.app.context()))[0]) === undefined) await Bun.sleep(5);
+
+  const run = await submissions.abandoned(pending.conversation, pending.requestIds, "agent_removed", s.app.context());
+  await s.app.context().emit("agent.failed", { ...(run as NonNullable<typeof run>), kind: "failed", messages: [] });
+
+  expect((await s.telegram.sentCount(1))[0]?.text).toBe("Sorry, we could not answer your message. Please send it again.");
+  s.runtime.release();
 });
 
 test("an answer that ended while the channel was stopped is delivered when it starts again, and only then", async () => {
