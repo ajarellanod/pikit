@@ -19,7 +19,7 @@ import { isInside, isProtected } from "../project/registry-source.ts";
 export const KINDS = [
   "channel", "router", "sessions", "storage", "workspace", "execution", "scheduler", "deployment",
   "tool", "policy", "admin", "inbound", "outbound", "log",
-  "conversations", "credentials", "provider", "runtime", "secrets", "server",
+  "conversations", "credentials", "provider", "runtime", "secrets", "server", "submissions",
 ];
 
 const KEBAB = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
