@@ -109,6 +109,16 @@ test("a running process prunes settlements past keepSettledDays at most hourly, 
   }
 });
 
+test("keepSettledDays is at least 1: 0 would prune, at start, every answer that ended during a deploy", async () => {
+  const failure = await open(temporaryDatabase(), createManualClock(), { "submissions-sql": { keepSettledDays: 0 } }).then(
+    ({ app }) => app.stop().then(() => undefined),
+    (error: unknown) => error,
+  );
+
+  expect(failure).toBeInstanceOf(Error);
+  expect(String(failure)).toMatch(/keepSettledDays/);
+});
+
 test("a database written by a newer component is refused at start", async () => {
   const database = temporaryDatabase();
   const newer = new DatabaseSync(database);

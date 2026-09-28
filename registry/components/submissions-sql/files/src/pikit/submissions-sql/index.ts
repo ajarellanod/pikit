@@ -31,8 +31,17 @@ const DAY = 24 * 60 * 60 * 1_000;
 const PRUNE_EVERY_MS = 60 * 60 * 1_000;
 
 const Config = Type.Object({
-  /** How long a settled run, and the requests it settled, are kept (for `answers` and `get`), in days. */
-  keepSettledDays: Type.Integer({ minimum: 0, default: 7 }),
+  /**
+   * How long a settled run, and the requests it settled, are kept (for `answers` and `get`), in days.
+   * At least 1: a channel must be able to read an answer after a deploy. With 0, `start` would prune
+   * every answer that ended while the channels were stopped (each a `gap`, never delivered), and the
+   * hourly prune could drop one settled a moment earlier that a woken channel has not read yet.
+   */
+  keepSettledDays: Type.Integer({
+    minimum: 1,
+    default: 7,
+    description: "Days a settled run is kept for answers and get. At least 1, so answers that ended during a deploy are still delivered.",
+  }),
 });
 
 export default defineComponent({

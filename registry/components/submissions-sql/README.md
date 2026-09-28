@@ -53,6 +53,12 @@ if (page.gap) {
 Settled runs, and the requests they settled, are kept `keepSettledDays` (7 by default), then pruned at
 start and at most hourly after. Pending requests are never pruned: nothing answered them yet.
 
+`keepSettledDays` is at least 1. The retention is how long a stopped channel has to read an answer:
+with 0, `start` would prune every answer that ended during a deploy before the channels start (each
+reader told `gap`, the answer never delivered), and the hourly prune could drop an answer settled a
+moment earlier that a woken channel has not read yet. Settling a run is idempotent only within the
+retention: once pruned, the same run settled again is appended to `answers` a second time.
+
 ## Seeing what happened
 
 ```sh
