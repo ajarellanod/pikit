@@ -5,6 +5,8 @@ Talk to your agent in Telegram: send your bot a message, get the answer in the c
 - **Provides:** nothing to other components. It receives messages and sends answers.
 - **Requires:** `secrets` (the bot token and the allowed users), `conversations.registry`,
   `agent.runtime`. A router (such as `router-basic`) picks the agent.
+- **Uses, if installed:** `outbound.queue` (durable sending), and `agent.submissions` with
+  `storage.sql` (no answer lost while the channel is stopped): "Sending" below.
 - **Target:** `server`: it receives messages by long polling, which needs a process that keeps
   running.
 - **Installs to:** `src/pikit/channel-telegram/`.
@@ -64,6 +66,16 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   - Without it, answers are sent directly, retried in the process: after `retry_after` for
     Telegram's 429, and with backoff for network errors and 5xx. A reply lost to a crash while
     sending is not sent again, but the answer is in the conversation's session.
+- **Answers that end while the channel is stopped.** A deploy stops the channel before the runtime,
+  so a long answer can end in between.
+  - With `submissions-sql` installed (`pikit add runtime-pi` offers it, with `storage-sqlite`), the
+    channel reads every run's outcome from its `answers` feed, from a cursor it keeps in
+    `storage.sql` (the table `channel_telegram_cursors`): when it starts, whenever a run ends, and
+    every 30 seconds. That answer is sent when the channel starts again; one the outbox could not
+    store is tried again (after 1 s, 5 s, 30 s, then every minute) instead of being dropped. With the
+    outbox, an answer read twice after a crash is stored once; without it, it may be sent twice.
+  - Without it, answers come from the runtime's events only: one that ends while the channel is
+    stopped is not sent, and a warning says so.
 
 It refuses to start:
 - without a token, or with a token Telegram does not know;
@@ -109,7 +121,10 @@ The tests are copied with the component and run in your project against `fake-te
 local stand-in of the Bot API: no bot, token or network needed.
 - `channel-telegram.test.ts` covers the whole conversation: allowed and refused users, commands,
   "typing…", formatting and splitting, retries, a redelivered message answered once, the
-  acknowledgement at stop, the lifecycle conformance suite and the start failures.
+  acknowledgement at stop, the lifecycle conformance suite and the start failures; with
+  `agent.submissions`, answers from its feed, one that ended while the channel was stopped delivered
+  at the next start (and only then), and a failed enqueue tried again; without it, the warning for an
+  answer that could not be sent.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
   channel does with a message (routed, deduplicated, stopped, denied, no router), through Telegram.
 - `configure.test.ts` covers the setup: a checked token, allowing whoever messages the bot, and
