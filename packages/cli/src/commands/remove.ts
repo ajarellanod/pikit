@@ -3,7 +3,9 @@
  * project as it was before `add` (S3).
  *
  * It refuses when another component requires (`use`) a capability this one is the only provider
- * of; losing the provider of an optional capability is allowed and `doctor` reports it. The answer
+ * of; losing the provider of an optional capability is allowed and `doctor` reports it. Without
+ * `--force`, it also refuses to take a key an agent names (a tool, an extension, a model's provider):
+ * the app would compose and the runtime refuse to start. The answer
  * comes from the app itself (`describe()`), not from manifests, so project components count too.
  * It never deletes a file the user modified without `--force`.
  *
@@ -19,6 +21,7 @@ import { CONFIG_FILE, removeComponent, removeConfigEntry } from "../project/conf
 import { ENV_EXAMPLE, removeExampleBlock } from "../project/env-file.ts";
 import { readPackageJson, removeDependencies, writePackageJson } from "../project/package-json.ts";
 import { type ProjectManifest, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { brokenReferences } from "../project/references.ts";
 import { probe } from "../project/run.ts";
 import { EXTENSION_ALIAS } from "../project/vendor.ts";
 import { CliError, log } from "../ui.ts";
@@ -107,7 +110,10 @@ async function installedOnlyFor(projectDir: string, name: string): Promise<strin
   return leftovers;
 }
 
-/** Refuses when a remaining component requires a capability only this component provides. */
+/**
+ * Refuses when a remaining component requires a capability only this component provides, and,
+ * unless forced, when an agent names a key only it provides.
+ */
 async function checkNoDependents(projectDir: string, name: string, force: boolean): Promise<void> {
   const result = await probe(projectDir);
   if (!result.ok) {
@@ -126,6 +132,10 @@ async function checkNoDependents(projectDir: string, name: string, force: boolea
   }
   if (blockers.length > 0) {
     throw new CliError(`${name} cannot be removed; it is the only provider of what the app needs:\n  ${blockers.join("\n  ")}\nInstall another provider first.`);
+  }
+  const references = brokenReferences(result, name);
+  if (references.length > 0 && !force) {
+    throw new CliError(`${name} cannot be removed; agents name what only it provides, and the app would not start:\n  ${references.join("\n  ")}\nChange those agents first, or pass --force.`);
   }
 }
 

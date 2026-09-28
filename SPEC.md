@@ -2261,6 +2261,12 @@ component requires (`use`) without a provider. Losing the provider of an optiona
 allowed; `doctor` reports it. `[decision]` The answer comes from the app's own `describe()` (every
 setup, no start), not from manifests, so project components count too and `remove` cannot disagree
 with `doctor`. `remove` also:
+- refuses, without `--force`, to take a key an agent names statically (a tool, an extension, its
+  model's provider) when it is the only provider of that key and a component (the runtime) reads
+  it: the app would compose and the runtime refuse to start (`agent "soporte" names the tool "bash",
+  which only tool-bash provides`). The probe reads each `agent.definition` provided during setup;
+  what `prepare(state)` names, a model id within its provider and a router's agent names are
+  checked only at start;
 - refuses to delete a file whose hash differs from `pikit.json` without `--force`;
 - removes the component's import, its `components` entry and its `config` key, its `.env.example`
   block, and the npm dependencies no remaining component declares and no project file imports.
@@ -2383,7 +2389,7 @@ M1 has these commands; the others print "not yet" and name the milestone that br
 | Command | M1 |
 |---|---|
 | `new`, `add`, `remove` | §10.5. `pikit new` with no directory, in a terminal, is the guided path (below). |
-| `doctor` | Creates the app (every setup, no start) and prints the component graph, capability providers, pipelines and config (§4.6). Fails when the app does not compose, when a variable a component marks required is set neither in the environment nor in `.env` (names only, never values), or when a file breaks the Pi import rule (S1: a component imports no `@earendil-works/*`, project code only `@earendil-works/pi-coding-agent`, the Pi extensions' alias). Lists modified and deleted installed files as information. |
+| `doctor` | Creates the app (every setup, no start) and prints the component graph, capability providers, pipelines and config (§4.6). Fails when the app does not compose, when a variable a component marks required is set neither in the environment nor in `.env` (names only, never values), when a file breaks the Pi import rule (S1: a component imports no `@earendil-works/*`, project code only `@earendil-works/pi-coding-agent`, the Pi extensions' alias), or when an agent names statically a tool, an extension or a model provider that no installed key provides while a component reads that capability (§10.5). Lists modified and deleted installed files as information. |
 | `configure` | First runs the components' own steps (below). Then writes the other variables of the installed components to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login runs where the app will run (below). |
 | `dev` | After `doctor`, `bun --watch src/pikit/<deployment>/main.ts` (the installed `deployment-*` component's entrypoint) with `.env` loaded. |
 | `up`, `down`, `restart`, `logs`, `status` | Delegate, as above. `up` runs `doctor` first, then checks the model credentials where the app runs (through the deployment's `exec`), and refuses to start an agent that has none. |

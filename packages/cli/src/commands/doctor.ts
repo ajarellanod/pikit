@@ -5,6 +5,8 @@
  * graph, the capability providers, the pipelines and the config. Then it checks:
  * - the app composes: every required capability has a provider, selections are valid, the config
  *   matches the merged schema (the core's own `create()` decides, SPEC §4.6);
+ * - every tool, extension and model provider an agent names statically is an installed key, when a
+ *   component (the runtime) uses it: the runtime would refuse to start otherwise (`references.ts`);
  * - every variable a component marks required is set in the environment or in `.env` (names
  *   only, never a value);
  * - the Pi import rule (S1): only `@pikit/pi-adapter` imports Pi. Components never import
@@ -21,6 +23,7 @@ import { join } from "node:path";
 import { packageName, scanImports } from "../registry/imports.ts";
 import { projectEnv, probe } from "../project/run.ts";
 import type { ProbeResult } from "../project/probe.ts";
+import { brokenReferences } from "../project/references.ts";
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
 import { EXTENSION_ALIAS } from "../project/vendor.ts";
 import { log } from "../ui.ts";
@@ -51,6 +54,7 @@ export async function doctor(projectDir: string, options: { quiet?: boolean } = 
       if (listable && !result.listed.includes(name)) notes.push(`${name} is installed but not listed in pikit.config.ts`);
     }
     notes.push(...unusedProviders(result.description.components));
+    problems.push(...brokenReferences(result));
   }
 
   const env = projectEnv(projectDir);
