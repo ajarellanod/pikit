@@ -126,6 +126,15 @@
       ],
       "path": "components/sessions-jsonl"
     },
+    "storage-kv-sql": {
+      "version": "0.0.0",
+      "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/storage-kv-sql"
+    },
     "storage-sqlite": {
       "version": "0.0.0",
       "description": "The app's SQL database (storage.sql) in one SQLite file, through node:sqlite: records components keep across restarts.",

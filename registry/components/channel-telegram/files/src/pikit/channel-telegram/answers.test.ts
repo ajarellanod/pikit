@@ -1,22 +1,13 @@
 /**
- * The answers' reader (`answers.ts`) on its own: a memory feed, cursors in memory or in a SQLite file,
+ * The answers' reader (`answers.ts`) on its own: a memory feed, cursors in memory or in `storage.kv`,
  * and a `deliver` the test controls. `channel-telegram.test.ts` runs it inside the channel.
  */
 
-import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { expect, test } from "bun:test";
 import type { Logger } from "@pikit/core";
 import type { RunSettlement } from "@pikit/contracts";
-import { createMemoryFeed } from "@pikit/contracts/testing";
+import { createMemoryFeed, createMemoryKeyValueStorage } from "@pikit/contracts/testing";
 import { type Cursors, openCursors, startAnswerReader } from "./answers.ts";
-import { openTestDatabase } from "./storage.test-support.ts";
-
-const directories: string[] = [];
-afterAll(() => {
-  for (const dir of directories) rmSync(dir, { recursive: true, force: true });
-});
 
 function answer(key: string, requestId: string): RunSettlement {
   return { conversation: { key, agent: "assistant", sessionId: `s-${key}` }, requestId, requestIds: [requestId], kind: "completed", text: `to ${requestId}` };
@@ -162,27 +153,20 @@ test("when storage fails, the reader backs off and tries again", async () => {
 });
 
 test("a cursor opened for the first time starts at the feed's end; one opened on an empty feed starts at its first answer", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "pikit-telegram-cursors-"));
-  directories.push(dir);
-  const upgraded = openTestDatabase(join(dir, "upgraded.db"));
-  const fresh = openTestDatabase(join(dir, "fresh.db"));
-  try {
-    // A project that already had submissions-sql: its answers were delivered by events.
-    const old = createMemoryFeed<RunSettlement>();
-    for (let i = 0; i < 520; i++) old.append(answer("telegram:1", `old-${i}`));
-    const cursors = await openCursors(upgraded.database, old.feed);
-    expect(await cursors.get()).toBe("520");
-    await cursors.save("600");
-    expect(await (await openCursors(upgraded.database, old.feed)).get()).toBe("600");
+  const upgraded = createMemoryKeyValueStorage().namespace("channel-telegram");
+  const fresh = createMemoryKeyValueStorage().namespace("channel-telegram");
+  // A project that already had submissions-sql: its answers were delivered by events.
+  const old = createMemoryFeed<RunSettlement>();
+  for (let i = 0; i < 520; i++) old.append(answer("telegram:1", `old-${i}`));
+  const cursors = await openCursors(upgraded, old.feed);
+  expect(await cursors.get()).toBe("520");
+  await cursors.save("600");
+  expect(await (await openCursors(upgraded, old.feed)).get()).toBe("600");
 
-    // A new project: nothing yet, so everything that comes is delivered.
-    const empty = createMemoryFeed<RunSettlement>();
-    const first = await openCursors(fresh.database, empty.feed);
-    expect(await first.get()).toBeUndefined();
-    empty.append(answer("telegram:1", "new"));
-    expect(await (await openCursors(fresh.database, empty.feed)).get()).toBeUndefined();
-  } finally {
-    await upgraded.close();
-    await fresh.close();
-  }
+  // A new project: nothing yet, so everything that comes is delivered.
+  const empty = createMemoryFeed<RunSettlement>();
+  const first = await openCursors(fresh, empty.feed);
+  expect(await first.get()).toBeUndefined();
+  empty.append(answer("telegram:1", "new"));
+  expect(await (await openCursors(fresh, empty.feed)).get()).toBeUndefined();
 });

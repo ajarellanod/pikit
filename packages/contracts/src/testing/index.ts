@@ -28,6 +28,8 @@ export { createConvergenceConformance, SimulatedCrash, SimulatedStorageFailure }
 
 export type { SqlDatabaseFixture } from "./storage-sql.ts";
 export { createSqlDatabaseConformance } from "./storage-sql.ts";
+export type { KeyValueFixture } from "./storage-kv.ts";
+export { createKeyValueConformance, createMemoryKeyValueStorage } from "./storage-kv.ts";
 
 export type { AgentStateFixture } from "./agent-state.ts";
 export { createAgentStateConformance } from "./agent-state.ts";

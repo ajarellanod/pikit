@@ -1,5 +1,5 @@
 /**
- * For the tests only: a `storage.sql` over one SQLite file, so channel-telegram's tests need no other
+ * For the tests only: a `storage.sql` over one SQLite file, so storage-kv-sql's tests need no other
  * component (a component never imports another's files). `storage-sqlite` is the real one.
  */
 

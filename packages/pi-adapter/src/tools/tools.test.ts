@@ -7,9 +7,13 @@ import { expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { BACKGROUND_CONTEXT, type AgentHarnessToolInvocation } from "@earendil-works/pi-agent-core";
+import { BACKGROUND_CONTEXT, type AgentHarnessTool, type AgentHarnessToolInvocation } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { bindTool, createBashTool, createReadTool, createWriteTool } from "./index.ts";
+import { Type } from "@earendil-works/pi-ai";
+import { type Context, defineApp, defineComponent, silentLogger, withCancel } from "@pikit/core";
+import type { AgentTool } from "@pikit/contracts";
+import { defineTool } from "../extensions/index.ts";
+import { bindTool, createBashTool, createReadTool, createWriteTool, toolComponent } from "./index.ts";
 
 const invocation: AgentHarnessToolInvocation = {
   invocationId: "i1",
@@ -41,4 +45,89 @@ test("a bound tool works on its own environment and carries its replay", async (
   expect(readFileSync(join(dir, "out/new.txt"), "utf8")).toBe("written");
   expect(textOf(ran)).toContain("written");
   rmSync(dir, { recursive: true, force: true });
+});
+
+/** Starts an app with `components` and returns every `agent.tool` it provides, by name. */
+async function toolsOf(...components: Parameters<typeof defineApp>[0]["components"]) {
+  let tools: Map<string, AgentTool> | undefined;
+  const consumer = defineComponent({
+    name: "tools-consumer",
+    setup(pikit) {
+      const handle = pikit.useKeyed("agent.tool");
+      return { start: () => void (tools = new Map(handle.keys().map((key) => [key, handle.get(key) as AgentTool]))) };
+    },
+  });
+  const app = await defineApp({ components: [...components, consumer], logger: silentLogger }).create();
+  await app.start();
+  return { app, tools: tools ?? new Map<string, AgentTool>() };
+}
+
+test("toolComponent: a tool in Pi's shape, provided as agent.tool under its name, with its replay", async () => {
+  const calls: { toolCallId: string; params: unknown; signal: AbortSignal | undefined; context: Context }[] = [];
+  const updates: unknown[] = [];
+  const search = toolComponent(
+    {
+      name: "web_search",
+      label: "Web search",
+      description: "Searches the web",
+      parameters: Type.Object({ query: Type.String() }),
+      async execute(toolCallId, params, signal, onUpdate, context) {
+        calls.push({ toolCallId, params, signal, context });
+        onUpdate?.({ content: [{ type: "text", text: "searching" }], details: undefined });
+        return { content: [{ type: "text", text: `results for ${params.query}` }], details: undefined };
+      },
+    },
+    { replay: "safe" },
+  );
+  const { app, tools } = await toolsOf(search);
+
+  expect(app.describe().components.find((c) => c.name === "tool-web-search")).toMatchObject({ provides: ["agent.tool"], requires: [], optional: [] });
+  const tool = tools.get("web_search") as AgentHarnessTool<undefined>;
+  expect([tool.name, tool.label, tool.replay]).toEqual(["web_search", "Web search", "safe"]);
+
+  // Pi's harness calls it; the definition gets Pi's order: the call's id, its params, the run's signal, onUpdate, the run's context.
+  const { context: run, cancel } = withCancel(BACKGROUND_CONTEXT);
+  const result = await tool.execute("c1", { query: "pikit" }, (partial) => void updates.push(partial), undefined, invocation, run);
+  expect(textOf(result)).toBe("results for pikit");
+  expect(calls).toEqual([{ toolCallId: "c1", params: { query: "pikit" }, signal: run.abortSignal, context: run }]);
+  expect(updates).toEqual([{ content: [{ type: "text", text: "searching" }], details: undefined }]);
+  cancel();
+  await app.stop();
+});
+
+test("toolComponent takes the object of a Pi tool as it is; one typed by Pi's defineTool is refused where it is written", async () => {
+  // Pi's own `hello` example, its object unchanged, written inside toolComponent instead of defineTool.
+  const { app, tools } = await toolsOf(
+    toolComponent(
+      {
+        name: "hello",
+        label: "Hello",
+        description: "A simple greeting tool",
+        parameters: Type.Object({ name: Type.String({ description: "Name to greet" }) }),
+        async execute(_toolCallId, params, _signal, _onUpdate) {
+          return { content: [{ type: "text", text: `Hello, ${params.name}!` }], details: { greeted: params.name } };
+        },
+      },
+      { replay: "never" },
+    ),
+  );
+  const tool = tools.get("hello") as AgentHarnessTool<undefined>;
+
+  expect(tool.replay).toBe("never");
+  expect(textOf(await tool.execute("c1", { name: "Ada" }, () => {}, undefined, invocation, BACKGROUND_CONTEXT))).toBe("Hello, Ada!");
+  await app.stop();
+
+  // Pi's defineTool types its fifth argument as the ExtensionContext, which only an extension's host
+  // has: such a tool stays an extension's tool, and the compiler says so, not a conversation.
+  const typedByPi = defineTool({
+    name: "hello",
+    label: "Hello",
+    description: "A simple greeting tool",
+    parameters: Type.Object({}),
+    async execute() {
+      return { content: [{ type: "text", text: "Hello!" }], details: undefined };
+    },
+  });
+  // @ts-expect-error: its execute takes an ExtensionContext, not the run's context
+  toolComponent(typedByPi, { replay: "never" });
 });

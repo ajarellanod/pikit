@@ -1,7 +1,7 @@
 /**
  * The sample with `channel-telegram` instead of `channel-http`, as `pikit new --preset telegram` makes
  * it: the same runtime, sessions and registry, the storage and submissions `runtime-pi` brings, and
- * the outbox the channel brings. Telegram is the channel's own fake Bot API (`fake-telegram.ts`), and
+ * the outbox and the key-value store (for its cursor) the channel brings. Telegram is the channel's own fake Bot API (`fake-telegram.ts`), and
  * the model Pi's faux provider, scripted.
  *
  * For `answers.test.ts`, in the test's process and in `telegram-worker.ts`, a process it kills.
@@ -17,6 +17,7 @@ import routerBasic from "../../../registry/components/router-basic/files/src/pik
 import { createRuntimePi } from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import sessionsJsonl from "../../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
+import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import storageSqlite from "../../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
 import submissionsSql from "../../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
 
@@ -52,6 +53,7 @@ export function telegramApp(options: TelegramAppOptions) {
       routerBasic,
       ...(options.between ?? []),
       outboundDurable,
+      storageKvSql,
       channelTelegram,
     ],
     config: {

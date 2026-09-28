@@ -5,6 +5,22 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
+  shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an
+  agent names it in `tools`. Unlike a Pi extension's tool, it may be `replay: "safe"`, and `pikit
+  doctor` lists it. Its fifth `execute` argument is the run's context (its conversation), not Pi's
+  `ExtensionContext`: an object typed by Pi's `defineTool` does not compile there; write it inside
+  `toolComponent`.
+- contracts: `storage.kv` (experimental): small JSON values a component keeps across restarts, by
+  key, in a namespace of its own (`get`, `set`, `setIfAbsent`, `delete`). Its conformance suite and a
+  memory storage for tests are in `@pikit/contracts/testing`. `pikit add` offers its provider.
+- component/storage-kv-sql: new. `storage.kv` on `storage.sql`, in one table
+  (`storage_kv_sql_entries`); targets `server` and `cloudflare`.
+- component/channel-telegram: its answers' cursor moves from its own `storage.sql` table
+  (`channel_telegram_cursors`) to `storage.kv` (key `answers-cursor` of its namespace); answers come
+  from the feed with `agent.submissions` and `storage.kv`. `pikit add channel-telegram` offers
+  `storage-kv-sql`. The old table is not read: a project that upgrades starts its cursor at the
+  feed's end, as on a first install, so an answer that ended during that one deploy is not sent.
 - component/channel-telegram: an answer read from the feed that Telegram could not take, or whose
   send a stop aborted, is sent again later instead of being dropped; the cursor moves only past a
   delivered answer. Chats no longer wait for each other, a stuck answer is logged as an error, and
