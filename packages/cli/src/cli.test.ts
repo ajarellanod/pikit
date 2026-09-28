@@ -175,6 +175,24 @@ test("doctor fails when an agent names a tool no installed component provides", 
   expect(broken.err).toContain('agent "soporte" names the tool "shell", which no installed component provides (agent.tool)');
 });
 
+test("doctor fails on a Pi extension importing what the shim lacks, and notes what pikit does not provide", () => {
+  const dir = agentProject(["bash"]);
+  const alias = '"@earendil-works/pi-coding-agent"';
+  writeFileSync(
+    join(dir, "src/extensions/tui.ts"),
+    `import type { ExtensionAPI } from ${alias};\n\nexport default function (pi: ExtensionAPI) {\n  pi.on("input", (_event, ctx) => ctx.ui.custom(() => undefined));\n}\n`,
+  );
+  const noted = pikit(["doctor"], dir);
+  expect(noted.out).toContain('src/extensions/tui.ts uses what pikit does not provide to Pi extensions; it does nothing or fails when called (SPEC §6.2b): pi.on("input"), ctx.ui.custom');
+  expect(noted.out).toContain("pikit doctor: green");
+  expect(noted.code).toBe(0);
+
+  writeFileSync(join(dir, "src/extensions/header.ts"), `import { VERSION, type ExtensionAPI } from ${alias};\n\nexport default (pi: ExtensionAPI) => void VERSION;\n`);
+  const broken = pikit(["doctor"], dir);
+  expect(broken.code).toBe(1);
+  expect(broken.err).toContain("src/extensions/header.ts imports `VERSION` from @earendil-works/pi-coding-agent, which pikit does not provide (SPEC §6.2b)");
+});
+
 test("remove refuses to take a tool an agent names; with --force it removes it, and doctor reports the name", () => {
   const dir = agentProject(["bash"]);
   const config = readFileSync(join(dir, "pikit.config.ts"), "utf8");

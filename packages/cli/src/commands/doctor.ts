@@ -11,7 +11,10 @@
  *   only, never a value);
  * - the Pi import rule (S1): only `@pikit/pi-adapter` imports Pi. Components never import
  *   `@earendil-works/*`; project code only imports `@earendil-works/pi-coding-agent`, the name Pi
- *   extensions use, which resolves to `@pikit/pi-extension-shim` (SPEC §6.2b).
+ *   extensions use, which resolves to `@pikit/pi-extension-shim` (SPEC §6.2b);
+ * - a Pi extension of the project imports nothing the shim lacks (`pi-extensions.ts`). What an
+ *   extension uses that pikit does not provide (an event it never fires, `ctx.sessionManager`,
+ *   terminal UI) is listed as information, one line per extension: it is read by heuristics.
  * Installed files that differ from what was installed are listed as information: they are yours.
  *
  * `problems` fail the command. `unconfigured` fail it too, but `pikit new` expects them: a new
@@ -24,6 +27,7 @@ import { packageName, scanImports } from "../registry/imports.ts";
 import { projectEnv, probe } from "../project/run.ts";
 import type { ProbeResult } from "../project/probe.ts";
 import { brokenReferences } from "../project/references.ts";
+import { checkPiExtensions } from "../project/pi-extensions.ts";
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
 import { EXTENSION_ALIAS } from "../project/vendor.ts";
 import { log } from "../ui.ts";
@@ -69,6 +73,9 @@ export async function doctor(projectDir: string, options: { quiet?: boolean } = 
   }
 
   problems.push(...checkPiImports(projectDir));
+  const extensions = checkPiExtensions(projectDir, projectSources(projectDir));
+  problems.push(...extensions.problems);
+  notes.push(...extensions.notes);
 
   if (options.quiet !== true) {
     for (const note of notes) log.info(`  ${note}`);
