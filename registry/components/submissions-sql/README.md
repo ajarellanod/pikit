@@ -90,6 +90,7 @@ database; drop them if you want (`submissions_requests`, `submissions_answers`, 
 
 Copied with the component, they run in your project: the `agent.submissions` conformance suite
 (pending, idempotent settlement, per-session requests, restarts, pruning) with the feed suite over
-`answers`, the lifecycle suite, the retention, a database from a newer version, and the convergence
+`answers`, the lifecycle suite, the retention, a database from a newer version, two processes
+migrating at once, and the convergence
 suite (the process killed after each of its commits in turn: every message still settled and its
 answer delivered).

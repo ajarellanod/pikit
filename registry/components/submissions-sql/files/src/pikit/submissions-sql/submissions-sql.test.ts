@@ -11,12 +11,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { type App, type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentSubmissions } from "@pikit/contracts";
+import { type AgentSubmissions, type SqlDatabase, type SqlStatements } from "@pikit/contracts";
 import { createLifecycleConformance, createManualClock, type ManualClock } from "@pikit/core/testing";
 import { createSubmissionsConformance } from "@pikit/contracts/testing";
 import submissionsSql from "./index.ts";
-import { SCHEMA_VERSION } from "./store.ts";
-import { testStorage } from "./storage.test-support.ts";
+import { createStore, SCHEMA_VERSION } from "./store.ts";
+import { openTestDatabase, testStorage } from "./storage.test-support.ts";
 
 const DAY = 24 * 60 * 60 * 1_000;
 const directories: string[] = [];
@@ -117,6 +117,35 @@ test("keepSettledDays is at least 1: 0 would prune, at start, every answer that 
 
   expect(failure).toBeInstanceOf(Error);
   expect(String(failure)).toMatch(/keepSettledDays/);
+});
+
+test("two processes migrating at once: the one that waited for the lock finds the schema done", async () => {
+  const database = temporaryDatabase();
+  const first = openTestDatabase(database);
+  const second = openTestDatabase(database);
+  try {
+    // The second process migrates while the first is between its own checks and its transaction:
+    // it is let through just before the first's transaction takes the lock.
+    let raced = false;
+    const racing: SqlDatabase = {
+      ...first.database,
+      transaction: async <T>(work: (tx: SqlStatements) => Promise<T>): Promise<T> => {
+        if (!raced) {
+          raced = true;
+          await createStore(second.database).migrate();
+        }
+        return first.database.transaction(work);
+      },
+    };
+
+    await createStore(racing).migrate();
+
+    expect(raced).toBe(true);
+    expect(await first.database.query("SELECT value FROM submissions_meta WHERE name = 'schema_version'")).toEqual([{ value: SCHEMA_VERSION }]);
+  } finally {
+    await first.close();
+    await second.close();
+  }
 });
 
 test("a database written by a newer component is refused at start", async () => {

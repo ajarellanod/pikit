@@ -9,8 +9,17 @@
  *   writer at a time (SQLite) commits them in order.
  *
  * The dialect is SQLite's (`AUTOINCREMENT`, `ON CONFLICT … DO UPDATE … WHERE`). A Postgres port changes
- * this file only; its feed needs a cursor that follows commit order, which a sequence under concurrent
- * writers does not (SPEC §4.8).
+ * this file only, and must handle:
+ * - the feed's cursor: it must follow commit order, which a sequence under concurrent writers does not
+ *   (SPEC §4.8);
+ * - `INTEGER` is 64-bit in SQLite and 32-bit in Postgres: `settled_at`, `admitted_at` (epoch
+ *   milliseconds) and `submissions_meta.value` need `BIGINT`;
+ * - the "one snapshot" reads in `get` and `readAnswers` rely on SQLite's transaction being one
+ *   snapshot; Postgres' default `READ COMMITTED` takes one per statement, so they need `REPEATABLE READ`;
+ * - `migrate` reads the schema version inside each migration's transaction, so two processes starting
+ *   at once do not both run the same step. That holds because SQLite's `BEGIN IMMEDIATE` takes the
+ *   write lock before the read; Postgres needs a lock of its own (`pg_advisory_xact_lock`, or
+ *   `SELECT … FOR UPDATE` on the version row).
  */
 
 import type { ConversationRef, FeedPage, PendingConversation, RunSettlement, SqlDatabase, SqlRow, SqlStatements, SubmissionStatus } from "@pikit/contracts";
@@ -81,17 +90,27 @@ export function createStore(db: SqlDatabase) {
     sql.run("INSERT INTO submissions_meta (name, value) VALUES (?, ?) ON CONFLICT (name) DO UPDATE SET value = excluded.value", [name, value]);
 
   return {
-    /** Brings the tables to `SCHEMA_VERSION`. Refuses a database written by a newer component. */
+    /**
+     * Brings the tables to `SCHEMA_VERSION`. Refuses a database written by a newer component.
+     *
+     * Each step reads the version in the transaction that runs it: another process starting at the same
+     * time may have run it between two steps, or before the first. Read outside, both would run
+     * migration 0 and the second would fail on a table that exists (outbound-durable's `migrate`, which
+     * this one was copied from, still reads it outside).
+     */
     async migrate(): Promise<void> {
       await db.run("CREATE TABLE IF NOT EXISTS submissions_meta (name TEXT PRIMARY KEY, value INTEGER NOT NULL)");
-      const version = (await meta(db, "schema_version")) ?? 0;
-      if (version > SCHEMA_VERSION) {
-        throw new Error(`submissions-sql: the database is at schema version ${version}, newer than this component's ${SCHEMA_VERSION}; upgrade the component`);
-      }
-      for (let next = version; next < SCHEMA_VERSION; next++) {
-        await db.transaction(async (tx) => {
-          await (MIGRATIONS[next] as (tx: SqlStatements) => Promise<void>)(tx);
-          await setMeta(tx, "schema_version", next + 1);
+      let done = false;
+      while (!done) {
+        done = await db.transaction(async (tx) => {
+          const version = (await meta(tx, "schema_version")) ?? 0;
+          if (version > SCHEMA_VERSION) {
+            throw new Error(`submissions-sql: the database is at schema version ${version}, newer than this component's ${SCHEMA_VERSION}; upgrade the component`);
+          }
+          if (version === SCHEMA_VERSION) return true;
+          await (MIGRATIONS[version] as (tx: SqlStatements) => Promise<void>)(tx);
+          await setMeta(tx, "schema_version", version + 1);
+          return false;
         });
       }
     },
