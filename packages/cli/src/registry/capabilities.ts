@@ -23,7 +23,7 @@ import type { Manifest } from "./manifest.ts";
 export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
   mode: Mode;
   /** The package whose declaration merging defines the contract. */
-  definedIn: "@pikit/core" | "@pikit/pi-adapter";
+  definedIn: "@pikit/contracts" | "@pikit/pi-adapter";
   /** One line: what a consumer gets from it. */
   summary: string;
   /**
@@ -48,28 +48,28 @@ type Catalogue = { [K in Real<keyof AppCapabilities>]: CapabilityEntry<"single">
 export const CAPABILITIES: Catalogue = {
   "agent.runtime": {
     mode: "single",
-    definedIn: "@pikit/core",
+    definedIn: "@pikit/contracts",
     summary: "Runs the agents: dispatch a message to its conversation, abort or resume a run.",
   },
   "conversations.registry": {
     mode: "single",
-    definedIn: "@pikit/core",
+    definedIn: "@pikit/contracts",
     summary: "Which session each conversation (channel:conversationId) is in now; resolve and reset.",
   },
   secrets: {
     mode: "single",
-    definedIn: "@pikit/core",
+    definedIn: "@pikit/contracts",
     summary: "The only way a component reads a secret (environment, Worker bindings, a vault).",
   },
   "outbound.queue": {
     mode: "single",
-    definedIn: "@pikit/core",
+    definedIn: "@pikit/contracts",
     summary: "Stores each answer before sending it and delivers it through the channel's transport, retrying.",
     offer: true,
   },
   "storage.sql": {
     mode: "single",
-    definedIn: "@pikit/core",
+    definedIn: "@pikit/contracts",
     summary: "An async SQL database for records that outlive the process; each component owns its own tables.",
   },
   "sessions.store": {
@@ -99,17 +99,17 @@ export const CAPABILITIES: Catalogue = {
   },
   "agent.definition": {
     mode: "keyed",
-    definedIn: "@pikit/core",
+    definedIn: "@pikit/contracts",
     summary: "One agent per name (model, prompt, tools); provided by the project, not the registry.",
   },
   "agent.tool": {
     mode: "keyed",
-    definedIn: "@pikit/core",
+    definedIn: "@pikit/contracts",
     summary: "One tool per name the model calls it by; an agent gets only the tools it names.",
   },
   "http.route": {
     mode: "keyed",
-    definedIn: "@pikit/core",
+    definedIn: "@pikit/contracts",
     summary: 'One HTTP endpoint per "METHOD /path", as a fetch handler; one server component serves them all.',
   },
   "model.provider": {

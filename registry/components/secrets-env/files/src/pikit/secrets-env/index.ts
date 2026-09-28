@@ -11,7 +11,8 @@
  * Target: `server` (Cloudflare's secrets are Worker bindings, a different component).
  */
 
-import { defineComponent, type SecretStore } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { type SecretStore } from "@pikit/contracts";
 
 export interface SecretsEnvOptions {
   /** Where the variables are read from. Default: `process.env`. Tests pass their own. */

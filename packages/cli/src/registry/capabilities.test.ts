@@ -19,7 +19,7 @@ const manifest = (name: string, fields: { provides?: string[]; requires?: string
 
 // Checked by tsc, not at run time: `agent.runtime` is a single capability, so a keyed entry is a type error.
 // @ts-expect-error the catalogue's mode must match how the capability is defined
-const wrongMode: (typeof CAPABILITIES)["agent.runtime"] = { mode: "keyed", definedIn: "@pikit/core", summary: "" };
+const wrongMode: (typeof CAPABILITIES)["agent.runtime"] = { mode: "keyed", definedIn: "@pikit/contracts", summary: "" };
 void wrongMode;
 
 test("validate rejects a capability the catalogue does not describe, once per name", () => {

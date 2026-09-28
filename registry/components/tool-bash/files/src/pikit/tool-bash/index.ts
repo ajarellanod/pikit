@@ -19,7 +19,8 @@
  * Targets: wherever an `execution.shell` provider is installed (`server` with `execution-local`).
  */
 
-import { CONVERSATION, defineComponent } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { CONVERSATION } from "@pikit/contracts";
 import { bindTool, createBashTool } from "@pikit/pi-adapter/tools";
 
 export default defineComponent({

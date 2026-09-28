@@ -7,7 +7,7 @@
  * removing what is private, so a field added to an event later is not logged until it is added here.
  */
 
-import type { Admission, AgentResult, ConversationRef, ConversationReset } from "@pikit/core";
+import type { Admission, AgentResult, ConversationRef, ConversationReset } from "@pikit/contracts";
 
 export type Fields = Record<string, string | number | boolean | string[]>;
 

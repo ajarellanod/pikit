@@ -5,6 +5,24 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- core, contracts: **breaking.** `@pikit/core` is now only the kernel: `defineApp`,
+  `defineComponent`, the capability, event and pipeline machinery, the context, clock and logger.
+  The vocabulary the components share moved to a new package, `@pikit/contracts`, which versions on
+  its own (SPEC §4.9):
+  - `defineAgent` and the agent's types, `admitInbound` and `InboundMessage`, `answerKey`,
+    `AGENT_STATE`, `CONVERSATION`, and the `storage.sql`, `secrets`, `http.route`,
+    `conversations.registry`, `outbound.queue` and feed contracts;
+  - their conformance suites, now in `@pikit/contracts/testing`. `@pikit/core/testing` keeps
+    `createLifecycleConformance` and `createManualClock`.
+
+  To migrate a project, import those names from `@pikit/contracts` and declare it in
+  `package.json`. The kernel's export list is held by a test: adding to it is a decision.
+- cli: `pikit new` vendors `@pikit/contracts` with the rest of the kit. `pikit add` on a project made
+  before the split adds its tarball and its override. The project's own imports still have to be
+  moved by hand.
+- registry: every component that imports `@pikit/contracts` lists it in `component.json`'s
+  `dependencies`, with its own version; `requires.pikit` covers the kernel only.
+
 - core, component/outbound-durable: the convergence suite, `createConvergenceConformance` in
   `@pikit/core/testing` (SPEC §14). It kills the process after each of its commits in turn (its
   `storage.sql` refuses the next commit and everything after it), starts a new one over the same

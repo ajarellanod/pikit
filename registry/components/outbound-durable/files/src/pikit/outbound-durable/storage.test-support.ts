@@ -4,7 +4,8 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import { defineComponent, type SqlDatabase, type SqlRow, type SqlStatements, type SqlValue } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { type SqlDatabase, type SqlRow, type SqlStatements, type SqlValue } from "@pikit/contracts";
 
 /** The contract over whatever SQLite handle `open()` gives now, one call at a time. */
 function sqlDatabase(open: () => DatabaseSync): { database: SqlDatabase; settled(): Promise<void> } {

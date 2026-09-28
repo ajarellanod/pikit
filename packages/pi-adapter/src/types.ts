@@ -1,12 +1,13 @@
 /**
- * Pi's exact types for the core's opaque agent payloads and for the capabilities whose contract is
- * Pi's own (SPEC §6.1, "Who owns these types"). Importing `@pikit/pi-adapter` anywhere in a project
+ * Pi's exact types for the contracts' opaque agent payloads and for the capabilities whose contract
+ * is Pi's own (SPEC §6.1, "Who owns these types"; §4.9: a contract whose type is Pi's lives here). Importing `@pikit/pi-adapter` anywhere in a project
  * makes them precise everywhere, by declaration merging, as `AppEvents` is extended.
  */
 
 import type { AgentHarnessTool, AgentMessage, Context, ExecutionEnv, SessionMetadata, SessionRepo } from "@earendil-works/pi-agent-core";
 import type { CredentialStore, Provider, Usage } from "@earendil-works/pi-ai";
-import type { ConversationRef, Context as PikitContext } from "@pikit/core";
+import type { Context as PikitContext } from "@pikit/core";
+import type { ConversationRef } from "@pikit/contracts";
 import type { PiExtension } from "./extensions/api.ts";
 
 /**
@@ -49,7 +50,7 @@ export interface Workspace {
   env: ExecutionEnv;
 }
 
-declare module "@pikit/core" {
+declare module "@pikit/contracts" {
   interface AgentPayloads {
     message: AgentMessage;
     // The tool context (Pi's own tools take `{ env }`) is decided with the tool-* components (§6.3).
@@ -57,6 +58,9 @@ declare module "@pikit/core" {
     tool: AgentHarnessTool<any>;
     usage: Usage;
   }
+}
+
+declare module "@pikit/core" {
   interface AppCapabilities {
     /** Pi's `SessionRepo` (SPEC §7.5): where conversations' sessions live. */
     "sessions.store": SessionStore;

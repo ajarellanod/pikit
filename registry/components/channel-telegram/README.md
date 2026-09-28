@@ -110,7 +110,7 @@ local stand-in of the Bot API: no bot, token or network needed.
 - `channel-telegram.test.ts` covers the whole conversation: allowed and refused users, commands,
   "typing…", formatting and splitting, retries, a redelivered message answered once, the
   acknowledgement at stop, the lifecycle conformance suite and the start failures.
-- `conformance.test.ts` runs the channel conformance suite from `@pikit/core/testing`: what every
+- `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
   channel does with a message (routed, deduplicated, stopped, denied, no router), through Telegram.
 - `configure.test.ts` covers the setup: a checked token, allowing whoever messages the bot, and
   the same without a terminal.

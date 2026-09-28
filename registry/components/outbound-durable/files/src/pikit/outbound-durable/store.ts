@@ -8,7 +8,7 @@
  * commit order, which a sequence under concurrent writers does not (SPEC §4.8).
  */
 
-import type { DeliveryReceipt, FeedPage, SqlDatabase, SqlRow, SqlStatements } from "@pikit/core";
+import type { DeliveryReceipt, FeedPage, SqlDatabase, SqlRow, SqlStatements } from "@pikit/contracts";
 
 /** `pending` → `sending` → `delivered` | `abandoned` (SPEC §5, "Outbound delivery"). */
 export type PieceState = "pending" | "sending" | "delivered" | "abandoned";

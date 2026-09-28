@@ -6,7 +6,8 @@
  */
 
 import { expect, test } from "bun:test";
-import { defineAgent, defineApp, defineComponent, Halt, type InboundMessage, silentLogger } from "@pikit/core";
+import { defineApp, defineComponent, Halt, silentLogger } from "@pikit/core";
+import { defineAgent, type InboundMessage } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import routerRules from "./index.ts";
 

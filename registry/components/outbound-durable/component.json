@@ -20,6 +20,7 @@
     "outbound.queue"
   ],
   "dependencies": {
+    "@pikit/contracts": "0.0.0",
     "typebox": "1.3.27"
   },
   "files": [

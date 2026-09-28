@@ -19,7 +19,8 @@
  * over TLS, with the bot's token. What is left to check is the sender, which step 2 does.
  */
 
-import { type AgentRuntime, type AppContext, admitInbound, type ConversationRegistry, type InboundMessage } from "@pikit/core";
+import { type AppContext } from "@pikit/core";
+import { admitInbound, type AgentRuntime, type ConversationRegistry, type InboundMessage } from "@pikit/contracts";
 import type { TelegramMessage, TelegramUpdate, TelegramUser } from "./api.ts";
 import { conversationKeyOf } from "./account.ts";
 import type { Delivery } from "./replies.ts";

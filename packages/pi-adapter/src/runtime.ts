@@ -11,7 +11,8 @@
  */
 
 import type { Models } from "@earendil-works/pi-ai";
-import type { Admission, AgentDefinition, AgentRequest, AgentRuntime, AgentTool, AppContext, Context, ConversationRef } from "@pikit/core";
+import type { AppContext, Context } from "@pikit/core";
+import type { Admission, AgentDefinition, AgentRequest, AgentRuntime, AgentTool, ConversationRef } from "@pikit/contracts";
 import { toPi } from "./context.ts";
 import { type HarnessHook, PiConversation, runContext } from "./conversation.ts";
 import type { PiExtension } from "./extensions/api.ts";

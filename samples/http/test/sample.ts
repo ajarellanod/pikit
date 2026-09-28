@@ -9,7 +9,8 @@
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AgentDefinition, type App, type ComponentDefinition, defineApp, silentLogger } from "@pikit/core";
+import { type App, type ComponentDefinition, defineApp, silentLogger } from "@pikit/core";
+import { type AgentDefinition } from "@pikit/contracts";
 import type { PiExtension } from "@pikit/pi-adapter";
 import { testComponents } from "@pikit/pi-adapter/testing";
 import channelHttp from "../../../registry/components/channel-http/files/src/pikit/channel-http/index.ts";

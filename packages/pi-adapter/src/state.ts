@@ -10,7 +10,7 @@
  */
 
 import { type Context, type JsonValue, type Session, value } from "@earendil-works/pi-agent-core";
-import type { AgentState } from "@pikit/core";
+import type { AgentState } from "@pikit/contracts";
 import { toPi } from "./context.ts";
 
 const STATE = value<JsonValue>("pikit", "agent.state");

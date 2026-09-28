@@ -22,7 +22,8 @@
  * Targets: `server` and `cloudflare` (it imports nothing platform-specific).
  */
 
-import { defineComponent, type InboundMessage } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { type InboundMessage } from "@pikit/contracts";
 import Type, { type Static } from "typebox";
 
 /** What a rule matches on. Each field it gives must match; none given matches every message. */

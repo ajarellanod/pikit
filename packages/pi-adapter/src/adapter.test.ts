@@ -18,18 +18,16 @@ import {
 } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import {
-  type AgentDefinition,
-  type AgentTool,
   type AppEvents,
   BACKGROUND_CONTEXT,
   createContextKey,
-  defineAgent,
   defineApp,
   defineComponent,
   silentLogger,
   withCancel,
   withContextValue,
 } from "@pikit/core";
+import { type AgentDefinition, type AgentTool, defineAgent } from "@pikit/contracts";
 import { toPi } from "./context.ts";
 import { hasRequest, inboundMessage, LANE } from "./inbound.ts";
 import { createPiRuntime, modelsFrom, type Provider, type SessionStore } from "./index.ts";

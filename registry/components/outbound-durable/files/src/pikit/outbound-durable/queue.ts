@@ -10,7 +10,8 @@
  * here: wait, retry, or give up.
  */
 
-import { type AppEvents, type ChannelTransport, type Clock, DeliveryError, type Logger, type OutboundQueue } from "@pikit/core";
+import { type AppEvents, type Clock, type Logger } from "@pikit/core";
+import { type ChannelTransport, DeliveryError, type OutboundQueue } from "@pikit/contracts";
 import type { Piece, Store } from "./store.ts";
 
 const SECOND = 1_000;

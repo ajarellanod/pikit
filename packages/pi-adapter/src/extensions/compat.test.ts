@@ -13,15 +13,8 @@ import { type AgentHarnessTool, BACKGROUND_CONTEXT, JsonlSessionRepo, MemorySess
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { type Message, Type } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
-import {
-  type AgentDefinition,
-  type AppEvents,
-  defineAgent,
-  defineApp,
-  defineComponent,
-  type Logger,
-  silentLogger,
-} from "@pikit/core";
+import { type AppEvents, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { type AgentDefinition, defineAgent } from "@pikit/contracts";
 import { createPiRuntime, type ExtensionAPI, modelsFrom, type PiExtension, type SessionStore } from "../index.ts";
 import { holdTool, killMidRun, scriptedAgent, scriptedProvider } from "../testing/index.ts";
 import hello from "./pi-examples/hello.ts";

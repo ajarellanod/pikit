@@ -11,7 +11,7 @@
 import type { AgentHarnessTool, Context } from "@earendil-works/pi-agent-core";
 import { createProvider, type Message, type Provider, Type } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
-import { type AgentDefinition, defineAgent } from "@pikit/core";
+import { type AgentDefinition, defineAgent } from "@pikit/contracts";
 
 /** How many model calls one provider answers; faux consumes one response per call. */
 const CALLS = 1000;

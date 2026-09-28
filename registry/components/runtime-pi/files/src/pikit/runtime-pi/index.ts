@@ -19,7 +19,8 @@
  * resumed after a crash. At-least-once: a crash can repeat an answer, never lose an accepted message.
  */
 
-import { type AgentRuntime, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { type AgentRuntime } from "@pikit/contracts";
 import { createPiRuntime, type HarnessHook, modelsFrom, type PiExtension, type PiRuntime } from "@pikit/pi-adapter";
 
 export interface RuntimePiOptions {

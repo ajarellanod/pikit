@@ -92,6 +92,25 @@ test("a new export is neutral until SERVER_ONLY says otherwise", () => {
   ]);
 });
 
+test("the kit depends only downwards: the kernel on the contracts is caught, the contracts on the kernel is not", () => {
+  const contracts = (json: Record<string, unknown> = {}) => ({
+    json: { name: "@pikit/contracts", exports: { ".": "./src/index.ts" }, dependencies: { "@pikit/core": "workspace:*" }, ...json },
+    files: { "src/index.ts": `import type { AppContext } from "@pikit/core";\n` },
+  });
+  expect(checkBoundaries(packages({ core: core(), contracts: contracts() }))).toEqual([]);
+
+  const kernelUp = { ...core(), json: { ...core().json, dependencies: { typebox: "1.3.27", "@pikit/contracts": "workspace:*" } } };
+  expect(checkBoundaries(packages({ core: kernelUp, contracts: contracts() }))).toEqual([
+    "packages/core/package.json: @pikit/core depends on @pikit/contracts; the kit's packages depend only downwards, @pikit/core → @pikit/contracts → @pikit/pi-adapter (SPEC §3)",
+    "packages/core/package.json: the kernel depends on @pikit/contracts; its only dependency is typebox (ROADMAP, \"Budgets\")",
+  ]);
+
+  const contractsUp = contracts({ devDependencies: { "@pikit/pi-adapter": "workspace:*" } });
+  expect(checkBoundaries(packages({ core: core(), contracts: contractsUp, "pi-adapter": adapter() }))).toEqual([
+    "packages/contracts/package.json: @pikit/contracts depends on @pikit/pi-adapter; the kit's packages depend only downwards, @pikit/core → @pikit/contracts → @pikit/pi-adapter (SPEC §3)",
+  ]);
+});
+
 test("an undeclared package is caught: the CLI importing the adapter", () => {
   const cli = {
     json: { name: "@pikit/cli", dependencies: { "@pikit/core": "workspace:*" } },

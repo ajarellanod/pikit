@@ -4,7 +4,7 @@
  * and must be tested without waiting.
  */
 
-import type { Clock } from "../contracts/clock.ts";
+import type { Clock } from "../clock.ts";
 
 export interface ManualClock extends Clock {
   /** Moves time forward by `ms`, resolving every sleep that ends by then, then lets their work run. */

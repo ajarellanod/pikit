@@ -8,7 +8,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
-import { type Admission, defineComponent } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { type Admission } from "@pikit/contracts";
 import { holdTool, scriptedAgent } from "@pikit/pi-adapter/testing";
 import { createSample, type Sample } from "./sample.ts";
 

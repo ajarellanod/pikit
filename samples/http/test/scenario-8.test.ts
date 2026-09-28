@@ -13,7 +13,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, readFileSync, realpathSync } from "node:fs";
 import { join } from "node:path";
-import { defineAgent, defineComponent } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { defineAgent } from "@pikit/contracts";
 import permissionGate from "../../../packages/pi-adapter/src/extensions/pi-examples/permission-gate.ts";
 import routerRules from "../../../registry/components/router-rules/files/src/pikit/router-rules/index.ts";
 import workspaceLocal from "../../../registry/components/workspace-local/files/src/pikit/workspace-local/index.ts";

@@ -8,24 +8,20 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
+import { type App, type AppContext, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import {
   type Admission,
   type AgentRuntime,
-  type App,
-  type AppContext,
-  BACKGROUND_CONTEXT,
+  type ChannelTransport,
   type ConversationRef,
   type ConversationRegistry,
-  type ChannelTransport,
   DeliveryError,
   type DeliveryReceipt,
-  defineApp,
-  defineComponent,
   type OutboundMessage,
   type OutboundQueue,
-  silentLogger,
-} from "@pikit/core";
-import { createLifecycleConformance, createMemoryFeed } from "@pikit/core/testing";
+} from "@pikit/contracts";
+import { createLifecycleConformance } from "@pikit/core/testing";
+import { createMemoryFeed } from "@pikit/contracts/testing";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
 import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";

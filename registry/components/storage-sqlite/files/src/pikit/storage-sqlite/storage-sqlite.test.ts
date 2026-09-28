@@ -7,8 +7,10 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defineApp, defineComponent, type SqlDatabase, silentLogger } from "@pikit/core";
-import { createLifecycleConformance, createSqlDatabaseConformance } from "@pikit/core/testing";
+import { defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type SqlDatabase } from "@pikit/contracts";
+import { createLifecycleConformance } from "@pikit/core/testing";
+import { createSqlDatabaseConformance } from "@pikit/contracts/testing";
 import storageSqlite from "./index.ts";
 
 const directories: string[] = [];

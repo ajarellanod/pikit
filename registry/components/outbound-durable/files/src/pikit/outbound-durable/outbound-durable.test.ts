@@ -7,7 +7,8 @@ import { afterAll, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createLifecycleConformance, createOutboundQueueConformance } from "@pikit/core/testing";
+import { createLifecycleConformance } from "@pikit/core/testing";
+import { createOutboundQueueConformance } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
 import { testStorage } from "./storage.test-support.ts";
 

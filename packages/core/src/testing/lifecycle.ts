@@ -18,7 +18,7 @@
  */
 
 import { BACKGROUND_CONTEXT, type Context, withAbortSignal } from "../context.ts";
-import { silentLogger } from "../contracts/logger.ts";
+import { silentLogger } from "../logger.ts";
 import { type ComponentDefinition, type ComponentLifecycle, defineApp, type App } from "../app.ts";
 
 /** One runner-independent case. Same shape as Pi's `ConformanceCase`. `run` throws on failure. */

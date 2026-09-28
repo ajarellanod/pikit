@@ -60,7 +60,7 @@ The file (mode `0600`):
 ## Tests
 
 `conversations-file.test.ts` is copied with the component and runs in your project. It covers:
-- the `conversations.registry` conformance suite from `@pikit/core/testing`, including the
+- the `conversations.registry` conformance suite from `@pikit/contracts/testing`, including the
   sessions it creates;
 - the lifecycle conformance suite;
 - the file's content, a `__proto__` key, and the start failures above.

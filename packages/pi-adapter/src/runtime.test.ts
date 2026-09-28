@@ -5,8 +5,9 @@
  */
 
 import { test } from "bun:test";
-import { BACKGROUND_CONTEXT, defineComponent, type AgentRuntime } from "@pikit/core";
-import { createAgentRuntimeConformance } from "@pikit/core/testing";
+import { BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { type AgentRuntime } from "@pikit/contracts";
+import { createAgentRuntimeConformance } from "@pikit/contracts/testing";
 import { type HarnessHook, modelsFrom, type PiRuntime, createPiRuntime } from "./index.ts";
 import { createPiRuntimeFixture } from "./testing/index.ts";
 

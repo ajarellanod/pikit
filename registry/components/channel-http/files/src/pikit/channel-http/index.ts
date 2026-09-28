@@ -33,7 +33,8 @@
  * Targets: `server` and `cloudflare` (fetch handlers and Web Crypto only).
  */
 
-import { type AgentResult, type AppContext, admitInbound, defineComponent, Halt, type InboundMessage } from "@pikit/core";
+import { type AppContext, defineComponent, Halt } from "@pikit/core";
+import { admitInbound, type AgentResult, type InboundMessage } from "@pikit/contracts";
 import Type from "typebox";
 import { bearerToken, type Digest, digest, matches, MIN_TOKEN_LENGTH, TOKEN_SECRET } from "./auth.ts";
 import { CONVERSATION_ID, readMessageBody } from "./body.ts";

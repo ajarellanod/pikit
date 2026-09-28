@@ -38,7 +38,8 @@ meet live in `ROADMAP.md`.
   Dynamic behavior is `prepare(state)` (§6.2a), not re-executed agent functions.
 - A workflow DSL. Multi-step processes are persisted state plus conditional tools.
 - Owning the harness pieces in a runtime package. Router, session stores, outbox, scheduler,
-  approvals, and channel ingress are components the user copies, not exports of `@pikit/core`.
+  approvals, and channel ingress are components the user copies, not exports of `@pikit/core` or
+  `@pikit/contracts`.
 
 ---
 
@@ -46,7 +47,8 @@ meet live in `ROADMAP.md`.
 
 | Term | Meaning |
 |---|---|
-| **Core** | `@pikit/core`. Events, pipelines, capabilities, lifecycle, config, diagnostics. |
+| **Core** (kernel) | `@pikit/core`: events, pipelines, capabilities, lifecycle, config, context, diagnostics. What the app runs itself; nothing of the domain (§4.9). |
+| **Contracts** | `@pikit/contracts`: the vocabulary components share. Types, identities, event and pipeline names, capability interfaces and their conformance suites (§4.9). |
 | **App** | `[decision]` The composed, running service: `defineApp({ components, config }).create()`, then `start()`/`stop()`. One per process on the server target, one per Durable Object on Cloudflare. It hosts many conversations; it is not Pi's `AgentHarness`, which runs one conversation's agent loop. Named `App` rather than `Harness` for that reason. |
 | **Component** | An installable unit of source: files + manifest + optional migrations, tests, config schema. Copied into the project. |
 | **Extension** | Runtime behavior registered against the app lifecycle (`pikit.on`, `pikit.pipeline`, `pikit.provide`). Usually the entry point of a component; may also be a standalone project file. |
@@ -82,8 +84,9 @@ meet live in `ROADMAP.md`.
 │  channels · router · sessions · outbox · scheduler ·      │
 │  approvals · workspace · execution · deployment · admin   │
 ├───────────────────────────────────────────────────────────┤
-│  @pikit/core        (npm dependency, versioned, small)    │
 │  @pikit/pi-adapter  (npm dependency, isolates Pi churn)   │
+│  @pikit/contracts   (npm dependency, the shared words)    │
+│  @pikit/core        (npm dependency, the kernel, frozen)  │
 ├───────────────────────────────────────────────────────────┤
 │  @earendil-works/pi-agent-core · pi-ai · pi-protocol ·    │
 │  pi-client                                                │
@@ -93,7 +96,10 @@ meet live in `ROADMAP.md`.
 Rules:
 
 - The core has **no** dependency on any component.
-- Components depend on the core and on **capability contracts**, never on other components'
+- The kit depends only downwards: `@pikit/core` (the kernel) → `@pikit/contracts` →
+  `@pikit/pi-adapter`, and the kernel's only dependency is `typebox` (§4.9;
+  `scripts/boundaries.ts` checks both).
+- Components depend on the kernel and on **capability contracts**, never on other components'
   files directly. (Exception: a component may declare a *component dependency* in its
   manifest; the CLI installs it. Code still talks through capabilities.)
 - Nothing in `src/pikit/` imports Node, Bun, or Cloudflare APIs directly unless the component
@@ -102,6 +108,10 @@ Rules:
 ---
 
 ## 4. Core
+
+This section is the kernel, `@pikit/core`, except the contracts it names (§4.8's `Feed`, the
+pipelines and capabilities of §4.4 and §4.5), which are in `@pikit/contracts`. §4.9 says what goes
+where.
 
 ### 4.1 Composition root
 
@@ -273,7 +283,7 @@ Every pipeline has **one value type**: stages are `Value → Value`. A pipeline 
 something carries it as a field of the value, so later stages see both the input and what
 earlier stages decided. `[decision]` — this is Pi's patch model and makes §6.2b trivial.
 
-Core-owned pipelines (value types defined with the components that first run them):
+Contract pipelines (value types defined with the components that first run them):
 
 ```
 inbound.authenticate   { channel, request: Request, verdict?: authenticated { actor } | rejected { reason } }
@@ -284,8 +294,8 @@ agent.prepare          AgentRequest                 (system prompt, tools, conte
 outbound.prepare       OutboundMessage                                               [planned] M2
 ```
 
-The first three are typed in the core since M1 (`inbound.ts`), with the first channel that runs
-them (`channel-http`). `inbound.authenticate` is shared by every channel: each channel adds its
+The first three are typed in `@pikit/contracts` since M1 (`inbound.ts`), with the first channel that
+runs them (`channel-http`). `inbound.authenticate` is shared by every channel: each channel adds its
 own stage, which acts only on requests whose `channel` is its own. A request is authenticated
 only when a stage returns the `authenticated` verdict; no verdict is a rejection, so a missing
 stage fails closed.
@@ -338,9 +348,10 @@ const store = pikit.use("sessions.store");   // in a component's setup; store.ge
   Same model as Chord's keyed services (§6.4), with keys fixed at setup instead of spawned at
   runtime. Keyed types are declared in `AppKeyedCapabilities`, single ones in
   `AppCapabilities`.
-- Capability contracts are TypeScript interfaces exported from `@pikit/core`.
+- Capability contracts are TypeScript interfaces exported from `@pikit/contracts`, or typed by
+  `@pikit/pi-adapter` when their type is Pi's (§4.9). The kernel defines none.
 
-Core-defined capability contracts (interfaces only; no implementations in core):
+Capability contracts (interfaces only; no implementation in the kit's packages):
 
 | Capability | Contract | Notes |
 |---|---|---|
@@ -525,7 +536,66 @@ interface FeedItem<T> {
   turn events into a queue, make every listener idempotent, and put one component at the centre of
   all the others. Pi has none either.
 - `createFeedConformance` (§14) holds every feed to this; `createMemoryFeed` is its in-memory
-  double, for tests. Core exports: `Feed`, `FeedPage`, `FeedItem`.
+  double, for tests. `@pikit/contracts` exports `Feed`, `FeedPage` and `FeedItem`.
+
+### 4.9 Where things go: kernel, contracts, adapter, components `[decision]`
+
+The kernel should not grow. What grows is the vocabulary the parts share, and it has a package and
+a promise of its own. Four layers, one sentence each:
+
+| Layer | Package | What goes in | Rate of change |
+|---|---|---|---|
+| **Kernel** | `@pikit/core` | What `createApp` runs itself, names nothing of the domain (agent, message, channel), and a component could not do with the verbs that exist | Almost never. A milestone that needs it is an architectural alarm |
+| **Contracts** | `@pikit/contracts` | What two independent parties must understand the same way, so that a divergence would be a bug | Grows with the milestones |
+| **Pi contracts** | `@pikit/pi-adapter` | A contract whose type is Pi's (`sessions.store`, `execution`, `workspace`, `model.*`, `agent.extension`) | With Pi |
+| **Components** | the registry | Everything else, and always the policy: timings, limits, strategies | Free: the code is the user's |
+
+The kit depends only downwards (§3). With the vocabulary out of it, the kernel is what the
+MANIFESTO says the core is, and it stays close to Chord's plugin host (§6.4), which it may one day
+be built on.
+
+**Where something new goes**, asked in this order:
+
+1. **Pi does it, or is about to?** The adapter (rule zero).
+2. **Does the kernel run it itself?** If not, it is not kernel: `Feed` is generic, but components
+   implement it, so it is a contract. If it does, it must be mechanism, name nothing of the domain,
+   and be something a component cannot do with `provide`, `use`, `on` and `pipeline`. `useOptional`
+   and keyed capabilities passed; a health registry and `ctx.has` do not. It has a counterpart in
+   Chord's semantics, or a written reason why not.
+3. **Do two real parties need it?** A provider and a consumer, or two producers, built in the same
+   change, not a `[planned]` line. Then it is a contract, and it is a type, an identity, an event or
+   pipeline name, or a protocol function: never policy, always runtime neutral, its suite written
+   first (rule 12). A contract whose type is Pi's goes to the adapter instead.
+4. **Otherwise it stays in its component.** A name only one component uses (its events, its
+   pipeline) is declared in that component by declaration merging. The project sees it all the
+   same, and it leaves with the component.
+
+**Shared code that is not a contract.** Ask whether two copies drifting apart would be a bug:
+- yes: it is an identity or a protocol, so a contract (`answerKey`);
+- it is about Pi: a helper in the adapter;
+- no: each component keeps its own copy. Source ownership means a component may change it
+  (`writeAtomically`). There is no shared library of registry code.
+
+**The life of a contract.**
+- It is born with two real parties and its suite.
+- It starts `experimental`, and may become `stable` once two independent implementations in the
+  registry pass the same suite, preferably on different backends or targets. Test doubles do not
+  count: they share their author's assumptions. A contract the project provides (`agent.definition`)
+  is promoted by a `[decision]`. 1.0 needs every contract `stable` (ROADMAP).
+- Its suite checks what every provider must do, never the policy of the provider it was written
+  with. It may hold a provider to a policy the provider declares, not to one the suite chose.
+- It goes back to its component when only one party is left.
+- A `stable` contract changes additively; a breaking change is a `[decision]` and a major of
+  `@pikit/contracts`, never of the kernel (§12a).
+
+**Protocol functions** are the only behaviour a contract carries: when every producer must run the
+same sequence and a divergence would be a bug. One has no policy of its own (no retry, timing or
+fallback), is customised only through pipelines, and has its own suite. `admitInbound` is one
+(channels, and later the scheduler; `createChannelConformance`).
+
+**Guards**, run by `bun test`:
+- the kernel's export list (`packages/core/src/exports.test.ts`): a change is a `[decision]`;
+- the layers and the kernel's single dependency (`scripts/boundaries.ts`).
 
 ---
 
@@ -584,7 +654,7 @@ pipeline outbound.prepare          → OutboundMessage
   a submission awaitable until its answer (§6.4).
 
 **The inbound path in code.** `[decision]` The steps after authentication are one function in
-`@pikit/core`, `admitInbound(ctx, message, { conversations, runtime, key, beforeDispatch? })`, the
+`@pikit/contracts`, a protocol function (§4.9), `admitInbound(ctx, message, { conversations, runtime, key, beforeDispatch? })`, the
 same for every producer of messages (a channel, a scheduler). It runs `inbound.normalize`, checks
 that no stage changed which message or conversation it is (`id`, `channel`, `conversationId`;
 changing one throws), runs `route.resolve`, resolves the conversation `key` and dispatches, and
@@ -803,7 +873,7 @@ interface ConversationRef {
   key: string;                        // tenant:channel:conversationId[:threadId]
   agent: string;
   sessionId: string;
-  workspaceRef?: WorkspaceRef;        // [planned] with `workspace` (§8.2); not in the core yet
+  workspaceRef?: WorkspaceRef;        // [planned] with `workspace` (§8.2); not in the contracts yet
 }
 
 interface OutboundMessage {        // M2, "Outbound delivery" above
@@ -823,7 +893,7 @@ first component that produces a part (the first channel that draws cards, or the
 
 ```ts
 // Declared by the component that introduces a kind of part, as events are (§4.3):
-declare module "@pikit/core" {
+declare module "@pikit/contracts" {
   interface AppMessageParts {
     choice: { prompt: string; options: { id: string; label: string }[] };
   }
@@ -1009,26 +1079,27 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   Pi 0.87.1 ties no other ledger row to an operation (a hook's own model request, an extension's
   `recordUsage` with no entry), so no run claims them. Pi's durable runtime keeps a completed
   attempt's usage on its entry, so the reading survives the move (§6.4). A run that called no model
-  reports zero. The field stays optional in the core: another runtime may not know its cost.
+  reports zero. The field stays optional in the contract: another runtime may not know its cost.
 
-Who owns these types `[decision]`: the core owns the *shapes* (`defineAgent`,
+Who owns these types `[decision]`: `@pikit/contracts` owns the *shapes* (`defineAgent`,
 `AgentDefinition`, `TurnConfig`, `AgentRequest`, `AgentResult`, `AgentRuntime`), because they
-are the stable programming model (§12a). The Pi-specific payloads inside them
-(`AgentMessage`, `ImageContent`, `Usage`, the tool type) are opaque in the core and made
-precise by `@pikit/pi-adapter` through declaration merging — the same mechanism as
-`AppEvents`. The core never imports Pi; a project with the adapter sees Pi's exact types.
+are the programming model (§12a; the first three are `stable`, the runtime's `experimental` until
+`pi-durable`). The Pi-specific payloads inside them
+(`AgentMessage`, `ImageContent`, `Usage`, the tool type) are opaque in the contracts and made
+precise by `@pikit/pi-adapter` through declaration merging (`declare module "@pikit/contracts"`), the
+same mechanism as `AppEvents`. Neither the kernel nor the contracts import Pi; a project with the adapter sees Pi's exact types.
 Components that implement a Pi contract (`sessions.store`, `execution`) import those types
 from `@pikit/pi-adapter`, which re-exports them, never from `@earendil-works/pi-*`.
 
-Core exports (M1): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest`, `Admission`,
+`@pikit/contracts` exports (M1; in `@pikit/core` until the split of §4.9): `defineAgent`, `AgentDefinition`, `TurnConfig`, `AgentRequest`, `Admission`,
 `AgentResult`, `AgentRuntime`, `ConversationRef`, `PrepareContext`, and the opaque `AgentMessage`, `AgentTool` and
 `Usage` with their merge target `AgentPayloads` (each `unknown` until the adapter fills it in).
 For the inbound path (§5): `InboundMessage` and `RouteDecision`, with the pipelines
 `inbound.authenticate`, `inbound.normalize` and `route.resolve` typed on `AppPipelines`. Contracts:
 `SecretStore` (`secrets`), and `ConversationRegistry` with `ConversationReset` (`conversations.registry`
 and the payload of `conversation.reset`), and `HttpRoute` (`http.route`). For agent state (§6.2a): `AgentState` and the context key `AGENT_STATE`; for the run's conversation (§6.3), the context key `CONVERSATION`;
-`@pikit/core/testing` has the state's suite, `createAgentStateConformance`. For feeds (§4.8): `Feed`,
-`FeedPage` and `FeedItem`, with `createFeedConformance` and `createMemoryFeed` in `@pikit/core/testing`.
+`@pikit/contracts/testing` has the state's suite, `createAgentStateConformance`. For feeds (§4.8): `Feed`,
+`FeedPage` and `FeedItem`, with `createFeedConformance` and `createMemoryFeed` in `@pikit/contracts/testing`.
 For delivery (§5): `answerKey` and `DeliveryReceipt`, next to the outbound contracts.
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`),
 `model.provider` (pi-ai's `Provider`) and `model.credentials` (pi-ai's `CredentialStore`) by
@@ -1253,7 +1324,7 @@ model, with an explicit input, an explicit output, and a documented moment of ex
 
 ```ts
 // src/agents/release/agent.ts
-import { defineAgent } from "@pikit/core";
+import { defineAgent } from "@pikit/contracts";
 import { deploy, summarize } from "../../tools";
 import { DEPLOYING, RELEASE } from "./prompts";
 
@@ -1311,7 +1382,7 @@ Rules:
   - `AgentState` is `get(ctx)` (a copy of the initial state with every update merged over it) and
     `update(patch, ctx)`: a shallow merge, committed before it resolves, applied one at a time per
     conversation so parallel tools never lose each other's keys. A patch that is not JSON is
-    rejected. Its suite is `createAgentStateConformance` (`@pikit/core/testing`), passed by an
+    rejected. Its suite is `createAgentStateConformance` (`@pikit/contracts/testing`), passed by an
     in-memory double and by the adapter's session-backed state.
   - A patch replaces whole keys, and it is computed before it is queued. A value built from
     the previous one (appending to a list, a counter) read with `get()` can lose a parallel
@@ -2029,11 +2100,13 @@ Rules:
   - `title` is what `pikit new` shows when the component answers a preset's question (§11):
     `"Name: what it is"`, the part after the colon being the hint. Optional, and required for every
     component of a kind some preset lets people choose (`validate` checks it).
-  - `requires.pikit` must accept the `@pikit/core` of the registry's own commit.
+  - `requires.pikit` must accept the `@pikit/core` (the kernel) of the registry's own commit.
   - `targets` is `server`, `cloudflare` or both.
   - `dependencies` lists exactly the npm packages the component's files import, tests included
     (they are copied and run in the project), except `@pikit/core`, which `requires.pikit` covers.
-    Versions are pinned as the repository pins them (`typebox` follows Pi exactly).
+    `@pikit/contracts` and `@pikit/pi-adapter` are listed like any other package, with their own
+    version: they version apart from the kernel (§12a). Versions are pinned as the repository pins
+    them (`typebox` follows Pi exactly).
   - `files` maps `files/src` onto `src`, and names each file outside `src/` on its own (see
     `files` above). `validate` rejects any other directory mapping.
   - `environment` lists every variable the component, or the Pi code it wraps, reads. A fallback
@@ -2215,17 +2288,19 @@ project might choose, so an HTTP project installed a queue nothing used.
 
 #### Vendored kit packages (M1 interim) `[decision]`
 
-`@pikit/core`, `@pikit/pi-adapter` and `@pikit/pi-extension-shim` are not published yet. Until they
-are, `pikit new` packs them from the CLI's checkout (`bun pm pack`) into the project's `vendor/`, and
+`@pikit/core`, `@pikit/contracts`, `@pikit/pi-adapter` and `@pikit/pi-extension-shim` are not published
+yet. Until they are, `pikit new` packs them from the CLI's checkout (`bun pm pack`) into the project's `vendor/`, and
 the project depends on the tarballs:
 
 ```json
 "dependencies": {
   "@earendil-works/pi-coding-agent": "file:vendor/pikit-pi-extension-shim-0.0.0-<hash>.tgz",
+  "@pikit/contracts": "file:vendor/pikit-contracts-0.0.0-<hash>.tgz",
   "@pikit/core": "file:vendor/pikit-core-0.0.0-<hash>.tgz",
   "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0-<hash>.tgz"
 },
 "overrides": {
+  "@pikit/contracts": "file:vendor/pikit-contracts-0.0.0-<hash>.tgz",
   "@pikit/core": "file:vendor/pikit-core-0.0.0-<hash>.tgz",
   "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0-<hash>.tgz",
   "@pikit/pi-extension-shim": "file:vendor/pikit-pi-extension-shim-0.0.0-<hash>.tgz"
@@ -2234,8 +2309,9 @@ the project depends on the tarballs:
 
 - A packed package names its kit dependencies by version (`"@pikit/core": "0.0.0"`), which npm does
   not have. `overrides` points each one at its tarball, which also keeps exactly one copy of
-  `@pikit/core` in `node_modules` (two copies would be two sets of contracts). The CLI's end-to-end
-  test checks that there is one.
+  `@pikit/core` and of `@pikit/contracts` in `node_modules` (two copies would be two sets of
+  contracts). The CLI's end-to-end test checks that there is one of each. Refreshing an older kit
+  adds the override of a kit package it did not have (`@pikit/contracts`, split out of the core).
 - Everything resolves inside the project, so `bun install --frozen-lockfile` works in
   `deployment-docker`'s image build, which copies `vendor/` before the install.
 - A tarball already in `vendor/` is never repacked: `bun.lock` records its integrity.
@@ -2443,15 +2519,15 @@ the whole 1.x line; there is no "pikit 2 rewrites how you define agents".
 
 | Surface | Rule |
 |---|---|
-| `@pikit/core` public API (`defineApp`, `defineComponent`, `defineAgent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed`, `ctx.emit/run/derive`, event and pipeline names, capability contracts) | Semver. Within a major: additive changes only. Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. Majors are rare and come with an automated migration where possible. |
-| Contract interfaces (`SessionStore`, `SqlDatabase`, `ExecutionEnv`, `Workspace`, `ChannelTransport`, …) | Same as core. A contract change ships with its updated conformance suite in the same release. |
-| `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface follows the core rule; its Pi-facing internals are unstable by design. |
+| `@pikit/core`, the kernel (`defineApp`, `defineComponent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed`, `ctx.emit/run/derive`, the context, clock and logger) | Semver, and meant never to need a major: the 1.x promise rests on it. Within a major: additive changes only, each a `[decision]` (S2, `exports.test.ts`). Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. |
+| `@pikit/contracts` (`defineAgent` and the agent's shapes, `InboundMessage`, `admitInbound`, `SqlDatabase`, `OutboundQueue`, `ChannelTransport`, `Feed`, event and pipeline names, conformance suites) | Its own semver, apart from the kernel's (§4.9). Each contract has a level: `experimental` may change with any minor, noted first in the release notes; `stable` changes additively, and a breaking change is a `[decision]` and a major of `@pikit/contracts`, with a migration. A contract change ships with its updated suite in the same release. The programming model (`defineAgent`, `AgentDefinition`, `TurnConfig`, `prepare`) is `stable` by `[decision]`. 1.0 needs every contract `stable`. |
+| `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface (the contracts it types) follows the contracts' rule; its Pi-facing internals are unstable by design. |
 | `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. |
-| Components | Version independently. A component major never forces a core major. Installed components are the user's; upstream changes reach them only through `pikit upgrade`. |
+| Components | Version independently. A component major never forces a kernel or contracts major. Installed components are the user's; upstream changes reach them only through `pikit upgrade`. |
 | Pre-1.0 (M0–M5) | Anything may change. No compatibility promises. This is the period to be wrong quickly. |
 
-Cadence: core minors as needed, never on a schedule that forces churn; component releases
-are independent. Every core release note lists "what you must change" first — the target
+Cadence: kernel and contracts minors as needed, never on a schedule that forces churn; component
+releases are independent. Every core release note lists "what you must change" first — the target
 is that the answer is "nothing" for every minor.
 
 ## 13. Security model
@@ -2490,12 +2566,13 @@ is that the answer is "nothing" for every minor.
 
 - Core: unit tests for event ordering, pipeline priority/halt, capability resolution errors,
   config schema merge, lifecycle order.
-- **Lifecycle conformance** (`createLifecycleConformance` in `@pikit/core/testing`): every
+- **Lifecycle conformance** (`createLifecycleConformance` in `@pikit/core/testing`, the kernel's
+  only suite, with `createManualClock`): every
   component that owns resources passes it. It aborts the component's `start` and `stop` while
   they run and checks that each settles within `settleMs`, that nothing is left open (when
   the fixture provides `openResources()`), and that a fresh app over the same component can start again. Cases have
   Pi's runner-independent shape (`{ group, name, run() }`).
-- **Agent runtime conformance** (`createAgentRuntimeConformance` in `@pikit/core/testing`):
+- **Agent runtime conformance** (`createAgentRuntimeConformance` in `@pikit/contracts/testing`):
   every `agent.runtime` passes it. It drives a scripted agent that the fixture provides (each
   turn answers `answer: <newest inbound message>`; `hold` blocks in a tool until released;
   `holdAtEnd()` pauses a run after its final answer) and observes only the capability and the
@@ -2576,7 +2653,8 @@ is that the answer is "nothing" for every minor.
   - without a shell: `shell_unavailable`.
 
   Pi's `NodeExecutionEnv` is the double, with and without a shell.
-- Contracts ship **conformance suites** (`@pikit/core/testing`): any `sessions.store`,
+- Contracts ship **conformance suites** (`@pikit/contracts/testing`; Pi's contracts in
+  `@pikit/pi-adapter/testing`): any `sessions.store`,
   `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue` and `Feed`
   implementation must pass its suite. Pi's session conformance is reused for
   `sessions.store`.
@@ -2858,6 +2936,17 @@ Resolved `[decision]`:
   not a field per platform feature (§5). Its code comes with its first producer.
 - Questions from Pi extensions are answered in the chat through an optional `interaction`
   capability, not by a pikit `ask_user` (§6.2b); answers that take days belong to `approvals`.
+- The kernel and the vocabulary are two packages, `@pikit/core` and `@pikit/contracts` (§4.9): they
+  change at opposite rates, and one semver for both would make a contract's break a "pikit 2". A
+  subpath would share the kernel's version, so it would not separate them.
+- Where a thing goes is decided by four questions (§4.9): Pi first; the kernel only for what it runs
+  itself, with no word of the domain; a contract only for what two real parties must agree on;
+  everything else, and all policy, in a component.
+- A contract is `experimental` until two independent providers in the registry pass its suite
+  (§4.9): one implementation cannot show that the contract is not shaped by it.
+- Shared code that is not a contract is copied, unless a divergence would be a bug (then it is a
+  contract) or it is about Pi (then it is an adapter helper). No shared library of registry code:
+  it would loosen rule 4 for code that has no reason to be the same.
 
 ---
 

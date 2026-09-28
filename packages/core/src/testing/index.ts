@@ -1,37 +1,9 @@
-// Public surface of @pikit/core/testing (SPEC §14): conformance suites for contracts.
+// Public surface of @pikit/core/testing (SPEC §14): what the kernel itself runs. The lifecycle
+// suite every component that owns resources passes, and a clock tests move by hand. The contracts'
+// suites are in @pikit/contracts/testing.
 
 export type { ConformanceCase, LifecycleConformanceOptions, LifecycleFixture } from "./lifecycle.ts";
 export { createLifecycleConformance } from "./lifecycle.ts";
 
-export type { AgentRuntimeConformanceOptions, AgentRuntimeFixture } from "./agent-runtime.ts";
-export { createAgentRuntimeConformance } from "./agent-runtime.ts";
-
-export type { SecretStoreFixture } from "./secrets.ts";
-export { createSecretStoreConformance } from "./secrets.ts";
-
-export type { ConversationRegistryFixture } from "./conversations.ts";
-export { createConversationRegistryConformance } from "./conversations.ts";
-
-export type { HttpRouteConformanceOptions, HttpRouteFixture } from "./http.ts";
-export { createHttpRouteConformance } from "./http.ts";
-
 export type { ManualClock } from "./manual-clock.ts";
 export { createManualClock } from "./manual-clock.ts";
-
-export type { OutboundQueueFixture } from "./outbound-queue.ts";
-export { createOutboundQueueConformance } from "./outbound-queue.ts";
-
-export type { FeedConformanceOptions, FeedFixture, MemoryFeed } from "./feed.ts";
-export { createFeedConformance, createMemoryFeed } from "./feed.ts";
-
-export type { ConvergenceFixture, ConvergenceProcess, ProcessLife } from "./convergence.ts";
-export { createConvergenceConformance, SimulatedCrash } from "./convergence.ts";
-
-export type { SqlDatabaseFixture } from "./storage-sql.ts";
-export { createSqlDatabaseConformance } from "./storage-sql.ts";
-
-export type { AgentStateFixture } from "./agent-state.ts";
-export { createAgentStateConformance } from "./agent-state.ts";
-
-export type { ChannelConformanceOptions, ChannelFixture, ChannelMessage, ChannelSetup } from "./channel.ts";
-export { CONFORMANCE_AGENT, CONFORMANCE_ANSWER, createChannelConformance } from "./channel.ts";

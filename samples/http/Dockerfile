@@ -3,7 +3,7 @@
 # published ones:
 # - The build context is the repository's root (compose.yaml: `context: ../..`), so the image gets
 #   packages/ and registry/. Dockerfile.dockerignore, next to this file, applies to that context.
-# - `bun install` keeps devDependencies: the monorepo's root lists @pikit/core, hono and typebox
+# - `bun install` keeps devDependencies: the monorepo's root lists @pikit/core, @pikit/contracts, hono and typebox
 #   there, where a project lists them as dependencies.
 # Everything else holds as in a project: Bun >= 1.4, a non-root user, .pikit/ on a volume, no secret
 # in the image.
@@ -18,6 +18,7 @@ ENV NODE_ENV=production
 COPY package.json bun.lock bunfig.toml ./
 COPY scripts/require-bun.ts scripts/
 COPY packages/core/package.json packages/core/
+COPY packages/contracts/package.json packages/contracts/
 COPY packages/pi-adapter/package.json packages/pi-adapter/
 COPY packages/pi-extension-shim/package.json packages/pi-extension-shim/
 RUN bun install --frozen-lockfile

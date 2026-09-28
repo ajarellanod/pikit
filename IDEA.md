@@ -91,6 +91,9 @@ Same agents, same routing, same channels. Different infrastructure underneath.
 
 - **A tiny core** (`@pikit/core`): typed events, ordered pipelines, named capabilities,
   component lifecycle, configuration, diagnostics. Nothing domain-specific.
+- **Shared contracts** (`@pikit/contracts`): the words the components agree on (an inbound
+  message, an agent runtime, an outbound queue), with their conformance suites. They version apart
+  from the core, so the vocabulary can grow while the core stays put.
 - **A Pi adapter**: the bridge between pikit's harness lifecycle and Pi's agent runtime
   (`AgentHarness`, `ExecutionEnv`, `SessionStorage`).
 - **A registry of components**: channels, routers, session stores, outboxes, schedulers,

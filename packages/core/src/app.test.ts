@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
 import Type from "typebox";
 import { BACKGROUND_CONTEXT, createContextKey, withAbortSignal, withContextValue } from "./context.ts";
-import { silentLogger } from "./contracts/logger.ts";
+import { silentLogger } from "./logger.ts";
 import { defineComponent, defineApp, type AppOptions, type Pikit } from "./app.ts";
 import { Halt } from "./pipeline.ts";
 
-declare module "./capabilities.ts" {
+declare module "@pikit/core" {
   interface AppCapabilities {
     "test.store": { name: string };
     "test.queue": { name: string };
@@ -14,12 +14,12 @@ declare module "./capabilities.ts" {
     "test.transport": { channel: string };
   }
 }
-declare module "./events.ts" {
+declare module "@pikit/core" {
   interface AppEvents {
     "test.app.ping": { via: string };
   }
 }
-declare module "./pipeline.ts" {
+declare module "@pikit/core" {
   interface AppPipelines {
     "test.app.text": { text: string };
   }

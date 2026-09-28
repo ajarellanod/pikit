@@ -37,7 +37,7 @@ nobody can check is only a wish.
 | # | Standard | Check |
 |---|---|---|
 | S1 | **Pi first.** No agent behavior is built in pikit if Pi provides it: loop, models, compaction, retries, steering and follow-up queues, session serialization, resume, tool execution, skills. Only `@pikit/pi-adapter` imports `@earendil-works/pi-*`; `coding-agent` is never a dependency. | Every agent-facing SPEC section names the Pi API it uses, or why one Pi process cannot provide it; SPEC §6.2 lists what Pi does and what pikit adds. Import scan: `pi-*` imports only under `packages/pi-adapter` (`scripts/boundaries.test.ts` for packages, `registry validate` for components). |
-| S2 | **The core stays small.** `@pikit/core` holds events, pipelines, capabilities, lifecycle, config, diagnostics and contract interfaces. Nothing domain-specific. Its only runtime dependency is `typebox`. | Every new export from `packages/core/src/index.ts` is approved by the maintainer and recorded in `SPEC.md`. |
+| S2 | **The kernel stays small; the vocabulary lives apart.** `@pikit/core` is the kernel: what the app runs itself (events, pipelines, capabilities, lifecycle, config, context, diagnostics), with no word of the domain. The vocabulary components share is `@pikit/contracts`; a contract whose type is Pi's is typed by the adapter. The kit depends only downwards, and the kernel's only runtime dependency is `typebox`. Where something new goes is decided by SPEC §4.9. | `packages/core/src/exports.test.ts` holds the kernel's exports: a change is a `[decision]` recorded in `SPEC.md`. `scripts/boundaries.ts` holds the layers and the kernel's dependency. |
 | S3 | **Absence, not flags.** A component that is not installed leaves no table, timer, config key, dependency or import. No `enabled: false`. | Removal test: add → run scenario → remove → `pikit doctor` green, `git diff` shows only that component. |
 | S4 | **Contracts are the only coupling.** A component never imports another component's files; it depends on a capability with `use("capability")`. | Import scan: nothing under a component imports a sibling component path. |
 | S5 | **Runtime neutrality.** No `node:*`, `bun:*` or `cloudflare:*` imports in core or in any component that declares more than one target. | Import scan per declared target (`registry validate` for components; `scripts/boundaries.test.ts` for every package export not marked server-only); Miniflare run for `cloudflare`. |
@@ -57,7 +57,7 @@ nobody can check is only a wish.
 
 | # | Standard | Check |
 |---|---|---|
-| S12 | **Contracts first.** Every capability has an interface and a conformance suite before its first implementation. It is stable only when two implementations (or one implementation plus the memory double) pass the same suite. Session stores also pass Pi's `createSessionRepoConformance` and `createStorageConformance`. | The suite exists and runs in CI for every implementation. |
+| S12 | **Contracts first.** Every capability has an interface and a conformance suite before its first implementation. It starts `experimental`, and is `stable` only when two independent implementations in the registry pass the same suite; a test double does not count (SPEC §4.9). A suite checks what every provider must do, never one provider's policy. Session stores also pass Pi's `createSessionRepoConformance` and `createStorageConformance`. | The suite exists and runs in CI for every implementation. |
 | S13 | **Readable source.** Copied components are small files with comments on the *why*. They ship their tests inside `files/`, so the tests keep running in the user's project, and they have no install scripts, ever. | Registry validation; review. |
 | S14 | **One truth per fact.** A component's dependencies are what its `setup` does (`provide`/`use`), never a separate declaration. `component.json`'s `provides`/`requires`/`optional` are generated from `setup` and never edited by hand. | `describe()` in `pikit registry validate` and `pikit doctor` fails on drift. |
 | S15 | **Always green.** `bun test` and `tsc --noEmit` pass on `main`. Every change leaves exactly one runnable check. A milestone ends with its scenarios running, not described. | CI. |
@@ -76,7 +76,8 @@ milestone touches them.
 | Budget | Value | From |
 |---|---|---|
 | Empty server → responding agent | ≤ 5 minutes, one command sequence | M1 |
-| Core runtime dependencies | `typebox` only | M0 |
+| Kernel runtime dependencies | `typebox` only (`scripts/boundaries.ts`) | M0 |
+| Kernel exports | the list in `packages/core/src/exports.test.ts`; growing it is a `[decision]` | M2 |
 | Cloudflare bundle | ≤ 10 MB compressed | M4 |
 | Cloudflare cold start | ≤ 1 s | M4 |
 | Cloudflare memory | ≤ 128 MB per isolate | M4 |
@@ -368,6 +369,11 @@ alerts build on later. Only the architecture is built here, not those components
   must still converge. `outbound-durable` passes it (18 crash points); the suite's own test shows a
   consumer that reacts to events alone fails it, and one that reads a feed passes.
 
+✅ **The kernel and the vocabulary apart** (SPEC §4.9), before M2 adds the contracts its fixes need:
+- `@pikit/core` keeps only the kernel; the shared contracts, `admitInbound` and their suites moved to
+  `@pikit/contracts`, which versions on its own. Components declare it in `dependencies`.
+- Guards: the kernel's exports, the kit's layers and the kernel's single dependency.
+
 Rich content (`parts`, `replyTo`) and questions from extensions in a chat (`interaction`) are
 decided in SPEC §5 and §6.2b; their code comes with the first component that produces them.
 
@@ -437,7 +443,7 @@ built as removable components:
 
 pikit reaches 1.0 when:
 1. All seven scenarios are green on every target they declare.
-2. Every contract is stable under S12.
+2. Every contract is `stable` under S12 (SPEC §4.9).
 3. Every standard above has an automated check.
 4. SPEC §12a is in force.
 

@@ -9,8 +9,9 @@ import { afterAll, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { defineComponent, type OutboundQueue } from "@pikit/core";
-import { type ConvergenceFixture, createConvergenceConformance } from "@pikit/core/testing";
+import { defineComponent } from "@pikit/core";
+import { type OutboundQueue } from "@pikit/contracts";
+import { type ConvergenceFixture, createConvergenceConformance } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
 import { openTestDatabase } from "./storage.test-support.ts";
 

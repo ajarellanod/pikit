@@ -12,7 +12,7 @@
  *   user blocked the bot, the chat is gone, a bad request) is permanent.
  */
 
-import { type ChannelTransport, DeliveryError } from "@pikit/core";
+import { type ChannelTransport, DeliveryError } from "@pikit/contracts";
 import { type TelegramApi, TelegramError } from "./api.ts";
 import { MAX_MESSAGE_LENGTH, splitMessage, toTelegramHtml } from "./format.ts";
 import { chatIn } from "./account.ts";

@@ -3,8 +3,9 @@
  */
 
 import { expect, test } from "bun:test";
-import { defineApp, defineComponent, type SecretStore, silentLogger } from "@pikit/core";
-import { createSecretStoreConformance } from "@pikit/core/testing";
+import { defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type SecretStore } from "@pikit/contracts";
+import { createSecretStoreConformance } from "@pikit/contracts/testing";
 import secretsEnv, { createSecretsEnv } from "./index.ts";
 
 // The secrets contract (SPEC §14), over an environment seeded by the suite.

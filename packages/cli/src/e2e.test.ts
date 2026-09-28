@@ -49,7 +49,7 @@ function sh(command: string[], cwd = project) {
 const git = (...args: string[]) => sh(["git", "-c", "user.email=e2e@pikit.test", "-c", "user.name=e2e", ...args]);
 
 test.skipIf(!E2E)(
-  "pikit new --preset http: a project that composes, with one copy of @pikit/core",
+  "pikit new --preset http: a project that composes, with one copy of @pikit/core and one of @pikit/contracts",
   async () => {
     const started = performance.now();
     const created = await pikit(["new", "my-agent", "--preset", "http"], { cwd: parent });
@@ -57,8 +57,11 @@ test.skipIf(!E2E)(
     expect(created.err).not.toContain("✗");
     expect(created.code).toBe(0);
 
-    const cores = [...new Bun.Glob("**/@pikit/core/package.json").scanSync({ cwd: join(project, "node_modules"), followSymlinks: true })];
-    expect(cores).toEqual(["@pikit/core/package.json"]);
+    // One copy of the kernel and one of the contracts: two copies would be two sets of contracts.
+    for (const kit of ["core", "contracts"]) {
+      const copies = [...new Bun.Glob(`**/@pikit/${kit}/package.json`).scanSync({ cwd: join(project, "node_modules"), followSymlinks: true })];
+      expect(copies).toEqual([`@pikit/${kit}/package.json`]);
+    }
     const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
     expect(config).toContain("createRuntimePi({ extensions: [permissionGate] }),");
     expect(config).not.toContain("deploymentDocker");

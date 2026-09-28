@@ -15,7 +15,9 @@
     "capabilities": []
   },
   "provides": [],
-  "dependencies": {},
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
   "files": [
     {
       "source": "files/src",

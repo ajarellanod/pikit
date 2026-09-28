@@ -10,7 +10,8 @@ is the moldable alternative to OpenClaw and Hermes. It is not a second agent and
 compete with Pi, Claude Code or Codex.
 
 The project has four parts:
-- **A small core:** events, pipelines, capabilities and lifecycle.
+- **A small core:** the kernel (`@pikit/core`: events, pipelines, capabilities and lifecycle) and,
+  apart, the contracts the parts share (`@pikit/contracts`). SPEC §4.9 says what goes where.
 - **A Pi adapter.**
 - **A registry of components** that users copy into their project as source.
 - **Two runtime targets:** a long-running server and Cloudflare Durable Objects.
@@ -115,7 +116,8 @@ Never design from memory of Pi's API; its API changes faster than this document.
   `@earendil-works/pi-coding-agent` is an alias of `@pikit/pi-extension-shim` (SPEC §6.2b),
   never the real coding agent.
 - Checks: `bun test` and `bun run typecheck` (`tsc --noEmit`, TypeScript 7, strict,
-  `exactOptionalPropertyTypes`). Conformance suites live in `@pikit/core/testing`.
+  `exactOptionalPropertyTypes`). Conformance suites live in `@pikit/contracts/testing` (the kernel's lifecycle suite in
+  `@pikit/core/testing`).
 
 ## The rules
 
@@ -128,9 +130,16 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
    `pi-ai` providers by subpath, never through the barrel, because of the Cloudflare bundle
    limit. Existing non-TUI Pi extensions must run unmodified (SPEC §6.2b). That compatibility
    lives in the adapter; never bend core names to Pi's `snake_case`.
-2. **The core stays small** (S2). A scheduler, storage driver, channel, router strategy,
-   tool, admin route or deduplication store is a component, not core. Ask before adding any
-   public export to `@pikit/core`.
+2. **The kernel stays small; the vocabulary lives apart** (S2, SPEC §4.9). Four questions, in
+   order, decide where something new goes:
+   - Pi does it, or is about to: the adapter.
+   - The kernel runs it itself, it names nothing of the domain, and a component could not do it
+     with `provide`/`use`/`on`/`pipeline`: `@pikit/core`. Ask first: it is a `[decision]`, and
+     `exports.test.ts` fails until it is recorded.
+   - Two real parties (built in the same change, not planned) must understand it the same way:
+     `@pikit/contracts`. A type, identity, event or pipeline name, or protocol function; never policy.
+   - Otherwise: its component. A scheduler, storage driver, channel, router strategy, tool, admin
+     route or deduplication store is a component, and so is every timing, limit and strategy.
 3. **Absence, not flags** (S3, S9). Never add `enabled: false` switches. Never add a core
    behavior that changes depending on which components are installed. Never add an in-memory
    fallback for something that must persist.
@@ -197,8 +206,11 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
 | I am writing… | It goes in… |
 |---|---|
-| An event name, pipeline name, capability contract, lifecycle rule | `@pikit/core` (ask first) |
-| A conformance suite for a contract | `@pikit/core/testing` |
+| Composition mechanism the kernel runs itself (lifecycle, capabilities, pipelines, context) | `@pikit/core` (a `[decision]`, SPEC §4.9) |
+| A type, identity, event name, pipeline name or capability contract two components share | `@pikit/contracts` (SPEC §4.9) |
+| A conformance suite for a contract | `@pikit/contracts/testing`; for a contract whose type is Pi's, `@pikit/pi-adapter/testing` |
+| An event or pipeline name only one component uses | that component, by declaration merging |
+| A timing, limit or strategy | the component that has it; a suite may only hold it to what it declares |
 | Anything importing `@earendil-works/pi-*` | `@pikit/pi-adapter` |
 | A channel, router, store, queue, dedup, scheduler, tool, executor, workspace, deployment target | a component in `registry/components/<name>/` |
 | Project-specific behavior in a sample or user project | `src/extensions/<name>.ts` |
@@ -278,9 +290,10 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   something must succeed, it belongs in `start`.
 - **Selection shapes dependency order.** A consumer depends only on the provider `get()`
   will return: the selected one when there are several.
-- **Transports are keyed.** `channel.transport` is a keyed capability: each channel provides it
-  under its own key (`provideKeyed`), and delivery looks it up per message with
-  `useKeyed(...).get(message.channel)`.
+- **Transports are attached, not keyed.** A channel's `ChannelTransport` is not a capability: the
+  channel attaches it to `outbound.queue` while it runs (`attach` / `detach`). A keyed capability used
+  by the queue, with the queue used by the channel, would be a cycle (SPEC §4.5). Without a queue, a
+  channel sends through its own transport.
 - **Optional capabilities are declared.** A component that can work without a capability
   declares it with `useOptional(name)`, so that its provider starts first when present, and
   asks `get() !== undefined`. There is no `ctx.has()`: an undeclared question is an undeclared
@@ -312,6 +325,9 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **A new capability needs a catalogue line.** Declaring one on `AppCapabilities` /
   `AppKeyedCapabilities` fails `tsc` until `packages/cli/src/registry/capabilities.ts` describes it
   (`bun run registry capabilities` prints the catalogue). Test-only capabilities are named `test.*`.
+- **Components declare `@pikit/contracts`.** It versions apart from the kernel, so a component that
+  imports it lists it in `component.json`'s `dependencies`, like `@pikit/pi-adapter`;
+  `requires.pikit` covers only `@pikit/core`.
 - **Test support is `*.test-support.ts`.** A fake, a fixture script or a test double a component's
   tests share lives in `<name>.test-support.ts`: `registry validate` holds it like a test (it may import
   `node:*` in a component that also targets Cloudflare, S5), and rejects a shipped file that imports it.
@@ -322,7 +338,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 
 ## Git and docs
 
-- Commit messages follow `<area>: <imperative summary>`. Areas: `core`, `adapter`, `cli`,
+- Commit messages follow `<area>: <imperative summary>`. Areas: `core`, `contracts`, `adapter`, `cli`,
   `component/<name>`, `registry` (manifests, `registry.json`, presets, `scripts/registry*`, `packages/cli/src/registry/`),
   `samples`, `installer`, `spec`, `docs`.
 - A change that adds a component, changes a contract or fixes user-visible behavior gets a
@@ -436,10 +452,13 @@ Record here anything that went wrong twice, or that the user explicitly said not
   asserts on a value typed by a narrowed annotation (a type-level test with `@ts-expect-error`).
   Assert on the original value instead, and keep the annotated variable only for the type check
   (`void variable`). This broke `typecheck` twice in `agent.test.ts`.
-- TypeScript 7 loses the core tests' relative module augmentations (`declare module "./capabilities.ts"`
-  in `app.test.ts`: 37 errors) when another workspace package resolves `@pikit/pi-adapter` through its
-  own `node_modules`. It passed in a `/tmp` worktree and failed in the main checkout, so a typecheck in
-  a worktree alone is not proof. Tooling that talks to a project's adapter (the CLI) describes the few
-  calls it makes with local types and loads the adapter at run time; it does not import it.
+- TypeScript 7 splits a kernel interface in two when some files augment it by relative path
+  (`declare module "./capabilities.ts"`) and others by package name (`declare module "@pikit/core"`):
+  each file then sees only one half, and hundreds of errors say a capability or pipeline "is not
+  assignable". It showed first as 37 errors in `app.test.ts`, then again when `@pikit/contracts` was
+  split out. Augment the kernel by its package name everywhere but in its own shipped files
+  (`app.ts`, `lifecycle.ts`); its tests included (`app.test.ts` does). A typecheck in a `/tmp` worktree alone is not proof. Tooling that talks to a
+  project's adapter (the CLI) describes the few calls it makes with local types and loads the adapter
+  at run time; it does not import it.
 - macOS has no `timeout` command. Bound a command that may hang with
   `perl -e 'alarm 60; exec @ARGV' <cmd>`, and give hanging tests `--timeout <ms>`.

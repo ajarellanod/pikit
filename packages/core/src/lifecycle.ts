@@ -15,7 +15,7 @@
  */
 
 import { type Context, withAbortSignal, withCancel } from "./context.ts";
-import type { Logger } from "./contracts/logger.ts";
+import type { Logger } from "./logger.ts";
 import type { ComponentLifecycle, AppContext } from "./app.ts";
 
 declare module "./events.ts" {

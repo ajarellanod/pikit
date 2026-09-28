@@ -43,6 +43,7 @@ export function packageJson(name: string, kit: Record<string, string>): string {
     scripts: { dev: "pikit dev", doctor: "pikit doctor", test: "bun test", typecheck: "tsc --noEmit" },
     dependencies: {
       [EXTENSION_ALIAS]: kit["@pikit/pi-extension-shim"],
+      "@pikit/contracts": kit["@pikit/contracts"],
       "@pikit/core": kit["@pikit/core"],
     },
     devDependencies: { "@types/bun": pin("@types/bun"), typescript: pin("typescript") },
@@ -97,7 +98,7 @@ export function agent(tools: string[]): string {
     tools.length > 0
       ? `\n    "You work in a workspace directory: use your tools to read, write and edit files there, and to run commands in it.",`
       : "";
-  return `import { defineAgent } from "@pikit/core";
+  return `import { defineAgent } from "@pikit/contracts";
 
 /**
  * Your agent. Pi runs the loop; this file says who the agent is. It names the installed tools it may
@@ -150,7 +151,7 @@ read, edit and remove.
 | \`src/extensions/\` | your own components (\`agents.ts\`) and Pi extensions (\`permission-gate.ts\`) |
 | \`src/pikit/<component>/\` | installed components, with their tests and a README |
 | \`pikit.json\` | what \`pikit add\` installed: registry, version, commit, and each file's hash |
-| \`vendor/\` | \`@pikit/core\`, \`@pikit/pi-adapter\` and \`@pikit/pi-extension-shim\`, until they are on npm |
+| \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\`, \`@pikit/pi-adapter\` and \`@pikit/pi-extension-shim\`, until they are on npm |
 | \`.env\` | secrets, written by \`pikit configure\` (mode 0600, never committed) |
 | \`.pikit/\` | state: sessions, conversations, model credentials, the workspace |
 

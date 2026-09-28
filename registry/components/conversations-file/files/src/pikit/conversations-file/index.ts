@@ -20,7 +20,8 @@
 
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
-import { type AppContext, type ConversationRef, type ConversationRegistry, type ConversationReset, defineComponent } from "@pikit/core";
+import { type AppContext, defineComponent } from "@pikit/core";
+import { type ConversationRef, type ConversationRegistry, type ConversationReset } from "@pikit/contracts";
 import type { SessionStore } from "@pikit/pi-adapter";
 import Type, { type Static } from "typebox";
 import Value from "typebox/value";

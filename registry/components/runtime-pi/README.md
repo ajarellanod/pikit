@@ -71,7 +71,7 @@ export default defineComponent({
 
 ```ts
 // src/agents/coder/agent.ts
-import { defineAgent } from "@pikit/core";
+import { defineAgent } from "@pikit/contracts";
 
 export default defineAgent({ name: "coder", model: "anthropic/claude-sonnet", tools: ["bash"], extensions: ["permission-gate"] });
 ```

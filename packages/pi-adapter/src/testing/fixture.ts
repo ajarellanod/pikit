@@ -16,14 +16,9 @@ import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
 import { JsonlSessionRepo, MemorySessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import {
-  type AgentDefinition,
-  BACKGROUND_CONTEXT,
-  type ComponentDefinition,
-  type ConversationRef,
-  defineComponent,
-} from "@pikit/core";
-import type { AgentRuntimeFixture } from "@pikit/core/testing";
+import { BACKGROUND_CONTEXT, type ComponentDefinition, defineComponent } from "@pikit/core";
+import { type AgentDefinition, type ConversationRef } from "@pikit/contracts";
+import type { AgentRuntimeFixture } from "@pikit/contracts/testing";
 import type { HarnessHook } from "../conversation.ts";
 import type { SessionStore } from "../types.ts";
 import { holdTool, scriptedAgent, scriptedProvider } from "./script.ts";

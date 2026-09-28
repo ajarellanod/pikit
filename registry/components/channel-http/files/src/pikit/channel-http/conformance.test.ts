@@ -8,8 +8,9 @@
  */
 
 import { test } from "bun:test";
-import { type AppContext, BACKGROUND_CONTEXT, defineComponent, type HttpRoute } from "@pikit/core";
-import { createChannelConformance } from "@pikit/core/testing";
+import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { type HttpRoute } from "@pikit/contracts";
+import { createChannelConformance } from "@pikit/contracts/testing";
 import channelHttp from "./index.ts";
 
 const TOKEN = "conformance-token-0123456789abcdef";

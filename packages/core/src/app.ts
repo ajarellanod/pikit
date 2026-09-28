@@ -34,8 +34,8 @@ import {
 } from "./capabilities.ts";
 import { checkUniqueNames, readSelection, validateConfig } from "./config.ts";
 import { BACKGROUND_CONTEXT, type Context } from "./context.ts";
-import { type Clock, systemClock } from "./contracts/clock.ts";
-import { consoleLogger, type Logger } from "./contracts/logger.ts";
+import { type Clock, systemClock } from "./clock.ts";
+import { consoleLogger, type Logger } from "./logger.ts";
 import { createEventBus, type EventBus, type AppEvents } from "./events.ts";
 import { orderRecords, recordUse, type SetupRecord, type Use } from "./graph.ts";
 import { createLifecycle } from "./lifecycle.ts";

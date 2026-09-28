@@ -5,8 +5,10 @@
  */
 
 import { expect, test } from "bun:test";
-import { AGENT_STATE, type AgentRuntime, type AgentTool, defineAgent, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { createAgentRuntimeConformance, createLifecycleConformance } from "@pikit/core/testing";
+import { defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { AGENT_STATE, type AgentRuntime, type AgentTool, defineAgent } from "@pikit/contracts";
+import { createLifecycleConformance } from "@pikit/core/testing";
+import { createAgentRuntimeConformance } from "@pikit/contracts/testing";
 import type { Credential, CredentialStore, SessionStore } from "@pikit/pi-adapter";
 import { createPiRuntimeFixture, recordingBash, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
 import Type from "typebox";

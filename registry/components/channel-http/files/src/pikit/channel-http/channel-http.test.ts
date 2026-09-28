@@ -8,19 +8,14 @@
  */
 
 import { expect, test } from "bun:test";
+import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withAbortSignal } from "@pikit/core";
 import {
   type Admission,
   type AgentRuntime,
-  type App,
-  BACKGROUND_CONTEXT,
   type ConversationRef,
   type ConversationRegistry,
-  defineApp,
-  defineComponent,
   type HttpRoute,
-  silentLogger,
-  withAbortSignal,
-} from "@pikit/core";
+} from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import channelHttp from "./index.ts";
 

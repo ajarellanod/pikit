@@ -11,7 +11,8 @@
  * Targets: `server` and `cloudflare`, wherever an `execution` provider is installed.
  */
 
-import { CONVERSATION, defineComponent } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { CONVERSATION } from "@pikit/contracts";
 import { bindTool, createReadTool } from "@pikit/pi-adapter/tools";
 
 export default defineComponent({

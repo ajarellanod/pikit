@@ -7,15 +7,8 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  type App,
-  CONVERSATION,
-  type ConversationRef,
-  defineAgent,
-  defineApp,
-  defineComponent,
-  silentLogger,
-} from "@pikit/core";
+import { type App, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { CONVERSATION, type ConversationRef, defineAgent } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createPiRuntime, modelsFrom, type SessionStore, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { createExecutionConformance, createWorkspaceConformance, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";

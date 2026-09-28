@@ -9,7 +9,8 @@
 
 import { JsonlSessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
-import { AGENT_STATE, defineApp, silentLogger } from "@pikit/core";
+import { defineApp, silentLogger } from "@pikit/core";
+import { AGENT_STATE } from "@pikit/contracts";
 import { modelsFrom } from "../models.ts";
 import { createPiRuntime } from "../runtime.ts";
 import { holdTool, preparedAgent, scriptedProvider } from "./script.ts";

@@ -24,7 +24,8 @@
  * Target: `server`: long polling needs a process that keeps running.
  */
 
-import { type AgentResult, type AppContext, answerKey, BACKGROUND_CONTEXT, defineComponent, type OutboundQueue } from "@pikit/core";
+import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { type AgentResult, answerKey, type OutboundQueue } from "@pikit/contracts";
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, chatIn } from "./account.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, TelegramError } from "./api.ts";

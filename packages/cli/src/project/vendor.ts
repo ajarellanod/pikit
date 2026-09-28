@@ -1,7 +1,7 @@
 /**
  * The kit packages in a project, until they are published (SPEC §10.5, "M1: vendored kit").
  *
- * `@pikit/core`, `@pikit/pi-adapter` and `@pikit/pi-extension-shim` are not on npm yet. The CLI
+ * `@pikit/core`, `@pikit/contracts`, `@pikit/pi-adapter` and `@pikit/pi-extension-shim` are not on npm yet. The CLI
  * packs them from its own checkout into the project's `vendor/` (`bun pm pack`), and the project
  * depends on the tarballs with `file:vendor/<tarball>`. Everything then resolves inside the project
  * directory, so `bun install --frozen-lockfile` works in a Docker build too.
@@ -28,6 +28,7 @@ export const VENDOR_DIR = "vendor";
 /** Kit package → its directory under `packages/`. */
 export const KIT_PACKAGES: Record<string, string> = {
   "@pikit/core": "core",
+  "@pikit/contracts": "contracts",
   "@pikit/pi-adapter": "pi-adapter",
   "@pikit/pi-extension-shim": "pi-extension-shim",
 };
@@ -109,7 +110,8 @@ export function vendorKitPackage(projectDir: string, name: string): string {
 
 /**
  * Points the project at this checkout's kit when it has another one (older, or from another
- * checkout): new tarballs in `vendor/`, `dependencies` and `overrides` rewritten. Returns the
+ * checkout): new tarballs in `vendor/`, `dependencies` and `overrides` rewritten, and an override
+ * added for a kit package the project's kit did not have. Returns the
  * packages refreshed; `bun install` must run after, then `pruneVendor`: `bun.lock` still names the old
  * tarballs until the install rewrites it.
  */
@@ -130,6 +132,15 @@ export function refreshKit(projectDir: string): string[] {
   };
   rewrite(pkg.dependencies);
   rewrite(pkg.overrides);
+  // A kit package the project's kit did not have yet (one split out of another, as @pikit/contracts
+  // was out of @pikit/core): the other kit packages name it by version, so it needs its override too.
+  if (pkg.overrides !== undefined) {
+    for (const kit of Object.keys(KIT_PACKAGES)) {
+      if (kit in pkg.overrides) continue;
+      pkg.overrides[kit] = vendorKitPackage(projectDir, kit);
+      if (!refreshed.includes(kit)) refreshed.push(kit);
+    }
+  }
   if (refreshed.length === 0) return [];
   writePackageJson(projectDir, pkg);
   return refreshed;

@@ -23,7 +23,7 @@ the working directory on its own; that is Bun's behaviour, not this component's.
 ## Tests
 
 `secrets-env.test.ts` is copied with the component and runs in your project. It runs the `secrets`
-conformance suite from `@pikit/core/testing`: values read back exactly, unset and empty ones read
+conformance suite from `@pikit/contracts/testing`: values read back exactly, unset and empty ones read
 `undefined`, and no value reaches `describe()` or a log line.
 
 `component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI

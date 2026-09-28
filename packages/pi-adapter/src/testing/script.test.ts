@@ -6,7 +6,8 @@
 import { expect, test } from "bun:test";
 import { InMemoryCredentialStore } from "@earendil-works/pi-ai";
 import { MemorySessionRepo } from "@earendil-works/pi-agent-core";
-import { type AppEvents, defineAgent, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { defineAgent } from "@pikit/contracts";
 import { modelsFrom } from "../models.ts";
 import { createPiRuntime } from "../runtime.ts";
 import { recordingBash, scriptedProvider } from "./script.ts";

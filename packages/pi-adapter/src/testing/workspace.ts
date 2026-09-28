@@ -15,7 +15,7 @@
  */
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/pi-agent-core";
-import type { ConversationRef } from "@pikit/core";
+import type { ConversationRef } from "@pikit/contracts";
 import type { ConformanceCase } from "@pikit/core/testing";
 import type { WorkspaceProvider } from "../types.ts";
 

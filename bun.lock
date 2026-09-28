@@ -6,6 +6,7 @@
       "name": "pikit-monorepo",
       "devDependencies": {
         "@earendil-works/pi-coding-agent": "workspace:@pikit/pi-extension-shim@*",
+        "@pikit/contracts": "workspace:*",
         "@pikit/core": "workspace:*",
         "@pikit/pi-adapter": "workspace:*",
         "@types/bun": "^1.4.2",
@@ -27,6 +28,13 @@
         "yaml": "2.9.1",
       },
     },
+    "packages/contracts": {
+      "name": "@pikit/contracts",
+      "version": "0.0.0",
+      "dependencies": {
+        "@pikit/core": "workspace:*",
+      },
+    },
     "packages/core": {
       "name": "@pikit/core",
       "version": "0.0.0",
@@ -40,6 +48,7 @@
       "dependencies": {
         "@earendil-works/pi-agent-core": "0.87.1",
         "@earendil-works/pi-ai": "0.87.1",
+        "@pikit/contracts": "workspace:*",
         "@pikit/core": "workspace:*",
       },
     },
@@ -163,6 +172,8 @@
     "@google/genai": ["@google/genai@2.21.0", "", { "dependencies": { "google-auth-library": "^10.3.0", "p-retry": "^4.6.2", "protobufjs": "^7.5.4", "ws": "^8.18.0" }, "peerDependencies": { "@modelcontextprotocol/sdk": "^1.25.2" }, "optionalPeers": ["@modelcontextprotocol/sdk"] }, "sha512-+PDtco2/Z0ONdzCGekCoCT+O1VJS9xJQNN4XzQpXG/t3El/SWWMkCWlFRO1KmivOHPa4Q0VjUYu1HBKCZ/v33Q=="],
 
     "@pikit/cli": ["@pikit/cli@workspace:packages/cli"],
+
+    "@pikit/contracts": ["@pikit/contracts@workspace:packages/contracts"],
 
     "@pikit/core": ["@pikit/core@workspace:packages/core"],
 

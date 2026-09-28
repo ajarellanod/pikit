@@ -4,7 +4,8 @@
  */
 
 import { expect, test } from "bun:test";
-import { type AgentResult, type AppEvents, type Clock, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { type AppEvents, type Clock, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { type AgentResult } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import logEvents from "./index.ts";
 

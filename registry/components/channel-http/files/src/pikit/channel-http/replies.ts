@@ -11,7 +11,7 @@
  * conversations, and duplicates are per conversation.
  */
 
-import type { AgentResult } from "@pikit/core";
+import type { AgentResult } from "@pikit/contracts";
 
 export type Outcome = { kind: "answered"; result: AgentResult } | { kind: "timeout" } | { kind: "cancelled" };
 

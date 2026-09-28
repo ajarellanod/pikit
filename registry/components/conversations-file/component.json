@@ -19,6 +19,7 @@
     "conversations.registry"
   ],
   "dependencies": {
+    "@pikit/contracts": "0.0.0",
     "@pikit/pi-adapter": "0.0.0",
     "typebox": "1.3.27"
   },

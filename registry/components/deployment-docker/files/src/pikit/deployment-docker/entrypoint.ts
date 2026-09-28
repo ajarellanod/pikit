@@ -16,7 +16,15 @@
  * are not visible from its definition, so they do not reach the container; pass them here.
  */
 
-import { type App, type AppDefinition, type Clock, type Logger, BACKGROUND_CONTEXT, defineApp, withAbortSignal } from "@pikit/core";
+import {
+  type App,
+  type AppDefinition,
+  BACKGROUND_CONTEXT,
+  type Clock,
+  defineApp,
+  type Logger,
+  withAbortSignal,
+} from "@pikit/core";
 import { createJsonLogger } from "./logger.ts";
 
 /** Longest a start may take before it is abandoned and rolled back. */

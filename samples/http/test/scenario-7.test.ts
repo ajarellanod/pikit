@@ -13,7 +13,7 @@
 import { afterEach, expect, test } from "bun:test";
 import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { defineAgent } from "@pikit/core";
+import { defineAgent } from "@pikit/contracts";
 import permissionGate from "../../../packages/pi-adapter/src/extensions/pi-examples/permission-gate.ts";
 import { createSample, type Sample } from "./sample.ts";
 

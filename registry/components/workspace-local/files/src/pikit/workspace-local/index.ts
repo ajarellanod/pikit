@@ -21,7 +21,8 @@
 
 import { access, constants, mkdir } from "node:fs/promises";
 import { join, resolve } from "node:path";
-import { type ConversationRef, defineComponent } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { type ConversationRef } from "@pikit/contracts";
 import type { Workspace, WorkspaceProvider } from "@pikit/pi-adapter";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
 import Type from "typebox";

@@ -12,6 +12,9 @@
  *   `SERVER_ONLY` names it, so a new export is held to the rule until someone decides otherwise.
  * - **Inside the package**: source files do not import relative paths outside their package; a
  *   package reaches another only through its exports. Tests may (they read registry fixtures).
+ * - **Layers** (SPEC §3, §4.9): the kit's packages depend only downwards, kernel → contracts →
+ *   adapter, and the kernel's only dependency is `typebox` (ROADMAP, "Budgets"). The kernel cannot
+ *   reach the vocabulary: an import needs a dependency, and this rule refuses that dependency.
  *
  * Specifiers with `${` are the CLI's templates for generated code, not imports, and are skipped.
  */
@@ -27,6 +30,12 @@ export const SERVER_ONLY: Readonly<Record<string, readonly string[]>> = {
   "pi-adapter": ["./node", "./testing"],
 };
 
+/** The kit's layers, lowest first: a kit package depends only on kit packages below it. */
+export const LAYERS: readonly string[] = ["@pikit/core", "@pikit/contracts", "@pikit/pi-adapter"];
+
+/** The kernel's whole dependency list. */
+export const KERNEL_DEPENDENCIES: readonly string[] = ["typebox"];
+
 /** A specifier some files may import beyond their dependencies, and why. */
 export const ALLOWED: readonly { dir: string; files: string; specifier: string; why: string }[] = [
   {
@@ -34,6 +43,12 @@ export const ALLOWED: readonly { dir: string; files: string; specifier: string; 
     files: "src/extensions/pi-examples/",
     specifier: "@earendil-works/pi-coding-agent",
     why: "Pi's example extensions, unmodified: a project aliases that name to @pikit/pi-extension-shim (SPEC §6.2b)",
+  },
+  {
+    dir: "cli",
+    files: "src/commands/starter.ts",
+    specifier: "@pikit/contracts",
+    why: "the source of a new project's starter agent, which imports defineAgent: the CLI writes it, it does not import it",
   },
 ];
 
@@ -60,6 +75,7 @@ export function checkBoundaries(packagesDir: string): string[] {
     const pkg = JSON.parse(readFileSync(manifestPath, "utf8")) as PackageJson;
     const dependencies = new Set(Object.keys(pkg.dependencies ?? {}));
     const devDependencies = new Set(Object.keys(pkg.devDependencies ?? {}));
+    problems.push(...layerProblems(pkg, `packages/${dir}/package.json`));
 
     for (const file of sourceFiles(join(root, "src"))) {
       const test = TEST.test(file);
@@ -94,6 +110,27 @@ export function checkBoundaries(packagesDir: string): string[] {
       const entry = `${pkg.name}${exported === "." ? "" : exported.slice(1)}`;
       for (const { file, specifier } of platformImports(resolve(root, target))) {
         problems.push(`${at(file)} imports "${specifier}", but ${entry} reaches it and must run on every target (rule 5)`);
+      }
+    }
+  }
+  return problems;
+}
+
+/** A kit package depending on its own layer or one above it; a kernel with more than typebox. */
+function layerProblems(pkg: PackageJson, at: string): string[] {
+  const layer = LAYERS.indexOf(pkg.name);
+  if (layer === -1) return [];
+  const problems: string[] = [];
+  for (const dependency of Object.keys({ ...pkg.dependencies, ...pkg.devDependencies })) {
+    const other = LAYERS.indexOf(dependency);
+    if (other >= layer) {
+      problems.push(`${at}: ${pkg.name} depends on ${dependency}; the kit's packages depend only downwards, ${LAYERS.join(" → ")} (SPEC §3)`);
+    }
+  }
+  if (layer === 0) {
+    for (const dependency of Object.keys(pkg.dependencies ?? {})) {
+      if (!KERNEL_DEPENDENCIES.includes(dependency)) {
+        problems.push(`${at}: the kernel depends on ${dependency}; its only dependency is ${KERNEL_DEPENDENCIES.join(", ")} (ROADMAP, "Budgets")`);
       }
     }
   }

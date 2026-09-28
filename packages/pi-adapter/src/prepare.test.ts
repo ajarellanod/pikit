@@ -14,17 +14,8 @@ import { fileURLToPath } from "node:url";
 import { AgentHarness, type AgentHarnessTool, JsonlSessionRepo, MemorySessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { type Message, Type } from "@earendil-works/pi-ai";
-import {
-  AGENT_STATE,
-  type AgentDefinition,
-  type AppEvents,
-  BACKGROUND_CONTEXT,
-  type ConversationRef,
-  defineAgent,
-  defineApp,
-  defineComponent,
-  type Logger,
-} from "@pikit/core";
+import { type AppEvents, BACKGROUND_CONTEXT, defineApp, defineComponent, type Logger } from "@pikit/core";
+import { AGENT_STATE, type AgentDefinition, type ConversationRef, defineAgent } from "@pikit/contracts";
 import { LANE } from "./inbound.ts";
 import { createPiRuntime, modelsFrom, type PiExtension, type SessionStore } from "./index.ts";
 import { holdTool, type ModelRequest, scriptedProvider } from "./testing/index.ts";

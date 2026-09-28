@@ -4,8 +4,10 @@
  */
 
 import { expect, test } from "bun:test";
-import { defineApp, defineComponent, type HttpRoute, silentLogger } from "@pikit/core";
-import { createHttpRouteConformance, createLifecycleConformance } from "@pikit/core/testing";
+import { defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type HttpRoute } from "@pikit/contracts";
+import { createLifecycleConformance } from "@pikit/core/testing";
+import { createHttpRouteConformance } from "@pikit/contracts/testing";
 import serverBun, { createServerBun } from "./index.ts";
 
 const LOCAL = { "server-bun": { port: 0, hostname: "127.0.0.1" } };

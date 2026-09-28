@@ -18,7 +18,8 @@
 
 import type { AgentHarness, AgentLane, Context, JsonValue } from "@earendil-works/pi-agent-core";
 import type { Api, Model, Models } from "@earendil-works/pi-ai";
-import type { AgentDefinition, AgentState, AgentTool, ConversationRef, Logger, TurnConfig } from "@pikit/core";
+import type { Logger } from "@pikit/core";
+import type { AgentDefinition, AgentState, AgentTool, ConversationRef, TurnConfig } from "@pikit/contracts";
 
 /** `customType` of the entry that records what a run had. */
 export const TURN = "pikit.turn";

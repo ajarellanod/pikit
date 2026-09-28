@@ -10,17 +10,8 @@ import { join } from "node:path";
 import { type AgentHarnessTool, type ExecutionEnv, MemorySessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { Type } from "@earendil-works/pi-ai";
-import {
-  type AgentDefinition,
-  type AgentTool,
-  type AppEvents,
-  CONVERSATION,
-  type ConversationRef,
-  defineAgent,
-  defineApp,
-  defineComponent,
-  silentLogger,
-} from "@pikit/core";
+import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type AgentDefinition, type AgentTool, CONVERSATION, type ConversationRef, defineAgent } from "@pikit/contracts";
 import { modelsFrom } from "./models.ts";
 import { createPiRuntime } from "./runtime.ts";
 import { scriptedProvider } from "./testing/index.ts";

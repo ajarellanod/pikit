@@ -7,7 +7,8 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AppEvents, defineApp, defineComponent, type OutboundPiece, type OutboundQueue, silentLogger } from "@pikit/core";
+import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type OutboundPiece, type OutboundQueue } from "@pikit/contracts";
 import outboundDurable from "./index.ts";
 import { testStorage } from "./storage.test-support.ts";
 

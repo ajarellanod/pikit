@@ -14,6 +14,7 @@ const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 test("a project on another kit gets this CLI's: tarballs, dependencies and overrides; the old tarballs go", () => {
+  // The old kit predates @pikit/contracts: it gets an override, since the other kit packages name it.
   const project = mkdtempSync(join(tmpdir(), "pikit-vendor-"));
   dirs.push(project);
   mkdirSync(join(project, "vendor"));
@@ -33,11 +34,12 @@ test("a project on another kit gets this CLI's: tarballs, dependencies and overr
     }),
   );
 
-  expect(refreshKit(project).sort()).toEqual(["@pikit/core", "@pikit/pi-adapter", "@pikit/pi-extension-shim"]);
+  expect(refreshKit(project).sort()).toEqual(["@pikit/contracts", "@pikit/core", "@pikit/pi-adapter", "@pikit/pi-extension-shim"]);
 
   const pkg = readPackageJson(project);
   expect(pkg.dependencies).toEqual({ [EXTENSION_ALIAS]: kitSpecifier("@pikit/pi-extension-shim"), "@pikit/core": kitSpecifier("@pikit/core"), hono: "4.13.9" });
   expect(pkg.overrides).toEqual({
+    "@pikit/contracts": kitSpecifier("@pikit/contracts"),
     "@pikit/core": kitSpecifier("@pikit/core"),
     "@pikit/pi-adapter": kitSpecifier("@pikit/pi-adapter"),
     "@pikit/pi-extension-shim": kitSpecifier("@pikit/pi-extension-shim"),

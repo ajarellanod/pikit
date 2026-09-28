@@ -8,7 +8,7 @@
 
 import { test } from "bun:test";
 import { defineComponent } from "@pikit/core";
-import { createChannelConformance } from "@pikit/core/testing";
+import { createChannelConformance } from "@pikit/contracts/testing";
 import { startFakeTelegram } from "./fake-telegram.ts";
 import channelTelegram from "./index.ts";
 

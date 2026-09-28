@@ -1,4 +1,4 @@
-import { defineAgent } from "@pikit/core";
+import { defineAgent } from "@pikit/contracts";
 
 /**
  * The sample's only agent. Claude answers; Pi runs the loop. It names the installed tools it may

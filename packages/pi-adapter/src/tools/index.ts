@@ -12,7 +12,8 @@
  */
 
 import type { AgentHarnessTool, ExecutionEnv } from "@earendil-works/pi-agent-core";
-import type { AgentTool, Context } from "@pikit/core";
+import type { Context } from "@pikit/core";
+import type { AgentTool } from "@pikit/contracts";
 
 export { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-agent-core";
 

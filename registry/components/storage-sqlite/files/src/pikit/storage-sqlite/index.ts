@@ -19,7 +19,8 @@
 import { mkdir } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { defineComponent, type SqlDatabase, type SqlRow, type SqlStatements, type SqlValue } from "@pikit/core";
+import { defineComponent } from "@pikit/core";
+import { type SqlDatabase, type SqlRow, type SqlStatements, type SqlValue } from "@pikit/contracts";
 import Type from "typebox";
 
 const Config = Type.Object({

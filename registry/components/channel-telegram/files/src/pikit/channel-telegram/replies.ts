@@ -14,7 +14,8 @@
  * delivery.
  */
 
-import { type ChannelTransport, DeliveryError, type Logger } from "@pikit/core";
+import { type Logger } from "@pikit/core";
+import { type ChannelTransport, DeliveryError } from "@pikit/contracts";
 import type { TelegramApi } from "./api.ts";
 import { conversationKeyOf } from "./account.ts";
 

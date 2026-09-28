@@ -52,7 +52,7 @@ channel's reply timeout (`channel-http` waits up to 120 s by default).
 
 `server-bun.test.ts` is copied with the component and runs in your project, on 127.0.0.1 and a free
 port. It covers:
-- the `http.route` conformance suite from `@pikit/core/testing`;
+- the `http.route` conformance suite from `@pikit/contracts/testing`;
 - the lifecycle conformance suite, including a stopped server that no longer answers;
 - `/health` and `/ready` while starting, running and stopping;
 - the start failures above, and the body limit.

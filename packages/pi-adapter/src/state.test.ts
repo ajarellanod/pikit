@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { JsonlSessionRepo, MemorySessionRepo, type Session } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { BACKGROUND_CONTEXT } from "@pikit/core";
-import { type AgentStateFixture, createAgentStateConformance } from "@pikit/core/testing";
+import { type AgentStateFixture, createAgentStateConformance } from "@pikit/contracts/testing";
 import { sessionState } from "./state.ts";
 import type { SessionStore } from "./types.ts";
 

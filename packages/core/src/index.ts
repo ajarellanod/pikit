@@ -1,4 +1,6 @@
-// Public surface of @pikit/core (SPEC §12a). Additive changes only within a major.
+// Public surface of @pikit/core, the kernel (SPEC §4, §12a): what `createApp` runs itself, with no
+// word of the domain. The vocabulary components share is in @pikit/contracts. Additive changes only
+// within a major; a new export needs a [decision] (S2), and `exports.test.ts` holds this list.
 
 export { defineComponent, defineApp } from "./app.ts";
 export type {
@@ -27,46 +29,10 @@ export {
 export { Halt, halt } from "./pipeline.ts";
 export type { AppPipelines, ResolvedStage, Stage, StageOptions } from "./pipeline.ts";
 
-export { defineAgent } from "./agent.ts";
-export type {
-  Admission,
-  AgentDefinition,
-  AgentMessage,
-  AgentPayloads,
-  AgentRequest,
-  AgentResult,
-  AgentRuntime,
-  AgentTool,
-  ConversationRef,
-  PrepareContext,
-  TurnConfig,
-  Usage,
-} from "./agent.ts";
-
-export { admitInbound } from "./inbound.ts";
-export type { AdmitOptions, InboundMessage, InboundOutcome, RouteDecision } from "./inbound.ts";
-
 export type { AppEvents } from "./events.ts";
 export type { CapabilityMode, AppCapabilities, AppKeyedCapabilities, Keyed } from "./capabilities.ts";
 
-export type { Clock } from "./contracts/clock.ts";
-export { systemClock } from "./contracts/clock.ts";
-export type { Logger } from "./contracts/logger.ts";
-export type { AgentState } from "./contracts/agent-state.ts";
-export { AGENT_STATE } from "./contracts/agent-state.ts";
-export { CONVERSATION } from "./contracts/conversation-context.ts";
-export type { ConversationRegistry, ConversationReset } from "./contracts/conversations.ts";
-export type { HttpRoute } from "./contracts/http.ts";
-export type { SecretStore } from "./contracts/secrets.ts";
-export type { SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./contracts/storage.ts";
-export type { Feed, FeedItem, FeedPage } from "./contracts/feed.ts";
-export type {
-  ChannelTransport,
-  DeliveryErrorKind,
-  DeliveryReceipt,
-  OutboundMessage,
-  OutboundPiece,
-  OutboundQueue,
-} from "./contracts/outbound.ts";
-export { answerKey, DeliveryError } from "./contracts/outbound.ts";
-export { consoleLogger, silentLogger } from "./contracts/logger.ts";
+export type { Clock } from "./clock.ts";
+export { systemClock } from "./clock.ts";
+export type { Logger } from "./logger.ts";
+export { consoleLogger, silentLogger } from "./logger.ts";

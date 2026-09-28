@@ -5,7 +5,8 @@
 
 import { expect, test } from "bun:test";
 import { MemorySessionRepo } from "@earendil-works/pi-agent-core";
-import { type AgentDefinition, type AppEvents, defineAgent, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type AgentDefinition, defineAgent } from "@pikit/contracts";
 import type { PiExtension } from "./extensions/api.ts";
 import { modelsFrom } from "./models.ts";
 import { createPiRuntime } from "./runtime.ts";

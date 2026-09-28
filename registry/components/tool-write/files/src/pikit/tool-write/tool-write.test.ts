@@ -8,15 +8,8 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import {
-  type AgentTool,
-  BACKGROUND_CONTEXT,
-  CONVERSATION,
-  defineApp,
-  defineComponent,
-  silentLogger,
-  withContextValue,
-} from "@pikit/core";
+import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
+import { type AgentTool, CONVERSATION } from "@pikit/contracts";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
 import toolUnderTest from "./index.ts";
 

@@ -4,7 +4,7 @@
 
 import type { AgentLane, AgentMessage, Context, Entry, OperationResultRecord } from "@earendil-works/pi-agent-core";
 import type { Usage } from "@earendil-works/pi-ai";
-import type { AgentResult, ConversationRef } from "@pikit/core";
+import type { AgentResult, ConversationRef } from "@pikit/contracts";
 import { requestIdOf } from "./inbound.ts";
 
 export async function toResult(

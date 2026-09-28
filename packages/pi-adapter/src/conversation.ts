@@ -21,20 +21,18 @@ import {
   type Session,
 } from "@earendil-works/pi-agent-core";
 import type { Models } from "@earendil-works/pi-ai";
+import { type AppContext, type Context, withContextValue } from "@pikit/core";
 import {
-  AGENT_STATE,
   type Admission,
+  AGENT_STATE,
   type AgentDefinition,
   type AgentRequest,
   type AgentResult,
   type AgentState,
   type AgentTool,
-  type AppContext,
-  type Context,
   CONVERSATION,
   type ConversationRef,
-  withContextValue,
-} from "@pikit/core";
+} from "@pikit/contracts";
 import { detached, toPi } from "./context.ts";
 import type { PiExtension } from "./extensions/api.ts";
 import { type BoundExtensions, loadExtensions } from "./extensions/host.ts";
