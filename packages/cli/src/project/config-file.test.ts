@@ -42,6 +42,17 @@ test("add then remove gives the file back byte for byte, config included", () =>
   expect(back).toBe(BASE);
 });
 
+test("a file without semicolons (prettier's semi: false) gets the import after its last one, in its style", () => {
+  // A `;` later in the code once pulled the insertion point down to it, into the middle of the code.
+  const noSemi = BASE.replaceAll(";\n", "\n")
+    .replace('import { defineApp } from "@pikit/core"', 'import {\n  defineApp,\n} from "@pikit/core"')
+    .replace("export const config = {}\n", 'export const config = {}\nexport const note = "one; two"\n');
+  const next = addComponent(noSemi, { name: "channel-http" });
+  expect(next).toContain('import permissionGate from "./src/extensions/permission-gate.ts"\nimport channelHttp from "./src/pikit/channel-http/index.ts"\n\nexport const config');
+  expect(next).toContain('export const note = "one; two"\n\nexport default');
+  expect(removeComponent(next, "channel-http")).toBe(noSemi);
+});
+
 test("a component that was never listed (a deployment-*) leaves the file unchanged", () => {
   expect(removeComponent(BASE, "deployment-docker")).toBe(BASE);
   expect(removeConfigEntry(BASE, "deployment-docker")).toBe(BASE);
