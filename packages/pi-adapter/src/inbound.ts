@@ -84,6 +84,20 @@ export async function hasRequest(session: Session, lane: AgentLane, requestId: s
 }
 
 /**
+ * The request id of the oldest inbound message waiting in the inbox, or `undefined` if none waits.
+ * Read from Pi's lane records, as `hasRequest` reads them.
+ */
+export async function queuedRequest(session: Session, ctx: Context): Promise<string | undefined> {
+  const state = await session.getValue(laneState(LANE), ctx);
+  for (const item of state?.value.inbox ?? []) {
+    const pending = (await session.getValue(pendingEntry(item.entryId), ctx))?.value;
+    const requestId = pending?.type === "message" ? requestIdOf(pending.payload) : undefined;
+    if (requestId !== undefined) return requestId;
+  }
+  return undefined;
+}
+
+/**
  * Record the requests an abort took out of the inbox. Pi returns them only in memory; without this
  * entry a redelivery would run as new. A crash between Pi's abort and this write loses the record,
  * not a message: the message was already withdrawn.

@@ -12,9 +12,9 @@ import { holdTool, scriptedProvider } from "./testing/index.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 
-async function openLane(tools = [] as ReturnType<typeof holdTool>[]) {
+async function openLane(tools = [] as ReturnType<typeof holdTool>[], provider = scriptedProvider()) {
   const session = await new MemorySessionRepo().create({}, ctx);
-  const models = modelsFrom([scriptedProvider()]);
+  const models = modelsFrom([provider]);
   const model = models.getModel("faux", "scripted");
   if (model === undefined) throw new Error("faux/scripted missing");
   const { harness } = await AgentHarness.create({ session, models, model, tools }, ctx);
@@ -57,6 +57,28 @@ describe("Pi gaps (pi-agent-core 0.87.1)", () => {
       (entry) => entry.type === "message" && entry.message.role === "user",
     );
     expect(users.map((entry) => entry.id)[0]).toBe(late.value.entryId);
+    await harness.close(ctx);
+  });
+
+  test("gap 2: a run that fails leaves what was steered during it in the inbox, and starts nothing", async () => {
+    let reached!: () => void;
+    const inCall = new Promise<void>((resolve) => (reached = resolve));
+    let release!: () => void;
+    const released = new Promise<string>((resolve) => (release = () => resolve("scripted failure")));
+    const { harness, lane } = await openLane([], scriptedProvider({ fail: () => (reached(), released) }));
+    const run = lane.prompt("hello", undefined, ctx);
+    await inCall;
+    const queued = await lane.steer("are you there?", undefined, ctx);
+    if (!queued.ok) throw queued.error;
+    release();
+
+    const ended = await run;
+    expect(ended.ok && "status" in ended.value && ended.value.status).toBe("failed");
+    // Still queued, with no run: only a new run takes it (the adapter's `reconcile`).
+    expect((await lane.inspectExecution(ctx)).current).toBeNull();
+    const watch = await lane.watch(ctx);
+    watch.unsubscribe();
+    expect(watch.snapshot.queues.map((item) => item.entryId)).toEqual([queued.value.entryId]);
     await harness.close(ctx);
   });
 

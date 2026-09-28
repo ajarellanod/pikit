@@ -1022,8 +1022,10 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   own.
   - On an idle conversation, Pi starts a run and drains its inbox into it.
   - On a busy one, `accept()` fails with `LaneBusy`, and the run in progress takes the message
-    at its next boundary. Pi re-reads its inbox inside the commit that ends a run, so a message
-    enqueued before that commit is never left behind.
+    at its next boundary. Pi re-reads its inbox at the final boundary of a run that completes; a
+    run that fails leaves its inbox as it is. So when a run ends, before the conversation can
+    close, the adapter starts a run for the inbound messages still queued (§6.4, gap 2): a
+    message admitted as `queued` is always answered, by the run it joined or by the next one.
 
   Deciding "busy, so steer" first and enqueuing afterwards would race the end of the run
   (§6.4, gap 2). That is why the contract has no `steer()`: `dispatch` is the only way in. It
@@ -1533,7 +1535,7 @@ contracts so the move happens inside the adapter. `[upstream]`
 
 | pikit need | Pi durable runtime | Until it ships (verified by the spike on 0.87.1) |
 |---|---|---|
-| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | Enqueue first (`steer()`), then `accept()`. Pi drains its inbox into a new run, or the run in progress takes the message at a boundary. Bridges gap 2 |
+| Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | Enqueue first (`steer()`), then `accept()`. Pi drains its inbox into a new run, or the run in progress takes the message at a boundary; what a run leaves queued gets the next run. Bridges gap 2 |
 | Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | The `requestId` travels inside the message (a Pi `custom` message) and is found in Pi's inbox or transcript. Bridges gaps 1 and 3 |
 | `agent.state` | Conversation-scoped document (a JSON object with an `initial()`). It can declare `history: "rewindable"` and `fork: "asOf"`, so the state follows a fork or a rewind of the transcript (`pico-v5.md` §3, checked at `cbe7cf00`) | Session value `pikit` / `agent.state` (`state.ts`), holding the updated keys; `get()` merges them over the agent's initial state. It is committed apart from the transcript, so a tool's state change and its result are two commits. A session value belongs to the whole session, not to a branch: correct while pikit never forks or rewinds a conversation. Passes `createAgentStateConformance` on memory and JSONL sessions |
 | Continue a killed run | Tasks resume from their records | `AgentHarness.create()` reports `open` operations; `lane.resume()` continues them; tool `replay` is Pi's |
@@ -1552,7 +1554,7 @@ conformance suite and `adapter.test.ts` prove each bridge. The bridges live in
 | # | Gap in `pi-agent-core` 0.87.1 | Bridge in the adapter | Pi durable runtime |
 |---|---|---|---|
 | 1 | `accept()` does not reject a reused `operationId`: an idle lane runs the same request again | Duplicate check before admission, and one admission at a time per conversation in its worker. One worker owns a conversation (§7.2) | `requestId` deduplicates before any write |
-| 2 | No atomic "run if idle, otherwise queue": a `steer()` that lands after the run's last boundary waits in the inbox for the next run | Enqueue first, then `accept()`. Pi re-reads its inbox in the commit that ends a run, and `accept()` drains it on an idle lane | Admission decides idle or busy in one transaction; an idle input first drains older queued items |
+| 2 | No atomic "run if idle, otherwise queue": a `steer()` that lands after the run's last boundary waits in the inbox for the next run. A run that fails leaves its inbox as it is, and nothing starts a run for it (`main` at `e1787702` does not either) | Enqueue first, then `accept()`, which drains the inbox on an idle lane. And `reconcile` (`conversation.ts`): when a run ends, when a conversation opens with no open run (a worker that died between `steer()` and `accept()`), and when a duplicate is found only in the inbox, an `accept()` with no prompt starts a run for the queued inbound messages, named after the oldest (`agent.started`, `resumed: false`); its result lists them all in `requestIds`. It takes them out of the inbox, so a run that fails again is not retried | Admission decides idle or busy in one transaction; an idle input first drains older queued items; a failed turn marks its inputs `unanswered` and clears or hands off the turn controller (`pico-v5.md` §6) |
 | 3 | `steer()`, `followUp()` and `nextRun()` take no request id | The message is a Pi `custom` message with `details: { requestId }`, committed with it | Queued submissions carry their `requestId` |
 | 4 | `abort()` takes the queued steers and follow-ups out of the inbox and returns them only in memory: a redelivery looks new | After `abort()`, a `custom` entry `pikit.withdrawn { requestIds }`, which the duplicate check reads | `Conversation.abort()` withdraws queued submissions and records them `unanswered` |
 

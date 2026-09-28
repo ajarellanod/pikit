@@ -4,7 +4,8 @@
  * session, and closing it never resets the conversation.
  *
  * Every run of the conversation is driven by this worker, whoever admitted it: a run started by a
- * `dispatch`, or a run a dead worker left open, which is resumed as soon as the conversation opens.
+ * `dispatch`, a run a dead worker left open, which is resumed as soon as the conversation opens, or
+ * a run started for the messages another run left in Pi's inbox (`reconcile`).
  * That is why a run's end always reaches `agent.settled`, with or without a caller waiting.
  *
  * Every run's context carries the conversation (`CONVERSATION`) and its `agent.state` (`AGENT_STATE`),
@@ -36,7 +37,7 @@ import {
 import { detached, toPi } from "./context.ts";
 import type { PiExtension } from "./extensions/api.ts";
 import { type BoundExtensions, loadExtensions } from "./extensions/host.ts";
-import { hasRequest, inboundMessage, LANE, recordWithdrawn } from "./inbound.ts";
+import { hasRequest, inboundMessage, LANE, queuedRequest, recordWithdrawn } from "./inbound.ts";
 import { toResult } from "./result.ts";
 import { sessionState } from "./state.ts";
 import { Turns } from "./turns.ts";
@@ -143,6 +144,8 @@ export class PiConversation {
         pi,
       );
       if (interrupted !== undefined) conversation.resumeOpen(interrupted.operationId, interrupted.kind === "run", ctx);
+      // A message a dead worker queued and never started (it died between `steer` and `accept`).
+      else await conversation.reconcile(ctx);
       return conversation;
     } catch (error) {
       await harness.close(pi).catch(() => {});
@@ -157,13 +160,18 @@ export class PiConversation {
   /**
    * Admit one message (SPEC §6.1): duplicate check, then enqueue as `steer`, then `accept()`. On an
    * idle lane Pi starts a run that drains the inbox; on a busy one it answers `LaneBusy` and the run
-   * in progress takes the message at a boundary, the last one included (gap 2). The caller runs
+   * in progress takes the message at a boundary. A message that run does not take (it failed, or the
+   * message landed after its last boundary: gap 2) gets the next run from `reconcile`. The caller runs
    * this in the conversation's line, so two deliveries of one request never both pass the check.
    */
   async admit(request: AgentRequest, ctx: AppContext): Promise<Admitted> {
     const { requestId } = request;
     const pi = toPi(ctx);
-    if (await hasRequest(this.session, this.lane, requestId, pi)) return { admission: { kind: "duplicate", requestId } };
+    if (await hasRequest(this.session, this.lane, requestId, pi)) {
+      // It may be a duplicate only because it waits in the inbox with no run to take it.
+      await this.reconcile(ctx);
+      return { admission: { kind: "duplicate", requestId } };
+    }
 
     const queued = await this.lane.steer(inboundMessage(requestId, request.prompt), undefined, pi);
     if (!queued.ok) throw queued.error;
@@ -192,6 +200,31 @@ export class PiConversation {
         }),
       started,
     );
+  }
+
+  /**
+   * Start a run for the inbound messages waiting in Pi's inbox when no run is going to take them
+   * (SPEC §6.4, gap 2). Pi 0.87.1 leaves the inbox as it is when a run ends: a message queued behind
+   * a run that failed, or steered after the run's last boundary, or steered by a worker that died
+   * before its `accept()`, would wait for the next message. `accept()` with an empty prompt takes
+   * them out of the inbox into the new run, which is named after the oldest one and answers them all
+   * (`AgentResult.requestIds`). Nothing is queued here: this only asks Pi's inbox. A run that fails
+   * again cannot loop, since its messages are in the transcript by then, no longer in the inbox.
+   * Called in the conversation's line.
+   */
+  private async reconcile(ctx: AppContext): Promise<void> {
+    if (this.closed) return;
+    const pi = toPi(ctx);
+    const requestId = await queuedRequest(this.session, pi);
+    if (requestId === undefined) return;
+    const accepted = await this.lane.accept({ kind: "prompt", operationId: requestId, prompt: [] }, pi);
+    if (!accepted.ok) {
+      // A run is going: it takes the messages at a boundary, and this runs again when it ends.
+      if (LaneBusy.is(accepted.error)) return;
+      throw accepted.error;
+    }
+    const started = runContext(ctx).emit("agent.started", { conversation: this.ref, requestId, resumed: false });
+    this.driveAccepted(requestId, ctx, started);
   }
 
   /**
@@ -295,6 +328,13 @@ export class PiConversation {
       return await toResult(this.lane, this.ref, record, toPi(runCtx));
     } finally {
       this.driving--;
+      // Before the line sees the conversation idle and closes it: what this run left in the inbox.
+      await this.reconcile(this.host.events).catch((error: unknown) => {
+        this.host.events.logger.error("starting a run for queued messages failed; they wait for the next one", {
+          conversation: this.ref.key,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
     }
   }
 }

@@ -416,6 +416,69 @@ describe("a killed worker (SPEC §8.4: replay is Pi's)", () => {
   }, 20_000);
 });
 
+describe("messages left in Pi's inbox (SPEC §6.4, gap 2)", () => {
+  /** A conversation whose worker died after `steer` and before `accept`: its message waits in the inbox. */
+  async function steeredAndDied(s: Awaited<ReturnType<typeof setup>>) {
+    const conversation = await s.conversation();
+    const metadata = (await s.sessions.list(undefined, ctx)).find((m: { id: string }) => m.id === conversation.sessionId);
+    const session = await s.sessions.open(metadata, ctx);
+    const models = modelsFrom([scriptedProvider()]);
+    const model = models.getModel("faux", "scripted");
+    if (model === undefined) throw new Error("faux/scripted missing");
+    const { harness } = await AgentHarness.create({ session, models, model }, ctx);
+    const lane = await harness.lane(LANE, ctx);
+    const steered = await lane.steer(inboundMessage("r1", "lost"), undefined, ctx);
+    if (!steered.ok) throw steered.error;
+    await harness.close(ctx);
+    return conversation;
+  }
+
+  test("a message steered by a worker that died before accept() is answered on redelivery", async () => {
+    const s = await setup();
+    const conversation = await steeredAndDied(s);
+
+    const again = await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "lost" }, s.app.context());
+
+    expect(again.kind).toBe("duplicate");
+    const result = await s.result("r1");
+    expect([result.kind, result.text, result.requestIds]).toEqual(["completed", "answer: lost", ["r1"]]);
+    await s.runtime.close(s.app.context());
+  });
+
+  test("... and when its conversation is resumed, with no message at all", async () => {
+    const s = await setup();
+    const conversation = await steeredAndDied(s);
+
+    await s.runtime.resume(conversation, s.app.context());
+
+    expect((await s.result("r1")).text).toBe("answer: lost");
+    await s.runtime.close(s.app.context());
+  });
+
+  test("a queued run that fails too is not started again: its messages left the inbox", async () => {
+    let requests = 0;
+    let release!: () => void;
+    const released = new Promise<string>((resolve) => (release = () => resolve("scripted failure")));
+    // Every model call fails; the first one only once released.
+    const fail = () => (requests === 1 ? released : Promise.resolve("scripted failure"));
+    const s = await setup({ providers: [scriptedProvider({ onRequest: () => void requests++, fail })] });
+    const conversation = await s.conversation();
+
+    await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "one" }, s.app.context());
+    while (requests === 0) await new Promise((resolve) => setTimeout(resolve, 1));
+    const queued = await s.runtime.dispatch({ requestId: "r2", conversation, prompt: "two" }, s.app.context());
+    release();
+
+    expect(queued.kind).toBe("queued");
+    expect((await s.result("r1")).requestIds).toEqual(["r1"]);
+    const second = await s.result("r2");
+    expect([second.kind, second.requestIds]).toEqual(["failed", ["r2"]]);
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(requests).toBe(2);
+    await s.runtime.close(s.app.context());
+  });
+});
+
 describe("inbound messages", () => {
   test("compaction keeps requests findable, and the conversation goes on after it", async () => {
     const session = await new MemorySessionRepo().create({}, ctx);

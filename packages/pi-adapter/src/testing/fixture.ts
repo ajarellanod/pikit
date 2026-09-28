@@ -21,7 +21,7 @@ import { type AgentDefinition, type ConversationRef } from "@pikit/contracts";
 import type { AgentRuntimeFixture } from "@pikit/contracts/testing";
 import type { HarnessHook } from "../conversation.ts";
 import type { SessionStore } from "../types.ts";
-import { holdTool, scriptedAgent, scriptedProvider } from "./script.ts";
+import { holdTool, scriptedAgent, scriptedProvider, type ScriptedProviderOptions } from "./script.ts";
 
 export interface PiRuntimeUnderTest {
   /** Pass to the runtime: the fixture pauses runs at their end through Pi's `before_run_end` hook. */
@@ -62,8 +62,17 @@ export function createPiRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) 
     });
   };
 
+  let failing: { reach(): void; released: Promise<void> } | undefined;
+  const fail = (): Promise<string> | undefined => {
+    const armed = failing;
+    if (armed === undefined) return undefined;
+    failing = undefined;
+    armed.reach();
+    return armed.released.then(() => "scripted failure");
+  };
+
   const agent = scriptedAgent(hold);
-  const support = testComponents({ sessions, agents: [agent] });
+  const support = testComponents({ sessions, agents: [agent], fail });
   const records = [support.sessions, support.agents, support.provider];
 
   const conversation = async (): Promise<ConversationRef> => {
@@ -82,6 +91,13 @@ export function createPiRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) 
       let resume!: () => void;
       const reached = new Promise<void>((resolve) => (reach = resolve));
       end = { reach, released: new Promise<void>((resolve) => (resume = resolve)) };
+      return { reached, release: () => resume() };
+    },
+    failNext() {
+      let reach!: () => void;
+      let resume!: () => void;
+      const reached = new Promise<void>((resolve) => (reach = resolve));
+      failing = { reach, released: new Promise<void>((resolve) => (resume = resolve)) };
       return { reached, release: () => resume() };
     },
     async interrupted() {
@@ -107,10 +123,12 @@ export interface TestComponents {
  * Test providers of what `agent.runtime` uses. Sessions default to Pi's in-memory repo, agents to
  * the scripted one (whose `hold` returns at once); the provider is `faux`, model `faux/scripted`.
  */
-export function testComponents(options: { sessions?: SessionStore; agents?: AgentDefinition[] } = {}): TestComponents {
+export function testComponents(
+  options: { sessions?: SessionStore; agents?: AgentDefinition[]; fail?: ScriptedProviderOptions["fail"] } = {},
+): TestComponents {
   const sessions = options.sessions ?? new MemorySessionRepo();
   const agents = options.agents ?? [scriptedAgent(holdTool(async () => "released"))];
-  const provider = scriptedProvider();
+  const provider = scriptedProvider(options.fail !== undefined ? { fail: options.fail } : {});
   return {
     sessions: defineComponent({ name: "sessions-fixture", setup: (pikit) => pikit.provide("sessions.store", sessions) }),
     agents: defineComponent({
