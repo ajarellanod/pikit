@@ -136,8 +136,9 @@ Run from the repository root:
   agent that does not name `bash` cannot run commands at all.
 - `test/config.test.ts`: `pikit.config.ts` composes, as `pikit doctor` will check it.
 - `test/anthropic.test.ts`: a real Claude answers, and uses its tools to write a file in the
-  workspace. It runs only when `.pikit/credentials.json` has an `anthropic` entry or
-  `ANTHROPIC_API_KEY` is exported, and is skipped otherwise.
+  workspace. It calls a paid API, so it is opt-in: it runs only with `PIKIT_LIVE=1` and a
+  credential (`.pikit/credentials.json` has an `anthropic` entry or `ANTHROPIC_API_KEY` is
+  exported), and is skipped otherwise: `PIKIT_LIVE=1 bun test samples/http/test/anthropic.test.ts`.
 
 - `test/docker.test.ts`: the sample's Docker files keep `deployment-docker`'s promises: no `.env`,
   `.pikit` or `node_modules` in the image, a non-root user, the volume where the state is, and a stop
