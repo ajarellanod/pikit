@@ -263,6 +263,10 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **Components targeting `cloudflare`** are tested under Miniflare or `wrangler dev`.
 - **Timezones:** never mutate `process.env.TZ` in a test; spawn a subprocess instead. Do not
   rely on `bun test` forcing UTC; run TZ-sensitive parsing under `bun run` too.
+- **Opt-in suites:** a plain `bun test` never calls a paid or external API. `PIKIT_E2E=1` (plus
+  `PIKIT_E2E_DOCKER=1`) runs the CLI e2e suites and `PIKIT_INSTALLER_TEST=1` a real install; the
+  nightly workflow runs both. `PIKIT_LIVE=1` plus a credential runs the live Anthropic test, and it
+  stays manual. A new test that calls a real API is gated on `PIKIT_LIVE`.
 
 ## Things that are easy to get wrong
 
@@ -462,5 +466,9 @@ Record here anything that went wrong twice, or that the user explicitly said not
   (`app.ts`, `lifecycle.ts`); its tests included (`app.test.ts` does). A typecheck in a `/tmp` worktree alone is not proof. Tooling that talks to a
   project's adapter (the CLI) describes the few calls it makes with local types and loads the adapter
   at run time; it does not import it.
+- A worktree under macOS's temp dir (`/var/folders/...`) reports about 47 phantom `typecheck` errors,
+  because `/var` is a symlink to `/private/var` and TypeScript loads some modules twice. It happened
+  to six subagents in one session. Run `typecheck` from the real path (`/private/var/...`), and
+  confirm on the main checkout after merging before calling an error real.
 - macOS has no `timeout` command. Bound a command that may hang with
   `perl -e 'alarm 60; exec @ARGV' <cmd>`, and give hanging tests `--timeout <ms>`.

@@ -5,6 +5,41 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: a Pi extension whose `tool_call` handler throws now blocks the call (fail closed), as Pi
+  does. Before, a failing permission check let the tool run. The error goes to the log, never to the
+  model.
+- adapter: a message queued behind a run that fails, steered after a run's last boundary, or left
+  by a worker that died between `steer` and `accept` now gets a run of its own. Before, it waited in
+  Pi's inbox until the user wrote again, and a redelivery was answered `duplicate`.
+- adapter: fix a deadlock when an extension calls `ctx.abort()` as a run ends; the runtime no longer
+  keeps one entry per session forever.
+- adapter: `close()` waits for conversations still opening, so none is left driving a run after
+  shutdown; `agent.started` always precedes the run's `agent.settled` or `agent.failed`.
+- contracts: the agent-runtime suite has a case for a message queued behind a failing run; its
+  fixture gains `failNext()`.
+- core: a failed rollback is no longer only logged. `start()` rejects with it attached (the start's
+  own failure stays the message and cause), and a `stop()` that interrupted the start rejects, so
+  the process exits non-zero.
+- contracts: the convergence suite also kills the process the instant each commit lands, and
+  injects a storage failure the process survives (fixture option `retryAfterMs`,
+  `SimulatedStorageFailure`). `outbound-durable` fails the second at the write of a delivery (a
+  known bug), marked `test.failing` until it is fixed.
+- cli: a refused or failed `pikit add` leaves the project as it was (`package.json`, `vendor/`,
+  `bun.lock`, `pikit.json`, `pikit.config.ts`). Every check and confirmation, offers included, comes
+  before the first write. `pikit.config.ts` edits work in files without semicolons, in `add` and
+  `remove`.
+- cli: `pikit add` lists every file a component writes outside `src/pikit/<name>/` and names them in
+  its confirmation. A component that would write the project's own records (`package.json`,
+  `pikit.json`, `bun.lock`, `.env`, `.git/`, `vendor/`, `node_modules/`, `.pikit/`…) is refused, even
+  with `--force`; `pikit registry validate` reports it.
+- cli: `pikit doctor` fails, and `pikit remove` refuses without `--force`, when an agent names a
+  tool, an extension or a model provider that no installed component provides.
+- installer: installs a pinned Bun (1.4.2, `PIKIT_BUN_VERSION` to change it) and accepts an existing
+  Bun only from 1.4.0 up to, not including, 2.0.0; `bun upgrade` is no longer run.
+- samples/http: the live Anthropic test runs only with `PIKIT_LIVE=1` and a credential, so a plain
+  `bun test` never calls a paid API.
+- repository: CI runs `bun test`, the typecheck and `registry validate` on every pull request and
+  push to main; a nightly workflow runs the installer and the e2e suites with Docker.
 - component/credentials-file: a write flushes the directory after its rename, as
   `conversations-file` does. Before, a crash right after a token refresh could bring the old file
   back, with a refresh token the provider had already revoked.
