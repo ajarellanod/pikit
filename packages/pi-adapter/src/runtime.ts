@@ -75,9 +75,18 @@ export interface PiRuntime extends AgentRuntime {
    * from the result Pi stored, with its `agent.settled` / `agent.failed` (one `agent.submissions` holds
    * settled already is skipped). Resolves once the runs opening the conversation resumed or started
    * ended (so a caller bounds how many run at once; runs of new messages are not waited for), or when
-   * `ctx` is cancelled.
+   * `ctx` is cancelled. A conversation that can never open (its agent is no longer defined:
+   * `agent_removed`; its session is gone: `session_missing`) has its requests abandoned (`abandon`).
    */
   recover(conversation: ConversationRef, requestIds: readonly string[], ctx: AppContext): Promise<void>;
+  /**
+   * Give up on requests nothing can answer: those of `requestIds` still pending in `agent.submissions`
+   * are settled unanswered with `reason` (`abandoned`), and that settlement is announced as
+   * `agent.failed` (code `abandoned`), so their channel tells the user. Logged. Skipped, for the next
+   * start to look at again, while a run this worker drives in the conversation may still take them.
+   * Without `agent.submissions`, nothing is recorded and this does nothing.
+   */
+  abandon(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<void>;
   /**
    * Close every open conversation. Runs in progress stop being driven and stay open in their
    * sessions; the next worker resumes them. Bounded by `ctx`'s cancellation.
@@ -91,6 +100,16 @@ interface Slot {
   /** Steps queued on `line` and not finished. At zero, with no conversation open, the slot is dropped. */
   queued: number;
   conversation?: PiConversation;
+}
+
+/** Why a conversation can never open: what `recover` abandons its requests for. */
+class Unopenable extends Error {
+  constructor(
+    readonly reason: "agent_removed" | "session_missing",
+    message: string,
+  ) {
+    super(message);
+  }
 }
 
 /** How many slots a runtime holds, for tests; not exported from the package. */
@@ -174,7 +193,7 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
     if (closed) throw new Error("agent.runtime is closed");
     if (slot.conversation !== undefined) return slot.conversation;
     const agent = options.agent(ref.agent);
-    if (agent === undefined) throw new Error(`no agent.definition "${ref.agent}" for conversation ${ref.key}`);
+    if (agent === undefined) throw new Unopenable("agent_removed", `no agent.definition "${ref.agent}" for conversation ${ref.key}`);
     // Resolved before the session opens: a name nothing provides fails the open with nothing to undo.
     const extensions = extensionsOf(agent, options);
     const session = await openSession(options.sessions, ref.sessionId, ctx);
@@ -273,16 +292,44 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
 
     async recover(conversation: ConversationRef, requestIds: readonly string[], ctx: AppContext): Promise<void> {
       const slot = slotOf(conversation.sessionId);
-      const { ended, results } = await serial(slot, async () => {
-        const wasOpen = slot.conversation !== undefined;
-        const opened = await ensureOpen(slot, conversation, ctx);
-        // Only the runs opening it started (one a dead worker left open, one for its inbox): the runs of
-        // messages that arrive meanwhile, or of a conversation already open, are not recover's to wait for.
-        const ended = wasOpen ? Promise.resolve() : opened.runsEnded();
-        return { ended, results: await settleUnrecorded(opened, requestIds, ctx) };
+      let recovered: { ended: Promise<void>; results: AgentResult[] };
+      try {
+        recovered = await serial(slot, async () => {
+          const wasOpen = slot.conversation !== undefined;
+          const opened = await ensureOpen(slot, conversation, ctx);
+          // Only the runs opening it started (one a dead worker left open, one for its inbox): the runs of
+          // messages that arrive meanwhile, or of a conversation already open, are not recover's to wait for.
+          const ended = wasOpen ? Promise.resolve() : opened.runsEnded();
+          return { ended, results: await settleUnrecorded(opened, requestIds, ctx) };
+        });
+      } catch (error) {
+        // Retrying at every start cannot help: the user is told instead of waiting for good.
+        if (error instanceof Unopenable) return runtime.abandon(conversation, requestIds, error.reason, ctx);
+        throw error;
+      }
+      await announceEnds(recovered.results, ctx);
+      await untilAborted(recovered.ended, ctx.abortSignal);
+    },
+
+    async abandon(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<void> {
+      const submissions = options.submissions;
+      if (submissions === undefined) return;
+      const slot = slotOf(conversation.sessionId);
+      // In the line, so no step of this conversation runs meanwhile; never opens it.
+      const run = await serial(slot, async () => {
+        if (slot.conversation !== undefined && !slot.conversation.idle) {
+          ctx.logger.warn("pending requests are not abandoned: a run in their conversation may still take them", { conversation: conversation.key, requests: requestIds, reason });
+          return undefined;
+        }
+        return submissions.abandoned(conversation, requestIds, reason, ctx);
       });
-      await announceEnds(results, ctx);
-      await untilAborted(ended, ctx.abortSignal);
+      if (run === undefined) return;
+      ctx.logger.warn("pending requests were abandoned unanswered; their channel tells the user", {
+        conversation: conversation.key,
+        requests: run.requestIds,
+        reason,
+      });
+      await announceEnds([{ ...run, messages: [] }], ctx);
     },
 
     async close(ctx: AppContext): Promise<void> {
@@ -361,6 +408,6 @@ async function openSession(sessions: SessionStore, sessionId: string, ctx: Conte
     sessions.find !== undefined
       ? await sessions.find(sessionId, pi)
       : (await sessions.list(undefined, pi)).find((candidate: { id: string }) => candidate.id === sessionId);
-  if (metadata === undefined) throw new Error(`session ${sessionId} not found in sessions.store`);
+  if (metadata === undefined) throw new Unopenable("session_missing", `session ${sessionId} not found in sessions.store`);
   return sessions.open(metadata, pi);
 }

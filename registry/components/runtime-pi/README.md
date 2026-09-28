@@ -62,6 +62,16 @@ With `agent.submissions` installed (`submissions-sql`):
   message waiting in Pi's inbox gets a run, and a run that ended without its end being recorded is
   settled from the session and announced. Start does not wait for them; stop cancels what has not
   started. Progress and failures are logged.
+- a message nothing can answer is **abandoned**: settled unanswered (`failed`, code `abandoned`) and
+  announced as `agent.failed`, so its channel asks the user to send it again, instead of being retried
+  at every start. At once when its conversation's agent is no longer defined (`agent_removed`) or its
+  session is gone (`session_missing`); and when, after resuming, it is still unanswered and its
+  conversation's oldest pending message is older than `abandonPendingAfterHours` (default 72, at
+  least 1; `unanswered_too_long`). Each abandon is logged.
+
+```json
+"runtime-pi": { "abandonPendingAfterHours": 72 }
+```
 
 Channels deliver from its `answers` feed, so an answer that ends while they are stopped (a deploy) is
 delivered when they start again. Without it, a run the last process left open waits for the next

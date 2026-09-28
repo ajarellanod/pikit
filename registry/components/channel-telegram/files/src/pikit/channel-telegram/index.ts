@@ -274,8 +274,13 @@ function aborted(signal: AbortSignal | undefined): Promise<void> {
   });
 }
 
-/** What the chat is told about a run: its answer, or that it failed. Nothing for an aborted or empty one. */
+/**
+ * What the chat is told about a run: its answer, or that it failed. Nothing for an aborted or empty one.
+ * A message the runtime abandoned (`abandoned`: nothing could answer it) is never answered: the user
+ * is asked to send it again.
+ */
 function replyText(answer: Pick<RunSettlement, "kind" | "text" | "error">): string | undefined {
+  if (answer.kind === "failed" && answer.error?.code === "abandoned") return "Sorry, we could not answer your message. Please send it again.";
   if (answer.kind === "failed") return `Sorry, something went wrong while answering (${answer.error?.code ?? "error"}). Try again in a moment.`;
   if (answer.kind === "completed" && (answer.text ?? "").trim() !== "") return answer.text;
   return undefined;

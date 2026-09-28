@@ -88,6 +88,7 @@ test("a running process prunes settlements past keepSettledDays at most hourly, 
   const clock = createManualClock();
   const { app, submissions: s, ctx } = await open(temporaryDatabase(), clock, { "submissions-sql": { keepSettledDays: 1 } });
   const conversation = { key: "test:c1", agent: "support", sessionId: "s1" };
+  const admittedAt = clock.now();
   try {
     await s.admitted(conversation, "waiting", ctx);
     await s.settled({ conversation, requestId: "old", requestIds: ["old"], kind: "completed", text: "old" }, ctx);
@@ -99,7 +100,8 @@ test("a running process prunes settlements past keepSettledDays at most hourly, 
 
     expect(await s.get(conversation, "old", ctx)).toBeUndefined();
     expect((await s.get(conversation, "new", ctx))?.kind).toBe("settled");
-    expect(await s.pending(ctx)).toEqual([{ conversation, requestIds: ["waiting"] }]);
+    // Pending, with the app's time of its admission: two days old by now.
+    expect(await s.pending(ctx)).toEqual([{ conversation, requestIds: ["waiting"], oldestAdmittedAt: admittedAt }]);
     const page = await s.answers.read(undefined, 10);
     expect(page.items.map((i) => i.fact.requestId)).toEqual(["new"]);
     expect((await s.answers.read("0", 10)).gap).toBe(true);

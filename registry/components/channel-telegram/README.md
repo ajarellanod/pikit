@@ -56,7 +56,8 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   - Markdown is converted to Telegram's formatting (bold, italics, code, links); if Telegram
     refuses it, the same words are sent as plain text.
   - Answers longer than Telegram's 4096 characters are sent in pieces.
-  - A failed run says so in the chat, with its error code.
+  - A failed run says so in the chat, with its error code. A message the runtime abandoned (code
+    `abandoned`) gets "Sorry, we could not answer your message. Please send it again."
 - **A message is acknowledged to Telegram only once its conversation has it.** A message delivered
   again after a crash is recognised by its id (`telegram:<chat>:<message>`) and answered once.
 - **Sending:**

@@ -432,6 +432,21 @@ test("with agent.submissions: a POST that answered 202 gets its answer with GET 
   await s.app.stop();
 });
 
+test("with agent.submissions: a message the runtime abandoned is 502 abandoned, to GET and to a repeated POST", async () => {
+  const { submissions } = createMemorySubmissions();
+  const s = await started({ submissions, config: { "channel-http": { replyTimeoutMs: 20 } } });
+  expect((await send(s, { conversationId: "c1", text: "hold", messageId: "m1" })).status).toBe(202);
+  const [pending] = await submissions.pending(s.app.context());
+  if (pending === undefined) throw new Error("m1 is not pending");
+
+  await submissions.abandoned(pending.conversation, ["m1"], "agent_removed", s.app.context());
+
+  expect(await get(s, "c1", "m1")).toEqual({ status: 502, body: { requestId: "m1", error: "abandoned" } });
+  expect(await send(s, { conversationId: "c1", text: "hold", messageId: "m1" })).toEqual({ status: 502, body: { requestId: "m1", error: "abandoned" } });
+  s.runtime.hold.release();
+  await s.app.stop();
+});
+
 test("with agent.submissions: GET says a failed run is 502, and an unknown message or conversation is 404", async () => {
   const s = await started({ submissions: createMemorySubmissions().submissions });
   await send(s, { conversationId: "c1", text: "fail", messageId: "m1" });

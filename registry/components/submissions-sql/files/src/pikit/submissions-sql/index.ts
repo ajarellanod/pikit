@@ -76,6 +76,10 @@ export default defineComponent({
           await prune(s, now).catch((error: unknown) => ctx.logger.warn("submissions-sql: pruning old settlements failed", { error: String(error) }));
         }
       },
+      abandoned(conversation, requestIds, reason) {
+        const { store, clock } = running();
+        return store.abandoned(conversation, requestIds, reason, clock.now());
+      },
       pending: () => running().store.pending(),
       get: (conversation, requestId) => running().store.get(conversation.sessionId, requestId),
       answers: { read: (after, limit) => running().store.readAnswers(after, limit) },

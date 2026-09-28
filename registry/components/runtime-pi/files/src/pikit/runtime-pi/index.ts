@@ -12,6 +12,8 @@
  * - `agent.submissions`, if installed (`submissions-sql`): where each admitted message and each run's
  *   end are recorded. At start, the conversations holding a message nobody answered are resumed in the
  *   background (`resume.ts`), with no new message needed; channels deliver answers from its feed.
+ *   Messages that can never be answered are abandoned, and their senders told: at once when their
+ *   agent or session is gone, and after `abandonPendingAfterHours` when resuming did not answer them.
  *
  * Everything that talks to Pi is in `@pikit/pi-adapter`, an npm dependency pinned with Pi: it
  * changes when Pi changes, and this file does not. What is here is the wiring, which is yours to
@@ -28,7 +30,22 @@
 import { BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
 import { type AgentRuntime } from "@pikit/contracts";
 import { createPiRuntime, type HarnessHook, modelsFrom, type PiExtension, type PiRuntime } from "@pikit/pi-adapter";
+import Type from "typebox";
 import { resumePending } from "./resume.ts";
+
+const Config = Type.Object({
+  /**
+   * With `agent.submissions`: how long, in hours, a conversation's oldest pending message may wait
+   * before the ones still unanswered after resuming it at start are abandoned (their channel tells the
+   * user to send them again) instead of being retried at every start. At least 1: a message must
+   * survive a deploy and the run that answers it.
+   */
+  abandonPendingAfterHours: Type.Integer({
+    minimum: 1,
+    default: 72,
+    description: "Hours after which messages still unanswered at start are abandoned, and their senders told. At least 1.",
+  }),
+});
 
 export interface RuntimePiOptions {
   /**
@@ -45,7 +62,8 @@ export interface RuntimePiOptions {
 export function createRuntimePi(options: RuntimePiOptions = {}) {
   return defineComponent({
     name: "runtime-pi",
-    setup(pikit) {
+    config: Config,
+    setup(pikit, config) {
       const sessions = pikit.use("sessions.store");
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
@@ -127,7 +145,9 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           if (recorded !== undefined) {
             // In the background: start does not wait for runs to resume, and stop cancels it.
             const controller = new AbortController();
-            const done = resumePending(created, recorded, background.derive((inner) => withAbortSignal(controller.signal, inner)));
+            const done = resumePending(created, recorded, background.derive((inner) => withAbortSignal(controller.signal, inner)), {
+              abandonAfterMs: config.abandonPendingAfterHours * 60 * 60 * 1_000,
+            });
             resuming = { controller, done };
           }
         },

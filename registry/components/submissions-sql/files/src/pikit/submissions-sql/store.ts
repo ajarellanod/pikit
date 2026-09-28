@@ -42,6 +42,7 @@ interface RequestRow extends SqlRow {
   request_id: string;
   conversation_key: string;
   agent: string;
+  admitted_at: number;
   answer_seq: number | null;
 }
 
@@ -163,15 +164,50 @@ export function createStore(db: SqlDatabase) {
       });
     },
 
+    /**
+     * Those of `requestIds` still pending, settled unanswered by one run appended to the answers, in one
+     * transaction. The run, or `undefined` when none was pending.
+     */
+    async abandoned(conversation: ConversationRef, requestIds: readonly string[], reason: string, now: number): Promise<RunSettlement | undefined> {
+      return db.transaction(async (tx) => {
+        const still: string[] = [];
+        for (const requestId of new Set(requestIds)) {
+          const [row] = await tx.query<{ answer_seq: number | null }>(
+            "SELECT answer_seq FROM submissions_requests WHERE session_id = ? AND request_id = ?",
+            [conversation.sessionId, requestId],
+          );
+          if (row !== undefined && row.answer_seq === null) still.push(requestId);
+        }
+        const [first] = still;
+        if (first === undefined) return undefined;
+        const run: RunSettlement = { conversation, requestId: first, requestIds: still, kind: "failed", error: { code: "abandoned", message: reason } };
+        await tx.run(
+          `INSERT INTO submissions_answers (session_id, request_id, conversation_key, agent, request_ids, kind, text, error_code, error_message, settled_at)
+           VALUES (?, ?, ?, ?, ?, 'failed', NULL, 'abandoned', ?, ?)`,
+          [conversation.sessionId, first, conversation.key, conversation.agent, JSON.stringify(still), reason, now],
+        );
+        const [answer] = await tx.query<{ seq: number }>("SELECT seq FROM submissions_answers WHERE session_id = ? AND request_id = ?", [
+          conversation.sessionId,
+          first,
+        ]);
+        if (answer === undefined) throw new Error("submissions-sql: a run just recorded cannot be read back");
+        for (const requestId of still) {
+          await tx.run("UPDATE submissions_requests SET answer_seq = ? WHERE session_id = ? AND request_id = ?", [answer.seq, conversation.sessionId, requestId]);
+        }
+        return run;
+      });
+    },
+
     /** Requests with no run yet, grouped by session, in admission order. */
     async pending(): Promise<PendingConversation[]> {
       const rows = await db.query<RequestRow>(
-        "SELECT session_id, request_id, conversation_key, agent, answer_seq FROM submissions_requests WHERE answer_seq IS NULL ORDER BY seq",
+        "SELECT session_id, request_id, conversation_key, agent, admitted_at, answer_seq FROM submissions_requests WHERE answer_seq IS NULL ORDER BY seq",
       );
       const bySession = new Map<string, PendingConversation>();
       for (const row of rows) {
-        const entry = bySession.get(row.session_id) ?? { conversation: conversationOf(row), requestIds: [] };
+        const entry = bySession.get(row.session_id) ?? { conversation: conversationOf(row), requestIds: [], oldestAdmittedAt: row.admitted_at };
         entry.requestIds.push(row.request_id);
+        entry.oldestAdmittedAt = Math.min(entry.oldestAdmittedAt, row.admitted_at);
         bySession.set(row.session_id, entry);
       }
       return [...bySession.values()];
@@ -181,7 +217,7 @@ export function createStore(db: SqlDatabase) {
       // One snapshot: a prune between the two reads would otherwise show a settled request with no run.
       return db.transaction(async (tx) => {
         const [request] = await tx.query<RequestRow>(
-          "SELECT session_id, request_id, conversation_key, agent, answer_seq FROM submissions_requests WHERE session_id = ? AND request_id = ?",
+          "SELECT session_id, request_id, conversation_key, agent, admitted_at, answer_seq FROM submissions_requests WHERE session_id = ? AND request_id = ?",
           [sessionId, requestId],
         );
         if (request === undefined) return undefined;
