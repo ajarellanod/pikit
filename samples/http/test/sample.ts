@@ -21,6 +21,8 @@ import { createRuntimePi } from "../../../registry/components/runtime-pi/files/s
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import { createServerBun } from "../../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
 import sessionsJsonl from "../../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
+import storageSqlite from "../../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
+import submissionsSql from "../../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
 import toolBash from "../../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
 import toolEdit from "../../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
 import toolRead from "../../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
@@ -50,6 +52,8 @@ export interface Sample {
   listening: Promise<URL>;
   /** Send a request with the bearer token (or `token`), and read the JSON answer. */
   post(path: string, body?: unknown, token?: string): Promise<{ status: number; body: Record<string, unknown> }>;
+  /** A GET with the bearer token, and its JSON answer. */
+  get(path: string): Promise<{ status: number; body: Record<string, unknown> }>;
   /** The status of a GET. */
   status(path: string): Promise<number>;
   /** Stop the app (idempotent). The data directory stays until `dispose`. */
@@ -76,6 +80,8 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
       toolWrite,
       toolEdit,
       toolBash,
+      storageSqlite,
+      submissionsSql,
       createRuntimePi(options.extensions !== undefined ? { extensions: options.extensions } : {}),
       routerBasic,
       channelHttp,
@@ -85,6 +91,7 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
     config: {
       "sessions-jsonl": { root: join(dataDir, "sessions") },
       "conversations-file": { path: join(dataDir, "conversations.json") },
+      "storage-sqlite": { path: join(dataDir, "pikit.db") },
       "execution-local": { root: join(dataDir, "workspace") },
       "router-basic": { defaultAgent },
       "server-bun": { port: 0, hostname: "127.0.0.1" },
@@ -104,6 +111,10 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
         headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
         ...(body !== undefined && { body: JSON.stringify(body) }),
       });
+      return { status: response.status, body: (await response.json()) as Record<string, unknown> };
+    },
+    async get(path) {
+      const response = await fetch(new URL(path, await listening), { headers: { authorization: `Bearer ${TOKEN}` } });
       return { status: response.status, body: (await response.json()) as Record<string, unknown> };
     },
     async status(path) {

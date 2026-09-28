@@ -1,7 +1,9 @@
 /**
  * The `http` preset is this sample's composition (ROADMAP M1): exactly the registry components
- * `pikit.config.ts` lists, plus `deployment-docker`, which runs it and is not in `pikit.config.ts`. A
- * chat channel chosen instead of `channel-http` brings its durable delivery itself (offered providers).
+ * `pikit.config.ts` lists, plus `deployment-docker`, which runs it and is not in `pikit.config.ts`,
+ * less the providers `runtime-pi` brings itself (offered providers, SPEC §10.5), which `pikit new`
+ * installs with it. A chat channel chosen instead of `channel-http` brings its durable delivery the
+ * same way.
  */
 
 import { expect, test } from "bun:test";
@@ -16,10 +18,12 @@ function preset(): string[] {
 
 /** Components this sample defines itself, which a project keeps in `src/extensions/`. */
 const PROJECT_LOCAL = new Set(["agents"]);
+/** What `runtime-pi` brings: `agent.submissions` and the storage it requires. */
+const OFFERED = new Set(["storage-sqlite", "submissions-sql"]);
 
 test("the http preset lists exactly the sample's registry components, and deployment-docker", () => {
   const listed = preset();
-  const sample = definition.components.map((component) => component.name).filter((name) => !PROJECT_LOCAL.has(name));
+  const sample = definition.components.map((component) => component.name).filter((name) => !PROJECT_LOCAL.has(name) && !OFFERED.has(name));
 
   expect([...listed].sort()).toEqual([...sample, "deployment-docker"].sort());
   expect(new Set(listed).size).toBe(listed.length);
