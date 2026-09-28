@@ -28,7 +28,7 @@ export { CONVERSATION } from "./conversation-context.ts";
 export type { ConversationRegistry, ConversationReset } from "./conversations.ts";
 export type { HttpRoute } from "./http.ts";
 export type { SecretStore } from "./secrets.ts";
-export type { SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
+export type { JsonValue, KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
 export type { Feed, FeedItem, FeedPage } from "./feed.ts";
 export type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "./submissions.ts";
 export type {

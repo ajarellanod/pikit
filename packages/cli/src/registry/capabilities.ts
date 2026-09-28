@@ -100,6 +100,13 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "An async SQL database for records that outlive the process; each component owns its own tables.",
   },
+  "storage.kv": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Small JSON values a component keeps across restarts, by key, in a namespace of its own (a cursor, a token).",
+    offer: true,
+  },
   "sessions.store": {
     mode: "single",
     definedIn: "@pikit/pi-adapter",

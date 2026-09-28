@@ -39,8 +39,43 @@ export interface SqlDatabase extends SqlStatements {
   transaction<T>(work: (tx: SqlStatements) => Promise<T>): Promise<T>;
 }
 
+/**
+ * `storage.kv`: small values a component keeps across restarts, by key: a reader's cursor, a token, a
+ * setting. What needs queries, or several records changed together, is `storage.sql`'s.
+ *
+ * - **A namespace per component.** A component opens the namespace named after it
+ *   (`namespace("channel-telegram")`), as it prefixes its SQL tables with its name. Two namespaces
+ *   never see each other's keys.
+ * - **Values are JSON**, and a value read back is a copy of what was written: changing either changes
+ *   nothing stored. `null` is a value; a missing key is `undefined`.
+ * - **Each call is atomic on its own**, across processes too; there is no transaction across calls or
+ *   keys. Of concurrent `setIfAbsent` calls for a missing key, exactly one writes.
+ *
+ * Pi first: Pi's durable documents are scoped to a session, a conversation or a task; this is a
+ * component's own state, across conversations, which Pi does not keep.
+ */
+export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
+
+/** One component's namespace in `storage.kv`. */
+export interface KeyValueStore {
+  /** The value at `key`, or `undefined` when there is none. `T` is not checked: it is what you wrote. */
+  get<T extends JsonValue = JsonValue>(key: string): Promise<T | undefined>;
+  /** Writes `value` at `key`, replacing any value there. */
+  set(key: string, value: JsonValue): Promise<void>;
+  /** Writes `value` only when `key` has no value; `true` when it wrote. */
+  setIfAbsent(key: string, value: JsonValue): Promise<boolean>;
+  /** Removes the value at `key`, if there is one. */
+  delete(key: string): Promise<void>;
+}
+
+export interface KeyValueStorage {
+  /** The namespace `name`: a component opens the one named after it. */
+  namespace(name: string): KeyValueStore;
+}
+
 declare module "@pikit/core" {
   interface AppCapabilities {
     "storage.sql": SqlDatabase;
+    "storage.kv": KeyValueStorage;
   }
 }
