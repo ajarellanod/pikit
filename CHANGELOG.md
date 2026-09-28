@@ -5,6 +5,17 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: **`pikit.json` version 2.** The CLI's own registry is recorded as `builtin`, not as this
+  machine's path, so a project cloned elsewhere keeps working; a registry inside the project is
+  recorded relative to it, and any other `--registry` path draws a "not portable" warning. A version 1
+  file is read and converted on the next write.
+- cli: `pikit add` keeps the original of every file it installs in `pikit-bases/<sha256>` (committed
+  with the project), the base M3's `upgrade` will merge from; `remove` deletes the ones nothing uses.
+  The plan warns when the registry has uncommitted changes.
+- cli: `pikit.json` records the commit of the kit in `vendor/`; `pikit add` refuses to replace a newer
+  kit with its own older one unless `--force`. A commit the CLI's checkout does not know is only
+  warned about.
+- component/deployment-docker: `.dockerignore` leaves `pikit-bases/` out of the image.
 - spec, adapter: pikit promises the tested tier A of Pi's extension API (tool policy, the run's
   lifecycle and notifications, tools), not every extension; the rest is best-effort or absent
   (SPEC §6.2b). `bun scripts/pi-extension-drift.ts <tag>` lists how Pi's extension API differs from

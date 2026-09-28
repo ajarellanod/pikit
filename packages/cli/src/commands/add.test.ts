@@ -26,8 +26,14 @@ const temp = () => {
   return dir;
 };
 
-function pikit(args: string[], cwd: string) {
-  const run = Bun.spawnSync([process.execPath, MAIN, ...args], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+function pikit(args: string[], cwd: string, env?: Record<string, string>) {
+  const run = Bun.spawnSync([process.execPath, MAIN, ...args], {
+    cwd,
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+    ...(env !== undefined && { env: { ...process.env, ...env } }),
+  });
   return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() };
 }
 
@@ -241,14 +247,22 @@ const cliGit = (...args: string[]) => Bun.spawnSync(["git", "-C", PIKIT_ROOT, ..
 const CLI_IN_GIT = cliGit("rev-parse", "HEAD").exitCode === 0;
 
 test.skipIf(!CLI_IN_GIT)("a project whose kit is newer than this CLI's is refused before any write; --force replaces it", () => {
-  // A commit after this checkout's HEAD, as a newer pikit would have: an object only, no ref moves.
-  const newer = cliGit("-c", "user.email=t@pikit.test", "-c", "user.name=t", "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "a newer kit").stdout.toString().trim();
+  // A commit after this checkout's HEAD, as a newer pikit would have. It is written to a temporary
+  // object store, never to the checkout's own .git: only the CLI runs below see it, as an alternate.
+  const objects = temp();
+  const realObjects = cliGit("rev-parse", "--path-format=absolute", "--git-path", "objects").stdout.toString().trim();
+  const newer = Bun.spawnSync(
+    ["git", "-C", PIKIT_ROOT, "-c", "user.email=t@pikit.test", "-c", "user.name=t", "commit-tree", "HEAD^{tree}", "-p", "HEAD", "-m", "a newer kit"],
+    { stdout: "pipe", stderr: "pipe", env: { ...process.env, GIT_OBJECT_DIRECTORY: objects, GIT_ALTERNATE_OBJECT_DIRECTORIES: realObjects } },
+  ).stdout.toString().trim();
   expect(newer).toMatch(/^[0-9a-f]{40}$/);
+  expect(cliGit("cat-file", "-e", newer).exitCode).not.toBe(0);
+  const seesNewer = { GIT_ALTERNATE_OBJECT_DIRECTORIES: objects };
   const dir = otherKitProject([], newer);
   writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
   const before = snapshot(dir);
 
-  const refused = pikit(["add", "log-events", "--yes"], dir);
+  const refused = pikit(["add", "log-events", "--yes"], dir, seesNewer);
   expect(refused.code).toBe(1);
   expect(refused.err).toContain(`this project's kit (vendor/) comes from pikit ${newer}, which this CLI's checkout`);
   expect(refused.err).toContain("pass --force to replace the kit anyway");
@@ -256,7 +270,7 @@ test.skipIf(!CLI_IN_GIT)("a project whose kit is newer than this CLI's is refuse
   expect(snapshot(dir)).toEqual(before);
 
   // Forced, it goes on to the kit refresh (the install then fails here, and everything is put back).
-  const forced = pikit(["add", "log-events", "--yes", "--force"], dir);
+  const forced = pikit(["add", "log-events", "--yes", "--force"], dir, seesNewer);
   expect(forced.err).toContain("--force: replacing it with this older kit");
   expect(forced.out).toContain("refreshed to this CLI's");
   expect(forced.err).toContain("nothing was added");

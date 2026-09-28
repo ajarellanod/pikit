@@ -2153,7 +2153,7 @@ Rules:
   overwritten without `--force`, as in step 6 of §10.5. A target never leaves the project (no `..`,
   no absolute path), and is never one of the project's own records: `pikit.json`, `package.json`,
   `bun.lock`, `bun.lockb`, `pikit.config.ts`, `.env`, `.env.example`, or anything under `.git/`,
-  `vendor/`, `node_modules/` or `.pikit/` (compared without case). `pikit add` refuses such a component
+  `vendor/`, `pikit-bases/`, `node_modules/` or `.pikit/` (compared without case). `pikit add` refuses such a component
   even with `--force`, since a registry may be anyone's, and `validate` reports it.
 - `replay.tools` is generated too, and only for a component that provides `agent.tool`: each tool's
   name → its `replay` (`"safe"` or `"never"`, §8.4), read from the tool it provides. A component with
