@@ -441,6 +441,10 @@ test("with agent.submissions: GET says a failed run is 502, and an unknown messa
   expect(await get(s, "c1", "nothing-here")).toEqual({ status: 404, body: { requestId: "nothing-here", error: "not_found" } });
   expect(await get(s, "nobody", "m1")).toEqual({ status: 404, body: { requestId: "m1", error: "not_found" } });
   expect((await get(s, "c1", "m1", {})).status).toBe(401);
+  // A malformed escape is the client's mistake: 400, not a 500 from decodeURIComponent.
+  expect((await get(s, "c1", "%E0")).status).toBe(400);
+  expect((await get(s, "%E0", "m1")).status).toBe(400);
+  expect((await s.call("POST /v1/conversations/:id/reset", "/v1/conversations/%E0/reset", { method: "POST", headers: AUTH })).status).toBe(400);
   await s.app.stop();
 });
 
