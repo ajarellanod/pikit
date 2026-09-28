@@ -21,9 +21,10 @@ spec the code is held to.
 
 | Document | Answers | Authority |
 |---|---|---|
+| `SPEC-CORE.md` | What must hold whatever else pikit becomes: the kernel's decisions (K1–K12), Cloudflare, the dashboard | Comes first: every other document and the code must fit it; only the owner changes it |
 | `MANIFESTO.md` | Why pikit exists and what it believes | Every decision is judged against it |
 | `ROADMAP.md` | Which standards always hold, and what each milestone proves | A milestone that breaks a standard is not done |
-| `SPEC.md` | The contracts: layering, lifecycle, capabilities, targets | Code that contradicts it is a bug in one of the two |
+| `SPEC.md` | The contracts and the features: layering, lifecycle, capabilities, targets, components | Code that contradicts it is a bug in one of the two |
 | `IDEA.md` | Positioning, context, and how pikit differs from Flue and others | Background for judgment calls |
 
 Tags in the SPEC:

@@ -5,7 +5,9 @@ standards hold the whole way. A milestone is done when its proof runs, not when 
 are ticked.
 
 - The **why** is in `MANIFESTO.md`.
-- The **contracts** are in `SPEC.md`.
+- What **must hold** (the kernel's decisions, Cloudflare, the dashboard) is in `SPEC-CORE.md`,
+  which comes first.
+- The **contracts and features** are in `SPEC.md`.
 - The **how we work** is in `AGENTS.md`.
 
 ---
@@ -417,6 +419,9 @@ improvements.
 
 ### M4 — The contracts are real
 
+**Required** (SPEC-CORE §4): Cloudflare is not optional, and track K cannot finish without this
+milestone's proof.
+
 **Proves:** the same project runs at the edge, which means none of the contracts was hiding
 a server.
 
@@ -446,15 +451,56 @@ built as removable components:
 **Scope:** `execution-cloudflare-container`, `workspace-container`,
 `workspace-r2-snapshot`, `approvals` on Workflows. (`channel-google-chat` moved up: see M2.)
 
+### Required tracks
+
+Two tracks run beside the milestones. They are required (SPEC-CORE §1), and they do not wait for
+the features: a feature milestone never blocks them, and no 1.0 ships without them.
+
+#### K — The kernel is stable
+
+**Proves:** `@pikit/core` can promise the whole 1.x line (SPEC-CORE §3).
+
+**Done when:**
+- K1–K7 and K10–K12 are applied: no `Target` in the kernel; every `deployment-*` entrypoint bounds
+  the rollback, checked by a conformance case that hangs one; no runtime event schemas; config is a
+  plain validated object; `Context` frozen as pikit's own; `stop()` documented and tested as
+  optional for correctness; several Apps per project; deprecation warnings and `doctor` hints; the
+  kernel's own TypeBox range; a type test against the packed tarball.
+- The kernel has no syntax Node's type stripping rejects (parameter properties in `context.ts`
+  and `pipeline.ts`), builds to JavaScript, and a Node smoke test runs it in CI.
+- M4's proof is green: a run survives Durable Object eviction.
+- `@pikit/core` is published as 1.0. `@pikit/contracts` stays 0.x on its own schedule.
+
+**Evidence:** `exports.test.ts` unchanged by the proofs, the Node smoke test, M4's eviction test,
+the type test.
+
+#### D — The service is visible
+
+**Proves:** a running pikit service can be seen and operated without reading logs or files
+(SPEC-CORE §5).
+
+**Done when:**
+- `admin-dashboard` installs with `pikit add` and leaves nothing when removed (S3).
+- It shows the composition, conversations and their runs, delivery and health, from contracts and
+  feeds, built with Beautiful UI primitives, with no paid dependency.
+- Its actions (abort, reset, talk to an agent) go through existing contracts.
+- It runs on the server and on Cloudflare.
+- The two `[open]` decisions of SPEC-CORE §5 are settled first.
+
+**Depends on:** M2's feeds (delivery receipts, submissions) for what must not be missed; M4 for
+Cloudflare.
+
 ### 1.0 — The promise
 
 pikit reaches 1.0 when:
-1. All seven scenarios are green on every target they declare.
+1. All eight scenarios (SPEC §15) are green on every target they declare.
 2. Every contract is `stable` under S12 (SPEC §4.9).
 3. Every standard above has an automated check.
 4. SPEC §12a is in force.
 5. The server target runs on Node ≥ 22 as well as Bun, from the published packages built to
    JavaScript, with a Node smoke test in CI (SPEC §9.1). Today it runs on Bun only.
+6. Tracks K and D are done (SPEC-CORE §1): the kernel is published as 1.0, and the dashboard runs
+   on both targets.
 
 From then on the programming model does not get rewritten.
 

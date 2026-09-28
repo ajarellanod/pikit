@@ -1,7 +1,8 @@
 # pikit — Technical Specification
 
-Status: **draft v0.1**. §4 (core) is implemented in `packages/core`; the rest describes
-intent and contracts. `[open]` is undecided, `[decision]` is settled, `[planned]` is agreed
+`SPEC-CORE.md` comes first: it holds what must hold (the kernel's decisions, Cloudflare, the
+dashboard), and this file must fit it. This file holds the contracts and the features. What is
+built is tracked in `ROADMAP.md` only. `[open]` is undecided, `[decision]` is settled, `[planned]` is agreed
 but not built, and `[upstream]` depends on experimental Pi APIs and must be isolated behind
 the Pi adapter. Principles live in `MANIFESTO.md`; milestones and the standards they must
 meet live in `ROADMAP.md`.
@@ -170,7 +171,7 @@ calls `start` in dependency order and `stop` in reverse (§4.6). Because setup a
 nothing, a failed `create()` has nothing to clean up.
 
 `[decision]` `setup` receives `pikit: Pikit`, which is **not** a context. It carries the
-read-only `target`, `config`, `logger` and `clock`, the registration verbs (`on`, `pipeline`,
+read-only `target` (leaving the kernel: SPEC-CORE K1), `config`, `logger` and `clock`, the registration verbs (`on`, `pipeline`,
 `provide`, `provideKeyed`, `use`, `useOptional`, `useKeyed`) and `halt`. It has no `emit`,
 `run`, `derive`, `abortSignal` or `value`: emitting or running a pipeline during setup would
 reach other components' handlers before the graph is validated. Work happens in `start`/`stop`
@@ -246,17 +247,8 @@ declare module "@pikit/core" {
 }
 ```
 
-For events that cross a process or persistence boundary (queues, webhooks, restored state) a
-runtime schema is also registered. `[planned]` — built with the first component that
-persists an event (`outbound-durable`):
-
-```ts
-pikit.registerEvent({
-  name: "acme.customer.created",
-  version: 1,
-  schema: Type.Object({ customerId: Type.String(), plan: Type.String() }),
-});
-```
+Events are never persisted, so they have no runtime schema and there is no `registerEvent`
+(SPEC-CORE K3). A fact that must cross a process or survive a restart is a feed (§4.8).
 
 ### 4.4 Pipelines
 
@@ -422,6 +414,8 @@ component: systemd's stop timeout, a Durable Object's `blockConcurrencyWhile`), 
 - Abandoned work is visible: a `warn` when it is abandoned.
 - The rollback of a failed start does not inherit the start's cancellation, which is usually
   why it runs. It is bounded only by a `stop()` that interrupts the start.
+- `stop()` may never run (a `kill -9`, an eviction): it is for tidiness, never for correctness
+  (SPEC-CORE K6). A failed start's rollback is bounded by the host's `stop(ctx)` (SPEC-CORE K2).
 - A failed rollback is never only logged: `start()` rejects with an `AggregateError` of the
   rollback's stop failures, whose message and `cause` are still the start's own failure.
 
@@ -2632,13 +2626,15 @@ and are not in a preset.
 
 ## 12. Configuration
 
-- `config/pikit.yaml` — non-secret values. Schema is the merge of core schema + every
-  installed component's schema; validated at `doctor`, `dev`, `up`, `deploy`.
+- The kernel takes the config as a plain object: the merge of every installed component's schema
+  under its name, validated and deep-frozen (SPEC-CORE K4). Today the object is `export const
+  config` in `pikit.config.ts`, checked by `doctor`, `dev` and `up`. A values file (YAML) and
+  profiles are features of the CLI, `[planned]`; the kernel never reads a file.
 - `.env` (server) / Worker secrets (cloudflare) — secrets, read through `secrets` capability.
   With `deployment-docker`, compose passes `.env` to the container when it starts (`env_file`);
   `.dockerignore` keeps it out of the build context, so no image ever contains a secret.
-- Profiles: `config/<profile>.yaml` overlays for `--profile`.
-- YAML is parsed with a YAML 1.2 parser; `on/off/yes/no` are strings. `[decision]`
+- When a values file exists: `config/<profile>.yaml` overlays for `--profile`, and YAML is parsed
+  with a YAML 1.2 parser, so `on/off/yes/no` are strings. `[decision]`
 - The validated config is a deep-frozen copy. `ctx.config` is shared by every component, so a
   mutation would be a hidden coupling between them; frozen, it throws where it happens. The
   caller's objects are never defaulted or frozen in place. `[decision]`
@@ -2836,7 +2832,7 @@ is that the answer is "nothing" for every minor.
 
 ## 15. Acceptance scenarios (design validation)
 
-The design is considered validated when all five pass without touching the core:
+The design is considered validated when all eight pass without touching the core:
 
 1. **Minimal**: `runtime-pi` + `server-bun` + `channel-http` → working agent over HTTP. Runs
    (M1) in `samples/http`, with `secrets-env`, `sessions-jsonl`, `conversations-file`,
@@ -2887,8 +2883,8 @@ And the runtime proof:
   I/O, so a sync store can run it as one step.
 - Where the conversation registry lives on Cloudflare when a *global* view is needed (list
   all conversations): D1 index vs per-DO only. Probably per-DO + optional D1 index component.
-- Config format: YAML vs TypeScript-only. TS gives types for free; YAML is friendlier for
-  `configure` wizards. Current lean: YAML for values, TS for composition.
+- Config format for values (YAML or TypeScript only): a CLI question, not the kernel's, which takes a
+  plain object (SPEC-CORE K4).
 - Streaming to channels that support message editing (Telegram, Google Chat): a
   `channel.transport` optional `edit()` + a `stream-to-edit` component, or core support.
 - Multi-tenant isolation guarantees: routing is not isolation. Document clearly; consider a

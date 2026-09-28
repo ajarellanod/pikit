@@ -5,6 +5,13 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- docs: **`SPEC-CORE.md`**, what must hold whatever else pikit becomes, comes before every other
+  document: the kernel's twelve decisions (no `Target` in the kernel, no persisted events, config as
+  a plain object, a frozen `Context`, `stop()` never needed for correctness, several Apps per
+  project, stability only after Node and Cloudflare prove it…), Cloudflare as a required target,
+  and a required dashboard built with Beautiful UI. `ROADMAP.md` gains the required tracks K (the
+  kernel is stable) and D (the service is visible). SPEC §12 no longer describes a
+  `config/pikit.yaml` the CLI never read.
 - cli: **`pikit.json` version 2.** The CLI's own registry is recorded as `builtin`, not as this
   machine's path, so a project cloned elsewhere keeps working; a registry inside the project is
   recorded relative to it, and any other `--registry` path draws a "not portable" warning. A version 1
