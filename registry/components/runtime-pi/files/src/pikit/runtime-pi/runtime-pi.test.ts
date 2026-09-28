@@ -84,6 +84,18 @@ test("at start, a conversation agent.submissions holds pending is resumed, with 
   }
 }, 30_000);
 
+test("stop, with no deadline, does not wait for an agent.submissions whose pending() never answers", async () => {
+  const { submissions } = createMemorySubmissions();
+  const hung: AgentSubmissions = { ...submissions, pending: () => new Promise(() => {}) };
+  const { sessions, agents, provider } = testComponents();
+  const app = await defineApp({ components: [sessions, agents, provider, memorySubmissions(hung), runtimePi], logger: silentLogger }).create();
+  await app.start();
+
+  const stopped = app.stop().then(() => "stopped");
+
+  expect(await Promise.race([stopped, Bun.sleep(2_000).then(() => "still waiting")])).toBe("stopped");
+});
+
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const { sessions, agents, provider } = testComponents();
   const app = await defineApp({ components: [sessions, agents, provider, runtimePi], logger: silentLogger }).create();

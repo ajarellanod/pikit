@@ -214,3 +214,116 @@ test("a failed admission record fails the dispatch, and the run still ends recor
   }
   await s.runtime.close(s.ctx);
 }, 10_000);
+
+/** A hold that never returns until the run is aborted. */
+const abortableHold = (context: PiContext, started: () => void) =>
+  new Promise<string>((_, reject) => {
+    started();
+    context.abortSignal?.addEventListener("abort", () => reject(new Error("aborted")), { once: true });
+  });
+
+test("a redelivery of a request Pi ran but agent.submissions never heard of settles it from the session", async () => {
+  const sessions = new MemorySessionRepo();
+  const { submissions } = createMemorySubmissions();
+  // Two crashes: the process that took r1 died before `admitted`, the one that ran it before `settled`.
+  const first = await setup({ sessions });
+  const conversation = await first.conversation();
+  await first.runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, first.ctx);
+  await first.result("r1");
+  await first.runtime.close(first.ctx);
+
+  const next = await setup({ sessions, submissions });
+  expect((await next.runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, next.ctx)).kind).toBe("duplicate");
+
+  const status = await submissions.get(conversation, "r1", next.ctx);
+  expect(status?.kind === "settled" && status.run.text).toBe("answer: hello");
+  expect((await next.result("r1")).text).toBe("answer: hello");
+  // Delivered again: recorded already, so nothing is recorded or announced twice.
+  await next.runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, next.ctx);
+  expect((await submissions.answers.read(undefined, 10)).items).toHaveLength(1);
+  expect(next.results).toHaveLength(1);
+  await next.runtime.close(next.ctx);
+});
+
+test("recover settles a request steered into a run named after another, not pending, request", async () => {
+  const sessions = new MemorySessionRepo();
+  const { submissions } = createMemorySubmissions();
+  // r1 was never recorded (its admission failed); r2 joined its run; the run ended and nobody recorded it.
+  const first = await setup({ sessions });
+  const conversation = await first.conversation();
+  await first.runtime.dispatch({ requestId: "r1", conversation, prompt: "hold" }, first.ctx);
+  await first.hold.started;
+  await first.runtime.dispatch({ requestId: "r2", conversation, prompt: "change course" }, first.ctx);
+  first.hold.release();
+  expect((await first.result("r1")).requestIds).toEqual(["r1", "r2"]);
+  await first.runtime.close(first.ctx);
+  await submissions.admitted(conversation, "r2", first.ctx);
+
+  const next = await setup({ sessions, submissions });
+  await next.runtime.recover(conversation, ["r2"], next.ctx);
+
+  const status = await submissions.get(conversation, "r2", next.ctx);
+  expect(status?.kind === "settled" && [status.run.requestId, status.run.text]).toEqual(["r1", "answer: change course"]);
+  expect(await submissions.pending(next.ctx)).toEqual([]);
+  expect((await next.result("r1")).requestIds).toEqual(["r1", "r2"]);
+  await next.runtime.close(next.ctx);
+});
+
+test("recover settles as aborted a request an abort withdrew, when the process died before recording it", async () => {
+  const sessions = new MemorySessionRepo();
+  const { submissions } = createMemorySubmissions();
+  // The abort's withdrawn record is in the session; the process died before `settled`.
+  const first = await setup({ sessions, hold: abortableHold });
+  const conversation = await first.conversation();
+  await first.runtime.dispatch({ requestId: "a1", conversation, prompt: "hold" }, first.ctx);
+  await first.hold.started;
+  await first.runtime.dispatch({ requestId: "a2", conversation, prompt: "never mind" }, first.ctx);
+  await first.runtime.abort(conversation, first.ctx);
+  await first.result("a1");
+  await first.runtime.close(first.ctx);
+  await submissions.admitted(conversation, "a2", first.ctx);
+
+  const next = await setup({ sessions, submissions });
+  await next.runtime.recover(conversation, ["a2"], next.ctx);
+
+  const status = await submissions.get(conversation, "a2", next.ctx);
+  expect(status?.kind === "settled" && [status.run.kind, status.run.requestIds]).toEqual(["aborted", ["a2"]]);
+  expect(await submissions.pending(next.ctx)).toEqual([]);
+  await next.runtime.close(next.ctx);
+});
+
+test("recover with a stale pending list announces nothing already settled", async () => {
+  const sessions = new MemorySessionRepo();
+  const { submissions } = createMemorySubmissions();
+  const first = await setup({ sessions });
+  const conversation = await first.conversation();
+  await submissions.admitted(conversation, "r1", first.ctx);
+  await first.runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, first.ctx);
+  await first.result("r1");
+  await first.runtime.close(first.ctx);
+
+  const next = await setup({ sessions, submissions });
+  const stale = await submissions.pending(next.ctx);
+  // Settled meanwhile (here by a first recover; in production, by the run a new message resumed).
+  await next.runtime.recover(conversation, ["r1"], next.ctx);
+  for (const { conversation: c, requestIds } of stale) await next.runtime.recover(c, requestIds, next.ctx);
+
+  expect(next.results.map((r) => r.requestId)).toEqual(["r1"]);
+  await next.runtime.close(next.ctx);
+});
+
+test("recover does not wait for a run a new message started in the conversation", async () => {
+  const { submissions } = createMemorySubmissions();
+  const s = await setup({ submissions });
+  const conversation = await s.conversation();
+  await s.runtime.dispatch({ requestId: "r1", conversation, prompt: "hold" }, s.ctx);
+  await s.hold.started;
+
+  const recovered = s.runtime.recover(conversation, ["r0"], s.ctx).then(() => "recovered");
+  const outcome = await Promise.race([recovered, Bun.sleep(1_000).then(() => "waited for r1")]);
+
+  expect(outcome).toBe("recovered");
+  s.hold.release();
+  await s.result("r1");
+  await s.runtime.close(s.ctx);
+});

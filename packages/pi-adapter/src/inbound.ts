@@ -65,14 +65,7 @@ function entryHolds(entry: Entry, requestId: string): boolean {
  * (`laneState`, `pendingEntry`), which follow Pi's storage layout: one more reason to pin Pi.
  */
 export async function hasRequest(session: Session, lane: AgentLane, requestId: string, ctx: Context): Promise<boolean> {
-  const state = await session.getValue(laneState(LANE), ctx);
-  for (const item of state?.value.inbox ?? []) {
-    const pending = (await session.getValue(pendingEntry(item.entryId), ctx))?.value;
-    if (pending?.type === "message" && requestIdOf(pending.payload) === requestId) return true;
-    if (pending?.type === "custom" && pending.customType === WITHDRAWN && withdrawnIds(pending.payload).includes(requestId)) {
-      return true;
-    }
-  }
+  if (await inInbox(session, requestId, ctx)) return true;
   const scans = [
     lane.findEntries({ type: "message", order: "newestFirst", limit: DEDUP_WINDOW }, ctx),
     lane.findEntries({ type: "custom", customType: WITHDRAWN, order: "newestFirst", limit: DEDUP_WINDOW }, ctx),
@@ -81,6 +74,47 @@ export async function hasRequest(session: Session, lane: AgentLane, requestId: s
     if (entries.some((entry) => entryHolds(entry, requestId))) return true;
   }
   return false;
+}
+
+/** Whether `requestId` waits in the inbox, as a message or in a withdrawn record not committed yet. */
+export async function inInbox(session: Session, requestId: string, ctx: Context): Promise<boolean> {
+  const state = await session.getValue(laneState(LANE), ctx);
+  for (const item of state?.value.inbox ?? []) {
+    const pending = (await session.getValue(pendingEntry(item.entryId), ctx))?.value;
+    if (pending?.type === "message" && requestIdOf(pending.payload) === requestId) return true;
+    if (pending?.type === "custom" && pending.customType === WITHDRAWN && withdrawnIds(pending.payload).includes(requestId)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+/**
+ * The requests one abort withdrew together with `requestId` (the whole record, as `abort()` settled
+ * them), or `undefined` if no abort withdrew it within the window.
+ */
+export async function withdrawnWith(lane: AgentLane, requestId: string, ctx: Context): Promise<string[] | undefined> {
+  const entries = await lane.findEntries({ type: "custom", customType: WITHDRAWN, order: "newestFirst", limit: DEDUP_WINDOW }, ctx);
+  for (const entry of entries) {
+    const ids = entry.type === "custom" ? withdrawnIds(entry.data) : [];
+    if (ids.includes(requestId)) return ids;
+  }
+  return undefined;
+}
+
+/**
+ * The ids of the inbound messages committed before `requestId`'s, newest first, within the window;
+ * empty if `requestId` is not in the transcript. A run is named after the first message it takes, so
+ * the run that took `requestId` is named after it or after one of these.
+ */
+export async function requestsBefore(lane: AgentLane, requestId: string, ctx: Context): Promise<string[]> {
+  const entries = await lane.findEntries({ type: "message", order: "newestFirst", limit: DEDUP_WINDOW }, ctx);
+  const ids = entries.flatMap((entry) => {
+    const id = entry.type === "message" ? requestIdOf(entry.message) : undefined;
+    return id === undefined ? [] : [id];
+  });
+  const at = ids.indexOf(requestId);
+  return at < 0 ? [] : ids.slice(at + 1);
 }
 
 /**

@@ -19,23 +19,25 @@ export const RESUME_AT_ONCE = 4;
 /** Resumes every pending conversation; `ctx`'s cancellation stops taking new ones. Never rejects. */
 export async function resumePending(runtime: PiRuntime, submissions: AgentSubmissions, ctx: AppContext): Promise<void> {
   const logger = ctx.logger;
-  let pending: Awaited<ReturnType<AgentSubmissions["pending"]>>;
+  let pending: Awaited<ReturnType<AgentSubmissions["pending"]>> | undefined;
   try {
-    pending = await submissions.pending(ctx);
+    // Bounded by `ctx`: a provider that never answers must not hold `stop`, which waits for this task.
+    pending = await untilAborted(submissions.pending(ctx), ctx.abortSignal);
   } catch (error) {
     logger.error("runtime-pi: could not read the conversations with unanswered messages; they resume when they get a new one", { error: String(error) });
     return;
   }
-  if (pending.length === 0) return;
+  if (pending === undefined || pending.length === 0) return;
   const messages = pending.reduce((sum, p) => sum + p.requestIds.length, 0);
   logger.info("runtime-pi: resuming conversations with unanswered messages", { conversations: pending.length, messages });
 
   const stopped = (): boolean => ctx.abortSignal?.aborted === true;
+  const list = pending;
   let next = 0;
   let failed = 0;
   const worker = async (): Promise<void> => {
-    while (next < pending.length && !stopped()) {
-      const { conversation, requestIds } = pending[next++] as (typeof pending)[number];
+    while (next < list.length && !stopped()) {
+      const { conversation, requestIds } = list[next++] as (typeof list)[number];
       try {
         await runtime.recover(conversation, requestIds, ctx);
       } catch (error) {
@@ -49,10 +51,36 @@ export async function resumePending(runtime: PiRuntime, submissions: AgentSubmis
       }
     }
   };
-  await Promise.all(Array.from({ length: Math.min(RESUME_AT_ONCE, pending.length) }, worker));
+  await Promise.all(Array.from({ length: Math.min(RESUME_AT_ONCE, list.length) }, worker));
   if (stopped()) {
-    logger.info("runtime-pi: stopped resuming conversations; the rest resume at the next start", { started: next, of: pending.length });
+    logger.info("runtime-pi: stopped resuming conversations; the rest resume at the next start", { started: next, of: list.length });
     return;
   }
-  logger.info("runtime-pi: resumed the conversations with unanswered messages", { conversations: pending.length, failed });
+  logger.info("runtime-pi: resumed the conversations with unanswered messages", { conversations: list.length, failed });
+}
+
+/** `work`'s value, or `undefined` once `signal` aborts first. A late rejection of `work` is swallowed. */
+function untilAborted<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T | undefined> {
+  if (signal === undefined) return work;
+  if (signal.aborted) {
+    work.catch(() => {});
+    return Promise.resolve(undefined);
+  }
+  return new Promise<T | undefined>((resolve, reject) => {
+    const onAbort = () => {
+      work.catch(() => {});
+      resolve(undefined);
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+    work.then(
+      (value) => {
+        signal.removeEventListener("abort", onAbort);
+        resolve(value);
+      },
+      (error: unknown) => {
+        signal.removeEventListener("abort", onAbort);
+        reject(error);
+      },
+    );
+  });
 }
