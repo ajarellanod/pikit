@@ -2652,14 +2652,27 @@ is that the answer is "nothing" for every minor.
 - **Convergence** (`createConvergenceConformance`): for components that react through records
   (§4.8). The fixture gives the records (a `storage.sql` database that outlives processes), the
   components of one process, a scenario (what the outside world does) and an invariant. The suite
-  runs the scenario with the process killed after each commit in turn: `k` commits go through, and
-  at the next one the database refuses it and every later call, as it would for a dead process,
-  and the fixture's fakes of the outside world stop answering it. What the process did between
-  commit `k` and its death happened, as in a real crash: a send after a commit whose outcome is
-  lost is where duplicates come from. Then a new process starts over the same records, the world
-  repeats the scenario (it retries what went unacknowledged), and the invariant must hold. It also
-  runs the scenario twice with no crash. Its own test proves that a consumer reading a feed passes
-  and one reacting to events alone fails. `outbound-durable` passes it, next to its SIGKILL test.
+  cuts the process at each commit in turn, three ways. A dead process's database refuses every
+  call, and the fixture's fakes of the outside world stop answering it.
+  - **Death at the next commit:** `k` commits go through and the process dies when it attempts the
+    next. What it did in between happened: a send after a commit whose outcome is lost is where
+    duplicates come from.
+  - **Death the instant a commit lands:** commit `k` is durable and the process dies before its
+    caller continues. Nothing after it happened: a task claimed whose effect never ran is where
+    lost work comes from.
+  - **A storage failure the process survives:** commit `k` is refused once, records unchanged, and
+    the process runs on. The world repeats the scenario on the same process a bounded number of
+    times, moving the clock by the fixture's `retryAfterMs` (the component's own retry delay), and
+    the invariant must hold by then. A consumer whose failed pass waits for the next event fails it.
+
+  The first two together cover a death before and after each stretch of effects between two
+  commits; a death between two effects of one stretch is the fixture's to fake. After a death, a
+  new process starts over the same records, the world repeats the scenario (it retries what went
+  unacknowledged), and the invariant must hold. It also runs the scenario twice with no crash. Its
+  own test proves that a consumer reading a feed passes, one reacting to events alone fails, and
+  one that takes a claimed task for done passes the first cut and fails the second.
+  `outbound-durable` passes both deaths, next to its SIGKILL test; it fails the storage failure
+  at the write of a delivery (known bug C1), marked `test.failing` until it is fixed.
 - **Execution conformance** (`createExecutionConformance` in `@pikit/pi-adapter/testing`): every
   `execution` and `execution.shell`. It checks what Pi's tools rely on:
   - paths relative to `cwd`, and reading, writing, appending, listing, renaming and removing;
