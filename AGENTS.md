@@ -352,6 +352,10 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
 - **`component.json` and presets have a schema.** Change their shape in `ManifestSchema`
   (`packages/cli/src/registry/manifest.ts`) or `PresetSchema` (`packages/cli/src/project/registry-source.ts`),
   then `bun run registry generate` rewrites `registry/schema/`; `validate` fails while it is stale.
+- **An answer has one path at a time.** With `agent.submissions` installed, a channel delivers from its
+  `answers` feed with its own cursor and `agent.settled` only wakes it; delivering from both sends twice
+  without an outbox. Without it, the event is the only path, and an answer it cannot send is logged,
+  never dropped silently (SPEC §4.8, §6.1).
 
 ## Git and docs
 

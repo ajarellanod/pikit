@@ -522,7 +522,7 @@ interface FeedItem<T> {
 
 - **The producer owns its facts.** It records each one in the same commit as the change it
   describes, and exposes them as a `Feed` inside its own capability contract (`outbound.queue`'s
-  `receipts`, §5). A feed is a contract type, not a capability: there is no feed registry, no bus,
+  `receipts`, §5; `agent.submissions`' `answers`, §6.1). A feed is a contract type, not a capability: there is no feed registry, no bus,
   and the core stores nothing.
 - **Order.** `read` returns facts in commit order, and a fact committed after a read never appears
   before a cursor that read returned: a reader that saved cursor `c` misses nothing by reading after
@@ -536,6 +536,11 @@ interface FeedItem<T> {
   event wakes it, applies what it reads idempotently, and saves the new cursor in the same
   transaction as what it did. A crash, a missed event or a failed listener only delay it; a fact
   applied twice changes nothing. No transaction spans two components.
+- **Answers travel by feed too.** `[decision]` (M2) With `agent.submissions` installed (§6.1), the
+  runtime records every run's end before its `agent.settled`, and a chat channel delivers the answer
+  from `answers` with its own cursor; the event only wakes it. An answer that ends while the channel
+  is stopped (a deploy stops channels before the runtime), whose `enqueue` fails, or whose process
+  dies between the event and the enqueue, is delivered when the channel reads again.
 - **Rejected: a durable event bus.** Persisting every event and replaying it to every listener would
   turn events into a queue, make every listener idempotent, and put one component at the centre of
   all the others. Pi has none either.
@@ -642,6 +647,7 @@ capability agent.runtime.dispatch(AgentRequest) → Admission, once the message 
 the run, in the worker (Pi lifecycle; the adapter re-emits selected Pi events as agent.*)
   │  emit agent.started
   │  emit agent.settled | agent.failed   (from Pi's run_end, also for a run resumed after a crash)
+  │  (with agent.submissions: the run's end is recorded first; channels deliver from its answers, §6.1)
   ▼
 pipeline outbound.prepare          → OutboundMessage
   │  emit outbound.requested
@@ -663,10 +669,13 @@ pipeline outbound.prepare          → OutboundMessage
   transport that can fail. `outbound.prepare`, `channel.transport` and the outbox arrive in M2 with
   `outbound-durable` and the first channel that sends to a platform. No `outbound-direct` component
   is built, because M2 would replace it.
-- **Duplicates.** A POST whose `messageId` is already in the conversation gets
-  `409 { requestId, error: "duplicate" }` and does not run. Its answer went to the first POST and
-  is in the session. pikit keeps no copy of answers to return again; Pi's durable runtime will make
-  a submission awaitable until its answer (§6.4).
+- **Duplicates.** A POST whose `messageId` is already in the conversation does not run. Without
+  `agent.submissions` it gets `409 { requestId, error: "duplicate" }`: its answer went to the first
+  POST and is in the session. With it (M2), it answers with the message's outcome as the first POST
+  would have (`202` while the run goes on), and `GET /v1/conversations/:id/messages/:messageId` reads
+  that outcome later (`200` / `202` / `502` / `409 aborted`, `404` unknown in the conversation's
+  current session, `501` without `agent.submissions`), through the same `http.authenticate`. Pi's
+  durable runtime will make a submission awaitable until its answer (§6.4).
 
 **The inbound path in code.** `[decision]` The steps after authentication are one function in
 `@pikit/contracts`, a protocol function (§4.9), `admitInbound(ctx, message, { conversations, runtime, key, beforeDispatch? })`, the
@@ -678,7 +687,7 @@ returns what happened:
 | Outcome | When | `channel-telegram` | `channel-http` |
 |---|---|---|---|
 | `admitted` | durable in its conversation (`started` or `queued`) | "typing…", then the answer | waits for the answer (`200` / `202`) |
-| `duplicate` | the conversation already has the message | nothing | `409 duplicate` |
+| `duplicate` | the conversation already has the message | nothing | `409 duplicate`; its outcome with `agent.submissions` |
 | `halted` | a stage of `inbound.normalize` or `route.resolve` stopped it | "I can't take that message." | `422` (normalize) / `403` (route) |
 | `denied` | the router decided no agent answers | "Sorry, I can't answer that here." | `403 denied` |
 | `no_route` | no stage of `route.resolve` decided (logged as an error) | "This bot is not set up to answer yet." | `500 no_route` |
@@ -723,6 +732,14 @@ returns what happened:
   - **Without it:** the answer is sent directly through the same transport, retried in the process;
     a reply lost to a crash while sending is not sent again (the answer is in the session).
   - The channel's own short replies (commands, a refused stranger, "typing…") are always direct.
+  - **With `agent.submissions` and `storage.sql`** (M2, §4.8): the answers come from `answers`, read
+    with a cursor in the channel's own table (`channel_telegram_cursors`) when it starts, on each
+    `agent.settled` / `agent.failed`, and every 30 s. Each answer is applied (enqueued, idempotent by
+    `answerKey`; or sent directly), then the cursor saved; a failed apply is tried again after 1 s,
+    5 s, 30 s, then every minute. `storage.sql` holds the cursor because a component's state goes
+    through a capability (rule 5), and the reader, not the producer, owns its place (§4.8).
+  - **Without them**, the answers come from the events, and every one the channel cannot send is
+    logged as a warning: one that ends while it is stopped, one whose `enqueue` fails.
 
 **Channels, accounts and keys.** `[decision]` (M1.5)
 - A channel component may serve several accounts of its platform: two Telegram bots, two Google
@@ -857,10 +874,16 @@ function answerKey(conversation: Pick<ConversationRef, "sessionId">, requestId: 
 - **Why `attach`.** A keyed `channel.transport` capability used by the queue, and the queue used by
   the channel, would be a cycle. With `attach`, the queue starts before the channels and stops after
   them, so a send in flight ends, or is aborted by the stop deadline, before its transport goes.
-- **Known gap** `[upstream]`: between the run's answer being recorded in Pi's session and `enqueue`
-  storing it there is a window (an `agent.settled` listener, milliseconds). A crash in it loses that
-  delivery; the answer stays in the session. Pi's durable runtime has the same gap, with no commit
-  hook at turn completion (§6.4); closed when it gains one.
+- **From the session to the outbox.** `[decision]` (M2) With `agent.submissions`, the answer
+  travels through records (§4.8): the runtime records the run's end, and the channel enqueues it from
+  `answers` with its own cursor. Two stretches are left, and both converge: a crash between Pi's
+  commit of the run's end and that record is settled at the next start from the result Pi stored
+  (`recover`, §6.1), and a record that fails while the process lives is tried again (1 s, 5 s, 30 s,
+  2 min), then at the next start. Without `agent.submissions`, the answer reaches the outbox only
+  through `agent.settled`: a channel stopped when the run ends (a deploy stops channels before the
+  runtime), a failed `enqueue`, or a crash between the event and the enqueue loses the delivery, and
+  the answer stays in the session. Pi's durable runtime has no commit hook at turn completion either
+  (§6.4).
 - Each transport states its semantics (rule 7): Telegram is at-least-once with the marker; a
   platform with idempotent sends is effectively once.
 
@@ -950,10 +973,11 @@ first attempt crashed. So:
   again. In-flight claims expire, so a crash does not block a conversation forever.
 - **Logical deduplication belongs to Pi.** Once a message reaches the conversation, it is
   submitted with `requestId = InboundMessage.id`; Pi deduplicates submissions per
-  conversation and tracks each one to its answer (§6.4). pikit does not track "was this
-  message answered" itself. `[upstream]` — until Pi's durable runtime ships, the adapter
+  conversation and tracks each one to its answer (§6.4). pikit does not decide a duplicate
+  from a record of its own. `[upstream]` — until Pi's durable runtime ships, the adapter
   hands the message to Pi with its `requestId` inside and finds duplicates in Pi's inbox and
-  transcript (§6.1, §6.4). pikit keeps no record of its own.
+  transcript (§6.1, §6.4). `agent.submissions` (§6.1) records what became of each message, to
+  resume and deliver it across processes; it never decides a duplicate.
 - The guarantee is **at-least-once**: a crash between effect and commit can repeat a reply.
   Effectful tools stay safe through idempotency keys (§8.4).
 - Without `inbound-dedup` there is no deduplication — no table, no LRU, no half-measure.
@@ -1036,7 +1060,8 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
 - **Answers are events, not return values.** Pi reports every run's end (`run_end`) whether
   anyone waits for it or not. That includes a run whose caller stopped waiting, and a run that
   a new worker resumed after a crash, which no `dispatch` call is waiting for. The adapter
-  emits `agent.settled` / `agent.failed` from that event, and delivery (§5) follows the event.
+  emits `agent.settled` / `agent.failed` from that event, and delivery (§5) follows the event, or,
+  with `agent.submissions`, the record of the run's end written before it.
   `dispatch` therefore returns only the admission.
 - **The admission is the ack point.** `dispatch` resolves once Pi has committed the run or the
   queued message to the session. That is "durably accepted" in §5: a channel may acknowledge
@@ -1054,7 +1079,7 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
     request cannot both pass the check.
   - A run takes the `requestId` of the message that started it as its `operationId`.
 
-  pikit keeps no record of its own.
+  pikit keeps no deduplication record of its own.
 - **`abort()` is cooperative.** Pi signals the running tools and waits for them to return; the
   run then ends as `aborted`. A tool that ignores `context.abortSignal` holds `abort()` until it
   finishes.
@@ -1102,6 +1127,66 @@ of a submission in Pi's durable runtime, so moving to that runtime happens insid
   attempt's usage on its entry, so the reading survives the move (§6.4). A run that called no model
   reports zero. The field stays optional in the contract: another runtime may not know its cost.
 
+**`agent.submissions`** `[decision]` (M2). What became of each admitted message, across processes:
+the record Pi's durable runtime keeps per session (its submissions, §6.4), which `pi-agent-core`
+0.87.1 does not, plus what one session cannot know, which sessions hold unanswered work. Optional:
+without it, the runtime behaves exactly as above (S3).
+
+```ts
+interface AgentSubmissions {
+  /** Once Pi holds the message, before `dispatch` resolves. A known request is left as it is. */
+  admitted(conversation: ConversationRef, requestId: string, ctx: AppContext): Promise<void>;
+  /** A run ended: every id in `run.requestIds` is settled by it, and `run` appended to `answers`, in one commit. Idempotent. */
+  settled(run: RunSettlement, ctx: AppContext): Promise<void>;
+  /** Conversations with requests admitted and not settled, the oldest first. */
+  pending(ctx: AppContext): Promise<{ conversation: ConversationRef; requestIds: string[] }[]>;
+  /** One request in a session: pending, settled with its run, or undefined. */
+  get(conversation: Pick<ConversationRef, "sessionId">, requestId: string, ctx: AppContext): Promise<SubmissionStatus | undefined>;
+  /** Every settlement, in commit order (§4.8). */
+  readonly answers: Feed<RunSettlement>;
+}
+
+/** An `AgentResult` without its transcript and usage, which stay in the session. */
+type RunSettlement = Pick<AgentResult, "conversation" | "requestId" | "requestIds" | "kind" | "text" | "error">;
+type SubmissionStatus =
+  | { kind: "pending"; conversation: ConversationRef; requestId: string }
+  | { kind: "settled"; conversation: ConversationRef; requestId: string; run: RunSettlement };
+```
+
+- **Recorded before the ack.** `dispatch` records `admitted` after Pi has committed the message and
+  before it resolves, and a channel acknowledges its platform only once `dispatch` resolved (§5), so
+  a platform is told "received" only once Pi and the record both hold the message. A failed record
+  fails the `dispatch`: the platform delivers the message again, a duplicate, while the run Pi
+  already holds goes on and is settled like any other. A crash between Pi's commit and the record
+  leaves the message unacknowledged; its redelivery opens the conversation, which resumes the run.
+  It is recorded outside the conversation's line: a run that ends first has settled the request
+  already, and a settled request stays settled.
+- **Settled before the event.** Every run's end is recorded in the conversation's line, after its
+  result is read and before `agent.settled` / `agent.failed`, for a started, a queued-into, a
+  reconciled and a resumed run alike. A channel the event wakes finds it in `answers`. Messages
+  `abort()` withdraws are settled `aborted` in a settlement of their own, as Pi's durable runtime
+  records them `unanswered`. A failed record is tried again in the background (1 s, 5 s, 30 s,
+  2 min), then left pending for the next start.
+- **Resumed at start** (§7). `runtime-pi` reads `pending()` in the background once it has started,
+  and opens each of those conversations with the adapter's `PiRuntime.recover(conversation,
+  requestIds, ctx)`, four at a time: a run a dead worker left open is resumed, messages in Pi's inbox
+  get a run (gap 2), and a request whose run ended without its end recorded (the process died between
+  Pi's commit and `settled`) is settled from the result Pi stored (`lane.getResult`) and announced
+  with `agent.settled`, with no `agent.started` before it. `recover` resolves once the runs it resumed
+  ended, which is what bounds the runs at once. Start does not wait for it; stop cancels what has not
+  started; progress and failures are logged. A pending request no run can settle is logged and
+  looked at again at the next start.
+- **Answers.** `answers` is a feed (§4.8): `channel-telegram` delivers from it (§5), `channel-http`
+  answers `GET` and a repeated POST from `get`. A settlement carries the run's final text, not its
+  transcript: what a channel delivers after a restart, kept for the provider's retention
+  (`submissions-sql`: 7 days, then pruned with the requests it settled; pending requests are never
+  pruned). The session stays the source of truth.
+- **Size.** One row per request and one per run, the final text included: an answer is stored once
+  more, for a week, as the outbox already stores it until it is delivered.
+- `createSubmissionsConformance` (§14) holds every provider to this, `createMemorySubmissions` is its
+  double; `submissions-sql` (on `storage.sql`) is the first provider, offered with `runtime-pi`.
+  `experimental` until a second.
+
 Who owns these types `[decision]`: `@pikit/contracts` owns the *shapes* (`defineAgent`,
 `AgentDefinition`, `TurnConfig`, `AgentRequest`, `AgentResult`, `AgentRuntime`), because they
 are the programming model (§12a; the first three are `stable`, the runtime's `experimental` until
@@ -1123,6 +1208,9 @@ and the payload of `conversation.reset`), and `HttpRoute` (`http.route`). For ag
 `@pikit/contracts/testing` has the state's suite, `createAgentStateConformance`. For feeds (§4.8): `Feed`,
 `FeedPage` and `FeedItem`, with `createFeedConformance` and `createMemoryFeed` in `@pikit/contracts/testing`.
 For delivery (§5): `answerKey` and `DeliveryReceipt`, next to the outbound contracts.
+For submissions (§6.1): `AgentSubmissions`, `RunSettlement`, `SubmissionStatus` and `PendingConversation`
+(`agent.submissions`), with `createSubmissionsConformance` and `createMemorySubmissions` in
+`@pikit/contracts/testing`.
 `@pikit/pi-adapter` fills in `AgentPayloads` and types `sessions.store` (Pi's `SessionRepo`),
 `model.provider` (pi-ai's `Provider`) and `model.credentials` (pi-ai's `CredentialStore`) by
 importing it anywhere in the project.
@@ -1144,7 +1232,7 @@ what a single Pi process cannot provide for itself. Verified against `pi-agent-c
 | Agent loop, providers (`pi-ai`), compaction, retries (`RetryPolicy`) | Channels, ingress, authentication, deduplication |
 | Steering, follow-up and next-run queues, persisted as the session inbox | Routing messages to agents (multi-agent) |
 | Serialized writes per session; exclusive open of a session within a process | Ownership of a session **across** processes (§7.2) |
-| Resume of the operations a dead worker left open; tool replay (`replay: "safe" \| "never"`) | Durable delivery (outbox), scheduling, approvals surfaces |
+| Resume of the operations a dead worker left open; tool replay (`replay: "safe" \| "never"`) | Durable delivery (outbox), which conversations to resume at start (`agent.submissions`, §6.1), scheduling, approvals surfaces |
 | Tool hooks, tool execution modes, turn preparation / finish hooks; `read` / `write` / `edit` / `bash` tools over `ExecutionEnv` | Tool components that give Pi's tools a capability and a `replay`; policy; sandboxes via `execution` |
 | Session values, branches, forks, usage records | Conversation registry, reset, workspace references |
 | Skills, prompt templates, system prompt assembly | Deployment, secrets, targets, `doctor` |
@@ -1574,6 +1662,7 @@ contracts so the move happens inside the adapter. `[upstream]`
 |---|---|---|
 | Message to a busy conversation | Submission with `whenBusy: "steer"` (pikit's default) | Enqueue first (`steer()`), then `accept()`. Pi drains its inbox into a new run, or the run in progress takes the message at a boundary; what a run leaves queued gets the next run. Bridges gap 2 |
 | Logical deduplication, "was it answered?" | Submission `requestId`, awaitable until `done` / `unanswered` with its answer | The `requestId` travels inside the message (a Pi `custom` message) and is found in Pi's inbox or transcript. Bridges gaps 1 and 3 |
+| What became of each message across processes; which sessions hold unanswered work | Submissions per session, `queued → placed → done` (with the answer entry) `| unanswered` (with a reason), committed with the session. It recovers work only in a session someone opens: which ones to open is the host's (`pico-v5.md` §5–§6). Package 18 of `pico-v5-handoff.md`, not implemented (packages 1–7 are), checked at `c1449660` | `agent.submissions` (`submissions-sql`, §6.1): `admitted` / `settled` per request, `pending()` across sessions, the `answers` feed. On the move, the per-session record (`admitted`, `settled`, `get`) becomes Pi's, and the contract is bridged to it or deleted; the index across sessions (`pending`, the host's job) and the feed channels deliver from stay pikit's |
 | `agent.state` | Conversation-scoped document (a JSON object with an `initial()`). It can declare `history: "rewindable"` and `fork: "asOf"`, so the state follows a fork or a rewind of the transcript (`pico-v5.md` §3, checked at `cbe7cf00`) | Session value `pikit` / `agent.state` (`state.ts`), holding the updated keys; `get()` merges them over the agent's initial state. It is committed apart from the transcript, so a tool's state change and its result are two commits. A session value belongs to the whole session, not to a branch: correct while pikit never forks or rewinds a conversation. Passes `createAgentStateConformance` on memory and JSONL sessions |
 | Continue a killed run | Tasks resume from their records | `AgentHarness.create()` reports `open` operations; `lane.resume()` continues them; tool `replay` is Pi's |
 | Multi-step work, waits, approvals that last days | Durable tasks: phases, effect sandwich (commit intent → effect → commit outcome), memos, `sleep(until)`, abort protocol | `state.phase` + tools; nothing more is built |
@@ -1664,6 +1753,8 @@ permanent; the worker is disposable. Everything else follows from five invariant
    of the same conversation never overlap.
 4. **Workers are disposable.** Losing a worker loses no actor: the next owner opens the
    session, `resume()` continues the run, and the inbox is still there (replay rules in §8.4).
+   With `agent.submissions`, the runtime opens at start every conversation holding a message nobody
+   answered (§6.1), with no new message; without it, the next message to the conversation does.
 5. **Idle actors cost only storage.** No open session, timer or sandbox is kept for an idle
    conversation. Closing a session deactivates the actor; it never resets it.
 
@@ -2383,8 +2474,9 @@ once. Two lines depend on what gets installed, never on the preset's name: `runt
 A preset lists only what every project made from it uses. What a component is better with comes
 with the component, decided by capabilities, never by naming other components (S4):
 - A capability the component can use (`useOptional`) that the catalogue marks `offer`, and that
-  nothing installed provides: its provider is offered. Today only `outbound.queue` is marked: a chat
-  channel brings `outbound-durable`. A per-agent `workspace` is not: it changes where agents work, so
+  nothing installed provides: its provider is offered. Today `outbound.queue` (a chat channel brings
+  `outbound-durable`) and `agent.submissions` (`runtime-pi` and the channels bring `submissions-sql`,
+  so every new project has it) are marked. A per-agent `workspace` is not: it changes where agents work, so
   it is a choice, never an offer.
 - A capability an offered component requires (`use`), and nothing provides: its provider comes too
   (`outbound-durable` needs `storage.sql`: `storage-sqlite`).
@@ -2709,10 +2801,12 @@ is that the answer is "nothing" for every minor.
 - **Agent runtime conformance** (`createAgentRuntimeConformance` in `@pikit/contracts/testing`):
   every `agent.runtime` passes it. It drives a scripted agent that the fixture provides (each
   turn answers `answer: <newest inbound message>`; `hold` blocks in a tool until released;
-  `holdAtEnd()` pauses a run after its final answer) and observes only the capability and the
+  `holdAtEnd()` pauses a run after its final answer; `failNext()` makes the next model call wait,
+  then fail) and observes only the capability and the
   `agent.*` events. It covers admission (`started` / `queued` / `duplicate`, concurrent
   deliveries included), a message answered by the run in progress even when it arrives as that run
-  ends, `agent.settled` with nobody waiting, a cancelled caller that does not stop the run,
+  ends, a message queued behind a run that fails getting a run of its own and its answer,
+  `agent.settled` with nobody waiting, a cancelled caller that does not stop the run,
   `abort()` withdrawing queued messages that stay duplicates, and a run left open by a dead worker:
   resumed by `resume()` or by the next `dispatch`, answering the messages dispatched to it, its
   request still a duplicate. The fixture's `interrupted()` provides that dead worker; the Pi
@@ -2767,6 +2861,13 @@ is that the answer is "nothing" for every minor.
   that change nothing, cursors that survive a restart, a malformed cursor rejected, and `gap`
   exactly when facts after the cursor were pruned. `createMemoryFeed` is the in-memory double and
   passes it.
+- **Submissions conformance** (`createSubmissionsConformance`): every `agent.submissions` (§6.1).
+  Pending after `admitted`, grouped by conversation in admission order; `admitted` twice changing
+  nothing; a run settling every request it took and appended to `answers` once; the same run settled
+  again changing nothing; a request keeping its first settlement; a request never admitted settled
+  all the same; requests per session; kind, text and error kept; and, when the fixture can, records
+  that survive a restart and pruning that keeps what is pending. `answers` also runs the feed suite.
+  `createMemorySubmissions` is the in-memory double and passes it.
 - **Convergence** (`createConvergenceConformance`): for components that react through records
   (§4.8). The fixture gives the records (a `storage.sql` database that outlives processes), the
   components of one process, a scenario (what the outside world does) and an invariant. The suite
@@ -2791,6 +2892,8 @@ is that the answer is "nothing" for every minor.
   one that takes a claimed task for done passes the first cut and fails the second.
   `outbound-durable` passes both deaths, next to its SIGKILL test; it fails the storage failure
   at the write of a delivery (known bug C1), marked `test.failing` until it is fixed.
+  `submissions-sql` passes all three, with a runtime double and a channel double that reads `answers`
+  from a cursor in `storage.sql`: every admitted message ends settled and its answer delivered.
 - **Execution conformance** (`createExecutionConformance` in `@pikit/pi-adapter/testing`): every
   `execution` and `execution.shell`. It checks what Pi's tools rely on:
   - paths relative to `cwd`, and reading, writing, appending, listing, renaming and removing;
@@ -2802,8 +2905,8 @@ is that the answer is "nothing" for every minor.
   Pi's `NodeExecutionEnv` is the double, with and without a shell.
 - Contracts ship **conformance suites** (`@pikit/contracts/testing`; Pi's contracts in
   `@pikit/pi-adapter/testing`): any `sessions.store`,
-  `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue` and `Feed`
-  implementation must pass its suite. Pi's session conformance is reused for
+  `storage.sql`, `workspace`, `execution`, `channel.transport`, `outbound.queue`, `agent.submissions`
+  and `Feed` implementation must pass its suite. Pi's session conformance is reused for
   `sessions.store`.
 - Components ship their own tests inside `files/` so they are copied into the user's project
   and keep running there.
@@ -2850,7 +2953,10 @@ The design is considered validated when all five pass without touching the core:
    `packages/cli/src/e2e-telegram.test.ts` runs `new --preset telegram` → `configure` → `dev` → an
    answer in the chat, against a fake Bot API.
 3. **Reliability**: `+ outbound-durable` → delivery retried after simulated channel failure;
-   channel component unchanged.
+   channel component unchanged. With `submissions-sql` (M2), no admitted message goes unanswered:
+   a process killed after Telegram's ack answers at the next start with no new message, an answer
+   that ends while the app stops reaches the chat at the next start, and an HTTP `202` is read later
+   with `GET` (`samples/http/test/answers.test.ts`).
 4. **Swap**: `remove sessions-sqlite`, `add sessions-postgres` → router/channel/agent
    untouched; conformance suite green.
 5. **Custom**: `pikit create extension company-policy` → alters routing and blocks a tool
