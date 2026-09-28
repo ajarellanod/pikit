@@ -8,8 +8,7 @@
   },
   "files": ["src"],
   "engines": {
-    "bun": ">=1.4.0",
-    "node": ">=22"
+    "bun": ">=1.4.0"
   },
   "dependencies": {
     "@pikit/core": "workspace:*"

@@ -453,6 +453,8 @@ pikit reaches 1.0 when:
 2. Every contract is `stable` under S12 (SPEC §4.9).
 3. Every standard above has an automated check.
 4. SPEC §12a is in force.
+5. The server target runs on Node ≥ 22 as well as Bun, from the published packages built to
+   JavaScript, with a Node smoke test in CI (SPEC §9.1). Today it runs on Bun only.
 
 From then on the programming model does not get rewritten.
 

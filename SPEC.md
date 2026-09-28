@@ -16,7 +16,7 @@ meet live in `ROADMAP.md`.
 2. **Source-owned components** installed into the user's project, editable and removable.
 3. A **typed, event-driven app lifecycle** covering the full path from inbound message to
    delivered reply, modeled the way Pi models the agent loop.
-4. **Two runtimes from the same project**: long-running server (Bun/Node) and serverless
+4. **Two runtimes from the same project**: long-running server (Bun; Node by 1.0, §9.1) and serverless
    Cloudflare Workers + Durable Objects.
 5. **Pi as the agent runtime**, consumed through its public, runtime-neutral packages.
 6. A CLI that makes add / edit / remove / diff / upgrade practical.
@@ -1884,7 +1884,11 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
 
 ### 9.1 Server
 
-- Process: Bun ≥ 1.4 (preferred) or Node ≥ 22.
+- Process: Bun ≥ 1.4. `[planned]` Node ≥ 22 too, required for 1.0 (ROADMAP, "1.0"). It is not
+  claimed today: the kit packages ship TypeScript source, which Node does not strip inside
+  `node_modules`, and use parameter properties, which Node's type stripping rejects
+  (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`). It arrives with the published packages built to JavaScript
+  and a Node smoke test in CI; until then no `package.json` lists `node` in `engines`.
 - HTTP: a thin `server-bun` component (Hono or `Bun.serve`) exposing `/health`, `/ready`,
   channel webhooks, and admin routes contributed by components.
 - Routes are the keyed capability `http.route` (§4.5) `[decision]`: a standard fetch handler under

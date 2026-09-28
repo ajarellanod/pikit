@@ -101,8 +101,11 @@ Never design from memory of Pi's API; its API changes faster than this document.
 ## Stack
 
 - TypeScript, ESM only. Bun >= 1.4.0 for development and tests (enforced by
-  `scripts/require-bun.ts` through `bunfig.toml`, because Bun ignores `engines`). Node ≥ 22 must also work for the
-  server target. The Cloudflare target is built with Wrangler.
+  `scripts/require-bun.ts` through `bunfig.toml`, because Bun ignores `engines`). Bun is the only
+  runtime today: the kit ships TypeScript source, which Node does not run from `node_modules`, and
+  uses parameter properties, which Node's type stripping rejects. Node ≥ 22 for the server target is
+  a 1.0 requirement (ROADMAP, "1.0"; SPEC §9.1): it arrives with the published, built packages and a
+  Node smoke test in CI. Do not claim it before then. The Cloudflare target is built with Wrangler.
 - `typebox` for schemas (the same library Pi uses). No zod.
 - A YAML 1.2 parser. Do not use `Bun.YAML`: it implements YAML 1.1, where `off` and `on`
   become booleans.

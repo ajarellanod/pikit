@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- repository: **correction.** pikit runs on Bun only; no `package.json` lists `node` in `engines`
+  any more. The kit ships TypeScript source that Node does not run. Node ≥ 22 is a 1.0 requirement
+  (SPEC §9.1).
 - adapter: a Pi extension whose `tool_call` handler throws now blocks the call (fail closed), as Pi
   does. Before, a failing permission check let the tool run. The error goes to the log, never to the
   model.

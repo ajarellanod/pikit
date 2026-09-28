@@ -99,7 +99,7 @@ Same agents, same routing, same channels. Different infrastructure underneath.
 - **A registry of components**: channels, routers, session stores, outboxes, schedulers,
   approval engines, executors, workspaces, deployment targets. Each one is source you copy.
 - **A CLI**: `new`, `add`, `remove`, `diff`, `upgrade`, `doctor`, `up`, `deploy`.
-- **Two first-class runtimes**: a long-running server (Bun/Node, Docker, systemd) and
+- **Two first-class runtimes**: a long-running server (Bun, and Node by 1.0; Docker, systemd) and
   serverless Cloudflare Workers + Durable Objects (optionally with Containers for shell
   access).
 
