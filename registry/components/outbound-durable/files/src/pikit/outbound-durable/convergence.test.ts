@@ -90,7 +90,7 @@ function fixture(): ConvergenceFixture {
 }
 
 for (const c of createConvergenceConformance(fixture)) {
-  // Known bug C1: send and markDelivered share a try/catch, see report-macro.md point 6. A failed
+  // Known bug: send and markDelivered share one try/catch in queue.ts. A failed
   // write of a delivery (commits 13, 14 and 16 of 18, one per piece) is taken for a failed send: the
   // piece is sent again after the backoff without the possible-duplicate mark. `failing` flips to a
   // failure once queue.ts is fixed: then this line goes.
