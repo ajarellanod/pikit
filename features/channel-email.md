@@ -1,0 +1,32 @@
+# Email channel
+
+**Public appeal:** ⭐ Write to your agent as you would to a person, and forward it things. Hermes'
+gateway talks over email.
+
+**Specified:** idea
+
+**Needed by:** nothing required.
+
+## What it gives
+An address for the agent: an email starts or continues a conversation, and the answer is a reply in
+the same thread.
+
+## How it fits pikit
+- `channel-email`: receives by IMAP polling (server, no public URL) or a provider's inbound webhook
+  (on Cloudflare, Email Routing hands a message to a Worker). It builds the key from the thread
+  (`Message-ID`, `In-Reply-To`, `References`), calls `admitInbound`, and passes
+  `createChannelConformance` (SPEC §5, §14).
+- `Message-ID` is the delivery id; a redelivered message is a duplicate by request id.
+- `From` can be forged: senders are authorized by an allowlist plus the receiving server's SPF,
+  DKIM and DMARC results, never by `From` alone.
+- Sends by SMTP or a provider's API; a provider's idempotency key makes the transport `idempotent`,
+  otherwise at-least-once. Replies keep the thread headers ([threads](threads.md)).
+- Attachments: [rich content](rich-content.md).
+
+## Pi first
+Nothing in Pi: channels are pikit's (SPEC §6.2 table).
+
+## Open questions
+- HTML to text, and stripping quoted history before it reaches the model.
+- Sending from Cloudflare: which service, and its limits.
+- One conversation per thread or per sender.

@@ -24,8 +24,9 @@ spec the code is held to.
 | `SPEC-CORE.md` | What must hold whatever else pikit becomes: the kernel's decisions (K1–K13), Cloudflare, the dashboard, the agent's self-improvement | Comes first: every other document and the code must fit it; only the owner changes it |
 | `MANIFESTO.md` | Why pikit exists and what it believes | Every decision is judged against it |
 | `ROADMAP.md` | Which standards always hold, and what each milestone proves | A milestone that breaks a standard is not done |
-| `SPEC.md` | The contracts and the features: layering, lifecycle, capabilities, targets, components | Code that contradicts it is a bug in one of the two |
+| `SPEC.md` | The contracts: layering, lifecycle, capabilities, targets, components | Code that contradicts it is a bug in one of the two |
 | `IDEA.md` | Positioning, context, and how pikit differs from Flue and others | Background for judgment calls |
+| `features/` | One file per feature (everything SPEC-CORE does not require), in no order; ⭐ marks what makes OpenClaw or Hermes attractive | A feature never changes SPEC-CORE; if one seems to, the change is proposed there first |
 
 Tags in the SPEC:
 - `[open]`: undecided.
@@ -34,7 +35,7 @@ Tags in the SPEC:
 - `[upstream]`: depends on experimental Pi APIs.
 
 **Status:** `ROADMAP.md` is the single place that says what is done. Do not start a
-milestone's work until the user asks for it.
+milestone's or a feature's work until the user asks for it.
 
 ## Rule zero: Pi first
 
@@ -250,7 +251,7 @@ rule maps to a standard in `ROADMAP.md` (S1–S16), which says how the rule is c
   - When implementation forces a contract change, edit `SPEC.md` in the same change.
   - When a milestone's state changes, edit `ROADMAP.md`.
   - When work forces a decision on an `[open]` question, record it in SPEC §16 as
-    `[decision]` with a one-line rationale.
+    `[decision]` with a one-line rationale; a feature's, in its file under `features/`.
 
 ## Testing expectations
 
@@ -461,8 +462,8 @@ Record here anything that went wrong twice, or that the user explicitly said not
 - The docs use `§`, `→`, `—` and box-drawing characters. The edit tool keeps writing
   `\uXXXX` escapes as literal text, or fails to match with them, and this has happened
   repeatedly. For doc edits that contain these characters, use a Python heredoc with
-  `str.replace` and an `assert count == 1`, then scan for `\\u[0-9a-f]{4}`. An edit batch is
-  atomic, so one bad entry discards all the others.
+  `str.replace` and an `assert count == 1`, then scan with `rg '\\u[0-9a-f]{4}' SPEC.md ROADMAP.md AGENTS.md
+  features/`. An edit batch is atomic, so one bad entry discards all the others.
 - Bun < 1.4.0 cancels an `AbortSignal.timeout()` for good when its abort-listener count drops
   from one to zero (`removeEventListener`, `onabort = null`): it never fires and `aborted`
   stays `false`. Node and Bun >= 1.4.0 are correct (fixed by oven-sh/bun#37666), so pikit

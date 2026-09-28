@@ -1,0 +1,41 @@
+# Streaming replies
+
+**Public appeal:** ⭐ The answer appears as it is written instead of after a silent minute: what
+users of ChatGPT-style apps expect, and what gateway agents offer in chats that allow editing.
+
+**Specified:** partly (moved from SPEC §16)
+
+**Needed by:** nothing required. The dashboard's live view streams `agent.*` events over its own
+stream (SPEC-CORE §5), which is not this.
+
+## What it gives
+In a chat that can edit messages (Telegram, Slack, Discord, Google Chat), a preview message is
+posted and edited as the model writes, then replaced by the final answer.
+
+## How it fits pikit
+- An optional `edit` on `ChannelTransport` (additive to an `experimental` contract), declared as
+  transports declare `draws` (SPEC §5): a transport without it gets no preview, and no flag says so.
+- A component (the `stream-to-edit` of the moved text; `outbound-stream` fits the naming table)
+  listens to the runtime's message updates and edits the preview, throttled per platform.
+- Previews never go through the outbox: "losing one costs nothing" (SPEC §5). The final answer is
+  still the outbox's, keyed by `answerKey`: it edits the preview into the answer, or sends it and
+  deletes the preview, and the receipt says which message holds it.
+- On Cloudflare, progress already reaches web clients through hibernating WebSockets (SPEC §9.2).
+- Absent: "typing…", then the answer, as today.
+
+## Pi first
+Pi streams: `message_update` events carry the deltas, and Pi's extension API after 0.87.1 adds
+`provider_stream_event` (SPEC §6.2b). pikit forwards what Pi emits; it builds no streaming of model
+calls. The adapter needs to re-emit message updates as an `agent.*` event, which today it does not.
+
+## Open questions
+- Edit rate limits (Telegram allows about one edit per second per chat) and long answers split
+  into pieces.
+- Telegram's newer draft-message API, if it exists for bots in the pinned API, instead of edits.
+- Whether the final answer edits the preview (one message) or replaces it (a clean notification).
+
+## Moved from SPEC
+SPEC §16, "Open questions":
+
+- Streaming to channels that support message editing (Telegram, Google Chat): a
+  `channel.transport` optional `edit()` + a `stream-to-edit` component, or core support.

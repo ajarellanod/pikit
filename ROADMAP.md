@@ -7,7 +7,8 @@ are ticked.
 - The **why** is in `MANIFESTO.md`.
 - What **must hold** (the kernel's decisions, Cloudflare, the dashboard) is in `SPEC-CORE.md`,
   which comes first.
-- The **contracts and features** are in `SPEC.md`.
+- The **contracts** are in `SPEC.md`; the **features**, one file each and in no order, are in
+  `features/`.
 - The **how we work** is in `AGENTS.md`.
 
 ---
@@ -319,7 +320,8 @@ keys do not change.
 (SPEC §8.2), accounts in `channel-telegram`.
 
 **Not in scope:** isolation. A directory per agent is order, not a sandbox (SPEC §8.2); running
-each agent's tools in a container of its own (`execution-docker`) comes after M2. `pikit create
+each agent's tools in a container of its own (`execution-docker`) is a feature
+(`features/sandboxed-execution.md`). `pikit create
 agent` stays in M3.
 
 **Order of work:** `router-rules` first: it is small, depends on nothing new, and shows many agents
@@ -408,10 +410,11 @@ again. Now:
   backed by two providers.
 
 Rich content (`parts`, `replyTo`) and questions from extensions in a chat (`interaction`) are
-decided in SPEC §5 and §6.2b; their code comes with the first component that produces them.
+decided in SPEC §5 and `features/interaction.md`; their code comes with the first component that
+produces them (`features/rich-content.md`).
 
 **Scope:** `channel-telegram`, `storage-sqlite`, `outbound-durable` (SPEC §5 "Outbound delivery"),
-feeds and receipts (SPEC §4.8), the convergence suite, `agent.submissions` and `submissions-sql`, `scheduler-cron`, the telegram preset, `config check`. Runtime availability (SPEC §16) is decided
+feeds and receipts (SPEC §4.8), the convergence suite, `agent.submissions` and `submissions-sql`, `scheduler-cron`, the telegram preset, `config check`. Runtime availability (`features/health.md`) is decided
 here, with the first components that can fail while running.
 
 **Order of work:** (M1.5's `router-rules`) → `storage-sqlite` → the outbound contracts and their
@@ -420,7 +423,8 @@ conformance suite → `outbound-durable`, with a test that kills the process mid
 `scheduler-cron`.
 
 **Moved:** `inbound-dedup` and `expose` come with the first webhook channel: Google Chat, by
-webhook, moves up from M5 to follow M1.5, as the channel where an agent per space matters.
+webhook, moves up to follow M1.5, as the channel where an agent per space matters
+(`features/inbound-dedup.md`, `features/channel-google-chat.md`).
 
 **Evidence:** scenarios 2 and 3, plus a process killed mid-send whose reply still arrives,
 `outbound-durable` converging after a crash at each of its commits, and a process killed after
@@ -458,7 +462,7 @@ a server.
 - The tools' own tests (`tool-read`, `tool-write`, `tool-edit`, `tool-bash`) run under
   Miniflare, as their `cloudflare` target promises. Today they set their files up with
   `node:fs` in a temporary directory; they set them up through `execution` instead. `tool-bash`
-  has a shell there only when something provides `execution.shell` (M5's container).
+  has a shell there only when something provides `execution.shell` (track S's `execution-cloudflare-sandbox`).
 
 **Scope:** `sessions-cloudflare-do`, alarm-driven `drive()` with resume, `deployment-cloudflare`,
 `workspace-virtual`, `execution-fetch`, `scheduler-cloudflare`.
@@ -467,14 +471,18 @@ a server.
 
 ### M5 — Operational patterns at the edge
 
-**Proves:** the patterns that made the original production platform worth having can be
-built as removable components:
-- approvals that wait for days and bind to the surface where a human can answer;
-- real shells;
-- workspace snapshots.
+Not required (SPEC-CORE §7): a list of features, each built when a user needs it, in no order.
 
-**Scope:** `execution-cloudflare-container`, `workspace-container`,
-`workspace-r2-snapshot`, `approvals` on Workflows. (`channel-google-chat` moved up: see M2.)
+**Would prove:** the patterns that made the original production platform worth having can be
+built as removable components:
+- approvals that wait for days and bind to the surface where a human can answer:
+  `features/approvals.md` (`approvals` on Workflows);
+- real shells: `features/sandboxed-execution.md`;
+- workspace snapshots: `features/workspace-snapshots.md` (`workspace-container`,
+  `workspace-r2-snapshot`).
+
+`execution-cloudflare-container`, once in this scope, is track S's `execution-cloudflare-sandbox`,
+which is required (track S, below). `channel-google-chat` moved up: see M2.
 
 ### Required tracks
 
@@ -536,8 +544,13 @@ visually, through a gate nothing it controls can open (SPEC-CORE §6).
   gradual deploy and a rollback. A Durable Object migration is marked irreversible and deployed
   alone.
 
+**Scope (required):** `execution-cloudflare-sandbox` (SPEC-CORE §6; SPEC §8.3): the agent's
+workspace on Cloudflare, a Cloudflare Sandbox behind `execution` in a Worker of its own, with
+credentials injected by its outbound handler and egress closed by default. It is not a feature:
+track S cannot finish without it.
+
 **Depends on:** D (the dashboard shows the proposals and takes the approval), M2 (health, for the
-rollback), M4 and M5's container execution (the Sandbox workspace on Cloudflare).
+rollback: `features/health.md`), and M4.
 
 ### 1.0 — The promise
 
@@ -553,17 +566,14 @@ pikit reaches 1.0 when:
 
 From then on the programming model does not get rewritten.
 
-### Later, only if demanded
+### Features
 
-- Several server replicas, with `conversations.ownership` (a lease per conversation and
-  fenced writes).
-- A remote executor protocol.
-- A second agent runtime behind `AgentRuntime`.
-- A static registry gallery.
-
-Nothing here starts because it would be nice; each item needs a user who needs it.
+Everything else is a feature: one file each in `features/`, in no order, indexed by
+`features/README.md`. Nothing there starts because it would be nice; each one needs a user who
+needs it, and none may require changing SPEC-CORE §1–§6.
 
 ---
 
-Open design questions are tracked in SPEC §16. A milestone that forces a decision records
-it there as `[decision]` with a one-line rationale.
+Open design questions about the contracts are tracked in SPEC §16, and a feature's in its file
+under `features/`. A milestone that forces a decision records it there as `[decision]` with a
+one-line rationale.

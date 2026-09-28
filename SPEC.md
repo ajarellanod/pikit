@@ -1,11 +1,12 @@
 # pikit — Technical Specification
 
 `SPEC-CORE.md` comes first: it holds what must hold (the kernel's decisions, Cloudflare, the
-dashboard), and this file must fit it. This file holds the contracts and the features. What is
-built is tracked in `ROADMAP.md` only. `[open]` is undecided, `[decision]` is settled, `[planned]` is agreed
-but not built, and `[upstream]` depends on experimental Pi APIs and must be isolated behind
-the Pi adapter. Principles live in `MANIFESTO.md`; milestones and the standards they must
-meet live in `ROADMAP.md`.
+dashboard), and this file must fit it. This file holds the contracts; the features, one file each
+and in no order, are in `features/` (§18). What is built is tracked in `ROADMAP.md` only.
+`[open]` is undecided, `[decision]` is settled, `[planned]` is agreed but not built, and
+`[upstream]` depends on experimental Pi APIs and must be isolated behind the Pi adapter.
+Principles live in `MANIFESTO.md`; milestones and the standards they must meet live in
+`ROADMAP.md`.
 
 ---
 
@@ -285,6 +286,9 @@ agent.prepare          AgentRequest                 (system prompt, tools, conte
 outbound.prepare       OutboundMessage                                               [planned] M2
 ```
 
+The three `[planned]` pipelines are a feature, added with their first consumer:
+`features/pipeline-anchors.md`.
+
 The first two are typed in `@pikit/contracts` since M1 (`inbound.ts`), with the first channel that
 runs them (`channel-http`). Authentication is not among them: each platform proves a sender its own
 way (a bearer token, a signed webhook, a bot API that delivers only real users), so it is not a
@@ -352,7 +356,7 @@ Capability contracts (interfaces only; no implementation in the kit's packages):
 | `storage.blob` | `BlobStore` | put/get/delete/list. Local dir, S3, R2. |
 | `sessions.store` | Pi `SessionRepo` + `SessionStorage` | Re-exported from Pi; typed by `@pikit/pi-adapter`. See §7. |
 | `conversations.registry` | `ConversationRegistry` | Conversation key → active session and agent: `resolve` (creates the session the first time), `get`, `reset` (§7.4, §7.6). Workspace ref and metadata `[planned]`. |
-| `conversations.ownership` | `ConversationOwnership` | `[planned]` Lease per conversation so only one worker has its session open. Needed only with several server replicas (§7.2). |
+| `conversations.ownership` | `ConversationOwnership` | `[planned]` Lease per conversation so only one worker has its session open. Needed only with several server replicas (§7.2; `features/replicas.md`). |
 | `workspace` | `WorkspaceProvider` | Resolves the `Workspace` (its Pi `ExecutionEnv`) of a run's conversation; the tool components work in it when it is installed. Typed by `@pikit/pi-adapter` (§8.2). |
 | `execution` | Pi `ExecutionEnv` | Filesystem for the agent's tools; `exec()` may return `shell_unavailable`. |
 | `execution.shell` | Pi `ExecutionEnv` | Same contract, provided **only** when `exec()` really runs commands on a real filesystem. Shell tools require this one. |
@@ -364,12 +368,12 @@ Capability contracts (interfaces only; no implementation in the kit's packages):
 | `agent.definition` (keyed by agent name) | `AgentDefinition` | One per agent, provided by the project. The runtime resolves `ConversationRef.agent` through it, and the router can check that a name exists (§6.1). |
 | `agent.tool` (keyed by tool name) | `AgentTool` | One per tool, provided by `tool-*` components. An agent names the tools it uses in `AgentDefinition.tools`; the runtime resolves the names (§6.3). |
 | `agent.extension` (keyed by extension name) | Pi `ExtensionFactory` | Built (M1.5). One per Pi extension, provided by a component. An agent names the extensions it uses in `AgentDefinition.extensions`, as it names tools; the runtime loads them per conversation (§6.2b). Typed by `@pikit/pi-adapter`, so the core sees only names. |
-| `agent.state` | `AgentState` | Per-conversation JSON state read by `prepare` and updated by tools. Not a capability today: the runtime puts the conversation's `AgentState` in the context of each run (`AGENT_STATE`), stored in the Pi session (§6.2a, §6.4); no separate store. A capability for components that act outside a run (an admin route, a scheduler) is `[planned]`, with the first one that needs it. |
+| `agent.state` | `AgentState` | Per-conversation JSON state read by `prepare` and updated by tools. Not a capability today: the runtime puts the conversation's `AgentState` in the context of each run (`AGENT_STATE`), stored in the Pi session (§6.2a, §6.4); no separate store. A capability for components that act outside a run (an admin route, a scheduler) is `[planned]`, with the first one that needs it (`features/pipeline-anchors.md`). |
 | (no capability) | `ChannelTransport` | How a channel sends to its platform: `idempotent`, `split`, `send` (§5, "Outbound delivery"). Not in the registry: a channel attaches its transport to `outbound.queue` while it runs, since a keyed `channel.transport` used by the queue, and a queue used by the channel, would be a dependency cycle. Without a queue, the channel sends through its own transport. |
-| `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5. |
+| `inbound.dedup` | `InboundDedup` | Claim / commit / release of platform delivery ids. Optional; see "Inbound deduplication" in §5 and `features/inbound-dedup.md`. |
 | `outbound.queue` | `OutboundQueue` | `enqueue`, `attach`, `detach`, and the `receipts` feed (§5, "Outbound delivery"; §4.8). Optional: without it a channel sends directly, best effort, as in M1. `outbound-durable` (M2) provides it on `storage.sql`. |
-| `scheduler` | `Scheduler` | Register/cancel timed jobs. |
-| `approvals` | `ApprovalStore` | Decision lifecycle persistence. |
+| `scheduler` | `Scheduler` | Register/cancel timed jobs. A feature: `features/scheduler.md`. |
+| `approvals` | `ApprovalStore` | Decision lifecycle persistence. A feature: `features/approvals.md`. |
 | `secrets` | `SecretStore` | `get(name)`: the value, or `undefined` when it is not set; an empty value is not set. The process environment (`secrets-env`, which never reads `.env` files itself), Worker bindings, an external vault. |
 | `clock` | `Clock` | `now()`, `sleep()`. Injectable for tests and for DO alarms. M0: a `defineApp` option, not a capability (the app needs it before any component runs). |
 | `logger` | `Logger` | Structured logging. M0: a `defineApp` option, same reason. |
@@ -759,7 +763,7 @@ returns what happened:
   accounts), `conversation` and `actor`, and gives `agent: "<name>"` or `deny`. A message no rule
   matches is left to the next stage: `router-basic`'s `defaultAgent`, or `route.failed` when nothing
   else routes it.
-  - `thread` is `[planned]`, with `InboundMessage.threadId`; until then a rule naming it is invalid
+  - `thread` is `[planned]`, with `InboundMessage.threadId` (`features/threads.md`); until then a rule naming it is invalid
     config, not a rule that matches every thread.
   - A `deny` decides `{ agent: "", access: "deny" }`: a denied message has no agent, and
     `admitInbound` does not read it.
@@ -922,7 +926,7 @@ interface OutboundMessage {        // M2, "Outbound delivery" above
 
 **Rich content.** `[decision]` for the shape; `[planned]` for the code, which arrives with the
 first component that produces a part (the first channel that draws cards, or the first
-`interaction-*`, §6.2b), since a field is added with its producer. Not a field per platform feature
+`interaction-*`, `features/interaction.md`), since a field is added with its producer. Not a field per platform feature
 (`blocks`, `buttons`, `attachments`…), and not an opaque `blocks: unknown`:
 
 ```ts
@@ -949,6 +953,8 @@ interface InboundMessage { /* … */ replyTo?: { platformMessageId: string; valu
   the type does not exist.
 - An answer to a drawn part (a button pressed, a quoted reply) arrives as an `InboundMessage` with
   `replyTo`. The receipt of the message it answers (above) says which run sent it.
+- What is not built yet (the first part kinds, attachments, media storage) is a feature:
+  `features/rich-content.md`.
 
 Inbound deduplication is **not core**. `[decision]` Platforms redeliver (webhook retries,
 polling restarts), and both what identifies a redelivery (Telegram `update_id`, Slack
@@ -975,6 +981,7 @@ first attempt crashed. So:
 - The guarantee is **at-least-once**: a crash between effect and commit can repeat a reply.
   Effectful tools stay safe through idempotency keys (§8.4).
 - Without `inbound-dedup` there is no deduplication — no table, no LRU, no half-measure.
+- The component itself is a feature: `features/inbound-dedup.md`.
 
 Prior art: OpenClaw's durable ingress (`docs/plugins/sdk-channel-plugins/durable-ingress.md`)
 reached the same shape: ack after durable append, claim/commit, completion tombstones.
@@ -1253,7 +1260,7 @@ Responsibilities:
     each re-exporting pi-ai's subpath and nothing else.
 - Translate Pi hooks/events → `agent.*` events and `agent.prepare` pipeline:
   - `before_run` → the agent's `prepare(state)` (§6.2a). Built. The `agent.prepare` pipeline after
-    it (context injection, policy) is `[planned]`.
+    it (context injection, policy) is `[planned]` (`features/pipeline-anchors.md`).
   - `before_tool` / `after_tool` → `agent.tool.call` / `agent.tool.result` (interceptable).
   - `after_response` → `agent.response` (provider errors, failover hooks).
   - `run_end` → `agent.settled` / `agent.failed`, whether or not anyone waits (§6.1). Built.
@@ -1394,7 +1401,7 @@ Support tiers (on 0.87.1):
 | Tier | Surface | How |
 |---|---|---|
 | A — works | `on(...)`: `session_start`, `session_shutdown`, `before_agent_start`, `context`, `before_provider_request`, `after_provider_response`, `agent_start`, `agent_end`, `turn_start`, `turn_end`, `message_start` / `_update` / `_end`, `tool_execution_start` / `_update` / `_end`, `tool_call`, `tool_result`. `registerTool`, `defineTool`, `isToolCallEventType`, `registerProvider` (a pi-ai provider object), `sendMessage`, `sendUserMessage`, `appendEntry`, `set/getSessionName`, `setLabel`, `set/getActiveTools`, `getAllTools`, `setModel`, `set/getThinkingLevel`, `events`. On `ctx`: `hasUI`, `mode`, `cwd`, `model`, `signal`, `isIdle`, `abort`, `hasPendingMessages`, `waitForIdle`, `getSystemPrompt`, `compact` | `tool_call` → `before_tool` (`block` blocks; mutating `event.input` in place patches the arguments; a handler that throws blocks the call with a fixed reason, as Pi's `beforeToolCall` does, and its error goes only to the log). `tool_result` → `after_tool`. `before_agent_start` → `before_run` (an added message) and `transform_context` (the system prompt, for that run). `context` → `transform_context`. `before_provider_request` → `before_payload`. `after_provider_response` → `after_response`. Run, turn, message and tool notifications → the harness's events, in Pi's order. `ctx.abort()` → the conversation's `abort()`, which records withdrawn messages (§6.4, gap 4); it is queued in the conversation's line without the close waiting for it, and is a no-op once the conversation has closed (an idle conversation has no run to stop). Tools → harness tools, `replay: "never"` |
-| B — later, with channels | `registerCommand` (slash commands from a channel), `ui.select` / `confirm` / `input` answered by a person (overlaps `approvals`) | Today they are tier C |
+| B — later, with channels | `registerCommand` (slash commands from a channel), `ui.select` / `confirm` / `input` answered by a person (overlaps `approvals`) | Today they are tier C. Features: `features/slash-commands.md`, `features/interaction.md` |
 | C — no-op with a warning | Every other event (`input`, `user_bash`, `model_select`, `agent_before_settle`, `context_with_system`, `cache_warming_decision`, `session_before_*`, `resources_discover`, `project_trust`…), `registerShortcut`, `registerFlag` / `getFlag`, `register*Renderer`, `registerMarkdownTransformer`, TUI `ui.*`, `ctx.shutdown()`. Absent: `ctx.sessionManager`, `ctx.modelRegistry`, `ctx.getContextUsage`, `ctx.isProjectTrusted`, `ctx.scopedModels`, `ctx.thinkingLevel`, `newSession`, `fork`, `switchSession`, `pi.getCommands`, `pi.unregisterProvider`, Pi's `registerProvider(name, config)`, and every value export of `pi-coding-agent` but `defineTool` and `isToolCallEventType` (tool factories, TUI components, Pi's paths and helpers) | TUI-only, or owned by pikit (the process, the sessions). The warning is a log line when the extension loads; `pikit doctor` lists what each extension uses in a note, and a missing import as a problem. `pi.exec()` rejects until extensions are given `execution.shell` |
 
 Where pikit differs from Pi in a way an extension may notice:
@@ -1403,31 +1410,9 @@ Where pikit differs from Pi in a way an extension may notice:
 - A lane created before an extension was installed gets that extension's tools activated when
   it opens.
 
-**Questions from extensions, in the chat.** `[planned]` (tier B), with the first `interaction-*`
-component. Pi's `ctx.ui.select` / `confirm` / `input` / `notify` are how an extension asks its user
-something. pikit answers them in the conversation's chat rather than inventing an `ask_user` of its
-own, so an unmodified extension that asks (Pi's `permission-gate`) works from Telegram:
-
-```ts
-interface Interaction {           // capability `interaction`; runtime-pi uses it optionally
-  ask(conversation: ConversationRef, question: Question, ctx: Context): Promise<string | undefined>;
-  notify(conversation: ConversationRef, text: string, level: "info" | "warning" | "error", ctx: Context): Promise<void>;
-}
-
-type Question =
-  | { kind: "select"; title: string; options: string[] }
-  | { kind: "confirm"; title: string; message: string }
-  | { kind: "input"; title: string; placeholder?: string };
-```
-
-- With `interaction` installed, the adapter gives extensions `hasUI: true` and a `ui` backed by it.
-  Without it they get today's no-op UI (absence, S3), and `permission-gate` blocks as it does now.
-- A question wants an answer now: the run waits for it, with a deadline, and the question waits in
-  the worker's memory. If the process dies the run dies with it, and the resumed run asks again.
-  An answer that may take days is not a question: it is a decision recorded by a component
-  (`approvals`, §18) that resumes the work when the answer arrives.
-- The question goes out as a message with a `choice` part, and the answer comes back with `replyTo`
-  (§5, "Rich content").
+**Questions from extensions, in the chat** (tier B) are a feature, `features/interaction.md`: Pi's
+`ctx.ui` answered by a person in the conversation's chat, through an optional `interaction`
+capability. Without it, extensions get the no-op UI above.
 
 **Taking a conversation up again with extensions loaded.** Loading per conversation means
 extensions load again each time a conversation reopens. Tested in `compat.test.ts`:
@@ -1553,11 +1538,8 @@ Rules:
   rules (§8.4); a `safe` tool that the new configuration no longer has is recorded interrupted,
   like a `never` one.
 - `prepare` is callable in tests as a plain function: `prepare({ testsPassed: true }, ctx)`.
-- `[planned]` The `agent.prepare` pipeline (§4.4) runs *after* `prepare` and lets components and
-  extensions patch the `TurnConfig` further (context injection, policy restrictions). Deferred
-  until the first component needs it (`policy-tools`, context injection): its value type is a core
-  export to decide with a real consumer, and adding the pipeline later changes nothing for agents
-  or for `prepare`.
+- The `agent.prepare` pipeline (§4.4), after `prepare`, is a feature:
+  `features/pipeline-anchors.md`.
 - Pi extensions do not reach `agent.state` yet: their tools and handlers receive an
   `ExtensionContext`, not the run's context. `[planned]` with the first extension that needs it.
   Once the state is a Pi document (§6.4), an extension reads it through Pi's own document API,
@@ -1660,7 +1642,7 @@ contracts so the move happens inside the adapter. `[upstream]`
 | `agent.state` | Conversation-scoped document (a JSON object with an `initial()`). It can declare `history: "rewindable"` and `fork: "asOf"`, so the state follows a fork or a rewind of the transcript (`pico-v5.md` §3, checked at `cbe7cf00`) | Session value `pikit` / `agent.state` (`state.ts`), holding the updated keys; `get()` merges them over the agent's initial state. It is committed apart from the transcript, so a tool's state change and its result are two commits. A session value belongs to the whole session, not to a branch: correct while pikit never forks or rewinds a conversation. Passes `createAgentStateConformance` on memory and JSONL sessions |
 | Continue a killed run | Tasks resume from their records | `AgentHarness.create()` reports `open` operations; `lane.resume()` continues them; tool `replay` is Pi's |
 | Multi-step work, waits, approvals that last days | Durable tasks: phases, effect sandwich (commit intent → effect → commit outcome), memos, `sleep(until)`, abort protocol | `state.phase` + tools; nothing more is built |
-| Subagents | Owned child conversations inside the session | Deferred |
+| Subagents | Owned child conversations inside the session | Deferred (`features/subagents.md`) |
 | `sessions-cloudflare-do` | Its SQLite core runs over a synchronous database facade that a Durable Object can implement | Pi's current `SessionRepo` |
 
 **Gaps found by the adapter spike, and their bridges.** Pi's durable runtime lives in
@@ -1767,12 +1749,10 @@ there is more than one process. That is all ownership means.
 | Target | How one owner is guaranteed | Component |
 |---|---|---|
 | Server, one replica | The process is the only worker; an in-memory map of open sessions is a cache | none |
-| Server, several replicas | A lease per conversation in the database; the non-owner forwards or waits | `[planned]` `conversations.ownership` |
+| Server, several replicas | A lease per conversation in the database; the non-owner forwards or waits | `[planned]` `conversations.ownership` (`features/replicas.md`) |
 | Cloudflare | `idFromName(conversationKey)` routes every message for a key to one Durable Object | none (platform) |
 
-`[open]` Several replicas need fenced writes: a worker that stalls past its lease must not
-write over the next owner. Pi's `Storage.commit` has no expected-sequence check, so the
-fencing belongs in the session store or the lease; decide when the component is built.
+Several replicas also need fenced writes: an open question of `features/replicas.md`.
 
 ### 7.3 Messages that arrive during a run `[decision]`
 
@@ -1818,7 +1798,7 @@ The registry's contract, `ConversationRegistry` (core, M1) `[decision]`:
 - `get(key, ctx)` reads without creating. `reset(key, ctx)` is §7.6, and returns `undefined` for a
   key with no conversation.
 - Keys are opaque strings. The channel builds them (`http:<conversationId>` for `channel-http`);
-  the tenant enters the key when tenants are routed (§16).
+  the tenant enters the key when tenants are routed (`features/multi-tenant-isolation.md`).
 
 Implementations: `conversations-file` (M1, server) keeps the pointers in one JSON file. Every change
 is written to a temporary file, flushed and renamed, and a pointer is used only once it is on disk.
@@ -1864,7 +1844,7 @@ Planned implementations:
 | `sessions-memory` | in-memory (Pi's `MemorySessionRepo`) | tests |
 | `sessions-jsonl` | Pi's `JsonlSessionRepo` over local FS. Built (M1) | server |
 | `sessions-sqlite` | `@earendil-works/pi-session-backend-sqlite-node` or `bun:sqlite` | server |
-| `sessions-postgres` | own implementation | server |
+| `sessions-postgres` | own implementation (`features/storage-postgres.md`) | server |
 | `sessions-cloudflare-do` | DO `ctx.storage.sql` | cloudflare |
 
 ### 7.6 Reset semantics
@@ -1938,6 +1918,9 @@ Implementations:
 
 \* requires an `execution` provider that has a real filesystem.
 
+Snapshots, git workspaces and the `[planned]` members of `Workspace` above are a feature:
+`features/workspace-snapshots.md`.
+
 **One workspace per agent** `[decision]` Built (M1.5). Each agent's tools work in a directory of
 their own (`workspace-local`: `<root>/<agent>/`, created on the agent's first call; every conversation
 of one agent shares it). Without a `workspace` provider every agent shares `execution`, as before.
@@ -1954,7 +1937,7 @@ How a run's tools get their agent's `ExecutionEnv`:
 
 A directory per agent is order, not isolation: a tool with `bash` runs as the same user
 as pikit and can leave it, and read the model credentials in `.pikit/`. Isolation needs each agent's
-tools in a separate sandbox (`execution-docker`, planned after M2).
+tools in a separate sandbox (`execution-docker`, a feature: `features/sandboxed-execution.md`).
 
 ### 8.3 `execution` capability
 
@@ -1964,8 +1947,8 @@ The contract is Pi's `ExecutionEnv`. Implementations:
 |---|---|---|
 | `execution-local` | Pi `NodeExecutionEnv`, commands from an allowlist of variables | server. Built (M1). Not a sandbox |
 | `execution-fetch` | returns `err(shell_unavailable)` | edge-pure; FS from `workspace-virtual` |
-| `execution-cloudflare-container` | RPC to the DO's attached Container | cloudflare |
-| `execution-remote` | HTTP/WebSocket to any host implementing the executor protocol | both |
+| `execution-cloudflare-sandbox` | a Cloudflare Sandbox in a Worker of its own (SPEC-CORE §6) | cloudflare. Required by track S |
+| `execution-remote` | HTTP/WebSocket to any host implementing the executor protocol | both. A feature: `features/sandboxed-execution.md` |
 
 Tools that need a shell declare `execution.shell`; `execution-fetch` does not provide it, so
 `pikit doctor` fails early.
@@ -2024,7 +2007,7 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
 - `server-bun` (M1) serves them with Hono 4.13.9 on `Bun.serve` `[decision]`:
   - `GET /health` answers `200` while the process can answer.
   - `GET /ready` answers `200` from `runtime.ready` until `runtime.stopping`, and `503` before and
-    after. Today it reflects the start only (runtime availability is §16).
+    after. Today it reflects the start only (runtime availability is `features/health.md`).
   - Stopping cancels every request in flight through its context, so a handler that waits answers
     at once. Past the stop deadline, the remaining connections are closed.
   - Bun closes a connection idle for about twice `idleTimeout`, even while its handler works, so
@@ -2037,9 +2020,9 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
   container's JSON lines come from `deployment-docker`). Without the component there are no such
   lines, and there is no switch. The start times behind `durationMs` are a cache: a run that ends
   in another process logs no duration.
-- Storage: `sessions-sqlite` + `storage-sqlite` by default; Postgres optional.
-- Scheduler: `scheduler-cron` (in-process, `Bun.cron` or `croner`), jobs persisted in
-  `storage.sql`.
+- Storage: `sessions-sqlite` + `storage-sqlite` by default; Postgres optional
+  (`features/storage-postgres.md`).
+- Scheduler: a feature (`features/scheduler.md`).
 - Deployment: a `deployment-*` component owns everything that runs the app on a machine: the
   process entrypoint, its logger, the supervisor's files and the commands `pikit up | down | restart
   | logs | status` delegate to (§11). It is not an app component: it runs the app rather than running
@@ -2049,11 +2032,11 @@ keys derived from `${sessionId}:${runId}:${toolCallId}`.
     `.pikit/` on a volume, secrets from `.env` at run time (never in the image), a healthcheck on
     `GET /health`, and `restart: unless-stopped`. Its commands run `docker compose …` without a shell,
     and `status` adds what `/health` and `/ready` answer.
-  - `deployment-systemd` `[planned]` generates a unit file.
+  - `deployment-systemd` is a feature (`features/deployment-systemd.md`).
 - Agent runtime is `pi-agent-core` here too; `pi-coding-agent` is not imported on any target
   (§6.3).
 - Workers: one process is one worker and owns every conversation (§7.2). Several replicas
-  need `conversations.ownership`; until it exists, the server target runs one replica.
+  need `conversations.ownership`; until it exists, the server target runs one replica (`features/replicas.md`).
 - Start and shutdown `[decision]`: the entrypoint (owned by the `deployment-*` component, not
   the core) passes deadlines and never restarts an app in the same process; the supervisor
   (systemd, Docker) restarts the process.
@@ -2721,12 +2704,10 @@ and are not in a preset.
 - The kernel takes the config as a plain object: the merge of every installed component's schema
   under its name, validated and deep-frozen (SPEC-CORE K4). Today the object is `export const
   config` in `pikit.config.ts`, checked by `doctor`, `dev` and `up`. A values file (YAML) and
-  profiles are features of the CLI, `[planned]`; the kernel never reads a file.
+  profiles are a feature of the CLI (`features/config-files.md`); the kernel never reads a file.
 - `.env` (server) / Worker secrets (cloudflare) — secrets, read through `secrets` capability.
   With `deployment-docker`, compose passes `.env` to the container when it starts (`env_file`);
   `.dockerignore` keeps it out of the build context, so no image ever contains a secret.
-- When a values file exists: `config/<profile>.yaml` overlays for `--profile`, and YAML is parsed
-  with a YAML 1.2 parser, so `on/off/yes/no` are strings. `[decision]`
 - The validated config is a deep-frozen copy. `ctx.config` is shared by every component, so a
   mutation would be a hidden coupling between them; frozen, it throws where it happens. The
   caller's objects are never defaulted or frozen in place. `[decision]`
@@ -2766,7 +2747,7 @@ is that the answer is "nothing" for every minor.
 - Tool gating is a component (`policy-tools`): intercepts `agent.tool.call`, evaluates rules
   by agent role, blocks or allows. It is **policy mediation, not a sandbox**; documented as
   such. Real isolation is a property of the `execution` provider (container, micro-VM,
-  remote sandbox).
+  remote sandbox). The component is a feature: `features/policy-tools.md`.
 - Secrets never appear in config files or session transcripts; the `secrets` capability is
   the only read path and logs redact by name.
 - Operational logs (`log-events`, §9.1) never carry a message's text, a prompt, an answer or a
@@ -2954,7 +2935,7 @@ The design is considered validated when all eight pass without touching the core
    that ends while the app stops reaches the chat at the next start, and an HTTP `202` is read later
    with `GET` (`samples/http/test/answers.test.ts`).
 4. **Swap**: `remove sessions-sqlite`, `add sessions-postgres` → router/channel/agent
-   untouched; conformance suite green.
+   untouched; conformance suite green (`features/storage-postgres.md`).
 5. **Custom**: `pikit create extension company-policy` → alters routing and blocks a tool
    without forking any component.
 
@@ -2984,30 +2965,12 @@ And the runtime proof:
 
 ## 16. Open questions `[open]`
 
+Questions about the contracts that exist. A feature's open questions are in its file under
+`features/`.
+
 - `[decision]` `SqlDatabase` is async (M2). Postgres cannot be sync; SQLite (`node:sqlite`) and
   Durable Object SQL wrap in promises at no cost. A transaction runs statements only, never other
   I/O, so a sync store can run it as one step.
-- Where the conversation registry lives on Cloudflare when a *global* view is needed (list
-  all conversations): D1 index vs per-DO only. Probably per-DO + optional D1 index component.
-- Config format for values (YAML or TypeScript only): a CLI question, not the kernel's, which takes a
-  plain object (SPEC-CORE K4).
-- Streaming to channels that support message editing (Telegram, Google Chat): a
-  `channel.transport` optional `edit()` + a `stream-to-edit` component, or core support.
-- Multi-tenant isolation guarantees: routing is not isolation. Document clearly; consider a
-  `tenant-isolation` component that maps tenants to separate DO namespaces / DB files.
-- Runtime availability and degradation: how a component that breaks after `start` (a stuck
-  poller, a dead connection) becomes visible, and who decides between degrading and
-  restarting. Today `/ready` reflects only the start, so a broken process looks healthy
-  and no supervisor restarts it (§9.1). Chord has the consumer half (stable handles,
-  `unavailable`/`replaced`, calls fail fast without queueing, `ready()`) but no
-  self-report, no notion of essential, and no policy. Current lean: a `health` capability
-  and a `health-registry` component, not core. Components report through
-  `useOptional("health")`, so absence changes nothing. The registry owns the policy: degrade
-  what can be tolerated, fail `/health` for what is essential so that the supervisor
-  restarts the process. It follows Chord's availability semantics so that §6.4 does not end
-  up with two models. It is decided with M2's real components, not before. To settle: grace
-  periods against flapping, where "essential" is declared (per deployment, so config), and a
-  conformance suite that proves a component reports its failures.
 
 Resolved `[decision]`:
 
@@ -3184,7 +3147,7 @@ Resolved `[decision]`:
 - Rich content is one `parts` field, typed by declaration merging, with a fallback text per part,
   not a field per platform feature (§5). Its code comes with its first producer.
 - Questions from Pi extensions are answered in the chat through an optional `interaction`
-  capability, not by a pikit `ask_user` (§6.2b); answers that take days belong to `approvals`.
+  capability, not by a pikit `ask_user` (`features/interaction.md`); answers that take days belong to `approvals`.
 - The kernel and the vocabulary are two packages, `@pikit/core` and `@pikit/contracts` (§4.9): they
   change at opposite rates, and one semver for both would make a contract's break a "pikit 2". A
   subpath would share the kernel's version, so it would not separate them.
@@ -3212,17 +3175,9 @@ Milestones, what each one proves, and the standards every milestone must meet li
 
 ---
 
-## 18. Higher-level components (post-M2)
+## 18. Features
 
-Components that encode operational patterns beyond plain message-in/reply-out, in order of
-value. Each one is built contracts-first against the core in §4–§5 and must remain removable:
-
-| Component | What it encodes |
-|---|---|
-| `approvals` | Deterministic decision lifecycle: proposed → approved/rejected → executed → verified, with retries, reminders, stalled escalation, TTL/abandonment, and **delivery-time binding** of a decision to the message/thread where a human can answer it (a decision created by a scheduled job cannot know its answer surface until the result is sent). It binds by reading `outbound.queue`'s receipts (§4.8, §5). |
-| `inbound-dedup` | Transport deduplication (§5): claim / commit / release of platform delivery ids, duplicates halted, retries of crashed attempts allowed, stale claims expired. At-least-once by contract. Logical deduplication is Pi's. |
-| `outbound-durable` | Outbound intents persisted before send, retried with backoff, dead-lettered, and recorded so later replies can quote or thread against them (its `receipts`, §5). |
-| `conversations.registry` | Conversation key → active session + workspace ref, with TTL eviction of memory that never drops the pointer, and explicit `/reset` semantics. |
-| `routines` | File-defined scheduled prompts (`src/agents/{name}/routines/*.yaml`) synced into `scheduler`, with target fan-out by route tags and previous-run context injection. |
-| `policy-tools` | Role-based interception of `agent.tool.call`: shell command and path rules, allow/deny lists, hot-reloadable. Policy mediation, not a sandbox. |
-| `channel-google-chat` | Google Chat app: JWT-verified webhook ingress, REST transport with message create/patch, cards, threads, media. |
+Everything that is not required (SPEC-CORE §7) is a feature: one file each in `features/`, in no
+order, built when a user needs one. `features/README.md` is the index, and marks with ⭐ what makes
+OpenClaw or Hermes attractive to the public. A feature may never require changing SPEC-CORE §1–§6;
+a contract it needs is written here first (rule 12).
