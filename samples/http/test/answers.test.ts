@@ -51,6 +51,19 @@ async function printed(stream: ReadableStream<Uint8Array>, line: string): Promis
   throw new Error(`the stream ended before printing "${line}"`);
 }
 
+/**
+ * The `hold` of an app that must not run it: its answer comes from what the previous process
+ * recorded. A call is counted (the test asserts none) and fails the tool, so a re-run cannot pass.
+ */
+let holdRanAgain = 0;
+afterEach(() => {
+  holdRanAgain = 0;
+});
+async function notRunAgain(): Promise<string> {
+  holdRanAgain++;
+  throw new Error("hold ran again: the answer must come from the recorded run");
+}
+
 async function until(condition: () => boolean, what: string, timeoutMs = 10_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (!condition()) {
@@ -82,14 +95,15 @@ test("killed after Telegram's ack, mid-run: the next process answers with no new
   }
   expect(telegram.sent).toEqual([]);
 
-  // The next process: nobody writes again.
-  const app = await telegramApp({ dataDir, apiBase: telegram.url, hold: async () => "not run again" }).create();
+  // The next process: nobody writes again. The resumed run does not run `hold` again (`replay: "never"`).
+  const app = await telegramApp({ dataDir, apiBase: telegram.url, hold: notRunAgain }).create();
   apps.push(app);
   await app.start();
 
   const [answer] = await telegram.sentCount(1, 15_000);
   expect(answer).toEqual({ chatId: OWNER.id, text: "answer: hold", html: true });
   expect(telegram.pending()).toEqual([]);
+  expect(holdRanAgain).toBe(0);
 }, 60_000);
 
 test("an answer that ends while the channel is stopping reaches the chat when the app starts again", async () => {
@@ -137,12 +151,16 @@ test("an answer that ends while the channel is stopping reaches the chat when th
   // Before this change, the answer was lost here: the channel had stopped when the run ended.
   expect(telegram.sent).toEqual([]);
 
-  const next = await telegramApp({ dataDir, apiBase: telegram.url, hold: async () => "unused" }).create();
+  // The answer comes from the recorded run's end, not from running it again.
+  const next = await telegramApp({ dataDir, apiBase: telegram.url, hold: notRunAgain }).create();
   apps.push(next);
   await next.start();
 
   const [answer] = await telegram.sentCount(1, 10_000);
   expect(answer).toEqual({ chatId: OWNER.id, text: "answer: hold", html: true });
+  await Bun.sleep(200);
+  expect(telegram.sent).toHaveLength(1);
+  expect(holdRanAgain).toBe(0);
 }, 60_000);
 
 test("HTTP: a POST that answered 202 reads its answer with GET, and sending it again returns it", async () => {
