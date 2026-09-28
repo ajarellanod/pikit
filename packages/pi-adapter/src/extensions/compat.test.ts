@@ -75,6 +75,15 @@ function recordingTool(name: "bash" | "write", ran: string[]): AgentHarnessTool<
   };
 }
 
+/** `promise`, or a failure after two seconds: a deadlock fails the test instead of hanging it. */
+function within<T>(promise: Promise<T>, what: string): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`timed out waiting for ${what}`)), 2000);
+  });
+  return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+}
+
 async function newSession(sessions: SessionStore): Promise<string> {
   const session = await sessions.create({ cwd: "/" }, ctx);
   await session.close(ctx);
@@ -415,6 +424,25 @@ describe("taking a conversation up again, with extensions loaded (SPEC §6.2b)",
       // In a real deployment the same extensions ran before the crash, so the call was checked.
       expect(runs()).toBe(1);
     }, 20_000);
+  });
+
+  test("ctx.abort() from an agent_end handler neither deadlocks the conversation nor loses the result", async () => {
+    let aborts = 0;
+    const aborter: PiExtension = (pi) =>
+      void pi.on("agent_end", async (_event, ctx) => {
+        // Late, as a handler that does I/O first: the run has settled and the conversation is closing.
+        await new Promise((resolve) => setTimeout(resolve, 10));
+        aborts++;
+        ctx.abort();
+      });
+    const s = await setup([aborter]);
+
+    const first = await within(s.say("one"), "the first result");
+    const second = await within(s.say("two"), "the result of a message after the abort");
+    await within(s.close(), "close()");
+
+    expect([first.text, second.text]).toEqual(["answer: one", "answer: two"]);
+    expect(aborts).toBe(2);
   });
 
   test("reopening keeps the provider's prompt cache: same system prompt, same tools, same prefix", async () => {

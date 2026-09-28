@@ -32,6 +32,7 @@ import { toPi } from "./context.ts";
 import { hasRequest, inboundMessage, LANE } from "./inbound.ts";
 import { createPiRuntime, modelsFrom, type Provider, type SessionStore } from "./index.ts";
 import { createJsonlSessionStore } from "./node/index.ts";
+import { slotCount } from "./runtime.ts";
 import { holdTool, killMidRun, type ModelRequest, scriptedAgent, scriptedProvider } from "./testing/index.ts";
 
 const ctx = BACKGROUND_CONTEXT;
@@ -132,6 +133,24 @@ describe("conversations", () => {
     };
     expect(await stats(a.sessionId)).toBe(4);
     expect(await stats(b.sessionId)).toBe(0);
+    await s.runtime.close(s.app.context());
+  });
+
+  test("a closed conversation leaves nothing behind in the runtime", async () => {
+    const s = await setup();
+    const conversations = await Promise.all([1, 2, 3].map(() => s.conversation()));
+
+    for (const [i, conversation] of conversations.entries()) {
+      await s.runtime.dispatch({ requestId: `r${i}`, conversation, prompt: "hello" }, s.app.context());
+      await s.result(`r${i}`);
+    }
+    // A duplicate opens and closes the conversation again, with no run.
+    const [first] = conversations;
+    if (first === undefined) throw new Error("expected conversations");
+    await s.runtime.dispatch({ requestId: "r0", conversation: first, prompt: "hello" }, s.app.context());
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(slotCount.get(s.runtime)?.()).toBe(0);
     await s.runtime.close(s.app.context());
   });
 });

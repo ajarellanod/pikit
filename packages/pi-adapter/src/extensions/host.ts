@@ -83,7 +83,10 @@ export interface BindTarget {
   lane: AgentLane;
   cwd: string;
   systemPrompt: string | undefined;
-  /** The conversation's abort, so an extension's `ctx.abort()` withdraws queued messages too. */
+  /**
+   * The conversation's abort, so an extension's `ctx.abort()` withdraws queued messages too. It must
+   * be a no-op once the conversation is closed: it may run after `close()`.
+   */
   abort(): Promise<void>;
 }
 
@@ -303,7 +306,13 @@ class Bound {
       model: this.model,
       signal,
       isIdle: () => this.idle,
-      abort: () => void this.act(() => this.target.abort()),
+      // Not an action `drain()` waits for: the conversation's abort runs in its line, and the step
+      // holding the line may be the one closing this conversation (a settled run closes it once idle),
+      // which waits for `drain()`. A closed conversation has no run to abort, so it is a no-op there.
+      abort: () =>
+        void this.target.abort().catch((error: unknown) => {
+          this.registry.logger.warn("a Pi extension's abort failed", { error: String(error) });
+        }),
       hasPendingMessages: () => this.pending > 0,
       waitForIdle: () => this.lane.waitForIdle(this.pi),
       getSystemPrompt: () => this.systemPromptOverride ?? this.target.systemPrompt ?? "",

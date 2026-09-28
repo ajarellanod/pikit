@@ -55,9 +55,15 @@ export interface PiRuntime extends AgentRuntime {
 }
 
 interface Slot {
+  readonly sessionId: string;
   line: Promise<unknown>;
+  /** Steps queued on `line` and not finished. At zero, with no conversation open, the slot is dropped. */
+  queued: number;
   conversation?: PiConversation;
 }
+
+/** How many slots a runtime holds, for tests; not exported from the package. */
+export const slotCount = new WeakMap<PiRuntime, () => number>();
 
 export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
   /** By session id: a session is Pi's single-writer unit, and a reset points a key to a new one. */
@@ -67,14 +73,19 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
   const slotOf = (sessionId: string): Slot => {
     let slot = slots.get(sessionId);
     if (slot === undefined) {
-      slot = { line: Promise.resolve() };
+      slot = { sessionId, line: Promise.resolve(), queued: 0 };
       slots.set(sessionId, slot);
     }
     return slot;
   };
 
-  /** Run `work` in the conversation's line, then close the conversation if it became idle. */
+  /**
+   * Run `work` in the conversation's line, then close the conversation if it became idle. The last
+   * step of a closed conversation drops its slot, so the map holds only conversations in use: a new
+   * call makes a new slot, and nothing is left on the old one's line to run beside it.
+   */
   const serial = <T>(slot: Slot, work: () => Promise<T>): Promise<T> => {
+    slot.queued++;
     const next = slot.line.then(async () => {
       try {
         return await work();
@@ -82,7 +93,12 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
         await closeIfIdle(slot);
       }
     });
-    slot.line = next.catch(() => {});
+    slot.line = next
+      .catch(() => {})
+      .then(() => {
+        slot.queued--;
+        if (slot.queued === 0 && slot.conversation === undefined && slots.get(slot.sessionId) === slot) slots.delete(slot.sessionId);
+      });
     return next;
   };
 
@@ -120,7 +136,7 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
     return conversation;
   };
 
-  return {
+  const runtime: PiRuntime = {
     async dispatch(request: AgentRequest, ctx: AppContext): Promise<Admission> {
       const slot = slotOf(request.conversation.sessionId);
       const admission = await serial(slot, async () => (await ensureOpen(slot, request.conversation, ctx)).admit(request, ctx));
@@ -165,6 +181,8 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
       ]);
     },
   };
+  slotCount.set(runtime, () => slots.size);
+  return runtime;
 }
 
 /**

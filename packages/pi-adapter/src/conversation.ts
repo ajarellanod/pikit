@@ -67,6 +67,7 @@ export interface OpenOptions {
 export class PiConversation {
   /** Runs this worker is driving right now. At zero the conversation is idle and may close. */
   private driving = 0;
+  private closed = false;
   private extensions: BoundExtensions | undefined;
 
   private constructor(
@@ -177,6 +178,9 @@ export class PiConversation {
    * the queued messages out of the inbox; they are recorded as withdrawn (gap 4).
    */
   async abort(ctx: AppContext): Promise<void> {
+    // An extension's `ctx.abort()` can reach the line after the conversation closed (host.ts): a
+    // closed conversation drives no run, so there is nothing to stop.
+    if (this.closed) return;
     const pi = toPi(ctx);
     const aborted = await this.lane.abort(pi);
     if (!aborted.ok) {
@@ -191,6 +195,7 @@ export class PiConversation {
    * in the session, for the next owner to resume: eviction is never a reset.
    */
   async close(ctx: AppContext): Promise<void> {
+    this.closed = true;
     await this.extensions?.close(toPi(ctx));
     await this.harness.close(toPi(ctx));
   }
