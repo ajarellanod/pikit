@@ -243,6 +243,8 @@ test("a failed start rolls back what started, never emits ready, and can be retr
   expect(failure).toBeInstanceOf(Error);
   expect((failure as Error).message).toBe('component "server-http" failed to start');
   expect(((failure as Error).cause as Error).message).toBe("EADDRINUSE");
+  // The rollback succeeded: nothing to aggregate.
+  expect(failure).not.toBeInstanceOf(AggregateError);
   expect(seen).toEqual(["db open", "db close", "runtime.stopped"]);
 
   // A failed start is final for that app; retrying is a fresh create().
@@ -499,7 +501,13 @@ test("stop() during start() cancels it; the rollback is bounded by stop's deadli
   const second = app.stop();
   expect(second).toBe(first);
   await expect(app.start()).rejects.toThrow("single-use");
-  await first;
+  // fast's rollback stop was abandoned at the stop deadline: that stop was not clean.
+  const stopError = await first.catch((e: AggregateError) => e);
+  expect(stopError).toBeInstanceOf(AggregateError);
+  expect((stopError as AggregateError).message).toBe("app stopped with errors");
+  const [abandoned] = (stopError as AggregateError).errors as Error[];
+  expect(abandoned?.message).toBe('component "fast" failed to stop');
+  expect((abandoned?.cause as DOMException).name).toBe("TimeoutError");
   const error = await starting.catch((e: Error) => e);
   expect(error).toBeInstanceOf(Error);
   expect((error as Error).message).toBe('component "slow" failed to start');
@@ -509,6 +517,75 @@ test("stop() during start() cancels it; the rollback is bounded by stop's deadli
   // The abandoned stop still runs and shares fast's closure; that app never starts again.
   await expect(app.start()).rejects.toThrow("single-use");
   releaseFast();
+});
+
+/** A component whose start waits until the app cancels it, like a connection that is still dialling. */
+const dialling = defineComponent({
+  name: "telegram",
+  setup: () => ({
+    start: (ctx) =>
+      new Promise<void>((_, reject) => {
+        ctx.abortSignal?.addEventListener("abort", () => reject(ctx.abortSignal?.reason));
+      }),
+  }),
+});
+const database = (closeError?: string) =>
+  defineComponent({
+    name: "sqlite",
+    setup: () => ({
+      stop: () => {
+        if (closeError) throw new Error(closeError);
+      },
+    }),
+  });
+const pause = () => new Promise((resolve) => setTimeout(resolve, 5));
+
+test("stop() during start(): a failed rollback rejects stop(); the start's error stays with start()", async () => {
+  const app = await defineApp(quiet({ components: [database("SQLITE_BUSY"), dialling] })).create();
+  const starting = app.start();
+  await pause(); // sqlite is up, telegram is still dialling: a SIGTERM arrives
+  const stopError = await app.stop().catch((e: AggregateError) => e);
+  expect(stopError).toBeInstanceOf(AggregateError);
+  expect((stopError as AggregateError).message).toBe("app stopped with errors");
+  const [closeFailure] = (stopError as AggregateError).errors as Error[];
+  expect(closeFailure?.message).toBe('component "sqlite" failed to stop');
+  expect((closeFailure?.cause as Error).message).toBe("SQLITE_BUSY");
+
+  const startError = await starting.catch((e: Error) => e);
+  expect((startError as Error).message).toBe('component "telegram" failed to start');
+  expect(((startError as Error).cause as Error).message).toBe("app is stopping");
+  await app.stop(); // already stopped: no-op, the failure is not reported twice
+});
+
+test("stop() during start(): a clean rollback is a clean stop", async () => {
+  const app = await defineApp(quiet({ components: [database(), dialling] })).create();
+  const starting = app.start();
+  await pause();
+  await app.stop();
+  const startError = await starting.catch((e: Error) => e);
+  expect(startError).not.toBeInstanceOf(AggregateError);
+  expect((startError as Error).message).toBe('component "telegram" failed to start');
+});
+
+test("a start that fails by itself exposes a failed rollback; its own failure stays primary", async () => {
+  const refused = defineComponent({
+    name: "server-http",
+    setup: () => ({
+      start: () => {
+        throw new Error("EADDRINUSE");
+      },
+    }),
+  });
+  const app = await defineApp(quiet({ components: [database("SQLITE_BUSY"), refused] })).create();
+  const failure = await app.start().catch((e: Error) => e);
+  expect(failure).toBeInstanceOf(AggregateError);
+  expect((failure as Error).message).toBe('component "server-http" failed to start');
+  expect(((failure as Error).cause as Error).message).toBe("EADDRINUSE");
+  const [closeFailure] = (failure as AggregateError).errors as Error[];
+  expect(closeFailure?.message).toBe('component "sqlite" failed to stop');
+  expect((closeFailure?.cause as Error).message).toBe("SQLITE_BUSY");
+  // start() reported it; a later stop() has nothing left to stop.
+  await app.stop();
 });
 
 test("start(ctx): a start that outlives its deadline is abandoned and rolled back without that deadline", async () => {

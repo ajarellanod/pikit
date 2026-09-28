@@ -422,10 +422,13 @@ component: systemd's stop timeout, a Durable Object's `blockConcurrencyWhile`), 
 - Abandoned work is visible: a `warn` when it is abandoned.
 - The rollback of a failed start does not inherit the start's cancellation, which is usually
   why it runs. It is bounded only by a `stop()` that interrupts the start.
+- A failed rollback is never only logged: `start()` rejects with an `AggregateError` of the
+  rollback's stop failures, whose message and `cause` are still the start's own failure.
 
 `stop()` during a `start()` in progress (a SIGTERM during boot) cancels the start, waits for
 its rollback within the stop's deadline, and leaves the start's error to the caller of
-`start()`. Concurrent `stop()` calls share the first call's shutdown and deadline, and
+`start()`. If that rollback failed, `stop()` rejects with its failures (`app stopped with
+errors`), so the host exits non-zero instead of reporting a clean shutdown. Concurrent `stop()` calls share the first call's shutdown and deadline, and
 `start()` while stopping is rejected.
 
 `[decision]` An app is **single-use**. Once `stop()` is called or `start()` fails, `start()`

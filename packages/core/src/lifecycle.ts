@@ -82,6 +82,8 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
     done: Promise<void>;
     cancel(reason: unknown): void;
     boundRollback(signal: AbortSignal | undefined): void;
+    /** The rollback's stop failures, once `done` has settled; a `stop()` that interrupted it reports them. */
+    rollbackErrors: readonly Error[];
   }
 
   const boot = (parent: Context): Boot => {
@@ -89,6 +91,7 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
     // The rollback does not inherit the start's cancellation, which is usually why it runs;
     // only a stop() that interrupts the start bounds it.
     const rollback = new AbortController();
+    const rollbackErrors: Error[] = [];
     const done = (async () => {
       const ctx = context(bootContext);
       await announce(ctx, "runtime.starting");
@@ -100,17 +103,19 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
         } catch (error) {
           // Every runtime.starting is closed by runtime.stopped, even when start fails.
           const rollbackCtx = context(withAbortSignal(rollback.signal, withoutCancel(parent)));
-          for (const stopError of await shutdown(up, rollbackCtx)) {
-            logger.error("rollback after failed start", { error: stopError });
-          }
-          throw new Error(`component "${entry.name}" failed to start`, { cause: error });
+          rollbackErrors.push(...(await shutdown(up, rollbackCtx)));
+          const message = `component "${entry.name}" failed to start`;
+          // A failed rollback may leave resources open, so it is not only logged: it travels with
+          // the start's failure, which stays the message and the cause.
+          if (rollbackErrors.length) throw new AggregateError(rollbackErrors, message, { cause: error });
+          throw new Error(message, { cause: error });
         }
         up.push(entry);
       }
       running = up;
       await announce(ctx, "runtime.ready");
     })();
-    return { done, cancel, boundRollback: (signal) => follow(signal, rollback) };
+    return { done, cancel, boundRollback: (signal) => follow(signal, rollback), rollbackErrors };
   };
 
   /** `stopped` is terminal: set by the first `stop()` or by a failed `start()`. */
@@ -140,17 +145,22 @@ export function createLifecycle({ components, context, logger }: LifecycleOption
       // Concurrent calls share the first call's shutdown; once it has finished, stop() is a no-op.
       stopping ??= (async () => {
         state = "stopped";
-        if (starting) {
+        const errors: Error[] = [];
+        const interrupted = starting;
+        if (interrupted) {
           // A SIGTERM during boot: cancel it and let it roll back within this stop's deadline.
-          // Its error belongs to the caller of start().
-          starting.boundRollback(parent.abortSignal);
-          starting.cancel(new Error("app is stopping"));
-          await starting.done.catch(() => {});
+          // Its error belongs to the caller of start(); a failed rollback is this stop's failure
+          // too, so a supervisor never reads it as a clean shutdown.
+          interrupted.boundRollback(parent.abortSignal);
+          interrupted.cancel(new Error("app is stopping"));
+          await interrupted.done.catch(() => {});
+          errors.push(...interrupted.rollbackErrors);
         }
-        if (running === undefined) return;
-        const list = running;
-        running = undefined;
-        const errors = await shutdown(list, context(parent));
+        if (running !== undefined) {
+          const list = running;
+          running = undefined;
+          errors.push(...(await shutdown(list, context(parent))));
+        }
         if (errors.length) throw new AggregateError(errors, "app stopped with errors");
       })().finally(() => {
         stopping = Promise.resolve();
