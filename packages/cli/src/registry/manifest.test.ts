@@ -36,3 +36,13 @@ test("validate knows when the registry's JSON Schemas are missing or stale", () 
   rmSync(join(root, "schema"), { recursive: true });
   expect(checkSchemaFiles(root)).toHaveLength(2);
 });
+
+test("a files target that leaves the project, or is one of its own records, is a problem", () => {
+  const manifest = toolBash();
+  const files = [...(manifest.files as unknown[]), { source: "README.md", target: "package.json" }, { source: "README.md", target: "../outside" }];
+  const problems = checkManifest({ ...manifest, files }, join(DEFAULT_REGISTRY, "components", "tool-bash"), "tool-bash", "0.0.0");
+  expect(problems).toEqual([
+    'files target "package.json" is one of the project\'s own files; no component writes it',
+    'files target "../outside" leaves the project',
+  ]);
+});

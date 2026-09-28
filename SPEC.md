@@ -2109,7 +2109,10 @@ Rules:
   names: `pikit remove` deletes those and nothing else, `pikit.json` hashes each of them, and two
   components naming the same target is an install error. A root file already present is not
   overwritten without `--force`, as in step 6 of §10.5. A target never leaves the project (no `..`,
-  no absolute path).
+  no absolute path), and is never one of the project's own records: `pikit.json`, `package.json`,
+  `bun.lock`, `bun.lockb`, `pikit.config.ts`, `.env`, `.env.example`, or anything under `.git/`,
+  `vendor/`, `node_modules/` or `.pikit/` (compared without case). `pikit add` refuses such a component
+  even with `--force`, since a registry may be anyone's, and `validate` reports it.
 - `replay.tools` is generated too, and only for a component that provides `agent.tool`: each tool's
   name → its `replay` (`"safe"` or `"never"`, §8.4), read from the tool it provides. A component with
   no tool has no `replay`. `[decision]`
@@ -2241,8 +2244,10 @@ pikit add channel-http [--registry <path>] [--force] [--yes]
   1. resolve the registry and the component's version (and the registry's commit)
   2. read the component package
   3. check targets and requires.pikit; warn for each required capability nothing installed provides
-  4. show: files to write, npm deps to add, env vars, capabilities provided and required, source
-  5. confirm (--yes when there is no terminal)
+  4. show: files to write (each one outside src/pikit/<name>/ by its path, marked), npm deps to add,
+     env vars, capabilities provided and required, source
+  5. confirm, naming the files outside src/pikit/<name>/ (--yes when there is no terminal;
+     step 4 still lists them)
   6. write files; refuse to overwrite a file that differs without --force
   7. add npm deps (kit packages to their vendored tarballs); run `bun install`
   8. edit pikit.config.ts: append the import and the `components` entry
@@ -2252,9 +2257,19 @@ pikit add channel-http [--registry <path>] [--force] [--yes]
  11. run `pikit doctor`
 ```
 
+`[decision]` Every refusal comes before the first write: steps 1–5 run for the component and for each
+provider it brings (asked after the confirmation), and the edits of steps 8–10 are computed then, so a
+`pikit.config.ts` of another shape refuses too. A refused `add` (installed, incompatible, a file
+conflict, a "no") leaves the project byte for byte as it was, `package.json`, `vendor/` and `bun.lock`
+included. A step that fails once writing began (`bun install`, say) puts back what it wrote:
+`package.json`, `bun.lock`, `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files and the new
+tarballs; only `node_modules` is not. Rationale: a `package.json` that `bun.lock` does not match fails
+the next `bun install --frozen-lockfile`, in `deployment-docker`'s image build.
+
 `[decision]` The CLI edits `pikit.config.ts` as text, on one shape: one import line per component
 (`import channelHttp from "./src/pikit/channel-http/index.ts";`), one entry per line in
-`components`, one key per component in `const config = { … }`. When the file does not have that
+`components`, one key per component in `const config = { … }`, with or without semicolons (a new import follows
+the last import's style). When the file does not have that
 shape, the CLI stops and says what to change; it never guesses. `add` scaffolds no config value: a
 component whose config has required fields makes `doctor` fail with the core's config error until
 they are set in `config` (M1 keeps values in `pikit.config.ts`, §12).
@@ -2341,8 +2356,8 @@ the project depends on the tarballs:
 - A tarball already in `vendor/` is never repacked: `bun.lock` records its integrity.
 - **Its name carries a hash of the package's files** (`-<hash>`), since the version stays `0.0.0`
   until the kit is published. `pikit add` refreshes a project whose tarballs are another checkout's
-  (`refreshKit`): new tarballs, `dependencies` and `overrides` rewritten, the old tarballs deleted,
-  then `bun install`. A component and the core it needs come from the same checkout; the components
+  (`refreshKit`): once the component is checked and confirmed, new tarballs, `dependencies` and
+  `overrides` rewritten, then `bun install`, and only then are the old tarballs deleted. A component and the core it needs come from the same checkout; the components
   already installed keep working, since the core only grows within a major (§12a). Found on the M1
   VPS: a project made before `outbound-durable` could not add it, its core lacking `DeliveryError`.
 - `vendor/` is committed with the project. When the packages are on npm, each `file:vendor/…`

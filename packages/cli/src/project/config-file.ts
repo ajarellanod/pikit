@@ -63,19 +63,30 @@ export function addComponent(text: string, component: ComponentEntry): string {
   const list = componentsList(text);
   const withEntry = `${text.slice(0, list.closeLineStart)}${list.indent}${entry},\n${text.slice(list.closeLineStart)}`;
 
-  const imports = [...withEntry.matchAll(/^import\b[^;]*;[^\n]*\n/gm)];
+  const imports = [...withEntry.matchAll(IMPORT)];
   const last = imports.at(-1);
   if (last === undefined) throw new ShapeError("it has no import statements (it must at least import defineApp)");
   const at = last.index + last[0].length;
-  return `${withEntry.slice(0, at)}import ${importClause} from "${path}";\n${withEntry.slice(at)}`;
+  // The file's own style: prettier's `semi: false` writes imports without `;`.
+  const semi = /;[ \t]*(?:\/\/[^\n]*)?\n$/.test(last[0]) ? ";" : "";
+  return `${withEntry.slice(0, at)}import ${importClause} from "${path}"${semi}\n${withEntry.slice(at)}`;
 }
+
+/**
+ * An import statement starting a line, up to the end of the line its module specifier is on, with or
+ * without `;`: `import x from "m"`, `import { a,\n b } from "m";`, `import "m"`. Its clause never holds
+ * a quote or a `;`, so a match cannot run past its own specifier into the code after, whatever the
+ * file's semicolons. Not `import(…)` nor `import.meta`.
+ */
+const IMPORT = /^import\b(?!\s*[(.])[^"'`;]*["'][^"'\n]*["'][^\n]*\n/gm;
 
 /**
  * Removes the component's import lines and every `components` entry that uses what they bind.
  * A component that was never listed (a `deployment-*`) leaves the text unchanged.
  */
 export function removeComponent(text: string, name: string): string {
-  const importLine = new RegExp(`^import\\s+([^;]+?)\\s+from\\s+["']\\./src/pikit/${escape(name)}/[^"']*["'];?[^\\n]*\\n`, "gm");
+  // The clause holds no quote, so a match cannot start at an earlier import (a file without `;`).
+  const importLine = new RegExp(`^import\\s+([^;"'\`]+?)\\s+from\\s+["']\\./src/pikit/${escape(name)}/[^"']*["'];?[^\\n]*\\n`, "gm");
   const imports = [...text.matchAll(importLine)];
   if (imports.length === 0) return text;
   const names = imports.flatMap((m) => boundNames(m[1] ?? ""));
