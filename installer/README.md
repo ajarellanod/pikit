@@ -11,9 +11,15 @@ It is POSIX sh (`set -eu`), idempotent (running it again updates pikit), and say
 before doing it. The steps and settings are at the top of the script.
 
 - `git`, `curl`, `unzip`: installed with `apt-get` only after a "y" (or `--yes` / `PIKIT_YES=1`).
-- Bun ≥ 1.4: installed with Bun's own installer into `~/.bun` when missing; no sudo.
+- Bun, pinned: an existing Bun is used only within the supported range, `>= 1.4.0` and `< 2.0.0`
+  (a new major may break pikit). When there is none, Bun's own installer puts the pinned version
+  (`PIKIT_BUN_VERSION`, default `1.4.2`) into `~/.bun`; no sudo. A Bun outside the range is replaced
+  by the pinned one in `~/.bun` only after a "y" (or `--yes` / `PIKIT_YES=1`); a Bun elsewhere, such
+  as Homebrew's, is left alone. It never runs `bun upgrade`, which would install the latest Bun.
 - pikit: `git clone` of `PIKIT_REPO` (or `PIKIT_SOURCE`, a local checkout) at `PIKIT_REF` into
-  `~/.pikit/pikit`, then `bun install --frozen-lockfile --production` there.
+  `~/.pikit/pikit`, then `bun install --frozen-lockfile --production` there. `PIKIT_REF` defaults to
+  `main` because pikit has no release tags yet; once it tags releases, the default becomes the latest
+  tag.
 - `~/.pikit/bin/pikit`: a two-line shim that runs the checkout's CLI with that Bun. The installer
   prints the `PATH` line to add; it edits no shell file.
 - Docker: only `pikit up` needs it. On Linux the official script (`get.docker.com`) runs only with
@@ -29,9 +35,12 @@ checkout into each project (SPEC §10.5).
 
 ## Tests
 
-- `install.test.ts`: `sh -n` and shellcheck (when installed) always; with `PIKIT_INSTALLER_TEST=1`,
-  a real install of this repository's committed `HEAD` into a temporary `HOME`, twice, then
-  `pikit --version`.
+- `install.test.ts`: always, `sh -n`, shellcheck (when installed), and how Bun is chosen (pin, range,
+  `PIKIT_BUN_VERSION`) with stand-ins for `bun`, `curl` and `git`, without network; with
+  `PIKIT_INSTALLER_TEST=1`, a real install of this repository's committed `HEAD` into a temporary
+  `HOME`, twice, then `pikit --version`. CI (`.github/workflows/ci.yml`) runs the first part on every
+  pull request; the nightly workflow (`.github/workflows/nightly.yml`) runs it with
+  `PIKIT_INSTALLER_TEST=1`.
 - On a clean Debian, by hand (Docker; the repository mounted read-only, the container removed):
 
   ```sh

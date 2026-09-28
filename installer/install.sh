@@ -6,7 +6,9 @@
 #
 # What it does, in order, and it says so as it goes:
 #   1. checks git, curl and (Linux) unzip; installs the missing ones with apt-get, after asking;
-#   2. checks Bun >= 1.4; installs it from bun.sh when missing (in ~/.bun, no sudo);
+#   2. checks Bun is in the supported range (>= 1.4.0, < 2.0.0); installs the pinned Bun (1.4.2) with
+#      Bun's own installer when there is none (in ~/.bun, no sudo), and over one outside the range
+#      after asking;
 #   3. fetches pikit with git into ~/.pikit/pikit, at a ref, and runs `bun install` there;
 #   4. writes ~/.pikit/bin/pikit and prints the PATH line to add (it edits no shell file);
 #   5. checks Docker, which only `pikit up` needs. On Linux it offers Docker's official script and
@@ -20,14 +22,25 @@
 # Settings (environment):
 #   PIKIT_HOME            where pikit lives (default ~/.pikit)
 #   PIKIT_REPO            the Git repository (default https://github.com/ajarellanod/pikit.git)
-#   PIKIT_REF             the branch, tag or commit (default main; HEAD with PIKIT_SOURCE)
+#   PIKIT_REF             the branch, tag or commit to install (default main; HEAD with PIKIT_SOURCE).
+#                         pikit has no release tags yet, so main is the default; once tags exist the
+#                         default becomes the latest release tag, and main is opt-in.
 #   PIKIT_SOURCE          a local checkout to install from instead of PIKIT_REPO (tests, development)
-#   PIKIT_YES=1           answer yes to installing git, curl, unzip, and to upgrading Bun (not Docker)
+#   PIKIT_BUN_VERSION     the Bun this installs when it needs one (default 1.4.2; "1.4.2" or "bun-v1.4.2");
+#                         it must be in the supported range
+#   PIKIT_YES=1           answer yes to installing git, curl, unzip, and to replacing a Bun outside the
+#                         supported range with PIKIT_BUN_VERSION (not Docker)
 #   PIKIT_INSTALL_DOCKER=1  consent to Docker's official install script on Linux
 
 set -eu
 
+# The Bun range pikit supports: BUN_MINIMUM included (older Bun never fires some of pikit's stop
+# deadlines), BUN_BELOW excluded (a new major may break pikit). BUN_PINNED is what this installs.
 BUN_MINIMUM="1.4.0"
+BUN_BELOW="2.0.0"
+BUN_PINNED="${PIKIT_BUN_VERSION:-1.4.2}"
+BUN_PINNED="${BUN_PINNED#bun-v}"
+BUN_PINNED="${BUN_PINNED#v}"
 PIKIT_HOME="${PIKIT_HOME:-$HOME/.pikit}"
 PIKIT_REPO="${PIKIT_REPO:-https://github.com/ajarellanod/pikit.git}"
 PIKIT_SOURCE="${PIKIT_SOURCE:-}"
@@ -36,6 +49,7 @@ PIKIT_INSTALL_DOCKER="${PIKIT_INSTALL_DOCKER:-}"
 if [ -n "$PIKIT_SOURCE" ]; then
   PIKIT_REF="${PIKIT_REF:-HEAD}"
 else
+  # No release tags yet: main. Once pikit tags releases, this default becomes the latest tag.
   PIKIT_REF="${PIKIT_REF:-main}"
 fi
 
@@ -103,25 +117,48 @@ if [ -n "$missing" ]; then
   fi
 fi
 
-# 2. Bun >= 1.4 (older Bun never fires some of pikit's stop deadlines).
-bun_ok() { "$1" -e "process.exit(Bun.semver.satisfies(Bun.version, '>=$BUN_MINIMUM') ? 0 : 1)" >/dev/null 2>&1; }
-BUN=""
-if has bun; then BUN="$(command -v bun)"; elif [ -x "$HOME/.bun/bin/bun" ]; then BUN="$HOME/.bun/bin/bun"; fi
-if [ -z "$BUN" ]; then
-  say "Bun is not installed: running Bun's own installer (https://bun.sh/install) into ~/.bun, no sudo."
+# 2. Bun, in the supported range. The version is compared in sh, so a broken or ancient Bun is only
+# asked for `--version`.
+BUN_RANGE=">= $BUN_MINIMUM, < $BUN_BELOW"
+# Succeeds when version $1 (x.y.z, any -suffix ignored) is in [BUN_MINIMUM, BUN_BELOW).
+bun_supported() {
+  awk -v v="$1" -v lo="$BUN_MINIMUM" -v hi="$BUN_BELOW" '
+    function key(s, p) { sub(/[-+].*/, "", s); if (s !~ /^[0-9]+\.[0-9]+\.[0-9]+$/) return -1; split(s, p, "."); return (p[1] * 1000 + p[2]) * 1000 + p[3] }
+    BEGIN { k = key(v); exit !(k >= key(lo) && k < key(hi)) }'
+}
+bun_version() { "$1" --version 2>/dev/null || true; }
+install_bun() {
+  say "running Bun's own installer (https://bun.sh/install) for Bun $BUN_PINNED into ~/.bun, no sudo."
   say "  It adds ~/.bun/bin to your shell's startup file; pikit itself does not need that."
   has bash || fail "the Bun installer needs bash; install bash, then run this again"
-  curl -fsSL https://bun.sh/install | bash
+  curl -fsSL https://bun.sh/install | bash -s "bun-v$BUN_PINNED"
   BUN="$HOME/.bun/bin/bun"
   [ -x "$BUN" ] || fail "Bun's installer did not leave $BUN"
-fi
-if ! bun_ok "$BUN"; then
-  if ask "Bun $("$BUN" --version) is older than $BUN_MINIMUM. Run \`bun upgrade\` (PIKIT_YES=1 or --yes to consent)?" "$PIKIT_YES"; then
-    "$BUN" upgrade
+}
+bun_supported "$BUN_PINNED" || fail "PIKIT_BUN_VERSION=$BUN_PINNED is outside the Bun range pikit supports ($BUN_RANGE)"
+# The Bun on the PATH, else the one in ~/.bun: the first in the range is used as it is.
+BUN=""
+FOUND=""
+for candidate in "$(command -v bun 2>/dev/null || true)" "$HOME/.bun/bin/bun"; do
+  if [ -z "$candidate" ] || [ ! -x "$candidate" ]; then continue; fi
+  version="$(bun_version "$candidate")"
+  if bun_supported "$version"; then BUN="$candidate"; break; fi
+  [ -n "$FOUND" ] || FOUND="Bun ${version:-of unknown version} at $candidate"
+done
+if [ -z "$BUN" ] && [ -z "$FOUND" ]; then
+  say "Bun is not installed."
+  install_bun
+elif [ -z "$BUN" ]; then
+  # Never `bun upgrade`: it installs the latest Bun, which may be a major pikit does not support yet.
+  say "$FOUND is outside the range pikit supports ($BUN_RANGE)."
+  if ask "Install Bun $BUN_PINNED into ~/.bun for pikit (PIKIT_YES=1 or --yes to consent)?" "$PIKIT_YES"; then
+    install_bun
+  else
+    fail "pikit needs Bun $BUN_RANGE; found $FOUND. Rerun with --yes to install Bun $BUN_PINNED into ~/.bun, or install it yourself: curl -fsSL https://bun.sh/install | bash -s bun-v$BUN_PINNED"
   fi
-  bun_ok "$BUN" || fail "pikit needs Bun >= $BUN_MINIMUM; found $("$BUN" --version) at $BUN"
 fi
-say "Bun $("$BUN" --version) at $BUN"
+bun_supported "$(bun_version "$BUN")" || fail "pikit needs Bun $BUN_RANGE; found $(bun_version "$BUN") at $BUN"
+say "Bun $(bun_version "$BUN") at $BUN"
 
 # 3. pikit itself.
 SOURCE="${PIKIT_SOURCE:-$PIKIT_REPO}"

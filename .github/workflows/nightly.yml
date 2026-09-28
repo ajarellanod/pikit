@@ -1,0 +1,54 @@
+# The slow end-to-end suites, as a new user meets pikit: the installer into a fresh HOME, and
+# `pikit new` / `configure` / `dev` / `up` against generated projects. They need the network (npm,
+# Docker images) and Docker, not secrets: every model key is a dummy and Telegram is the channel's
+# local fake Bot API. The wizard suite drives `pikit new` through Bun's own pseudo-terminal
+# (`Bun.spawn({ terminal })`), so it needs no TTY from the runner.
+#
+# Manual, never here: the live Anthropic test (PIKIT_LIVE=1, samples/http/README.md), because it
+# costs money and needs a credential; and the clean-Debian installer run (installer/README.md).
+name: Nightly e2e
+
+on:
+  schedule:
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: nightly-e2e
+  cancel-in-progress: false
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    env:
+      PIKIT_E2E: "1"
+      PIKIT_E2E_DOCKER: "1"
+      PIKIT_INSTALLER_TEST: "1"
+    steps:
+      # Full history: the installer test clones this checkout (PIKIT_SOURCE) at HEAD.
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: Docker is available (pikit up needs it)
+        run: docker version && docker compose version
+      # One step per suite, and every suite runs even when an earlier one failed.
+      - name: installer
+        if: ${{ !cancelled() }}
+        run: bun test installer/install.test.ts
+      - name: pikit new / configure / doctor / add / remove / up (Docker)
+        if: ${{ !cancelled() }}
+        run: bun test packages/cli/src/e2e.test.ts
+      - name: pikit new, the guided path in a pseudo-terminal
+        if: ${{ !cancelled() }}
+        run: bun test packages/cli/src/e2e-wizard.test.ts
+      - name: Telegram preset against the fake Bot API
+        if: ${{ !cancelled() }}
+        run: bun test packages/cli/src/e2e-telegram.test.ts

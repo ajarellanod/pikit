@@ -1,9 +1,12 @@
 /**
  * The sample against Anthropic for real: the composition of `pikit.config.ts`, with a free port and
- * temporary sessions, and the sample's own credentials. It runs only when a credential exists:
+ * temporary sessions, and the sample's own credentials. It calls a paid API over the network, so it
+ * is opt-in: it runs only with `PIKIT_LIVE=1` AND a credential:
  * - the sample's credentials file has an `anthropic` entry (`bun samples/http/scripts/login.ts`), or
  * - `ANTHROPIC_API_KEY` is already exported.
- * Otherwise it is skipped. It never prints a credential.
+ * Otherwise it is skipped, so a plain `bun test` never reaches Anthropic. It never prints a credential.
+ *
+ *   PIKIT_LIVE=1 bun test samples/http/test/anthropic.test.ts
  */
 
 import { expect, test } from "bun:test";
@@ -25,7 +28,7 @@ function storedAnthropicCredential(): boolean {
   }
 }
 
-const available = storedAnthropicCredential() || Boolean(process.env.ANTHROPIC_API_KEY);
+const available = process.env.PIKIT_LIVE === "1" && (storedAnthropicCredential() || Boolean(process.env.ANTHROPIC_API_KEY));
 const TOKEN = "live-test-token-0123456789abcdef";
 
 /** The sample's own app, with the test's token, a free port, and state and workspace in `dataDir`. */
