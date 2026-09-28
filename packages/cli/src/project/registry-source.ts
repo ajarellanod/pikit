@@ -9,6 +9,10 @@ import { isAbsolute, join, normalize, resolve } from "node:path";
 import { parse } from "yaml";
 import Type, { type Static } from "typebox";
 import { kindOf, type Manifest, ManifestSchema, readManifest, type RegistryIndex, SCHEMA_DIR, schemaProblems } from "../registry/manifest.ts";
+import { CONFIG_FILE } from "./config-file.ts";
+import { ENV_EXAMPLE, ENV_FILE } from "./env-file.ts";
+import { PIKIT_JSON } from "./pikit-json.ts";
+import { VENDOR_DIR } from "./vendor.ts";
 
 /** One question of `pikit new`: which component of `kind` the project gets. */
 export interface PresetSlot {
@@ -124,6 +128,8 @@ export function openRegistry(path: string): Registry {
       for (const { source, target } of this.manifest(name).files) {
         const from = join(componentDir, source);
         if (!isInside(target)) throw new Error(`${name}: the file target "${target}" leaves the project`);
+        // Refused with --force too: the registry may be anyone's, and these are not a component's to write.
+        if (isProtected(target)) throw new Error(`${name}: the file target "${target}" is the project's own (${PROTECTED}); no component writes it`);
         if (statSync(from).isDirectory()) {
           // SPEC §10.2: `files/src` → `src` is the only directory mapping.
           if (source !== "files/src" || target !== "src") throw new Error(`${name}: only files/src → src may map a directory`);
@@ -141,6 +147,24 @@ export function openRegistry(path: string): Registry {
 export function isInside(target: string): boolean {
   if (target === "" || isAbsolute(target)) return false;
   return !normalize(target).split(/[\\/]/).includes("..");
+}
+
+/**
+ * The project's own records, which no component may write, whatever `--force` says: what the CLI and
+ * Bun keep (`pikit.json`, `package.json`, the lockfile, `pikit.config.ts`, `.env.example`, `vendor/`,
+ * `node_modules/`), the app's secrets and state (`.env`, `.pikit/`) and Git's (`.git`).
+ */
+const PROTECTED_FILES = [PIKIT_JSON, "package.json", "bun.lock", "bun.lockb", CONFIG_FILE, ENV_FILE, ENV_EXAMPLE];
+const PROTECTED_DIRS = [".git", VENDOR_DIR, "node_modules", ".pikit"];
+const PROTECTED = [...PROTECTED_FILES, ...PROTECTED_DIRS.map((dir) => `${dir}/`)].join(", ");
+
+/**
+ * A target that is one of the project's own records (`PROTECTED_FILES`) or lies under one of its own
+ * directories (`PROTECTED_DIRS`). Without case: macOS and Windows would write `Package.json` over `package.json`.
+ */
+export function isProtected(target: string): boolean {
+  const path = normalize(target).split("\\").join("/").replace(/\/+$/, "").toLowerCase();
+  return PROTECTED_FILES.includes(path) || PROTECTED_DIRS.includes(path.split("/")[0] as string);
 }
 
 function listFiles(dir: string): string[] {

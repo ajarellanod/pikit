@@ -4,8 +4,9 @@
  *   1. resolve the registry (a local path in M1) and the component's version and commit
  *   2. read the component's package
  *   3. check its targets and `requires.pikit`; warn for each required capability nothing provides
- *   4. show what it writes: files, npm dependencies, environment, capabilities, source
- *   5. confirm (`--yes` in a script)
+ *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies,
+ *      environment, capabilities, source
+ *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
  *   6. write its files; refuse to overwrite a file that differs without `--force`
  *   7. add its npm dependencies; `bun install`
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not)
@@ -117,9 +118,9 @@ async function acceptedOffers(registry: Registry, name: string, installed: reado
     }
     const what = (capabilityEntry(offer.capability)?.summary ?? offer.capability).replace(/\.$/, "");
     const question =
-      offer.why === "recommended"
+      (offer.why === "recommended"
         ? `${offer.for} can use ${offer.capability} (${what}). Install ${offer.component}?`
-        : `${offer.for} requires ${offer.capability}. Install ${offer.component}?`;
+        : `${offer.for} requires ${offer.capability}. Install ${offer.component}?`) + alsoWrites(offer.component, registry.files(offer.component));
     if (options.yes === true || (isInteractive() && (await confirm(question, true)))) {
       log.step(`${offer.component}, for ${offer.for} (${offer.capability})`);
       accepted.push(offer);
@@ -235,7 +236,23 @@ function planInstall(
 async function confirmPlan(plan: Plan, options: AddOptions): Promise<void> {
   if (options.yes === true) return;
   if (!isInteractive()) throw new CliError("pikit add asks for confirmation; pass --yes when it runs without a terminal");
-  if (!(await confirm(`Install ${plan.name}?`))) throw new CliError("cancelled", 1);
+  if (!(await confirm(`Install ${plan.name}?${alsoWrites(plan.name, plan.files)}`))) throw new CliError("cancelled", 1);
+}
+
+/** Where a component's own files go; the plan names every file it writes anywhere else. */
+function ownDir(name: string): string {
+  return `src/pikit/${name}/`;
+}
+
+/** The targets outside the component's own directory, sorted (so grouped by directory). */
+function outside(name: string, files: Map<string, string>): string[] {
+  return [...files.keys()].filter((target) => !target.startsWith(ownDir(name))).sort();
+}
+
+/** What a confirmation adds when the component writes outside its directory: the files, by name. */
+function alsoWrites(name: string, files: Map<string, string>): string {
+  const others = outside(name, files);
+  return others.length === 0 ? "" : ` It also writes, outside ${ownDir(name)}: ${others.join(", ")}`;
 }
 
 /** Steps 6–10 for the confirmed plans: files, npm dependencies, then the draft's three files. */
@@ -377,7 +394,13 @@ function checkConflicts(projectDir: string, project: ProjectManifest, name: stri
 
 function describePlan({ registry, manifest, files }: Plan): void {
   log.step(`${manifest.name} ${manifest.version} from ${registry.root}${registry.commit ? ` at ${registry.commit}` : ""}`);
-  log.info(`  files: ${files.size} (${[...new Set([...files.keys()].map((f) => (f.startsWith("src/") ? `src/pikit/${manifest.name}/` : f)))].join(", ")})`);
+  // A registry may be anyone's: a file outside the component's directory is shown by its path, marked.
+  const others = outside(manifest.name, files);
+  log.info(`  files: ${files.size - others.length} in ${ownDir(manifest.name)}`);
+  if (others.length > 0) {
+    log.info(`  files outside ${ownDir(manifest.name)}: ${others.length}`);
+    for (const target of others) log.info(`    ! ${target}`);
+  }
   const deps = Object.entries(manifest.dependencies);
   if (deps.length > 0) log.info(`  npm: ${deps.map(([p, v]) => `${p}@${v}`).join(", ")}`);
   const env = manifest.environment ?? [];

@@ -11,7 +11,7 @@ import { join } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import type { Manifest } from "../registry/manifest.ts";
 import { checkPresets } from "../registry/commands.ts";
-import { openRegistry } from "./registry-source.ts";
+import { isProtected, openRegistry } from "./registry-source.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -126,4 +126,13 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   const r = openRegistry(DEFAULT_REGISTRY);
   expect(r.preset("telegram")).toEqual(r.preset("http", ["channel-telegram"]));
   expect(r.slots("http")[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram"]);
+});
+
+test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {
+  for (const target of ["package.json", "./Package.JSON", "pikit.json", "pikit.config.ts", "bun.lock", ".env", ".env.example", ".git", ".git/config", "vendor/x.tgz", "node_modules/a/index.js", ".pikit/sessions/a.jsonl"]) {
+    expect(isProtected(target)).toBe(true);
+  }
+  for (const target of ["Dockerfile", "compose.yaml", ".dockerignore", ".gitignore", "src/pikit/x/package.json", "src/vendor/x.ts", "vendored.txt", ".env.production"]) {
+    expect(isProtected(target)).toBe(false);
+  }
 });

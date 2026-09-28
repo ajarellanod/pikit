@@ -2106,7 +2106,10 @@ Rules:
   names: `pikit remove` deletes those and nothing else, `pikit.json` hashes each of them, and two
   components naming the same target is an install error. A root file already present is not
   overwritten without `--force`, as in step 6 of §10.5. A target never leaves the project (no `..`,
-  no absolute path).
+  no absolute path), and is never one of the project's own records: `pikit.json`, `package.json`,
+  `bun.lock`, `bun.lockb`, `pikit.config.ts`, `.env`, `.env.example`, or anything under `.git/`,
+  `vendor/`, `node_modules/` or `.pikit/` (compared without case). `pikit add` refuses such a component
+  even with `--force`, since a registry may be anyone's, and `validate` reports it.
 - `replay.tools` is generated too, and only for a component that provides `agent.tool`: each tool's
   name → its `replay` (`"safe"` or `"never"`, §8.4), read from the tool it provides. A component with
   no tool has no `replay`. `[decision]`
@@ -2238,8 +2241,10 @@ pikit add channel-http [--registry <path>] [--force] [--yes]
   1. resolve the registry and the component's version (and the registry's commit)
   2. read the component package
   3. check targets and requires.pikit; warn for each required capability nothing installed provides
-  4. show: files to write, npm deps to add, env vars, capabilities provided and required, source
-  5. confirm (--yes when there is no terminal)
+  4. show: files to write (each one outside src/pikit/<name>/ by its path, marked), npm deps to add,
+     env vars, capabilities provided and required, source
+  5. confirm, naming the files outside src/pikit/<name>/ (--yes when there is no terminal;
+     step 4 still lists them)
   6. write files; refuse to overwrite a file that differs without --force
   7. add npm deps (kit packages to their vendored tarballs); run `bun install`
   8. edit pikit.config.ts: append the import and the `components` entry

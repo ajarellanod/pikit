@@ -4,6 +4,9 @@
  * projects are "made by another kit revision": their vendored tarballs are not this checkout's, so
  * an add that went ahead would rewrite `package.json` and `vendor/` (SPEC §10.5, "Vendored kit").
  * No network: the one `bun install` here is made to fail at once.
+ *
+ * A registry may be anyone's (`--registry`): the plan names every file written outside the
+ * component's own directory, and the project's own records are never a component's to write.
  */
 
 import { afterAll, expect, test } from "bun:test";
@@ -68,6 +71,33 @@ function otherKitProject(installed: string[] = []): string {
     'import { defineApp } from "@pikit/core";\n\nexport const config = {};\n\nexport default defineApp({\n  components: [\n  ],\n  config,\n});\n',
   );
   return dir;
+}
+
+/**
+ * A registry with one component, `tool-fake`: its own `src/pikit/tool-fake/index.ts`, plus `extra`
+ * (component-relative source → project target; a source under `files/src/` rides on the src mapping).
+ */
+function fakeRegistry(extra: Record<string, string>): string {
+  const root = temp();
+  const dir = join(root, "components", "tool-fake");
+  const put = (file: string, text: string) => {
+    mkdirSync(join(dir, file, ".."), { recursive: true });
+    writeFileSync(join(dir, file), text);
+  };
+  put("files/src/pikit/tool-fake/index.ts", "export default {};\n");
+  const files = [{ source: "files/src", target: "src" }];
+  for (const [source, target] of Object.entries(extra)) {
+    put(source, "written by tool-fake\n");
+    if (!source.startsWith("files/src/")) files.push({ source, target });
+  }
+  const manifest = {
+    name: "tool-fake", version: "0.0.0", description: "tool-fake", targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
+    optional: { capabilities: [] }, provides: [], dependencies: {}, files,
+  };
+  writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));
+  const index = { "tool-fake": { version: "0.0.0", description: "tool-fake", targets: ["server"], path: "components/tool-fake" } };
+  writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
+  return root;
 }
 
 /** Every file under `dir` (node_modules aside) → its content: equal snapshots are byte-identical trees. */
@@ -135,3 +165,34 @@ test("an add that fails once writing began puts back what it wrote: files, tarba
   expect(run.out).toContain("refreshed to this CLI's");
   expect(snapshot(dir)).toEqual(before);
 }, 120_000);
+
+test("the plan and the confirmation name each file written outside the component's directory", async () => {
+  const dir = otherKitProject();
+  const registry = fakeRegistry({ "files/src/other/x.ts": "src/other/x.ts" });
+  const before = snapshot(dir);
+  const plan = pikit(["add", "tool-fake", "--registry", registry], dir);
+  expect(plan.code).toBe(1);
+  expect(plan.out).toContain("files: 1 in src/pikit/tool-fake/");
+  expect(plan.out).toContain("files outside src/pikit/tool-fake/: 1\n    ! src/other/x.ts\n");
+  expect(plan.err).toContain("pass --yes");
+
+  const asked = await pikitAnsweringEnter(["add", "tool-fake", "--registry", registry], dir, "It also writes, outside src/pikit/tool-fake/: src/other/x.ts");
+  expect(asked.code).toBe(1);
+  expect(snapshot(dir)).toEqual(before);
+
+  // The repository's own: deployment-docker's root files are shown by name.
+  expect(pikit(["add", "deployment-docker"], dir).out).toContain("files outside src/pikit/deployment-docker/: 3\n    ! .dockerignore\n    ! Dockerfile\n    ! compose.yaml\n");
+}, 60_000);
+
+test("a component that would write the project's own records is refused, --force or not, and nothing changes", () => {
+  const dir = otherKitProject();
+  mkdirSync(join(dir, ".git"));
+  writeFileSync(join(dir, ".git", "config"), "[core]\n");
+  const before = snapshot(dir);
+  for (const target of ["package.json", ".git/config", "vendor/pikit-core-0.0.0-0000000000.tgz", "Pikit.json"]) {
+    const run = pikit(["add", "tool-fake", "--yes", "--force", "--registry", fakeRegistry({ "files/payload": target })], dir);
+    expect(run.code).toBe(1);
+    expect(run.err).toContain(`tool-fake: the file target "${target}" is the project's own`);
+    expect(snapshot(dir)).toEqual(before);
+  }
+}, 60_000);

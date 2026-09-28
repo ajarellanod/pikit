@@ -9,6 +9,7 @@ import { dirname, join, relative, resolve, sep } from "node:path";
 import { capabilityEntry } from "./capabilities.ts";
 import { isRelative, packageName, runtimeScheme, scanImports } from "./imports.ts";
 import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
+import { isInside, isProtected } from "../project/registry-source.ts";
 
 /**
  * Component kinds (AGENTS.md, "Naming"): the table's kinds plus the ones the registry already uses.
@@ -60,6 +61,9 @@ export function checkManifest(manifest: unknown, componentDir: string, dirName: 
     problems.push(`requires.pikit "${m.requires.pikit}" does not accept this repository's @pikit/core ${coreVersion}`);
   }
   for (const f of m.files) {
+    // What `pikit add` refuses to install (registry-source.ts), refused here first.
+    if (!isInside(f.target)) problems.push(`files target "${f.target}" leaves the project`);
+    else if (isProtected(f.target)) problems.push(`files target "${f.target}" is one of the project's own files; no component writes it`);
     if (!existsSync(join(componentDir, f.source))) problems.push(`files source "${f.source}" does not exist`);
     // SPEC §10.2: only `src` is mapped as a directory; every file outside it is listed on its own,
     // so a component owns exactly the files it lists and removing it cannot touch another one.
