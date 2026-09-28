@@ -11,7 +11,8 @@
  *
  * Delivery guarantee: best effort within the process. The answer is always in the conversation's
  * session; a reply lost to a crash while sending is not sent again. `outbound-durable` is the durable
- * delivery.
+ * delivery. An answer read from `agent.submissions`' feed is sent with `sendOrFail`, which rejects
+ * when it could not be sent, so the feed's reader keeps it and tries again (`answers.ts`).
  */
 
 import { type Logger } from "@pikit/core";
@@ -30,8 +31,16 @@ export interface Delivery {
   /** Show "typing…" in `chatId` until `typingStopped` (or a limit). */
   typingStarted(chatId: number): void;
   typingStopped(chatId: number): void;
-  /** Queue `text` for `chatId`. Resolves when it was sent or given up; never rejects. */
+  /** Queue `text` for `chatId`. Resolves when it was sent or given up (logged); never rejects. */
   send(chatId: number, text: string): Promise<void>;
+  /**
+   * Queue `text` for `chatId`, in the same line as `send`. Resolves once it was sent, or refused for
+   * good (the user blocked the bot, the chat is gone: logged, as sending it again would fail the same
+   * way). Rejects when Telegram could not be reached after the retries, or the channel stopped first:
+   * the caller still has the answer and sends it again later. A long answer sent again may repeat
+   * the pieces that had gone out.
+   */
+  sendOrFail(chatId: number, text: string): Promise<void>;
   /** Stop every "typing…", abandon waits between retries, and wait for sends in flight. */
   close(): Promise<void>;
 }
@@ -72,6 +81,22 @@ export function createDelivery(api: TelegramApi, transport: ChannelTransport, lo
     typing.delete(chatId);
   };
 
+  /** Sends every piece of `text` after the chat's previous messages; rejects with the first piece that failed. */
+  const line = (chatId: number, text: string): Promise<void> => {
+    const previous = lines.get(chatId) ?? Promise.resolve();
+    const next = previous.then(async () => {
+      if (closing.signal.aborted) throw new Error("channel-telegram: stopping");
+      for (const [index, piece] of transport.split(text).entries()) await sendPiece(chatId, piece, index);
+    });
+    // The line itself never rejects: one message's failure does not stop the chat's next ones.
+    const settled = next.catch(() => {});
+    lines.set(chatId, settled);
+    void settled.then(() => {
+      if (lines.get(chatId) === settled) lines.delete(chatId);
+    });
+    return next;
+  };
+
   return {
     typingStarted(chatId) {
       if (typing.has(chatId) || closing.signal.aborted) return;
@@ -85,22 +110,15 @@ export function createDelivery(api: TelegramApi, transport: ChannelTransport, lo
     },
     typingStopped,
     send(chatId, text) {
-      const previous = lines.get(chatId) ?? Promise.resolve();
-      const next = previous.then(async () => {
-        for (const [index, piece] of transport.split(text).entries()) {
-          try {
-            await sendPiece(chatId, piece, index);
-          } catch (error) {
-            logger.error("channel-telegram: a reply could not be sent", { chat: chatId, error: String(error) });
-            return;
-          }
-        }
-      });
-      lines.set(chatId, next);
-      void next.finally(() => {
-        if (lines.get(chatId) === next) lines.delete(chatId);
-      });
-      return next;
+      return line(chatId, text).catch((error: unknown) => logger.error("channel-telegram: a reply could not be sent", { chat: chatId, error: String(error) }));
+    },
+    async sendOrFail(chatId, text) {
+      try {
+        await line(chatId, text);
+      } catch (error) {
+        if (closing.signal.aborted || !(error instanceof DeliveryError) || error.kind !== "permanent") throw error;
+        logger.error("channel-telegram: Telegram refused a reply for good; it is not sent", { chat: chatId, error: String(error) });
+      }
     },
     async close() {
       closing.abort(new Error("channel-telegram: stopping"));
