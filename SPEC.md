@@ -2208,10 +2208,11 @@ Rules:
 ```json
 // pikit.json
 {
-  "version": 1,
+  "version": 2,
+  "kit": { "commit": "9b1c0de…" },
   "targets": ["server"],
   "registries": {
-    "default": "/home/me/.pikit/pikit/registry"
+    "default": "builtin"
   },
   "components": {
     "channel-http": {
@@ -2229,18 +2230,48 @@ Rules:
 }
 ```
 
-- `version` is the schema version (§12a). Components and files are sorted, so the file's diff shows
-  only what changed.
-- `registries` maps a name to a location. `[decision]` M1 reads local paths only: by default the
-  registry of the pikit checkout the CLI runs from, or `--registry <path>`. Git and HTTP registries
-  (`"official": "https://github.com/…"`, `"acme": "git+ssh://…"`) come with M3's `upgrade`, which is
-  when a pinned commit starts to be fetched again.
+- `version` is the schema version (§12a), 2 today. Components and files are sorted, and the keys come
+  in one order, so the file's diff shows only what changed.
+- `registries` maps a name to a location. `[decision]` A location is what resolves wherever the
+  project is cloned, since the project is committed and moved between machines:
+  - `builtin` is the registry of the pikit checkout the running CLI comes from. `pikit new` records it
+    by default, and for a `--registry` that is that registry.
+  - A registry inside the project is recorded relative to it (`"./registries/acme"`).
+  - Any other `--registry <path>` is recorded as given. It resolves only on this machine, and `add`
+    and `new` say so each time they use it.
+
+  M1 reads local registries only. Git and HTTP registries (`"official": "https://github.com/…"`,
+  `"acme": "git+ssh://…"`) come with M3's `upgrade`, which is when a pinned commit starts to be
+  fetched again. Every command resolves a location through one helper (`registry-location.ts`).
+- Version 1 recorded every registry as an absolute path, the one of the machine that installed, so a
+  clone on another machine failed with "… is not a registry". The CLI reads version 1 and converts it
+  in memory; the next write saves version 2 (§12a). `[decision]` A version 1 path becomes `builtin`
+  when it names a pikit checkout's registry: the running CLI's registry, the `registry/` of a pikit
+  checkout that exists here (its `packages/cli/package.json` is `@pikit/cli`), or any path ending in
+  `/.pikit/pikit/registry` (the installer's checkout, which exists on the machine that made the
+  project, not necessarily here). Version 1 recorded the checkout the CLI ran from unless
+  `--registry` was given, so these are the CLI's registry by construction. Another path inside the
+  project becomes relative, and any other stays as it was.
+- `kit` is the kit vendored in `vendor/`: the commit of the pikit checkout it was packed from, ending
+  in `-dirty` when a kit package had uncommitted changes (§10.5, "Vendored kit packages"). Absent when
+  unknown: a project made before version 2, or by a CLI that is not in Git.
 - `commit` is the registry's Git commit when the component was installed, ending in `-dirty` when the
-  registry had uncommitted changes; absent when the registry is not in Git.
+  registry had uncommitted changes (`add` says so in its plan); absent when the registry is not in Git.
 - `files` holds each installed file's hash. `[decision]` Whether a file is modified is computed by
   comparing hashes and never stored: a stored flag goes stale as soon as someone edits the file.
   `doctor` lists modified files as information, `remove` refuses to delete them without `--force`,
   and M3's three-way `upgrade` takes the hash as its base.
+- **Bases.** `[decision]` Each file a component installs is also kept, as installed, in the project's
+  `pikit-bases/`, named by the hash `files` records for it (`sha256:<hex>` → `pikit-bases/<hex>`). It
+  is what M3's three-way `upgrade` diffs against, and the registry cannot always give it back: its
+  commit may be `-dirty`, it may not be in Git, or its path may be gone. Content-addressed, so two
+  components installing the same bytes share one base. No extension, so `tsc`, `bun test` and
+  `doctor`'s source scan never read a base as code. Committed with the project, so not under
+  `.pikit/`, which is ignored because it holds credentials; like `vendor/`, no component may write
+  under it (§10.2). `remove` deletes the bases no remaining component names, and a failed `add` puts
+  them back as they were. A project installed before bases existed has none for what it had then:
+  nothing is lost, since those files had no base before either; reinstalling a component
+  (`add --force`) stores its bases, and M3's `upgrade` falls back to the recorded `commit` for it.
 - `dependencies` and `environment` are the manifest's fields at install time: `remove` deletes the
   npm packages nothing else needs, and `doctor` and `configure` know the variables, from this file
   alone.
@@ -2285,7 +2316,8 @@ No server-side logic. Private registries use the user's existing Git credentials
 pikit add channel-http [--registry <path>] [--force] [--yes]
   1. resolve the registry and the component's version (and the registry's commit)
   2. read the component package
-  3. check targets and requires.pikit; warn for each required capability nothing installed provides
+  3. check targets and requires.pikit, and that the CLI's kit is not older than the project's
+     ("Vendored kit packages" below); warn for each required capability nothing installed provides
   4. show: files to write (each one outside src/pikit/<name>/ by its path, marked), npm deps to add,
      env vars, capabilities provided and required, source
   5. confirm, naming the files outside src/pikit/<name>/ (--yes when there is no terminal;
@@ -2295,7 +2327,8 @@ pikit add channel-http [--registry <path>] [--force] [--yes]
   8. edit pikit.config.ts: append the import and the `components` entry
      (a component with no default export, a `deployment-*`, is not listed)
   9. append its variables to .env.example, one block per component
- 10. record registry, version, commit, file hashes, dependencies and environment in pikit.json
+ 10. record registry, version, commit, file hashes, dependencies and environment in pikit.json;
+     keep each file as installed in pikit-bases/ (§10.3)
  11. run `pikit doctor`
 ```
 
@@ -2304,8 +2337,8 @@ provider it brings (asked after the confirmation), and the edits of steps 8–10
 `pikit.config.ts` of another shape refuses too. A refused `add` (installed, incompatible, a file
 conflict, a "no") leaves the project byte for byte as it was, `package.json`, `vendor/` and `bun.lock`
 included. A step that fails once writing began (`bun install`, say) puts back what it wrote:
-`package.json`, `bun.lock`, `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files and the new
-tarballs; only `node_modules` is not. Rationale: a `package.json` that `bun.lock` does not match fails
+`package.json`, `bun.lock`, `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files, the bases
+and the new tarballs; only `node_modules` is not. Rationale: a `package.json` that `bun.lock` does not match fails
 the next `bun install --frozen-lockfile`, in `deployment-docker`'s image build.
 
 `[decision]` The CLI edits `pikit.config.ts` as text, on one shape: one import line per component
@@ -2329,7 +2362,8 @@ with `doctor`. `remove` also:
   checked only at start;
 - refuses to delete a file whose hash differs from `pikit.json` without `--force`;
 - removes the component's import, its `components` entry and its `config` key, its `.env.example`
-  block, and the npm dependencies no remaining component declares and no project file imports.
+  block, the bases no remaining component names, and the npm dependencies no remaining component
+  declares and no project file imports.
 
 Adding and then removing a component leaves `git status` clean (S3). The CLI's end-to-end test checks
 it on a generated project.
@@ -2402,6 +2436,24 @@ the project depends on the tarballs:
   `overrides` rewritten, then `bun install`, and only then are the old tarballs deleted. A component and the core it needs come from the same checkout; the components
   already installed keep working, since the core only grows within a major (§12a). Found on the M1
   VPS: a project made before `outbound-durable` could not add it, its core lacking `DeliveryError`.
+- **Never an older kit.** `[decision]` The versions stay `0.0.0` until the kit is published, and a hash
+  says two kits differ, not which is newer. Meanwhile the kit's identity is the commit of the checkout
+  it was packed from, recorded in `pikit.json` as `kit.commit` (§10.3) by `new`, and by `add` when it
+  refreshes the kit. Before any write, `add` compares the project's commit with its own checkout's, in
+  that checkout (`git merge-base --is-ancestor`, `-dirty` set aside):
+  - the project's commit is the CLI's or comes before it: the refresh goes ahead, as above;
+  - it does not (the CLI is older, or on another branch): `add` refuses, and says to update pikit or
+    pass `--force`, which replaces the kit anyway. Rationale: an older CLI used to "refresh" a newer
+    project's kit, downgrading it without a word, and the components installed with the newer kit may
+    need what only it has;
+  - unknown (no `kit` recorded, a commit the CLI's checkout does not have, both on one commit with the
+    project's `-dirty`, or a CLI not in Git): the refresh goes ahead with a warning that names why.
+    A CLI older than the project usually lacks its commit, so this is where an old installer's checkout
+    lands: warned, not refused.
+
+  A project whose tarballs are already this CLI's is not refreshed and not compared; one that does not
+  record its kit records this CLI's commit then. When the kit is published, versions order it, and
+  `kit` goes with `vendor/`.
 - `vendor/` is committed with the project. When the packages are on npm, each `file:vendor/…`
   becomes a version, and `overrides` and `vendor/` go.
 
@@ -2603,7 +2655,7 @@ the whole 1.x line; there is no "pikit 2 rewrites how you define agents".
 | `@pikit/core`, the kernel (`defineApp`, `defineComponent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed`, `ctx.emit/run/derive`, the context, clock and logger) | Semver, and meant never to need a major: the 1.x promise rests on it. Within a major: additive changes only, each a `[decision]` (S2, `exports.test.ts`). Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. |
 | `@pikit/contracts` (`defineAgent` and the agent's shapes, `InboundMessage`, `admitInbound`, `SqlDatabase`, `OutboundQueue`, `ChannelTransport`, `Feed`, event and pipeline names, conformance suites) | Its own semver, apart from the kernel's (§4.9). Each contract has a level: `experimental` may change with any minor, noted first in the release notes; `stable` changes additively, and a breaking change is a `[decision]` and a major of `@pikit/contracts`, with a migration. A contract change ships with its updated suite in the same release. The programming model (`defineAgent`, `AgentDefinition`, `TurnConfig`, `prepare`) is `stable` by `[decision]`. 1.0 needs every contract `stable`. |
 | `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface (the contracts it types) follows the contracts' rule; its Pi-facing internals are unstable by design. |
-| `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. |
+| `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. `pikit.json` is at version 2 (§10.3): the CLI reads version 1, converts it in memory, and the next write saves version 2. |
 | Components | Version independently. A component major never forces a kernel or contracts major. Installed components are the user's; upstream changes reach them only through `pikit upgrade`. |
 | Pre-1.0 (M0–M5) | Anything may change. No compatibility promises. This is the period to be wrong quickly. |
 

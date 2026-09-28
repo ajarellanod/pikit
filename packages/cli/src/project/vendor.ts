@@ -15,13 +15,18 @@
  * gets this CLI's when a component is added (`refreshKit`): the component and the core it needs come
  * from the same checkout. The core only grows within a major (SPEC §12a), so the components already
  * installed keep working.
+ *
+ * A hash says two kits differ, not which is newer. Meanwhile the kit's identity is the commit of the
+ * checkout it was packed from (`kitCommit`), recorded in `pikit.json` as `kit.commit`: `add` refuses to
+ * replace a project's kit with an older one (`compareKits`), so an older CLI never downgrades it silently.
  */
 
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { PACKAGES_DIR } from "../paths.ts";
-import { readPackageJson, writePackageJson } from "./package-json.ts";
+import { PACKAGES_DIR, PIKIT_ROOT } from "../paths.ts";
+import { gitCommit, isAncestor } from "./git.ts";
+import { type PackageJson, readPackageJson, writePackageJson } from "./package-json.ts";
 
 export const VENDOR_DIR = "vendor";
 
@@ -113,21 +118,39 @@ export function vendorKitPackage(projectDir: string, name: string): string {
  * checkout): new tarballs in `vendor/`, `dependencies` and `overrides` rewritten, and an override
  * added for a kit package the project's kit did not have. Returns the
  * packages refreshed; `bun install` must run after, then `pruneVendor`: `bun.lock` still names the old
- * tarballs until the install rewrites it.
+ * tarballs until the install rewrites it. `add` checks first that this is no downgrade (`compareKits`).
  */
 export function refreshKit(projectDir: string): string[] {
   const pkg = readPackageJson(projectDir);
-  const refreshed: string[] = [];
+  const { stale } = pointAtKit(pkg, (kit) => vendorKitPackage(projectDir, kit));
+  if (stale.length === 0) return [];
+  writePackageJson(projectDir, pkg);
+  return stale;
+}
+
+/**
+ * What `refreshKit` would do, writing nothing: the kit packages it would refresh, and whether the
+ * project has a vendored kit at all.
+ */
+export function staleKit(projectDir: string): { vendored: boolean; stale: string[] } {
+  return pointAtKit(readPackageJson(projectDir), kitSpecifier);
+}
+
+/** Points `pkg`'s kit packages at `specifier(kit)`, in memory. */
+function pointAtKit(pkg: PackageJson, specifier: (kit: string) => string): { vendored: boolean; stale: string[] } {
+  const stale: string[] = [];
+  let vendored = false;
   const rewrite = (record: Record<string, string> | undefined): void => {
     if (record === undefined) return;
-    for (const [dependency, specifier] of Object.entries(record)) {
+    for (const [dependency, current] of Object.entries(record)) {
       // The Pi extension alias points at the shim's tarball too.
-      const kit = Object.keys(KIT_PACKAGES).find((name) => name === dependency || specifier.includes(`/${packedName(name)}`));
-      if (kit === undefined || !specifier.startsWith(`file:${VENDOR_DIR}/`)) continue;
-      const current = vendorKitPackage(projectDir, kit);
-      if (specifier === current) continue;
-      record[dependency] = current;
-      if (!refreshed.includes(kit)) refreshed.push(kit);
+      const kit = Object.keys(KIT_PACKAGES).find((name) => name === dependency || current.includes(`/${packedName(name)}`));
+      if (kit === undefined || !current.startsWith(`file:${VENDOR_DIR}/`)) continue;
+      vendored = true;
+      const wanted = specifier(kit);
+      if (current === wanted) continue;
+      record[dependency] = wanted;
+      if (!stale.includes(kit)) stale.push(kit);
     }
   };
   rewrite(pkg.dependencies);
@@ -137,13 +160,46 @@ export function refreshKit(projectDir: string): string[] {
   if (pkg.overrides !== undefined) {
     for (const kit of Object.keys(KIT_PACKAGES)) {
       if (kit in pkg.overrides) continue;
-      pkg.overrides[kit] = vendorKitPackage(projectDir, kit);
-      if (!refreshed.includes(kit)) refreshed.push(kit);
+      pkg.overrides[kit] = specifier(kit);
+      if (!stale.includes(kit)) stale.push(kit);
     }
   }
-  if (refreshed.length === 0) return [];
-  writePackageJson(projectDir, pkg);
-  return refreshed;
+  return { vendored, stale };
+}
+
+let commit: { value: string | undefined } | undefined;
+
+/**
+ * The kit's identity until it is published: the commit of this CLI's checkout, `-dirty` when a kit
+ * package has uncommitted changes. Undefined when the checkout is not in Git.
+ */
+export function kitCommit(): string | undefined {
+  commit ??= { value: gitCommit(PIKIT_ROOT, Object.values(KIT_PACKAGES).map((dir) => `packages/${dir}`)) };
+  return commit.value;
+}
+
+/** Whether replacing a project's kit with another is an upgrade, a downgrade, or cannot be told. */
+export type KitOrder = { verdict: "upgrade" } | { verdict: "downgrade" } | { verdict: "unknown"; why: string };
+
+/**
+ * How the kit at commit `next` (this CLI's) compares with the project's, at commit `current`, in the
+ * repository `repo` (this CLI's checkout). An upgrade when `current` is `next` or comes before it; a
+ * downgrade when it does not (`next` is older, or on another branch). `-dirty` is set aside, except
+ * when both name one commit and the project's had uncommitted changes, which Git cannot order.
+ */
+export function compareKits(repo: string, current: string | undefined, next: string | undefined): KitOrder {
+  if (current === undefined) return { verdict: "unknown", why: "pikit.json does not record the project's kit (it predates pikit.json version 2)" };
+  if (next === undefined) return { verdict: "unknown", why: `this CLI's checkout (${repo}) is not in Git` };
+  const [from, to] = [current.replace(/-dirty$/, ""), next.replace(/-dirty$/, "")];
+  if (from === to && current.endsWith("-dirty")) return { verdict: "unknown", why: `the project's kit was packed from uncommitted changes to ${from}` };
+  const ancestor = isAncestor(repo, from, to);
+  if (ancestor === undefined) return { verdict: "unknown", why: `this CLI's checkout does not have the project's kit commit ${current}, which may be newer` };
+  return { verdict: ancestor ? "upgrade" : "downgrade" };
+}
+
+/** `compareKits` for this CLI's kit. */
+export function kitOrder(current: string | undefined): KitOrder {
+  return compareKits(PIKIT_ROOT, current, kitCommit());
 }
 
 /** Deletes the tarballs in `vendor/` that `package.json` no longer names (after a refresh and its install). */

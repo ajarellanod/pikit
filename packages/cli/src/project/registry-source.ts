@@ -9,8 +9,10 @@ import { isAbsolute, join, normalize, resolve } from "node:path";
 import { parse } from "yaml";
 import Type, { type Static } from "typebox";
 import { kindOf, type Manifest, ManifestSchema, readManifest, type RegistryIndex, SCHEMA_DIR, schemaProblems } from "../registry/manifest.ts";
+import { BASES_DIR } from "./bases.ts";
 import { CONFIG_FILE } from "./config-file.ts";
 import { ENV_EXAMPLE, ENV_FILE } from "./env-file.ts";
+import { gitCommit } from "./git.ts";
 import { PIKIT_JSON } from "./pikit-json.ts";
 import { VENDOR_DIR } from "./vendor.ts";
 
@@ -152,10 +154,10 @@ export function isInside(target: string): boolean {
 /**
  * The project's own records, which no component may write, whatever `--force` says: what the CLI and
  * Bun keep (`pikit.json`, `package.json`, the lockfile, `pikit.config.ts`, `.env.example`, `vendor/`,
- * `node_modules/`), the app's secrets and state (`.env`, `.pikit/`) and Git's (`.git`).
+ * `pikit-bases/`, `node_modules/`), the app's secrets and state (`.env`, `.pikit/`) and Git's (`.git`).
  */
 const PROTECTED_FILES = [PIKIT_JSON, "package.json", "bun.lock", "bun.lockb", CONFIG_FILE, ENV_FILE, ENV_EXAMPLE];
-const PROTECTED_DIRS = [".git", VENDOR_DIR, "node_modules", ".pikit"];
+const PROTECTED_DIRS = [".git", VENDOR_DIR, BASES_DIR, "node_modules", ".pikit"];
 const PROTECTED = [...PROTECTED_FILES, ...PROTECTED_DIRS.map((dir) => `${dir}/`)].join(", ");
 
 /**
@@ -172,14 +174,6 @@ function listFiles(dir: string): string[] {
     .map((f) => f.split("\\").join("/"))
     .filter((f) => !f.split("/").includes("node_modules") && statSync(join(dir, f)).isFile())
     .sort();
-}
-
-function gitCommit(root: string): string | undefined {
-  const head = Bun.spawnSync(["git", "-C", root, "rev-parse", "HEAD"], { stdout: "pipe", stderr: "ignore" });
-  if (head.exitCode !== 0) return undefined;
-  const status = Bun.spawnSync(["git", "-C", root, "status", "--porcelain", "--", "."], { stdout: "pipe", stderr: "ignore" });
-  const dirty = status.stdout.toString().trim() !== "";
-  return `${head.stdout.toString().trim()}${dirty ? "-dirty" : ""}`;
 }
 
 const KEBAB = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";

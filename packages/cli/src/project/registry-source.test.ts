@@ -129,7 +129,7 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
 });
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {
-  for (const target of ["package.json", "./Package.JSON", "pikit.json", "pikit.config.ts", "bun.lock", ".env", ".env.example", ".git", ".git/config", "vendor/x.tgz", "node_modules/a/index.js", ".pikit/sessions/a.jsonl"]) {
+  for (const target of ["package.json", "./Package.JSON", "pikit.json", "pikit.config.ts", "bun.lock", ".env", ".env.example", ".git", ".git/config", "vendor/x.tgz", "pikit-bases/0a1b", "node_modules/a/index.js", ".pikit/sessions/a.jsonl"]) {
     expect(isProtected(target)).toBe(true);
   }
   for (const target of ["Dockerfile", "compose.yaml", ".dockerignore", ".gitignore", "src/pikit/x/package.json", "src/vendor/x.ts", "vendored.txt", ".env.production"]) {

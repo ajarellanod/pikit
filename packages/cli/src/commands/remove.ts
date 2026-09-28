@@ -7,7 +7,8 @@
  * `--force`, it also refuses to take a key an agent names (a tool, an extension, a model's provider):
  * the app would compose and the runtime refuse to start. The answer
  * comes from the app itself (`describe()`), not from manifests, so project components count too.
- * It never deletes a file the user modified without `--force`.
+ * It never deletes a file the user modified without `--force`. The bases of its files (`bases.ts`) go
+ * with it, unless another component installed the same content.
  *
  * What was installed *for* it (an offered provider, SPEC §10.5) goes with it when nothing else uses
  * it, so `add` then `remove` leaves no trace even when `add` brought a provider along. When another
@@ -17,6 +18,7 @@
 import { existsSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { packageName, scanImports } from "../registry/imports.ts";
+import { BASES_DIR, unreferencedBases } from "../project/bases.ts";
 import { CONFIG_FILE, removeComponent, removeConfigEntry } from "../project/config-file.ts";
 import { ENV_EXAMPLE, removeExampleBlock } from "../project/env-file.ts";
 import { readPackageJson, removeDependencies, writePackageJson } from "../project/package-json.ts";
@@ -66,6 +68,8 @@ export async function remove(projectDir: string, name: string, options: RemoveOp
 
   delete project.components[name];
   writeProjectManifest(projectDir, project);
+  for (const base of unreferencedBases(projectDir, project)) rmSync(join(projectDir, base));
+  removeEmptyParents(projectDir, BASES_DIR);
 
   const pkg = readPackageJson(projectDir);
   const removed = removeDependencies(pkg, unneededDependencies(projectDir, project, installed.dependencies));

@@ -66,7 +66,10 @@ test.skipIf(!E2E)(
     expect(config).toContain("createRuntimePi({ extensions: [permissionGate] }),");
     expect(config).not.toContain("deploymentDocker");
     // HTTP answers in the response: nothing offers it durable delivery, so none is installed.
-    expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components)).not.toContain("outbound-durable");
+    const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
+    expect(Object.keys(manifest.components)).not.toContain("outbound-durable");
+    // Portable: the registry is this CLI's, by name, not by this machine's path (SPEC §10.3).
+    expect(manifest.registries).toEqual({ default: "builtin" });
   },
   TIMEOUT,
 );

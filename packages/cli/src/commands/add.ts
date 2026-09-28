@@ -1,9 +1,10 @@
 /**
  * `pikit add <component>`: the install flow of SPEC §10.5.
  *
- *   1. resolve the registry (a local path in M1) and the component's version and commit
+ *   1. resolve the registry (`builtin`, or a local path in M1) and the component's version and commit
  *   2. read the component's package
- *   3. check its targets and `requires.pikit`; warn for each required capability nothing provides
+ *   3. check its targets and `requires.pikit`, and that this CLI's kit is not older than the
+ *      project's (`checkKit`); warn for each required capability nothing provides
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies,
  *      environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
@@ -11,12 +12,13 @@
  *   7. add its npm dependencies; `bun install`
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not)
  *   9. append its variables to `.env.example`
- *  10. record the registry, version, commit and file hashes in `pikit.json`
+ *  10. record the registry, version, commit and file hashes in `pikit.json`, and keep each file as
+ *      installed, its base, in `pikit-bases/` (`bases.ts`)
  *  11. `pikit doctor`
  *
  * Every refusal (steps 1–5, for the component and the providers it brings) comes before the first
  * write. A step that fails after it puts back what was written: `package.json`, `bun.lock`,
- * `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files and the new tarballs.
+ * `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files, the bases and the new tarballs.
  */
 
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -24,13 +26,15 @@ import { dirname, join } from "node:path";
 import { stripComments } from "../registry/imports.ts";
 import { coreVersion } from "../registry/commands.ts";
 import type { Manifest } from "../registry/manifest.ts";
+import { basePath, unreferencedBases } from "../project/bases.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry } from "../project/config-file.ts";
 import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-file.ts";
 import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
 import { hashFile, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
+import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import { type Offer, offeredProviders } from "../project/offers.ts";
-import { pruneVendor, refreshKit, VENDOR_DIR } from "../project/vendor.ts";
+import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit, VENDOR_DIR } from "../project/vendor.ts";
 import { capabilityEntry } from "../registry/capabilities.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
@@ -42,7 +46,7 @@ const BUN_LOCK = "bun.lock";
 export interface AddOptions {
   /** A registry path other than the project's default one. */
   registry?: string;
-  /** Overwrite files that differ, and reinstall an installed component. */
+  /** Overwrite files that differ, reinstall an installed component, and replace a newer kit with this CLI's. */
   force?: boolean;
   /** Skip the confirmation (step 5). */
   yes?: boolean;
@@ -61,8 +65,11 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   // Steps 1–5 for the component and the providers it brings, before anything is written: a refusal
   // (installed, incompatible, a conflict, a config shape, a "no") leaves the project as it was.
   const draft = readDraft(projectDir);
-  const registryName = registryKey(draft.project, options.registry);
-  const registry = openRegistry(draft.project.registries[registryName] as string);
+  checkKit(projectDir, draft.project, options.force === true);
+  const registryName = registryKey(projectDir, draft.project, options.registry);
+  const location = draft.project.registries[registryName] as string;
+  const registry = openRegistry(registryPath(projectDir, location));
+  if (!isPortable(location)) log.warn(notPortable(location));
   const installed = Object.keys(draft.project.components);
   const plans = [planInstall(projectDir, draft, registry, registryName, name, options)];
   if (options.quiet !== true) describePlan(plans[0] as Plan);
@@ -137,8 +144,8 @@ export async function installComponent(
   options: AddOptions = {},
 ): Promise<{ dependenciesChanged: boolean }> {
   const draft = readDraft(projectDir);
-  const registryName = registryKey(draft.project, options.registry);
-  const registry = openRegistry(draft.project.registries[registryName] as string);
+  const registryName = registryKey(projectDir, draft.project, options.registry);
+  const registry = openRegistry(registryPath(projectDir, draft.project.registries[registryName] as string));
   const plan = planInstall(projectDir, draft, registry, registryName, name, options);
   if (options.quiet !== true) describePlan(plan);
   await confirmPlan(plan, options);
@@ -232,6 +239,38 @@ function planInstall(
   return { name, registry, manifest, files };
 }
 
+/**
+ * The kit `add` will point the project at is this CLI's (`refreshKit`, in the apply phase). Refused,
+ * before any write, when that replaces a newer kit: the components installed with it may need what
+ * it has. `--force` replaces it anyway. When the order cannot be told, it is said, and it goes ahead.
+ * The draft records the kit the project will have.
+ */
+function checkKit(projectDir: string, project: ProjectManifest, force: boolean): void {
+  const { vendored, stale } = staleKit(projectDir);
+  const cli = kitCommit();
+  if (stale.length === 0) {
+    // Already this CLI's packages, byte for byte: a project that does not say which kit it has now does.
+    if (vendored && project.kit === undefined && cli !== undefined) project.kit = { commit: cli };
+    return;
+  }
+  const current = project.kit?.commit;
+  const order = kitOrder(current);
+  if (order.verdict === "downgrade") {
+    const what = `this project's kit (vendor/) comes from pikit ${current}, which this CLI's checkout (${cli}) does not include: this CLI is older, or on another branch`;
+    if (!force) {
+      throw new CliError(
+        `${what}. Adding a component replaces the project's kit with this CLI's, and the components installed with the newer kit may need what only it has.\n` +
+          "Update pikit (run the installer again, or `git pull` in its checkout), or pass --force to replace the kit anyway (then check with `pikit doctor`).",
+      );
+    }
+    log.warn(`${what}; --force: replacing it with this older kit`);
+  } else if (order.verdict === "unknown") {
+    log.warn(`the project's kit is replaced with this CLI's (${cli ?? "not in Git"}), which may be older: ${order.why}`);
+  }
+  if (cli === undefined) delete project.kit;
+  else project.kit = { commit: cli };
+}
+
 /** Step 5: `--yes`, or a "yes" at a terminal. */
 async function confirmPlan(plan: Plan, options: AddOptions): Promise<void> {
   if (options.yes === true) return;
@@ -255,12 +294,18 @@ function alsoWrites(name: string, files: Map<string, string>): string {
   return others.length === 0 ? "" : ` It also writes, outside ${ownDir(name)}: ${others.join(", ")}`;
 }
 
-/** Steps 6–10 for the confirmed plans: files, npm dependencies, then the draft's three files. */
+/** Steps 6–10 for the confirmed plans: files and their bases, npm dependencies, then the draft's three files. */
 function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], undo: Undo): { dependenciesChanged: boolean } {
   for (const plan of plans) {
+    const recorded = draft.project.components[plan.name]?.files ?? {};
     for (const [target, source] of plan.files) {
       undo.keep(target);
       copyFileSync(source, undo.mkdirFor(target));
+      // The base is named by the hash pikit.json records: the source's, which the copy has.
+      const base = basePath(recorded[target]?.hash ?? hashFile(source));
+      if (existsSync(join(projectDir, base))) continue;
+      undo.keep(base);
+      copyFileSync(source, undo.mkdirFor(base));
     }
   }
 
@@ -284,6 +329,11 @@ function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], un
   }
   undo.keep(PIKIT_JSON);
   writeProjectManifest(projectDir, draft.project);
+  // A reinstall (--force) replaces the component's hashes: the bases of the old ones may be nobody's now.
+  for (const base of unreferencedBases(projectDir, draft.project)) {
+    undo.keep(base);
+    rmSync(join(projectDir, base));
+  }
   return { dependenciesChanged };
 }
 
@@ -333,19 +383,25 @@ class Undo {
   }
 }
 
-/** The key of `registries` for this path, added when the project does not know it yet. */
-function registryKey(project: ProjectManifest, path: string | undefined): string {
+/** The key of `registries` for this path, added (as `recordedLocation` records it) when the project does not know it yet. */
+function registryKey(projectDir: string, project: ProjectManifest, path: string | undefined): string {
   if (path === undefined) {
     if (project.registries.default === undefined) throw new CliError("pikit.json has no default registry; pass --registry <path>");
     return "default";
   }
   const root = openRegistry(path).root;
-  const known = Object.entries(project.registries).find(([, location]) => location === root);
+  const location = recordedLocation(projectDir, root);
+  const known = Object.entries(project.registries).find(([, recorded]) => recorded === location || registryPath(projectDir, recorded) === root);
   if (known) return known[0];
   let key = "local";
   for (let n = 2; key in project.registries; n++) key = `local-${n}`;
-  project.registries[key] = root;
+  project.registries[key] = location;
   return key;
+}
+
+/** Said whenever a component comes from a registry recorded by a path of this machine. */
+export function notPortable(location: string): string {
+  return `the registry ${location} is a path on this machine: where this project is cloned, \`pikit add\` from it fails (put the registry inside the project to keep it portable)`;
 }
 
 /** Refuses a component that does not run on `targets` or does not accept this CLI's core. */
@@ -394,6 +450,9 @@ function checkConflicts(projectDir: string, project: ProjectManifest, name: stri
 
 function describePlan({ registry, manifest, files }: Plan): void {
   log.step(`${manifest.name} ${manifest.version} from ${registry.root}${registry.commit ? ` at ${registry.commit}` : ""}`);
+  if (registry.commit?.endsWith("-dirty")) {
+    log.warn(`the registry has uncommitted changes: its commit does not name these files (pikit-bases/ keeps them as installed, for \`pikit upgrade\`)`);
+  }
   // A registry may be anyone's: a file outside the component's directory is shown by its path, marked.
   const others = outside(manifest.name, files);
   log.info(`  files: ${files.size - others.length} in ${ownDir(manifest.name)}`);
