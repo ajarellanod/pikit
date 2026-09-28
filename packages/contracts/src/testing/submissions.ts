@@ -96,6 +96,17 @@ export function createSubmissionsConformance(
       expect(await s.get(conversation(1), "r3", c), { kind: "pending", conversation: conversation(1), requestId: "r3" } satisfies SubmissionStatus, "get");
     }),
 
+    submissionsCase("conversations are ordered by their oldest pending request, not their oldest request", async (f, c) => {
+      const s = f.submissions();
+      await s.admitted(conversation(1), "r1", c);
+      await s.admitted(conversation(2), "r2", c);
+      await s.admitted(conversation(1), "r3", c);
+
+      await s.settled(completed(conversation(1), ["r1"]), c);
+
+      expect(pending(await s.pending(c)), [["session-2", ["r2"]], ["session-1", ["r3"]]], "pending");
+    }),
+
     submissionsCase("admitting a request again changes nothing", async (f, c) => {
       const s = f.submissions();
       await s.admitted(conversation(1), "r1", c);
@@ -206,6 +217,22 @@ export function createSubmissionsConformance(
         expect(pending(await s.pending(c)), [["session-2", ["r2"]]], "pending");
         expect(await s.get(conversation(1), "r1", c), { kind: "settled", conversation: conversation(1), requestId: "r1", run }, "get");
         expect(await answers(f), [run], "answers");
+      }),
+
+      submissionsCase("settling the same run again after a restart changes nothing", async (f, c) => {
+        if (f.restart === undefined) throw new Error(`${GROUP}: the fixture has no restart(), but the options say it restarts`);
+        const run = completed(conversation(1), ["r1"]);
+        await f.submissions().admitted(conversation(1), "r1", c);
+        await f.submissions().settled(run, c);
+
+        await f.restart();
+        await f.submissions().settled(run, c);
+        await f.submissions().settled({ ...run, text: "a second reading of the same run" }, c);
+
+        const s = f.submissions();
+        expect(await answers(f), [run], "answers");
+        expect(await s.get(conversation(1), "r1", c), { kind: "settled", conversation: conversation(1), requestId: "r1", run }, "get");
+        expect(await s.pending(c), [], "pending");
       }),
     );
   }

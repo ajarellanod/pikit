@@ -54,11 +54,16 @@ export interface AgentSubmissions {
   /**
    * A run ended: every request in `run.requestIds` is settled by it, and `run` is appended to
    * `answers`, in one commit. A request never admitted is recorded settled all the same (its
-   * admission was lost with a crash). Idempotent: a run already settled (the same session and
-   * `requestId`) changes nothing, and a request keeps the first run that settled it.
+   * admission was lost with a crash). Idempotent within the provider's retention: a run already
+   * settled (the same session and `requestId`) changes nothing, and a request keeps the first run
+   * that settled it. Once a settlement is pruned, the provider no longer knows it: settling the same
+   * run again appends it to `answers` a second time.
    */
   settled(run: RunSettlement, ctx: AppContext): Promise<void>;
-  /** Every conversation with a request admitted and not settled, the oldest first. */
+  /**
+   * Every conversation with a request admitted and not settled, ordered by its oldest pending request
+   * (a request already settled does not count).
+   */
   pending(ctx: AppContext): Promise<PendingConversation[]>;
   /**
    * Where `requestId` is in the conversation's session, or `undefined` if it is unknown there (never
