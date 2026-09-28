@@ -5,10 +5,10 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { emptyManifest, writeProjectManifest } from "./project/pikit-json.ts";
+import { emptyManifest, hashOf, writeProjectManifest } from "./project/pikit-json.ts";
 import { DEFAULT_REGISTRY } from "./paths.ts";
 import { openRegistry } from "./project/registry-source.ts";
 
@@ -133,4 +133,65 @@ test("add without a terminal needs --yes, and writes nothing without it", () => 
   expect(run.err).toContain("pass --yes");
   expect(readdirSync(dir).sort()).toEqual(before);
   expect(pikit(["add", "no-such-thing", "--yes"], dir).err).toContain('no component "no-such-thing"');
+});
+
+/**
+ * A project whose agent `soporte` names `bash`, provided by an installed `tool-bash`, and a
+ * `runtime` that reads the tools as `runtime-pi` does. Stand-ins, not the registry's components:
+ * what is checked is the CLI's, and `@pikit/core` is this repository's, linked as `bun install` would.
+ */
+function agentProject(tools: string[]): string {
+  const dir = temp();
+  mkdirSync(join(dir, "node_modules", "@pikit"), { recursive: true });
+  symlinkSync(join(import.meta.dir, "..", "..", "core"), join(dir, "node_modules", "@pikit", "core"));
+  writeFileSync(join(dir, "package.json"), '{ "name": "agents", "dependencies": {} }\n');
+  const files: Record<string, string> = {
+    "src/pikit/tool-bash/index.ts":
+      'import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({\n  name: "tool-bash",\n  setup(pikit) {\n    pikit.provideKeyed("agent.tool", "bash", { name: "bash" });\n  },\n});\n',
+    "src/extensions/runtime.ts":
+      'import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({\n  name: "runtime",\n  setup(pikit) {\n    pikit.useKeyed("agent.definition");\n    pikit.useKeyed("agent.tool");\n  },\n});\n',
+    "src/extensions/agents.ts": `import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({\n  name: "agents",\n  setup(pikit) {\n    pikit.provideKeyed("agent.definition", "soporte", { name: "soporte", model: "test/model", tools: ${JSON.stringify(tools)} });\n  },\n});\n`,
+    "pikit.config.ts":
+      'import { defineApp } from "@pikit/core";\nimport agents from "./src/extensions/agents.ts";\nimport runtime from "./src/extensions/runtime.ts";\nimport toolBash from "./src/pikit/tool-bash/index.ts";\n\nexport const config = {};\n\nexport default defineApp({\n  components: [\n    agents,\n    runtime,\n    toolBash,\n  ],\n  config,\n});\n',
+  };
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(dir, file, ".."), { recursive: true });
+    writeFileSync(join(dir, file), text);
+  }
+  const manifest = emptyManifest(DEFAULT_REGISTRY);
+  const toolFile = "src/pikit/tool-bash/index.ts";
+  manifest.components["tool-bash"] = { registry: "default", version: "0.0.0", files: { [toolFile]: { hash: hashOf(files[toolFile] ?? "") } }, dependencies: {}, environment: [] };
+  writeProjectManifest(dir, manifest);
+  return dir;
+}
+
+test("doctor fails when an agent names a tool no installed component provides", () => {
+  const green = pikit(["doctor"], agentProject(["bash"]));
+  expect(green.out).toContain("pikit doctor: green");
+  expect(green.code).toBe(0);
+
+  const broken = pikit(["doctor"], agentProject(["bash", "shell"]));
+  expect(broken.code).toBe(1);
+  expect(broken.err).toContain('agent "soporte" names the tool "shell", which no installed component provides (agent.tool)');
+});
+
+test("remove refuses to take a tool an agent names; with --force it removes it, and doctor reports the name", () => {
+  const dir = agentProject(["bash"]);
+  const config = readFileSync(join(dir, "pikit.config.ts"), "utf8");
+  const refused = pikit(["remove", "tool-bash"], dir);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain('agent "soporte" names the tool "bash", which only tool-bash provides');
+  expect(refused.err).toContain("pass --force");
+  expect(existsSync(join(dir, "src/pikit/tool-bash/index.ts"))).toBe(true);
+  expect(readFileSync(join(dir, "pikit.config.ts"), "utf8")).toBe(config);
+
+  const forced = pikit(["remove", "tool-bash", "--force"], dir);
+  expect(forced.out).toContain("tool-bash removed");
+  expect(existsSync(join(dir, "src/pikit/tool-bash"))).toBe(false);
+  expect(forced.code).toBe(1);
+  expect(forced.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool)');
+
+  const doctor = pikit(["doctor"], dir);
+  expect(doctor.code).toBe(1);
+  expect(doctor.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool)');
 });
