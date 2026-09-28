@@ -15,7 +15,7 @@ import { type AgentDefinition, type AgentTool, CONVERSATION, type ConversationRe
 import { modelsFrom } from "./models.ts";
 import { createPiRuntime } from "./runtime.ts";
 import { scriptedProvider } from "./testing/index.ts";
-import { bindTool, createWriteTool } from "./tools/index.ts";
+import { bindTool, createWriteTool, toolComponent } from "./tools/index.ts";
 
 const directories: string[] = [];
 afterAll(() => {
@@ -101,4 +101,40 @@ test("a bound tool resolves its environment per run: each agent writes in its ow
   expect(readFileSync(join(root, "beta", "note.md"), "utf8")).toBe("from beta");
   expect(existsSync(join(root, "note.md"))).toBe(false);
   await s.close();
+});
+
+test("a tool from toolComponent runs when its agent names it, with the run's conversation", async () => {
+  const seen: { name: string; conversation: ConversationRef | undefined }[] = [];
+  const greeting = toolComponent(
+    {
+      name: "greeting",
+      label: "Greeting",
+      description: "Greets someone",
+      parameters: Type.Object({ name: Type.String() }),
+      async execute(_toolCallId, params, _signal, _onUpdate, context) {
+        seen.push({ name: params.name, conversation: context.value(CONVERSATION) });
+        return { content: [{ type: "text", text: `Hello, ${params.name}!` }], details: undefined };
+      },
+    },
+    { replay: "safe" },
+  );
+  // What runtime-pi does: the agent.tool the component provides, by the name the agent gives.
+  let tool: AgentTool | undefined;
+  const reader = defineComponent({
+    name: "tool-reader",
+    setup(pikit) {
+      const tools = pikit.useKeyed("agent.tool");
+      return { start: () => void (tool = tools.get("greeting")) };
+    },
+  });
+  const app = await defineApp({ components: [greeting, reader], logger: silentLogger }).create();
+  await app.start();
+  const s = await runtimeWith([defineAgent({ name: "support", model: "faux/scripted", tools: ["greeting"] })], { greeting: tool as AgentTool });
+  const conversation = await s.conversation("support");
+
+  await s.ask(conversation, "r1", 'call: greeting {"name":"Ada"}');
+
+  expect(seen).toEqual([{ name: "Ada", conversation }]);
+  await s.close();
+  await app.stop();
 });

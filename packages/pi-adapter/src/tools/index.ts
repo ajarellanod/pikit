@@ -9,10 +9,14 @@
  * Pi's tools read their environment from the harness's `toolContext.env`. A bound tool ignores the
  * harness's context and asks its own `env` for one on every call instead, with the run's context, so
  * the runtime passes none, and each tool works on exactly what its component chose for that run.
+ *
+ * `toolComponent` is the short way to a tool of your own: one written as Pi's `defineTool` writes it,
+ * provided as `agent.tool` by a component, with the `replay` pikit needs.
  */
 
-import type { AgentHarnessTool, ExecutionEnv } from "@earendil-works/pi-agent-core";
-import type { Context } from "@pikit/core";
+import type { AgentHarnessTool, AgentToolResult, AgentToolUpdateCallback, ExecutionEnv } from "@earendil-works/pi-agent-core";
+import type { Static, TSchema } from "@earendil-works/pi-ai";
+import { type ComponentDefinition, type Context, defineComponent } from "@pikit/core";
 import type { AgentTool } from "@pikit/contracts";
 
 export { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-agent-core";
@@ -26,6 +30,62 @@ export interface BindOptions {
   env: (context: Context) => ExecutionEnv | Promise<ExecutionEnv>;
   /** `"safe"`: run again when a run is resumed after a crash. `"never"`: report it interrupted instead. */
   replay: "safe" | "never";
+}
+
+/**
+ * A tool in the shape of Pi's `defineTool` (`@earendil-works/pi-coding-agent`), for `toolComponent`:
+ * the same fields and the same `execute` order. Only its fifth argument differs: the run's context
+ * (its conversation, `context.value(CONVERSATION)`; its cancellation), not Pi's `ExtensionContext`,
+ * which only an extension's host has. So a Pi tool's object moves in as it is, written inside
+ * `toolComponent`; one typed by Pi's `defineTool` promises that context and does not compile here,
+ * and a tool that uses it stays an extension's tool.
+ */
+export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown> {
+  /** The name the model calls it by, and the one agents name in `tools`. */
+  name: string;
+  label: string;
+  description: string;
+  parameters: TParams;
+  prepareArguments?: (args: unknown) => Static<TParams>;
+  execute(
+    toolCallId: string,
+    params: Static<TParams>,
+    signal: AbortSignal | undefined,
+    onUpdate: AgentToolUpdateCallback<TDetails> | undefined,
+    context: Context,
+  ): Promise<AgentToolResult<TDetails>>;
+}
+
+/**
+ * A component that provides `tool` as `agent.tool` under its name, so an agent names it in `tools`:
+ * the short way to add a tool of your own, in the shape Pi's `defineTool` uses. Its component is
+ * `tool-<name>` (`_` becomes `-`: `web_search` is `tool-web-search`).
+ *
+ * `replay` is required, because pikit resumes runs after a crash (SPEC §8.4): `"safe"` runs it again
+ * (it only reads), `"never"` tells the model it was interrupted (it changes something; derive an
+ * idempotency key from the run's conversation and `toolCallId`). A Pi extension's tools are always
+ * `"never"`.
+ *
+ * A tool that needs a capability (an environment, a secret) is a `defineComponent` of its own that
+ * `use`s it; this one declares none.
+ */
+export function toolComponent<TParams extends TSchema, TDetails = unknown>(tool: ToolDefinition<TParams, TDetails>, options: { replay: "safe" | "never" }): ComponentDefinition {
+  const harnessTool: AgentHarnessTool<undefined, TParams, TDetails> = {
+    name: tool.name,
+    label: tool.label,
+    description: tool.description,
+    parameters: tool.parameters,
+    ...(tool.prepareArguments !== undefined && { prepareArguments: tool.prepareArguments }),
+    replay: options.replay,
+    execute: (toolCallId, params, onUpdate, _toolContext, _invocation, context) =>
+      tool.execute(toolCallId, params, context.abortSignal, (partial) => onUpdate(partial), context),
+  };
+  return defineComponent({
+    name: `tool-${tool.name.replaceAll("_", "-")}`,
+    setup(pikit) {
+      pikit.provideKeyed("agent.tool", tool.name, harnessTool as unknown as AgentTool);
+    },
+  });
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: Pi's tool types vary by parameters and details
