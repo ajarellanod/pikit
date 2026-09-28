@@ -10,8 +10,8 @@
  *   delivered when the channel reads again. `get` answers for one request (HTTP's `GET`).
  *
  * Shaped like the submissions of Pi's durable runtime (`packages/durable/docs/pico-v5.md` §6):
- * `pending` is its `queued` and `placed`; a `completed` settlement is `done` with its answer; `failed`
- * and `aborted` are `unanswered` with a reason. Pi's submissions are not implemented yet (package 18 of
+ * `pending` is its `queued` and `placed`; a `completed` settlement is `done` with its answer; `failed`,
+ * `aborted` and `abandoned` are `unanswered` with a reason. Pi's submissions are not implemented yet (package 18 of
  * `pico-v5-handoff.md`, checked at `c1449660`). When the adapter moves to them, `admitted` and
  * `settled` become Pi's own records and this contract is bridged or deleted; what stays is what one
  * Pi session cannot know: which sessions hold pending work (`pending`, an index across sessions), and
@@ -41,6 +41,11 @@ export type SubmissionStatus =
 export interface PendingConversation {
   conversation: ConversationRef;
   requestIds: string[];
+  /**
+   * When the oldest of `requestIds` was admitted, in epoch milliseconds of the provider's clock: how
+   * long the conversation has waited, for the runtime to give up on requests nothing can answer.
+   */
+  oldestAdmittedAt: number;
 }
 
 export interface AgentSubmissions {
@@ -60,6 +65,17 @@ export interface AgentSubmissions {
    * run again appends it to `answers` a second time.
    */
   settled(run: RunSettlement, ctx: AppContext): Promise<void>;
+  /**
+   * The runtime gives up on requests nothing can answer (their agent was removed, their session is
+   * gone, or they waited too long with no run to take them): those of `requestIds` still pending are
+   * settled unanswered, and one settlement is appended to `answers` for them, in one commit: `failed`,
+   * `error: { code: "abandoned", message: reason }`, `requestId` the first of them and `requestIds`
+   * them all. Never pretends they were answered; tells their channel so, which tells the user.
+   * A request already settled, or unknown, is left as it is. Resolves with the settlement appended,
+   * or `undefined` when none of them was pending (so abandoning again changes nothing), for the
+   * caller to announce it as `agent.failed`.
+   */
+  abandoned(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<RunSettlement | undefined>;
   /**
    * Every conversation with a request admitted and not settled, ordered by its oldest pending request
    * (a request already settled does not count).

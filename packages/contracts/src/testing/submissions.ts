@@ -5,7 +5,7 @@
  *   for (const c of createSubmissionsConformance(() => myFixture(), { prunes: true, restarts: true }))
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
- * The suite calls the contract as the runtime (`admitted`, `settled`) and the channels (`pending`,
+ * The suite calls the contract as the runtime (`admitted`, `settled`, `abandoned`) and the channels (`pending`,
  * `get`, `answers`) do. `answers` also runs the feed suite (§4.8), each fact committed by a `settled`.
  * Pruning and restarting are the provider's to do; the cases that need them run only when the options
  * say the fixture can.
@@ -92,6 +92,8 @@ export function createSubmissionsConformance(
 
       const list = await s.pending(c);
       expect(pending(list), [["session-1", ["r1", "r3"]], ["session-2", ["r2"]]], "pending");
+      const [first, second] = list.map((p) => p.oldestAdmittedAt);
+      expect(Number.isFinite(first) && Number.isFinite(second) && (first as number) <= (second as number), true, "oldestAdmittedAt: a time, the oldest first");
       expect(list[0]?.conversation, conversation(1), "the conversation of the first");
       expect(await s.get(conversation(1), "r3", c), { kind: "pending", conversation: conversation(1), requestId: "r3" } satisfies SubmissionStatus, "get");
     }),
@@ -202,6 +204,61 @@ export function createSubmissionsConformance(
     }),
   ];
 
+  const abandon = (on: ConversationRef, requestIds: string[], reason: string): RunSettlement => ({
+    conversation: on,
+    requestId: requestIds[0] ?? "",
+    requestIds,
+    kind: "failed",
+    error: { code: "abandoned", message: reason },
+  });
+  cases.push(
+    submissionsCase("abandoning settles the pending requests unanswered, and appends one settlement for them", async (f, c) => {
+      const s = f.submissions();
+      await s.admitted(conversation(1), "r1", c);
+      await s.admitted(conversation(1), "r2", c);
+      await s.admitted(conversation(2), "r3", c);
+
+      const appended = await s.abandoned(conversation(1), ["r1", "r2"], "agent_removed", c);
+
+      const expected = abandon(conversation(1), ["r1", "r2"], "agent_removed");
+      expect(appended, expected, "the settlement appended");
+      expect(await answers(f), [expected], "answers");
+      expect(pending(await s.pending(c)), [["session-2", ["r3"]]], "pending");
+      expect(await s.get(conversation(1), "r2", c), { kind: "settled", conversation: conversation(1), requestId: "r2", run: expected }, "get");
+    }),
+
+    submissionsCase("abandoning leaves a settled or unknown request as it is", async (f, c) => {
+      const s = f.submissions();
+      const run = completed(conversation(1), ["r1"]);
+      await s.admitted(conversation(1), "r1", c);
+      await s.admitted(conversation(1), "r2", c);
+      await s.settled(run, c);
+
+      const appended = await s.abandoned(conversation(1), ["r1", "unknown", "r2"], "too_old", c);
+
+      expect(appended, abandon(conversation(1), ["r2"], "too_old"), "the settlement: only the pending one");
+      expect(await s.get(conversation(1), "r1", c), { kind: "settled", conversation: conversation(1), requestId: "r1", run }, "the settled one");
+      expect(await s.get(conversation(1), "unknown", c), undefined, "the unknown one");
+      expect(await s.pending(c), [], "pending");
+    }),
+
+    submissionsCase("abandoning again, or nothing pending, changes nothing", async (f, c) => {
+      const s = f.submissions();
+      await s.admitted(conversation(1), "r1", c);
+
+      await s.abandoned(conversation(1), ["r1"], "session_missing", c);
+      const again = await s.abandoned(conversation(1), ["r1"], "session_missing", c);
+      const none = await s.abandoned(conversation(2), ["r9"], "session_missing", c);
+
+      expect([again, none], [undefined, undefined], "what abandoning again appended");
+      expect(await answers(f), [abandon(conversation(1), ["r1"], "session_missing")], "answers");
+      await s.settled(completed(conversation(1), ["r1"]), c);
+      expect((await answers(f)).length, 1, "answers after a late run of the abandoned request");
+      const status = await s.get(conversation(1), "r1", c);
+      expect(status?.kind === "settled" ? status.run.error?.code : status?.kind, "abandoned", "the request keeps its first settlement");
+    }),
+  );
+
   if (options.restarts) {
     cases.push(
       submissionsCase("pending requests and settlements survive a restart", async (f, c) => {
@@ -299,18 +356,18 @@ export interface MemorySubmissions {
 export function createMemorySubmissions(): MemorySubmissions {
   const answers = createMemoryFeed<RunSettlement>();
   /** By `${sessionId}\0${requestId}`, in admission order (a Map keeps insertion order). */
-  const requests = new Map<string, { conversation: ConversationRef; requestId: string; run?: RunSettlement }>();
+  const requests = new Map<string, { conversation: ConversationRef; requestId: string; admittedAt: number; run?: RunSettlement }>();
   /** Runs already settled, by `${sessionId}\0${requestId}` of their starter. */
   const runs = new Set<string>();
   const keyOf = (sessionId: string, requestId: string) => `${sessionId}\u0000${requestId}`;
   const copy = <T>(value: T): T => structuredClone(value);
 
   const submissions: AgentSubmissions = {
-    async admitted(conversation, requestId) {
+    async admitted(conversation, requestId, ctx) {
       const key = keyOf(conversation.sessionId, requestId);
-      if (!requests.has(key)) requests.set(key, { conversation: copy(conversation), requestId });
+      if (!requests.has(key)) requests.set(key, { conversation: copy(conversation), requestId, admittedAt: ctx.clock.now() });
     },
-    async settled(run) {
+    async settled(run, ctx) {
       const runKey = keyOf(run.conversation.sessionId, run.requestId);
       if (runs.has(runKey)) return;
       runs.add(runKey);
@@ -318,17 +375,35 @@ export function createMemorySubmissions(): MemorySubmissions {
       for (const requestId of run.requestIds) {
         const key = keyOf(run.conversation.sessionId, requestId);
         const request = requests.get(key);
-        if (request === undefined) requests.set(key, { conversation: copy(run.conversation), requestId, run: stored });
+        if (request === undefined) requests.set(key, { conversation: copy(run.conversation), requestId, admittedAt: ctx.clock.now(), run: stored });
         else if (request.run === undefined) request.run = stored;
       }
       answers.append(stored);
     },
+    async abandoned(conversation, requestIds, reason) {
+      const still = [...new Set(requestIds)].filter((id) => {
+        const request = requests.get(keyOf(conversation.sessionId, id));
+        return request !== undefined && request.run === undefined;
+      });
+      const [first] = still;
+      if (first === undefined) return undefined;
+      const run: RunSettlement = { conversation: copy(conversation), requestId: first, requestIds: still, kind: "failed", error: { code: "abandoned", message: reason } };
+      runs.add(keyOf(conversation.sessionId, first));
+      for (const id of still) (requests.get(keyOf(conversation.sessionId, id)) as { run?: RunSettlement }).run = run;
+      answers.append(run);
+      return copy(run);
+    },
     async pending() {
-      const bySession = new Map<string, { conversation: ConversationRef; requestIds: string[] }>();
+      const bySession = new Map<string, PendingConversation>();
       for (const request of requests.values()) {
         if (request.run !== undefined) continue;
-        const entry = bySession.get(request.conversation.sessionId) ?? { conversation: copy(request.conversation), requestIds: [] };
+        const entry = bySession.get(request.conversation.sessionId) ?? {
+          conversation: copy(request.conversation),
+          requestIds: [],
+          oldestAdmittedAt: request.admittedAt,
+        };
         entry.requestIds.push(request.requestId);
+        entry.oldestAdmittedAt = Math.min(entry.oldestAdmittedAt, request.admittedAt);
         bySession.set(request.conversation.sessionId, entry);
       }
       return [...bySession.values()];
