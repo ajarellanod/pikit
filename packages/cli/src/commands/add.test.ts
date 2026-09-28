@@ -13,7 +13,6 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { DEFAULT_REGISTRY } from "../paths.ts";
 import { emptyManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { EXTENSION_ALIAS, KIT_PACKAGES } from "../project/vendor.ts";
 
@@ -53,7 +52,7 @@ async function pikitAnsweringEnter(args: string[], cwd: string, question: string
 /** A project whose kit tarballs are another checkout's, with a lockfile naming them. */
 function otherKitProject(installed: string[] = []): string {
   const dir = temp();
-  const manifest = emptyManifest(DEFAULT_REGISTRY);
+  const manifest = emptyManifest();
   for (const name of installed) manifest.components[name] = { registry: "default", version: "0.0.0", files: {}, dependencies: {}, environment: [] };
   writeProjectManifest(dir, manifest);
   mkdirSync(join(dir, "vendor"));

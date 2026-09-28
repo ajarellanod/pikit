@@ -5,12 +5,13 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyManifest, hashOf, writeProjectManifest } from "./project/pikit-json.ts";
 import { DEFAULT_REGISTRY } from "./paths.ts";
 import { openRegistry } from "./project/registry-source.ts";
+import { kitSpecifier } from "./project/vendor.ts";
 
 const MAIN = join(import.meta.dir, "main.ts");
 const dirs: string[] = [];
@@ -29,7 +30,7 @@ function pikit(args: string[], cwd: string) {
 /** The smallest project `add` accepts: a manifest, a composition root, a package.json. */
 function tinyProject(): string {
   const dir = temp();
-  writeProjectManifest(dir, emptyManifest(DEFAULT_REGISTRY));
+  writeProjectManifest(dir, emptyManifest());
   writeFileSync(join(dir, "package.json"), '{ "name": "tiny", "dependencies": {} }\n');
   writeFileSync(join(dir, "pikit.config.ts"), 'import { defineApp } from "@pikit/core";\n\nexport const config = {};\n\nexport default defineApp({\n  components: [\n  ],\n  config,\n});\n');
   return dir;
@@ -135,6 +136,74 @@ test("add without a terminal needs --yes, and writes nothing without it", () => 
   expect(pikit(["add", "no-such-thing", "--yes"], dir).err).toContain('no component "no-such-thing"');
 });
 
+test("new records the builtin registry, not this machine's path to it", () => {
+  const parent = temp();
+  // Nothing resolves: `bun install` fails at once, after pikit.json is written.
+  const run = Bun.spawnSync([process.execPath, MAIN, "new", "fresh", "--registry", DEFAULT_REGISTRY], {
+    cwd: parent,
+    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(run.stderr.toString()).toContain("`bun install` failed");
+  const manifest = JSON.parse(readFileSync(join(parent, "fresh", "pikit.json"), "utf8"));
+  expect(manifest.version).toBe(2);
+  expect(manifest.registries).toEqual({ default: "builtin" });
+}, 60_000);
+
+/**
+ * A project made on another machine, cloned here: its `pikit.json` is version 1 and names the
+ * registry of that machine's pikit checkout, a path that does not exist here. Its kit is this CLI's
+ * (the tarball's name is current), and `@pikit/core` and `@pikit/contracts` are linked as `bun install`
+ * would, so `add` runs to the end without the network.
+ */
+function clonedProject(): string {
+  const made = temp();
+  writeFileSync(
+    join(made, "pikit.json"),
+    JSON.stringify({ version: 1, targets: ["server"], registries: { default: "/home/someone/.pikit/pikit/registry" }, components: {} }),
+  );
+  const contracts = kitSpecifier("@pikit/contracts");
+  mkdirSync(join(made, "vendor"));
+  writeFileSync(join(made, contracts.slice("file:".length)), "this CLI's kit");
+  writeFileSync(join(made, "package.json"), `${JSON.stringify({ name: "cloned", dependencies: { "@pikit/contracts": contracts } }, null, 2)}\n`);
+  writeFileSync(join(made, "pikit.config.ts"), 'import { defineApp } from "@pikit/core";\n\nexport const config = {};\n\nexport default defineApp({\n  components: [\n  ],\n  config,\n});\n');
+  mkdirSync(join(made, "node_modules", "@pikit"), { recursive: true });
+  for (const kit of ["core", "contracts"]) symlinkSync(join(import.meta.dir, "..", "..", kit), join(made, "node_modules", "@pikit", kit));
+  // Another directory, as on another machine: nothing may depend on where it was made.
+  const clone = join(temp(), "cloned");
+  cpSync(made, clone, { recursive: true, verbatimSymlinks: true });
+  rmSync(made, { recursive: true, force: true });
+  return clone;
+}
+
+test("a project cloned on another machine resolves its registry: a v1 checkout path is builtin, and add works", () => {
+  const dir = clonedProject();
+  const run = pikit(["add", "log-events", "--yes"], dir);
+  expect(run.err).not.toContain("is not a registry");
+  expect(run.out).toContain("log-events installed; `pikit doctor` is green");
+  expect(run.code).toBe(0);
+  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
+  expect(manifest.version).toBe(2);
+  expect(manifest.registries).toEqual({ default: "builtin" });
+  expect(Object.keys(manifest.components)).toEqual(["log-events"]);
+}, 60_000);
+
+test("add from a registry outside the project says the project is not portable; the builtin one and one inside it do not", () => {
+  const dir = tinyProject();
+  expect(pikit(["add", "log-events", "--registry", DEFAULT_REGISTRY], dir).err).not.toContain("is a path on this machine");
+  // A copy of the builtin registry, elsewhere: a path of this machine.
+  const copy = join(temp(), "registry");
+  cpSync(DEFAULT_REGISTRY, copy, { recursive: true });
+  expect(pikit(["add", "log-events", "--registry", copy], dir).err).toContain(`the registry ${copy} is a path on this machine`);
+  const inside = join(dir, "vendor-registry");
+  cpSync(copy, inside, { recursive: true });
+  const run = pikit(["add", "log-events", "--registry", inside], dir);
+  expect(run.err).not.toContain("is a path on this machine");
+  expect(run.err).toContain("pass --yes");
+}, 60_000);
+
 /**
  * A project whose agent `soporte` names `bash`, provided by an installed `tool-bash`, and a
  * `runtime` that reads the tools as `runtime-pi` does. Stand-ins, not the registry's components:
@@ -158,7 +227,7 @@ function agentProject(tools: string[]): string {
     mkdirSync(join(dir, file, ".."), { recursive: true });
     writeFileSync(join(dir, file), text);
   }
-  const manifest = emptyManifest(DEFAULT_REGISTRY);
+  const manifest = emptyManifest();
   const toolFile = "src/pikit/tool-bash/index.ts";
   manifest.components["tool-bash"] = { registry: "default", version: "0.0.0", files: { [toolFile]: { hash: hashOf(files[toolFile] ?? "") } }, dependencies: {}, environment: [] };
   writeProjectManifest(dir, manifest);

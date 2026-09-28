@@ -14,9 +14,10 @@ import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { withOffers } from "../project/offers.ts";
 import { openRegistry } from "../project/registry-source.ts";
+import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { vendorKit } from "../project/vendor.ts";
 import { CliError, log } from "../ui.ts";
-import { checkCompatible, installComponent } from "./add.ts";
+import { checkCompatible, installComponent, notPortable } from "./add.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
 import * as starter from "./starter.ts";
@@ -68,7 +69,10 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools));
   write("src/extensions/agents.ts", starter.AGENTS);
   write("src/extensions/permission-gate.ts", starter.permissionGate());
-  writeProjectManifest(projectDir, emptyManifest(registry.root));
+  // `builtin` for this CLI's registry: the project resolves it wherever it is cloned (SPEC §10.3).
+  const location = recordedLocation(projectDir, registry.root);
+  if (!isPortable(location)) log.warn(notPortable(location));
+  writeProjectManifest(projectDir, emptyManifest(location));
 
   for (const component of components) {
     const wiring = starter.STARTER_WIRING[component];

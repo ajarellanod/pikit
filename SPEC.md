@@ -2174,10 +2174,10 @@ Rules:
 ```json
 // pikit.json
 {
-  "version": 1,
+  "version": 2,
   "targets": ["server"],
   "registries": {
-    "default": "/home/me/.pikit/pikit/registry"
+    "default": "builtin"
   },
   "components": {
     "channel-http": {
@@ -2195,12 +2195,28 @@ Rules:
 }
 ```
 
-- `version` is the schema version (§12a). Components and files are sorted, so the file's diff shows
-  only what changed.
-- `registries` maps a name to a location. `[decision]` M1 reads local paths only: by default the
-  registry of the pikit checkout the CLI runs from, or `--registry <path>`. Git and HTTP registries
-  (`"official": "https://github.com/…"`, `"acme": "git+ssh://…"`) come with M3's `upgrade`, which is
-  when a pinned commit starts to be fetched again.
+- `version` is the schema version (§12a), 2 today. Components and files are sorted, and the keys come
+  in one order, so the file's diff shows only what changed.
+- `registries` maps a name to a location. `[decision]` A location is what resolves wherever the
+  project is cloned, since the project is committed and moved between machines:
+  - `builtin` is the registry of the pikit checkout the running CLI comes from. `pikit new` records it
+    by default, and for a `--registry` that is that registry.
+  - A registry inside the project is recorded relative to it (`"./registries/acme"`).
+  - Any other `--registry <path>` is recorded as given. It resolves only on this machine, and `add`
+    and `new` say so each time they use it.
+
+  M1 reads local registries only. Git and HTTP registries (`"official": "https://github.com/…"`,
+  `"acme": "git+ssh://…"`) come with M3's `upgrade`, which is when a pinned commit starts to be
+  fetched again. Every command resolves a location through one helper (`registry-location.ts`).
+- Version 1 recorded every registry as an absolute path, the one of the machine that installed, so a
+  clone on another machine failed with "… is not a registry". The CLI reads version 1 and converts it
+  in memory; the next write saves version 2 (§12a). `[decision]` A version 1 path becomes `builtin`
+  when it names a pikit checkout's registry: the running CLI's registry, the `registry/` of a pikit
+  checkout that exists here (its `packages/cli/package.json` is `@pikit/cli`), or any path ending in
+  `/.pikit/pikit/registry` (the installer's checkout, which exists on the machine that made the
+  project, not necessarily here). Version 1 recorded the checkout the CLI ran from unless
+  `--registry` was given, so these are the CLI's registry by construction. Another path inside the
+  project becomes relative, and any other stays as it was.
 - `commit` is the registry's Git commit when the component was installed, ending in `-dirty` when the
   registry had uncommitted changes; absent when the registry is not in Git.
 - `files` holds each installed file's hash. `[decision]` Whether a file is modified is computed by
@@ -2569,7 +2585,7 @@ the whole 1.x line; there is no "pikit 2 rewrites how you define agents".
 | `@pikit/core`, the kernel (`defineApp`, `defineComponent`, `pikit.on/pipeline/provide/provideKeyed/use/useOptional/useKeyed`, `ctx.emit/run/derive`, the context, clock and logger) | Semver, and meant never to need a major: the 1.x promise rests on it. Within a major: additive changes only, each a `[decision]` (S2, `exports.test.ts`). Removals require a deprecation that ships in at least one minor with a runtime warning and a `pikit doctor` hint, then a major. |
 | `@pikit/contracts` (`defineAgent` and the agent's shapes, `InboundMessage`, `admitInbound`, `SqlDatabase`, `OutboundQueue`, `ChannelTransport`, `Feed`, event and pipeline names, conformance suites) | Its own semver, apart from the kernel's (§4.9). Each contract has a level: `experimental` may change with any minor, noted first in the release notes; `stable` changes additively, and a breaking change is a `[decision]` and a major of `@pikit/contracts`, with a migration. A contract change ships with its updated suite in the same release. The programming model (`defineAgent`, `AgentDefinition`, `TurnConfig`, `prepare`) is `stable` by `[decision]`. 1.0 needs every contract `stable`. |
 | `@pikit/pi-adapter` | May move faster to absorb Pi churn. Its *pikit-facing* surface (the contracts it types) follows the contracts' rule; its Pi-facing internals are unstable by design. |
-| `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. |
+| `component.json`, `pikit.json`, registry format | Versioned schemas (`version` field). Readers accept all prior versions of the same major. `pikit.json` is at version 2 (§10.3): the CLI reads version 1, converts it in memory, and the next write saves version 2. |
 | Components | Version independently. A component major never forces a kernel or contracts major. Installed components are the user's; upstream changes reach them only through `pikit upgrade`. |
 | Pre-1.0 (M0–M5) | Anything may change. No compatibility promises. This is the period to be wrong quickly. |
 

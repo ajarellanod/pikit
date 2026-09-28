@@ -1,7 +1,7 @@
 /**
  * `pikit add <component>`: the install flow of SPEC §10.5.
  *
- *   1. resolve the registry (a local path in M1) and the component's version and commit
+ *   1. resolve the registry (`builtin`, or a local path in M1) and the component's version and commit
  *   2. read the component's package
  *   3. check its targets and `requires.pikit`; warn for each required capability nothing provides
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies,
@@ -29,6 +29,7 @@ import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-fi
 import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
 import { hashFile, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
+import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import { type Offer, offeredProviders } from "../project/offers.ts";
 import { pruneVendor, refreshKit, VENDOR_DIR } from "../project/vendor.ts";
 import { capabilityEntry } from "../registry/capabilities.ts";
@@ -61,8 +62,10 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   // Steps 1–5 for the component and the providers it brings, before anything is written: a refusal
   // (installed, incompatible, a conflict, a config shape, a "no") leaves the project as it was.
   const draft = readDraft(projectDir);
-  const registryName = registryKey(draft.project, options.registry);
-  const registry = openRegistry(draft.project.registries[registryName] as string);
+  const registryName = registryKey(projectDir, draft.project, options.registry);
+  const location = draft.project.registries[registryName] as string;
+  const registry = openRegistry(registryPath(projectDir, location));
+  if (!isPortable(location)) log.warn(notPortable(location));
   const installed = Object.keys(draft.project.components);
   const plans = [planInstall(projectDir, draft, registry, registryName, name, options)];
   if (options.quiet !== true) describePlan(plans[0] as Plan);
@@ -137,8 +140,8 @@ export async function installComponent(
   options: AddOptions = {},
 ): Promise<{ dependenciesChanged: boolean }> {
   const draft = readDraft(projectDir);
-  const registryName = registryKey(draft.project, options.registry);
-  const registry = openRegistry(draft.project.registries[registryName] as string);
+  const registryName = registryKey(projectDir, draft.project, options.registry);
+  const registry = openRegistry(registryPath(projectDir, draft.project.registries[registryName] as string));
   const plan = planInstall(projectDir, draft, registry, registryName, name, options);
   if (options.quiet !== true) describePlan(plan);
   await confirmPlan(plan, options);
@@ -333,19 +336,25 @@ class Undo {
   }
 }
 
-/** The key of `registries` for this path, added when the project does not know it yet. */
-function registryKey(project: ProjectManifest, path: string | undefined): string {
+/** The key of `registries` for this path, added (as `recordedLocation` records it) when the project does not know it yet. */
+function registryKey(projectDir: string, project: ProjectManifest, path: string | undefined): string {
   if (path === undefined) {
     if (project.registries.default === undefined) throw new CliError("pikit.json has no default registry; pass --registry <path>");
     return "default";
   }
   const root = openRegistry(path).root;
-  const known = Object.entries(project.registries).find(([, location]) => location === root);
+  const location = recordedLocation(projectDir, root);
+  const known = Object.entries(project.registries).find(([, recorded]) => recorded === location || registryPath(projectDir, recorded) === root);
   if (known) return known[0];
   let key = "local";
   for (let n = 2; key in project.registries; n++) key = `local-${n}`;
-  project.registries[key] = root;
+  project.registries[key] = location;
   return key;
+}
+
+/** Said whenever a component comes from a registry recorded by a path of this machine. */
+export function notPortable(location: string): string {
+  return `the registry ${location} is a path on this machine: where this project is cloned, \`pikit add\` from it fails (put the registry inside the project to keep it portable)`;
 }
 
 /** Refuses a component that does not run on `targets` or does not accept this CLI's core. */

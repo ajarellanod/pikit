@@ -6,12 +6,17 @@
  * the registry at hand: the npm dependencies and environment variables the component declared when
  * it was installed. Whether a file is modified is not stored: it is computed by comparing its hash,
  * so it can never go stale.
+ *
+ * Version 2 records registries by what resolves on any machine (`registry-location.ts`). Version 1
+ * recorded the path of the CLI's checkout; it is read and converted in memory, and the next write
+ * saves version 2 (SPEC §12a).
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import type { EnvironmentVariable } from "../registry/manifest.ts";
+import { BUILTIN_REGISTRY, isCheckoutRegistry, recordedLocation } from "./registry-location.ts";
 
 export const PIKIT_JSON = "pikit.json";
 
@@ -36,9 +41,9 @@ export interface InstalledComponent {
 
 export interface ProjectManifest {
   /** Schema version of `pikit.json` (SPEC §12a). */
-  version: 1;
+  version: 2;
   targets: string[];
-  /** Name → location. M1 reads local paths only. */
+  /** Name → location: `builtin`, a path inside the project (`./…`), or an absolute path (`registry-location.ts`). */
   registries: Record<string, string>;
   components: Record<string, InstalledComponent>;
 }
@@ -46,8 +51,9 @@ export interface ProjectManifest {
 /** A new project's targets (M1 has one; `--target` arrives with the cloudflare target). */
 export const NEW_PROJECT_TARGETS: readonly string[] = ["server"];
 
-export function emptyManifest(registry: string): ProjectManifest {
-  return { version: 1, targets: [...NEW_PROJECT_TARGETS], registries: { default: registry }, components: {} };
+/** A new project's manifest; `registry` is a recorded location (`recordedLocation`). */
+export function emptyManifest(registry: string = BUILTIN_REGISTRY): ProjectManifest {
+  return { version: 2, targets: [...NEW_PROJECT_TARGETS], registries: { default: registry }, components: {} };
 }
 
 export function readProjectManifest(projectDir: string): ProjectManifest {
@@ -55,9 +61,22 @@ export function readProjectManifest(projectDir: string): ProjectManifest {
   if (!existsSync(path)) {
     throw new Error(`${projectDir} is not a pikit project: there is no ${PIKIT_JSON} (create one with \`pikit new\`)`);
   }
-  const manifest = JSON.parse(readFileSync(path, "utf8")) as ProjectManifest;
-  if (manifest.version !== 1) throw new Error(`${PIKIT_JSON} has version ${String(manifest.version)}; this CLI reads version 1`);
+  const manifest = JSON.parse(readFileSync(path, "utf8")) as ProjectManifest | ProjectManifestV1;
+  if (manifest.version === 1) return fromV1(projectDir, manifest);
+  if (manifest.version !== 2) throw new Error(`${PIKIT_JSON} has version ${String((manifest as { version: unknown }).version)}; this CLI reads versions 1 and 2`);
   return manifest;
+}
+
+/** Version 1: registries are absolute paths, those of the machine that installed. */
+type ProjectManifestV1 = Omit<ProjectManifest, "version"> & { version: 1 };
+
+/** Version 1 in version 2's shape: a pikit checkout's registry is `builtin`, one inside the project relative. */
+function fromV1(projectDir: string, manifest: ProjectManifestV1): ProjectManifest {
+  const registries: Record<string, string> = {};
+  for (const [name, location] of Object.entries(manifest.registries)) {
+    registries[name] = isCheckoutRegistry(location) ? BUILTIN_REGISTRY : recordedLocation(projectDir, location);
+  }
+  return { ...manifest, version: 2, registries };
 }
 
 /** Stable text: components and files sorted, so the file's diff shows only what changed. */
@@ -69,7 +88,9 @@ export function writeProjectManifest(projectDir: string, manifest: ProjectManife
     for (const file of Object.keys(c.files).sort()) files[file] = c.files[file] as { hash: string };
     components[name] = { ...c, files };
   }
-  writeFileSync(join(projectDir, PIKIT_JSON), `${JSON.stringify({ ...manifest, components }, null, 2)}\n`);
+  // Keys in one order, whatever order the object was built in.
+  const { version, targets, registries } = manifest;
+  writeFileSync(join(projectDir, PIKIT_JSON), `${JSON.stringify({ version, targets, registries, components }, null, 2)}\n`);
 }
 
 export function hashOf(content: string | Uint8Array): string {
