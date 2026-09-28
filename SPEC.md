@@ -1226,10 +1226,13 @@ src/agents/assistant/
 └── context/            files copied into the workspace before a run
 ```
 
-### 6.2b Running Pi extensions unchanged
+### 6.2b Running Pi extensions: a tested subset
 
-A Pi extension is `export default function (pi: ExtensionAPI) { ... }`. pikit runs existing
-extensions without modification, except for what needs a terminal UI. Built in M1
+A Pi extension is `export default function (pi: ExtensionAPI) { ... }`. pikit promises a tested
+subset of Pi's extension API, not all of it: the policy and lifecycle surface of tier A below,
+which Pi's own examples (copied byte for byte) and `compat.test.ts` exercise. An extension that
+uses only tier A runs without modification. Anything else is best-effort (tiers B and C) or
+absent, and an extension that needs it fails at `pikit doctor`, not at run time. Built in M1
 (`packages/pi-adapter/src/extensions/`), checked against pi-coding-agent 0.87.1.
 
 Known facts (0.87.1):
@@ -1238,6 +1241,23 @@ Known facts (0.87.1):
   hooks, not Pi's classes, so Pi's own migration lands in the adapter only.
 - Existing extensions import from `@earendil-works/pi-coding-agent`, and not only types:
   `defineTool` is a value.
+- Of Pi's 68 single-file example extensions, 51 load against the shim (with Pi's other packages
+  installed). The 17 that do not import a value the shim does not export: Pi's built-in tool
+  factories (`createBashTool`…, 4), TUI components and themes (`CustomEditor`, `BorderedLoader`,
+  `DynamicBorder`, `getSettingsListTheme`, 7), Pi's paths and version (`getAgentDir`,
+  `CONFIG_DIR_NAME`, `VERSION`, 4) and its message and truncation helpers (`convertToLlm`,
+  `truncateHead`, 2). Most of the 51 also use tier C: commands, `ctx.ui.custom`,
+  `ctx.sessionManager`, events pikit never fires.
+- Pi's host also gives extensions `typebox`, `@earendil-works/pi-ai`, `pi-tui` and
+  `pi-agent-core` as virtual modules. A pikit project has only the alias, and S1 refuses the other
+  Pi packages in project code, so an extension that imports them fails `pikit doctor`: Pi's `hello`
+  imports `Type` from `pi-ai`, and runs unmodified here only because this repository installs it.
+  `[open]`: whether project extensions may import `pi-ai`, or take `Type` from `typebox`.
+- Pi's extension API keeps moving after 0.87.1: `provider_stream_event` (#9901) is an event pikit
+  never fires, and `ProviderModelConfig` grows image and classifier models (#9948) for
+  `registerProvider(name, config)`, which pikit does not provide. `bun scripts/pi-extension-drift.ts
+  <tag>` lists what Pi's `ExtensionAPI`, `ExtensionContext`, events and exports have at a tag that
+  pikit's subset lacks, and the reverse; run it before a Pi bump.
 
 Decisions `[decision]`:
 - **A vendored subset.** The compat layer's `ExtensionAPI` is a subset of Pi's types in
@@ -1245,6 +1265,20 @@ Decisions `[decision]`:
   `pi-coding-agent`: 19 MB for types is out of proportion, and a subset states exactly what pikit
   supports. Pi's own example extensions, copied byte for byte, compile against it and run in
   `compat.test.ts`; a Pi bump copies them again.
+- **The promise is tier A, and `doctor` says the rest.** `[decision]` pikit promises tier A:
+  `tool_call` / `tool_result`, `before_agent_start`, `context`, the provider request and response,
+  the run, turn, message and tool notifications, `registerTool` / `defineTool`, and the actions and
+  `ctx` members the table lists. Tiers B and C are best-effort or absent. `pikit doctor` reads the
+  project's extensions (its files that import the alias, outside installed components) without
+  running them. A name imported from the alias that the shim does not export, or a subpath of it,
+  is a problem: the module would not load, or not typecheck. What they use that pikit does not
+  provide (events it never fires, `pi.*` and `ctx.*` members it lacks or leaves inert, terminal UI
+  calls) is one note per extension, because it is read by heuristics and must not fail the command.
+  The CLI does not load the adapter: it checks against a list generated from
+  `packages/pi-adapter/src/extensions` (`bun scripts/pi-extension-surface.ts`), which
+  `scripts/pi-extension-surface.test.ts` keeps equal to the shim's exports and to the events
+  `host.ts` fires (`extensions/surface.ts`). Rationale: 17 of Pi's 68 examples failed to load with
+  a cryptic error; a narrow promise that is tested beats a broad one that is not.
 - **No TUI.** The compat object reports `mode: "rpc"` and `hasUI: false`. `ui.select` / `ui.input`
   answer `undefined`, `ui.confirm` answers `false`, and every other `ui.*` call does nothing, so
   extensions that guard on `hasUI` take their non-interactive path, as Pi already asks them to.
@@ -1277,9 +1311,9 @@ Support tiers (on 0.87.1):
 
 | Tier | Surface | How |
 |---|---|---|
-| A — works | `on(...)`: `session_start`, `session_shutdown`, `before_agent_start`, `context`, `before_provider_request`, `after_provider_response`, `agent_start`, `agent_end`, `turn_start`, `turn_end`, `message_start` / `_update` / `_end`, `tool_execution_start` / `_update` / `_end`, `tool_call`, `tool_result`. `registerTool`, `defineTool`, `isToolCallEventType`, `registerProvider`, `sendMessage`, `sendUserMessage`, `appendEntry`, `set/getSessionName`, `setLabel`, `set/getActiveTools`, `getAllTools`, `setModel`, `set/getThinkingLevel`, `events`. On `ctx`: `hasUI`, `mode`, `cwd`, `model`, `signal`, `isIdle`, `abort`, `hasPendingMessages`, `waitForIdle`, `getSystemPrompt`, `compact` | `tool_call` → `before_tool` (`block` blocks; mutating `event.input` in place patches the arguments; a handler that throws blocks the call with a fixed reason, as Pi's `beforeToolCall` does, and its error goes only to the log). `tool_result` → `after_tool`. `before_agent_start` → `before_run` (an added message) and `transform_context` (the system prompt, for that run). `context` → `transform_context`. `before_provider_request` → `before_payload`. `after_provider_response` → `after_response`. Run, turn, message and tool notifications → the harness's events, in Pi's order. `ctx.abort()` → the conversation's `abort()`, which records withdrawn messages (§6.4, gap 4); it is queued in the conversation's line without the close waiting for it, and is a no-op once the conversation has closed (an idle conversation has no run to stop). Tools → harness tools, `replay: "never"` |
+| A — works | `on(...)`: `session_start`, `session_shutdown`, `before_agent_start`, `context`, `before_provider_request`, `after_provider_response`, `agent_start`, `agent_end`, `turn_start`, `turn_end`, `message_start` / `_update` / `_end`, `tool_execution_start` / `_update` / `_end`, `tool_call`, `tool_result`. `registerTool`, `defineTool`, `isToolCallEventType`, `registerProvider` (a pi-ai provider object), `sendMessage`, `sendUserMessage`, `appendEntry`, `set/getSessionName`, `setLabel`, `set/getActiveTools`, `getAllTools`, `setModel`, `set/getThinkingLevel`, `events`. On `ctx`: `hasUI`, `mode`, `cwd`, `model`, `signal`, `isIdle`, `abort`, `hasPendingMessages`, `waitForIdle`, `getSystemPrompt`, `compact` | `tool_call` → `before_tool` (`block` blocks; mutating `event.input` in place patches the arguments; a handler that throws blocks the call with a fixed reason, as Pi's `beforeToolCall` does, and its error goes only to the log). `tool_result` → `after_tool`. `before_agent_start` → `before_run` (an added message) and `transform_context` (the system prompt, for that run). `context` → `transform_context`. `before_provider_request` → `before_payload`. `after_provider_response` → `after_response`. Run, turn, message and tool notifications → the harness's events, in Pi's order. `ctx.abort()` → the conversation's `abort()`, which records withdrawn messages (§6.4, gap 4); it is queued in the conversation's line without the close waiting for it, and is a no-op once the conversation has closed (an idle conversation has no run to stop). Tools → harness tools, `replay: "never"` |
 | B — later, with channels | `registerCommand` (slash commands from a channel), `ui.select` / `confirm` / `input` answered by a person (overlaps `approvals`) | Today they are tier C |
-| C — no-op with a warning | Every other event (`input`, `user_bash`, `model_select`, `agent_before_settle`, `context_with_system`, `cache_warming_decision`, `session_before_*`, `resources_discover`, `project_trust`…), `registerShortcut`, `registerFlag` / `getFlag`, `register*Renderer`, `registerMarkdownTransformer`, TUI `ui.*`, `ctx.shutdown()`. Absent: `ctx.sessionManager`, `ctx.modelRegistry`, `newSession`, `fork`, `switchSession` | TUI-only, or owned by pikit (the process, the sessions). The warning is a log line when the extension loads; `pikit doctor` lists it once the CLI exists `[planned]`. `pi.exec()` rejects until extensions are given `execution.shell` |
+| C — no-op with a warning | Every other event (`input`, `user_bash`, `model_select`, `agent_before_settle`, `context_with_system`, `cache_warming_decision`, `session_before_*`, `resources_discover`, `project_trust`…), `registerShortcut`, `registerFlag` / `getFlag`, `register*Renderer`, `registerMarkdownTransformer`, TUI `ui.*`, `ctx.shutdown()`. Absent: `ctx.sessionManager`, `ctx.modelRegistry`, `ctx.getContextUsage`, `ctx.isProjectTrusted`, `ctx.scopedModels`, `ctx.thinkingLevel`, `newSession`, `fork`, `switchSession`, `pi.getCommands`, `pi.unregisterProvider`, Pi's `registerProvider(name, config)`, and every value export of `pi-coding-agent` but `defineTool` and `isToolCallEventType` (tool factories, TUI components, Pi's paths and helpers) | TUI-only, or owned by pikit (the process, the sessions). The warning is a log line when the extension loads; `pikit doctor` lists what each extension uses in a note, and a missing import as a problem. `pi.exec()` rejects until extensions are given `execution.shell` |
 
 Where pikit differs from Pi in a way an extension may notice:
 - `sendMessage` / `sendUserMessage` on an idle conversation wait for its next run (`nextRun`):
@@ -2415,7 +2449,7 @@ M1 has these commands; the others print "not yet" and name the milestone that br
 | Command | M1 |
 |---|---|
 | `new`, `add`, `remove` | §10.5. `pikit new` with no directory, in a terminal, is the guided path (below). |
-| `doctor` | Creates the app (every setup, no start) and prints the component graph, capability providers, pipelines and config (§4.6). Fails when the app does not compose, when a variable a component marks required is set neither in the environment nor in `.env` (names only, never values), when a file breaks the Pi import rule (S1: a component imports no `@earendil-works/*`, project code only `@earendil-works/pi-coding-agent`, the Pi extensions' alias), or when an agent names statically a tool, an extension or a model provider that no installed key provides while a component reads that capability (§10.5). Lists modified and deleted installed files as information. |
+| `doctor` | Creates the app (every setup, no start) and prints the component graph, capability providers, pipelines and config (§4.6). Fails when the app does not compose, when a variable a component marks required is set neither in the environment nor in `.env` (names only, never values), when a file breaks the Pi import rule (S1: a component imports no `@earendil-works/*`, project code only `@earendil-works/pi-coding-agent`, the Pi extensions' alias), when a Pi extension imports from `@earendil-works/pi-coding-agent` a name the shim does not export (§6.2b), or when an agent names statically a tool, an extension or a model provider that no installed key provides while a component reads that capability (§10.5). Lists modified and deleted installed files as information, and, for each Pi extension, what it uses that pikit does not provide. |
 | `configure` | First runs the components' own steps (below). Then writes the other variables of the installed components to `.env` (mode 0600): a secret is asked without echo, and a required `*_TOKEN` can be generated. Then, for each `model.provider` without credentials, it runs pi-ai's login through `@pikit/pi-adapter` into the project's own `model.credentials` component, or stores the provider's API key in `.env`. Without a terminal (or with `--yes`), values come from the environment and `--generate <NAME>`, and `--login <provider>` runs a login. It never prints a value and never touches `~/.pi/agent/auth.json` (§13). A login runs where the app will run (below). |
 | `dev` | After `doctor`, `bun --watch src/pikit/<deployment>/main.ts` (the installed `deployment-*` component's entrypoint) with `.env` loaded. |
 | `up`, `down`, `restart`, `logs`, `status` | Delegate, as above. `up` runs `doctor` first, then checks the model credentials where the app runs (through the deployment's `exec`), and refuses to start an agent that has none. |
