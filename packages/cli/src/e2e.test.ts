@@ -173,6 +173,22 @@ test.skipIf(!E2E)(
       sh([process.execPath, "install"]);
     }
 
+    // submissions-sql, which runtime-pi brought: removed, it takes its storage along and the runtime
+    // and the channel work without them; added back with its storage, green; removed again, no trace.
+    expect((await pikit(["remove", "submissions-sql"])).out).toContain("storage-sqlite was installed for submissions-sql, and nothing uses it now");
+    expect((await pikit(["doctor"])).code).toBe(0);
+    git("add", "-A");
+    git("commit", "-qm", "without submissions-sql");
+    expect((await pikit(["add", "storage-sqlite", "--yes"])).code).toBe(0);
+    const submissions = await pikit(["add", "submissions-sql", "--yes"]);
+    expect(submissions.code).toBe(0);
+    expect(submissions.out).toContain("`pikit doctor` is green");
+    expect((await pikit(["remove", "submissions-sql"])).code).toBe(0);
+    expect((await pikit(["remove", "storage-sqlite"])).code).toBe(0);
+    expect(git("status", "--porcelain").out).toBe("");
+    git("reset", "-q", "--hard", "HEAD~1");
+    sh([process.execPath, "install"]);
+
     const refused = await pikit(["remove", "sessions-jsonl"]);
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("conversations-file requires sessions.store");
