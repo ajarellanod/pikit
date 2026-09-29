@@ -51,7 +51,7 @@ export function settlementOf(result: AgentResult): RunSettlement {
 /**
  * The entries the run added, oldest first: its branch from `tipId` back to `fromTipId`, excluded. Pi
  * walks a branch from `start` towards the root only `newestFirst` (`oldestFirst` starts at the root),
- * and includes the `stopAtId` entry; checked on 0.87.1.
+ * and includes the `stopAtId` entry; checked on 0.99.0.
  */
 async function runEntries(lane: AgentLane, record: OperationResultRecord, ctx: Context): Promise<Entry[]> {
   if (record.tipId === null || record.tipId === record.fromTipId) return [];
@@ -68,7 +68,7 @@ async function runEntries(lane: AgentLane, record: OperationResultRecord, ctx: C
  * attempts before a retry included, every tool result that reports usage, and a compaction or branch
  * summary made inside the run. They are the rows of Pi's usage ledger that point to an entry.
  *
- * Pi 0.87.1 does not tie its other ledger rows to an operation (a hook's own model request, an
+ * Pi 0.99.0 does not tie its other ledger rows to an operation (a hook's own model request, an
  * extension's `recordUsage` without an entry), so a run cannot claim them; the session's totals
  * (`getStats`) still count them. Pi's durable runtime keeps a completed attempt's usage on its entry
  * (SPEC §6.4), so this reading survives the move. A run that called no model reports zero.
@@ -96,7 +96,7 @@ const ZERO: Usage = {
 };
 
 /**
- * Pi's own `addUsage` (`harness/utils/usage.js`, which 0.87.1 does not export): the optional fields
+ * Pi's own `addUsage` (`harness/utils/usage.js`, which 0.99.0 does not export): the optional fields
  * appear only when one side reports them, so "not reported" stays distinct from zero.
  */
 function addUsage(left: Usage, right: Usage): Usage {

@@ -238,7 +238,7 @@ export class PiConversation {
 
   /**
    * Start a run for the inbound messages waiting in Pi's inbox when no run is going to take them
-   * (SPEC §6.4, gap 2). Pi 0.87.1 leaves the inbox as it is when a run ends: a message queued behind
+   * (SPEC §6.4, gap 2). Pi 0.99.0 leaves the inbox as it is when a run ends: a message queued behind
    * a run that failed, or steered after the run's last boundary, or steered by a worker that died
    * before its `accept()`, would wait for the next message. `accept()` with an empty prompt takes
    * them out of the inbox into the new run, which is named after the oldest one and answers them all
