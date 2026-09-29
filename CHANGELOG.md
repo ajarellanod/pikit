@@ -5,6 +5,17 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- contracts: `actor.mailbox` and the keyed `actor.inbox` (experimental, SPEC C2): `send(key, type,
+  message, ctx)` resolves once the actor owning `key` holds the JSON message durably (its `actor.inbox`
+  handler for `type` resolved), and rejects otherwise, with an error naming the type when nothing
+  handles it. The handler gets a copy and a context of its own. Its conformance suite and a memory
+  mailbox for tests are in `@pikit/contracts/testing`.
+- contracts: `wakeups` and the keyed `wakeup` (experimental, SPEC C3, C4): `at(name, time, ctx)` runs
+  the handler `name` at or after `time`, replacing its earlier request; `cancel(name, ctx)` drops it.
+  At least once, never early, one run per name at a time; a handler that rejects runs again with the
+  provider's backoff, and its context may be cancelled at a slice deadline, after which it asks again.
+  Its conformance suite (on a manual clock) and a memory wakeups for tests are in
+  `@pikit/contracts/testing`.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an

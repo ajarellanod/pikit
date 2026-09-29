@@ -31,6 +31,11 @@ export { createSqlDatabaseConformance } from "./storage-sql.ts";
 export type { KeyValueFixture } from "./storage-kv.ts";
 export { createKeyValueConformance, createMemoryKeyValueStorage } from "./storage-kv.ts";
 
+export type { MailboxFixture } from "./mailbox.ts";
+export { createMailboxConformance, createMemoryMailbox } from "./mailbox.ts";
+export type { WakeupsConformanceOptions, WakeupsFixture } from "./wakeups.ts";
+export { createMemoryWakeups, createWakeupsConformance } from "./wakeups.ts";
+
 export type { AgentStateFixture } from "./agent-state.ts";
 export { createAgentStateConformance } from "./agent-state.ts";
 
