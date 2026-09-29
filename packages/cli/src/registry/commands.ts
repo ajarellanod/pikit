@@ -1,6 +1,6 @@
 /**
  * `generate` and `validate` over a registry root (a directory holding `components/` and
- * `registry.json`, SPEC §10.4). Both find the components by listing `components/`, so a component
+ * `registry.json`). Both find the components by listing `components/`, so a component
  * added later needs no change here.
  */
 
@@ -244,7 +244,7 @@ export function readManifests(root: string): Manifest[] {
   return componentNames(root).flatMap((name) => readManifest(join(root, "components", name)) ?? []);
 }
 
-/** S14: the generated fields are exactly what setup declares. S10: every tool states its replay. */
+/** The generated fields are exactly what setup declares, and every tool states its replay. */
 export function checkDrift(manifest: Manifest, generated: Generated): string[] {
   const problems: string[] = [];
   const expected = withGenerated(manifest, generated);
@@ -259,13 +259,13 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
   for (const [field, actual, derived] of fields) {
     if (JSON.stringify(actual) !== JSON.stringify(derived)) {
       problems.push(
-        `${field} drifted from setup: component.json has ${JSON.stringify(actual) ?? "nothing"}, setup declares ${JSON.stringify(derived) ?? "nothing"}; run \`bun run registry generate\` (S14)`,
+        `${field} drifted from setup: component.json has ${JSON.stringify(actual) ?? "nothing"}, setup declares ${JSON.stringify(derived) ?? "nothing"}; run \`bun run registry generate\``,
       );
     }
   }
   for (const [tool, replay] of Object.entries({ ...generated.tools, ...generated.exampleTools })) {
     if (replay !== "safe" && replay !== "never") {
-      problems.push(`the agent.tool "${tool}" has replay ${JSON.stringify(replay)}; every tool declares "safe" or "never" (S10)`);
+      problems.push(`the agent.tool "${tool}" has replay ${JSON.stringify(replay)}; every tool declares "safe" or "never"`);
     }
   }
   return problems;

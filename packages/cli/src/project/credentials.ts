@@ -1,7 +1,7 @@
 /**
  * Run as `bun credentials.ts <project-dir> <output-file> check | login <provider>` in the project's
  * directory: on this machine for `pikit dev`, or where the app runs for `pikit up` (the deployment's
- * `exec`, SPEC §11). The model-credential half of `pikit configure`, as `samples/http/scripts/login.ts`:
+ * `exec`). The model-credential half of `pikit configure`, as `samples/http/scripts/login.ts`:
  *
  * - It builds a small app from the project's own components: the one that provides
  *   `model.credentials` (`credentials-file`) and those that provide `model.provider`, with the
@@ -13,7 +13,7 @@
  *
  * It uses the project's `@pikit/core` and `@pikit/pi-adapter`, resolved from its `node_modules`.
  * It never prints a credential, and never reads or writes Pi's own `~/.pi/agent/auth.json`: a
- * refresh here would rotate the token the Pi CLI holds (SPEC §13).
+ * refresh here would rotate the token the Pi CLI holds.
  */
 
 import { writeFileSync } from "node:fs";
@@ -27,7 +27,7 @@ import type { AppDefinition, ComponentDefinition, defineApp, defineComponent } f
  * the adapter is loaded from the project at run time (`load` below), and the project's version may
  * differ from the one next to the CLI. A type import would also make the CLI package resolve the
  * adapter through its own `node_modules`, which made TypeScript 7 lose the core tests' relative
- * module augmentations (see AGENTS.md, Lessons). Opaque where the script only passes values through.
+ * module augmentations. Opaque where the script only passes values through.
  */
 /** pi-ai's `Provider`, passed through untouched. */
 type Provider = { readonly id: string };

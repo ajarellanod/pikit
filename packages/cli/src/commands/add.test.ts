@@ -2,7 +2,7 @@
  * `pikit add`, run as a user runs it, on what it must refuse or undo: a refusal leaves the project
  * byte for byte as it was, and a step that fails once writing began puts back what was written. The
  * projects are "made by another kit revision": their vendored tarballs are not this checkout's, so
- * an add that went ahead would rewrite `package.json` and `vendor/` (SPEC §10.5, "Vendored kit").
+ * an add that went ahead would rewrite `package.json` and `vendor/` (`project/vendor.ts`).
  * No network: the one `bun install` here is made to fail at once.
  *
  * A registry may be anyone's (`--registry`): the plan names every file written outside the

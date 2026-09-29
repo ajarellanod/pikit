@@ -1,6 +1,6 @@
 /**
- * The project's `package.json`: the npm dependencies components declare (SPEC §10.2: protocols
- * and crypto are depended on, behaviour is copied), and the dev dependencies they declare (a tool
+ * The project's `package.json`: the npm dependencies components declare (protocols and
+ * crypto are depended on, behaviour is copied), and the dev dependencies they declare (a tool
  * they run, like deployment-cloudflare's `wrangler`). Kit packages resolve to their vendored tarballs.
  */
 

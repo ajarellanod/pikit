@@ -1,6 +1,6 @@
 /**
  * The static checks of `registry validate`: one function per rule, each returning plain messages.
- * The drift check (S14) needs `setup` and lives in `commands.ts`.
+ * The drift check needs `setup` and lives in `commands.ts`.
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
@@ -12,17 +12,16 @@ import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 
 /**
- * Component kinds (AGENTS.md, "Naming"): the table's kinds plus the ones the registry already uses.
- * A new kind is a naming decision, so it is added here on purpose, not accepted silently.
+ * Component kinds: the prefix of every component's name. A new kind is a naming decision, so it is
+ * added here on purpose, not accepted silently.
  */
-/** The component kinds of the AGENTS.md naming table; keep the two lists equal. */
 export const KINDS = [
   "channel", "router", "sessions", "storage", "workspace", "execution", "scheduler", "deployment",
   "tool", "policy", "admin", "inbound", "outbound", "log",
   "conversations", "credentials", "provider", "runtime", "secrets", "server", "submissions",
-  // SPEC §4.1, C2 and C3: `mailbox-local`, `wakeups-timers`.
+  // SPEC C2 and C3: `mailbox-local`, `wakeups-timers`.
   "mailbox", "wakeups",
-  // SPEC §4.1, C2 to C5: a target's platform providers (`platform-cloudflare`).
+  // SPEC C2 to C5: a target's platform providers (`platform-cloudflare`).
   "platform",
 ];
 
@@ -34,9 +33,9 @@ const TEST_SUPPORT = /\.test-support\.[cm]?[jt]sx?$/;
 const forTests = (file: string): boolean => TEST.test(file) || TEST_SUPPORT.test(file);
 /**
  * A deployment component's commands (`src/pikit/deployment-*\/commands.ts`) run on the machine that
- * deploys, loaded by the CLI under Bun (SPEC §11), never in the app: `deployment-cloudflare`'s spawn
+ * deploys, loaded by the CLI under Bun, never in the app: `deployment-cloudflare`'s spawn
  * `wrangler` with `node:child_process` while its entrypoint runs in workerd. Like tests, that one file
- * is not held to the component's targets (S5).
+ * is not held to the component's targets (SPEC §4).
  */
 const forMachine = (file: string, name: string): boolean => name.startsWith("deployment-") && file === `src/pikit/${name}/commands.ts`;
 
@@ -47,7 +46,7 @@ export function checkNaming(name: string): string[] {
   if (!KEBAB.test(name)) return [`name "${name}" is not kebab-case`];
   const kind = name.split("-")[0] ?? "";
   if (!name.includes("-") || !KINDS.includes(kind)) {
-    return [`name "${name}" has no known kind prefix (${KINDS.map((k) => `${k}-`).join(", ")}); a new kind goes in KINDS in packages/cli/src/registry/checks.ts and the AGENTS.md naming table`];
+    return [`name "${name}" has no known kind prefix (${KINDS.map((k) => `${k}-`).join(", ")}); a new kind goes in KINDS in packages/cli/src/registry/checks.ts`];
   }
   return [];
 }
@@ -58,7 +57,7 @@ export function checkNaming(name: string): string[] {
  */
 export function checkManifest(manifest: unknown, componentDir: string, dirName: string, coreVersion: string): string[] {
   const shape = schemaProblems(ManifestSchema, manifest).map((problem) =>
-    // The one extra field worth explaining: a dependency on another component (SPEC §10.2).
+    // The one extra field worth explaining: a dependency on another component.
     problem.startsWith("/requires/") && problem.endsWith("is not a known field")
       ? `component.json ${problem}: components depend on capabilities only, never on components`
       : `component.json ${problem}`,
@@ -76,7 +75,7 @@ export function checkManifest(manifest: unknown, componentDir: string, dirName: 
     if (!isInside(f.target)) problems.push(`files target "${f.target}" leaves the project`);
     else if (isProtected(f.target)) problems.push(`files target "${f.target}" is one of the project's own files; no component writes it`);
     if (!existsSync(join(componentDir, f.source))) problems.push(`files source "${f.source}" does not exist`);
-    // SPEC §10.2: only `src` is mapped as a directory; every file outside it is listed on its own,
+    // Only `src` is mapped as a directory; every file outside it is listed on its own,
     // so a component owns exactly the files it lists and removing it cannot touch another one.
     else if (isDirectory(join(componentDir, f.source)) && !(f.source === "files/src" && f.target === "src")) {
       problems.push(`files maps the directory "${f.source}" onto "${f.target}"; only files/src → src is a directory, list other files one by one`);
@@ -89,17 +88,17 @@ export function checkManifest(manifest: unknown, componentDir: string, dirName: 
   return problems;
 }
 
-/** SPEC §10.1 and S13: README, the installed directory, an entry point, tests, no install scripts. */
+/** The layout: README, the installed directory, an entry point, tests, no install scripts. */
 export function checkLayout(componentDir: string, name: string): string[] {
   const problems: string[] = [];
   if (!existsSync(join(componentDir, "README.md"))) problems.push("README.md is missing");
   const own = join(componentDir, "files", "src", "pikit", name);
   if (!isDirectory(own)) return [...problems, `files/src/pikit/${name}/ is missing (a component installs to src/pikit/<name>/)`];
   if (!existsSync(join(own, "index.ts"))) problems.push(`files/src/pikit/${name}/index.ts is missing`);
-  if (!listFiles(own).some((f) => TEST.test(f))) problems.push(`files/src/pikit/${name}/ has no *.test.ts (tests ship with the component, S13)`);
+  if (!listFiles(own).some((f) => TEST.test(f))) problems.push(`files/src/pikit/${name}/ has no *.test.ts (tests ship with the component)`);
   for (const file of listFiles(componentDir).filter((f) => f.endsWith("package.json"))) {
     const scripts = (JSON.parse(readFileSync(join(componentDir, file), "utf8")) as { scripts?: unknown }).scripts;
-    if (scripts !== undefined) problems.push(`${file} has scripts: components have no install scripts, ever (S13)`);
+    if (scripts !== undefined) problems.push(`${file} has scripts: components have no install scripts, ever`);
   }
   return problems;
 }
@@ -110,7 +109,10 @@ export interface ImportScan {
   packages: Set<string>;
 }
 
-/** S1, S4, S5 over every source file under `files/`, and the packages they need. */
+/**
+ * The imports of every source file under `files/` (only the adapter imports Pi; no sibling
+ * component's files, P4; the targets' runtimes, SPEC §4), and the packages they need.
+ */
 export function checkImports(componentDir: string, name: string, targets: readonly string[]): ImportScan {
   const problems: string[] = [];
   const packages = new Set<string>();
@@ -127,7 +129,7 @@ export function checkImports(componentDir: string, name: string, targets: readon
         if (target.startsWith("..")) {
           problems.push(`${at} imports "${specifier}", outside the component's files`);
         } else if (sibling !== undefined && sibling !== name) {
-          problems.push(`${at} imports "${specifier}", a file of the component "${sibling}": depend on its capability instead (S4)`);
+          problems.push(`${at} imports "${specifier}", a file of the component "${sibling}": depend on its capability instead (SPEC P4)`);
         } else if (TEST_SUPPORT.test(target) && !forTests(file)) {
           problems.push(`${at} imports "${specifier}", which is test support: only tests may import it`);
         }
@@ -136,13 +138,13 @@ export function checkImports(componentDir: string, name: string, targets: readon
       const scheme = specifier === "bun" ? "bun" : runtimeScheme(specifier);
       if (scheme !== undefined) {
         // Tests run under Bun's test runner in the project (they import bun:test), never in a
-        // deployed bundle, so only shipped files are held to the targets (S5).
+        // deployed bundle, so only shipped files are held to the targets (SPEC §4).
         if (forTests(file) || forMachine(file, name)) continue;
         if ((scheme === "node" || scheme === "bun") && !serverOnly) {
-          problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: node:* and bun:* need targets ["server"] (S5)`);
+          problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: node:* and bun:* need targets ["server"] (SPEC §4)`);
         }
         if (scheme === "cloudflare" && !cloudflareOnly) {
-          problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: cloudflare:* needs targets ["cloudflare"] (S5)`);
+          problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: cloudflare:* needs targets ["cloudflare"] (SPEC §4)`);
         }
         continue;
       }
@@ -151,7 +153,7 @@ export function checkImports(componentDir: string, name: string, targets: readon
         continue;
       }
       if (specifier.startsWith("@earendil-works/")) {
-        problems.push(`${at} imports "${specifier}": only @pikit/pi-adapter imports Pi (S1)`);
+        problems.push(`${at} imports "${specifier}": only @pikit/pi-adapter imports Pi`);
       }
       const pkg = packageName(specifier);
       if (!KIT_PACKAGES.has(pkg)) packages.add(pkg);

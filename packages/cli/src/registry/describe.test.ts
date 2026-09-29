@@ -79,7 +79,7 @@ test("an invalid example, or one setup refuses, is a problem that names it", asy
   await expect(describeComponent(refusing, "server")).rejects.toThrow("with examples[1] of its config schema: bad name");
 });
 
-test("an example tool's replay is checked (S10) but not written", async () => {
+test("an example tool's replay is checked but not written", async () => {
   const component = defineComponent({
     name: "tool-vague",
     config: Type.Object({ tools: Type.Array(Type.String(), { default: [] }) }, { examples: [{ tools: ["poke"] }] }) as TSchema,
@@ -89,5 +89,5 @@ test("an example tool's replay is checked (S10) but not written", async () => {
   });
   const generated = await describeComponent(component, "server");
   const manifest = { provides: ["agent.tool"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
-  expect(checkDrift(manifest, generated)).toEqual(['the agent.tool "poke" has replay "undefined"; every tool declares "safe" or "never" (S10)']);
+  expect(checkDrift(manifest, generated)).toEqual(['the agent.tool "poke" has replay "undefined"; every tool declares "safe" or "never"']);
 });

@@ -1,6 +1,6 @@
 /**
- * Offered providers (SPEC §10.5): what a component brings along, decided by capabilities, never by
- * naming other components (S4).
+ * Offered providers: what a component brings along, decided by capabilities, never by naming
+ * other components (SPEC P4).
  *
  * - A capability a component can use (`useOptional`) or requires (`use`) and the catalogue marks
  *   `offer` (durable delivery, `outbound.queue`; a place for small values, `storage.kv`), which

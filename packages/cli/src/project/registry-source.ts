@@ -1,5 +1,5 @@
 /**
- * A registry the CLI installs from (SPEC §10.4). M1 reads a local directory: the registry of the
+ * A registry the CLI installs from. It reads a local directory: the registry of the
  * pikit checkout by default, or `--registry <path>`. Git URLs come later; the path and the commit
  * it was at are what `pikit.json` records.
  */
@@ -133,7 +133,7 @@ export function openRegistry(path: string): Registry {
         // Refused with --force too: the registry may be anyone's, and these are not a component's to write.
         if (isProtected(target)) throw new Error(`${name}: the file target "${target}" is the project's own (${PROTECTED}); no component writes it`);
         if (statSync(from).isDirectory()) {
-          // SPEC §10.2: `files/src` → `src` is the only directory mapping.
+          // `files/src` → `src` is the only directory mapping.
           if (source !== "files/src" || target !== "src") throw new Error(`${name}: only files/src → src may map a directory`);
           for (const file of listFiles(from)) files.set(`src/${file}`, join(from, file));
         } else {
@@ -211,14 +211,14 @@ const AliasPresetSchema = Type.Object(
 
 /**
  * A preset (`presets/<name>.yaml`): the list of `add` calls, and a `title` for `pikit new`'s
- * question. Nothing reads which preset a project came from (SPEC §11). YAML 1.2 (SPEC §12). Either:
+ * question. Nothing reads which preset a project came from. YAML 1.2. Either:
  * - a base: `components`, and optionally `choose`, one question per kind whose answers are every
  *   registry component of that kind (the listed one is the default); or
  * - an alias: `extends` a base and answers some of its questions with `with`, as `--with` does.
  */
 export const PresetSchema = Type.Union([BasePresetSchema, AliasPresetSchema], {
   title: "pikit preset",
-  description: "A preset of a pikit registry (SPEC §11): a base, or an alias of one.",
+  description: "A preset of a pikit registry: a base, or an alias of one.",
 });
 
 /** Where a registry's preset schema lives; each preset names it in a `yaml-language-server` comment. */

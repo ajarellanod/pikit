@@ -107,7 +107,7 @@ test("a new component's skeleton is rejected until its targets are written by ha
   expect(await problems(f)).toContain("component.json /targets: must not have fewer than 1 items");
 });
 
-test("drift: generated fields that differ from setup (S14)", async () => {
+test("drift: generated fields that differ from setup", async () => {
   const f = await fixture();
   f.writeManifest({ ...f.manifest(), provides: [], optional: { capabilities: ["agent.tool"] } });
   const found = await problems(f);
@@ -136,7 +136,7 @@ test("naming: name equal to its directory, with a known kind prefix", async () =
   expect(await problems(await fixture({ name: "widget-sample" }))).toContain(`name "widget-sample" has no known kind prefix`);
 });
 
-test("layout: tests ship in src/pikit/<name>/, a README exists, no install scripts (S13)", async () => {
+test("layout: tests ship in src/pikit/<name>/, a README exists, no install scripts", async () => {
   const noTest = await fixture();
   rmSync(join(noTest.own, "sample.test.ts"));
   expect(await problems(noTest)).toContain("files/src/pikit/conversations-sample/ has no *.test.ts");
@@ -150,21 +150,21 @@ test("layout: tests ship in src/pikit/<name>/, a README exists, no install scrip
   expect(await problems(scripts)).toContain("files/package.json has scripts");
 });
 
-test("imports: no sibling component's files (S4)", async () => {
+test("imports: no sibling component's files (SPEC P4)", async () => {
   const f = await fixture();
   f.append("index.ts", `import type { X } from "../router-basic/index.ts";`);
   expect(await problems(f)).toContain(`imports "../router-basic/index.ts", a file of the component "router-basic"`);
 });
 
-test("imports: only the adapter imports Pi (S1)", async () => {
+test("imports: only the adapter imports Pi", async () => {
   const f = await fixture();
-  // Spelled apart so the repository's own import scan (AGENTS.md) does not flag this test.
+  // Spelled apart so the repository's own import scan (`scripts/boundaries.ts`) does not flag this test.
   const pi = ["@earendil-works", "pi-ai"].join("/");
   f.append("index.ts", `import type { Model } from "${pi}";`);
-  expect(await problems(f)).toContain(`imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi (S1)`);
+  expect(await problems(f)).toContain(`imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi`);
 });
 
-test("imports: node:* only when targets are exactly [\"server\"]; tests are exempt (S5)", async () => {
+test("imports: node:* only when targets are exactly [\"server\"]; tests are exempt (SPEC §4)", async () => {
   const f = await fixture();
   f.append("index.ts", `import "node:path";`);
   f.append("sample.test.ts", `import "node:fs";`);
@@ -177,7 +177,7 @@ test("imports: node:* only when targets are exactly [\"server\"]; tests are exem
   expect(found).not.toContain("node:fs");
 });
 
-test("imports: a deployment component's commands.ts runs on the deploying machine, so it may import node:* on any target (S5)", async () => {
+test("imports: a deployment component's commands.ts runs on the deploying machine, so it may import node:* on any target (SPEC §4)", async () => {
   const index = `export async function up(): Promise<void> {}\n`;
   const f = await fixture({ name: "deployment-sample", index });
   f.writeManifest({ ...f.manifest(), targets: ["cloudflare"] });
@@ -195,7 +195,7 @@ test("imports: a deployment component's commands.ts runs on the deploying machin
   expect(await problems(other)).toContain(`commands.ts imports "node:child_process"`);
 });
 
-test("imports: test support (*.test-support.ts) is held like tests, and only tests may import it (S5)", async () => {
+test("imports: test support (*.test-support.ts) is held like tests, and only tests may import it (SPEC §4)", async () => {
   const f = await fixture();
   f.writeManifest({ ...f.manifest(), targets: ["server", "cloudflare"] });
   writeFileSync(join(f.own, "storage.test-support.ts"), `import "node:sqlite";\n`);
@@ -244,13 +244,13 @@ test("deployment-cloudflare declares wrangler, the version this repository check
   expect(manifest.devDependencies).toEqual({ wrangler: root.devDependencies.wrangler as string });
 });
 
-test("manifest: no requires.components (SPEC §10.2)", async () => {
+test("manifest: no requires.components", async () => {
   const f = await fixture();
   f.writeManifest({ ...f.manifest(), requires: { ...f.manifest().requires, components: ["router-basic"] } as Manifest["requires"] });
   expect(await problems(f)).toContain("component.json /requires/components: is not a known field: components depend on capabilities only");
 });
 
-test("files: only files/src maps as a directory; a file outside src is listed on its own (SPEC §10.2)", async () => {
+test("files: only files/src maps as a directory; a file outside src is listed on its own", async () => {
   const f = await fixture();
   writeFileSync(join(f.dir, "files", "Dockerfile"), "FROM scratch\n");
 
@@ -346,7 +346,7 @@ test("hooks: afterDeploy names a file of the component that exports it", async (
   expect(await problems(f)).toContain("component.json /hooks/afterDeploy:");
 });
 
-test("tools: replay is generated, and a tool without one fails (S10)", async () => {
+test("tools: replay is generated, and a tool without one fails", async () => {
   const safe = await fixture({ name: "tool-safe", setup: `\n    pikit.provideKeyed("agent.tool", "look", { replay: "safe" });` });
   expect(safe.manifest().replay).toEqual({ tools: { look: "safe" } });
   expect((await validate(safe.root)).problems).toEqual([]);

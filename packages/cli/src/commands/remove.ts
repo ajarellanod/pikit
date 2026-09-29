@@ -1,6 +1,6 @@
 /**
- * `pikit remove <component>`: the install flow in reverse (SPEC §10.5), so that removing leaves the
- * project as it was before `add` (S3).
+ * `pikit remove <component>`: the install flow in reverse, so that removing leaves the
+ * project as it was before `add` (SPEC P3).
  *
  * It refuses when another component requires (`use`) a capability this one is the only provider
  * of; losing the provider of an optional capability is allowed and `doctor` reports it. Without
@@ -10,7 +10,7 @@
  * It never deletes a file the user modified without `--force`. The bases of its files (`bases.ts`) go
  * with it, unless another component installed the same content.
  *
- * What was installed *for* it (an offered provider, SPEC §10.5) goes with it when nothing else uses
+ * What was installed *for* it (an offered provider, `offers.ts`) goes with it when nothing else uses
  * it, so `add` then `remove` leaves no trace even when `add` brought a provider along. When another
  * component uses it now, it stays, installed for that one.
  *

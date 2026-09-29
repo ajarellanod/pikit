@@ -4,7 +4,7 @@
  *
  * A component that needs more than a variable typed in (a token to check, an id to discover)
  * ships `src/pikit/<name>/configure.ts` exporting `configure(io)`. The CLI calls it and knows
- * nothing about what it does (SPEC §11): the component owns its setup as it owns its code. The step
+ * nothing about what it does: the component owns its setup as it owns its code. The step
  * gets its config from `pikit.config.ts`, reads and writes `.env` through `io`, asks through the
  * terminal, and returns what is still missing.
  *

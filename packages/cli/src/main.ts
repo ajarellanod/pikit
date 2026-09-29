@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
- * `pikit`: the CLI (SPEC §11). It is tooling: it copies components into a project, edits the
+ * `pikit`: the CLI. It is tooling: it copies components into a project, edits the
  * project's files and runs the project, and it may use Node and Bun APIs to do so. It never imports
- * Pi (only `@pikit/pi-adapter` does, S1), and it runs a project's own code in child processes.
+ * Pi (only `@pikit/pi-adapter` does), and it runs a project's own code in child processes.
  */
 
 import { readFileSync } from "node:fs";
@@ -36,22 +36,25 @@ Usage:
 
 Project commands run in the current directory.`;
 
-/** SPEC §11 commands that later milestones bring (ROADMAP). */
+/**
+ * Commands the former SPEC (§11) planned and pikit does not have yet: where each is specified now,
+ * or `""` when nothing current specifies it.
+ */
 const LATER: Record<string, string> = {
-  init: "M3",
-  create: "M3",
-  outdated: "M3",
-  diff: "M3",
-  upgrade: "M3",
-  config: "M2",
-  expose: "M2",
-  deploy: "M4",
+  init: "",
+  create: "",
+  outdated: "SPEC P6",
+  diff: "SPEC P6",
+  upgrade: "SPEC P6",
+  config: "features/config-files.md",
+  expose: "",
+  deploy: "",
 };
 
 const MINIMUM_BUN = "1.4.0";
 
 async function main(argv: string[]): Promise<number> {
-  // Bun ignores `engines`; older Bun never fires some stop deadlines (see AGENTS.md).
+  // Bun ignores `engines`; older Bun never fires some stop deadlines.
   if (!Bun.semver.satisfies(Bun.version, `>=${MINIMUM_BUN}`)) {
     throw new CliError(`pikit requires Bun >= ${MINIMUM_BUN}, found ${Bun.version}. Run \`bun upgrade\`.`);
   }
@@ -143,9 +146,9 @@ async function main(argv: string[]): Promise<number> {
     await deployment(cwd, command as DeploymentCommand, { follow: values.follow === true, ...(tail !== undefined && { tail }) });
     return 0;
   }
-  const milestone = LATER[command];
-  if (milestone !== undefined) {
-    log.info(`pikit ${command}: not yet; it arrives in ${milestone} (see ROADMAP.md)`);
+  const later = LATER[command];
+  if (later !== undefined) {
+    log.info(`pikit ${command}: not built yet${later === "" ? "" : ` (see ${later})`}`);
     return 1;
   }
   throw new CliError(`unknown command "${command}"\n\n${USAGE}`, 2);

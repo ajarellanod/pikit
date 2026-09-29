@@ -1,6 +1,6 @@
 /**
  * Run as `bun probe.ts <project-dir> <output-file>` in the project's directory: loads the project's
- * `pikit.config.ts`, creates the app (every setup, no start, SPEC §4.6) and writes its `describe()`
+ * `pikit.config.ts`, creates the app (every setup, no start) and writes its `describe()`
  * as JSON to `<output-file>`.
  *
  * It runs in its own process so that the project's code, and the `@pikit/core` it resolves from

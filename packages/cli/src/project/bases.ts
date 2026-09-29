@@ -1,8 +1,8 @@
 /**
- * The bases: every file a component installed, as it was installed, kept in the project (SPEC §10.3).
+ * The bases: every file a component installed, as it was installed, kept in the project.
  *
- * M3's three-way `upgrade` needs the file as it was installed. The registry may not give it back: its
- * commit is `-dirty` when it had uncommitted changes, it may not be in Git, or its path may be gone. So
+ * A three-way `upgrade` (SPEC P6) needs the file as it was installed. The registry may not give it
+ * back: its commit is `-dirty` when it had uncommitted changes, it may not be in Git, or its path may be gone. So
  * `add` stores each file it writes under `pikit-bases/`, named by the hash `pikit.json` records for it
  * (`sha256:<hex>` → `pikit-bases/<hex>`), and `remove` deletes those no installed component names.
  *

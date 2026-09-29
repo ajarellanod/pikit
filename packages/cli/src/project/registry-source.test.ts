@@ -1,5 +1,5 @@
 /**
- * Presets (SPEC §11): a base lists components and may `choose` one per kind; an alias `extends` a
+ * Presets: a base lists components and may `choose` one per kind; an alias `extends` a
  * base and answers with `with`, exactly as `--with` does. Built on throwaway registries, plus the
  * repository's own, which must keep resolving.
  */

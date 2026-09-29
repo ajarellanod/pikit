@@ -1,5 +1,5 @@
 /**
- * Edits to `pikit.config.ts`, the composition root (SPEC §4.1). `pikit add` and `pikit remove` keep
+ * Edits to `pikit.config.ts`, the composition root. `pikit add` and `pikit remove` keep
  * it explicit and readable: one import line per component and one entry per line in `components`.
  *
  * The edits are textual and deliberately narrow. The file is the user's, so when its shape is not
@@ -52,7 +52,7 @@ export const WORKER_CONFIG = "workerConfig";
 
 class ShapeError extends Error {
   constructor(problem: string) {
-    super(`${CONFIG_FILE}: ${problem}. Edit it by hand (SPEC §4.1), then run the command again.`);
+    super(`${CONFIG_FILE}: ${problem}. Edit it by hand, then run the command again.`);
   }
 }
 
