@@ -1,0 +1,16 @@
+// The Worker the workerd lane runs its suites in (README.md). Never deployed.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pikit-workerd-tests",
+  "main": "src/worker.ts",
+  "compatibility_date": "2026-09-01",
+  // Vitest's runner inside workerd needs it; the components under test do not.
+  "compatibility_flags": ["nodejs_compat"],
+  "durable_objects": {
+    "bindings": [{ "name": "OBJECTS", "class_name": "TestObject" }]
+  },
+  // SQLite-backed, as a conversation's object is on Cloudflare (SPEC C1, C5).
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TestObject"] }],
+  // A variable secrets-cloudflare must read back from the real env.
+  "vars": { "PIKIT_WORKERD_VAR": "from wrangler vars" }
+}

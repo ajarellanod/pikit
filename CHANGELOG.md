@@ -5,6 +5,11 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- repository: the workerd lane (`bun run test:workerd`, `tests/workerd/`, a CI job): Vitest with
+  `@cloudflare/vitest-plugin` runs, offline in workerd on a real SQLite-backed Durable Object, the
+  `storage.sql` suite on `storage-do`, `storage.kv` on `storage-kv-sql` and `agent.submissions` (with
+  its feed) on `submissions-sql` over it, and `secrets` on `secrets-cloudflare`, and typechecks them
+  against Workers' runtime types.
 - contracts: the agent runtime and HTTP route suites compile against Workers' runtime types too.
 - component/secrets-cloudflare: new. `secrets` from the Worker's `env` (its secrets and variables;
   bindings and empty strings read `undefined`), in either App of a Cloudflare project. Target
