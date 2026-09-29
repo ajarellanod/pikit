@@ -12,8 +12,9 @@
  * permission gate loaded, and `router-basic` sends every message to `assistant`.
  *
  * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
- * two Apps (SPEC C1), `package.json` has `wrangler`, the agent's model is one whose provider runs
- * there (`STARTER_MODEL`), and `.gitignore` and the README say so.
+ * two Apps (SPEC C1), the agent's model is one whose provider runs there (`STARTER_MODEL`), and
+ * `.gitignore` and the README say so. What a component needs in `package.json` (deployment-cloudflare's
+ * `wrangler`) its `component.json` declares, and `pikit add` installs it: never the starter.
  */
 
 import { readFileSync } from "node:fs";
@@ -34,7 +35,7 @@ export const STARTER_CONFIG: Record<string, string> = {
   "router-basic": `{ defaultAgent: "${STARTER_AGENT}" }`,
 };
 
-export function packageJson(name: string, kit: Record<string, string>, target = "server"): string {
+export function packageJson(name: string, kit: Record<string, string>): string {
   const root = JSON.parse(readFileSync(join(PIKIT_ROOT, "package.json"), "utf8")) as { devDependencies: Record<string, string> };
   // The versions this repository is checked with, pinned exactly.
   const pin = (pkg: string): string => (root.devDependencies[pkg] ?? "").replace(/^[\^~]/, "");
@@ -53,8 +54,6 @@ export function packageJson(name: string, kit: Record<string, string>, target = 
     devDependencies: {
       "@types/bun": pin("@types/bun"),
       typescript: pin("typescript"),
-      // deployment-cloudflare's commands and tests run the project's own wrangler.
-      ...(target === "cloudflare" && { wrangler: pin("wrangler") }),
     },
     // Kit packages depend on each other by version, which npm does not have yet: every one of them
     // resolves to its tarball in vendor/, and there is one copy of each (SPEC §10.5).

@@ -5,11 +5,11 @@
  *   2. read the component's package
  *   3. check its targets and `requires.pikit`, and that this CLI's kit is not older than the
  *      project's (`checkKit`); warn for each required capability nothing provides
- *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies,
- *      environment, capabilities, source
+ *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies
+ *      and dev dependencies, environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
  *   6. write its files; refuse to overwrite a file that differs without `--force`
- *   7. add its npm dependencies; `bun install`
+ *   7. add its npm dependencies and dev dependencies (`component.json`'s `devDependencies`); `bun install`
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not);
  *      on Cloudflare, also in the Worker's App when its `component.json`'s `apps.worker` says so (C1)
  *   9. append its variables to `.env.example`
@@ -239,6 +239,7 @@ function planInstall(
     ...(registry.commit !== undefined && { commit: registry.commit }),
     files: hashes,
     dependencies: manifest.dependencies,
+    ...(manifest.devDependencies !== undefined && { devDependencies: manifest.devDependencies }),
     environment: manifest.environment ?? [],
     // What the deployment runs for it (`deployment-cloudflare`'s `up`), by its project path.
     ...(manifest.hooks !== undefined && { hooks: { afterDeploy: `${ownDir(name)}${manifest.hooks.afterDeploy}` } }),
@@ -316,7 +317,7 @@ function alsoWrites(name: string, files: Map<string, string>): string {
   return others.length === 0 ? "" : ` It also writes, outside ${ownDir(name)}: ${others.join(", ")}`;
 }
 
-/** Steps 6–10 for the confirmed plans: files and their bases, npm dependencies, then the draft's three files. */
+/** Steps 6–10 for the confirmed plans: files and their bases, npm (dev) dependencies, then the draft's three files. */
 function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], undo: Undo): { dependenciesChanged: boolean } {
   for (const plan of plans) {
     const recorded = draft.project.components[plan.name]?.files ?? {};
@@ -337,7 +338,9 @@ function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], un
   for (const plan of plans) {
     const { added, conflicts } = addDependencies(projectDir, pkg, plan.manifest.dependencies);
     for (const conflict of conflicts) log.warn(`dependency kept as the project has it: ${conflict}`);
-    dependenciesChanged ||= added.length > 0;
+    const dev = addDependencies(projectDir, pkg, plan.manifest.devDependencies ?? {}, "devDependencies");
+    for (const conflict of dev.conflicts) log.warn(`dev dependency kept as the project has it: ${conflict}`);
+    dependenciesChanged ||= added.length > 0 || dev.added.length > 0;
   }
   if (dependenciesChanged) writePackageJson(projectDir, pkg);
 
@@ -499,6 +502,8 @@ function describePlan({ registry, manifest, files }: Plan): void {
   }
   const deps = Object.entries(manifest.dependencies);
   if (deps.length > 0) log.info(`  npm: ${deps.map(([p, v]) => `${p}@${v}`).join(", ")}`);
+  const devDeps = Object.entries(manifest.devDependencies ?? {});
+  if (devDeps.length > 0) log.info(`  npm (dev): ${devDeps.map(([p, v]) => `${p}@${v}`).join(", ")}`);
   const env = manifest.environment ?? [];
   if (env.length > 0) log.info(`  environment: ${env.map((v) => `${v.name}${v.required ? "" : " (optional)"}`).join(", ")}`);
   if (manifest.provides.length > 0) log.info(`  provides: ${manifest.provides.join(", ")}`);
