@@ -1,6 +1,6 @@
 /**
- * The composition root of the `http` sample (SPEC §4.1): talk to an agent over HTTP (§15,
- * scenario 1).
+ * The composition root of the `http` sample: talk to an agent over HTTP (scenario 1,
+ * `test/scenario-1.test.ts`).
  *
  * A fixture of this repository, not a generated project. It imports the components straight from
  * `registry/` because there is no CLI yet; `pikit add` will copy them to `src/pikit/` and write
@@ -27,7 +27,7 @@ import toolEdit from "../../registry/components/tool-edit/files/src/pikit/tool-e
 import toolRead from "../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
 import toolWrite from "../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
 import agents from "./src/extensions/agents.ts";
-// Pi's own `permission-gate` example, unmodified (SPEC §6.2b): it blocks `rm -rf`, `sudo` and
+// Pi's own `permission-gate` example, unmodified: it blocks `rm -rf`, `sudo` and
 // `chmod 777` in `bash`. In a project it sits in `src/extensions/` and imports
 // `@earendil-works/pi-coding-agent`, which resolves to `@pikit/pi-extension-shim`. This fixture uses
 // the byte-for-byte copy the adapter already keeps, instead of a second one.
@@ -62,8 +62,8 @@ export default defineApp({
     toolWrite,
     toolEdit,
     toolBash,
-    // Brought by runtime-pi (offered providers, SPEC §10.5): no accepted message goes unanswered
-    // across restarts, and a POST that answered 202 reads its answer with GET.
+    // Brought by runtime-pi (offered providers, as `pikit add` brings them): no accepted message
+    // goes unanswered across restarts, and a POST that answered 202 reads its answer with GET.
     storageSqlite,
     submissionsSql,
     createRuntimePi({ extensions: [permissionGate] }),

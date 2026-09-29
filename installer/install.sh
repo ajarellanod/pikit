@@ -1,5 +1,5 @@
 #!/bin/sh
-# pikit installer (ROADMAP M1): puts the `pikit` CLI on this machine.
+# pikit installer: puts the `pikit` CLI on this machine.
 #
 #   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --yes --install-docker

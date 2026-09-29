@@ -1,6 +1,6 @@
 # installer
 
-`install.sh` puts the `pikit` CLI on a machine (ROADMAP M1): a clean Debian/Ubuntu VPS or macOS.
+`install.sh` puts the `pikit` CLI on a machine: a clean Debian/Ubuntu VPS or macOS.
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh                                 # asks before anything with sudo
@@ -63,8 +63,8 @@ storage; the Paid plan, $5 a month, raises them). What you pay for is the model'
 per message. On a machine without a browser, use an API token from the "Edit Cloudflare Workers"
 template as `CLOUDFLARE_API_TOKEN` instead of `wrangler login`; see deployment-cloudflare's README.
 
-M1 installs from Git because `@pikit/*` are not published yet; `pikit new` vendors them from this
-checkout into each project (SPEC §10.5).
+It installs from Git because `@pikit/*` are not published yet; `pikit new` vendors them from this
+checkout into each project.
 
 ## Tests
 

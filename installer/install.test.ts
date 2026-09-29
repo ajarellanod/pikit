@@ -1,5 +1,5 @@
 /**
- * The installer (ROADMAP M1). Always: it is POSIX sh that parses, shellcheck finds nothing when it
+ * The installer. Always: it is POSIX sh that parses, shellcheck finds nothing when it
  * is installed, and it chooses Bun by its pin and supported range (with stand-ins for `bun`, `curl`
  * and `git`: no network, and it stops before fetching pikit). With `PIKIT_INSTALLER_TEST=1`: it installs this repository's committed HEAD
  * (`PIKIT_SOURCE`) into a temporary HOME, twice (it is idempotent), and `pikit --version` runs.

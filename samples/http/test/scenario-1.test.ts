@@ -1,5 +1,5 @@
 /**
- * Scenario 1 (SPEC §15): talk to an agent over HTTP. `runtime-pi` + `server-bun` + `channel-http`,
+ * Scenario 1: talk to an agent over HTTP. `runtime-pi` + `server-bun` + `channel-http`,
  * with the sample's sessions, registry, secrets and router, over real HTTP on a free port. Pi runs
  * the agent on its faux provider, scripted: each turn answers `answer: <newest message>`, and
  * `hold` blocks in a tool until the test releases it.

@@ -1,6 +1,6 @@
 /**
  * `pikit doctor` checks Pi extensions against the CLI's copy of what the adapter provides
- * (SPEC §6.2b). The copy must be the adapter's, and the adapter's own lists must agree.
+ * (tier A). The copy must be the adapter's, and the adapter's own lists must agree.
  */
 
 import { expect, test } from "bun:test";

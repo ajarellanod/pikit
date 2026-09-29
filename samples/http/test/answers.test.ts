@@ -1,6 +1,7 @@
 /**
- * No admitted message ends without an answer reaching its user, across crashes, restarts and deploys
- * (ROADMAP M2; SPEC §4.8, §6.1, §7). With the storage and submissions `runtime-pi` brings:
+ * No admitted message ends without an answer reaching its user, across crashes, restarts and
+ * deploys (SPEC P5; `agent.submissions` and its answers feed). With the storage and submissions
+ * `runtime-pi` brings:
  *
  * - **Killed after the ack.** Telegram was told "received" (it will not send the message again), and
  *   the process is killed mid-run (SIGKILL). The next process resumes the run at start and the answer

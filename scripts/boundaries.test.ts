@@ -60,13 +60,13 @@ test("the fixtures keep them too, so each test below breaks only its own rule", 
 test("core reading a file with node:fs is caught: core must run on every target (case A)", () => {
   const root = packages({ core: core({ "src/config.ts": `import { readFileSync } from "node:fs";\n` }) });
   expect(checkBoundaries(root)).toEqual([
-    `packages/core/src/config.ts imports "node:fs", but @pikit/core reaches it and must run on every target (rule 5)`,
+    `packages/core/src/config.ts imports "node:fs", but @pikit/core reaches it and must run on every target (SPEC §4)`,
   ]);
 });
 
 test("core importing a Pi type is caught, even type-only (case B)", () => {
   const root = packages({ core: core({ "src/agent.ts": `import type { Usage } from "@earendil-works/pi-ai";\n` }) });
-  expect(checkBoundaries(root)).toEqual([`packages/core/src/agent.ts imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi (rule 1)`]);
+  expect(checkBoundaries(root)).toEqual([`packages/core/src/agent.ts imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi`]);
 });
 
 test("the adapter's main entry reaching Node is caught; the same import behind ./node is not (case C)", () => {
@@ -74,13 +74,13 @@ test("the adapter's main entry reaching Node is caught; the same import behind .
     "pi-adapter": adapter({ "src/runtime.ts": `import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";\n` }),
   });
   expect(checkBoundaries(direct)).toEqual([
-    `packages/pi-adapter/src/runtime.ts imports "@earendil-works/pi-agent-core/node", but @pikit/pi-adapter reaches it and must run on every target (rule 5)`,
+    `packages/pi-adapter/src/runtime.ts imports "@earendil-works/pi-agent-core/node", but @pikit/pi-adapter reaches it and must run on every target (SPEC §4)`,
   ]);
   // Through a relative import into node/: the file reached is reported, with the entry that reached it.
   const relative = packages({ "pi-adapter": adapter({ "src/runtime.ts": `import { x } from "./node/index.ts";\n` }) });
   expect(checkBoundaries(relative)).toEqual([
-    `packages/pi-adapter/src/node/index.ts imports "@earendil-works/pi-agent-core/node", but @pikit/pi-adapter reaches it and must run on every target (rule 5)`,
-    `packages/pi-adapter/src/node/index.ts imports "node:fs/promises", but @pikit/pi-adapter reaches it and must run on every target (rule 5)`,
+    `packages/pi-adapter/src/node/index.ts imports "@earendil-works/pi-agent-core/node", but @pikit/pi-adapter reaches it and must run on every target (SPEC §4)`,
+    `packages/pi-adapter/src/node/index.ts imports "node:fs/promises", but @pikit/pi-adapter reaches it and must run on every target (SPEC §4)`,
   ]);
 });
 
@@ -88,7 +88,7 @@ test("a new export is neutral until SERVER_ONLY says otherwise", () => {
   const json = { ...adapter().json, exports: { ...adapter().json.exports, "./files": "./src/files.ts" } };
   const root = packages({ "pi-adapter": { json, files: { ...adapter().files, "src/files.ts": `import { readFile } from "node:fs/promises";\n` } } });
   expect(checkBoundaries(root)).toEqual([
-    `packages/pi-adapter/src/files.ts imports "node:fs/promises", but @pikit/pi-adapter/files reaches it and must run on every target (rule 5)`,
+    `packages/pi-adapter/src/files.ts imports "node:fs/promises", but @pikit/pi-adapter/files reaches it and must run on every target (SPEC §4)`,
   ]);
 });
 
@@ -102,7 +102,7 @@ test("the kit depends only downwards: the kernel on the contracts is caught, the
   const kernelUp = { ...core(), json: { ...core().json, dependencies: { typebox: "1.3.27", "@pikit/contracts": "workspace:*" } } };
   expect(checkBoundaries(packages({ core: kernelUp, contracts: contracts() }))).toEqual([
     "packages/core/package.json: @pikit/core depends on @pikit/contracts; the kit's packages depend only downwards, @pikit/core → @pikit/contracts → @pikit/pi-adapter (SPEC §3)",
-    "packages/core/package.json: the kernel depends on @pikit/contracts; its only dependency is typebox (ROADMAP, \"Budgets\")",
+    "packages/core/package.json: the kernel depends on @pikit/contracts; its only dependency is typebox (SPEC §3)",
   ]);
 
   const contractsUp = contracts({ devDependencies: { "@pikit/pi-adapter": "workspace:*" } });
@@ -133,7 +133,7 @@ test("a Node builtin without its scheme, and a relative import out of the packag
   expect(checkBoundaries(root)).toEqual([
     `packages/core/src/config.ts imports the Node builtin "path" without its scheme: write "node:path"`,
     `packages/core/src/config.ts imports "../../registry/x.ts", outside @pikit/core: reach another package through its exports`,
-    `packages/core/src/config.ts imports "path", but @pikit/core reaches it and must run on every target (rule 5)`,
+    `packages/core/src/config.ts imports "path", but @pikit/core reaches it and must run on every target (SPEC §4)`,
   ]);
 });
 

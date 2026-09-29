@@ -1,6 +1,6 @@
 /**
  * What Pi's extension API at a tag has that pikit's vendored subset lacks, and the reverse
- * (SPEC §6.2b). Run it before a Pi bump, and when Pi's extension API moves:
+ * (tier A). Run it before a Pi bump, and when Pi's extension API moves:
  *
  *   bun scripts/pi-extension-drift.ts v0.88.0
  *   bun scripts/pi-extension-drift.ts main
