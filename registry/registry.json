@@ -126,6 +126,14 @@
       ],
       "path": "components/sessions-jsonl"
     },
+    "storage-do": {
+      "version": "0.0.0",
+      "description": "The app's SQL database (storage.sql) in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/storage-do"
+    },
     "storage-kv-sql": {
       "version": "0.0.0",
       "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",

@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/storage-do: new. `storage.sql` in a Durable Object's own SQLite (`ctx.storage.sql`), for
+  the conversation object's App on Cloudflare; its README lists the object's SQL limits (2 MB per
+  row, short `LIKE` patterns, 10 GB per object, 1 GB on Free). Target `cloudflare`.
 - cli: `pikit add` and `pikit new` offer only providers that run on the project's targets, so a
   Cloudflare provider in the registry (`storage-do`) does not stop `storage-sqlite` from being
   offered on a server.
