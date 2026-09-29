@@ -69,7 +69,9 @@ and `pikit logs` streams them.
 
 One Durable Object class, `Conversation`, bound as `CONVERSATION`, created SQLite-backed by migration
 `v1`. `nodejs_compat`, `version_metadata` (the version `/health` reports), Workers Logs on, and rules
-that import `.md` files as text and bundle `.wasm` files compiled. It has no `name`: the commands name
+that import `.md` files as text and bundle `.wasm` files compiled. A rule matches an import as it is
+written, so `execution-do`'s QuickJS, imported by a package export without `.wasm`
+(`@jitl/quickjs-wasmfile-release-sync/wasm`), is named in it. It has no `name`: the commands name
 the Worker after `package.json`'s `name`. Running wrangler by hand, pass `--name`.
 
 This file is yours: add bindings, routes, a custom domain. Keep the migration: a migration is

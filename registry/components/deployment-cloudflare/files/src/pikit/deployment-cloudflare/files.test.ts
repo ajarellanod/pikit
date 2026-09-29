@@ -43,7 +43,8 @@ test("/health can report the version, nodejs_compat is on, and .md and .wasm are
   expect(config.compatibility_date).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   expect(config.rules?.map((r) => [r.type, r.globs])).toEqual([
     ["Text", ["**/*.md"]],
-    ["CompiledWasm", ["**/*.wasm"]],
+    // execution-do imports QuickJS by a package export without `.wasm`: a rule matches the import as written.
+    ["CompiledWasm", ["**/*.wasm", "@jitl/quickjs-wasmfile-release-sync/wasm"]],
   ]);
 });
 

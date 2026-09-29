@@ -73,7 +73,8 @@ They are code, not instructions to the model:
 
 ## On Cloudflare
 
-Two settings in the Worker's `wrangler.jsonc`, besides the object's class in `new_sqlite_classes`:
+Two settings in the Worker's `wrangler.jsonc`, besides the object's class in `new_sqlite_classes`.
+`deployment-cloudflare`'s `wrangler.jsonc` has both; keep them if you write your own:
 
 ```jsonc
 "compatibility_flags": ["nodejs_compat"],   // isomorphic-git uses Node's Buffer
