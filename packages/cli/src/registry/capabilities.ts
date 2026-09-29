@@ -43,9 +43,10 @@ export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
   /** One line: what a consumer gets from it. */
   summary: string;
   /**
-   * Offered: when a component that can use it (`useOptional`) is added and nothing provides it,
-   * `pikit add` and `pikit new` offer its provider (SPEC §10.5, "Offered providers"). For what a
-   * component is better with and changes nothing else; not for a choice like a per-agent workspace.
+   * Offered: when a component that can use it (`useOptional`) or requires it (`use`) is added and
+   * nothing provides it, `pikit add` and `pikit new` offer its provider (SPEC §10.5, "Offered
+   * providers"). For a capability with one obvious provider that changes nothing else; not for a
+   * choice like a per-agent workspace.
    */
   offer?: true;
 }

@@ -5,6 +5,7 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: `pikit add` and `pikit new` also offer the provider of a capability a component requires when the catalogue marks it `offer`: `pikit add conversations-kv` offers `storage-kv-sql` (and `storage-sqlite`).
 - component/conversations-kv: new. `conversations.registry` on `storage.kv` (namespace `conversations-kv`) and `sessions.store`; targets `server` and `cloudflare`. A first pointer is written with `setIfAbsent`, a reset emits `conversation.reset` once its pointer is stored, and its README says what holds when resets and resolves race across processes.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
