@@ -17,7 +17,9 @@
       "storage.kv"
     ]
   },
-  "provides": [],
+  "provides": [
+    "agent.tool"
+  ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "@pikit/pi-adapter": "0.0.0",
