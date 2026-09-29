@@ -17,8 +17,9 @@
  * When Pi's durable runtime ships its submissions, the adapter moves to them and the per-session half
  * of this component goes; the index across sessions (`pending`) and the feed stay (SPEC §6.4).
  *
- * Target: `server`. It imports nothing platform-specific (its storage is `storage.sql`, its time the
- * app's clock), but it is tested only on a server.
+ * Targets: `server` and `cloudflare`. It imports nothing platform-specific (its storage is
+ * `storage.sql`, its time the app's clock); on Cloudflare its storage is the conversation object's
+ * (`storage-do`), where pikit's workerd lane runs its suites.
  */
 
 import { type AgentSubmissions, type RunSettlement } from "@pikit/contracts";

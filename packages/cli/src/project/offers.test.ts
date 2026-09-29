@@ -54,6 +54,14 @@ test("the runtime brings the record of submissions, and the storage it requires"
   ]);
 });
 
+test("only providers that run on the project's targets are offered: on Cloudflare, the storage is storage-do", () => {
+  // storage-sqlite does not run on Cloudflare, so storage-do is the one provider of storage.sql there.
+  expect(offeredProviders(registry, ["channel-http"], [], ["cloudflare"])).toEqual([
+    { component: "storage-do", capability: "storage.sql", for: "submissions-sql", why: "required" },
+    { component: "submissions-sql", capability: "agent.submissions", for: "channel-http", why: "recommended" },
+  ]);
+});
+
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {
   const http = registry.preset("http", []);
   const withHttp = withOffers(registry, http);

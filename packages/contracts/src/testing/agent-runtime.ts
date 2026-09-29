@@ -290,7 +290,8 @@ function createSubject(fixture: AgentRuntimeFixture, workers: Worker[], timeoutM
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(`${GROUP}: timed out after ${timeoutMs} ms waiting for ${what}`)), timeoutMs);
     });
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    // Workers' clearTimeout takes no `undefined`: the suites also compile against its types.
+    return Promise.race([promise, timeout]).finally(() => timer !== undefined && clearTimeout(timer));
   };
 
   return {

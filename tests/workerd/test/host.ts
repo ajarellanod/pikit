@@ -1,0 +1,48 @@
+/**
+ * Runs a conformance case inside a fresh SQLite-backed Durable Object, with that object in
+ * `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint will put it: the Worker's `env`, the
+ * object's id and storage, and hooks for its alarm and RPC (recorded, never called here).
+ *
+ * The suites build their fixtures in a factory the case calls, so a fixture reads the object it runs
+ * in from `objectHost()`:
+ *
+ *   for (const c of createSqlDatabaseConformance(() => ({ components: withWorkersHost(objectHost(), [storageDo]) })))
+ *     it(`${c.group}: ${c.name}`, () => inObject(c));
+ */
+
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
+import type { WorkersHost } from "@pikit/contracts";
+import type { ConformanceCase } from "@pikit/core/testing";
+
+/** The Worker's env as the entrypoint puts it in `WORKERS_HOST` (typed by `wrangler types`). */
+export const workerEnv: WorkersHost["env"] = { ...env };
+
+let current: WorkersHost | undefined;
+
+/** The host of the object the running case is in. */
+export function objectHost(): WorkersHost {
+  if (current === undefined) throw new Error("workerd lane: objectHost() called outside inObject()");
+  return current;
+}
+
+/** The host deployment-cloudflare builds for an object: its id, its storage, its hooks. */
+export function hostOf(state: DurableObjectState): WorkersHost {
+  return {
+    env: workerEnv,
+    object: { id: state.id.toString(), storage: state.storage, onAlarm: () => {}, onDeliver: () => {} },
+  };
+}
+
+/** Runs `c` inside a new object, which no other case has touched. */
+export function inObject(c: ConformanceCase | ((host: WorkersHost) => Promise<void>)): Promise<void> {
+  const stub = env.OBJECTS.get(env.OBJECTS.newUniqueId());
+  return runInDurableObject(stub, async (_instance, state) => {
+    current = hostOf(state);
+    try {
+      await (typeof c === "function" ? c(current) : c.run());
+    } finally {
+      current = undefined;
+    }
+  });
+}

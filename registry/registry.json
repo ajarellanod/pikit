@@ -120,6 +120,14 @@
       ],
       "path": "components/runtime-pi"
     },
+    "secrets-cloudflare": {
+      "version": "0.0.0",
+      "description": "Secrets from the Worker's env on Cloudflare: its secrets and variables, never its bindings.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/secrets-cloudflare"
+    },
     "secrets-env": {
       "version": "0.0.0",
       "description": "Secrets from the process environment.",
@@ -144,6 +152,14 @@
       ],
       "path": "components/sessions-jsonl"
     },
+    "storage-do": {
+      "version": "0.0.0",
+      "description": "The app's SQL database (storage.sql) in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/storage-do"
+    },
     "storage-kv-sql": {
       "version": "0.0.0",
       "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",
@@ -165,7 +181,8 @@
       "version": "0.0.0",
       "description": "No admitted message ends without its answer: unanswered conversations resume at start, and channels deliver every answer from a feed, even one that ended while they were stopped.",
       "targets": [
-        "server"
+        "server",
+        "cloudflare"
       ],
       "path": "components/submissions-sql"
     },

@@ -30,3 +30,22 @@ jobs:
       - run: bun test
       - run: bun run typecheck
       - run: bun run registry validate
+
+  # The Cloudflare lane (tests/workerd/README.md): the Cloudflare components' suites in workerd, on a
+  # real SQLite-backed Durable Object. Local and offline: no account, no secret.
+  workerd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      # Vitest and wrangler run on Node; wrangler needs >= 22.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      - run: bun run test:workerd
+        env:
+          WRANGLER_SEND_METRICS: "false"

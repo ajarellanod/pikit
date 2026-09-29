@@ -23,6 +23,28 @@ line names its area (AGENTS.md, "Git and docs").
   capability (a secret) and names itself (`tool-websearch-brave` provides `websearch`).
 - adapter: `@pikit/pi-adapter/providers/openrouter` exposes pi-ai's OpenRouter provider by
   subpath, so a bundle carries only the providers it installs. Its module imports nothing node-only.
+- component/submissions-sql: targets `cloudflare` too: unmodified, over `storage-do`, it passes its
+  `agent.submissions` suite (with the feed, pruning and restarts) in workerd. On Cloudflare its
+  records are the conversation object's.
+- repository: the workerd lane (`bun run test:workerd`, `tests/workerd/`, a CI job): Vitest with
+  `@cloudflare/vitest-plugin` runs, offline in workerd on a real SQLite-backed Durable Object, the
+  `storage.sql` suite on `storage-do`, `storage.kv` on `storage-kv-sql` and `agent.submissions` (with
+  its feed) on `submissions-sql` over it, and `secrets` on `secrets-cloudflare`, and typechecks them
+  against Workers' runtime types.
+- contracts: the agent runtime and HTTP route suites compile against Workers' runtime types too.
+- component/secrets-cloudflare: new. `secrets` from the Worker's `env` (its secrets and variables;
+  bindings and empty strings read `undefined`), in either App of a Cloudflare project. Target
+  `cloudflare`.
+- component/storage-do: new. `storage.sql` in a Durable Object's own SQLite (`ctx.storage.sql`), for
+  the conversation object's App on Cloudflare; its README lists the object's SQL limits (2 MB per
+  row, short `LIKE` patterns, 10 GB per object, 1 GB on Free). Target `cloudflare`.
+- cli: `pikit add` and `pikit new` offer only providers that run on the project's targets, so a
+  Cloudflare provider in the registry (`storage-do`) does not stop `storage-sqlite` from being
+  offered on a server.
+- contracts: the context key `WORKERS_HOST` (SPEC C5): on Cloudflare, each App's start context carries
+  the Worker's `env` and, in a Durable Object's App, the object (its id, its storage, and hooks for
+  its alarm and RPC deliveries), typed structurally. `withWorkersHost` in `@pikit/contracts/testing`
+  puts it in the context of components under test.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an
