@@ -33,6 +33,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
 | [channel-google-chat](channel-google-chat.md) | | Google Chat by webhook, an agent per space | No; ROADMAP M2 places it next |
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: track D and resuming on Cloudflare |
+| [codemode](codemode.md) | | The model writes a script that calls its tools (Pi's `pi-codemode`), server only; what the extension host leaves pending until then | No |
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
 | [deployment-systemd](deployment-systemd.md) | | Run as a systemd service, without Docker | No |
 | [health](health.md) | | Components report failures; essential ones restart the process | Yes: tracks D and S, M2 |
