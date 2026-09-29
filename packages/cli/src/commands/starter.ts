@@ -112,17 +112,20 @@ export default defineApp({
 
 /**
  * The composition root of a project on Cloudflare: two Apps (SPEC C1). `pikit add` lists components in
- * the default export, the object's App; the Worker's list is edited by hand until components with a
- * Worker half install there themselves.
+ * the default export, the object's App, and, as their `component.json`'s `apps` says, their Worker half
+ * (or themselves) in `worker`.
  */
 export const CLOUDFLARE_CONFIG = `/**
  * The composition root (SPEC §4.1) of a project on Cloudflare: two Apps (SPEC C1), and everything
  * that runs is listed in their \`components\`. Follow the imports to read it all.
  *
  * - The default export runs in each conversation's Durable Object: the channel's other half, the
- *   router, the runtime, sessions, storage, delivery. \`pikit add\` lists components here.
+ *   router, the runtime, sessions, storage, delivery. \`pikit add\` lists every component here.
  * - \`worker\` runs in the Worker, which receives every request first: the ingress half of each
  *   channel, the mailbox, secrets. The Worker checks and routes; the object owns the conversation.
+ *   \`pikit add\` lists here a component's Worker half (\`channelTelegramWebhookWorker\`, configured
+ *   under \`"channel-telegram-webhook-worker"\` in \`workerConfig\`), or a component that works in both
+ *   Apps (\`secrets-cloudflare\`).
  *
  * \`pikit add\` and \`pikit remove\` edit this file: one import line per component, one entry per line
  * in \`components\`, and one key per component in \`config\`. Edit it yourself too; keep that shape.
@@ -149,10 +152,7 @@ export default defineApp({
 /** The Worker's config, under each of its components' names. */
 export const workerConfig = {};
 
-/**
- * The Worker runs this App: its components' \`http.route\`s are what it serves, besides \`GET /health\`.
- * \`pikit add\` lists components in the default export only: list the Worker's here by hand.
- */
+/** The Worker runs this App: its components' \`http.route\`s are what it serves, besides \`GET /health\`. */
 export const worker = defineApp({
   components: [
   ],

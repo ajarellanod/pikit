@@ -7,7 +7,8 @@
  *   runs `export const worker`, each `Conversation` Durable Object runs the default export, and both
  *   find the platform in `WORKERS_HOST` (C1, C4, C5);
  * - `wrangler.jsonc`, at the project's root;
- * - the commands the CLI delegates to (`up`, `down`, `logs`, `status`, `dev`), each one `wrangler …`.
+ * - the commands the CLI delegates to (`up`, `down`, `logs`, `status`, `dev`), each one `wrangler …`;
+ *   `up` then runs the installed components' `afterDeploy` hooks, once the new version answers (C8).
  *
  * This file exports only what runs on the machine and what is neutral: `entrypoint.ts` imports
  * `cloudflare:workers` and loads only in workerd.
@@ -30,11 +31,14 @@ export {
   type WorkerHost,
 } from "./host.ts";
 export {
+  type AfterDeployIO,
+  type DeployHook,
   up,
   down,
   logs,
   status,
   dev,
+  deployHooks,
   deploySecrets,
   parseDeployments,
   readDeployOutput,

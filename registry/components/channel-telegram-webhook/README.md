@@ -39,7 +39,12 @@ export const worker = defineApp({ components: [/* … */ channelTelegramWebhookW
 export default defineApp({ components: [/* … */ channelTelegramWebhook], config });
 ```
 
-Both halves take the same `apiBase` and `accounts` in their own config.
+`pikit add channel-telegram-webhook` writes both lines, and the import, in a project on Cloudflare
+(`component.json`'s `apps.worker` names the export); `pikit remove` takes both out, with their config
+keys. Both halves take the same `apiBase` and `accounts` in their own config. Each App needs what its
+half requires: `secrets` in both (`secrets-cloudflare` goes in both), `actor.mailbox` in the Worker's;
+`pikit add` warns per App about what is missing, and `pikit doctor` composes both. The Worker's routes
+are served by `deployment-cloudflare`'s entrypoint.
 
 The object's half registers its `actor.inbox` handler in `actor-inbox.ts` only (`registerInbox`): it
 uses `actor.inbox` and calls `handle("telegram.update", handler)` in its `start`. The mailbox's
@@ -140,8 +145,10 @@ the start, and each call is a subrequest.
 
 Telegram must be told where to post (`setWebhook`), and only once the new version answers: right after
 a deploy the previous version still answers for a few seconds, and would refuse the new secret (C8). So
-`deploy.ts` exports `afterDeploy`, for `deployment-cloudflare`'s `up` to call once `/health` answers
-with the version it deployed, the way `pikit configure` calls `configure(io)`:
+`deploy.ts` exports `afterDeploy`, and `component.json` names it (`"hooks": { "afterDeploy": "deploy.ts" }`):
+`pikit add` records it in `pikit.json`, and `deployment-cloudflare`'s `up` calls it once `/health`
+answers with the version it deployed (its README, "After the deploy"). `pikit up` prints what it says,
+and fails with its problems. Called by hand:
 
 ```ts
 import { afterDeploy } from "./src/pikit/channel-telegram-webhook/deploy.ts";

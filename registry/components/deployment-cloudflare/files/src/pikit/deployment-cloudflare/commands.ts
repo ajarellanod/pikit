@@ -9,12 +9,16 @@
  *
  * The Worker is named after `package.json`'s `name`, passed as `--name` to every command, so two
  * projects on one account never deploy over each other.
+ *
+ * After a deploy answers, `up` runs the installed components' `afterDeploy` hooks (C8): each one is
+ * named in its `component.json`'s `hooks`, and `pikit add` records its file in `pikit.json`.
  */
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 
 export interface RunResult {
@@ -55,6 +59,22 @@ export interface UpOptions extends CommandOptions {
   intervalMs?: number;
   /** Roll back (`wrangler rollback`) when the new version answers that its App does not start. Default: true. */
   rollback?: boolean;
+  /** Where the components' after-deploy hooks' lines go. Default: `console.log`. */
+  say?: (line: string) => void;
+}
+
+/**
+ * What a component's `afterDeploy` receives (`component.json`'s `hooks.afterDeploy` names its file).
+ * It resolves with its problems, one line each: empty when done.
+ */
+export interface AfterDeployIO {
+  /** The deployed Worker's public base URL, once it answers with the new version. */
+  url: string;
+  /** The component's config in `pikit.config.ts` (its default export's), with its defaults. */
+  config: Readonly<Record<string, unknown>>;
+  /** A variable exported in the environment, or else in `.env`: the secrets the deploy uploaded. */
+  get(name: string): string | undefined;
+  say(line: string): void;
 }
 
 /**
@@ -89,7 +109,10 @@ export async function up(options: UpOptions = {}): Promise<Deployed> {
     writeFileSync(recordPath(cwd, true), `${JSON.stringify(deployed, null, 2)}\n`);
 
     const outcome = await waitForVersion(deployed, options);
-    if (outcome.kind === "ok") return deployed;
+    if (outcome.kind === "ok") {
+      await afterDeploy(cwd, deployed, options.say ?? ((line) => console.log(line)));
+      return deployed;
+    }
     if (outcome.kind === "failing" && options.rollback !== false) {
       const rolledBack = await run(["wrangler", "rollback", "--name", name, "--message", `pikit up: ${deployed.version} failed /health`, "--yes"], options, false);
       throw new Error(
@@ -106,6 +129,74 @@ export async function up(options: UpOptions = {}): Promise<Deployed> {
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
+}
+
+/** A component's after-deploy hook, as `pikit.json` records it: its project-relative file. */
+export interface DeployHook {
+  component: string;
+  file: string;
+}
+
+/** The installed components' `afterDeploy` hooks, in `pikit.json`'s order; none without `pikit.json`. */
+export function deployHooks(cwd: string): DeployHook[] {
+  const path = join(cwd, "pikit.json");
+  if (!existsSync(path)) return [];
+  const { components } = JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, { hooks?: { afterDeploy?: unknown } }> };
+  return Object.entries(components ?? {}).flatMap(([component, installed]) => {
+    const file = installed.hooks?.afterDeploy;
+    return typeof file === "string" ? [{ component, file }] : [];
+  });
+}
+
+/**
+ * Runs every installed component's `afterDeploy` once the new version answers (C8): a Telegram webhook
+ * is registered against the version that will receive it. Each hook gets the URL, its component's
+ * config and a reader of the secrets; what it says is printed. Every hook runs, then `up` fails with
+ * all their problems (the version stays deployed: it answers, what failed is outside it).
+ */
+async function afterDeploy(cwd: string, deployed: Deployed, say: (line: string) => void): Promise<void> {
+  const hooks = deployHooks(cwd);
+  if (hooks.length === 0) return;
+  const config = await projectConfig(cwd);
+  const env = readDotEnv(cwd);
+  const get = (name: string): string | undefined => process.env[name] || env[name] || undefined;
+  const problems: string[] = [];
+  for (const hook of hooks) {
+    try {
+      const module = (await import(pathToFileURL(join(cwd, hook.file)).href)) as { afterDeploy?: unknown };
+      if (typeof module.afterDeploy !== "function") {
+        problems.push(`${hook.component}: ${hook.file} does not export afterDeploy`);
+        continue;
+      }
+      const own = config[hook.component];
+      const io: AfterDeployIO = { url: deployed.url, config: typeof own === "object" && own !== null ? (own as Record<string, unknown>) : {}, get, say };
+      const found = (await (module.afterDeploy as (io: AfterDeployIO) => Promise<unknown>)(io)) ?? [];
+      if (!Array.isArray(found)) throw new Error("afterDeploy did not resolve with a list of problems");
+      for (const problem of found) problems.push(`${hook.component}: ${String(problem)}`);
+    } catch (error) {
+      problems.push(`${hook.component}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(
+      `the new version ${deployed.version} answers at ${deployed.url}, but what runs after a deploy failed:\n  ${problems.join("\n  ")}\n` +
+        "The version stays deployed. Fix it, then `pikit up` again",
+    );
+  }
+}
+
+/** The default App's config, as `pikit.config.ts` resolves it (its defaults applied). */
+async function projectConfig(cwd: string): Promise<Readonly<Record<string, unknown>>> {
+  const path = join(cwd, "pikit.config.ts");
+  if (!existsSync(path)) return {};
+  const app = ((await import(pathToFileURL(path).href)) as { default?: { config?: unknown } }).default;
+  const config = app?.config;
+  return typeof config === "object" && config !== null ? (config as Record<string, unknown>) : {};
+}
+
+function readDotEnv(cwd: string): Record<string, string | undefined> {
+  const path = join(cwd, ".env");
+  return existsSync(path) ? parseEnv(readFileSync(path, "utf8")) : {};
 }
 
 export interface DownOptions extends CommandOptions {
@@ -230,10 +321,8 @@ export function workerName(cwd: string): string {
 
 /** `.env`'s values for the Worker: set, and not wrangler's own `CLOUDFLARE_*` credentials. */
 export function deploySecrets(cwd: string): Record<string, string> {
-  const path = join(cwd, ".env");
-  if (!existsSync(path)) return {};
   const secrets: Record<string, string> = {};
-  for (const [name, value] of Object.entries(parseEnv(readFileSync(path, "utf8")))) {
+  for (const [name, value] of Object.entries(readDotEnv(cwd))) {
     if (value === undefined || value === "" || name.startsWith("CLOUDFLARE_")) continue;
     secrets[name] = value;
   }

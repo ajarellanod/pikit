@@ -15,6 +15,11 @@
  *     ],
  *     config,
  *   });
+ *
+ * A project on Cloudflare has a second App in the same shape (SPEC C1): `export const worker =
+ * defineApp({ components: [ … ], config: workerConfig })`, with `export const workerConfig = { … }`.
+ * `addComponent` lists a component there too when asked (`worker`); `removeComponent` takes its
+ * entries out of every list.
  */
 
 // Comments are blanked before looking for a name, so a name in a comment does not count as a use.
@@ -38,7 +43,12 @@ export interface ComponentEntry {
   importClause?: string;
   /** The expression listed in `components`: `channelHttp` or `createRuntimePi({ … })`. */
   entry?: string;
+  /** The expression listed in the Worker's App (`export const worker`), when it goes there too. */
+  worker?: string;
 }
+
+/** The object holding the Worker's App's config, in a project on Cloudflare. */
+export const WORKER_CONFIG = "workerConfig";
 
 class ShapeError extends Error {
   constructor(problem: string) {
@@ -59,9 +69,9 @@ export function addComponent(text: string, component: ComponentEntry): string {
     }
   }
 
-  // The list first: inserting the import shifts every index below it.
-  const list = componentsList(text);
-  const withEntry = `${text.slice(0, list.closeLineStart)}${list.indent}${entry},\n${text.slice(list.closeLineStart)}`;
+  // The lists first: inserting the import shifts every index below it.
+  let withEntry = appendEntry(text, componentsList(text), entry);
+  if (component.worker !== undefined) withEntry = appendEntry(withEntry, componentsList(withEntry, "worker"), component.worker);
 
   const imports = [...withEntry.matchAll(IMPORT)];
   const last = imports.at(-1);
@@ -70,6 +80,10 @@ export function addComponent(text: string, component: ComponentEntry): string {
   // The file's own style: prettier's `semi: false` writes imports without `;`.
   const semi = /;[ \t]*(?:\/\/[^\n]*)?\n$/.test(last[0]) ? ";" : "";
   return `${withEntry.slice(0, at)}import ${importClause} from "${path}"${semi}\n${withEntry.slice(at)}`;
+}
+
+function appendEntry(text: string, list: ListPosition, entry: string): string {
+  return `${text.slice(0, list.closeLineStart)}${list.indent}${entry},\n${text.slice(list.closeLineStart)}`;
 }
 
 /**
@@ -81,8 +95,8 @@ export function addComponent(text: string, component: ComponentEntry): string {
 const IMPORT = /^import\b(?!\s*[(.])[^"'`;]*["'][^"'\n]*["'][^\n]*\n/gm;
 
 /**
- * Removes the component's import lines and every `components` entry that uses what they bind.
- * A component that was never listed (a `deployment-*`) leaves the text unchanged.
+ * Removes the component's import lines and every `components` entry that uses what they bind, in
+ * every App's list. A component that was never listed (a `deployment-*`) leaves the text unchanged.
  */
 export function removeComponent(text: string, name: string): string {
   // The clause holds no quote, so a match cannot start at an earlier import (a file without `;`).
@@ -91,27 +105,31 @@ export function removeComponent(text: string, name: string): string {
   if (imports.length === 0) return text;
   const names = imports.flatMap((m) => boundNames(m[1] ?? ""));
 
-  // Every top-level entry that uses what the imports bind goes, whole, even over several lines.
-  const list = componentsList(text);
-  const close = matchClose(text, list.open);
+  // Every top-level entry that uses what the imports bind goes, whole, even over several lines, from
+  // each App's list: the default export's (checked for its shape, as `add` needs it) and any other.
+  componentsList(text);
   const removals: [number, number][] = [];
-  for (let i = list.open + 1; ; ) {
-    const start = skipSpaces(text, i);
-    if (start >= close) break;
-    let end = skipValue(text, start);
-    const entry = text.slice(start, end);
-    if (text[end] === ",") end++;
-    i = end;
-    if (!names.some((n) => new RegExp(`\\b${escape(n)}\\b`).test(stripComments(entry)))) continue;
-    const lineStart = text.lastIndexOf("\n", start - 1) + 1;
-    const lineEnd = text.indexOf("\n", end);
-    if (text.slice(lineStart, start).trim() !== "" || lineEnd === -1 || text.slice(end, lineEnd).trim() !== "") {
-      throw new ShapeError(`the entry "${entry.trim()}" of "${name}" shares its line with another entry`);
+  for (const list of text.matchAll(COMPONENTS)) {
+    const open = list.index + list[0].length - 1;
+    const close = matchClose(text, open);
+    for (let i = open + 1; ; ) {
+      const start = skipSpaces(text, i);
+      if (start >= close) break;
+      let end = skipValue(text, start);
+      const entry = text.slice(start, end);
+      if (text[end] === ",") end++;
+      i = end;
+      if (!names.some((n) => new RegExp(`\\b${escape(n)}\\b`).test(stripComments(entry)))) continue;
+      const lineStart = text.lastIndexOf("\n", start - 1) + 1;
+      const lineEnd = text.indexOf("\n", end);
+      if (text.slice(lineStart, start).trim() !== "" || lineEnd === -1 || text.slice(end, lineEnd).trim() !== "") {
+        throw new ShapeError(`the entry "${entry.trim()}" of "${name}" shares its line with another entry`);
+      }
+      removals.push([lineStart, lineEnd + 1]);
     }
-    removals.push([lineStart, lineEnd + 1]);
   }
   let next = text;
-  for (const [from, to] of removals.reverse()) next = next.slice(0, from) + next.slice(to);
+  for (const [from, to] of removals.sort(([a], [b]) => b - a)) next = next.slice(0, from) + next.slice(to);
   for (const m of [...next.matchAll(importLine)].reverse()) next = next.slice(0, m.index) + next.slice(m.index + m[0].length);
 
   const stillUsed = names.filter((n) => new RegExp(`\\b${escape(n)}\\b`).test(stripComments(next)));
@@ -135,9 +153,12 @@ export function setConfigEntry(text: string, name: string, value: string): strin
   return `${text.slice(0, closeLineStart)}  ${line}\n${text.slice(closeLineStart)}`;
 }
 
-/** Removes `config["<name>"]`, however many lines its value takes. No key, no change. */
-export function removeConfigEntry(text: string, name: string): string {
-  const object = configObject(text);
+/**
+ * Removes `config["<name>"]`, however many lines its value takes; `object` names another config
+ * object (`workerConfig`). No key, or no such object, no change.
+ */
+export function removeConfigEntry(text: string, name: string, objectName = "config"): string {
+  const object = configObject(text, objectName);
   if (object === undefined) return text;
   const key = findConfigKey(text, object, name);
   if (key === undefined) return text;
@@ -150,7 +171,7 @@ export function removeConfigEntry(text: string, name: string): string {
   const start = text.slice(lineStart, key.start).trim() === "" ? lineStart : key.start;
   const next = text.slice(0, start) + text.slice(end);
   // `{\n}` left behind by the last key goes back to `{}`.
-  const after = configObject(next);
+  const after = configObject(next, objectName);
   if (after !== undefined && next.slice(after.open + 1, after.close).trim() === "") {
     return next.slice(0, after.open + 1) + next.slice(after.close);
   }
@@ -165,21 +186,30 @@ interface ListPosition {
   indent: string;
 }
 
+const COMPONENTS = /\bcomponents\s*:\s*\[/g;
+
 /**
- * The `components: [` list the CLI edits: the only one, or, in a file with several Apps (a Cloudflare
- * project's `export const worker`, SPEC C1), the one of `export default defineApp({ … })`.
+ * The `components: [` list of an App: for the default one, the only list, or, in a file with several
+ * Apps (a Cloudflare project's, SPEC C1), the one of `export default defineApp({ … })`; for the
+ * Worker's, the one of `export const worker = defineApp({ … })`.
  */
-function componentsList(text: string): ListPosition {
-  let matches = [...text.matchAll(/\bcomponents\s*:\s*\[/g)];
-  if (matches.length > 1) {
-    const app = /^export\s+default\s+defineApp\s*\(\s*\{/m.exec(text);
-    if (app !== null) {
-      const open = app.index + app[0].length - 1;
+function componentsList(text: string, app: "default" | "worker" = "default"): ListPosition {
+  let matches = [...text.matchAll(COMPONENTS)];
+  if (app === "worker" || matches.length > 1) {
+    const found = (app === "worker" ? /^export\s+const\s+worker\s*=\s*defineApp\s*\(\s*\{/m : /^export\s+default\s+defineApp\s*\(\s*\{/m).exec(text);
+    if (found === null && app === "worker") {
+      throw new ShapeError("it has no `export const worker = defineApp({ components: [ … ], config: workerConfig })`, the Worker's App of a project on Cloudflare (SPEC C1)");
+    }
+    if (found !== null) {
+      const open = found.index + found[0].length - 1;
       const close = matchClose(text, open);
       matches = matches.filter((m) => m.index > open && m.index < close);
     }
   }
-  if (matches.length !== 1) throw new ShapeError(`it must have exactly one \`components: [\` list in its default export, found ${matches.length}`);
+  if (matches.length !== 1) {
+    const where = app === "worker" ? "`export const worker`" : "its default export";
+    throw new ShapeError(`it must have exactly one \`components: [\` list in ${where}, found ${matches.length}`);
+  }
   const match = matches[0] as RegExpExecArray;
   const open = match.index + match[0].length - 1;
   const close = matchClose(text, open);
@@ -192,8 +222,8 @@ function componentsList(text: string): ListPosition {
   return { open, closeLineStart, indent: firstEntry?.[1] ?? `${closeIndent}  ` };
 }
 
-function configObject(text: string): { open: number; close: number } | undefined {
-  const match = /\bconst\s+config\b[^=]*=\s*\{/.exec(text);
+function configObject(text: string, name = "config"): { open: number; close: number } | undefined {
+  const match = new RegExp(`\\bconst\\s+${escape(name)}\\b[^=]*=\\s*\\{`).exec(text);
   if (match === null) return undefined;
   const open = match.index + match[0].length - 1;
   return { open, close: matchClose(text, open) };

@@ -17,6 +17,14 @@ pikit add sessions-sql
 It replaces `sessions-jsonl`: install one or the other. Sessions already in JSONL files are not
 copied into the database.
 
+## Transitional
+
+This component bridges a gap until Pi's durable runtime (`pi-durable`) carries pikit's runs. Then
+sessions are that runtime's own storage, and this component is removed (SPEC P1: when Pi ships what
+pikit built, pikit deletes its own). Until then it gets fixes, not features: see
+`features/pi-durable-migration.md` for what replaces it and when. It also carries two small helpers
+copied from Pi (usage sums and the branch a fork keeps), which must follow Pi's upgrades.
+
 ## What it does
 
 The store is `@pikit/pi-adapter/sql`'s: Pi's own session over a `Storage` whose every commit is one

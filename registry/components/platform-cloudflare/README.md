@@ -18,7 +18,9 @@ pikit add platform-cloudflare
 ```
 
 It goes in **both Apps** of `pikit.config.ts` (C1): the Worker's (`export const worker`) and the
-conversation object's (the default export). What it does depends on the App it starts in.
+conversation object's (the default export). What it does depends on the App it starts in. So
+`component.json` says `"apps": { "worker": "default" }`, and `pikit add` lists it in both (`pikit
+remove` takes it out of both).
 
 ## In the Worker's App: `actor.mailbox`
 

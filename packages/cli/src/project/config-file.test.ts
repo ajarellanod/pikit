@@ -71,7 +71,7 @@ test("unrecognised shapes are errors that say what to change", () => {
   expect(() => removeComponent(shared, "channel-http")).toThrow(/shares its line/);
 });
 
-test("with two Apps (a Cloudflare project, SPEC C1), add and remove edit the default export's list and config, never the Worker's", () => {
+test("with two Apps (a Cloudflare project, SPEC C1), a component without a Worker half goes in the default export's list and config only", () => {
   let text = addComponent(CLOUDFLARE_CONFIG, { name: "storage-do" });
   text = setConfigEntry(text, "storage-do", "{}");
   expect(text).toContain("export default defineApp({\n  components: [\n    agents,\n    storageDo,\n  ],");
@@ -79,13 +79,51 @@ test("with two Apps (a Cloudflare project, SPEC C1), add and remove edit the def
   expect(text).toContain("export const worker = defineApp({\n  components: [\n  ],\n  config: workerConfig,\n});");
   expect(removeConfigEntry(removeComponent(text, "storage-do"), "storage-do")).toBe(CLOUDFLARE_CONFIG);
 
-  // A component listed in the Worker by hand is still used there: removing it is refused, not half done.
-  const inWorker = text.replace("  components: [\n  ],\n  config: workerConfig", "  components: [\n    storageDo,\n  ],\n  config: workerConfig");
-  expect(() => removeComponent(inWorker, "storage-do")).toThrow(/still used outside the components list/);
   // Several lists and no default export: nothing to choose, said so.
   expect(() => addComponent(CLOUDFLARE_CONFIG.replace("export default defineApp", "export const object = defineApp"), { name: "storage-do" })).toThrow(
     /exactly one `components: \[` list in its default export, found 2/,
   );
+});
+
+test("a component with a Worker half goes in both lists; remove takes it out of both, and its keys out of both configs", () => {
+  const text = addComponent(CLOUDFLARE_CONFIG, {
+    name: "channel-telegram-webhook",
+    importClause: "channelTelegramWebhook, { worker as channelTelegramWebhookWorker }",
+    worker: "channelTelegramWebhookWorker",
+  });
+  expect(text).toContain(
+    'import permissionGate from "./src/extensions/permission-gate.ts";\nimport channelTelegramWebhook, { worker as channelTelegramWebhookWorker } from "./src/pikit/channel-telegram-webhook/index.ts";\n',
+  );
+  expect(text).toContain("export default defineApp({\n  components: [\n    agents,\n    channelTelegramWebhook,\n  ],");
+  expect(text).toContain("export const worker = defineApp({\n  components: [\n    channelTelegramWebhookWorker,\n  ],\n  config: workerConfig,\n});");
+
+  // Configured by hand in each App, under each half's name.
+  const configured = setConfigEntry(text, "channel-telegram-webhook", "{ accounts: [] }").replace(
+    "export const workerConfig = {};",
+    'export const workerConfig = {\n  "channel-telegram-webhook-worker": {\n    accounts: [],\n  },\n};',
+  );
+  let back = removeComponent(configured, "channel-telegram-webhook");
+  back = removeConfigEntry(back, "channel-telegram-webhook");
+  back = removeConfigEntry(back, "channel-telegram-webhook-worker", "workerConfig");
+  expect(back).toBe(CLOUDFLARE_CONFIG);
+
+  // A component that works in both Apps is the same entry in each.
+  const both = addComponent(CLOUDFLARE_CONFIG, { name: "secrets-cloudflare", worker: "secretsCloudflare" });
+  expect(both).toContain("    agents,\n    secretsCloudflare,\n  ],");
+  expect(both).toContain("  components: [\n    secretsCloudflare,\n  ],\n  config: workerConfig,");
+  expect(removeComponent(both, "secrets-cloudflare")).toBe(CLOUDFLARE_CONFIG);
+
+  // Listed in the Worker by hand, it is taken out of it too: remove undoes both Apps.
+  const byHand = addComponent(CLOUDFLARE_CONFIG, { name: "storage-do" }).replace("  components: [\n  ],\n  config: workerConfig", "  components: [\n    storageDo,\n  ],\n  config: workerConfig");
+  expect(removeComponent(byHand, "storage-do")).toBe(CLOUDFLARE_CONFIG);
+});
+
+test("a Worker half needs the Worker's App: a file without one, or with two lists in it, is refused", () => {
+  expect(() => addComponent(BASE, { name: "secrets-cloudflare", worker: "secretsCloudflare" })).toThrow(/no `export const worker = defineApp/);
+  const twoLists = CLOUDFLARE_CONFIG.replace("  config: workerConfig,\n", "  config: workerConfig,\n  extra: { components: [\n  ] },\n");
+  expect(() => addComponent(twoLists, { name: "secrets-cloudflare", worker: "secretsCloudflare" })).toThrow(/exactly one `components: \[` list in `export const worker`, found 2/);
+  // No workerConfig (a server project): nothing to remove there.
+  expect(removeConfigEntry(BASE, "channel-telegram-webhook-worker", "workerConfig")).toBe(BASE);
 });
 
 test("an entry written over several lines is removed whole", () => {

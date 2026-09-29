@@ -18,6 +18,9 @@
     "actor.inbox",
     "actor.mailbox"
   ],
+  "apps": {
+    "worker": "default"
+  },
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "typebox": "1.3.27"

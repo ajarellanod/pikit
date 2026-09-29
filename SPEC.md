@@ -192,6 +192,12 @@ written here. Status (built or not) is tracked apart, as for the kernel.
   RPC call. Its types are structural: no `cloudflare:*` import leaves the entrypoints. *Why:* the
   components that must touch the platform are few and say so by reading one key; everything else is
   the same code on both targets.
+  `sessions-sql` is transitional (P1): when the adapter moves to Pi's durable runtime (`pi-durable`),
+  sessions are that runtime's own storage and `sessions-sql` goes (`features/pi-durable-migration.md`).
+  `pi-durable`'s SQLite core takes a synchronous database facade, which a Durable Object's SQLite
+  and Bun's can implement and an asynchronous API cannot: sessions will then sit on the object's SQL
+  directly, through `WORKERS_HOST`, not on `storage.sql`, which stays asynchronous so that Postgres fits
+  and keeps the records components own.
 - **C6. Telegram by webhook is its own component.** `channel-telegram-webhook` (Worker half: the
   route, the secret Telegram echoes, the allowed users, `actor.mailbox`; object half: the inbox
   handler and delivery from `agent.submissions`' answers) reuses `channel-telegram`'s client, format

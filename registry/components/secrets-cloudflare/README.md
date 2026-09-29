@@ -19,7 +19,9 @@ Secrets from the Worker's `env`, on Cloudflare.
 - a binding (a Durable Object namespace, a KV namespace, a service): it is not a secret.
 
 It works in both of a Cloudflare project's Apps (the Worker's and each Durable Object's): both are
-given the same `env`. It refuses to start where there is no `WORKERS_HOST` (off Cloudflare).
+given the same `env`. So `component.json` says `"apps": { "worker": "default" }`, and `pikit add`
+lists it in both (`pikit remove` takes it out of both). It refuses to start where there is no
+`WORKERS_HOST` (off Cloudflare).
 
 It never writes or logs a value.
 

@@ -108,11 +108,95 @@
         "worker": {
           "type": "string",
           "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$",
-          "description": "The export of index.ts that goes in the Worker's App (`export const worker` of pikit.config.ts)."
+          "description": "The export of index.ts that goes in the Worker's App (`export const worker` of pikit.config.ts). A named export is the Worker's half: a component named \"<name>-worker\", its config key in `workerConfig` (`registry validate` checks it). \"default\": the default export itself goes in both Apps, under its own name and config key in each."
         }
       },
       "additionalProperties": false,
-      "description": "A component with a half for each App (SPEC §4.1, C1): the App → the named export of index.ts `pikit add` lists in it. The default export goes in the default App (on Cloudflare, the Durable Object's). provides, requires and optional cover every half."
+      "description": "Where a component goes in a project on Cloudflare, which has two Apps (SPEC §4.1, C1): the App → the export of index.ts `pikit add` lists in it (and `pikit remove` takes out). The default export goes in the default App (the Durable Object's); without `apps`, only there. On a server, only the default export is listed. provides, requires and optional cover every half."
+    },
+    "halves": {
+      "type": "object",
+      "required": [
+        "default",
+        "worker"
+      ],
+      "properties": {
+        "default": {
+          "type": "object",
+          "required": [
+            "provides",
+            "requires",
+            "optional"
+          ],
+          "properties": {
+            "provides": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "optional": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        },
+        "worker": {
+          "type": "object",
+          "required": [
+            "provides",
+            "requires",
+            "optional"
+          ],
+          "properties": {
+            "provides": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "requires": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            },
+            "optional": {
+              "type": "array",
+              "items": {
+                "type": "string"
+              }
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "description": "Generated when `apps.worker` names a half: what each App's half declares (provide, use, useOptional), so `pikit add` checks and offers providers per App."
+    },
+    "hooks": {
+      "type": "object",
+      "required": [
+        "afterDeploy"
+      ],
+      "properties": {
+        "afterDeploy": {
+          "type": "string",
+          "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ts$",
+          "description": "A file of src/pikit/<name>/ exporting `afterDeploy({ url, config, get, say })`, which resolves with its problems (empty when done). The deployment's `up` calls it once the new version answers (SPEC §4.1, C8), with the deployed URL, this component's config in pikit.config.ts and a reader of .env and the environment."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Steps the deployment runs for this component. `pikit add` records them in pikit.json."
     },
     "replay": {
       "type": "object",
