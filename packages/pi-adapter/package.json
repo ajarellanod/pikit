@@ -8,6 +8,7 @@
     "./testing": "./src/testing/index.ts",
     "./extensions": "./src/extensions/index.ts",
     "./node": "./src/node/index.ts",
+    "./sql": "./src/sql/index.ts",
     "./providers/anthropic": "./src/providers/anthropic.ts",
     "./providers/openrouter": "./src/providers/openrouter.ts",
     "./tools": "./src/tools/index.ts"
