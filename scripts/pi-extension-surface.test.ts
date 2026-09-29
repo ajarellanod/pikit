@@ -6,7 +6,18 @@
 import { expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { CLI_COPY, EXTENSIONS_DIR, eventNames, exportedNames, interfaceMembers, localSurface, moduleExports, render } from "./pi-extension-surface.ts";
+import {
+  CLI_COPY,
+  drift,
+  EXTENSIONS_DIR,
+  eventNames,
+  exportedNames,
+  interfaceMembers,
+  localSurface,
+  moduleExports,
+  render,
+  toolMembers,
+} from "./pi-extension-surface.ts";
 
 test("the CLI's copy is the adapter's surface: run bun scripts/pi-extension-surface.ts when this fails", () => {
   expect(readFileSync(CLI_COPY, "utf8")).toBe(render(localSurface()));
@@ -49,4 +60,37 @@ test("the parsers: an export they do not understand throws; members are read at 
   ].join("\n");
   expect(interfaceMembers(source, "Api")).toEqual(["events", "getModel", "on", "send"]);
   expect(eventNames(source, "Api")).toEqual(["a"]);
+});
+
+test("the tool interfaces: ToolDefinition, and ExtensionToolContext's own members when there is one", () => {
+  // Shaped as Pi 0.99 writes them: generic defaults, `extends`, members over several lines.
+  const pi099 = [
+    "export interface ExtensionContext { cwd: string; }",
+    "/** interface ExtensionToolContext in a comment does not count */",
+    "export interface ExtensionToolContext extends ExtensionContext {",
+    "  readonly tools: readonly AgentTool[];",
+    "  executeTool(name: string, args: unknown, options?: ExecuteToolOptions): Promise<AgentToolCallOutcome>;",
+    "}",
+    "export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown, TState = any> {",
+    "  name: string;",
+    "  exposure?: ToolExposure;",
+    "  prepareLoadout?: (loadout: ToolLoadout) => ToolLoadoutChanges | undefined;",
+    "  execute(",
+    "    toolCallId: string,",
+    "    ctx: ExtensionToolContext,",
+    "  ): Promise<AgentToolResult<TDetails>>;",
+    "}",
+  ].join("\n");
+  expect(toolMembers(pi099)).toEqual({ toolDefinition: ["execute", "exposure", "name", "prepareLoadout"], toolContext: ["executeTool", "tools"] });
+  // Pi before 0.99 has no ExtensionToolContext.
+  const pi087 = "export interface ToolDefinition<TParams extends TSchema = TSchema> {\n  name: string;\n  execute(): void;\n}";
+  expect(toolMembers(pi087)).toEqual({ toolDefinition: ["execute", "name"], toolContext: [] });
+  expect(drift(["a", "b", "c"], ["b", "d"])).toEqual({ lacks: ["a", "c"], extra: ["d"] });
+});
+
+test("pikit's tool interfaces have what Pi 0.99 added to them", () => {
+  const local = toolMembers(readFileSync(join(EXTENSIONS_DIR, "api.ts"), "utf8"));
+  const added = ["annotations", "defaultActive", "exposure", "namespace", "outputSchema", "prepareLoadout"];
+  expect(drift(added, local.toolDefinition).lacks).toEqual([]);
+  expect(local.toolContext).toEqual(["executeTool", "tools"]);
 });
