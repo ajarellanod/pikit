@@ -31,6 +31,37 @@
   "apps": {
     "worker": "worker"
   },
+  "halves": {
+    "default": {
+      "provides": [
+        "actor.inbox"
+      ],
+      "requires": [
+        "secrets",
+        "conversations.registry",
+        "agent.runtime",
+        "agent.submissions",
+        "storage.kv",
+        "wakeups"
+      ],
+      "optional": [
+        "outbound.queue"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "secrets",
+        "actor.mailbox"
+      ],
+      "optional": []
+    }
+  },
+  "hooks": {
+    "afterDeploy": "deploy.ts"
+  },
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "typebox": "1.3.27"

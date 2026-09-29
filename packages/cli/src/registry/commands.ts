@@ -6,12 +6,14 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, readPreset } from "../project/registry-source.ts";
 import { checkCapabilities, checkDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeSetup, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
+  BOTH_APPS,
   buildIndex,
   COMPONENT_SCHEMA_FILE,
   COMPONENT_SCHEMA_REF,
@@ -66,12 +68,29 @@ async function generatedFor(componentDir: string, name: string, manifest: Manife
   if (component === undefined) return { provides: [], requires: [], optional: [] };
   const target = describeTarget(manifest);
   const own = await describeSetup(component, target);
-  // A component with a half for another App (C1): the manifest covers both halves.
-  const exports = Object.values(manifest?.apps ?? {});
-  if (exports.length === 0) return own;
-  const halves = [own];
-  for (const exported of exports) halves.push(await describeSetup(await loadExport(entry, exported), target));
-  return mergeGenerated(halves);
+  // A component with a half for the Worker's App (C1): the manifest covers both halves, and says what
+  // each declares. The default export in both Apps (`"default"`) is one component: nothing to add.
+  const exported = manifest?.apps?.worker;
+  if (exported === undefined || exported === BOTH_APPS) return own;
+  const half = await loadExport(entry, exported);
+  // Its name is its config key in `workerConfig`, which `pikit remove` takes out: never a guess.
+  if (half.name !== `${name}-worker`) {
+    throw new Error(`the export "${exported}" (apps.worker) is the component "${half.name}": the Worker's half of ${name} is named "${name}-worker", its config key in workerConfig`);
+  }
+  const worker = await describeSetup(half, target);
+  const declared = ({ provides, requires, optional }: Generated) => ({ provides, requires, optional });
+  return { ...mergeGenerated([own, worker]), halves: { default: declared(own), worker: declared(worker) } };
+}
+
+/** `hooks.afterDeploy` names a file of the component that exports `afterDeploy`, a function. */
+async function checkHooks(componentDir: string, name: string, manifest: Manifest): Promise<string[]> {
+  const file = manifest.hooks?.afterDeploy;
+  if (file === undefined) return [];
+  const path = join(componentDir, "files", "src", "pikit", name, file);
+  if (!existsSync(path)) return [`hooks.afterDeploy "${file}" is not a file of files/src/pikit/${name}/`];
+  if (/\.test(-support)?\.ts$/.test(file)) return [`hooks.afterDeploy "${file}" is a test file`];
+  const module = (await import(pathToFileURL(path).href)) as { afterDeploy?: unknown };
+  return typeof module.afterDeploy === "function" ? [] : [`hooks.afterDeploy "${file}" does not export a function afterDeploy`];
 }
 
 export interface Outcome {
@@ -160,6 +179,11 @@ export async function validate(root: string, options: { coreVersion?: string } =
     } catch (error) {
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
     }
+    try {
+      (await checkHooks(dir, name, manifest)).forEach(report);
+    } catch (error) {
+      report(`hooks.afterDeploy could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
   const indexPath = join(root, "registry.json");
@@ -229,6 +253,7 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
     ["requires.capabilities", manifest.requires?.capabilities, expected.requires.capabilities],
     ["optional.capabilities", manifest.optional?.capabilities, expected.optional.capabilities],
     ["replay", manifest.replay, expected.replay],
+    ["halves", manifest.halves, expected.halves],
   ];
   for (const [field, actual, derived] of fields) {
     if (JSON.stringify(actual) !== JSON.stringify(derived)) {

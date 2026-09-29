@@ -242,15 +242,18 @@ test("a component with no default export is not an app component: it provides an
   expect(await problems(f)).toBe("");
 });
 
-test("apps: a half for the Worker's App is a named export, and the generated fields cover both halves (C1)", async () => {
-  const half = (name: string, body: string) => `export const ${name}: ComponentDefinition = { name: "${name}", setup(pikit) {${body}} };\n`;
+/** A component's half: the export `name`, the component `component`. */
+const half = (name: string, component: string, body: string) => `export const ${name}: ComponentDefinition = { name: "${component}", setup(pikit) {${body}} };\n`;
+
+test("apps: a half for the Worker's App is a named export, and the generated fields cover both halves, and say what each declares (C1)", async () => {
   const index =
     `import type { ComponentDefinition } from "@pikit/core";\n` +
-    half("objectHalf", `pikit.use("agent.runtime"); pikit.useOptional("storage.kv"); pikit.provideKeyed("actor.inbox", "sample.message", {});`) +
-    half("workerHalf", `pikit.use("actor.mailbox"); pikit.use("storage.kv"); pikit.provideKeyed("http.route", "POST /sample", {});`) +
+    half("objectHalf", "channel-halves", `pikit.use("agent.runtime"); pikit.useOptional("storage.kv"); pikit.provideKeyed("actor.inbox", "sample.message", {});`) +
+    half("workerHalf", "channel-halves-worker", `pikit.use("actor.mailbox"); pikit.use("storage.kv"); pikit.provideKeyed("http.route", "POST /sample", {});`) +
     "export default objectHalf;\n";
   const f = await fixture({ name: "channel-halves", index });
   expect(f.manifest()).toMatchObject({ provides: ["actor.inbox"], requires: { capabilities: ["agent.runtime"] } });
+  expect(f.manifest().halves).toBeUndefined();
 
   f.writeManifest({ ...f.manifest(), apps: { worker: "workerHalf" } });
   expect((await generate(f.root)).problems).toEqual([]);
@@ -261,12 +264,59 @@ test("apps: a half for the Worker's App is a named export, and the generated fie
     optional: { capabilities: [] },
     apps: { worker: "workerHalf" },
   });
+  // Each half in its own App: what `pikit add` checks and offers by.
+  expect(f.manifest().halves).toEqual({
+    default: { provides: ["actor.inbox"], requires: ["agent.runtime"], optional: ["storage.kv"] },
+    worker: { provides: ["http.route"], requires: ["actor.mailbox", "storage.kv"], optional: [] },
+  });
   expect(await problems(f)).toBe("");
 
+  const generated = f.manifest().halves as NonNullable<Manifest["halves"]>;
+  f.writeManifest({ ...f.manifest(), halves: { ...generated, worker: { provides: [], requires: [], optional: [] } } });
+  expect(await problems(f)).toContain("halves drifted from setup");
   f.writeManifest({ ...f.manifest(), apps: { worker: "missingHalf" } });
   expect(await problems(f)).toContain('has no export "missingHalf" made with defineComponent');
   f.writeManifest({ ...f.manifest(), apps: { worker: "objectHalf", edge: "x" } as never });
   expect(await problems(f)).toContain("component.json /apps/edge: is not a known field");
+  // The default export, as the Worker's half: it would be the same component twice.
+  f.writeManifest({ ...f.manifest(), apps: { worker: "objectHalf" } });
+  expect(await problems(f)).toContain('the Worker\'s half of channel-halves is named "channel-halves-worker"');
+});
+
+test('apps: a Worker half is named "<name>-worker", its config key; "default" puts the component itself in both Apps', async () => {
+  // A module is imported once per path: each case is a component of its own.
+  const index = `import type { ComponentDefinition } from "@pikit/core";\n${half("main", "channel-misnamed", "")}${half("edge", "edge", `pikit.use("actor.mailbox");`)}export default main;\n`;
+  const misnamed = await fixture({ name: "channel-misnamed", index });
+  misnamed.writeManifest({ ...misnamed.manifest(), apps: { worker: "edge" } });
+  expect((await generate(misnamed.root)).problems).toEqual([
+    'channel-misnamed: the export "edge" (apps.worker) is the component "edge": the Worker\'s half of channel-misnamed is named "channel-misnamed-worker", its config key in workerConfig',
+  ]);
+
+  const both = await fixture({ name: "secrets-both", setup: `\n    pikit.provide("secrets", {});` });
+  both.writeManifest({ ...both.manifest(), apps: { worker: "default" } });
+  expect((await generate(both.root)).problems).toEqual([]);
+  expect(both.manifest()).toMatchObject({ provides: ["secrets"], apps: { worker: "default" } });
+  expect(both.manifest().halves).toBeUndefined();
+  expect(await problems(both)).toBe("");
+});
+
+test("hooks: afterDeploy names a file of the component that exports it", async () => {
+  const f = await fixture({ name: "channel-hooked" });
+  writeFileSync(join(f.own, "deploy.ts"), "export async function afterDeploy(): Promise<string[]> {\n  return [];\n}\n");
+  writeFileSync(join(f.own, "other.ts"), "export const somethingElse = 1;\n");
+  f.writeManifest({ ...f.manifest(), hooks: { afterDeploy: "deploy.ts" } });
+  expect((await generate(f.root)).problems).toEqual([]);
+  expect(f.manifest().hooks).toEqual({ afterDeploy: "deploy.ts" });
+  expect(await problems(f)).toBe("");
+
+  f.writeManifest({ ...f.manifest(), hooks: { afterDeploy: "missing.ts" } });
+  expect(await problems(f)).toContain('hooks.afterDeploy "missing.ts" is not a file of files/src/pikit/channel-hooked/');
+  f.writeManifest({ ...f.manifest(), hooks: { afterDeploy: "other.ts" } });
+  expect(await problems(f)).toContain('hooks.afterDeploy "other.ts" does not export a function afterDeploy');
+  f.writeManifest({ ...f.manifest(), hooks: { afterDeploy: "sample.test.ts" } });
+  expect(await problems(f)).toContain('hooks.afterDeploy "sample.test.ts" is a test file');
+  f.writeManifest({ ...f.manifest(), hooks: { afterDeploy: "../escape.ts" } });
+  expect(await problems(f)).toContain("component.json /hooks/afterDeploy:");
 });
 
 test("tools: replay is generated, and a tool without one fails (S10)", async () => {

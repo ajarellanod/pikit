@@ -8,8 +8,8 @@
  * component.json names in `$schema` so an editor completes and checks it too.
  *
  * Generated from `setup` (S14), rewritten by `generate`, checked by `validate`: `$schema`,
- * `provides`, `requires.capabilities`, `optional.capabilities` and `replay.tools`. Everything else
- * is written by hand and `generate` never changes it.
+ * `provides`, `requires.capabilities`, `optional.capabilities`, `halves` and `replay.tools`. Everything
+ * else is written by hand and `generate` never changes it.
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -31,6 +31,27 @@ const ENV_NAME = "^[A-Z][A-Z0-9_]*$";
 /** A JavaScript identifier: the name of an export. */
 const IDENTIFIER = "^[A-Za-z_$][A-Za-z0-9_$]*$";
 const TEXT = "\\S";
+/** A file name of the component's own directory, `src/pikit/<name>/`. */
+const OWN_FILE = "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ts$";
+
+/**
+ * `apps.worker` naming the default export: the component goes in both Apps as it is (SPEC §4.1, C1),
+ * under its own name and config key in each (`secrets-cloudflare`, which works in both).
+ */
+export const BOTH_APPS = "default";
+
+/** The Apps a Cloudflare project has in `pikit.config.ts` (SPEC C1). */
+export type AppName = "default" | "worker";
+
+/** What one half of a component declares in its App. */
+const HalfSchema = Type.Object(
+  {
+    provides: Type.Array(Type.String()),
+    requires: Type.Array(Type.String()),
+    optional: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
 
 const EnvironmentVariableSchema = Type.Object(
   {
@@ -78,13 +99,39 @@ export const ManifestSchema = Type.Object(
         {
           worker: Type.String({
             pattern: IDENTIFIER,
-            description: "The export of index.ts that goes in the Worker's App (`export const worker` of pikit.config.ts).",
+            description:
+              `The export of index.ts that goes in the Worker's App (\`export const worker\` of pikit.config.ts). A named export is the Worker's half: a component named "<name>-worker", its config key in \`workerConfig\` (\`registry validate\` checks it). "${BOTH_APPS}": the default export itself goes in both Apps, under its own name and config key in each.`,
           }),
         },
         {
           additionalProperties: false,
           description:
-            "A component with a half for each App (SPEC §4.1, C1): the App → the named export of index.ts `pikit add` lists in it. The default export goes in the default App (on Cloudflare, the Durable Object's). provides, requires and optional cover every half.",
+            "Where a component goes in a project on Cloudflare, which has two Apps (SPEC §4.1, C1): the App → the export of index.ts `pikit add` lists in it (and `pikit remove` takes out). The default export goes in the default App (the Durable Object's); without `apps`, only there. On a server, only the default export is listed. provides, requires and optional cover every half.",
+        },
+      ),
+    ),
+    halves: Type.Optional(
+      Type.Object(
+        { default: HalfSchema, worker: HalfSchema },
+        {
+          additionalProperties: false,
+          description:
+            "Generated when `apps.worker` names a half: what each App's half declares (provide, use, useOptional), so `pikit add` checks and offers providers per App.",
+        },
+      ),
+    ),
+    hooks: Type.Optional(
+      Type.Object(
+        {
+          afterDeploy: Type.String({
+            pattern: OWN_FILE,
+            description:
+              "A file of src/pikit/<name>/ exporting `afterDeploy({ url, config, get, say })`, which resolves with its problems (empty when done). The deployment's `up` calls it once the new version answers (SPEC §4.1, C8), with the deployed URL, this component's config in pikit.config.ts and a reader of .env and the environment.",
+          }),
+        },
+        {
+          additionalProperties: false,
+          description: "Steps the deployment runs for this component. `pikit add` records them in pikit.json.",
         },
       ),
     ),
@@ -113,6 +160,7 @@ export const ManifestSchema = Type.Object(
 
 export type Manifest = Static<typeof ManifestSchema>;
 export type EnvironmentVariable = Static<typeof EnvironmentVariableSchema>;
+export type Half = Static<typeof HalfSchema>;
 
 /**
  * `value` against `schema`, as plain messages (`/path: problem`); empty when it conforms. A field the
@@ -136,6 +184,8 @@ export interface Generated {
   optional: string[];
   /** Tool name → its replay; absent when the component provides no tool. */
   tools?: Record<string, string>;
+  /** What each App's half declares; absent unless `apps.worker` names a half. */
+  halves?: Record<AppName, Half>;
 }
 
 /** Top-level key order: every field of the schema, `$schema` first. */
@@ -171,6 +221,8 @@ export function withGenerated(manifest: Manifest, generated: Generated): Manifes
   };
   if (generated.tools === undefined) delete next.replay;
   else next.replay = { ...manifest.replay, tools: generated.tools };
+  if (generated.halves === undefined) delete next.halves;
+  else next.halves = generated.halves;
   return next;
 }
 
