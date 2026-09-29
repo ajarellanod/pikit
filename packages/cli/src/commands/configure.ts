@@ -10,7 +10,8 @@
  *    own flow, stored by the project's `model.credentials` component (`credentials-file`), or an
  *    API key in `.env`. The login runs where the app will run: through the deployment's `exec` for
  *    `pikit up` (in Docker, its volume), or on this machine for `pikit dev`. Each place keeps its
- *    own copy; nothing is copied between them (SPEC §11).
+ *    own copy; nothing is copied between them (SPEC §11). A project with no `model.credentials`
+ *    component (on Cloudflare) has nowhere to keep a login: it is offered the API key only.
  *
  * Without a terminal (or with `--yes`) it asks nothing: a variable comes from the process
  * environment or from `--generate <NAME>`, and a missing required one fails the command. It never
@@ -153,16 +154,24 @@ async function configureModels(
   if (!interactive) return unconfigured;
 
   const left: string[] = [];
+  // A login is stored by `model.credentials`: without one (a Cloudflare project) it has nowhere to go.
+  const canLogIn = here.store !== undefined;
   for (const id of unconfigured) {
     const keyName = apiKeyName(id);
     const hasKeyVariable = variables.some((v) => v.name === keyName);
     const inApp = there !== undefined;
+    if (!canLogIn && !hasKeyVariable) {
+      left.push(id);
+      continue;
+    }
     const choice = await choose<"up" | "key" | "dev" | "skip">(`The model provider "${id}" has no credentials. How should your agent reach it?`, [
-      inApp
-        ? { value: "up", label: "Log in with your subscription, for `pikit up`", hint: "OAuth: open a URL, then paste the page's address back here" }
-        : { value: "dev", label: `Log in with your subscription${exec === undefined ? "" : ", for `pikit dev` only"}`, hint: "OAuth, opens a URL" },
+      ...(!canLogIn
+        ? []
+        : inApp
+          ? [{ value: "up" as const, label: "Log in with your subscription, for `pikit up`", hint: "OAuth: open a URL, then paste the page's address back here" }]
+          : [{ value: "dev" as const, label: `Log in with your subscription${exec === undefined ? "" : ", for `pikit dev` only"}`, hint: "OAuth, opens a URL" }]),
       ...(hasKeyVariable ? [{ value: "key" as const, label: "Paste an API key", hint: `stored in ${ENV_FILE} as ${keyName}; \`pikit up\` and \`pikit dev\` both read it` }] : []),
-      ...(inApp ? [{ value: "dev" as const, label: "Log in with your subscription, for `pikit dev` only", hint: "on this machine" }] : []),
+      ...(canLogIn && inApp ? [{ value: "dev" as const, label: "Log in with your subscription, for `pikit dev` only", hint: "on this machine" }] : []),
       { value: "skip", label: "Skip for now" },
     ]);
     if (choice === "up") await login(projectDir, id, here.store, exec);

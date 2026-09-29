@@ -25,9 +25,10 @@
   // Logs kept by Cloudflare (Workers Logs, in the dashboard); `pikit logs` streams them live.
   "observability": { "enabled": true },
   // A prompt in a .md file is imported as text; a WebAssembly module is compiled at deploy (a Worker
-  // cannot compile one at run time).
+  // cannot compile one at run time). A rule matches the import as written, so a module imported by a
+  // package export without `.wasm` is named: execution-do's QuickJS.
   "rules": [
     { "type": "Text", "globs": ["**/*.md"], "fallthrough": true },
-    { "type": "CompiledWasm", "globs": ["**/*.wasm"], "fallthrough": true }
+    { "type": "CompiledWasm", "globs": ["**/*.wasm", "@jitl/quickjs-wasmfile-release-sync/wasm"], "fallthrough": true }
   ]
 }

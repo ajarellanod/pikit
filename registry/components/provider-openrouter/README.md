@@ -9,7 +9,7 @@ API key. An agent names one as `openrouter/<vendor>/<model>`, for example
   installed.
 - **Targets:** `server` and `cloudflare`: the provider's module imports nothing node-only.
 - **Installs to:** `src/pikit/provider-openrouter/`.
-- **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi).
+- **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi), `typebox`.
 
 ## What it does
 
@@ -47,10 +47,23 @@ they exclude is still listed here, and an agent naming it starts; its first requ
 OpenRouter's error ("No endpoints found matching your data policy", 404 or 403). Pick another model,
 or change the settings on openrouter.ai.
 
+## Config
+
+```ts
+config: { "provider-openrouter": { apiBase: "https://openrouter.ai/api" } }
+```
+
+`apiBase` is OpenRouter's API by default: every model's address is under it (`<apiBase>/v1` for
+most). Change it only for a proxy in front of OpenRouter, or a test double. The key goes wherever
+`apiBase` points.
+
 ## Tests
 
-`provider-openrouter.test.ts` is copied with the component and runs in your project. It makes no
-request and reads no credential.
+`provider-openrouter.test.ts` is copied with the component and runs in your project. It reads no
+credential and reaches no network: a model answers through `apiBase` from
+`fake-openrouter.test-support.ts`, a local stand-in of OpenRouter's streamed chat completions that
+answers `answer: <your message>` and records what it was asked. Only tests import it. pikit's
+end-to-end test of a Telegram bot on Cloudflare uses it as the bot's model.
 
 `component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
 exists, the test "what setup declares" pins it.

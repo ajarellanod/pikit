@@ -3,8 +3,8 @@
  * --preset cloudflare-minimal`, `pikit doctor`, the project's own tests (with its `wrangler deploy
  * --dry-run`) and typecheck, then `pikit dev` (wrangler dev, workerd) answering `/health` from the
  * object's App. Then a Telegram agent on Cloudflare: `pikit add` of secrets-cloudflare and
- * platform-cloudflare (both in both Apps), provider-openrouter (the agent's model moved to it: the
- * Anthropic provider is server-only), runtime-pi and channel-telegram-webhook (with what they offer)
+ * platform-cloudflare (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
+ * is already OpenRouter's: the Anthropic provider is server-only), runtime-pi and channel-telegram-webhook (with what they offer)
  * put each half in its App (C1), every add is green, the project installs, typechecks and passes its
  * tests, and `pikit remove` undoes both Apps. Nothing reaches a Cloudflare account: `pikit up` is never
  * run.
@@ -16,7 +16,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -115,9 +115,8 @@ test.skipIf(!E2E)(
     await add("platform-cloudflare");
     expect(lists()).toEqual({ object: [...preset.object, "secretsCloudflare", "platformCloudflare"], worker: ["secretsCloudflare", "platformCloudflare"] });
 
-    // A model provider that runs on Cloudflare, and the agent's model moved to it.
-    expect(agentBefore).toContain('model: "anthropic/claude-sonnet-4-6"');
-    writeFileSync(agentPath, agentBefore.replace('model: "anthropic/claude-sonnet-4-6"', 'model: "openrouter/z-ai/glm-5.3-flash"'));
+    // The provider of the starter's model, which on Cloudflare is one that runs there.
+    expect(agentBefore).toContain('model: "openrouter/z-ai/glm-5.3-flash"');
     await add("provider-openrouter");
     // The runtime, with what it offers: the record of submissions (storage-do has its storage).
     const runtime = await add("runtime-pi");
@@ -169,7 +168,7 @@ test.skipIf(!E2E)(
     expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components).sort()).toEqual(
       ["conversations-kv", "deployment-cloudflare", "sessions-sql", "storage-do", "storage-kv-sql"],
     );
-    writeFileSync(agentPath, agentBefore);
+    expect(readFileSync(agentPath, "utf8")).toBe(agentBefore);
     expect((await run([process.execPath, MAIN, "doctor"])).out).toContain("pikit doctor: green");
   },
   TIMEOUT,

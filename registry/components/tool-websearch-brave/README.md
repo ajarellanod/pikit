@@ -35,7 +35,11 @@ component could provide the same name and your agents would not change.
 
 Get one at api-dashboard.search.brave.com (the free plan works; it has a monthly quota and a rate
 limit). Set it as the secret `BRAVE_API_KEY` of whatever provides `secrets`: an environment variable
-with `secrets-env`.
+with `secrets-env`, a Worker secret with `secrets-cloudflare` (`pikit up` uploads `.env`'s).
+
+`pikit configure` asks for it (`configure.ts`, this component's step): in a terminal it says where to
+get one and asks without echo, and Enter skips; a key already in `.env` or exported is kept. It is
+optional, so `pikit configure` and `pikit doctor` never fail without it.
 
 - It is read through `secrets` at every call, and sent only to Brave. It is not in the tool's
   description, its parameters, its answers or its errors, so it never reaches the model or a
@@ -62,7 +66,8 @@ A search only reads, so a run resumed after a crash (SPEC §8.4) simply searches
 local stand-in on a free port (`Bun.serve`), reached through `apiBase`: no test reaches the network
 or needs a real key. It covers what setup declares, the replay, the request (path, query, count,
 token), the results as plain text, no results, a missing key, a refused key and a quota, and that the
-key never reaches what the model sees.
+key never reaches what the model sees. `configure.test.ts` covers the configure step with a scripted
+terminal: a key asked and saved, Enter skipping, a key kept, and nothing asked without a terminal.
 
 `component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
 exists, the test "what setup declares" pins it.

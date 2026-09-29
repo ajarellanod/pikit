@@ -39,8 +39,8 @@
     {
       "name": "BRAVE_API_KEY",
       "secret": true,
-      "required": true,
-      "description": "A Brave Search API key, from api-dashboard.search.brave.com (the free plan works). Read through secrets; the model never sees it."
+      "required": false,
+      "description": "A Brave Search API key, from api-dashboard.search.brave.com (the free plan works). Optional: without it the app starts and each search fails saying so. Read through secrets; the model never sees it."
     }
   ]
 }

@@ -9,7 +9,8 @@
  *
  * The target (`server` unless `--target` says otherwise) is recorded in `pikit.json`'s `targets`: every
  * component installed then and later must run there (`checkCompatible`), and the providers offered are
- * the ones that do. On `cloudflare`, `pikit.config.ts` has two Apps (SPEC C1).
+ * the ones that do. On `cloudflare`, `pikit.config.ts` has two Apps (SPEC C1). The target is never
+ * guessed from the preset: a preset for another target is refused, with the command that makes it.
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -63,7 +64,14 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   // channel, and the storage it needs. A preset lists only what every project of it uses.
   const { order: components, installedFor } = withOffers(registry, chosen, targets);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
-  for (const component of components) checkCompatible(targets, registry.manifest(component));
+  try {
+    for (const component of components) checkCompatible(targets, registry.manifest(component));
+  } catch (error) {
+    // The target is chosen, never guessed from the preset: say which one it runs on.
+    const runsOn = TARGETS.find((t) => chosen.length > 0 && chosen.every((c) => registry.manifest(c).targets.includes(t)));
+    if (!(error instanceof CliError) || options.target !== undefined || runsOn === undefined || runsOn === target) throw error;
+    throw new CliError(`${error.message}; the preset "${options.preset}" runs on ${runsOn}: pikit new ${dir} --target ${runsOn} --preset ${options.preset}${(options.with ?? []).map((w) => ` --with ${w}`).join("")}`);
+  }
   const tools = components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {}));
 
   const step = (message: string) => options.quiet !== true && log.step(message);
@@ -77,7 +85,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   write(".gitignore", starter.gitignore(target));
   write("README.md", starter.readme(name, components, target));
   write(CONFIG_FILE, starter.configFile(target));
-  write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools));
+  write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, target));
   write("src/extensions/agents.ts", starter.AGENTS);
   write("src/extensions/permission-gate.ts", starter.permissionGate());
   // `builtin` for this CLI's registry: the project resolves it wherever it is cloned (SPEC §10.3).

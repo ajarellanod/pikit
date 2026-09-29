@@ -102,6 +102,10 @@ test("a component with a Worker half goes in both lists; remove takes it out of 
     "export const workerConfig = {};",
     'export const workerConfig = {\n  "channel-telegram-webhook-worker": {\n    accounts: [],\n  },\n};',
   );
+  // setConfigEntry writes the Worker's config the same way, when told which object.
+  const worker = setConfigEntry(setConfigEntry(text, "channel-telegram-webhook", "{ accounts: [] }"), "channel-telegram-webhook-worker", "{\n    accounts: [],\n  }", "workerConfig");
+  expect(worker).toBe(configured);
+  expect(() => setConfigEntry(worker, "channel-telegram-webhook-worker", "{}", "workerConfig")).toThrow('workerConfig already has "channel-telegram-webhook-worker"');
   let back = removeComponent(configured, "channel-telegram-webhook");
   back = removeConfigEntry(back, "channel-telegram-webhook");
   back = removeConfigEntry(back, "channel-telegram-webhook-worker", "workerConfig");
