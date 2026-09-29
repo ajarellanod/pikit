@@ -1,7 +1,9 @@
 /**
  * The guided path, in a real pseudo-terminal, as the installer runs it: `pikit new` with no
- * arguments asks the agent's name and where to talk to it (the registry's channel-* components), writes the
+ * arguments asks the agent's name, where it runs, and where to talk to it (the registry's channel-* components), writes the
  * project, then runs the channel's own setup and the model's step, and offers to start it.
+ * On Cloudflare, chosen in the menu or with the installer's `--target cloudflare --preset
+ * telegram-cloudflare`, it asks only the name before writing the bot.
  *
  * Telegram is channel-telegram's `fake-telegram.ts`. Ctrl-C stops the wizard with nothing written;
  * `pikit new` with the same name continues with the project already there. The model key is a
@@ -35,10 +37,10 @@ afterAll(async () => {
 });
 
 /** `pikit new` in a pseudo-terminal: what it printed, without colours, and a way to answer. */
-function wizard(env: Record<string, string> = {}) {
+function wizard(env: Record<string, string> = {}, args: string[] = []) {
   let output = "";
   const decoder = new TextDecoder();
-  const proc = Bun.spawn([process.execPath, MAIN, "new"], {
+  const proc = Bun.spawn([process.execPath, MAIN, "new", ...args], {
     cwd: parent,
     env: { ...process.env, ...env },
     terminal: { cols: 160, rows: 50, data: (_terminal, data) => void (output += decoder.decode(data)) },
@@ -64,10 +66,22 @@ function wizard(env: Record<string, string> = {}) {
 const DOWN = "\x1b[B";
 const RIGHT = "\x1b[C";
 
-/** Answers the name, then picks Telegram in the menu with the arrow keys. */
+/** Answers "Where should it run?" with the target at `down` arrows from the first, the server. */
+async function runOn(w: ReturnType<typeof wizard>, down: number): Promise<void> {
+  await w.waitFor("Where should it run?");
+  await w.waitFor("On Cloudflare");
+  expect(w.text()).toContain("On a server or this computer");
+  await Bun.sleep(100);
+  w.type(DOWN.repeat(down));
+  await Bun.sleep(100);
+  w.type("\r");
+}
+
+/** Answers the name and the server, then picks Telegram in the menu with the arrow keys. */
 async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
   await w.waitFor("Name of your agent");
   w.type("my-bot\r");
+  await runOn(w, 0);
   await w.waitFor("Where do you want to talk to your agent?");
   const [channels] = openRegistry(DEFAULT_REGISTRY).slots("http");
   const telegramAt = channels?.options.findIndex((o) => o.name === "channel-telegram") ?? -1;
@@ -86,6 +100,7 @@ test.skipIf(!E2E)(
     const w = wizard();
     await w.waitFor("Name of your agent");
     w.type("my-bot\r");
+    await runOn(w, 0);
     await w.waitFor("Where do you want to talk to your agent?");
     await w.waitFor("Telegram");
     expect(w.text()).toContain("HTTP API");
@@ -165,6 +180,51 @@ test.skipIf(!E2E)(
     expect(env).toContain(`TELEGRAM_ALLOWED_USERS=${OWNER.id}`);
     // The bot told the owner, in the chat, that they can talk to it now.
     expect(telegram.sent.some((m) => m.chatId === OWNER.id)).toBe(true);
+  },
+  TIMEOUT,
+);
+
+/** Declines "Configure it now?" once the bot is written; returns what the wizard printed. */
+async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string): Promise<string> {
+  await w.waitFor(`Created ${name} in`);
+  await w.waitFor("Configure it now?");
+  await Bun.sleep(100);
+  w.type(RIGHT);
+  await Bun.sleep(100);
+  w.type("\r");
+  expect(await w.exited).toBe(0);
+  const pikitJson = JSON.parse(readFileSync(join(parent, name, "pikit.json"), "utf8")) as { targets: string[]; components: Record<string, unknown> };
+  expect(pikitJson.targets).toEqual(["cloudflare"]);
+  expect(Object.keys(pikitJson.components)).toContain("channel-telegram-webhook");
+  expect(Object.keys(pikitJson.components)).toContain("deployment-cloudflare");
+  return w.text();
+}
+
+test.skipIf(!E2E)(
+  "Cloudflare, chosen in the menu: the Telegram bot on Cloudflare is written, and the same command is printed",
+  async () => {
+    const w = wizard();
+    await w.waitFor("Name of your agent");
+    w.type("cf-bot\r");
+    await runOn(w, 1);
+    const text = await writtenNotConfigured(w, "cf-bot");
+    // One preset runs on Cloudflare and makes an agent you talk to: no question of presets.
+    expect(text).not.toContain("Which preset do you start from?");
+    expect(text).toContain("The same, in a script: pikit new cf-bot --target cloudflare --preset telegram-cloudflare");
+    expect(text).toContain("Later: cd cf-bot && pikit configure && pikit up");
+  },
+  TIMEOUT,
+);
+
+test.skipIf(!E2E)(
+  "the installer's --cloudflare: pikit new --target cloudflare --preset telegram-cloudflare asks only the name",
+  async () => {
+    const w = wizard({}, ["--target", "cloudflare", "--preset", "telegram-cloudflare"]);
+    await w.waitFor("Name of your agent");
+    w.type("flag-bot\r");
+    const text = await writtenNotConfigured(w, "flag-bot");
+    expect(text).not.toContain("Where should it run?");
+    expect(text).toContain("The same, in a script: pikit new flag-bot --target cloudflare --preset telegram-cloudflare");
   },
   TIMEOUT,
 );

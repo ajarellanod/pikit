@@ -87,6 +87,56 @@ test("a Bun below the minimum or of the next major is replaced by the pinned one
   }
 });
 
+/**
+ * Runs install.sh past pikit's install with stand-ins: a `bun` of a supported version that does
+ * nothing else, a `git` that "clones" an empty directory, and a `node` of `nodeVersion`. No network,
+ * no terminal (so no `pikit new`): it stops after Docker's step, or Cloudflare's.
+ */
+function install(args: string[], nodeVersion: string, env: Record<string, string> = {}) {
+  const home = mkdtempSync(join(tmpdir(), "pikit-install-path-"));
+  homes.push(home);
+  const bin = join(home, "fake-bin");
+  mkdirSync(bin);
+  const script = (name: string, body: string) => writeFileSync(join(bin, name), `#!/bin/sh\n${body}\n`, { mode: 0o755 });
+  script("bun", 'if [ "$1" = "--version" ]; then echo 1.4.7; fi');
+  script("git", 'for a; do last="$a"; done\ncase " $* " in *" clone "*) mkdir -p "$last" ;; *" rev-parse "*) echo abc1234 ;; esac');
+  script("node", `echo ${nodeVersion}`);
+  script("unzip", "exit 0");
+  const run = Bun.spawnSync(["sh", SCRIPT, ...args], {
+    env: { HOME: home, PATH: `${bin}:/usr/bin:/bin`, TMPDIR: tmpdir(), ...env },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString(), home };
+}
+
+test("--cloudflare skips Docker, checks the Node.js wrangler runs on, and hands over to the Cloudflare bot", () => {
+  const run = install(["--cloudflare"], "v22.11.0");
+  expect(run.err).toBe("");
+  expect(run.code).toBe(0);
+  expect(run.out).toContain("Cloudflare: no Docker needed");
+  expect(run.out).toContain("Node.js v22.11.0 found: wrangler can run");
+  expect(run.out).not.toMatch(/Docker is not installed|Docker with Compose found|docker group/);
+  expect(run.out).toContain("pikit new --target cloudflare --preset telegram-cloudflare starts another Telegram bot on Cloudflare");
+  expect(existsSync(join(run.home, ".pikit", "bin", "pikit"))).toBe(true);
+
+  // PIKIT_CLOUDFLARE=1 is the same; an old Node.js is named, and the install still completes.
+  const old = install([], "v20.9.0", { PIKIT_CLOUDFLARE: "1" });
+  expect(old.code).toBe(0);
+  expect(old.err).toContain("wrangler needs Node.js >= 22 (found: v20.9.0)");
+  expect(old.out).not.toMatch(/Docker is not installed|Docker with Compose found/);
+});
+
+test("without --cloudflare, Docker is checked as before and pikit new asks everything", () => {
+  const run = install([], "v22.11.0");
+  expect(run.code).toBe(0);
+  expect(run.out).toMatch(/Docker is not installed|Docker with Compose found/);
+  expect(run.out).not.toContain("Cloudflare: no Docker needed");
+  expect(run.out).toContain("pikit new starts a new agent step by step");
+  expect(install(["--cloud"], "v22.11.0").err).toContain("unknown option --cloud");
+});
+
 test("a pin outside the supported range is refused before anything is installed", () => {
   const run = chooseBun(null, { PIKIT_BUN_VERSION: "2.0.0" });
   expect(run.err).toContain("PIKIT_BUN_VERSION=2.0.0 is outside the Bun range pikit supports (>= 1.4.0, < 2.0.0)");

@@ -16,6 +16,38 @@ objects running the project's two Apps, `wrangler.jsonc`, and the commands
 - **Environment:** none of its own. `.env` holds the app's secrets: `pikit up` uploads them with each
   version, and `pikit dev` gives them to the local Worker.
 
+## Cloudflare in one line
+
+On a Mac or Linux machine with nothing of pikit yet:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --cloudflare
+```
+
+The installer puts `pikit` on the machine (git, curl, Bun, as for a server), skips Docker, which
+Cloudflare does not need, and checks Node.js >= 22, which wrangler runs on (it says how to install
+it if it is missing). Then, at the terminal, it runs
+`pikit new --target cloudflare --preset telegram-cloudflare`, which asks, in order:
+
+1. **the bot's name**, its folder (`my-agent` on Enter); then it writes the project and runs `bun install`;
+2. **"Configure it now?"**: `pikit configure`'s questions, below: the bot's token from @BotFather,
+   who may talk to it (you send it a message), the webhook's secret (generated), a Brave Search key
+   (optional) and the OpenRouter key;
+3. **"Start it?"**, "On Cloudflare": `pikit up`. If wrangler is not logged in to Cloudflare, it asks
+   "Log in now? It opens your browser" and runs `wrangler login` (create a free account there if you
+   have none). On an account's first deploy, wrangler asks for its `workers.dev` subdomain, the
+   `<subdomain>.workers.dev` every Worker of the account answers at: choose one. Then it deploys,
+   waits for `/health`, and sets the Telegram webhook. Write to the bot: it answers.
+
+Without the installer, the same is `pikit new` (answer "On Cloudflare" to "Where should it run?"), or
+the three commands below. Ctrl-C stops at any question; `pikit new` again, with the same name,
+continues where you left off.
+
+**What it costs.** Cloudflare's **Workers Free plan is enough**: pikit's Cloudflare decisions were
+proven on it (SPEC §4.1). It allows 100,000 requests a day (Telegram's updates, the objects' RPCs and
+alarms count) and 5 GB of Durable Object storage per account; the Workers Paid plan ($5 a month)
+raises both. What you pay for is the **model's tokens**, to OpenRouter, per message.
+
 ## Your Telegram bot on Cloudflare
 
 ```sh
@@ -35,10 +67,24 @@ pikit up
   secret (generated), the Brave Search key (optional: Enter skips, and only web search needs it) and
   the OpenRouter key. Everything goes to `.env` (mode 0600). Without a terminal, export them instead:
   `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`, `OPENROUTER_API_KEY`, `BRAVE_API_KEY`.
-- **`up`** deploys the Worker with `.env`'s variables as its secrets (`wrangler deploy`, on your
-  Cloudflare account: `bunx wrangler login` once, or `CLOUDFLARE_API_TOKEN`), waits until `/health` answers from the
+- **`up`** logs in to Cloudflare if wrangler is not (below), deploys the Worker with `.env`'s variables
+  as its secrets (`wrangler deploy`), waits until `/health` answers from the
   version it deployed, then tells Telegram where to post (`setWebhook` at `<workers.dev URL>/telegram`,
   with the secret). Write to the bot: it answers.
+
+**Logging in to Cloudflare.** `up`, `down`, `logs` and `status` reach your account, so each first
+checks that wrangler can: a `CLOUDFLARE_API_TOKEN` (exported, or in `.env`, which wrangler reads and
+`up` never uploads) is used as it is; otherwise `wrangler whoami` says whether wrangler's own login
+holds. If not, at a terminal they offer `wrangler login`, which opens your browser, and continue.
+Without a terminal (a server over SSH without a browser, CI) they stop and say what to do: `bunx wrangler
+login` at a terminal, or an API token from the **"Edit Cloudflare Workers"** template at
+https://dash.cloudflare.com/profile/api-tokens as `CLOUDFLARE_API_TOKEN` (with `CLOUDFLARE_ACCOUNT_ID`
+when it reaches several accounts).
+
+**The first deploy of an account.** Workers are published at `<worker>.<subdomain>.workers.dev`, and a
+new account has no subdomain yet. At a terminal, wrangler asks for one during `up`; without a
+terminal it cannot, and `up` fails saying so, with the dashboard's link to register it (free, once
+per account). Then `pikit up` again.
 
 `pikit dev` runs the same Worker and objects on your machine (`wrangler dev`); Telegram cannot reach it
 there, so a webhook needs a deploy. `pikit logs` streams the deployed bot's logs, `pikit status` shows
@@ -114,6 +160,7 @@ project's `node_modules/.bin/wrangler` in the project's directory, without a she
 
 | Function | Runs |
 |---|---|
+| `login()` | Nothing with a `CLOUDFLARE_API_TOKEN`; else `wrangler whoami --json`, and at a terminal `wrangler login` if it is not logged in. `up`, `down`, `logs` and `status` run it first |
 | `up({ url })` | `wrangler deploy --secrets-file <.env's secrets>`, then `GET /health` every 2 s until it answers ok from the version it deployed (3 min at most), then the components' `afterDeploy` hooks. Resolves with `{ version, url }` |
 | `down()` | `wrangler delete`, only at a terminal (see below) |
 | `logs()` | `wrangler tail`: live, until Ctrl-C |
@@ -191,8 +238,10 @@ The tests are copied with the component and run in your project:
   rollback that hangs (both deadlines hold), the Worker's routes and `/health`.
 - `commands.test.ts`: the exact `wrangler` argv of every command, the secrets file, the wait for the
   new version, the components' hooks run after it (with their URL, config and secrets, their problems
-  failing `up`, none for a version that does not answer), the rollback and `status`, with a fake runner
-  and a fake `fetch`. No wrangler, no account.
+  failing `up`, none for a version that does not answer), the rollback and `status`, the login each
+  command checks first (a token, `whoami`, `wrangler login` offered at a terminal, what to do without
+  one, no Node.js), and a first deploy without a `workers.dev` subdomain, with a fake runner and a
+  fake `fetch`. No wrangler, no account.
 - `bundle.test.ts`: `wrangler deploy --dry-run` bundles `worker.ts` with a two-App `pikit.config.ts`
   and exports `Conversation`, and the commands never reach the bundle. Uploads nothing.
 - `files.test.ts`: `wrangler.jsonc` keeps its promises, and only `entrypoint.ts` imports `cloudflare:*`.
