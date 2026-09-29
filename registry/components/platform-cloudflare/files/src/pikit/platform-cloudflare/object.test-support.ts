@@ -46,7 +46,7 @@ export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: strin
   const schedule = () => {
     const mine = ++generation;
     if (alarm === null || firing || clock === undefined) return;
-    void clock.sleep(alarm - clock.now()).then(() => {
+    void clock.sleep(Math.max(0, alarm - clock.now())).then(() => {
       if (mine === generation) void fire();
     });
   };

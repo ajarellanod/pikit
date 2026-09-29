@@ -114,6 +114,12 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Delivers a JSON message to the actor owning a key, wherever it runs; resolves once the actor holds it durably.",
   },
+  "actor.inbox": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Where an actor registers one handler per message type it receives through actor.mailbox; a handler resolves once the message is durable.",
+  },
   wakeups: {
     mode: "single",
     definedIn: "@pikit/contracts",
@@ -169,12 +175,6 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/contracts",
     stability: "experimental",
     summary: 'One HTTP endpoint per "METHOD /path", as a fetch handler; one server component serves them all.',
-  },
-  "actor.inbox": {
-    mode: "keyed",
-    definedIn: "@pikit/contracts",
-    stability: "experimental",
-    summary: "One handler per message type an actor receives through actor.mailbox; it resolves once the message is durable.",
   },
   "model.provider": {
     mode: "keyed",

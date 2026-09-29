@@ -4,8 +4,9 @@
  * - The `wakeups` suite, with the slice deadline and a restart over the same storage, on a real
  *   object's SQLite. The suite owns a manual clock and a real alarm fires on the real one, so there
  *   the alarm is `simulatedObject`'s, on the app's clock (the component's test support).
- * - The `actor.mailbox` suite from the Worker's App, over the real `CONVERSATION` binding: each key is
- *   a real object (`ConversationDouble`, with deployment-cloudflare's interface), reached by RPC.
+ * - The `actor.mailbox` and `actor.inbox` suite from the Worker's App, over the real `CONVERSATION`
+ *   binding: each key is a real object (`ConversationDouble`, with deployment-cloudflare's interface),
+ *   reached by RPC, whose actor also sends to another and wakes itself by the object's real alarm.
  * - Then the real alarm: `at` and `cancel` set it, `runDurableObjectAlarm` fires it through the
  *   object's `alarm()`, and it survives an eviction; the slice, the backoff, a request waiting for its
  *   handler; and an object's own mailbox.
@@ -41,10 +42,14 @@ for (const c of createWakeupsConformance(
   it(`platform-cloudflare ${c.group}: ${c.name}`, () => inObject(c));
 }
 
-for (const c of createMailboxConformance((inbox) => {
-  composeObjects({ components: [platformCloudflare, inbox] });
-  return { components: withWorkersHost({ env: workerEnv }, [platformCloudflare]), dispose: stopObjects };
-})) {
+// Where the actors run, platform-cloudflare also provides wakeups: the suite's actor wakes itself by the real alarm.
+for (const c of createMailboxConformance(
+  (inbox) => {
+    composeObjects({ components: [platformCloudflare, inbox] });
+    return { components: withWorkersHost({ env: workerEnv }, [platformCloudflare]), dispose: stopObjects };
+  },
+  { wakeups: true },
+)) {
   it(`platform-cloudflare ${c.group}: ${c.name}`, () => c.run());
 }
 
@@ -170,7 +175,8 @@ it("a handler that fails gets a backoff row and the real alarm moves to its retr
     const [row] = rowsOf(storage) as { name: string; time: number; failures: number }[];
     expect(row?.failures).toBe(1);
     expect(row?.time).toBeGreaterThanOrEqual(before + BACKOFF_MS[0]);
-    expect(row?.time).toBeLessThan(clock.now() + BACKOFF_MS[0]);
+    // The failure's time plus the first wait: now, read after it, may be the same millisecond.
+    expect(row?.time).toBeLessThanOrEqual(clock.now() + BACKOFF_MS[0]);
     expect(await storage.getAlarm()).toBe(Math.ceil(row?.time as number));
   });
 });
@@ -210,9 +216,13 @@ it("in an object, actor.mailbox delivers to its own key locally and to any other
   const inbox = defineComponent({
     name: "test-inbox",
     setup(pikit) {
-      pikit.provideKeyed("actor.inbox", "test.message", async (key, message, ctx) => {
-        received.push({ key, message, object: ctx.value(WORKERS_HOST)?.object?.id });
-      });
+      const handle = pikit.use("actor.inbox");
+      return {
+        start: () =>
+          handle.get().handle("test.message", async (key, message, ctx) => {
+            received.push({ key, message, object: ctx.value(WORKERS_HOST)?.object?.id });
+          }),
+      };
     },
   });
   let mailbox: ActorMailbox | undefined;

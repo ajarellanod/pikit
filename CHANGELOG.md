@@ -5,7 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
-- component/platform-cloudflare: new. `actor.mailbox` and `wakeups` on Cloudflare, in both Apps: from the Worker, `send` is an RPC to the conversation's object (`env.CONVERSATION`, configurable); in the object, `deliver` reaches `actor.inbox`, `actor.mailbox` sends to its own key locally and to others by RPC, and `wakeups` are rows in `platform_cloudflare_wakeups` over the object's one alarm, run one at a time in slices (`sliceMs`, 60 s by default) with backoff rows. Target `cloudflare`; new kind `platform`. Both suites also run in the workerd lane, on real Durable Objects with their RPC and alarm.
+- component/platform-cloudflare: new. `actor.mailbox`, `actor.inbox` and `wakeups` on Cloudflare, in both Apps: from the Worker, `send` is an RPC to the conversation's object (`env.CONVERSATION`, configurable; its `actor.inbox` and `wakeups` throw, saying they belong in the object); in the object, `deliver` calls the handler registered with `actor.inbox` for the type, `actor.mailbox` sends to its own key locally and to others by RPC, and `wakeups` are rows in `platform_cloudflare_wakeups` over the object's one alarm, run one at a time in slices (`sliceMs`, 60 s by default) with backoff rows. Target `cloudflare`; new kind `platform`. Both suites also run in the workerd lane, on real Durable Objects with their RPC and alarm.
+- component/runtime-pi: targets `cloudflare` too: in workerd, in a real Durable Object with sessions on `sessions-sql` over `storage-do`, a message sent from the Worker by RPC is answered by a run driven in `platform-cloudflare`'s alarm.
 - component/runtime-pi: uses `wakeups` when installed (SPEC C4): every run is driven inside the wakeup handler `runtime-pi.drive`, asked for by a dispatch or resume that leaves a run going, by start with `agent.submissions` (instead of resuming in the background) and by Pi's retry backoff; each run of it resumes what is due or pending, waits for the App's runs until its slice ends, and asks again at once while runs remain. Without `wakeups`, nothing changes. Its README has a Cloudflare section.
 - adapter: `createPiRuntime({ retryAt })` continues a run past Pi's retry backoff from outside the process (the run stops being driven at the wait, and is resumed at or after `notBefore`) instead of a timer; `runtime.holds(conversation)` and `runtime.whenIdle(ctx)` tell a host whether this worker still drives runs, for one that must wait for them inside an event.
 - cli: `pikit add` and `pikit new` also offer the provider of a capability a component requires when the catalogue marks it `offer`: `pikit add conversations-kv` offers `storage-kv-sql` (and `storage-sqlite`).
@@ -62,11 +63,14 @@ line names its area (AGENTS.md, "Git and docs").
   and its killed workers on it, `openSqliteDatabase(path, { durableObjectLimits })` is a `storage.sql`
   for tests, and `createSessionRepoStreamingForkConformance` is Pi's fork cases the repository suite
   does not include yet.
-- contracts: `actor.mailbox` and the keyed `actor.inbox` (experimental, SPEC C2): `send(key, type,
-  message, ctx)` resolves once the actor owning `key` holds the JSON message durably (its `actor.inbox`
-  handler for `type` resolved), and rejects otherwise, with an error naming the type when nothing
-  handles it. The handler gets a copy and a context of its own. Its conformance suite and a memory
-  mailbox for tests are in `@pikit/contracts/testing`.
+- contracts: `actor.mailbox` and `actor.inbox` (experimental, SPEC C2): the component that handles a
+  type of message registers its handler with `actor.inbox`'s `handle(type, handler)` in its `start`
+  (one handler per type, dropped at stop), as `wakeups` registers its own, so it may also send, wake
+  itself or use the runtime with no dependency cycle. `send(key, type, message, ctx)` resolves once
+  the actor owning `key` holds the JSON message durably (its handler for `type` resolved), and
+  rejects otherwise, with an error naming the type when nothing handles it. The handler gets a copy
+  and a context of its own. Its conformance suite (with `wakeups: true`, an actor that also wakes
+  itself) and a memory mailbox for tests are in `@pikit/contracts/testing`.
 - contracts: `wakeups` (experimental, SPEC C3, C4): the component that owns the work registers a
   handler with `handle(name, handler)` in its `start` (one owner per name, dropped at stop) and asks
   with `at(name, time, ctx)`, replacing its earlier request; `cancel(name, ctx)` drops it. A request
@@ -74,9 +78,9 @@ line names its area (AGENTS.md, "Git and docs").
   time; a handler that rejects runs again with the provider's backoff, and its context may be
   cancelled at a slice deadline, after which it asks again. Its conformance suite (on a manual clock)
   and a memory wakeups for tests, forgetful or durable, are in `@pikit/contracts/testing`.
-- component/mailbox-local: new. `actor.mailbox` on a server: `send` calls the same app's
-  `actor.inbox` handler for the type with a JSON copy and resolves when it does; `stop` cancels the
-  handlers still running. Targets `server`. `mailbox` is a new component kind.
+- component/mailbox-local: new. `actor.mailbox` and `actor.inbox` on a server: `send` calls the
+  handler registered for the type in the same app with a JSON copy and resolves when it does; `stop`
+  cancels the handlers still running and drops them. Targets `server`. `mailbox` is a new component kind.
 - component/wakeups-timers: new. `wakeups` on a server as in-process timers on the app's clock: a
   failed handler runs again after 1 s, 5 s, 30 s, then every 60 s, logged each time; optional
   `sliceMs` cancels a running handler's context as Cloudflare would, and no timer outlives a stop by

@@ -1,12 +1,12 @@
 # platform-cloudflare
 
 The platform half of a Cloudflare project: the Worker reaches each conversation's Durable Object,
-and components in the object wake at the time they ask for. It provides `actor.mailbox` and
-`wakeups` (SPEC §4.1, C2 to C5), the capabilities `mailbox-local` and `wakeups-timers` provide on a
-server, so a channel or a runtime written against them runs on both.
+and components in the object handle its messages and wake at the time they ask for. It provides
+`actor.mailbox`, `actor.inbox` and `wakeups` (SPEC §4.1, C2 to C5), the capabilities
+`mailbox-local` and `wakeups-timers` provide on a server, so a channel or a runtime written against
+them runs on both.
 
-- **Provides:** `actor.mailbox`, `wakeups`.
-- **Uses:** `actor.inbox` (keyed, optional): the handlers of the messages delivered to the object.
+- **Provides:** `actor.mailbox`, `actor.inbox`, `wakeups`.
 - **Requires:** nothing; it reads the platform from `WORKERS_HOST`, which `deployment-cloudflare`'s
   entrypoints put in each App's start context.
 - **Target:** `cloudflare`. On a server, use `mailbox-local` and `wakeups-timers`.
@@ -31,7 +31,7 @@ the channel does not acknowledge its platform, which delivers again: delivery is
 handlers recognise a message they already hold.
 
 It refuses to start when `env.CONVERSATION` (or the binding you configure) is not a Durable Object
-namespace.
+namespace. Its `actor.inbox` and `wakeups` throw there, saying they belong in the object's App.
 
 ## In the object's App
 
@@ -59,12 +59,26 @@ is set to the earliest row whose name has a handler.
 
 Nothing else in the object may set its alarm: a component that needs to wake uses `wakeups`.
 
-### The RPC's other end, and `actor.mailbox` in the object
+### `actor.inbox`: the RPC's other end
 
-It registers the object's `deliver` RPC: `deliver(type, key, message)` calls this App's
-`actor.inbox` handler for `type` with a context of its own (the start context's values, cancelled
-when the App stops, never by the sender), and resolves or rejects with it. With no handler for the
-type, the error names it and lists the ones handled.
+The components that handle messages (a channel's object half) register a handler per type in their
+`start`:
+
+```ts
+const inbox = pikit.use("actor.inbox");
+// in start:
+inbox.get().handle("telegram.update", async (key, message, ctx) => {
+  await admit(key, message, ctx);   // resolve once it is durable: the Worker acknowledges then
+});
+```
+
+A type has one handler (registering it twice throws); handlers are dropped at `stop`. The object's
+`deliver` RPC, `deliver(type, key, message)`, calls the handler for `type` with a context of its own
+(the start context's values, cancelled when the App stops, never by the sender), and resolves or
+rejects with it. With no handler for the type, the error names it and lists the ones handled; the
+Worker's `send` rejects, and the platform delivers again.
+
+### `actor.mailbox` in the object
 
 `actor.mailbox` works in the object too, so a component there can reach another conversation:
 another key is an RPC to its object, as from the Worker; the object's own key (the one whose
@@ -106,27 +120,27 @@ minutes, then runs again from the start: honour `ctx.abortSignal`.
 Both are optional; these are the defaults. `binding` must be the one `deployment-cloudflare` binds
 its conversation class to.
 
-## Where it goes, and the dependency graph
+## The dependency graph
 
-It uses `actor.inbox` with `useKeyed`, so it starts after every component that provides an inbox
-handler, and it provides `wakeups` and `actor.mailbox`, so it starts before every component that
-uses them. In the object's App, **a component that provides an `actor.inbox` handler must not
-depend, even through other capabilities, on `wakeups` or `actor.mailbox`**: that is a dependency
-cycle, and the App refuses to start, naming it. Wakeup handlers are registered with
-`wakeups.handle`, not provided, so a component that wakes creates no cycle.
+It uses nothing: message and wakeup handlers are registered with `handle`, not provided, so it starts
+first and depends on none of them. A component in the object may handle messages, send them, wake
+itself and use the runtime, which drives its runs with the same `wakeups`: no dependency cycle.
 
 ## Removing it
 
-`pikit remove platform-cloudflare` refuses while a component requires `actor.mailbox` or
-`wakeups`. The table `platform_cloudflare_wakeups` stays in each object until the object is deleted;
+`pikit remove platform-cloudflare` refuses while a component requires `actor.mailbox`,
+`actor.inbox` or `wakeups`. The table `platform_cloudflare_wakeups` stays in each object until the object is deleted;
 drop it if you want it gone.
 
 ## Tests
 
 Copied with the component, they run in your project under `bun test`, over doubles of a Durable
 Object (its alarm on the app's clock, its RPC, its SQL in `node:sqlite`): the `wakeups` conformance
-suite (with the slice deadline and requests that survive a restart), the `actor.mailbox` suite from
-a Worker's App to the objects, the lifecycle suite, and the alarm set again, a slice, the backoff
-rows, a request waiting for its handler, deliveries to `actor.inbox`, the object's own mailbox and
-what it refuses at start. pikit also runs both suites in workerd on real Durable Objects, and there
-the real alarm, an eviction, the slice and the backoff (`tests/workerd`).
+suite (with the slice deadline and requests that survive a restart), the `actor.mailbox` and
+`actor.inbox` suite from a Worker's App to the objects (whose actor also sends and wakes itself), the
+lifecycle suite, and the alarm set again, a slice, the backoff rows, a request waiting for its
+handler, deliveries to `actor.inbox`, the object's own mailbox and what it refuses at start. pikit
+also runs both suites in workerd on real Durable Objects, and there the real alarm, an eviction, the
+slice and the backoff (`tests/workerd`); and, beside the component, an object's App with `runtime-pi`
+on these wakeups and an actor that handles and wakes, which answers a delivered message in an alarm
+(here and in workerd).

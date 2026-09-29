@@ -2,7 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "mailbox-local",
   "version": "0.0.0",
-  "description": "Hands a channel's message to the actor that owns its conversation, in the same app: actor.mailbox on a server.",
+  "description": "Hands a channel's message to the actor that owns its conversation, in the same app: actor.mailbox and actor.inbox on a server.",
   "targets": [
     "server"
   ],
@@ -11,11 +11,10 @@
     "capabilities": []
   },
   "optional": {
-    "capabilities": [
-      "actor.inbox"
-    ]
+    "capabilities": []
   },
   "provides": [
+    "actor.inbox",
     "actor.mailbox"
   ],
   "dependencies": {

@@ -44,11 +44,15 @@ for (const c of createWakeupsConformance(
   test(`platform-cloudflare ${c.group}: ${c.name}`, () => c.run());
 }
 
-// The actor.mailbox contract from a Worker's App: each key is an object running its own App.
-for (const c of createMailboxConformance((inbox) => {
-  const objects = simulatedNamespace(() => [platformCloudflare, inbox], fakeSql);
-  return { components: withWorkersHost({ env: objects.env }, [platformCloudflare]), dispose: objects.stop };
-})) {
+// The actor.mailbox and actor.inbox contract from a Worker's App: each key is an object running its
+// own App, where platform-cloudflare also provides wakeups (the suite's actor wakes itself too).
+for (const c of createMailboxConformance(
+  (inbox) => {
+    const objects = simulatedNamespace(() => [platformCloudflare, inbox], fakeSql);
+    return { components: withWorkersHost({ env: objects.env }, [platformCloudflare]), dispose: objects.stop };
+  },
+  { wakeups: true },
+)) {
   test(`platform-cloudflare ${c.group}: ${c.name}`, () => c.run());
 }
 
@@ -104,9 +108,9 @@ const rowsOf = (object: SimulatedObject) =>
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [platformCloudflare], logger: silentLogger }).create();
   expect(app.describe().components.find((component) => component.name === "platform-cloudflare")).toMatchObject({
-    provides: ["wakeups", "actor.mailbox"],
+    provides: ["wakeups", "actor.inbox", "actor.mailbox"],
     requires: [],
-    optional: ["actor.inbox"],
+    optional: [],
   });
 });
 
@@ -244,9 +248,14 @@ function recordingInbox() {
   const component = defineComponent({
     name: "test-inbox",
     setup(pikit) {
-      pikit.provideKeyed("actor.inbox", "test.message", async (key, message, ctx) => {
-        received.push({ key, message, object: ctx.value(WORKERS_HOST)?.object?.id, ctx });
-      });
+      const inbox = pikit.use("actor.inbox");
+      return {
+        start() {
+          inbox.get().handle("test.message", async (key, message, ctx) => {
+            received.push({ key, message, object: ctx.value(WORKERS_HOST)?.object?.id, ctx });
+          });
+        },
+      };
     },
   });
   return { component, received };
@@ -295,7 +304,7 @@ test("in an object, actor.mailbox delivers to its own key locally and to any oth
   }
 });
 
-test("in the Worker's App, wakeups say they belong in an object's App", async () => {
+test("in the Worker's App, wakeups and actor.inbox say they belong in an object's App", async () => {
   const objects = simulatedNamespace(() => [], fakeSql);
   const owner = defineComponent({
     name: "test-owner",
@@ -305,6 +314,14 @@ test("in the Worker's App, wakeups say they belong in an object's App", async ()
     },
   });
   expect(await startFailure([platformCloudflare, owner], { env: objects.env })).toContain("wakeups exist only in a Durable Object's App");
+  const actor = defineComponent({
+    name: "test-actor",
+    setup(pikit) {
+      const handle = pikit.use("actor.inbox");
+      return { start: () => handle.get().handle("test.message", async () => {}) };
+    },
+  });
+  expect(await startFailure([platformCloudflare, actor], { env: objects.env })).toContain("actor.inbox exists only in a Durable Object's App");
 });
 
 /** The reason `app.start` fails with, when the host in its context is `host`. */

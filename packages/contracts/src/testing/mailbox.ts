@@ -1,13 +1,19 @@
 /**
- * `actor.mailbox` conformance (SPEC §4.1, C2): what every mailbox must do, wherever its actors run.
- * Runner-independent, like the lifecycle suite:
+ * `actor.mailbox` and `actor.inbox` conformance (SPEC §4.1, C2): what every mailbox must do, wherever
+ * its actors run. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createMailboxConformance((inbox) => ({ components: [inbox, myMailbox] })))
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
- * The suite brings the actor's side: a component providing `actor.inbox` handlers it scripts
- * (`inbox`). The fixture installs it where its actors run: in its own list, for a mailbox that
- * delivers in the same App. The suite sends through the capability, as a channel would.
+ * The suite brings the actor's side: a component (`inbox`) that uses `actor.inbox` and registers the
+ * handlers it scripts in its `start`. The fixture installs it where its actors run: in its own list,
+ * for a mailbox that delivers in the same App. The suite sends through the capability, as a channel
+ * would.
+ *
+ * That component is an actor as real ones are: it also uses `actor.mailbox` (a handler sends to
+ * another actor) and, when installed, `wakeups` (it registers a wakeup handler and asks for it from a
+ * message's handler). So every fixture proves that one component can handle and send, and one with
+ * `wakeups: true` that an actor waking itself composes with its mailbox: none is a dependency cycle.
  *
  * `createMemoryMailbox` is the in-memory double: it passes this suite, and it stands in for a
  * mailbox in the tests of a channel or an actor.
@@ -25,13 +31,17 @@ import {
   withCancel,
 } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
-import type { ActorMailbox } from "../actor.ts";
+import type { ActorInboxHandler, ActorMailbox } from "../actor.ts";
 import type { JsonValue } from "../storage.ts";
+import type { Wakeups } from "../wakeups.ts";
 import { checker, expecter } from "./assert.ts";
 
 /** A mailbox built for one case. */
 export interface MailboxFixture {
-  /** The component providing `actor.mailbox`, what it uses, and `inbox` wherever the actors run. */
+  /**
+   * The component providing `actor.mailbox`, what it uses, and `inbox` wherever the actors run, with
+   * the providers of `actor.inbox` and `actor.mailbox` there (and of `wakeups`, if the options say so).
+   */
   components: ComponentDefinition[];
   config?: Record<string, unknown>;
   dispose?(): Promise<void>;
@@ -44,12 +54,17 @@ const check = checker(GROUP);
 /** The message types the suite's inbox handles. */
 const TYPE = "conformance";
 const OTHER_TYPE = "conformance.other";
+/** The wakeup handler the suite's actors register when `wakeups` is provided. */
+const WAKE = "mailbox-conformance.wake";
 
 interface Received {
   type: string;
   key: string;
   message: JsonValue;
   ctx: AppContext;
+  /** The actor App's own mailbox and wakeups (when provided): what its handlers may use. */
+  mailbox: ActorMailbox;
+  wakeups: Wakeups | undefined;
 }
 
 const rejection = (promise: Promise<unknown>): Promise<unknown> =>
@@ -77,7 +92,15 @@ async function hasSettled(promise: Promise<unknown>): Promise<boolean> {
   return settled;
 }
 
-export function createMailboxConformance(factory: (inbox: ComponentDefinition) => MailboxFixture | Promise<MailboxFixture>): readonly ConformanceCase[] {
+export interface MailboxConformanceOptions {
+  /** Where the actors run, the App also provides `wakeups`: the case of an actor that wakes itself runs. */
+  wakeups?: boolean;
+}
+
+export function createMailboxConformance(
+  factory: (inbox: ComponentDefinition) => MailboxFixture | Promise<MailboxFixture>,
+  options: MailboxConformanceOptions = {},
+): readonly ConformanceCase[] {
   const mailboxCase = (name: string, run: (s: Subject) => Promise<void>): ConformanceCase => ({
     group: GROUP,
     name,
@@ -104,6 +127,10 @@ export function createMailboxConformance(factory: (inbox: ComponentDefinition) =
           get finished() {
             return inbox.finished;
           },
+          get woken() {
+            return inbox.woken;
+          },
+          registration: inbox.registration,
           behave: inbox.behave,
           hold: inbox.hold,
           send: (key, type, message, ctx = started.context()) => resolved.send(key, type, message, ctx),
@@ -116,7 +143,7 @@ export function createMailboxConformance(factory: (inbox: ComponentDefinition) =
     },
   });
 
-  return [
+  const cases: ConformanceCase[] = [
     mailboxCase("send resolves once the handler for its type resolved, and the handler gets the key and the message", async (s) => {
       const gate = s.hold();
       const sent = s.send("actor-1", TYPE, { text: "hello" });
@@ -217,7 +244,45 @@ export function createMailboxConformance(factory: (inbox: ComponentDefinition) =
         "each key and its message",
       );
     }),
+
+    mailboxCase("a type has one handler: registering it again throws, naming it, and an empty type throws", async (s) => {
+      // The actor's start tried both after registering its handlers; an actor starts by the first send.
+      await s.send("actor-1", TYPE, 1);
+      const [again, empty] = s.registration;
+      check(again instanceof Error && again.message.includes(TYPE), `an error naming "${TYPE}", got ${String(again)}`);
+      check(empty !== undefined, "handle with an empty type to throw");
+      expect(s.received.length, 1, "handlers called: the first registration stands");
+    }),
+
+    mailboxCase("one component both handles and sends: a handler sends to another actor through the mailbox", async (s) => {
+      s.behave(async (r) => {
+        if (r.type === TYPE) await r.mailbox.send("actor-2", OTHER_TYPE, { forwarded: r.message }, r.ctx);
+      });
+      await s.send("actor-1", TYPE, "hello");
+      expect(
+        s.received.map(({ type, key, message }) => [type, key, message]),
+        [
+          [TYPE, "actor-1", "hello"],
+          [OTHER_TYPE, "actor-2", { forwarded: "hello" }],
+        ],
+        "the message and the one its handler sent",
+      );
+    }),
   ];
+
+  if (options.wakeups) {
+    cases.push(
+      mailboxCase("an actor that handles messages also registers a wakeup handler, and asks for it from a message's handler", async (s) => {
+        s.behave(async (r) => {
+          if (r.wakeups === undefined) throw new Error(`${GROUP}: wakeups is not provided where the actor runs`);
+          await r.wakeups.at(WAKE, r.ctx.clock.now(), r.ctx);
+        });
+        await s.send("actor-1", TYPE, { wake: true });
+        await eventually(() => s.woken > 0, "the actor's wakeup handler to run");
+      }),
+    );
+  }
+  return cases;
 }
 
 interface Inbox {
@@ -226,6 +291,10 @@ interface Inbox {
   received: Received[];
   /** How many handler calls resolved. */
   readonly finished: number;
+  /** How many times the actors' wakeup handler ran. */
+  readonly woken: number;
+  /** What registering `TYPE` again, then an empty type, threw in the actor's start (the last one's). */
+  registration: unknown[];
   /** What the handlers do after recording a call; by default they resolve at once. */
   behave(run: (received: Received) => Promise<void>): void;
   /** Makes the handlers wait until `release()`. */
@@ -238,28 +307,58 @@ interface Subject extends Omit<Inbox, "component"> {
   context(parent?: Parameters<App["context"]>[0]): AppContext;
 }
 
-/** The actor's side, scripted by each case: handlers for `TYPE` and `OTHER_TYPE`. */
+/**
+ * The actor's side, scripted by each case: a component that registers handlers for `TYPE` and
+ * `OTHER_TYPE` in its start, and a wakeup handler when `wakeups` is provided. Every App it is
+ * installed in (every actor) records into the same lists.
+ */
 function createInbox(): Inbox {
   const received: Received[] = [];
+  const registration: unknown[] = [];
   let finished = 0;
+  let woken = 0;
   let behaviour: (received: Received) => Promise<void> = async () => {};
-  const handler = (type: string) => async (key: string, message: JsonValue, ctx: AppContext) => {
-    const call = { type, key, message, ctx };
-    received.push(call);
-    await behaviour(call);
-    finished++;
+  const attempt = (register: () => void): unknown => {
+    try {
+      register();
+      return undefined;
+    } catch (thrown) {
+      return thrown ?? new Error("threw nothing");
+    }
   };
   return {
     component: defineComponent({
       name: "mailbox-conformance-inbox",
       setup(pikit) {
-        pikit.provideKeyed("actor.inbox", TYPE, handler(TYPE));
-        pikit.provideKeyed("actor.inbox", OTHER_TYPE, handler(OTHER_TYPE));
+        const inbox = pikit.use("actor.inbox");
+        const mailbox = pikit.use("actor.mailbox");
+        const wakeups = pikit.useOptional("wakeups");
+        return {
+          start() {
+            const own = { mailbox: mailbox.get(), wakeups: wakeups.get() };
+            const handler =
+              (type: string): ActorInboxHandler =>
+              async (key, message, ctx) => {
+                const call = { type, key, message, ctx, ...own };
+                received.push(call);
+                await behaviour(call);
+                finished++;
+              };
+            inbox.get().handle(TYPE, handler(TYPE));
+            inbox.get().handle(OTHER_TYPE, handler(OTHER_TYPE));
+            registration.splice(0, registration.length, attempt(() => inbox.get().handle(TYPE, handler(TYPE))), attempt(() => inbox.get().handle("", handler(""))));
+            own.wakeups?.handle(WAKE, async () => void woken++);
+          },
+        };
       },
     }),
     received,
+    registration,
     get finished() {
       return finished;
+    },
+    get woken() {
+      return woken;
     },
     behave(run) {
       behaviour = run;
@@ -274,21 +373,29 @@ function createInbox(): Inbox {
 }
 
 /**
- * `actor.mailbox` in memory, for tests: every key's actor is this App, as on a server. `send` calls
- * this App's `actor.inbox` handler for the type with a JSON copy of the message and a context of the
- * handler's own (cancelled when the App stops), and resolves when the handler does.
+ * `actor.mailbox` and `actor.inbox` in memory, for tests: every key's actor is this App, as on a
+ * server. `send` calls the handler registered for the type with a JSON copy of the message and a
+ * context of the handler's own (cancelled when the App stops), and resolves when the handler does.
+ * Handlers are dropped when the App stops.
  */
 export function createMemoryMailbox(): ComponentDefinition {
   return defineComponent({
     name: "memory-mailbox",
     setup(pikit) {
-      const inbox = pikit.useKeyed("actor.inbox");
+      const handlers = new Map<string, ActorInboxHandler>();
       let running: { ctx: AppContext; stop: AbortController } | undefined;
+      pikit.provide("actor.inbox", {
+        handle(type, handler) {
+          if (typeof type !== "string" || type === "") throw new TypeError("memory-mailbox: a message type is a non-empty string");
+          if (handlers.has(type)) throw new Error(`memory-mailbox: the type "${type}" already has a handler`);
+          handlers.set(type, handler);
+        },
+      });
       pikit.provide("actor.mailbox", {
         async send(key, type, message, ctx) {
           if (running === undefined) throw new Error("memory-mailbox: actor.mailbox used while the app is not running");
           if (typeof key !== "string" || key === "") throw new TypeError("memory-mailbox: a key is a non-empty string");
-          const handler = inbox.get(type);
+          const handler = handlers.get(type);
           if (handler === undefined) throw new Error(`memory-mailbox: no actor.inbox handler for the type "${type}"`);
           const text = JSON.stringify(message) as string | undefined;
           if (text === undefined) throw new TypeError("memory-mailbox: a message must be JSON");
@@ -307,12 +414,13 @@ export function createMemoryMailbox(): ComponentDefinition {
         start(ctx) {
           const stop = new AbortController();
           // The start context's values, cancelled only when the app stops.
-          const handlers = ctx.derive((inner) => ({ abortSignal: stop.signal, value: (key) => inner.value(key), toString: () => `${inner}.Inbox` }));
-          running = { ctx: handlers, stop };
+          const context = ctx.derive((inner) => ({ abortSignal: stop.signal, value: (key) => inner.value(key), toString: () => `${inner}.Inbox` }));
+          running = { ctx: context, stop };
         },
         stop() {
           running?.stop.abort(new Error("memory-mailbox: the app is stopping"));
           running = undefined;
+          handlers.clear();
         },
       };
     },

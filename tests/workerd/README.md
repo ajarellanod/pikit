@@ -19,6 +19,7 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | `test/submissions-sql.workerd.ts` | `agent.submissions` with its `answers` feed, pruning and restarts, on `submissions-sql` over `storage-do` |
 | `test/secrets-cloudflare.workerd.ts` | `secrets` on `secrets-cloudflare`, over the Worker's real `env` |
 | `test/platform-cloudflare.workerd.ts` | `wakeups` on `platform-cloudflare` over a real object's SQL (the alarm simulated on the suite's clock); `actor.mailbox` from the Worker's App by real RPC to `ConversationDouble`s; the real alarm (set, fired, after an eviction), the slice, the backoff, a request waiting for its handler, an object's own mailbox |
+| `test/runtime-pi.workerd.ts` | `runtime-pi` in a conversation object's App (sessions on `sessions-sql` over `storage-do`, `platform-cloudflare`'s `actor.inbox` and `wakeups`, an actor that handles and wakes): a message sent from the Worker's App by RPC is answered by a run driven in the object's alarm |
 
 Each case of a storage suite runs in a Durable Object of its own (`runInDurableObject` on a new id),
 and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint will

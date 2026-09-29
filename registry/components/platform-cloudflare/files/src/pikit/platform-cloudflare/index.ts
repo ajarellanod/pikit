@@ -1,5 +1,5 @@
 /**
- * platform-cloudflare: `actor.mailbox` and `wakeups` on Cloudflare (SPEC §4.1, C2 to C5).
+ * platform-cloudflare: `actor.mailbox`, `actor.inbox` and `wakeups` on Cloudflare (SPEC §4.1, C2 to C5).
  *
  * One component, installed in both Apps of a Cloudflare project (C1). What it does depends on the
  * App it starts in, which it reads from `WORKERS_HOST`:
@@ -8,7 +8,7 @@
  *   the conversation's Durable Object, `env[binding].get(env[binding].idFromName(key))
  *   .deliver(type, key, message)`. It resolves when the RPC does (the object's `actor.inbox` handler
  *   resolved), and rejects on any error, so the channel does not acknowledge its platform and the
- *   platform delivers again.
+ *   platform delivers again. Its `actor.inbox` and `wakeups` throw, saying they belong in an object.
  * - **In an object's App** (`object` present):
  *   - `wakeups`, as rows in the object's SQL (`platform_cloudflare_wakeups`, one per name)
  *     multiplexed over its one alarm. The alarm is set to the earliest row whose name has a handler,
@@ -16,8 +16,11 @@
  *     run one at a time, within one slice (`sliceMs`): at the slice's deadline the running handler's
  *     context is cancelled, it asks again (`at(name, now)`) and resolves, and the alarm is set for
  *     what remains, so a long piece of work is a sequence of short alarms (C4).
- *   - The RPC's other end: `deliver(type, key, message)` calls this App's `actor.inbox` handler for
- *     `type`, with a context of its own (cancelled when the App stops).
+ *   - `actor.inbox`, the RPC's other end: the actors' components register a handler per message
+ *     type (`handle(type, handler)`, in their start), and `deliver(type, key, message)` calls the one
+ *     for `type`, with a context of its own (cancelled when the App stops). Registered, not provided:
+ *     this component depends on no handler, so an actor's component may also use `wakeups` (the
+ *     runtime does) or `actor.mailbox` with no dependency cycle.
  *   - `actor.mailbox` too, so a component in the object can reach another conversation: another key
  *     is an RPC like the Worker's; this object's own key is a local call, which spends no subrequest
  *     and does not re-enter the object. (Its own key is the one whose `idFromName` is this object.)
@@ -32,7 +35,7 @@
  */
 
 import { type AppContext, defineComponent, withAbortSignal } from "@pikit/core";
-import { type ActorMailbox, type JsonValue, type WakeupHandler, type Wakeups, WORKERS_HOST } from "@pikit/contracts";
+import { type ActorInbox, type ActorInboxHandler, type ActorMailbox, type JsonValue, type WakeupHandler, type Wakeups, WORKERS_HOST } from "@pikit/contracts";
 import Type from "typebox";
 
 const SECOND = 1_000;
@@ -92,7 +95,8 @@ export default defineComponent({
   config: Config,
   setup(pikit, config) {
     const { clock, logger } = pikit;
-    const inbox = pikit.useKeyed("actor.inbox");
+    /** The handler of each message type, registered by the actors' components in their start. */
+    const inboxHandlers = new Map<string, ActorInboxHandler>();
     const handlers = new Map<string, WakeupHandler>();
     /** The run in progress: `at` or `cancel` for its name during it decides what its outcome does. */
     let current: { name: string; touched: boolean } | undefined;
@@ -268,9 +272,9 @@ export default defineComponent({
 
     /** Calls this App's `actor.inbox` handler for `type`; `stop` waits for it. */
     const deliver = (r: Running, type: string, key: string, message: JsonValue): Promise<void> => {
-      const handler = inbox.get(type);
+      const handler = inboxHandlers.get(type);
       if (handler === undefined) {
-        const known = inbox.keys();
+        const known = [...inboxHandlers.keys()];
         throw new Error(
           `platform-cloudflare: no actor.inbox handler for the type "${type}" in the conversation object's App (handled: ${known.length > 0 ? known.join(", ") : "none"}); ` +
             "install the component that handles it in the default export of pikit.config.ts, or check the type the sender names",
@@ -288,6 +292,20 @@ export default defineComponent({
       if (running !== r) throw new Error("platform-cloudflare: the conversation object's App is not running; the message was not delivered, and the sender's platform delivers it again");
       await deliver(r, type, key, message);
     };
+
+    const actorInbox: ActorInbox = {
+      handle(type, handler) {
+        if (typeof type !== "string" || type === "") throw new TypeError("platform-cloudflare: a message type is a non-empty string, prefixed with the component that handles it");
+        if (opened().object === undefined) {
+          throw new Error(
+            "platform-cloudflare: actor.inbox exists only in a Durable Object's App, and this is the Worker's: a component that handles messages (a channel's object half) belongs in the default export of pikit.config.ts.",
+          );
+        }
+        if (inboxHandlers.has(type)) throw new Error(`platform-cloudflare: the message type "${type}" already has a handler; a type has one handler in an app`);
+        inboxHandlers.set(type, handler);
+      },
+    };
+    pikit.provide("actor.inbox", actorInbox);
 
     const mailbox: ActorMailbox = {
       async send(key, type, message, ctx) {
@@ -353,6 +371,7 @@ export default defineComponent({
         const pending = Promise.all([stopping.alarm, ...stopping.inFlight]).then(() => {});
         await untilCancelled(pending, ctx.abortSignal).catch(() => {});
         handlers.clear();
+        inboxHandlers.clear();
       },
     };
   },
