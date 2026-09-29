@@ -33,6 +33,20 @@ test("HTTP brings only the record of submissions (its GET); tools do not bring a
   for (const tool of ["tool-read", "tool-write", "tool-edit", "tool-bash"]) expect(offeredProviders(registry, [tool])).toEqual([]);
 });
 
+test("a component that requires a capability marked offer brings its provider, and the storage it requires", () => {
+  expect(offeredProviders(registry, ["conversations-kv"])).toEqual([
+    { component: "storage-sqlite", capability: "storage.sql", for: "storage-kv-sql", why: "required" },
+    { component: "storage-kv-sql", capability: "storage.kv", for: "conversations-kv", why: "required" },
+  ]);
+  // The storage is there: only the key-value store comes. Both there: nothing.
+  expect(offeredProviders(registry, ["conversations-kv"], ["storage-sqlite"])).toEqual([
+    { component: "storage-kv-sql", capability: "storage.kv", for: "conversations-kv", why: "required" },
+  ]);
+  expect(offeredProviders(registry, ["conversations-kv"], ["storage-sqlite", "storage-kv-sql"])).toEqual([]);
+  // What it requires and the catalogue does not mark offer (its sessions) stays the user's choice.
+  expect(offeredProviders(registry, ["conversations-kv"]).map((o) => o.capability)).not.toContain("sessions.store");
+});
+
 test("the runtime brings the record of submissions, and the storage it requires", () => {
   expect(offeredProviders(registry, ["runtime-pi"])).toEqual([
     { component: "storage-sqlite", capability: "storage.sql", for: "submissions-sql", why: "required" },

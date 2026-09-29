@@ -2,8 +2,9 @@
  * Offered providers (SPEC §10.5): what a component brings along, decided by capabilities, never by
  * naming other components (S4).
  *
- * - A capability a component can use (`useOptional`) and the catalogue marks `offer` (durable
- *   delivery, `outbound.queue`), which nothing installed provides: its provider is offered.
+ * - A capability a component can use (`useOptional`) or requires (`use`) and the catalogue marks
+ *   `offer` (durable delivery, `outbound.queue`; a place for small values, `storage.kv`), which
+ *   nothing installed provides: its provider is offered.
  * - A capability an offered component requires (`use`), which nothing provides: its provider comes
  *   too (`outbound-durable` needs `storage.sql`: `storage-sqlite`).
  *
@@ -47,9 +48,12 @@ export function offeredProviders(registry: Registry, names: readonly string[], i
     const manifest = known(name);
     if (manifest === undefined) return;
     const wanted: [string, Offer["why"]][] = [
-      // What an offered component requires comes with it; what a component the user chose requires
-      // is theirs to provide (`pikit add` warns, `pikit doctor` fails).
-      ...(depth > 0 ? manifest.requires.capabilities.map((c): [string, Offer["why"]] => [c, "required"]) : []),
+      // What an offered component requires comes with it. What a component the user chose requires
+      // is theirs to provide (`pikit add` warns, `pikit doctor` fails), unless the catalogue marks
+      // it `offer`: `conversations-kv` brings `storage-kv-sql` as `channel-telegram` does.
+      ...manifest.requires.capabilities
+        .filter((c) => depth > 0 || capabilityEntry(c)?.offer === true)
+        .map((c): [string, Offer["why"]] => [c, "required"]),
       ...manifest.optional.capabilities.filter((c) => capabilityEntry(c)?.offer === true).map((c): [string, Offer["why"]] => [c, "recommended"]),
     ];
     for (const [capability, why] of wanted) {

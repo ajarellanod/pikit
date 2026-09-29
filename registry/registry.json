@@ -26,6 +26,15 @@
       ],
       "path": "components/conversations-file"
     },
+    "conversations-kv": {
+      "version": "0.0.0",
+      "description": "The conversation registry in storage.kv: which Pi session each conversation is in now, on a server or in a Durable Object.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/conversations-kv"
+    },
     "credentials-file": {
       "version": "0.0.0",
       "description": "The model providers' credentials in one JSON file, readable only by its owner (mode `0600`).",
