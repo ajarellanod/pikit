@@ -50,7 +50,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   const chosen = options.preset === undefined ? [] : registry.preset(options.preset, options.with ?? []);
   // What the chosen components bring (SPEC §10.5, "Offered providers"): durable delivery for a chat
   // channel, and the storage it needs. A preset lists only what every project of it uses.
-  const { order: components, installedFor } = withOffers(registry, chosen);
+  const { order: components, installedFor } = withOffers(registry, chosen, NEW_PROJECT_TARGETS);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
   for (const component of components) checkCompatible(NEW_PROJECT_TARGETS, registry.manifest(component));
   const tools = components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {}));

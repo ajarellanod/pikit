@@ -74,7 +74,7 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   const plans = [planInstall(projectDir, draft, registry, registryName, name, options)];
   if (options.quiet !== true) describePlan(plans[0] as Plan);
   await confirmPlan(plans[0] as Plan, options);
-  for (const offer of await acceptedOffers(registry, name, installed, options)) {
+  for (const offer of await acceptedOffers(registry, name, installed, draft.project.targets, options)) {
     const offered = planInstall(projectDir, draft, registry, registryName, offer.component, { ...options, installedFor: offer.for });
     if (options.quiet !== true) describePlan(offered);
     plans.push(offered);
@@ -115,10 +115,10 @@ export async function add(projectDir: string, name: string, options: AddOptions 
  * The providers `name` brings (`offers.ts`), each asked about (Enter is yes), or all of them with
  * `--yes`. A declined provider takes what only it needed with it.
  */
-async function acceptedOffers(registry: Registry, name: string, installed: readonly string[], options: AddOptions): Promise<Offer[]> {
+async function acceptedOffers(registry: Registry, name: string, installed: readonly string[], targets: readonly string[], options: AddOptions): Promise<Offer[]> {
   const accepted: Offer[] = [];
   const declined = new Set<string>();
-  for (const offer of offeredProviders(registry, [name], installed).reverse()) {
+  for (const offer of offeredProviders(registry, [name], installed, targets).reverse()) {
     if (declined.has(offer.for)) {
       declined.add(offer.component);
       continue;

@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: `pikit add` and `pikit new` offer only providers that run on the project's targets, so a
+  Cloudflare provider in the registry (`storage-do`) does not stop `storage-sqlite` from being
+  offered on a server.
 - contracts: the context key `WORKERS_HOST` (SPEC C5): on Cloudflare, each App's start context carries
   the Worker's `env` and, in a Durable Object's App, the object (its id, its storage, and hooks for
   its alarm and RPC deliveries), typed structurally. `withWorkersHost` in `@pikit/contracts/testing`

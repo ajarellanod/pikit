@@ -7,12 +7,14 @@
  * - A capability an offered component requires (`use`), which nothing provides: its provider comes
  *   too (`outbound-durable` needs `storage.sql`: `storage-sqlite`).
  *
- * Only when the registry has exactly one provider: with several, choosing is the user's, and `pikit
- * doctor` says what is missing. What is installed this way is recorded as installed *for* the
+ * Only when the registry has exactly one provider that runs on every one of the project's targets
+ * (`storage-sqlite` on a server, `storage-do` on Cloudflare): with several, choosing is the user's,
+ * and `pikit doctor` says what is missing. What is installed this way is recorded as installed *for* the
  * component that brought it, and leaves with it when nothing else uses it (`pikit remove`).
  */
 
 import { capabilityEntry } from "../registry/capabilities.ts";
+import { NEW_PROJECT_TARGETS } from "./pikit-json.ts";
 import type { Registry } from "./registry-source.ts";
 
 export interface Offer {
@@ -27,10 +29,16 @@ export interface Offer {
 }
 
 /**
- * The providers `names` bring, given what `installed` already provides; dependencies first (the
- * order to install them in). `names` themselves are never offered.
+ * The providers `names` bring, given what `installed` already provides, among those that run on
+ * `targets` (the project's); dependencies first (the order to install them in). `names` themselves
+ * are never offered.
  */
-export function offeredProviders(registry: Registry, names: readonly string[], installed: readonly string[] = []): Offer[] {
+export function offeredProviders(
+  registry: Registry,
+  names: readonly string[],
+  installed: readonly string[] = [],
+  targets: readonly string[] = NEW_PROJECT_TARGETS,
+): Offer[] {
   const provided = new Set<string>();
   const known = (name: string) => {
     try {
@@ -41,7 +49,8 @@ export function offeredProviders(registry: Registry, names: readonly string[], i
   };
   for (const name of [...installed, ...names]) for (const capability of known(name)?.provides ?? []) provided.add(capability);
 
-  const providersOf = (capability: string) => registry.names().filter((name) => known(name)?.provides.includes(capability) === true);
+  const runsHere = (name: string) => targets.every((target) => known(name)?.targets.includes(target) === true);
+  const providersOf = (capability: string) => registry.names().filter((name) => known(name)?.provides.includes(capability) === true && runsHere(name));
   const offers: Offer[] = [];
   const visit = (name: string, depth: number): void => {
     const manifest = known(name);
@@ -71,8 +80,12 @@ export function offeredProviders(registry: Registry, names: readonly string[], i
  * `components` with what they bring, each provider placed right before the component it came for
  * (the order `pikit new` installs them in), and what each was installed for.
  */
-export function withOffers(registry: Registry, components: readonly string[]): { order: string[]; installedFor: Map<string, string> } {
-  const offers = offeredProviders(registry, components);
+export function withOffers(
+  registry: Registry,
+  components: readonly string[],
+  targets: readonly string[] = NEW_PROJECT_TARGETS,
+): { order: string[]; installedFor: Map<string, string> } {
+  const offers = offeredProviders(registry, components, [], targets);
   const installedFor = new Map(offers.map((o) => [o.component, o.for]));
   /** The component the user chose that an offer, directly or through another offer, came for. */
   const rootOf = (name: string): string => {
