@@ -13,7 +13,7 @@
  */
 
 import type { AppContext } from "@pikit/core";
-import { isJsonObject } from "./agent-state.ts";
+import { isJsonObject } from "./json.ts";
 
 /**
  * Pi payload types, filled in by `@pikit/pi-adapter`:

@@ -17,6 +17,8 @@
  *   contract does not translate it.
  */
 
+import type { JsonValue } from "./json.ts";
+
 /** A value bound to a parameter or read from a column. Integers read back as `number`. */
 export type SqlValue = string | number | null | Uint8Array;
 
@@ -54,7 +56,6 @@ export interface SqlDatabase extends SqlStatements {
  * Pi first: Pi's durable documents are scoped to a session, a conversation or a task; this is a
  * component's own state, across conversations, which Pi does not keep.
  */
-export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
 /** One component's namespace in `storage.kv`. */
 export interface KeyValueStore {
