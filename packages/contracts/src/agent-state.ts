@@ -1,5 +1,5 @@
 /**
- * `agent.state` (SPEC §6.2a): the per-conversation JSON document an agent's `prepare(state)` reads
+ * `agent.state`: the per-conversation JSON document an agent's `prepare(state)` reads
  * and its tools update. It lives in the conversation's Pi session, so it commits with the session,
  * survives restarts and eviction, and starts fresh after a reset (a new session). The runtime
  * provides it; pikit keeps no store of its own.

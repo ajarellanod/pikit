@@ -1,5 +1,5 @@
 /**
- * The conversation a run belongs to, in the run's context (SPEC §6.3).
+ * The conversation a run belongs to, in the run's context.
  *
  * The runtime puts the run's `ConversationRef` in the context of every run, next to its
  * `AGENT_STATE`, and Pi hands that context to each tool call. A tool that needs to know whose run it

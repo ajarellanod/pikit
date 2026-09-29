@@ -7,7 +7,7 @@
  *
  * The suite owns the clock (`createManualClock`), so times are checked to the millisecond without
  * waiting, and the handlers, which it scripts. How long a failed handler waits is the provider's
- * policy (SPEC §4.9): the provider declares it (`backoffMs`), and the suite holds it to that. So are
+ * policy: the provider declares it (`backoffMs`), and the suite holds it to that. So are
  * a slice deadline (`sliceMs`) and requests that survive a restart (`durable`): the cases that need
  * them run only when the options say the provider has them.
  *

@@ -1,5 +1,5 @@
 /**
- * Feed conformance (SPEC §4.8, §14): what every `Feed` must do, whoever produces it. Runner-independent,
+ * Feed conformance (SPEC K3): what every `Feed` must do, whoever produces it. Runner-independent,
  * like the lifecycle suite:
  *
  *   for (const c of createFeedConformance(() => myFixture(), { prunes: true, restarts: true }))

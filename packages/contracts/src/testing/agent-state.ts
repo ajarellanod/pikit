@@ -1,5 +1,5 @@
 /**
- * `agent.state` conformance (SPEC §6.2a, §14): what every `AgentState` must do, wherever the
+ * `agent.state` conformance: what every `AgentState` must do, wherever the
  * conversation's state is stored. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createAgentStateConformance(() => myFixture()))

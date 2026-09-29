@@ -1,5 +1,5 @@
 /**
- * The convergence suite against the ways a component can react to another's facts (SPEC §4.8):
+ * The convergence suite against the ways a component can react to another's facts (SPEC K3):
  * reading the producer's feed with a cursor of its own passes; listening to its events alone fails,
  * because a crash between the producer's commit and the listener's loses the reaction for good.
  *
@@ -43,7 +43,7 @@ const RETRY_MS = 1_000;
 
 /**
  * Runs `pass` one at a time; a pass that fails is retried after `RETRY_MS` while the process runs.
- * A failed listener only delays a consumer (SPEC §4.8) if something ends the delay: this timer.
+ * A failed listener only delays a consumer if something ends the delay: this timer.
  */
 function passes(pass: () => Promise<void>) {
   let clock: Clock | undefined;

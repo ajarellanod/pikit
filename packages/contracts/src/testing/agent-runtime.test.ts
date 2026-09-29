@@ -84,7 +84,7 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
             await script.atEnd();
             if (record.inbox.length > 0) continue;
             // The run ends in the same step that found the inbox empty: a message admitted as
-            // queued is always taken by this run (the double's version of SPEC §6.4, gap 2).
+            // queued is always taken by this run (the double's version of Pi's gap 2, `pi-adapter`'s `pi-gaps.test.ts`).
             end();
             return { kind: "completed", text };
           }

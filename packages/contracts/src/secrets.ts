@@ -1,5 +1,5 @@
 /**
- * `secrets` (SPEC §4.5, §13): the only way a component reads a secret. Environment variables on a
+ * `secrets`: the only way a component reads a secret. Environment variables on a
  * server, Worker bindings on Cloudflare, a vault: each is a component providing this contract.
  *
  * A secret never appears in config, in `describe()`, in a log line or in a transcript; a component

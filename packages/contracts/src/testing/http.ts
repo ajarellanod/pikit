@@ -1,5 +1,5 @@
 /**
- * `http.route` conformance (SPEC §9.1, §14): what every server of `http.route` must guarantee to
+ * `http.route` conformance: what every server of `http.route` must guarantee to
  * the handlers it serves. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createHttpRouteConformance(() => myServerFixture()))

@@ -1,5 +1,5 @@
 /**
- * Convergence (SPEC §4.8, §14): kill the process after each of its commits in turn, start a new one
+ * Convergence (SPEC K3): kill the process after each of its commits in turn, start a new one
  * over the same records, and check that it ends where it should. Runner-independent, like the
  * lifecycle suite:
  *

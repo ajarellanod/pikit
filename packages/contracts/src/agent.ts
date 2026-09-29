@@ -1,5 +1,5 @@
 /**
- * The agent's programming model (SPEC §6.1): the shapes a project and its components use to talk
+ * The agent's programming model: the shapes a project and its components use to talk
  * to the agent runtime, without importing Pi.
  *
  * The core owns the shapes; Pi runs the agent. What is Pi-specific inside them (messages, tools,
@@ -36,7 +36,7 @@ export type AgentTool = Payload<"tool">;
 /** Token and cost accounting of a run (Pi's `Usage`). */
 export type Usage = Payload<"usage">;
 
-/** Which conversation (actor) a message belongs to (SPEC §5, §7). */
+/** Which conversation (actor) a message belongs to. */
 export interface ConversationRef {
   /** `tenant:channel:conversationId[:threadId]`. */
   key: string;
@@ -48,7 +48,7 @@ export interface ConversationRef {
 
 /**
  * What the agent has for one run: model, instructions and tools. The static fields of an
- * `AgentDefinition` are its defaults; `prepare(state)` returns the fields it changes (§6.2a).
+ * `AgentDefinition` are its defaults; `prepare(state)` returns the fields it changes.
  */
 export interface TurnConfig {
   /** `provider/modelId`, resolved by the runtime against its models. */
@@ -71,7 +71,7 @@ export interface PrepareContext {
 }
 
 /**
- * An agent is to a conversation what a class is to an object (SPEC §7.1): routing picks the agent
+ * An agent is to a conversation what a class is to an object: routing picks the agent
  * by name, and the runtime finds its definition under the keyed capability `agent.definition`.
  *
  * `S` is the type of the agent's state. It defaults to `object` so that a definition with a typed
@@ -93,7 +93,7 @@ export interface AgentDefinition<S extends object = object> {
   tools?: readonly (AgentTool | string)[];
   /**
    * The Pi extensions this agent's conversations load, by name: each is provided by a component under
-   * the keyed capability `agent.extension` (SPEC §6.2b). Like tools, installing an extension gives no
+   * the keyed capability `agent.extension`. Like tools, installing an extension gives no
    * agent anything until it names it. A conversation loads them when it opens, after the extensions
    * the runtime loads for every agent; they stay for as long as it is open, since its agent is fixed.
    * The runtime refuses a name with no provider.
@@ -186,7 +186,7 @@ export interface AgentResult {
   error?: { code: string; message: string };
 }
 
-/** The `agent.runtime` capability (SPEC §6.1). */
+/** The `agent.runtime` capability. */
 export interface AgentRuntime {
   /**
    * Hand a message to its conversation. Resolves once the message is durable (the ack point for a

@@ -1,8 +1,8 @@
 /**
- * Feeds (SPEC §4.8): facts a component records, read by others with a cursor of their own.
+ * Feeds (SPEC K3): facts a component records, read by others with a cursor of their own.
  *
  * Events are notices and can be missed: a listener that throws, or a process that dies between a
- * commit and the event about it, loses one (§4.3). A reaction that must not be lost reads the
+ * commit and the event about it, loses one (K3). A reaction that must not be lost reads the
  * producer's feed instead. It reads from its saved cursor when it starts and whenever an event
  * wakes it, applies what it reads idempotently, and saves the new cursor in the same transaction
  * as what it did. A crash only delays it.

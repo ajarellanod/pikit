@@ -1,9 +1,9 @@
 /**
- * `conversations.registry` (SPEC §7.4, §7.6): which Pi session a conversation is in now.
+ * `conversations.registry`: which Pi session a conversation is in now.
  *
  * A conversation key (`channel:conversationId`, built by the channel) points to one active
  * session. The pointer is a record, never worker memory: it outlives every worker, and dropping a
- * conversation from memory never touches it (§7.1, §7.4). A reset is the only thing that moves it,
+ * conversation from memory never touches it. A reset is the only thing that moves it,
  * and it moves it to a new session: the old one is kept, and no pointer is ever deleted.
  */
 
@@ -14,7 +14,7 @@ export interface ConversationRegistry {
   /**
    * The conversation for `key`. The first time, the registry creates its session and records the
    * pointer with `agent`; after that it returns what it recorded. A conversation keeps the agent it
-   * was created with: an actor does not change class (§7.1). Concurrent first calls for one key
+   * was created with: an actor does not change class. Concurrent first calls for one key
    * create one session.
    */
   resolve(key: string, agent: string, ctx: AppContext): Promise<ConversationRef>;
@@ -28,7 +28,7 @@ export interface ConversationRegistry {
   reset(key: string, ctx: AppContext): Promise<ConversationReset | undefined>;
 }
 
-/** What a reset did: the payload of `conversation.reset` (§7.6). */
+/** What a reset did: the payload of `conversation.reset`. */
 export interface ConversationReset {
   /** The conversation as it is now, on its new session. */
   conversation: ConversationRef;
@@ -38,7 +38,7 @@ export interface ConversationReset {
 
 declare module "@pikit/core" {
   interface AppEvents {
-    /** A conversation was pointed to a new session; the previous one is kept (§7.6). */
+    /** A conversation was pointed to a new session; the previous one is kept. */
     "conversation.reset": ConversationReset;
   }
 }

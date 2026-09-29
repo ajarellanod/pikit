@@ -1,5 +1,5 @@
 /**
- * `storage.sql` (SPEC §4.5, §16): a SQL database for the components that must keep records across
+ * `storage.sql` (SPEC §4.1, C5): a SQL database for the components that must keep records across
  * restarts: the outbox's deliveries, a scheduler's jobs, approvals. SQLite on a server
  * (`storage-sqlite`), a Durable Object's SQL on Cloudflare, Postgres later: each is a component
  * providing this contract.

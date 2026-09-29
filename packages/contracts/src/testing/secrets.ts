@@ -1,5 +1,5 @@
 /**
- * `secrets` conformance (SPEC §4.5, §13, §14): what every `SecretStore` must do, wherever the
+ * `secrets` conformance: what every `SecretStore` must do, wherever the
  * secrets live. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createSecretStoreConformance((secrets) => myFixture(secrets)))

@@ -1,12 +1,12 @@
 /**
- * `agent.submissions` conformance (SPEC §6.1, §14): what every record of submissions must do, wherever
+ * `agent.submissions` conformance: what every record of submissions must do, wherever
  * it keeps them. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createSubmissionsConformance(() => myFixture(), { prunes: true, restarts: true }))
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
  * The suite calls the contract as the runtime (`admitted`, `settled`, `abandoned`) and the channels (`pending`,
- * `get`, `answers`) do. `answers` also runs the feed suite (§4.8), each fact committed by a `settled`.
+ * `get`, `answers`) do. `answers` also runs the feed suite (SPEC K3), each fact committed by a `settled`.
  * Pruning and restarting are the provider's to do; the cases that need them run only when the options
  * say the fixture can.
  *
@@ -315,7 +315,7 @@ export function createSubmissionsConformance(
     );
   }
 
-  // `answers` is a feed like any other (SPEC §4.8).
+  // `answers` is a feed like any other (SPEC K3).
   const feedCases = createFeedConformance<RunSettlement>(
     async () => {
       const fixture = await factory();
