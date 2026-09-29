@@ -1,5 +1,5 @@
 /**
- * Delivering answers from `agent.submissions`' feed (SPEC §4.8), with `submissions-sql` and
+ * Delivering answers from `agent.submissions`' feed (`Feed`, SPEC K3), with `submissions-sql` and
  * `storage.kv` installed.
  *
  * An answer used to reach the chat only through `agent.settled`, an event: one that ended while the
@@ -22,7 +22,7 @@
  *
  * The first time the channel opens its cursor, it starts at the feed's end: the answers already there
  * ended before this reader existed, and were answered by events (an upgrade must not resend days of
- * them). No transaction spans the queue and the cursor: they are two components (SPEC §4.8).
+ * them). No transaction spans the queue and the cursor: they are two components.
  */
 
 import type { Logger } from "@pikit/core";

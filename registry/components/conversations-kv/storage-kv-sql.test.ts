@@ -2,7 +2,7 @@
  * conversations-kv over the real `storage.kv` of this registry: storage-kv-sql on a SQLite file.
  *
  * A repository test, not copied with the component: a component's files never import another
- * component's (S4), so this one lives beside `files/`. The copied tests use the memory `storage.kv`
+ * component's (SPEC P4), so this one lives beside `files/`. The copied tests use the memory `storage.kv`
  * from `@pikit/contracts/testing`; this one checks the same contract where the values are rows and
  * two processes share a database. Sessions come from Pi's in-memory repository through
  * `@pikit/pi-adapter/testing`.

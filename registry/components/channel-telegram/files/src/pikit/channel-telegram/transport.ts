@@ -1,6 +1,6 @@
 /**
- * How channel-telegram sends one piece of an answer (`ChannelTransport`, SPEC §5 "Outbound
- * delivery"): what `outbound.queue` calls when it is installed, and what the direct delivery in
+ * How channel-telegram sends one piece of an answer (`ChannelTransport`, @pikit/contracts'
+ * outbound.ts): what `outbound.queue` calls when it is installed, and what the direct delivery in
  * `replies.ts` retries when it is not.
  *
  * - A piece is sent as Telegram HTML (Markdown converted), or as plain text when Telegram cannot

@@ -1,5 +1,5 @@
 /**
- * One Telegram update, from the bot's inbox to the agent (SPEC §5):
+ * One Telegram update, from the bot's inbox to the agent:
  *
  * 1. Private chats only, for now; group messages are ignored (groups need the bot's privacy mode
  *    and mention rules, which come later).
@@ -7,7 +7,7 @@
  *    agent with tools must not answer strangers: an unknown user is told their id once, so the
  *    owner can add it, and nothing reaches the agent.
  * 3. Commands the channel answers itself: `/start` and `/help` explain, `/new` starts the
- *    conversation over (a reset: a new session, the old one kept, SPEC §7.6). Other commands go to
+ *    conversation over (a reset: a new session, the old one kept: `conversations.registry`'s `reset`). Other commands go to
  *    the agent as text.
  * 4. Everything else takes the inbound path every channel takes (`admitInbound`: `inbound.normalize`,
  *    `route.resolve`, the conversation `<instance>:<chat id>`, `dispatch`), and the sender is told what
@@ -33,7 +33,7 @@ export interface InboundDeps {
   delivery: Delivery;
   conversations: ConversationRegistry;
   runtime: AgentRuntime;
-  /** A context of the channel's own, never `start`'s (SPEC §4.7). */
+  /** A context of the channel's own, never `start`'s. */
   ctx: AppContext;
   /** Users already told they are not allowed, so a stranger's spam gets one answer. */
   refused: Set<number>;

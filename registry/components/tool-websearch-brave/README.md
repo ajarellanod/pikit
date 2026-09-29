@@ -58,7 +58,7 @@ config: { "tool-websearch-brave": { apiBase: "https://api.search.brave.com" } }
 
 ## Replay: `safe`
 
-A search only reads, so a run resumed after a crash (SPEC §8.4) simply searches again.
+A search only reads, so a run resumed after a crash simply searches again.
 
 ## Tests
 

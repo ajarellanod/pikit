@@ -1,7 +1,7 @@
 # submissions-sql
 
 No message your agent accepted ends without its answer reaching you, across crashes, restarts and
-deploys. It provides `agent.submissions` (SPEC §6.1, §6.4) on `storage.sql`.
+deploys. It provides `agent.submissions` (@pikit/contracts' submissions.ts) on `storage.sql`.
 
 ```sh
 pikit add storage-sqlite      # the database it keeps its records in
@@ -40,7 +40,7 @@ before, from events only.
 - **Abandoned.** Requests nothing can answer are settled unanswered by one `failed` run with error
   code `abandoned` and the reason as its message, appended to `answers` in the same transaction; a
   request already settled keeps its run. No schema change: `admitted_at` and `error_code` hold it.
-- **Answers** are a feed (SPEC §4.8): a channel reads them from a cursor of its own, whenever
+- **Answers** are a feed (`Feed`, SPEC K3): a channel reads them from a cursor of its own, whenever
   `agent.settled` wakes it and when it starts, so a crash only delays a delivery.
 
 ```ts
@@ -85,7 +85,7 @@ sqlite3 .pikit/pikit.db "SELECT seq, conversation_key, request_id, kind, error_c
 Pi's durable runtime (`pi-durable`) will keep a record per message in the session itself, with its
 answer. The adapter will then use Pi's, and what this component records per session goes. What one
 session cannot know stays: which sessions hold pending work, and the feed channels deliver from
-(SPEC §6.4).
+(`features/pi-durable-migration.md`).
 
 ## Removing it
 

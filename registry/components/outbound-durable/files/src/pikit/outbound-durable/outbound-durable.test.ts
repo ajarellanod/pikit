@@ -24,7 +24,7 @@ function temporaryDatabase(): string {
   return join(dir, "pikit.db");
 }
 
-// The outbound.queue contract (SPEC §5, §14): order, retries, abandonment, duplicates, restarts.
+// The outbound.queue contract (@pikit/contracts' outbound.ts): order, retries, abandonment, duplicates, restarts.
 // The suite holds this component to its own retry policy (queue.ts).
 const retry = { waitsMs: BACKOFF_MS, maxAgeMs: MAX_AGE_MS };
 for (const c of createOutboundQueueConformance(() => ({ components: [testStorage(temporaryDatabase()), outboundDurable] }), { retry })) {

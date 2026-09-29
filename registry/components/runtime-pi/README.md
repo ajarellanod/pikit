@@ -135,9 +135,9 @@ knows which conversation had one: it waits for its next message, as on a server.
 
 ## Pi extensions
 
-A Pi extension that uses only what pikit promises (tier A in SPEC §6.2b: tool policy, the run's
-lifecycle and notifications, its own tools) runs unmodified. Its terminal UI is inert: `ctx.hasUI`
-is `false`, and `ctx.ui.*` does nothing. `pikit doctor` fails on an import pikit does not provide,
+A Pi extension that uses only what pikit promises (tier A, listed in @pikit/pi-adapter's
+`extensions/surface.ts`: tool policy, the run's lifecycle and notifications, its own tools) runs
+unmodified. Its terminal UI is inert: `ctx.hasUI` is `false`, and `ctx.ui.*` does nothing. `pikit doctor` fails on an import pikit does not provide,
 and notes anything else an extension uses that never fires or does nothing here.
 
 An agent names the extensions it uses, as it names its tools. A component of yours installs each
@@ -182,8 +182,8 @@ under that name, so the import resolves without the coding agent itself:
 ```
 
 Each conversation loads the extensions when it opens: those given to `createRuntimePi` first, then
-the ones its agent names, in that order, each once. What pikit supports is listed in SPEC §6.2b;
-anything else logs a warning and does nothing.
+the ones its agent names, in that order, each once. What pikit supports is listed in
+@pikit/pi-adapter's `extensions/surface.ts`; anything else logs a warning and does nothing.
 
 ## Your agents
 
@@ -223,7 +223,7 @@ inside (`features/completed/tool-component.md`, "Migration").
 ## Agents that change with the conversation
 
 An agent can keep a JSON state per conversation and choose its model, system prompt and tools
-for each run from it (SPEC §6.2a):
+for each run from it (`agent.state`, @pikit/contracts' agent-state.ts):
 
 ```ts
 defineAgent({

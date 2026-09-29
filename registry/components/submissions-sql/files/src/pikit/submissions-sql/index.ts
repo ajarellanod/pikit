@@ -1,11 +1,11 @@
 /**
  * submissions-sql: no admitted message ends without its answer reaching you, across crashes, restarts
- * and deploys (SPEC §6.1, §6.4). It provides `agent.submissions` on `storage.sql`.
+ * and deploys. It provides `agent.submissions` on `storage.sql`.
  *
  * - The runtime (`runtime-pi`) records each message it admits, before the channel acknowledges it,
  *   and settles it when the run that took it ends. At start, it resumes every conversation with a
  *   message still pending, with no new message needed.
- * - Every run's outcome is appended to `answers`, a feed (SPEC §4.8), in the same transaction as the
+ * - Every run's outcome is appended to `answers`, a feed (`Feed`, SPEC K3), in the same transaction as the
  *   requests it settles. Channels deliver from it with a cursor of their own, so an answer that ended
  *   while the channel was stopped (a deploy) is delivered when it starts again.
  * - `get` says where one request is: HTTP's `GET /v1/conversations/:id/messages/:messageId`.
@@ -15,7 +15,8 @@
  * behind is told it missed some (`gap`). Pending requests are never pruned: nothing answered them yet.
  *
  * When Pi's durable runtime ships its submissions, the adapter moves to them and the per-session half
- * of this component goes; the index across sessions (`pending`) and the feed stay (SPEC §6.4).
+ * of this component goes; the index across sessions (`pending`) and the feed stay
+ * (features/pi-durable-migration.md).
  *
  * Targets: `server` and `cloudflare`. It imports nothing platform-specific (its storage is
  * `storage.sql`, its time the app's clock); on Cloudflare its storage is the conversation object's

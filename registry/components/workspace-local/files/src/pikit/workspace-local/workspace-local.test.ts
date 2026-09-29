@@ -46,7 +46,7 @@ async function started(config: Record<string, unknown>): Promise<{ app: App; wor
   return { app, workspace: found };
 }
 
-// The workspace contract (SPEC §14): a conversation keeps its files, two agents are apart.
+// The workspace contract: a conversation keeps its files, two agents are apart.
 for (const c of createWorkspaceConformance(async () => {
   const { app, workspace } = await started({ root: temporaryRoot() });
   return { provider: workspace, dispose: () => app.stop() };
@@ -54,7 +54,7 @@ for (const c of createWorkspaceConformance(async () => {
   test(`workspace-local ${c.group}: ${c.name}`, () => c.run());
 }
 
-// An agent's directory is Pi's ExecutionEnv, with a shell (SPEC §8.3).
+// An agent's directory is Pi's ExecutionEnv, with a shell.
 for (const c of createExecutionConformance(async () => {
   const { app, workspace } = await started({ root: temporaryRoot() });
   const { env } = await workspace.resolve(conversation("support"), app.context());

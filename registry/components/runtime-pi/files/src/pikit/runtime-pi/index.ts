@@ -1,5 +1,5 @@
 /**
- * runtime-pi: the agent runtime (SPEC §6). Pi runs the agent; this component wires it into the app.
+ * runtime-pi: the agent runtime (SPEC P1). Pi runs the agent; this component wires it into the app.
  *
  * It provides `agent.runtime` and uses:
  * - `sessions.store`: where each conversation's Pi session lives;
@@ -58,7 +58,7 @@ export interface RuntimePiOptions {
    * Pi extensions, unmodified, for every agent: `createRuntimePi({ extensions: [permissionGate] })`
    * in `pikit.config.ts`. Each conversation loads them when it opens, as Pi loads them per session,
    * then the extensions its agent names (`agent.extension`). There is no terminal UI: `ctx.hasUI` is
-   * false and `ctx.ui.*` does nothing (SPEC §6.2b).
+   * false and `ctx.ui.*` does nothing (runtime-pi's README).
    */
   extensions?: readonly PiExtension[];
   /** Attach Pi hooks to each conversation's harness when it opens (tests). */

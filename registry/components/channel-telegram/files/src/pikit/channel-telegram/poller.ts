@@ -6,7 +6,7 @@
  *
  * Acknowledgement: Telegram forgets an update once a later `getUpdates` asks for an `offset` past
  * it. The offset moves past an update only after `handle` resolved, that is once the message is
- * durably accepted by its conversation (`dispatch`'s admission, SPEC §5). A crash before that gets
+ * durably accepted by its conversation (`dispatch`'s admission, @pikit/contracts' agent.ts). A crash before that gets
  * the update again after the restart, and the conversation recognises it as a duplicate by its
  * request id, so it is answered once. An update whose handling keeps failing is skipped after a
  * few attempts, so one bad message cannot stop the bot.

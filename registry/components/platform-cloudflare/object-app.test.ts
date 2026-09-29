@@ -10,7 +10,7 @@
  * delivered to the object is answered in Telegram (a local fake of its Bot API).
  *
  * A repository test, not copied with the component: a component's files never import another
- * component's (S4), so this one lives beside `files/`. The object is the component's double (its alarm
+ * component's (SPEC P4), so this one lives beside `files/`. The object is the component's double (its alarm
  * on the app's clock, its SQL in `node:sqlite`); `tests/workerd` runs runtime-pi's App on a real object.
  */
 

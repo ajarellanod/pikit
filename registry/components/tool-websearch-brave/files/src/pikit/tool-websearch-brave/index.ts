@@ -6,7 +6,7 @@
  * - **The key is a secret.** `BRAVE_API_KEY` is read through `secrets` at each call and sent only to
  *   Brave, in the `X-Subscription-Token` header. It never appears in the tool's description,
  *   parameters, answers or errors, so the model never sees it. A call without it fails, saying so.
- * - **Its replay is `"safe"`** (SPEC §8.4): a search only reads, so a run resumed after a crash
+ * - **Its replay is `"safe"`** (`agentTool`'s replay): a search only reads, so a run resumed after a crash
  *   searches again.
  * - **`apiBase`** in config is Brave's API by default; a proxy or a test double replaces it.
  *

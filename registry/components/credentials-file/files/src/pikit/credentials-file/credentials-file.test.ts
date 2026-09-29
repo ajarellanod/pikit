@@ -54,7 +54,7 @@ async function startFailure(path: string): Promise<Error> {
   return error;
 }
 
-// pi-ai's CredentialStore contract (SPEC §14), with persistence and pi-ai's refresh written back.
+// pi-ai's CredentialStore contract (`createCredentialStoreConformance`), with persistence and pi-ai's refresh written back.
 for (const c of createCredentialStoreConformance(async () => {
   const path = temporaryPath();
   const apps: App[] = [];

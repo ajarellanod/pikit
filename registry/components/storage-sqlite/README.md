@@ -1,6 +1,6 @@
 # storage-sqlite
 
-The app's SQL database in one SQLite file. It provides `storage.sql` (SPEC §4.5): components that
+The app's SQL database in one SQLite file. It provides `storage.sql`: components that
 keep records across restarts (the outbox's deliveries, a scheduler's jobs) use it, and each creates
 and prefixes its own tables.
 

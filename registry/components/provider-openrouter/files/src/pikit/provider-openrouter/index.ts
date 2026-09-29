@@ -1,7 +1,7 @@
 /**
  * provider-openrouter: the models OpenRouter serves, for your agents, named
  * `openrouter/<vendor>/<model>` (`openrouter/z-ai/glm-5.3-flash`). It provides the keyed capability
- * `model.provider` under the key `openrouter` (SPEC §4.5).
+ * `model.provider` under the key `openrouter`.
  *
  * The provider is pi-ai's, imported by subpath through `@pikit/pi-adapter/providers/openrouter`, so
  * the app carries this provider and no other. Pi does the rest: requests, retries, and credentials.

@@ -1,5 +1,5 @@
 /**
- * The process killed after each commit in turn (SPEC §4.8, §14): whatever the point, every admitted
+ * The process killed after each commit in turn (`createConvergenceConformance`): whatever the point, every admitted
  * message ends settled, and its answer reaches the user.
  *
  * Around this component, two doubles play the parts the registry's components play:

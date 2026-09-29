@@ -1,5 +1,5 @@
 /**
- * credentials-file: the model providers' credentials in one JSON file, mode 0600 (SPEC §4.5).
+ * credentials-file: the model providers' credentials in one JSON file, mode 0600.
  *
  * It provides `model.credentials`, pi-ai's `CredentialStore`: one credential per provider id, an
  * API key or OAuth tokens, in the same shape as Pi's own `auth.json`. pi-ai reads a provider's

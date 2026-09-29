@@ -1,7 +1,7 @@
 /**
- * log-events: one structured log line per operational event, through the app's `Logger` (SPEC §9.1,
- * §13). Installing it is what turns these lines on; removing it turns them off. Where the lines go
- * and in which format (console, JSON lines in a container) is the logger's job, not this one.
+ * log-events: one structured log line per operational event, through the app's `Logger`. Installing
+ * it is what turns these lines on; removing it turns them off. Where the lines go and in which
+ * format (console, JSON lines in a container) is the logger's job, not this one.
  *
  *   agent.dispatched     conversation, agent, session, requestId, admission
  *   agent.started        conversation, agent, session, requestId, resumed
@@ -14,7 +14,7 @@
  * Privacy: no line carries a message's text, a prompt, an answer or an error message, and nothing
  * here reads a secret. See `fields.ts`, which picks each field by name.
  *
- * Events are notifications (SPEC §4.3): every listener catches its own failures, including a logger
+ * Events are notifications (SPEC K3): every listener catches its own failures, including a logger
  * that throws, so logging can never fail the code that emitted the event.
  *
  * Duration is measured with `ctx.clock` from `agent.started` to the run's end. The start times are

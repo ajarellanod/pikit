@@ -1,7 +1,7 @@
 /**
  * The fields of each log line, built from an event's payload. Only identifiers, kinds, counts,
- * durations, tokens and costs: never a message's text, a prompt, an answer or an error message
- * (SPEC §13). Every field is a plain value, so any logger (console, JSON lines) prints it as is.
+ * durations, tokens and costs: never a message's text, a prompt, an answer or an error message.
+ * Every field is a plain value, so any logger (console, JSON lines) prints it as is.
  *
  * Each function picks the fields it names from the payload, rather than copying the payload and
  * removing what is private, so a field added to an event later is not logged until it is added here.
@@ -46,7 +46,7 @@ export function resetFields(reset: ConversationReset): Fields {
 }
 
 /**
- * Tokens and cost, read from the runtime's `Usage`. The core keeps `Usage` opaque (SPEC §6.1): with
+ * Tokens and cost, read from the runtime's `Usage`. The core keeps `Usage` opaque (@pikit/contracts' agent.ts): with
  * `runtime-pi` it is pi-ai's, whose `cost.total` is priced by pi-ai. Each field is read only when it
  * is a number, so a runtime with another shape, or none, logs fewer fields instead of failing.
  */

@@ -1,6 +1,6 @@
 /**
  * sessions-jsonl's tests. They are copied with the component and keep running in your project.
- * Pi's own session suites run over the store this component provides (SPEC §7.5, §14), through
+ * Pi's own session suites run over the store this component provides (`sessions.store`), through
  * `@pikit/pi-adapter/testing`, so they never import Pi.
  */
 

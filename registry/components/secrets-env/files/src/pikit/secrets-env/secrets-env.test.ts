@@ -8,7 +8,7 @@ import { type SecretStore } from "@pikit/contracts";
 import { createSecretStoreConformance } from "@pikit/contracts/testing";
 import secretsEnv, { createSecretsEnv } from "./index.ts";
 
-// The secrets contract (SPEC §14), over an environment seeded by the suite.
+// The secrets contract, over an environment seeded by the suite.
 for (const c of createSecretStoreConformance((secrets) => ({ components: [createSecretsEnv({ env: secrets })] }))) {
   test(`secrets-env ${c.group}: ${c.name}`, () => c.run());
 }

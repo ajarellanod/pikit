@@ -1,5 +1,5 @@
 /**
- * secrets-env: secrets from the process environment (SPEC §4.5, §13).
+ * secrets-env: secrets from the process environment.
  *
  * It provides `secrets` and reads `process.env` on every `get`, so it sees what the process was
  * started with (systemd `Environment=`, Docker `--env`, an exported variable). An empty variable

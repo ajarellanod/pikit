@@ -1,5 +1,6 @@
 /**
- * conversations-file: the conversation registry in one JSON file (SPEC §7.4, §7.6).
+ * conversations-file: the conversation registry in one JSON file (`conversations.registry`,
+ * in @pikit/contracts' conversations.ts).
  *
  * It provides `conversations.registry`: which Pi session each conversation key is in now. The first
  * message of a conversation creates its session (through `sessions.store`) and records the pointer;
@@ -13,7 +14,7 @@
  * a missing one.
  *
  * One process owns the file: changes run one at a time in this process, and two processes on one
- * file are not supported (one server replica, SPEC §7.2).
+ * file are not supported (one server replica).
  *
  * Target: `server` (it uses the filesystem).
  */
@@ -34,7 +35,7 @@ const Config = Type.Object({
 const Pointer = Type.Object({
   agent: Type.String({ minLength: 1 }),
   sessionId: Type.String({ minLength: 1 }),
-  /** Sessions this conversation was in before, oldest first. Kept, never deleted (§7.6). */
+  /** Sessions this conversation was in before, oldest first. Kept, never deleted. */
   previousSessionIds: Type.Array(Type.String()),
   createdAt: Type.Number(),
   updatedAt: Type.Number(),

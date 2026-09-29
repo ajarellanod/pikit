@@ -1,5 +1,5 @@
 /**
- * storage-sqlite: the app's SQL database in one SQLite file (SPEC §4.5, `storage.sql`).
+ * storage-sqlite: the app's SQL database in one SQLite file (`storage.sql`).
  *
  * Components that keep records across restarts (the outbox's deliveries, a scheduler's jobs) use it
  * through `storage.sql`; each creates and prefixes its own tables. It is `node:sqlite`, which Bun

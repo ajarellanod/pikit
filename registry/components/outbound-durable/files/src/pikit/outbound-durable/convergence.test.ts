@@ -1,5 +1,5 @@
 /**
- * The process killed after each of outbound-durable's commits in turn (SPEC §4.8, §14): whatever the
+ * The process killed after each of outbound-durable's commits in turn (`createConvergenceConformance`): whatever the
  * point, the next process delivers every piece, in order per conversation, with exactly one receipt
  * each, and every piece sent more than once is marked a possible duplicate. `crash.test.ts` does the
  * same for one point with a real SIGKILL.

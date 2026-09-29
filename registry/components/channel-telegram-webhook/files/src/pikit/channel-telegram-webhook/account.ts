@@ -1,5 +1,5 @@
 /**
- * The bots this channel runs (SPEC §5, "Channels, accounts and keys"). Each Telegram bot is an
+ * The bots this channel runs. Each Telegram bot is an
  * account, and each account a channel instance with its own token, allowed users, webhook secret,
  * claim code, webhook path, conversations and transport:
  *

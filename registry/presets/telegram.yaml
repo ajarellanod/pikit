@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../schema/preset.schema.json
-# An agent in Telegram, run in Docker (SPEC §11): `pikit new my-agent --preset telegram`.
+# An agent in Telegram, run in Docker: `pikit new my-agent --preset telegram`.
 # An alias: the http preset with channel-telegram instead of channel-http, exactly as
 # `pikit new my-agent --preset http --with channel-telegram`. server-bun stays for /health and
 # /ready, which the container's healthcheck and `pikit status` use.

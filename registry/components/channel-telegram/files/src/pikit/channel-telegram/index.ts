@@ -1,5 +1,5 @@
 /**
- * channel-telegram: talk to your agents in Telegram (SPEC §5).
+ * channel-telegram: talk to your agents in Telegram.
  *
  * Each bot receives messages by long polling (no public URL needed), lets through only the Telegram
  * users its allowlist names, hands each message to its conversation (`<instance>:<chat id>`) and
@@ -8,8 +8,8 @@
  *
  * - Accounts (`account.ts`): one bot by default (`TELEGRAM_BOT_TOKEN`, instance `telegram`); each
  *   name in `accounts` adds one (`TELEGRAM_<NAME>_BOT_TOKEN`, instance `telegram:<name>`), with its
- *   own allowed users and conversations. A router can send each bot to its own agent (SPEC §5,
- *   "Routing to many agents").
+ *   own allowed users and conversations. A router can send each bot to its own agent
+ *   (`router-rules`).
  * - Ingress (`poller.ts`, `inbound.ts`): a message is acknowledged to Telegram only once its
  *   conversation durably accepted it; a redelivery is a duplicate request, answered once.
  * - Replies: the chat gets one answer per run, whichever messages the run took.
@@ -69,7 +69,7 @@ export default defineComponent({
     const secrets = pikit.use("secrets");
     const conversations = pikit.use("conversations.registry");
     const runtime = pikit.use("agent.runtime");
-    // Optional: with it, answers are stored before they are sent (SPEC §5, "Outbound delivery").
+    // Optional: with it, answers are stored before they are sent (@pikit/contracts' outbound.ts).
     const outbound = pikit.useOptional("outbound.queue");
     // Optional, together: with them, answers are delivered from the record of every run's end, from a
     // cursor kept in storage.kv, so none is lost while the channel is stopped (`answers.ts`).
@@ -166,7 +166,7 @@ export default defineComponent({
 
     return {
       async start(ctx) {
-        // Updates and replies outlive start: they get the app's context, not start's (SPEC §4.7).
+        // Updates and replies outlive start: they get the app's context, not start's.
         const background: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
         const queue = outbound.get();
         const recorded = submissions.get();

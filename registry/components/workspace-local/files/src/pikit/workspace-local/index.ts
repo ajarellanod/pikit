@@ -1,5 +1,6 @@
 /**
- * workspace-local: each agent's tools work in a directory of their own on this server (SPEC §8.2).
+ * workspace-local: each agent's tools work in a directory of their own on this server (the `workspace`
+ * capability, in @pikit/pi-adapter).
  *
  * It provides `workspace`. The tool components (`tool-read`, `tool-write`, `tool-edit`, `tool-bash`)
  * ask it, on every call in a run, for the workspace of the run's conversation, and this component
@@ -14,7 +15,7 @@
  * ORDER, NOT ISOLATION. The directory is where an agent's tools start, not a wall. Paths are not
  * confined, and `bash` runs as the server's OS user: it can `cd ..`, read another agent's files and
  * this app's `.pikit/credentials.json`. Isolation needs each agent's tools in a sandbox of their own
- * (an `execution-docker`, planned after M2).
+ * (an `execution-docker`, features/sandboxed-execution.md).
  *
  * Target: `server`.
  */

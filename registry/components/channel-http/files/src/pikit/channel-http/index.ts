@@ -1,5 +1,5 @@
 /**
- * channel-http: talk to an agent over HTTP (SPEC §5, §15 scenario 1).
+ * channel-http: talk to an agent over HTTP (samples/http's scenario-1.test.ts).
  *
  *   POST /v1/messages                              { conversationId, text, messageId? }
  *   GET  /v1/conversations/:id/messages/:messageId  the outcome of a message, later
@@ -7,10 +7,10 @@
  *
  * All need `Authorization: Bearer <PIKIT_HTTP_TOKEN>`, read from `secrets` at start.
  *
- * A message goes through the inbound path of SPEC §5:
+ * A message goes through the inbound path (@pikit/contracts' inbound.ts):
  * 1. `http.authenticate`: this channel's stage checks the bearer token. The pipeline is this
  *    component's own (declared below): how a sender proves who it is depends on the platform, so it
- *    is not a shared contract (SPEC §4.9). A project extension adds a stage to it, as to any pipeline.
+ *    is not a shared contract. A project extension adds a stage to it, as to any pipeline.
  * 2. The body becomes an `InboundMessage`, and `admitInbound` takes it the way every channel does:
  *    `inbound.normalize`, `route.resolve` (a router picks the agent), the conversation
  *    `http:<conversationId>`, and `agent.runtime.dispatch`: Pi takes the message. An idle
@@ -36,8 +36,8 @@
  * settled longer ago than `submissions-sql` keeps them). Without it: `501`, since nothing keeps the
  * outcome of a message outside its session.
  *
- * Delivery `[decision]` for M1: the answer is returned in the HTTP response, not sent through
- * `outbound.prepare` and `channel.transport`, which arrive in M2 with `outbound-durable`. The channel
+ * Delivery `[decision]`: the answer is returned in the HTTP response, not queued in `outbound.queue`
+ * (`outbound-durable`) and sent by a `ChannelTransport`, as a chat channel's is. The channel
  * listens to `agent.settled` / `agent.failed` itself and answers every POST waiting for one of the
  * run's `requestIds`. The map of waiting POSTs is a cache: the answer is in the session anyway, and
  * in `agent.submissions` when installed.

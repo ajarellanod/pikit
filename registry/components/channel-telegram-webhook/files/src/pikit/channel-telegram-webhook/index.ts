@@ -74,7 +74,7 @@ export default defineComponent({
     const submissions = pikit.use("agent.submissions");
     const storage = pikit.use("storage.kv");
     const wakeups = pikit.use("wakeups");
-    // Optional: with it, answers are stored before they are sent (SPEC §5, "Outbound delivery").
+    // Optional: with it, answers are stored before they are sent (@pikit/contracts' outbound.ts).
     const outbound = pikit.useOptional("outbound.queue");
     const accounts = accountsOf(config.accounts);
     let running: Running | undefined;

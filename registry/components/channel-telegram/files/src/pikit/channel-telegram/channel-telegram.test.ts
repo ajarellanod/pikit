@@ -357,7 +357,7 @@ test("it refuses to start without a valid token, without allowed users, or with 
 });
 
 // ---------------------------------------------------------------------------------------------
-// Durable delivery: the transport, and the channel with an outbound.queue (SPEC §5).
+// Durable delivery: the transport, and the channel with an outbound.queue.
 
 function transportOver(telegram: FakeTelegram) {
   return createTelegramTransport(createTelegramApi(telegram.token, telegram.url), "telegram");
@@ -434,7 +434,7 @@ test("with an outbound.queue, the answer is enqueued once per run and delivered 
 });
 
 // ---------------------------------------------------------------------------------------------
-// Accounts: several bots in one channel, each its own instance (SPEC §5, "Channels, accounts and keys").
+// Accounts: several bots in one channel, each its own instance.
 
 test("accounts: the default bot keeps its keys and secrets; a named one gets its own", () => {
   expect(accountsOf(["ops", "customer-care"])).toEqual([
@@ -516,7 +516,7 @@ test("accounts: a named bot without its token fails the start, and leaves no bot
 
 
 // ---------------------------------------------------------------------------------------------
-// Answers from agent.submissions (SPEC §4.8): delivered from its feed, with a cursor in storage.kv.
+// Answers from agent.submissions: delivered from its feed, with a cursor in storage.kv.
 
 function kvWith(storage: KeyValueStorage) {
   return defineComponent({ name: "kv-test", setup: (pikit) => pikit.provide("storage.kv", storage) });

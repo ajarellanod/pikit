@@ -54,7 +54,7 @@ install this tool there, or put the server behind a firewall that refuses it.
 
 ## Replay: `never`
 
-pikit resumes a run after a crash (SPEC §8.4). A tool that is `"safe"` is called again; one that is
+pikit resumes a run after a crash. A tool that is `"safe"` is called again; one that is
 `"never"` is reported to the model as interrupted, and the model decides what to do.
 
 `fetch` is `"never"` because a POST, PUT, PATCH or DELETE may have reached the server and had its

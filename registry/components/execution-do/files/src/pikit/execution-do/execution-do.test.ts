@@ -63,7 +63,7 @@ async function run(env: ExecutionEnv, command: string, cwd?: string) {
   return { exitCode: result.value.exitCode, output };
 }
 
-// Pi's ExecutionEnv contract, with a shell (SPEC §14).
+// Pi's ExecutionEnv contract, with a shell.
 for (const c of createExecutionConformance(async () => {
   const { app, env } = await started();
   return { env, shell: true, dispose: () => app.stop() };

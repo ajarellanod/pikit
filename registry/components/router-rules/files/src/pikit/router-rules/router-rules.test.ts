@@ -1,7 +1,7 @@
 /**
  * router-rules' tests. They are copied with the component and keep running in your project.
  *
- * A component never imports another's files (S4), so `router-basic` is played by `defaultRouter`
+ * A component never imports another's files (SPEC P4), so `router-basic` is played by `defaultRouter`
  * below: the same stage, at the same priority (0).
  */
 

@@ -11,7 +11,7 @@
  * conversation registry creates sessions in.
  *
  * A session is open in one process at a time: one server over its database, or the Durable Object
- * that owns the conversation (SPEC §7.2, S11). Two processes on one session are not detected.
+ * that owns the conversation (SPEC C1). Two processes on one session are not detected.
  *
  * Targets: `server` and `cloudflare`: it imports nothing platform-specific, and its storage is
  * whatever provides `storage.sql` there.
