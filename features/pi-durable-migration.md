@@ -54,6 +54,10 @@ an answer out, messages to a busy conversation queued, and owned runs, through i
 and a Pi release makes it the harness's storage or offers it alongside. Until then, build nothing that
 duplicates `pi-durable`; shape new work so that it can drop in.
 
+The spike is deferred by the owner until Pi ships packages 16–18 (tool turns, the busy-conversation
+inbox, owned runs). Re-check `pico-v5-handoff.md` and `pi-durable`'s changelog on each Pi bump, and
+update "Where Pi stands" above. It is listed in [kit follow-ups](kit-follow-ups.md).
+
 ## Open questions
 - Whether `pi-durable` ships its own Durable Object facade, or pikit keeps a few lines for it (0.99.0
   ships none).
