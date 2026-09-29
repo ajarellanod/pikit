@@ -23,6 +23,12 @@ import type { JsonValue } from "./storage.ts";
 export interface WorkersHost {
   /** The Worker's bindings, variables and secrets. */
   env: Readonly<Record<string, unknown>>;
+  /**
+   * Only in the Worker's App: the origin (`https://<host>`) of the request that started it, which is
+   * where this Worker is reached. A component that registers the Worker with something outside it (a
+   * Telegram webhook) reads it, since a Worker is never told its own public URL.
+   */
+  origin?: string;
   /** Only in a Durable Object's App. */
   object?: {
     /** The object's id, as `DurableObjectId.toString()` gives it. */

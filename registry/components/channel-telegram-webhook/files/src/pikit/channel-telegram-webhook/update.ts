@@ -7,6 +7,11 @@ import type { TelegramMessage, TelegramUpdate } from "./api.ts";
 
 /** The type of the message the Worker sends to the conversation's actor: the update, as Telegram posted it. */
 export const UPDATE_TYPE = "telegram.update";
+/**
+ * The type of an update from someone `TELEGRAM_[<NAME>_]ALLOWED_USERS` does not list, sent only when the
+ * bot can be claimed (`claim.ts`): the chat's actor decides, from the claim it keeps.
+ */
+export const STRANGER_TYPE = "telegram.stranger";
 
 /** An update with a message from a person in a private chat. */
 export type PrivateUpdate = TelegramUpdate & { message: TelegramMessage & { from: NonNullable<TelegramMessage["from"]> } };

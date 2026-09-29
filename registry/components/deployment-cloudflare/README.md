@@ -45,6 +45,10 @@ there, so a webhook needs a deploy. `pikit logs` streams the deployed bot's logs
 what serves. pikit's own end-to-end test (`packages/cli/src/e2e-telegram-cloudflare.test.ts`) runs this
 whole path in workerd against a fake Telegram and a fake OpenRouter.
 
+The same project can also be a "Deploy to Cloudflare" button's template, with no CLI at all: the
+Worker registers its own webhook, and the owner claims the bot with `/claim <code>`
+(`channel-telegram-webhook`'s README, "With a Deploy to Cloudflare button").
+
 ## What it does
 
 ### Two Apps (`worker.ts`, `entrypoint.ts`, `host.ts`)
@@ -78,7 +82,9 @@ export on its first event, never in its constructor:
 - Its RPC interface is `health()`, `deliver()` and `alarm()`, nothing else.
 
 **The Worker** composes `export const worker` on its first request, once per isolate, with
-`WORKERS_HOST` `{ env }` on its start context and the same deadlines. A failed start answers 503 and
+`WORKERS_HOST` `{ env, origin }` on its start context (`origin`: that of the request that started it,
+`/health` included, which is where the Worker is reached; a Worker is never told its own URL
+otherwise) and the same deadlines. A failed start answers 503 and
 the next request tries again. It serves the App's `http.route`s as `server-bun` does on a server: a
 context of their own per request (never the start's, and without `WORKERS_HOST`), a literal path
 before one with parameters, 404 for no match, and a 500 that does not reveal the error. The routes

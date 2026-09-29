@@ -49,6 +49,8 @@ export interface FakeTelegram {
   allowedUpdates: string[] | undefined;
   /** How many times `setWebhook` was called. */
   webhooksSet: number;
+  /** How many times `getWebhookInfo` was called. */
+  webhookInfoAsked: number;
   rejectHtml: boolean;
   rateLimitNextSend?: number;
   /** The next `sendMessage` fails with this Telegram error (403 blocked, 500…). */
@@ -130,6 +132,7 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
     webhookSecret: undefined,
     allowedUpdates: undefined,
     webhooksSet: 0,
+    webhookInfoAsked: 0,
     rejectHtml: false,
     message(user, text, options = {}) {
       const from: TelegramUser = { is_bot: false, first_name: "Someone", ...user };
@@ -207,6 +210,7 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
         fake.allowedUpdates = undefined;
         return ok(true);
       case "getWebhookInfo":
+        fake.webhookInfoAsked++;
         return ok({ url: fake.webhookUrl, pending_update_count: updates.length, ...(fake.allowedUpdates !== undefined && { allowed_updates: fake.allowedUpdates }) });
       case "sendChatAction":
         fake.actions.push({ chatId: Number(body.chat_id), action: String(body.action) });

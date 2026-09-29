@@ -207,35 +207,55 @@ function freePort(): number {
   return port;
 }
 
+/**
+ * `pikit dev` runs `wrangler dev --name <name>`: the same, on a free port. It reads .env as the Worker's
+ * secrets. Resolves once `/health` answers ok, with the version it reports.
+ */
+async function wranglerDev() {
+  const port = freePort();
+  const base = `http://127.0.0.1:${port}`;
+  const dev = Bun.spawn(
+    [join(project, "node_modules", ".bin", "wrangler"), "dev", "--name", NAME, "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(freePort())],
+    { cwd: project, env: { ...CLEAN_ENV, WRANGLER_SEND_METRICS: "false" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
+  );
+  let logs = "";
+  const decoder = new TextDecoder();
+  const collect = async (stream: ReadableStream<Uint8Array>) => {
+    for await (const chunk of stream) logs += decoder.decode(chunk);
+  };
+  const collected = Promise.all([collect(dev.stdout), collect(dev.stderr)]);
+  const stop = async () => {
+    dev.kill("SIGINT");
+    const stopped = await Promise.race([dev.exited, Bun.sleep(15_000).then(() => undefined)]);
+    if (stopped === undefined) dev.kill("SIGKILL");
+    await dev.exited;
+    await collected;
+  };
+  try {
+    let health: { ok?: boolean; version?: string } | undefined;
+    for (let i = 0; i < 90 && health?.ok !== true; i++) {
+      health = await fetch(`${base}/health`).then(
+        (response) => response.json() as Promise<{ ok?: boolean; version?: string }>,
+        () => undefined,
+      );
+      if (health?.ok !== true) {
+        if (dev.exitCode !== null) throw new Error(`wrangler dev exited (${dev.exitCode}):\n${logs}`);
+        await Bun.sleep(1_000);
+      }
+    }
+    return { base, health, logs: () => logs, stop };
+  } catch (error) {
+    await stop();
+    throw error;
+  }
+}
+
 test.skipIf(!E2E)(
   "in workerd: up's after-deploy hook sets the webhook, a stranger is told their id, and the owner's message is answered in the chat through the object's alarm",
   async () => {
     telegram.sent.length = 0;
-    const port = freePort();
-    const base = `http://127.0.0.1:${port}`;
-    // `pikit dev` runs `wrangler dev --name <name>`: the same, on a free port. It reads .env as the Worker's secrets.
-    const dev = Bun.spawn(
-      [join(project, "node_modules", ".bin", "wrangler"), "dev", "--name", NAME, "--ip", "127.0.0.1", "--port", String(port), "--inspector-port", String(freePort())],
-      { cwd: project, env: { ...CLEAN_ENV, WRANGLER_SEND_METRICS: "false" }, stdin: "ignore", stdout: "pipe", stderr: "pipe" },
-    );
-    let logs = "";
-    const decoder = new TextDecoder();
-    const collect = async (stream: ReadableStream<Uint8Array>) => {
-      for await (const chunk of stream) logs += decoder.decode(chunk);
-    };
-    const collected = Promise.all([collect(dev.stdout), collect(dev.stderr)]);
+    const { base, health, logs: devLogs, stop } = await wranglerDev();
     try {
-      let health: { ok?: boolean; version?: string } | undefined;
-      for (let i = 0; i < 90 && health?.ok !== true; i++) {
-        health = await fetch(`${base}/health`).then(
-          (response) => response.json() as Promise<{ ok?: boolean; version?: string }>,
-          () => undefined,
-        );
-        if (health?.ok !== true) {
-          if (dev.exitCode !== null) throw new Error(`wrangler dev exited (${dev.exitCode}):\n${logs}`);
-          await Bun.sleep(1_000);
-        }
-      }
       // Read before any matcher: Bun's toMatchObject writes its asymmetric matchers into what it checks.
       const version = health?.version;
       expect(health?.ok).toBe(true);
@@ -287,12 +307,9 @@ test.skipIf(!E2E)(
       expect(spans.jsrpc).toBeGreaterThan(0);
       expect(spans.alarm).toBeGreaterThan(0);
     } finally {
-      dev.kill("SIGINT");
-      const stopped = await Promise.race([dev.exited, Bun.sleep(15_000).then(() => undefined)]);
-      if (stopped === undefined) dev.kill("SIGKILL");
-      await dev.exited;
-      await collected;
+      await stop();
     }
+    const logs = devLogs();
     expect(logs).toContain("pikit: Worker started");
     for (const secret of [telegram.token, MODEL_KEY, BRAVE_KEY, env().TELEGRAM_WEBHOOK_SECRET as string]) expect(logs).not.toContain(secret);
 
@@ -320,6 +337,61 @@ test.skipIf(!E2E)(
     expect(answers).toEqual([{ conversation_key: `telegram:${OWNER.id}`, kind: "completed", text: "answer: hello" }]);
     expect(pieces).toEqual([{ conversation_key: `telegram:${OWNER.id}`, state: "delivered" }]);
     expect(existsSync(join(project, ".pikit", "deployment-cloudflare.json"))).toBe(true);
+  },
+  TIMEOUT,
+);
+
+test.skipIf(!E2E)(
+  "in workerd, as a Deploy to Cloudflare button leaves it: the build's script has the Worker register its webhook, and the owner claims the bot with /claim",
+  async () => {
+    // The button's form: a token, a webhook secret and a claim code; nobody listed, since nobody ran configure.
+    const CLAIM_CODE = "e2e correct horse battery staple";
+    const OWNER_OF_BUTTON = { id: 3003, first_name: "Grace" };
+    const lines = readFileSync(join(project, ".env"), "utf8")
+      .split("\n")
+      .filter((line) => line !== "" && !line.startsWith("TELEGRAM_ALLOWED_USERS="));
+    writeFileSync(join(project, ".env"), `${[...lines, `TELEGRAM_CLAIM_CODE=${CLAIM_CODE}`].join("\n")}\n`);
+    telegram.sent.length = 0;
+    const asked = openrouter.requests.length;
+    // No `pikit up` will register anything: nothing is set until the Worker does.
+    await fetch(`${telegram.url}/bot${telegram.token}/deleteWebhook`, { method: "POST" });
+    expect(telegram.webhookUrl).toBe("");
+
+    const { base, health, logs: devLogs, stop } = await wranglerDev();
+    try {
+      const version = health?.version;
+      expect(health?.ok).toBe(true);
+
+      // Workers Builds' deploy command: `wrangler deploy | node .../setup-webhook.mjs`; here, given the URL
+      // and version. It waits for that version on /health, then GET /telegram/setup: the Worker uses its own secret.
+      const script = await run(["node", join(project, "src", "pikit", "channel-telegram-webhook", "setup-webhook.mjs"), base, version as string]);
+      expect(script.err).toBe("");
+      expect(script.code).toBe(0);
+      expect(script.out).toBe(`\u2713 Telegram telegram: webhook ${base}/telegram\n`);
+      expect([telegram.webhookUrl, telegram.webhookSecret, telegram.allowedUpdates]).toEqual([`${base}/telegram`, env().TELEGRAM_WEBHOOK_SECRET, ["message"]]);
+
+      // The owner, whom no list names, is told their id and /claim; a wrong code is refused; the right one claims.
+      expect((await telegram.write(OWNER_OF_BUTTON, "hello?")).status).toBe(200);
+      expect((await telegram.write(OWNER_OF_BUTTON, "/claim not the code")).status).toBe(200);
+      expect((await telegram.write(OWNER_OF_BUTTON, `/claim ${CLAIM_CODE}`)).status).toBe(200);
+      expect((await telegram.write(OWNER_OF_BUTTON, "hello again")).status).toBe(200);
+      const sent = await telegram.sentCount(4, 60_000);
+      expect(sent.map((message) => [message.chatId, message.text])).toEqual([
+        [OWNER_OF_BUTTON.id, `This bot is private. Your Telegram user id is ${OWNER_OF_BUTTON.id}: its owner can let you in by adding it to TELEGRAM_ALLOWED_USERS. If you are its owner, send /claim followed by the claim code.`],
+        [OWNER_OF_BUTTON.id, "That is not the claim code."],
+        [OWNER_OF_BUTTON.id, "\u2713 This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."],
+        [OWNER_OF_BUTTON.id, "answer: hello again"],
+      ]);
+      // Only the message after the claim reached the model; the code never did.
+      expect(openrouter.requests).toHaveLength(asked + 1);
+      expect(JSON.stringify(openrouter.requests.at(-1)?.messages)).toContain("hello again");
+      expect(JSON.stringify(openrouter.requests)).not.toContain(CLAIM_CODE);
+    } finally {
+      await stop();
+    }
+    const logs = devLogs();
+    expect(logs).toContain("channel-telegram-webhook: a chat claimed the bot");
+    for (const secret of [telegram.token, CLAIM_CODE, env().TELEGRAM_WEBHOOK_SECRET as string]) expect(logs).not.toContain(secret);
   },
   TIMEOUT,
 );
