@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: `agentTool(tool, { replay })` in `@pikit/pi-adapter/tools`: the tool `toolComponent`
+  provides, without the component, for a `defineComponent` of your own that needs config or a
+  capability (a secret) and names itself (`tool-websearch-brave` provides `websearch`).
 - adapter: `@pikit/pi-adapter/providers/openrouter` exposes pi-ai's OpenRouter provider by
   subpath, so a bundle carries only the providers it installs. Its module imports nothing node-only.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.

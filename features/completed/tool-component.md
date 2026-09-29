@@ -42,8 +42,10 @@ export default toolComponent(
 - **The fifth `execute` argument is the run's context**: its conversation
   (`context.value(CONVERSATION)`) and its cancellation. `signal` is the same cancellation, in Pi's
   place.
-- **A tool that needs a capability** (an environment, a secret) is a `defineComponent` of its own that
-  `use`s it, as `tool-read` does with `bindTool`; `toolComponent` declares none.
+- **A tool that needs a capability** (an environment, a secret) or config is a `defineComponent` of
+  its own that `use`s it and provides `agentTool(tool, { replay })`, the same tool without the
+  component (`tool-websearch-brave` reads its key through `secrets`); `toolComponent` declares none.
+  Pi's own tools bound to an environment use `bindTool` instead, as `tool-read` does.
 
 ## Pi first
 Pi already has `defineTool` (`@earendil-works/pi-coding-agent`, re-exported by
@@ -60,7 +62,7 @@ extension's host has. Pi's `defineTool` always types it, so:
 - a tool that really uses the `ExtensionContext` stays an extension's tool.
 
 ## Where it is
-- `packages/pi-adapter/src/tools/index.ts` (`ToolDefinition`, `toolComponent`).
+- `packages/pi-adapter/src/tools/index.ts` (`ToolDefinition`, `toolComponent`, `agentTool`).
 - `packages/pi-adapter/src/tools/tools.test.ts`: component name, key, `replay`, Pi's argument order,
   `onUpdate`; Pi's `hello` object unchanged; the one typed by `defineTool` refused
   (`@ts-expect-error`).
@@ -68,6 +70,6 @@ extension's host has. Pi's `defineTool` always types it, so:
   run's conversation.
 
 ## Open questions
-- Config for such a tool (an API URL, a limit): today it is a `defineComponent`. An optional
-  `config` schema could come if users ask for it.
+- Config for such a tool (an API URL, a limit): today it is a `defineComponent` providing
+  `agentTool(...)`. An optional `config` schema on `toolComponent` could come if users ask for it.
 - Whether `pikit add` should scaffold one (`pikit new tool <name>`).
