@@ -196,6 +196,15 @@
       ],
       "path": "components/tool-read"
     },
+    "tool-websearch-brave": {
+      "version": "0.0.0",
+      "description": "The `websearch` tool, for the agents that name it: searches the web with the Brave Search API, whose key the model never sees.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-websearch-brave"
+    },
     "tool-write": {
       "version": "0.0.0",
       "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",

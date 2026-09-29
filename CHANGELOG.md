@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/tool-websearch-brave: new. The `websearch` tool on the Brave Search API; its key,
+  `BRAVE_API_KEY`, is read through `secrets` and never reaches the model, and a search without it
+  fails saying so. `replay: "safe"`, `apiBase` in config; targets `server` and `cloudflare`.
 - component/tool-fetch: new. The `fetch` tool: one HTTP(S) request, GET by default (HEAD, POST, PUT,
   PATCH, DELETE allowed; the model is asked to confirm any but GET and HEAD with the user), 20 s,
   2 MB read, HTML as readable text with its links, JSON pretty-printed, binary refused, no
