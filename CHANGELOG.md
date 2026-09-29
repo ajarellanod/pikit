@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/secrets-cloudflare: new. `secrets` from the Worker's `env` (its secrets and variables;
+  bindings and empty strings read `undefined`), in either App of a Cloudflare project. Target
+  `cloudflare`.
 - component/storage-do: new. `storage.sql` in a Durable Object's own SQLite (`ctx.storage.sql`), for
   the conversation object's App on Cloudflare; its README lists the object's SQL limits (2 MB per
   row, short `LIKE` patterns, 10 GB per object, 1 GB on Free). Target `cloudflare`.
