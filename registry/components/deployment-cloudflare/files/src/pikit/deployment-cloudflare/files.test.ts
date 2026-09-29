@@ -48,8 +48,12 @@ test("/health can report the version, nodejs_compat is on, and .md and .wasm are
   ]);
 });
 
-test("no name in the file: the commands name the Worker after package.json, so projects never collide", () => {
-  expect(config.name).toBeUndefined();
+test("a name in the file (a Deploy to Cloudflare template's, for Workers Builds) is one Cloudflare accepts; pikit's has none", () => {
+  // Without one, the commands name the Worker after package.json, so projects never collide; with one,
+  // they use it (commands.test.ts), so `pikit up` and Workers Builds deploy the same Worker.
+  if (config.name !== undefined) expect(config.name).toMatch(/^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/);
+  // In pikit's registry the file is `files/wrangler.jsonc`, and names nothing.
+  if (existsSync(join(ROOT, "..", "component.json"))) expect(config.name).toBeUndefined();
 });
 
 test("entrypoint.ts is the only file that imports cloudflare:*, and worker.ts reaches no node:* (C5)", () => {

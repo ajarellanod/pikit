@@ -134,7 +134,11 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
    URL instead (`node …/setup-webhook.mjs https://my-bot.acme.workers.dev`), it does the same by hand.
 
    The template's `wrangler.jsonc` also names the Worker (`"name"`): pikit's leaves it out, since its
-   commands pass `--name`, and Workers Builds runs wrangler without them.
+   commands pass `--name`, and Workers Builds runs wrangler without them. With one, pikit's commands
+   use it too, so `pikit up` from a clone deploys the same Worker.
+
+   pikit makes this template itself: `bun scripts/template.ts telegram-cloudflare <dir>`
+   (`templates/README.md`).
 
 3. **The owner claims the bot.** Once deployed, they open the bot in Telegram. It answers that it is
    private, with their id, and that its owner sends `/claim` followed by the claim code. They send
