@@ -5,6 +5,7 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- registry: `component.json` may name a half for another App, `"apps": { "worker": "<export>" }` (SPEC §4.1, C1): the named export of `index.ts` goes in the Worker's App, the default export in the default one; `registry generate` and `validate` describe both halves, so `provides`, `requires` and `optional` cover the component as a whole, and a named export that is missing or not a component is a problem.
 - cli: `pikit add` and `pikit new` also offer the provider of a capability a component requires when the catalogue marks it `offer`: `pikit add conversations-kv` offers `storage-kv-sql` (and `storage-sqlite`).
 - component/conversations-kv: new. `conversations.registry` on `storage.kv` (namespace `conversations-kv`) and `sessions.store`; targets `server` and `cloudflare`. A first pointer is written with `setIfAbsent`, a reset emits `conversation.reset` once its pointer is stored, and its README says what holds when resets and resolves race across processes.
 - component/tool-websearch-brave: new. The `websearch` tool on the Brave Search API; its key,
