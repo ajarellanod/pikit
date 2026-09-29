@@ -62,6 +62,17 @@ export interface PiRuntimeOptions {
    * it, nothing is recorded and the runtime behaves exactly as before.
    */
   submissions?: AgentSubmissions;
+  /**
+   * Continue runs past Pi's backoff from outside this process. Before retrying a failed model call Pi
+   * waits (1 s, 2 s, 4 s… up to a minute); without this option the run waits in this process, as Pi's
+   * `resume()` does, which a host that keeps running only while an event is in progress loses (a
+   * Durable Object, SPEC §4.1, C4). With it, a run that reaches such a wait stops being driven there:
+   * it stays open in its session, its conversation closes once idle, and `retryAt` is called with when
+   * the retry is due (`notBefore`, epoch ms on Pi's clock, `Date.now()`). The host opens the
+   * conversation again at or after that time (`resume`, or `recover`), which continues the run. If it
+   * rejects, the run stays open, logged, for whatever opens the conversation next.
+   */
+  retryAt?(conversation: ConversationRef, notBefore: number, ctx: AppContext): Promise<void>;
 }
 
 /** How long to wait before recording a run's end again, after `agent.submissions` failed to. */
@@ -87,6 +98,16 @@ export interface PiRuntime extends AgentRuntime {
    * Without `agent.submissions`, nothing is recorded and this does nothing.
    */
   abandon(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<void>;
+  /** Whether this worker has the conversation open now: a run it drives, or a step (an admission, an open) under way. */
+  holds(conversation: Pick<ConversationRef, "sessionId">): boolean;
+  /**
+   * Resolves `true` once this worker drives no run and has no conversation open, runs that start
+   * meanwhile included; `false` as soon as `ctx` is cancelled or the runtime is closed (its runs stay
+   * open in their sessions). What a host that keeps running only while an event is in progress waits
+   * for, one slice at a time (SPEC §4.1, C4). A run waiting for a retry the host continues
+   * (`retryAt`) is not driven, so it does not count.
+   */
+  whenIdle(ctx: AppContext): Promise<boolean>;
   /**
    * Close every open conversation. Runs in progress stop being driven and stay open in their
    * sessions; the next worker resumes them. Bounded by `ctx`'s cancellation.
@@ -189,6 +210,7 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
     });
   };
 
+  const retryAt = options.retryAt;
   const ensureOpen = async (slot: Slot, ref: ConversationRef, ctx: AppContext): Promise<PiConversation> => {
     if (closed) throw new Error("agent.runtime is closed");
     if (slot.conversation !== undefined) return slot.conversation;
@@ -214,6 +236,7 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
           serial: (work) => serial(slot, work),
           events: options.events,
           ...(options.submissions !== undefined && { settled: recordSettled }),
+          ...(retryAt !== undefined && { retryAt: (notBefore: number, runCtx: AppContext) => retryAt(ref, notBefore, runCtx) }),
         },
         onHarness: options.onHarness,
         extensions,
@@ -330,6 +353,21 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
         reason,
       });
       await announceEnds([{ ...run, messages: [] }], ctx);
+    },
+
+    holds(conversation: Pick<ConversationRef, "sessionId">): boolean {
+      return slots.has(conversation.sessionId);
+    },
+
+    async whenIdle(ctx: AppContext): Promise<boolean> {
+      // A slot lives as long as its conversation is open or has steps queued (`serial`), so no slot
+      // left means nothing is driven. Each pass waits for what is going now, then looks again.
+      for (;;) {
+        if (closed || ctx.abortSignal?.aborted) return false;
+        if (slots.size === 0) return true;
+        const going = [...slots.values()].flatMap((slot) => [slot.line, slot.conversation?.runsEnded() ?? Promise.resolve()]);
+        await untilAborted(Promise.all(going), ctx.abortSignal);
+      }
     },
 
     async close(ctx: AppContext): Promise<void> {

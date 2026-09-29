@@ -19,7 +19,8 @@
       "model.credentials",
       "agent.tool",
       "agent.extension",
-      "agent.submissions"
+      "agent.submissions",
+      "wakeups"
     ]
   },
   "provides": [
