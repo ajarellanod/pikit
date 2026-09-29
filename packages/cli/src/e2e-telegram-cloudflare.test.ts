@@ -252,6 +252,8 @@ test.skipIf(!E2E)(
         waitMs: 30_000,
         say: (line) => said.push(line),
         run: async (command, { env: runEnv }) => {
+          // A wrangler logged in to an account: the login check passes, and nothing reaches Cloudflare.
+          if (command[1] === "whoami") return { code: 0, stdout: JSON.stringify({ loggedIn: true }) };
           const output = runEnv?.WRANGLER_OUTPUT_FILE_PATH;
           if (command[1] !== "deploy" || output === undefined) throw new Error(`unexpected: ${command.join(" ")}`);
           writeFileSync(output, `${JSON.stringify({ type: "deploy", version_id: version, targets: [base] })}\n`);
