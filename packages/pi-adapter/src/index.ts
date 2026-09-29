@@ -9,7 +9,8 @@ export { modelsFrom } from "./models.ts";
 export type { ModelsOptions } from "./models.ts";
 export type { SessionStore, Workspace, WorkspaceProvider } from "./types.ts";
 
-// Pi contract types, for components that implement or wire them without importing Pi (rule 1).
+// Pi contract types, for components that implement or wire them without importing Pi (only the
+// adapter does).
 export type { AgentHarness, AgentHarnessTool, ExecutionEnv, Session, SessionRepo } from "@earendil-works/pi-agent-core";
 export type {
   AuthInteraction,
