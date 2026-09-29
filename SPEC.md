@@ -22,33 +22,32 @@ Four outcomes are required. Without any one of them, pikit is not what it set ou
 
 ## 2. The properties that must hold
 
-Each one is enforced by a standard in `ROADMAP.md` (Part 1); a milestone that breaks one is not
-done.
+A change that breaks one is not done.
 
-| # | Property | Standard |
-|---|---|---|
+| # | Property |
+|---|---|
 | P1 | **Pi is the agent; pikit is the kit.** pikit builds only what one Pi process cannot give itself (channels, routing between agents, conversation ownership across processes, durable delivery, scheduling, approvals, deployment, the dashboard, the path by which an agent
-changes its own service). When Pi ships something pikit built, pikit deletes its own. | S1 |
-| P2 | **Five minutes, then it's yours.** One command sequence from an empty server to a reachable agent, leaving a project the user owns. | Budget "Empty server → responding agent" |
-| P3 | **Components are source you own.** Copied into the project, readable, editable, removable; removing one leaves a clean, working project. | S3, S13, S14 |
-| P4 | **A small, stable kernel; contracts are the only coupling; no magic; absence, not flags.** | S2, S4, S6, S7 |
-| P5 | **Fail loudly, recover honestly.** A part that cannot start stops the app. Delivery is at-least-once and says so. A restart, crash or eviction never loses a conversation and never pretends a message was answered. | S8–S11 |
-| P6 | **Copied code does not rot.** A user who edited a component still takes upstream fixes, with a three-way merge from the base kept at install. | M3 |
-| P7 | **Boring on purpose.** The model learned for 1.0 holds for all of 1.x (`SPEC.md` §12a). | S16 |
-| P8 | **Runs where you want:** server and Cloudflare (§4). | S5, M4 |
-| P9 | **Self-improvement is gated.** An agent changes the service only through the source of its own project, with tests, a human's approval and an automatic rollback; nothing it can edit can open that gate (§6). | Track S |
+changes its own service). When Pi ships something pikit built, pikit deletes its own. |
+| P2 | **Five minutes, then it's yours.** One command sequence from an empty server to a reachable agent, leaving a project the user owns. |
+| P3 | **Components are source you own.** Copied into the project, readable, editable, removable; removing one leaves a clean, working project. |
+| P4 | **A small, stable kernel; contracts are the only coupling; no magic; absence, not flags.** |
+| P5 | **Fail loudly, recover honestly.** A part that cannot start stops the app. Delivery is at-least-once and says so. A restart, crash or eviction never loses a conversation and never pretends a message was answered. |
+| P6 | **Copied code does not rot.** A user who edited a component still takes upstream fixes, with a three-way merge from the base kept at install. |
+| P7 | **Boring on purpose.** The model learned for 1.0 holds for all of 1.x (K8, K10). |
+| P8 | **Runs where you want:** server and Cloudflare (§4). |
+| P9 | **Self-improvement is gated.** An agent changes the service only through the source of its own project, with tests, a human's approval and an automatic rollback; nothing it can edit can open that gate (§6). |
 
 ## 3. The kernel
 
 The kernel is `@pikit/core`: what the app runs itself (composition, capabilities, events,
 pipelines, lifecycle, config validation, context, clock, logger), with no word of the domain.
 Its exports are held by `packages/core/src/exports.test.ts`; its only runtime dependency is
-`typebox`. The shared vocabulary lives in `@pikit/contracts` and versions apart (`SPEC.md` §4.9).
+`typebox`. The shared vocabulary lives in `@pikit/contracts` and versions apart (K8).
 
 ### 3.1 Decisions
 
 Each decision states what the kernel promises and why it keeps holding as pikit grows. Status
-(built or not) is tracked in `ROADMAP.md`, track K.
+(built or not) is not tracked here: the code and its tests say what is built.
 
 - **K1. The kernel knows no target.** `Target`, `pikit.target` and `ctx.target` leave the kernel.
   A component's targets are declared in its `component.json`; a component that needs something
@@ -56,13 +55,13 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   would change the kernel for every new runtime, and `setup` that branches per target makes the
   generated manifest depend on which target it was generated for. Adding it back later would be
   additive.
-- **K2. Whoever runs the app bounds the rollback.** The kernel keeps no timeouts (`SPEC.md` §4.6).
+- **K2. Whoever runs the app bounds the rollback.** The kernel keeps no timeouts.
   A failed start's rollback is bounded by a `stop(ctx)` with a deadline, which the host calls while
   `start()` is pending or after it rejects. Every `deployment-*` component's entrypoint does so, and
   a conformance case for deployment components hangs a rollback on purpose and requires the process
   to exit. *Why:* no new kernel API, and the rule is checked, not only written.
 - **K3. Events are never persisted.** An event is a notification and may be missed. A fact that
-  must not be lost is a feed (`SPEC.md` §4.8). There is no runtime schema for events and no
+  must not be lost is a feed (`Feed`, `packages/contracts/src/feed.ts`). There is no runtime schema for events and no
   `registerEvent`. *Why:* one pattern for durability instead of two, and less kernel surface.
 - **K4. The kernel takes a plain, validated object as config.** It merges the components' TypeBox
   schemas under their names, validates, and deep-freezes. Where the object comes from (TypeScript
@@ -81,17 +80,17 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 - **K7. An App is one composition; a project may have several.** `defineApp` composes one App. A
   project may define more than one (on Cloudflare, one for the Worker and one for each Durable
   Object); how components are split between them is the target's and the components' design
-  (M4), never the kernel's. *Why:* the kernel already supports it, so no answer M4 reaches changes
-  the kernel.
+  (§4, C1), never the kernel's. *Why:* the kernel already supports it, so no answer Cloudflare's
+  design reaches changes the kernel.
 - **K8. The kernel is declared stable only after it is proven.** `@pikit/core` 1.0 requires K1–K13
   applied, the kernel running on Node from a JavaScript build, and the Cloudflare proof (a run that
   survives eviction, §4). The contracts stay 0.x and `experimental` on their own schedule. *Why:*
   declaring stable a kernel that Cloudflare could still force to change is the surest way to break
   the promise.
-- **K9. Kernel stability is its own track.** `ROADMAP.md` tracks it as K, apart from the features
-  (M2–M5). No 1.0 of pikit ships without K done.
+- **K9. Kernel stability is its own track.** K1–K13 stand apart from the features. No 1.0 of pikit
+  ships without them done.
 - **K10. Deprecation exists before publishing.** A removal from the kernel is announced by a runtime
-  warning and a `pikit doctor` hint for at least one minor (`SPEC.md` §12a). The mechanism is
+  warning and a `pikit doctor` hint for at least one minor. The mechanism is
   internal: no new export. *Why:* it is the only way to change something later without breaking
   anyone.
 - **K11. The kernel owns its TypeBox range.** `defineComponent`'s config schema is TypeBox
@@ -103,7 +102,7 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   pipelines are typed by augmenting `@pikit/core`'s interfaces, as Pi types its messages. A type test
   builds a project against the packed `@pikit/core` tarball and declares its own augmentations, so
   a TypeScript or packaging change that breaks them fails in CI before a user sees it. *Why:*
-  TypeScript 7 already lost relative augmentations once (`AGENTS.md`, lessons).
+  TypeScript 7 already lost relative augmentations once.
 - **K13. The app can describe itself, for observation only.** The kernel exports one context key,
   `APP_DESCRIPTION`, and puts on every context it creates a frozen snapshot of `describe()`: the
   components in start order, what each provides and requires, the selected providers and keys, the
@@ -132,23 +131,22 @@ Durable Objects. This is not a feature: it is the proof that the contracts hide 
 
 What it requires:
 - **Neutral layers.** The kernel, the contracts, the adapter's shipped exports and every component
-  in the required set import no `node:*`, `bun:*` or `cloudflare:*` (S5, checked by
+  in the required set import no `node:*`, `bun:*` or `cloudflare:*` (checked by
   `scripts/boundaries.test.ts` and `registry validate`). A component may be server-only, but the
   required set has a Cloudflare provider for every capability it needs.
-- **The required set.** At least what scenario 6 names (`SPEC.md` §15): a channel, the runtime,
-  sessions, conversations, delivery, workspace and execution providers for Cloudflare, the
-  dashboard (§5), and `deployment-cloudflare`.
-- **The actor model holds there.** One conversation is owned by one Durable Object (S11). An
+- **The required set.** At least a channel, the runtime, sessions, conversations, delivery,
+  workspace and execution providers for Cloudflare, the dashboard (§5), and `deployment-cloudflare`.
+- **The actor model holds there.** One conversation is owned by one Durable Object (C1). An
   evicted object loses nothing: the next request or alarm resumes the run (`resume()`), per K6.
 - **The budgets hold.** Bundle ≤ 10 MB compressed, cold start ≤ 1 s, ≤ 128 MB per isolate,
-  ≤ 6 concurrent outbound connections (`ROADMAP.md`, Budgets), measured, not estimated.
-- **The proof runs.** Scenario 6 deploys and answers; a run killed by eviction mid-drive completes
-  after `resume()`; the Durable Object session backend passes Pi's session conformance.
+  ≤ 6 concurrent outbound connections, measured, not estimated.
+- **The proof runs.** The required set deploys and answers; a run killed by eviction mid-drive
+  completes after `resume()`; the Durable Object session backend passes Pi's session conformance.
 
 ### 4.1 Decisions
 
 Each decision was proven by a spike on Cloudflare (September 2026, Workers Free plan) before it was
-written here. Status (built or not) is tracked apart, as for the kernel.
+written here. Status (built or not) is not tracked here, as for the kernel.
 
 - **C1. A thin Worker, and one Durable Object per conversation running the App.** A project on
   Cloudflare has two Apps (K7), both in `pikit.config.ts`: the default export is the Durable
@@ -253,8 +251,7 @@ records and diff tables, prompt bars, an agent chat harness).
   on Cloudflare).
 - **Its build is its own.** Building the dashboard's assets does not become a build step every
   pikit app needs (no magic, principle 9).
-- **It is safe by default.** Authenticated; never shows a secret or a credential; follows
-  `SPEC.md` §13. Operational logs stay without message text; the transcript views are an explicit,
+- **It is safe by default.** Authenticated; never shows a secret or a credential. Operational logs stay without message text; the transcript views are an explicit,
   authenticated read of the session.
 - **No paid dependencies.** Beautiful UI's `SidebarNav` uses a commercial icon set
   (`@central-icons-react`); the dashboard replaces it with a free set. Every copied primitive is
