@@ -13,13 +13,17 @@
     "bindings": [
       { "name": "OBJECTS", "class_name": "TestObject" },
       // deployment-cloudflare's class, under the binding its entrypoint reads (src/deployment.ts).
-      { "name": "CONVERSATION", "class_name": "Conversation" }
+      { "name": "CONVERSATION", "class_name": "Conversation" },
+      // The same class, over the Apps platform-cloudflare's tests compose (src/platform.ts); they set
+      // platform-cloudflare's binding to this name.
+      { "name": "PLATFORM_CONVERSATION", "class_name": "PlatformConversation" }
     ]
   },
   // SQLite-backed, as a conversation's object is on Cloudflare (SPEC C1, C5).
   "migrations": [
     { "tag": "v1", "new_sqlite_classes": ["TestObject"] },
-    { "tag": "v2", "new_sqlite_classes": ["Conversation"] }
+    { "tag": "v2", "new_sqlite_classes": ["Conversation"] },
+    { "tag": "v3", "new_sqlite_classes": ["PlatformConversation"] }
   ],
   // The version deployment-cloudflare's /health reports.
   "version_metadata": { "binding": "CF_VERSION_METADATA" },

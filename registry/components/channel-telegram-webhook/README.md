@@ -2,11 +2,11 @@
 
 Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.
 
-- **Provides:** `http.route` (`POST /telegram`, and `POST /telegram/<name>` per extra bot) and the
-  `actor.inbox` handler of `telegram.update`.
+- **Provides:** `http.route` (`POST /telegram`, and `POST /telegram/<name>` per extra bot).
 - **Requires:** in the Worker's half, `secrets` and `actor.mailbox`; in the object's half, `secrets`,
-  `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv` and `wakeups`. A router
-  (such as `router-basic`) picks the agent.
+  `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv`, `wakeups` and
+  `actor.inbox`, where it registers the handler of `telegram.update`. A router (such as
+  `router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (durable sending).
 - **Target:** `cloudflare`. On a server, use `channel-telegram` (long polling, no public URL needed):
   absence, not flags (SPEC §4.1, C6).
@@ -46,10 +46,11 @@ half requires: `secrets` in both (`secrets-cloudflare` goes in both), `actor.mai
 `pikit add` warns per App about what is missing, and `pikit doctor` composes both. The Worker's routes
 are served by `deployment-cloudflare`'s entrypoint.
 
-The object's half registers its `actor.inbox` handler in `actor-inbox.ts` only (`registerInbox`):
-today a keyed capability provided in `setup`; when `actor.inbox` becomes a single capability with
-`handle(type, handler)`, that file alone changes (and `component.json` then lists `actor.inbox` under
-`requires` instead of `provides`).
+The object's half registers its `actor.inbox` handler in `actor-inbox.ts` only (`registerInbox`): it
+uses `actor.inbox` and calls `handle("telegram.update", handler)` in its `start`. The mailbox's
+provider depends on no handler, so the half uses `wakeups` and the runtime (which drives its runs with
+the same `wakeups`) in one App with `platform-cloudflare`, which provides `actor.inbox` and `wakeups`
+there, with no dependency cycle.
 
 It also runs with both halves in one App on a server (with `mailbox-local`, `wakeups-timers`, and
 `server-bun` behind HTTPS): its tests run it that way. Its target stays `cloudflare`, since on a server

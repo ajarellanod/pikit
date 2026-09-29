@@ -21,6 +21,8 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | `test/deployment-cloudflare.workerd.ts` | `deployment-cloudflare`'s entrypoint: its `Conversation` class (exported by `src/worker.ts`, over the small Apps of `src/deployment.ts`) and its Worker `fetch`: `/health`, `WORKERS_HOST`, `deliver` and the alarm reaching their handlers, eviction, a failed start resetting the object |
 | `test/sessions-sql.workerd.ts` | Pi's own `SessionRepo` and `Storage` suites on `sessions-sql` over `storage-do` (the Durable Object session backend passes Pi's session conformance, SPEC §4); `agent.runtime` on `runtime-pi` over those sessions, a worker killed mid-run included |
 | `test/execution-do.workerd.ts` | Pi's `ExecutionEnv` suite on `execution-do`; Pi's own `write`, `read`, `edit` and `bash` tools on it through the `tool-*` components; the shell, `node` in QuickJS and its budget, the `.git` fence, and `git` clone, commit and push against a fake GitHub |
+| `test/platform-cloudflare.workerd.ts` | `wakeups` on `platform-cloudflare` over a real object's SQL (the alarm simulated on the suite's clock); `actor.mailbox` and `actor.inbox` from the Worker's App by real RPC to deployment-cloudflare's `Conversation` class (`PlatformConversation`); on that class, the real alarm (set, fired, after an eviction), the slice, the backoff, a request waiting for its handler, an object's own mailbox |
+| `test/runtime-pi.workerd.ts` | `runtime-pi` in a `PlatformConversation` object's App (sessions on `sessions-sql` over `storage-do`, `platform-cloudflare`'s `actor.inbox` and `wakeups`, an actor that handles and wakes): a message sent from the Worker's App by RPC is answered by a run driven in the object's alarm |
 
 Each case of a storage suite runs in a Durable Object of its own (`runInDurableObject` on a new id),
 and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint
@@ -34,12 +36,23 @@ the object instead, an app never stopped whose tool never returns (`interruptInP
 the next worker finds is what a reset object leaves. `git` reaches a fake GitHub through `fetch`,
 which the test puts in place of the global one: the lane never touches the network.
 
+`platform-cloudflare`'s tests run on deployment-cloudflare's real `Conversation` class, a second time
+(`PlatformConversation`, bound as `PLATFORM_CONVERSATION`, platform-cloudflare's `binding` in those
+tests), over an object App each test composes (`composeObjects`, `src/platform.ts`: the tests and the
+objects share one isolate). An object composes its App once and never stops it, as on Cloudflare, so
+`resetObjects` (`test/host.ts`) resets every object's instance after each test (`abortAllDurableObjects`:
+storage stays; an eviction would wait for references a rejected RPC keeps). Where a test needs time to pass,
+it fakes `Date` (the apps' clock), never the timers. An RPC method that throws is logged by workerd as
+an uncaught exception even though its caller gets the rejection: those lines are expected in the
+mailbox suite's rejection cases.
+
 ## How
 
 - **Vitest with `@cloudflare/vitest-plugin`** (Cloudflare's Workers integration, formerly
-  `@cloudflare/vitest-pool-workers`), `wrangler.jsonc` for the Worker: one class, `TestObject`, in
-  `new_sqlite_classes`. Versions are pinned exactly in `package.json`; the plugin pins its wrangler
-  and miniflare.
+  `@cloudflare/vitest-pool-workers`), `wrangler.jsonc` for the Worker: three classes in
+  `new_sqlite_classes`, `TestObject`, `Conversation` and `PlatformConversation` (the last two both
+  deployment-cloudflare's). Versions are pinned exactly in `package.json`; the
+  plugin pins its wrangler and miniflare.
 - **Files end in `.workerd.ts`**, not `.test.ts`, so the root `bun test` never picks them up.
 - **The components are imported from `registry/`**, as TypeScript source; Vite compiles them.
 - **The typecheck** compiles the lane, and every file it imports (components, contracts, kernel),

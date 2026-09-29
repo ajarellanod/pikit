@@ -94,7 +94,7 @@
     },
     "mailbox-local": {
       "version": "0.0.0",
-      "description": "Hands a channel's message to the actor that owns its conversation, in the same app: actor.mailbox on a server.",
+      "description": "Hands a channel's message to the actor that owns its conversation, in the same app: actor.mailbox and actor.inbox on a server.",
       "targets": [
         "server"
       ],
@@ -108,6 +108,14 @@
         "cloudflare"
       ],
       "path": "components/outbound-durable"
+    },
+    "platform-cloudflare": {
+      "version": "0.0.0",
+      "description": "Reaches each conversation's Durable Object from the Worker, and wakes components in it on its one alarm: actor.mailbox, actor.inbox and wakeups on Cloudflare.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/platform-cloudflare"
     },
     "provider-anthropic": {
       "version": "0.0.0",
@@ -148,7 +156,8 @@
       "version": "0.0.0",
       "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
       "targets": [
-        "server"
+        "server",
+        "cloudflare"
       ],
       "path": "components/runtime-pi"
     },

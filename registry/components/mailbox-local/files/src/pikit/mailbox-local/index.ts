@@ -1,11 +1,15 @@
 /**
- * mailbox-local: `actor.mailbox` on a server, where every actor is this App (SPEC §4.1, C2).
+ * mailbox-local: `actor.mailbox` and `actor.inbox` on a server, where every actor is this App (SPEC
+ * §4.1, C2).
  *
- * `send(key, type, message, ctx)` calls this App's `actor.inbox` handler for `type` and resolves when
- * it does: once the actor holds the message durably, the channel acknowledges its platform. On
- * Cloudflare the same `send` is an RPC to the Durable Object that owns `key`; the channel does not
- * change.
+ * The components that handle messages register a handler per type with `actor.inbox`'s
+ * `handle(type, handler)`, in their `start`; a type has one handler, and handlers are dropped at
+ * `stop`. `send(key, type, message, ctx)` calls the handler registered for `type` and resolves when it
+ * does: once the actor holds the message durably, the channel acknowledges its platform. On Cloudflare
+ * the same `send` is an RPC to the Durable Object that owns `key`; the channel does not change.
  *
+ * - **Registered, not provided.** This component depends on no handler, so a component may both
+ *   handle messages and send them, or wake itself with `wakeups`: no dependency cycle.
  * - **The handler gets a copy** of the message, made through JSON, as an RPC would: what is not JSON
  *   is refused here, not only on Cloudflare.
  * - **The handler gets its own context**: the start context's values, cancelled when the app stops,
@@ -20,22 +24,31 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import type { JsonValue } from "@pikit/contracts";
+import type { ActorInboxHandler, JsonValue } from "@pikit/contracts";
 
 export default defineComponent({
   name: "mailbox-local",
   setup(pikit) {
-    const inbox = pikit.useKeyed("actor.inbox");
+    /** The handler of each message type, registered by the actors' components in their start. */
+    const registered = new Map<string, ActorInboxHandler>();
     /** While the app runs: the handlers' context, and what `stop` cancels and waits for. */
     let running: { handlers: AppContext; stop: AbortController; inFlight: Set<Promise<void>> } | undefined;
+
+    pikit.provide("actor.inbox", {
+      handle(type, handler) {
+        if (typeof type !== "string" || type === "") throw new TypeError("mailbox-local: a message type is a non-empty string, prefixed with the component that handles it");
+        if (registered.has(type)) throw new Error(`mailbox-local: the message type "${type}" already has a handler; a type has one handler in an app`);
+        registered.set(type, handler);
+      },
+    });
 
     pikit.provide("actor.mailbox", {
       async send(key, type, message, ctx) {
         if (running === undefined) throw new Error("mailbox-local: actor.mailbox was used while the app is not running; send from start or later");
         if (typeof key !== "string" || key === "") throw new TypeError(`mailbox-local: the key of a "${type}" message must be a non-empty string`);
-        const handler = inbox.get(type);
+        const handler = registered.get(type);
         if (handler === undefined) {
-          const known = inbox.keys();
+          const known = [...registered.keys()];
           throw new Error(
             `mailbox-local: no actor.inbox handler for the type "${type}" (handled: ${known.length > 0 ? known.join(", ") : "none"}); ` +
               "install the component that handles it, or check the type the sender names",
@@ -70,6 +83,8 @@ export default defineComponent({
         // an answer either way. The wait is bounded by the stop's own deadline.
         stopping.stop.abort(new Error("mailbox-local: the app is stopping"));
         await untilCancelled(Promise.all(stopping.inFlight).then(() => {}), ctx.abortSignal).catch(() => {});
+        // The next app's components register theirs again.
+        registered.clear();
       },
     };
   },

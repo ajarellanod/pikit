@@ -74,7 +74,7 @@ export default defineComponent({
     const accounts = accountsOf(config.accounts);
     let running: Running | undefined;
 
-    // How the handler is registered lives in `actor-inbox.ts` alone (actor.inbox is changing shape).
+    // Registered with actor.inbox in start (`actor-inbox.ts`): the mailbox depends on no handler.
     const inbox = registerInbox(pikit, UPDATE_TYPE, async (key, message, ctx) => {
       const now = running;
       if (now === undefined) throw new Error("channel-telegram-webhook: an update arrived while the channel is not running");

@@ -16,6 +16,7 @@
       "agent.submissions",
       "storage.kv",
       "wakeups",
+      "actor.inbox",
       "actor.mailbox"
     ]
   },
@@ -25,7 +26,6 @@
     ]
   },
   "provides": [
-    "actor.inbox",
     "http.route"
   ],
   "apps": {
@@ -33,16 +33,15 @@
   },
   "halves": {
     "default": {
-      "provides": [
-        "actor.inbox"
-      ],
+      "provides": [],
       "requires": [
         "secrets",
         "conversations.registry",
         "agent.runtime",
         "agent.submissions",
         "storage.kv",
-        "wakeups"
+        "wakeups",
+        "actor.inbox"
       ],
       "optional": [
         "outbound.queue"

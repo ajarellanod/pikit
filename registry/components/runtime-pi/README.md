@@ -23,8 +23,8 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
   all. That last check makes no network call and
   refreshes nothing: it only asks whether a credential is stored or an environment variable is
   set.
-- **Target:** `server`. `cloudflare` is added once it is proven in workerd with the Cloudflare
-  `wakeups` provider ("Cloudflare" below says what is ready for it).
+- **Target:** `server` and `cloudflare`. On Cloudflare it goes in the conversation object's App,
+  with `platform-cloudflare` for `wakeups` ("Cloudflare" below).
 - **Installs to:** `src/pikit/runtime-pi/`.
 - **npm dependencies:** `@pikit/pi-adapter`, which is pinned with Pi.
 
@@ -87,8 +87,11 @@ A Durable Object keeps running only while an event is in progress (a request, an
 promise left running after its event is killed when the object is evicted, 70 to 140 s after it went
 idle, and waiting on an outbound `fetch` (a model call) does not keep it alive: measured, a 180 s run
 was lost. So on Cloudflare (SPEC §4.1, C4) a run is driven inside an event: install a `wakeups`
-provider (the object's alarm, multiplexed) and `agent.submissions` (`submissions-sql` over the
-object's SQL), and runtime-pi does the rest.
+provider (`platform-cloudflare`: the object's alarm, multiplexed) and `agent.submissions`
+(`submissions-sql` over the object's SQL), and runtime-pi does the rest. pikit's workerd lane runs it
+so in a real Durable Object (`tests/workerd/test/runtime-pi.workerd.ts`): sessions on `sessions-sql`
+over `storage-do`, a message sent from the Worker's App by RPC, and its run driven in the object's
+alarm until it answers.
 
 It registers the wakeup handler `runtime-pi.drive` at start and asks for it whenever a run may be left
 going: after a `dispatch` or a `resume` that leaves a run in the conversation (before `dispatch`

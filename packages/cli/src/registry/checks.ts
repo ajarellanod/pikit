@@ -22,6 +22,8 @@ export const KINDS = [
   "conversations", "credentials", "provider", "runtime", "secrets", "server", "submissions",
   // SPEC §4.1, C2 and C3: `mailbox-local`, `wakeups-timers`.
   "mailbox", "wakeups",
+  // SPEC §4.1, C2 to C5: a target's platform providers (`platform-cloudflare`).
+  "platform",
 ];
 
 const KEBAB = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;

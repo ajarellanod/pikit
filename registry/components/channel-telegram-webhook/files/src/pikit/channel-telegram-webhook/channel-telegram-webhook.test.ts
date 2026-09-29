@@ -288,8 +288,8 @@ test("what setup declares: component.json's fields cover both halves", async () 
   const described = (name: string) => app.describe().components.find((component) => component.name === name);
 
   expect(described(NAME)).toMatchObject({
-    provides: ["actor.inbox"],
-    requires: ["secrets", "conversations.registry", "agent.runtime", "agent.submissions", "storage.kv", "wakeups"],
+    provides: [],
+    requires: ["secrets", "conversations.registry", "agent.runtime", "agent.submissions", "storage.kv", "wakeups", "actor.inbox"],
     optional: ["outbound.queue"],
   });
   expect(described(WORKER_NAME)).toMatchObject({ provides: ["http.route"], requires: ["secrets", "actor.mailbox"], optional: [] });
@@ -337,6 +337,7 @@ for (const c of createLifecycleConformance(() => {
       submissionsWith(submissions),
       kvWith(createMemoryKeyValueStorage()),
       createMemoryWakeups(),
+      createMemoryMailbox(),
     ],
     config: { [NAME]: { apiBase: telegram.url } },
   };

@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/platform-cloudflare: new. `actor.mailbox`, `actor.inbox` and `wakeups` on Cloudflare, in both Apps: from the Worker, `send` is an RPC to the conversation's object (`env.CONVERSATION`, configurable; its `actor.inbox` and `wakeups` throw, saying they belong in the object); in the object, `deliver` calls the handler registered with `actor.inbox` for the type, `actor.mailbox` sends to its own key locally and to others by RPC, and `wakeups` are rows in `platform_cloudflare_wakeups` over the object's one alarm, run one at a time in slices (`sliceMs`, 60 s by default) with backoff rows. Target `cloudflare`; new kind `platform`. A slice leaves no timer longer than a second behind (a pending timer keeps an object from being evicted). Both suites also run in the workerd lane, by RPC and alarm to deployment-cloudflare's real `Conversation` class.
+- component/runtime-pi: targets `cloudflare` too: in workerd, in a real Durable Object with sessions on `sessions-sql` over `storage-do`, a message sent from the Worker by RPC is answered by a run driven in `platform-cloudflare`'s alarm.
 - docs: `sessions-sql` is transitional: when the adapter moves to Pi's durable runtime (`pi-durable`), sessions become its storage and `sessions-sql` goes (SPEC C5, `features/pi-durable-migration.md`). On Cloudflare they will sit on the object's SQL directly, since `pi-durable`'s SQLite core needs a synchronous database and `storage.sql` is asynchronous.
 - registry: `component.json`'s `apps.worker` may be `"default"`: the component itself goes in both Apps of a Cloudflare project, under its own name and config key in each (SPEC C1). When it names a Worker half, `registry generate` writes what each half declares in `halves` (`default`, `worker`), and `registry validate` checks it and that the half is the component `<name>-worker`, its config key in `workerConfig`.
 - cli: on Cloudflare, `pikit add` lists a component's Worker half in `export const worker` too (`import channelTelegramWebhook, { worker as channelTelegramWebhookWorker }`), or the component itself in both lists when `apps.worker` is `"default"`; what each half requires is warned about and offered in its own App; `pikit remove` takes its entries out of every list and its keys out of `config` and `workerConfig`, and refuses when something in either App requires what only it provides; `pikit doctor` prints the Worker's App too. Server projects are unchanged.
@@ -12,6 +14,7 @@ line names its area (AGENTS.md, "Git and docs").
 - component/deployment-cloudflare: `up` runs the installed components' `afterDeploy` hooks once `/health` answers the new version (C8), with the deployed URL, each component's config and a reader of the environment and `.env`; it prints what they say and fails with all their problems, leaving the version deployed. `deployHooks(cwd)` lists them.
 - component/channel-telegram-webhook: `component.json` names `deploy.ts` as its after-deploy hook, so `pikit up` registers each bot's webhook once the new version answers; `pikit add` puts each half in its App.
 - component/secrets-cloudflare: `apps.worker` is `"default"`: `pikit add` lists it in both Apps.
+- component/platform-cloudflare: `apps.worker` is `"default"`: `pikit add` lists it in both Apps (the mailbox in the Worker's; `wakeups`, `actor.inbox` and the mailbox in the object's).
 - component/runtime-pi: uses `wakeups` when installed (SPEC C4): every run is driven inside the wakeup handler `runtime-pi.drive`, asked for by a dispatch or resume that leaves a run going, by start with `agent.submissions` (instead of resuming in the background) and by Pi's retry backoff; each run of it resumes what is due or pending, waits for the App's runs until its slice ends, and asks again at once while runs remain. Without `wakeups`, nothing changes. Its README has a Cloudflare section.
 - adapter: `createPiRuntime({ retryAt })` continues a run past Pi's retry backoff from outside the process (the run stops being driven at the wait, and is resumed at or after `notBefore`) instead of a timer; `runtime.holds(conversation)` and `runtime.whenIdle(ctx)` tell a host whether this worker still drives runs, for one that must wait for them inside an event.
 - cli: `pikit new <dir> --target cloudflare` records `targets: ["cloudflare"]` in `pikit.json` (components and offered providers are then those that run there), writes a two-App `pikit.config.ts` (the default export for each conversation's Durable Object, `export const worker` for the Worker, SPEC C1), `wrangler` in devDependencies and `.wrangler/`/`.dev.vars*` in `.gitignore`. `pikit add`/`remove` edit the default export's list in a file with several Apps; `pikit doctor` also composes `export const worker`; `pikit dev` runs the deployment's own `dev` when it exports one (`wrangler dev`); `pikit status` prints Cloudflare deployments; the guided `pikit new` offers only presets that run on a server. The server path is unchanged.
@@ -19,6 +22,7 @@ line names its area (AGENTS.md, "Git and docs").
 - component/deployment-cloudflare: new. Runs a project on Cloudflare: `wrangler.jsonc` (one SQLite-backed `Conversation` Durable Object class, `nodejs_compat`, `version_metadata`, `.md`/`.wasm` rules) and an entrypoint that composes `pikit.config.ts`'s default export in each object (lazily, inside `blockConcurrencyWhile`, 20 s start and 5 s rollback deadlines, a failed start rethrown so the object resets) and `export const worker` in the Worker (its `http.route`s served), with `WORKERS_HOST` on each start context; `alarm()` and the RPC `deliver()` call the handlers registered with `onAlarm`/`onDeliver`; public `GET /health` answers `{ ok, version }`. Commands: `up` (`wrangler deploy --secrets-file` with `.env`'s secrets but `CLOUDFLARE_*`, then waits until `/health` answers the new version, rolling back one that answers its App does not start), `down` (`wrangler delete`, only at a terminal), `logs`, `status`, `dev`. Target `cloudflare`.
 - repository: `wrangler` 4.143.0 in the root devDependencies (the version the workerd lane pins), for `deployment-cloudflare`'s bundle test and the Worker of new Cloudflare projects; the workerd lane runs `deployment-cloudflare`'s entrypoint on real Durable Objects.
 - registry: a deployment component's `commands.ts` runs on the machine that deploys (the CLI loads it), so `registry validate` lets it import `node:*` whatever the component's targets, as it does tests; every other file stays held to them (S5).
+- component/channel-telegram-webhook: its object half registers `telegram.update` with `actor.inbox`'s `handle` in its start: `actor.inbox` moves from its `provides` to its `requires`. It starts in one object App with `platform-cloudflare` and `runtime-pi`, and answers an update there.
 - component/channel-telegram-webhook: new. Telegram by webhook for Cloudflare (SPEC §4.1, C6), in two halves: the Worker's (the export `worker`: `POST /telegram` and `/telegram/<name>`, the webhook's secret checked in constant time, private text messages from allowed users only, a stranger told their id, then `actor.mailbox.send("telegram:<chat>", "telegram.update", update)`, `200` once the conversation holds it and `500` otherwise) and the object's (the `actor.inbox` handler: `/start`, `/help`, `/new`, `admitInbound`; the wakeup `channel-telegram-webhook.deliver`: answers from `agent.submissions`' feed with a cursor in `storage.kv`, pieces marked `sending`/`sent` and one found `sending` sent again with `↻ `, "typing…" while a message waits, `outbound.queue` if installed). `pikit configure` checks the token, generates `TELEGRAM_WEBHOOK_SECRET` and allows you; `deploy.ts`'s `afterDeploy({ url, config, get, say })` registers and checks each bot's webhook once a deploy answers (C8). Target `cloudflare`.
 - registry: `component.json` may name a half for another App, `"apps": { "worker": "<export>" }` (SPEC §4.1, C1): the named export of `index.ts` goes in the Worker's App, the default export in the default one; `registry generate` and `validate` describe both halves, so `provides`, `requires` and `optional` cover the component as a whole, and a named export that is missing or not a component is a problem.
 - repository: the workerd lane also runs Pi's session conformance on `sessions-sql` over `storage-do`
@@ -91,11 +95,14 @@ line names its area (AGENTS.md, "Git and docs").
   and its killed workers on it, `openSqliteDatabase(path, { durableObjectLimits })` is a `storage.sql`
   for tests, and `createSessionRepoStreamingForkConformance` is Pi's fork cases the repository suite
   does not include yet.
-- contracts: `actor.mailbox` and the keyed `actor.inbox` (experimental, SPEC C2): `send(key, type,
-  message, ctx)` resolves once the actor owning `key` holds the JSON message durably (its `actor.inbox`
-  handler for `type` resolved), and rejects otherwise, with an error naming the type when nothing
-  handles it. The handler gets a copy and a context of its own. Its conformance suite and a memory
-  mailbox for tests are in `@pikit/contracts/testing`.
+- contracts: `actor.mailbox` and `actor.inbox` (experimental, SPEC C2): the component that handles a
+  type of message registers its handler with `actor.inbox`'s `handle(type, handler)` in its `start`
+  (one handler per type, dropped at stop), as `wakeups` registers its own, so it may also send, wake
+  itself or use the runtime with no dependency cycle. `send(key, type, message, ctx)` resolves once
+  the actor owning `key` holds the JSON message durably (its handler for `type` resolved), and
+  rejects otherwise, with an error naming the type when nothing handles it. The handler gets a copy
+  and a context of its own. Its conformance suite (with `wakeups: true`, an actor that also wakes
+  itself) and a memory mailbox for tests are in `@pikit/contracts/testing`.
 - contracts: `wakeups` (experimental, SPEC C3, C4): the component that owns the work registers a
   handler with `handle(name, handler)` in its `start` (one owner per name, dropped at stop) and asks
   with `at(name, time, ctx)`, replacing its earlier request; `cancel(name, ctx)` drops it. A request
@@ -103,9 +110,9 @@ line names its area (AGENTS.md, "Git and docs").
   time; a handler that rejects runs again with the provider's backoff, and its context may be
   cancelled at a slice deadline, after which it asks again. Its conformance suite (on a manual clock)
   and a memory wakeups for tests, forgetful or durable, are in `@pikit/contracts/testing`.
-- component/mailbox-local: new. `actor.mailbox` on a server: `send` calls the same app's
-  `actor.inbox` handler for the type with a JSON copy and resolves when it does; `stop` cancels the
-  handlers still running. Targets `server`. `mailbox` is a new component kind.
+- component/mailbox-local: new. `actor.mailbox` and `actor.inbox` on a server: `send` calls the
+  handler registered for the type in the same app with a JSON copy and resolves when it does; `stop`
+  cancels the handlers still running and drops them. Targets `server`. `mailbox` is a new component kind.
 - component/wakeups-timers: new. `wakeups` on a server as in-process timers on the app's clock: a
   failed handler runs again after 1 s, 5 s, 30 s, then every 60 s, logged each time; optional
   `sliceMs` cancels a running handler's context as Cloudflare would, and no timer outlives a stop by
