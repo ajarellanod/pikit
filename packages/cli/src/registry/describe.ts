@@ -10,13 +10,20 @@
  * 2. an app of the component plus the stubs is created (every setup, no start) and described.
  *
  * Setups are synchronous and only register, so running them twice acquires nothing.
+ *
+ * A component whose declarations depend on its config (`tool-mcp` provides one `agent.tool` per
+ * tool its config names, none by default) is also described with each config in the `examples` of
+ * its root config schema (`Type.Object({ ... }, { examples: [config, ...] })`): the manifest says
+ * what it can declare, the union of the default config's and every example's. The tools only an
+ * example provides are not in `replay.tools`: their names are the example's, and `pikit new` gives
+ * those names to the starter agent. Their replay is still checked (S10).
  */
 
 import { pathToFileURL } from "node:url";
 import { type ComponentDefinition, defineApp, defineComponent, halt, type Pikit, silentLogger, systemClock, type Target } from "@pikit/core";
 import type { TSchema } from "typebox";
 import Value from "typebox/value";
-import type { Generated } from "./manifest.ts";
+import { type Generated, schemaProblems } from "./manifest.ts";
 
 /**
  * The component a registry entry installs: the default export of `src/pikit/<name>/index.ts`.
@@ -51,19 +58,70 @@ export async function loadExport(entry: string, name: string): Promise<Component
 /** What several halves declare together: each list in order, without repeats. */
 export function mergeGenerated(halves: readonly Generated[]): Generated {
   const union = (lists: string[][]): string[] => [...new Set(lists.flat())];
-  const tools = halves.reduce<Record<string, string> | undefined>((all, half) => (half.tools === undefined ? all : { ...all, ...half.tools }), undefined);
+  const merge = (pick: (half: Generated) => Record<string, string> | undefined) =>
+    halves.reduce<Record<string, string> | undefined>((all, half) => (pick(half) === undefined ? all : { ...all, ...pick(half) }), undefined);
+  const tools = merge((h) => h.tools);
+  const exampleTools = merge((h) => h.exampleTools);
   return {
     provides: union(halves.map((h) => h.provides)),
     requires: union(halves.map((h) => h.requires)),
     optional: union(halves.map((h) => h.optional)).filter((name) => !halves.some((h) => h.requires.includes(name))),
     ...(tools !== undefined && { tools }),
+    ...(exampleTools !== undefined && { exampleTools }),
   };
 }
 
-export async function describeSetup(component: ComponentDefinition, target: Target): Promise<Generated> {
+/**
+ * The configs of the `examples` of the component's root config schema, each with the schema's
+ * defaults applied, as the app would take it. An example that is not a valid config throws: it would
+ * describe a component nobody can configure.
+ */
+export function configExamples(component: ComponentDefinition): unknown[] {
+  const schema = component.config as (TSchema & { examples?: unknown }) | undefined;
+  if (schema?.examples === undefined) return [];
+  if (!Array.isArray(schema.examples)) throw new Error(`the examples of ${component.name}'s config schema are not an array of configs`);
+  return schema.examples.map((example, i) => {
+    const config = Value.Default(schema, Value.Clone(example));
+    const problems = schemaProblems(schema, config);
+    if (problems.length > 0) throw new Error(`examples[${i}] of ${component.name}'s config schema is not a valid config: ${problems.join("; ")}`);
+    return config;
+  });
+}
+
+/**
+ * What `setup` declares with the default config and with each example config: every list in that
+ * order, without repeats; `tools` only the default config's, the examples' others in `exampleTools`.
+ */
+export async function describeComponent(component: ComponentDefinition, target: Target): Promise<Generated> {
+  const own = await describeSetup(component, target);
+  const examples = configExamples(component);
+  if (examples.length === 0) return own;
+  const described: Generated[] = [];
+  for (const [i, config] of examples.entries()) {
+    try {
+      described.push(await describeSetup(component, target, config));
+    } catch (error) {
+      throw new Error(`with examples[${i}] of its config schema: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  const { provides, requires, optional } = mergeGenerated([own, ...described]);
+  const exampleTools = Object.fromEntries(
+    described.flatMap((d) => Object.entries(d.tools ?? {})).filter(([tool]) => own.tools?.[tool] === undefined),
+  );
+  return {
+    provides,
+    requires,
+    optional,
+    ...(own.tools !== undefined && { tools: own.tools }),
+    ...(Object.keys(exampleTools).length > 0 && { exampleTools }),
+  };
+}
+
+/** What `setup` declares with `componentConfig`, by default a placeholder made from the schema. */
+export async function describeSetup(component: ComponentDefinition, target: Target, componentConfig?: unknown): Promise<Generated> {
   // A placeholder config only for describing: defaults where the schema has them, typebox's
   // minimal valid values for required fields (router-basic's `defaultAgent`).
-  const config = component.config ? { [component.name]: Value.Create(component.config as TSchema) } : {};
+  const config = component.config ? { [component.name]: componentConfig ?? Value.Create(component.config as TSchema) } : {};
   const recorded = record(component, target, config);
 
   const stubs = recorded.singleUses
