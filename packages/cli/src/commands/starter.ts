@@ -10,6 +10,9 @@
  *
  * Two lines depend on what gets installed, and only on that: `runtime-pi` is listed with the
  * permission gate loaded, and `router-basic` sends every message to `assistant`.
+ *
+ * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
+ * two Apps (SPEC C1), `package.json` has `wrangler`, and `.gitignore` and the README say so.
  */
 
 import { readFileSync } from "node:fs";
@@ -30,7 +33,7 @@ export const STARTER_CONFIG: Record<string, string> = {
   "router-basic": `{ defaultAgent: "${STARTER_AGENT}" }`,
 };
 
-export function packageJson(name: string, kit: Record<string, string>): string {
+export function packageJson(name: string, kit: Record<string, string>, target = "server"): string {
   const root = JSON.parse(readFileSync(join(PIKIT_ROOT, "package.json"), "utf8")) as { devDependencies: Record<string, string> };
   // The versions this repository is checked with, pinned exactly.
   const pin = (pkg: string): string => (root.devDependencies[pkg] ?? "").replace(/^[\^~]/, "");
@@ -46,7 +49,12 @@ export function packageJson(name: string, kit: Record<string, string>): string {
       "@pikit/contracts": kit["@pikit/contracts"],
       "@pikit/core": kit["@pikit/core"],
     },
-    devDependencies: { "@types/bun": pin("@types/bun"), typescript: pin("typescript") },
+    devDependencies: {
+      "@types/bun": pin("@types/bun"),
+      typescript: pin("typescript"),
+      // deployment-cloudflare's commands and tests run the project's own wrangler.
+      ...(target === "cloudflare" && { wrangler: pin("wrangler") }),
+    },
     // Kit packages depend on each other by version, which npm does not have yet: every one of them
     // resolves to its tarball in vendor/, and there is one copy of each (SPEC §10.5).
     overrides: kit,
@@ -67,6 +75,15 @@ export const GITIGNORE = `node_modules/
 # State: sessions, conversations, model credentials, the agents' workspace.
 .pikit/
 `;
+
+/** `.gitignore` for a project on `target`. */
+export function gitignore(target = "server"): string {
+  if (target !== "cloudflare") return GITIGNORE;
+  return `${GITIGNORE}# wrangler's own: local secrets, the local objects' state and its build cache.
+.dev.vars*
+.wrangler/
+`;
+}
 
 export const CONFIG = `/**
  * The composition root (SPEC §4.1): everything that runs is listed in \`components\`, and nothing
@@ -92,6 +109,61 @@ export default defineApp({
   config,
 });
 `;
+
+/**
+ * The composition root of a project on Cloudflare: two Apps (SPEC C1). `pikit add` lists components in
+ * the default export, the object's App; the Worker's list is edited by hand until components with a
+ * Worker half install there themselves.
+ */
+export const CLOUDFLARE_CONFIG = `/**
+ * The composition root (SPEC §4.1) of a project on Cloudflare: two Apps (SPEC C1), and everything
+ * that runs is listed in their \`components\`. Follow the imports to read it all.
+ *
+ * - The default export runs in each conversation's Durable Object: the channel's other half, the
+ *   router, the runtime, sessions, storage, delivery. \`pikit add\` lists components here.
+ * - \`worker\` runs in the Worker, which receives every request first: the ingress half of each
+ *   channel, the mailbox, secrets. The Worker checks and routes; the object owns the conversation.
+ *
+ * \`pikit add\` and \`pikit remove\` edit this file: one import line per component, one entry per line
+ * in \`components\`, and one key per component in \`config\`. Edit it yourself too; keep that shape.
+ * deployment-cloudflare runs both Apps (\`src/pikit/deployment-cloudflare/worker.ts\`).
+ */
+
+import { defineApp } from "@pikit/core";
+import agents from "./src/extensions/agents.ts";
+// Pi's own permission-gate extension, unmodified: it blocks \`rm -rf\`, \`sudo\` and \`chmod 777\` in
+// \`bash\`. A policy, not a sandbox.
+import permissionGate from "./src/extensions/permission-gate.ts";
+
+/** Values, not behaviour (SPEC §12), under each component's name: the object's App. */
+export const config = {};
+
+/** Each conversation's Durable Object runs this App. */
+export default defineApp({
+  components: [
+    agents,
+  ],
+  config,
+});
+
+/** The Worker's config, under each of its components' names. */
+export const workerConfig = {};
+
+/**
+ * The Worker runs this App: its components' \`http.route\`s are what it serves, besides \`GET /health\`.
+ * \`pikit add\` lists components in the default export only: list the Worker's here by hand.
+ */
+export const worker = defineApp({
+  components: [
+  ],
+  config: workerConfig,
+});
+`;
+
+/** `pikit.config.ts` for a project on `target`. */
+export function configFile(target = "server"): string {
+  return target === "cloudflare" ? CLOUDFLARE_CONFIG : CONFIG;
+}
 
 export function agent(tools: string[]): string {
   const workspace =
@@ -138,7 +210,21 @@ export function permissionGate(): string {
   return readFileSync(join(PACKAGES_DIR, "pi-adapter", "src", "extensions", "pi-examples", "permission-gate.ts"), "utf8");
 }
 
-export function readme(name: string, components: string[]): string {
+export function readme(name: string, components: string[], target = "server"): string {
+  const run =
+    target === "cloudflare"
+      ? `pikit configure   # the variables in .env.example (they go up as the Worker's secrets), and a model API key
+pikit doctor      # the component graph; green when everything is provided and configured
+pikit dev         # run it here in workerd (wrangler dev), reloading on change
+pikit up          # or deploy it to Cloudflare (deployment-cloudflare): then pikit status, logs`
+      : `pikit configure   # the variables in .env.example, and a model login or API key
+pikit doctor      # the component graph; green when everything is provided and configured
+pikit dev         # run it here, reloading on change
+pikit up          # or run it in Docker (deployment-docker): then pikit status, logs, down`;
+  const composition =
+    target === "cloudflare"
+      ? "the composition root: two Apps, the default export in each conversation's Durable Object and `worker` in the Worker, and their config values"
+      : "the composition root: every component that runs, and their config values";
   return `# ${name}
 
 A pikit project: Pi runs the agents, and every other behaviour is source in \`src/pikit/\`, yours to
@@ -146,7 +232,7 @@ read, edit and remove.
 
 | Path | What it is |
 |---|---|
-| \`pikit.config.ts\` | the composition root: every component that runs, and their config values |
+| \`pikit.config.ts\` | ${composition} |
 | \`src/agents/\` | your agents (\`assistant\`) |
 | \`src/extensions/\` | your own components (\`agents.ts\`) and Pi extensions (\`permission-gate.ts\`) |
 | \`src/pikit/<component>/\` | installed components, with their tests and a README |
@@ -160,10 +246,7 @@ Installed: ${components.length > 0 ? components.map((c) => `\`${c}\``).join(", "
 ## Run it
 
 \`\`\`sh
-pikit configure   # the variables in .env.example, and a model login or API key
-pikit doctor      # the component graph; green when everything is provided and configured
-pikit dev         # run it here, reloading on change
-pikit up          # or run it in Docker (deployment-docker): then pikit status, logs, down
+${run}
 \`\`\`
 
 ## Change it

@@ -79,7 +79,7 @@ test("new with no directory asks only on a terminal; the presets it offers have 
   expect(readdirSync(parent)).toEqual([]);
 
   const presets = openRegistry(DEFAULT_REGISTRY).presets();
-  expect(presets.map((p) => p.name)).toEqual(["http", "telegram"]);
+  expect(presets.map((p) => p.name)).toEqual(["cloudflare-minimal", "http", "telegram"]);
   for (const preset of presets) expect(preset.title).not.toBe(preset.name);
 });
 
@@ -125,6 +125,49 @@ test("new refuses a preset component that does not run on a new project's target
   expect(run.err).toContain("channel-edge runs on cloudflare, not on this project's server target");
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
+
+test("new --target: an unknown target, and a preset that does not run on the chosen one, are refused before writing anything", () => {
+  const parent = temp();
+  const mars = pikit(["new", "fresh", "--target", "mars"], parent);
+  expect(mars.code).toBe(2);
+  expect(mars.err).toContain('--target is one of server, cloudflare, not "mars"');
+
+  const server = pikit(["new", "fresh", "--target", "cloudflare", "--preset", "http"], parent);
+  expect(server.code).toBe(1);
+  expect(server.err).toContain("runs on server, not on this project's cloudflare target");
+  const edge = pikit(["new", "fresh", "--preset", "cloudflare-minimal"], parent);
+  expect(edge.code).toBe(1);
+  expect(edge.err).toContain("storage-do runs on cloudflare, not on this project's server target");
+  expect(existsSync(join(parent, "fresh"))).toBe(false);
+});
+
+test("new --target cloudflare records the target, and writes two Apps, wrangler and the Cloudflare components", () => {
+  const parent = temp();
+  // Nothing resolves: `bun install` fails at once, after every file is written.
+  const run = Bun.spawnSync([process.execPath, MAIN, "new", "edge", "--target", "cloudflare", "--preset", "cloudflare-minimal"], {
+    cwd: parent,
+    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(run.stderr.toString()).toContain("`bun install` failed");
+  const project = join(parent, "edge");
+  const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
+  expect(manifest.targets).toEqual(["cloudflare"]);
+  expect(Object.keys(manifest.components).sort()).toEqual(["conversations-kv", "deployment-cloudflare", "sessions-sql", "storage-do", "storage-kv-sql"]);
+  // Offered among the providers that run on Cloudflare: storage-kv-sql, never storage-sqlite.
+  expect(manifest.components["storage-kv-sql"].installedFor).toEqual(["conversations-kv"]);
+  expect(Object.keys(manifest.components["deployment-cloudflare"].files)).toContain("wrangler.jsonc");
+
+  const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
+  expect(config).toContain("export default defineApp({\n  components: [\n    agents,\n    storageDo,\n    sessionsSql,\n    storageKvSql,\n    conversationsKv,\n  ],");
+  expect(config).toContain("export const worker = defineApp({\n  components: [\n  ],\n  config: workerConfig,\n});");
+  expect(config).not.toContain("deploymentCloudflare");
+  expect(JSON.parse(readFileSync(join(project, "package.json"), "utf8")).devDependencies.wrangler).toBe("4.143.0");
+  expect(readFileSync(join(project, ".gitignore"), "utf8")).toContain(".wrangler/\n");
+  expect(existsSync(join(project, "wrangler.jsonc"))).toBe(true);
+}, 60_000);
 
 test("add without a terminal needs --yes, and writes nothing without it", () => {
   const dir = tinyProject();

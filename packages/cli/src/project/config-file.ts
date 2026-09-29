@@ -165,9 +165,21 @@ interface ListPosition {
   indent: string;
 }
 
+/**
+ * The `components: [` list the CLI edits: the only one, or, in a file with several Apps (a Cloudflare
+ * project's `export const worker`, SPEC C1), the one of `export default defineApp({ … })`.
+ */
 function componentsList(text: string): ListPosition {
-  const matches = [...text.matchAll(/\bcomponents\s*:\s*\[/g)];
-  if (matches.length !== 1) throw new ShapeError(`it must have exactly one \`components: [\` list, found ${matches.length}`);
+  let matches = [...text.matchAll(/\bcomponents\s*:\s*\[/g)];
+  if (matches.length > 1) {
+    const app = /^export\s+default\s+defineApp\s*\(\s*\{/m.exec(text);
+    if (app !== null) {
+      const open = app.index + app[0].length - 1;
+      const close = matchClose(text, open);
+      matches = matches.filter((m) => m.index > open && m.index < close);
+    }
+  }
+  if (matches.length !== 1) throw new ShapeError(`it must have exactly one \`components: [\` list in its default export, found ${matches.length}`);
   const match = matches[0] as RegExpExecArray;
   const open = match.index + match[0].length - 1;
   const close = matchClose(text, open);
