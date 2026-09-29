@@ -104,7 +104,7 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   }
   // Only now: until the install rewrote bun.lock, it named the old tarballs.
   if (refreshed.length > 0) pruneVendor(projectDir);
-  const report = await doctor(projectDir, { quiet: true });
+  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
   if (report.problems.length > 0) {
     for (const problem of report.problems) log.problem(problem);
     throw new CliError(`${name} is installed, but \`pikit doctor\` found ${report.problems.length} problem(s)`);
