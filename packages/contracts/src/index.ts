@@ -25,6 +25,8 @@ export type { AdmitOptions, InboundMessage, InboundOutcome, RouteDecision } from
 export type { AgentState } from "./agent-state.ts";
 export { AGENT_STATE } from "./agent-state.ts";
 export { CONVERSATION } from "./conversation-context.ts";
+export type { WorkersHost } from "./workers-host.ts";
+export { WORKERS_HOST } from "./workers-host.ts";
 export type { ConversationRegistry, ConversationReset } from "./conversations.ts";
 export type { HttpRoute } from "./http.ts";
 export type { SecretStore } from "./secrets.ts";
