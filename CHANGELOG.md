@@ -5,6 +5,8 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/platform-cloudflare: new. `actor.mailbox` and `wakeups` on Cloudflare, in both Apps: from the Worker, `send` is an RPC to the conversation's object (`env.CONVERSATION`, configurable); in the object, `deliver` reaches `actor.inbox`, `actor.mailbox` sends to its own key locally and to others by RPC, and `wakeups` are rows in `platform_cloudflare_wakeups` over the object's one alarm, run one at a time in slices (`sliceMs`, 60 s by default) with backoff rows. Target `cloudflare`; new kind `platform`. Both suites also run in the workerd lane, on real Durable Objects with their RPC and alarm.
+
 - cli: `pikit add` and `pikit new` also offer the provider of a capability a component requires when the catalogue marks it `offer`: `pikit add conversations-kv` offers `storage-kv-sql` (and `storage-sqlite`).
 - component/conversations-kv: new. `conversations.registry` on `storage.kv` (namespace `conversations-kv`) and `sessions.store`; targets `server` and `cloudflare`. A first pointer is written with `setIfAbsent`, a reset emits `conversation.reset` once its pointer is stored, and its README says what holds when resets and resolves race across processes.
 - component/tool-websearch-brave: new. The `websearch` tool on the Brave Search API; its key,

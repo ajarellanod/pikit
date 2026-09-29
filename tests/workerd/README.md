@@ -18,6 +18,7 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | `test/storage-do.workerd.ts` | `storage.sql` on `storage-do`; `storage.kv` on `storage-kv-sql` over `storage-do`; the start as `deployment-cloudflare` does it; the SQL limits `storage-do`'s README states |
 | `test/submissions-sql.workerd.ts` | `agent.submissions` with its `answers` feed, pruning and restarts, on `submissions-sql` over `storage-do` |
 | `test/secrets-cloudflare.workerd.ts` | `secrets` on `secrets-cloudflare`, over the Worker's real `env` |
+| `test/platform-cloudflare.workerd.ts` | `wakeups` on `platform-cloudflare` over a real object's SQL (the alarm simulated on the suite's clock); `actor.mailbox` from the Worker's App by real RPC to `ConversationDouble`s; the real alarm (set, fired, after an eviction), the slice, the backoff, a request waiting for its handler, an object's own mailbox |
 
 Each case of a storage suite runs in a Durable Object of its own (`runInDurableObject` on a new id),
 and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint will
@@ -25,12 +26,19 @@ put it (`test/host.ts`): the suites start their own apps, so the host is given w
 from `@pikit/contracts/testing`. A test in each file also starts an app with the host in
 `app.start`'s context, the entrypoint's own way.
 
+`ConversationDouble` (bound as `CONVERSATION`) stands in for `deployment-cloudflare`'s conversation
+object, with its interface: an App per object with the object in `WORKERS_HOST`, `alarm()` calling
+the `onAlarm` handler and the RPC `deliver(type, key, message)` the `onDeliver` handler. A test says
+what that App is made of with `composeObjects` (tests and objects share one isolate). An RPC method
+that throws is logged by workerd as an uncaught exception even though its caller gets the rejection:
+those lines are expected in the mailbox suite's rejection cases.
+
 ## How
 
 - **Vitest with `@cloudflare/vitest-plugin`** (Cloudflare's Workers integration, formerly
-  `@cloudflare/vitest-pool-workers`), `wrangler.jsonc` for the Worker: one class, `TestObject`, in
-  `new_sqlite_classes`. Versions are pinned exactly in `package.json`; the plugin pins its wrangler
-  and miniflare.
+  `@cloudflare/vitest-pool-workers`), `wrangler.jsonc` for the Worker: two classes, `TestObject` and
+  `ConversationDouble`, in `new_sqlite_classes`. Versions are pinned exactly in `package.json`; the
+  plugin pins its wrangler and miniflare.
 - **Files end in `.workerd.ts`**, not `.test.ts`, so the root `bun test` never picks them up.
 - **The components are imported from `registry/`**, as TypeScript source; Vite compiles them.
 - **The typecheck** compiles the lane, and every file it imports (components, contracts, kernel),

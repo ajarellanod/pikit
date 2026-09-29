@@ -85,6 +85,14 @@
       ],
       "path": "components/outbound-durable"
     },
+    "platform-cloudflare": {
+      "version": "0.0.0",
+      "description": "Reaches each conversation's Durable Object from the Worker, and wakes components in it on its one alarm: actor.mailbox and wakeups on Cloudflare.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/platform-cloudflare"
+    },
     "provider-anthropic": {
       "version": "0.0.0",
       "description": "Anthropic's Claude models for your agents. An agent names one as `anthropic/<modelId>`, for example `anthropic/claude-sonnet-4-6`.",

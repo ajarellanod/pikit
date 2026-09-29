@@ -1,0 +1,132 @@
+# platform-cloudflare
+
+The platform half of a Cloudflare project: the Worker reaches each conversation's Durable Object,
+and components in the object wake at the time they ask for. It provides `actor.mailbox` and
+`wakeups` (SPEC §4.1, C2 to C5), the capabilities `mailbox-local` and `wakeups-timers` provide on a
+server, so a channel or a runtime written against them runs on both.
+
+- **Provides:** `actor.mailbox`, `wakeups`.
+- **Uses:** `actor.inbox` (keyed, optional): the handlers of the messages delivered to the object.
+- **Requires:** nothing; it reads the platform from `WORKERS_HOST`, which `deployment-cloudflare`'s
+  entrypoints put in each App's start context.
+- **Target:** `cloudflare`. On a server, use `mailbox-local` and `wakeups-timers`.
+- **Installs to:** `src/pikit/platform-cloudflare/`.
+- **npm dependencies:** none beyond pikit's (`typebox` for its config).
+
+```sh
+pikit add platform-cloudflare
+```
+
+It goes in **both Apps** of `pikit.config.ts` (C1): the Worker's (`export const worker`) and the
+conversation object's (the default export). What it does depends on the App it starts in.
+
+## In the Worker's App: `actor.mailbox`
+
+`send(key, type, message, ctx)` is an RPC to the conversation's object:
+`env.CONVERSATION.get(env.CONVERSATION.idFromName(key)).deliver(type, key, message)`. It resolves
+when the object's `actor.inbox` handler for `type` resolved (the message is durable there), and
+rejects on anything else: an empty key, a message that is not JSON, no handler for the type in the
+object, a handler that rejected, the object unreachable, or `ctx` cancelled first. On a rejection
+the channel does not acknowledge its platform, which delivers again: delivery is at-least-once, so
+handlers recognise a message they already hold.
+
+It refuses to start when `env.CONVERSATION` (or the binding you configure) is not a Durable Object
+namespace.
+
+## In the object's App
+
+### `wakeups`, rows over one alarm
+
+The object has one alarm; every component's requests share it. Each request is a row in the
+object's SQL, in its own table (`platform_cloudflare_wakeups`: name, time, failures), and the alarm
+is set to the earliest row whose name has a handler.
+
+- **`at`, `cancel` and `handle` set the alarm again** when they change the earliest. A request for a
+  name with no handler yet stays in the table and sets nothing (it would fire for nothing); the
+  alarm is set once its handler registers.
+- **When the alarm fires**, the due requests whose handler is registered run **one at a time**,
+  earliest first, within **one slice** (`sliceMs`, 60 s by default). At the slice's deadline the
+  running handler's context is cancelled: it stops at a consistent point, asks again
+  (`at(name, ctx.clock.now(), ctx)`) and resolves. Then the alarm is set to the earliest pending
+  request, now if it is due, and the next alarm continues.
+- **A row is deleted only when its handler resolved.** An alarm cut by the platform (a deploy, 15
+  minutes of wall clock, an eviction) is retried by the platform and finds the row still there. A
+  handler that rejects gets its row moved by the backoff: 1 s, 5 s, 30 s, then every 60 s, with its
+  failures counted in the row and logged as a warning. A request made during the failed run stands
+  if it is sooner; a `cancel` during it drops the retry. A run cut by the App's stop leaves its row
+  as it was.
+- **At start**, if rows exist, the alarm is set again (a reset may have lost it).
+
+Nothing else in the object may set its alarm: a component that needs to wake uses `wakeups`.
+
+### The RPC's other end, and `actor.mailbox` in the object
+
+It registers the object's `deliver` RPC: `deliver(type, key, message)` calls this App's
+`actor.inbox` handler for `type` with a context of its own (the start context's values, cancelled
+when the App stops, never by the sender), and resolves or rejects with it. With no handler for the
+type, the error names it and lists the ones handled.
+
+`actor.mailbox` works in the object too, so a component there can reach another conversation:
+another key is an RPC to its object, as from the Worker; the object's own key (the one whose
+`idFromName` is this object) is a local call, which spends no subrequest and does not re-enter the
+object.
+
+## How C4's budgets shape the slice
+
+On Cloudflare an object runs only while an event is in progress: a request, an RPC, an alarm. A
+promise left running after it is killed once the object idles out (70 to 140 s), and `waitUntil`
+does nothing in an object. So long work (a run driven by the runtime) happens inside alarms, and
+each alarm has its own budget, measured on the Free plan:
+
+| Budget, per invocation | What the slice does about it |
+|---|---|
+| **15 minutes of wall clock** for an alarm, then it is cut (and retried) | A slice of 60 s is far from it; `sliceMs` is capped at 10 minutes. A cut alarm loses nothing (the rows stay) but wastes the work since the last commit. |
+| **A deploy cuts every alarm in progress** (retried) | Short slices mean a deploy cuts at most one slice of work, which runs again. |
+| **30 s of CPU** (waiting on the network does not count) | A slice is mostly waiting on the model; 60 s of wall clock rarely nears 30 s of CPU. Handlers that compute a lot should ask again sooner. |
+| **50 subrequests** (fetches, RPCs to other objects) | Shared by the handlers of one slice. A runtime turn is one model call plus its tool calls; a slice of a few turns fits. A handler that fans out should stop early and ask again: the next alarm has 50 of its own. |
+| **About 200 MB of memory** before the object is reset | Not the slice's: a reset is an eviction, and the rows make it lose nothing (K6). |
+
+Why 60 to 90 s: long enough that a model call and its tools finish inside one slice, short enough to
+stay far from every limit above and to let the other wakeups of the object (an outbox delivery) run
+within a minute or so. Handlers run one at a time, so a slice that uses its whole length delays the
+object's other due wakeups by that much: "never early, maybe late".
+
+A handler that ignores its cancelled context keeps the alarm until the platform cuts it at 15
+minutes, then runs again from the start: honour `ctx.abortSignal`.
+
+## Config
+
+```ts
+"platform-cloudflare": {
+  binding: "CONVERSATION",   // the conversation object's namespace binding in wrangler.jsonc
+  sliceMs: 60_000,           // one alarm's slice, 1 ms to 10 minutes
+}
+```
+
+Both are optional; these are the defaults. `binding` must be the one `deployment-cloudflare` binds
+its conversation class to.
+
+## Where it goes, and the dependency graph
+
+It uses `actor.inbox` with `useKeyed`, so it starts after every component that provides an inbox
+handler, and it provides `wakeups` and `actor.mailbox`, so it starts before every component that
+uses them. In the object's App, **a component that provides an `actor.inbox` handler must not
+depend, even through other capabilities, on `wakeups` or `actor.mailbox`**: that is a dependency
+cycle, and the App refuses to start, naming it. Wakeup handlers are registered with
+`wakeups.handle`, not provided, so a component that wakes creates no cycle.
+
+## Removing it
+
+`pikit remove platform-cloudflare` refuses while a component requires `actor.mailbox` or
+`wakeups`. The table `platform_cloudflare_wakeups` stays in each object until the object is deleted;
+drop it if you want it gone.
+
+## Tests
+
+Copied with the component, they run in your project under `bun test`, over doubles of a Durable
+Object (its alarm on the app's clock, its RPC, its SQL in `node:sqlite`): the `wakeups` conformance
+suite (with the slice deadline and requests that survive a restart), the `actor.mailbox` suite from
+a Worker's App to the objects, the lifecycle suite, and the alarm set again, a slice, the backoff
+rows, a request waiting for its handler, deliveries to `actor.inbox`, the object's own mailbox and
+what it refuses at start. pikit also runs both suites in workerd on real Durable Objects, and there
+the real alarm, an eviction, the slice and the backoff (`tests/workerd`).

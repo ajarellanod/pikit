@@ -7,10 +7,17 @@
   // Vitest's runner inside workerd needs it; the components under test do not.
   "compatibility_flags": ["nodejs_compat"],
   "durable_objects": {
-    "bindings": [{ "name": "OBJECTS", "class_name": "TestObject" }]
+    "bindings": [
+      { "name": "OBJECTS", "class_name": "TestObject" },
+      // deployment-cloudflare's conversation object, under platform-cloudflare's default binding.
+      { "name": "CONVERSATION", "class_name": "ConversationDouble" }
+    ]
   },
   // SQLite-backed, as a conversation's object is on Cloudflare (SPEC C1, C5).
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TestObject"] }],
+  "migrations": [
+    { "tag": "v1", "new_sqlite_classes": ["TestObject"] },
+    { "tag": "v2", "new_sqlite_classes": ["ConversationDouble"] }
+  ],
   // A variable secrets-cloudflare must read back from the real env.
   "vars": { "PIKIT_WORKERD_VAR": "from wrangler vars" }
 }
