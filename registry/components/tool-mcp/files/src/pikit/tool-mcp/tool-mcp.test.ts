@@ -5,8 +5,9 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentTool, defineAgent } from "@pikit/contracts";
+import { type App, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { type AgentTool, defineAgent, type KeyValueStorage } from "@pikit/contracts";
+import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
 import { createPiRuntime, modelsFrom, type SessionStore } from "@pikit/pi-adapter";
 import { createFakeMcpServer, type FakeMcpServer, type FakeMcpTool } from "@pikit/pi-adapter/mcp/testing";
 import { type ModelRequest, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing/neutral";
@@ -62,8 +63,13 @@ interface Installed {
   tools: Map<string, AgentTool>;
 }
 
-/** tool-mcp in an app with `config`, started; `extra` are more components (secrets). */
-async function installed(config: Record<string, unknown>, extra: ComponentDefinition[] = []): Promise<Installed> {
+/** A `storage.kv` provider over `storage`: apps created one after the other over it share its data. */
+function kvOf(storage: KeyValueStorage) {
+  return defineComponent({ name: "storage-kv-test", setup: (pikit) => pikit.provide("storage.kv", storage) });
+}
+
+/** tool-mcp in an app with `config`, started; `extra` are more components (secrets, storage.kv). */
+async function installed(config: Record<string, unknown>, extra: ComponentDefinition[] = [], logger: Logger = silentLogger): Promise<Installed> {
   const tools = new Map<string, AgentTool>();
   const reader = defineComponent({
     name: "tool-reader",
@@ -79,10 +85,19 @@ async function installed(config: Record<string, unknown>, extra: ComponentDefini
       };
     },
   });
-  const app = await defineApp({ components: [...extra, toolMcp, reader], config: { "tool-mcp": config }, logger: silentLogger }).create();
+  const app = await defineApp({ components: [...extra, toolMcp, reader], config: { "tool-mcp": config }, logger }).create();
   await app.start();
   stops.push(() => app.stop());
   return { app, tools };
+}
+
+/** A copy of the wiki's tools, for a server whose tools a test changes. */
+const wikiTools = (): FakeMcpTool[] => WIKI_TOOLS.map((tool) => ({ ...tool }));
+
+/** A logger that keeps its errors' messages. */
+function errorsLogger(): Logger & { errors: string[] } {
+  const errors: string[] = [];
+  return { ...silentLogger, errors, error: (message) => void errors.push(message) };
 }
 
 const invocation = { invocationId: "invocation-1", operationId: "operation-1", turnId: "turn-1", getMemo: async () => undefined, setMemo: async () => {} };
@@ -213,6 +228,150 @@ test("stop ends each server's session", async () => {
   const s = await installed({ servers: { wiki: { url: serve(server), tools: ["ask_question"] } } });
   await s.app.stop();
   expect(server.requests.at(-1)?.method).toBe("DELETE");
+});
+
+test("with storage.kv, a start without a kept listing reaches the server and keeps what it listed of the named tools", async () => {
+  const storage = createMemoryKeyValueStorage();
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const url = serve(server);
+  const s = await installed({ servers: { wiki: { url, tools: ["ask_question", "open_issue"] } } }, [kvOf(storage)]);
+  expect(server.requests.map((r) => r.rpc).filter((rpc) => rpc !== undefined)).toEqual(["initialize", "notifications/initialized", "tools/list"]);
+  expect(s.tools.get("wiki_ask_question")?.description).toBe("Asks a question about a repository.");
+  const kept = (await storage.namespace("tool-mcp").get("server/wiki")) as Record<string, unknown> | undefined;
+  expect(kept).toMatchObject({
+    url,
+    tools: {
+      ask_question: { name: "ask_question", title: "Ask a question", description: "Asks a question about a repository.", annotations: { readOnlyHint: true } },
+      open_issue: { name: "open_issue", inputSchema: { type: "object", properties: { title: { type: "string" } } } },
+    },
+  });
+  // Only the named tools.
+  expect(Object.keys(kept?.tools as object).sort()).toEqual(["ask_question", "open_issue"]);
+  expect(Number.isNaN(Date.parse(String(kept?.listedAt)))).toBe(false);
+});
+
+test("with a kept listing, a start makes no request and describes the tools from it; the first call connects", async () => {
+  const storage = createMemoryKeyValueStorage();
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const config = { servers: { wiki: { url: serve(server), tools: ["ask_question", "open_issue"] } } };
+  await installed(config, [kvOf(storage)]);
+  const before = server.requests.length;
+
+  const s = await installed(config, [kvOf(storage)]);
+  expect(server.requests.length).toBe(before);
+  const ask = s.tools.get("wiki_ask_question");
+  expect(ask?.label).toBe("Ask a question");
+  expect(ask?.description).toBe("Asks a question about a repository.");
+  expect(ask?.parameters).toMatchObject({ type: "object", properties: { repoName: { type: "string" } }, required: ["repoName", "question"] });
+  expect(ask?.replay).toBe("safe");
+  expect(s.tools.get("wiki_open_issue")?.replay).toBe("never");
+
+  expect(textOf(await call(ask, { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+  expect(server.requests.slice(before).flatMap((r) => (r.rpc === undefined ? [] : [r.rpc]))).toEqual(["initialize", "notifications/initialized", "tools/list", "tools/call"]);
+});
+
+test("a kept listing for another URL, or without every named tool, is not used: the start reaches the server", async () => {
+  const storage = createMemoryKeyValueStorage();
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const url = serve(server);
+  await installed({ servers: { wiki: { url, tools: ["ask_question"] } } }, [kvOf(storage)]);
+
+  let before = server.requests.length;
+  await installed({ servers: { wiki: { url, tools: ["ask_question", "open_issue"] } } }, [kvOf(storage)]);
+  expect(server.requests.length).toBeGreaterThan(before);
+
+  await storage.namespace("tool-mcp").set("server/wiki", { url: "http://127.0.0.1:9/elsewhere", listedAt: "2026-01-01T00:00:00.000Z", tools: {} });
+  before = server.requests.length;
+  await installed({ servers: { wiki: { url, tools: ["ask_question"] } } }, [kvOf(storage)]);
+  expect(server.requests.length).toBeGreaterThan(before);
+});
+
+test("a server that is down does not stop a start that has its listing: its calls fail, the other servers answer", async () => {
+  const storage = createMemoryKeyValueStorage();
+  const wiki = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const http = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: wiki.fetch });
+  const config = {
+    servers: {
+      wiki: { url: `http://127.0.0.1:${http.port}/mcp`, tools: ["ask_question"] },
+      other: { url: serve(createFakeMcpServer({ tools: WIKI_TOOLS })), tools: ["ask_question"] },
+    },
+  };
+  await installed(config, [kvOf(storage)]);
+  await http.stop(true);
+
+  const s = await installed(config, [kvOf(storage)]);
+  expect(s.tools.get("wiki_ask_question")?.description).toBe("Asks a question about a repository.");
+  await expect(call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" })).rejects.toThrow('tool-mcp: the MCP server "wiki" could not be reached');
+  expect(textOf(await call(s.tools.get("other_ask_question"), { repoName: "pi", question: "?" }))).toBe("pi: it is a kit");
+});
+
+test("with storage.kv but no kept listing, a server that cannot be reached still stops the start", async () => {
+  const message = await startError({ servers: { gone: { url: "http://127.0.0.1:9/mcp", tools: ["anything"] } } }, [kvOf(createMemoryKeyValueStorage())]);
+  expect(message).toContain('the MCP server "gone" could not list its tools');
+});
+
+test("each connection lists the tools again: the tools and the kept listing follow the server", async () => {
+  const storage = createMemoryKeyValueStorage();
+  const tools = wikiTools();
+  const server = createFakeMcpServer({ tools });
+  const config = { servers: { wiki: { url: serve(server), tools: ["ask_question"] } } };
+  await installed(config, [kvOf(storage)]);
+  const s = await installed(config, [kvOf(storage)]);
+  const ask = s.tools.get("wiki_ask_question");
+
+  // The first call after a start from the kept listing connects, and lists.
+  (tools[0] as FakeMcpTool).description = "Asks, version 2.";
+  await call(ask, { repoName: "pikit", question: "?" });
+  expect(ask?.description).toBe("Asks, version 2.");
+  expect(await storage.namespace("tool-mcp").get("server/wiki")).toMatchObject({ tools: { ask_question: { description: "Asks, version 2." } } });
+
+  // A forgotten session connects again, and lists again.
+  tools[0] = { ...(tools[0] as FakeMcpTool), description: "Asks, version 3.", annotations: { readOnlyHint: false } };
+  server.expireSessions();
+  await call(ask, { repoName: "pikit", question: "?" });
+  expect(ask?.description).toBe("Asks, version 3.");
+  expect(ask?.replay).toBe("never");
+  expect(await storage.namespace("tool-mcp").get("server/wiki")).toMatchObject({ tools: { ask_question: { description: "Asks, version 3." } } });
+});
+
+test("a named tool the server no longer lists fails its calls and is logged; the next start still starts", async () => {
+  const storage = createMemoryKeyValueStorage();
+  const tools = wikiTools();
+  const server = createFakeMcpServer({ tools });
+  const config = { servers: { wiki: { url: serve(server), tools: ["ask_question", "open_issue"] } } };
+  await installed(config, [kvOf(storage)]);
+  tools.splice(tools.findIndex((tool) => tool.name === "open_issue"), 1);
+
+  const logger = errorsLogger();
+  const s = await installed(config, [kvOf(storage)], logger);
+  await expect(call(s.tools.get("wiki_open_issue"), { title: "bug" })).rejects.toThrow(
+    'tool-mcp: the MCP server "wiki" no longer lists the tool "open_issue" (it has: ask_question, no_arguments, slow)',
+  );
+  expect(logger.errors).toEqual(['tool-mcp: the MCP server "wiki" no longer lists the tool "open_issue": its calls fail']);
+  expect(server.requests.some((r) => r.rpc === "tools/call")).toBe(false);
+  // The other tools still answer.
+  expect(textOf(await call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+
+  // The kept listing keeps the tool's last description: a start does not stop the app over it.
+  const before = server.requests.length;
+  await installed(config, [kvOf(storage)]);
+  expect(server.requests.length).toBe(before);
+});
+
+test("without storage.kv, every start reaches the server", async () => {
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const config = { servers: { wiki: { url: serve(server), tools: ["ask_question"] } } };
+  await installed(config);
+  await installed(config);
+  expect(server.requests.filter((r) => r.rpc === "tools/list")).toHaveLength(2);
+});
+
+test("the config's example composes and provides its tools (setup only: nothing is reached)", async () => {
+  const examples = (toolMcp.config as { examples?: Record<string, unknown>[] }).examples ?? [];
+  expect(examples).toHaveLength(1);
+  const app = await defineApp({ components: [toolMcp], config: { "tool-mcp": examples[0] }, logger: silentLogger }).create();
+  const keys = (app.describe() as { capabilities: Record<string, { keys?: Record<string, string> }> }).capabilities["agent.tool"]?.keys;
+  expect(Object.keys(keys ?? {}).sort()).toEqual(["deepwiki_ask_wiki_question", "deepwiki_read_wiki_structure"]);
 });
 
 test("setup refuses a server name that cannot start a tool name, and two tools with one name", async () => {

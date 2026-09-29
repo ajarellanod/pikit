@@ -10,6 +10,7 @@
 
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { AgentTool } from "@pikit/contracts";
+import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
 import { McpClient, mcpHttpTransport, StreamableHttpTransport } from "@pikit/pi-adapter/mcp";
 import { expect, it } from "vitest";
 import toolMcp from "../../../registry/components/tool-mcp/files/src/pikit/tool-mcp/index.ts";
@@ -84,6 +85,48 @@ it("tool-mcp in workerd: tools described at start, calls, a reported failure, a 
     // The server forgets its sessions, as one that restarted: the call connects again.
     await fetch(`http://${MCP_HOSTS.sse}/__expire`, { method: "POST" });
     expect(textOf(await call("wiki_ask_question", { repoName: "again" }))).toBe("again: it is a kit");
+  } finally {
+    await app.stop();
+  }
+});
+
+it("tool-mcp in workerd with storage.kv: a start with the kept listing makes no request; the first call connects and lists", async () => {
+  const storage = createMemoryKeyValueStorage();
+  const kv = defineComponent({ name: "storage-kv-test", setup: (pikit) => pikit.provide("storage.kv", storage) });
+  const tools = new Map<string, AgentTool>();
+  const reader = defineComponent({
+    name: "tool-reader",
+    setup(pikit) {
+      const provided = pikit.useKeyed("agent.tool");
+      return {
+        start() {
+          for (const key of provided.keys()) tools.set(key, provided.get(key) as AgentTool);
+        },
+      };
+    },
+  });
+  const requests = async () => (await (await fetch(`http://${MCP_HOSTS.json}/__requests`)).json()) as number;
+  const definition = defineApp({
+    components: [kv, toolMcp, reader],
+    config: { "tool-mcp": { servers: { wiki: { url: urlOf(MCP_HOSTS.json), tools: ["ask_question"] } } } },
+    logger: silentLogger,
+  });
+  const first = await definition.create();
+  await first.start();
+  await first.stop();
+
+  const before = await requests();
+  const app = await definition.create();
+  await app.start();
+  try {
+    expect(await requests()).toBe(before);
+    const ask = tools.get("wiki_ask_question");
+    expect(ask?.description).toBe("Asks a question about a repository.");
+    expect(ask?.replay).toBe("safe");
+    const result = await ask?.execute("call-1", { repoName: "pikit" }, () => {}, undefined, invocation, context);
+    expect(textOf(result ?? { content: [] })).toBe("pikit: it is a kit");
+    // initialize, notifications/initialized, tools/list, tools/call.
+    expect((await requests()) - before).toBe(4);
   } finally {
     await app.stop();
   }

@@ -15,7 +15,10 @@
  *   extensions use, which resolves to `@pikit/pi-extension-shim` (SPEC §6.2b);
  * - a Pi extension of the project imports nothing the shim lacks (`pi-extensions.ts`). What an
  *   extension uses that pikit does not provide (an event it never fires, `ctx.sessionManager`,
- *   terminal UI) is listed as information, one line per extension: it is read by heuristics.
+ *   terminal UI) is listed as information, one line per extension: it is read by heuristics;
+ * - each installed component's own check, `src/pikit/<name>/doctor.ts` (`component-doctor.ts`), once
+ *   the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
+ *   network; a project without one runs none.
  * Installed files that differ from what was installed are listed as information: they are yours.
  *
  * `problems` fail the command. `unconfigured` fail it too, but `pikit new` expects them: a new
@@ -25,7 +28,8 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { packageName, scanImports } from "../registry/imports.ts";
-import { projectEnv, probe } from "../project/run.ts";
+import { type ComponentDoctorResult, componentsWithChecks } from "../project/component-doctor.ts";
+import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
 import { brokenReferences } from "../project/references.ts";
 import { checkPiExtensions } from "../project/pi-extensions.ts";
@@ -42,7 +46,16 @@ export interface DoctorReport {
   probe: ProbeResult;
 }
 
-export async function doctor(projectDir: string, options: { quiet?: boolean } = {}): Promise<DoctorReport> {
+export interface DoctorOptions {
+  quiet?: boolean;
+  /**
+   * Whether the components' own checks run (default: yes). `add`, `remove` and `new` check what
+   * they changed, the composition: an MCP server down elsewhere is not theirs to report.
+   */
+  componentChecks?: boolean;
+}
+
+export async function doctor(projectDir: string, options: DoctorOptions = {}): Promise<DoctorReport> {
   const project = readProjectManifest(projectDir);
   const problems: string[] = [];
   const unconfigured: string[] = [];
@@ -66,6 +79,7 @@ export async function doctor(projectDir: string, options: { quiet?: boolean } = 
     }
     notes.push(...unusedProviders(result.description.components));
     problems.push(...brokenReferences(result));
+    if (options.componentChecks !== false) problems.push(...(await componentChecks(projectDir)));
   }
 
   const env = projectEnv(projectDir);
@@ -91,6 +105,13 @@ export async function doctor(projectDir: string, options: { quiet?: boolean } = 
     if (problems.length === 0 && unconfigured.length === 0) log.ok("pikit doctor: green");
   }
   return { problems, unconfigured, notes, probe: result };
+}
+
+/** The problems the installed components' own checks find; none, and no process, without a check. */
+async function componentChecks(projectDir: string): Promise<string[]> {
+  if (componentsWithChecks(projectDir).length === 0) return [];
+  const result = await runScript<ComponentDoctorResult>("component-doctor.ts", projectDir, []);
+  return result.ok ? result.problems : [`the components' own checks could not run: ${result.error}`];
 }
 
 /** Components that provide capabilities no other component uses: installed, and doing nothing. */
