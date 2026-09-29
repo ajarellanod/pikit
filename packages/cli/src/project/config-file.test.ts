@@ -1,6 +1,6 @@
 /**
  * `pikit add` and `pikit remove` edit `pikit.config.ts` as text. Removing what was added gives the
- * file back byte for byte (S3), and a shape the CLI does not recognise is an error, not a guess.
+ * file back byte for byte (SPEC P3), and a shape the CLI does not recognise is an error, not a guess.
  */
 
 import { expect, test } from "bun:test";

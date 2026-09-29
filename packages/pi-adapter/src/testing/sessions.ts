@@ -1,7 +1,7 @@
 /**
- * Pi's own conformance suites for session stores (SPEC §7.5, §14), for `sessions.*` components to
- * run without importing Pi (rule 1). Every `sessions.store` passes `createSessionRepoConformance`
- * and `createStorageConformance`, as Pi's own repositories do.
+ * Pi's own conformance suites for session stores (`sessions.store`), for `sessions.*` components to
+ * run without importing Pi (only the adapter does). Every `sessions.store` passes
+ * `createSessionRepoConformance` and `createStorageConformance`, as Pi's own repositories do.
  */
 
 import type { Session, Storage } from "@earendil-works/pi-agent-core";

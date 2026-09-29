@@ -1,5 +1,5 @@
 /**
- * Scenario 8, many agents (SPEC §15, ROADMAP M1.5): one pikit runs several agents side by side, each
+ * Scenario 8, many agents: one pikit runs several agents side by side, each
  * with its own tools, Pi extensions and directory, each reached from the conversations its rules give
  * it, all by adding components:
  * - `router-rules` sends `ops-room` to `ops` and `support-room` to `support`; any other conversation
@@ -7,7 +7,7 @@
  * - `ops` and `support` both have Pi's real `bash`, but only `ops` names Pi's `permission-gate`
  *   extension (provided under `agent.extension`), and `assistant` has no tools;
  * - `workspace-local` gives each agent its own directory.
- * Removing `router-rules` routes everything to `assistant` again, with nothing else changed (S3).
+ * Removing `router-rules` routes everything to `assistant` again, with nothing else changed (SPEC P3).
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -74,7 +74,7 @@ test("each conversation reaches its agent, with that agent's tools, extensions a
   expect(other.body.text).toBe('tool said: Tool "bash" is unavailable');
 });
 
-test("without router-rules, every conversation goes to the default agent (S3)", async () => {
+test("without router-rules, every conversation goes to the default agent (SPEC P3)", async () => {
   const sample = await createSample({ agents: [assistant, ops, support], extra: [extensions, workspaceLocal], workspaces: true });
   samples.push(sample);
   await sample.app.start();

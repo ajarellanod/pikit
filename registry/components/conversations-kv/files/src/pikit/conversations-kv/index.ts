@@ -1,5 +1,6 @@
 /**
- * conversations-kv: the conversation registry in `storage.kv` (SPEC §7.4, §7.6, §4.1 C5).
+ * conversations-kv: the conversation registry in `storage.kv` (`conversations.registry`,
+ * in @pikit/contracts' conversations.ts; SPEC §4.1, C5).
  *
  * It provides `conversations.registry`: which Pi session each conversation key is in now. The first
  * message of a conversation creates its session (through `sessions.store`) and records the pointer;
@@ -42,7 +43,7 @@ export const NAMESPACE = "conversations-kv";
 const Pointer = Type.Object({
   agent: Type.String({ minLength: 1 }),
   sessionId: Type.String({ minLength: 1 }),
-  /** Sessions this conversation was in before, oldest first. Kept, never deleted (§7.6). */
+  /** Sessions this conversation was in before, oldest first. Kept, never deleted. */
   previousSessionIds: Type.Array(Type.String()),
   createdAt: Type.Number(),
   updatedAt: Type.Number(),

@@ -1,7 +1,7 @@
 /**
  * channel-telegram-webhook's step of `pikit configure`: everything a person needs to do, asked in
  * order, checked on the spot. The CLI finds this file in an installed component and calls
- * `configure(io)`; it knows nothing about Telegram (SPEC §11). Taken from channel-telegram's step
+ * `configure(io)`; it knows nothing about Telegram. Taken from channel-telegram's step
  * (components never import each other, C6), with the webhook's secret added:
  *
  * 1. The bot token. Without one, it explains @BotFather in three lines and asks for it; every token

@@ -3,14 +3,14 @@
  * command in the working directory and returns its output (the last lines when it is long), with
  * an optional timeout.
  *
- * pikit does not reimplement it (SPEC §6.3). This component adds only what the kit owns:
+ * pikit does not reimplement it (SPEC P1). This component adds only what the kit owns:
  * - the environment it works on, read when the tool runs: the agent's own `workspace` when one is
- *   installed (`workspace-local`: a directory per agent, with a shell, SPEC §8.2), otherwise
+ *   installed (`workspace-local`: a directory per agent, with a shell), otherwise
  *   `execution.shell`. It needs a real shell, so an environment with `execution` only cannot install
  *   it, and `pikit doctor` says so. A `workspace` without a shell fails every call: do not install
  *   one with `bash`;
  * - its replay, `"never"`: a command can do anything, so after a crash Pi reports the call as
- *   interrupted, and the model decides whether to run it again (SPEC §8.4).
+ *   interrupted, and the model decides whether to run it again (`agentTool`'s replay).
  *
  * A shell can do anything the environment's OS user can, outside the working directory too. Give
  * `bash` only to the agents that need it, and know the limits of the environment it runs in:

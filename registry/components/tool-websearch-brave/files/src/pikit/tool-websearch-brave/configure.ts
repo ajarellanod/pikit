@@ -1,7 +1,7 @@
 /**
  * tool-websearch-brave's step of `pikit configure`: the Brave Search API key, which is optional. The
  * CLI finds this file in an installed component and calls `configure(io)`; it knows nothing about
- * Brave (SPEC §11).
+ * Brave.
  *
  * - A key already in `.env`, or exported, is kept (written to `.env`, which the app reads).
  * - In a terminal, without one: where to get it, then the key, asked without echo. Enter skips: the

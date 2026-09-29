@@ -3,7 +3,7 @@
  * a new project.
  *
  * It writes the project's own part (`starter.ts`), vendors the kit packages into `vendor/`, adds
- * every component of the preset through the same install flow as `pikit add` (SPEC §10.5), runs
+ * every component of the preset through the same install flow as `pikit add`, runs
  * `bun install` once, and ends with `pikit doctor`. A preset is a list of `add` calls and nothing
  * else: no step here reads the preset's name.
  *
@@ -60,7 +60,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   const registry = openRegistry(options.registry ?? DEFAULT_REGISTRY);
   if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions: it needs --preset");
   const chosen = options.preset === undefined ? [] : registry.preset(options.preset, options.with ?? []);
-  // What the chosen components bring (SPEC §10.5, "Offered providers"): durable delivery for a chat
+  // What the chosen components bring (offered providers, `offers.ts`): durable delivery for a chat
   // channel, and the storage it needs. A preset lists only what every project of it uses.
   const { order: components, installedFor } = withOffers(registry, chosen, targets);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
@@ -88,7 +88,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, target));
   write("src/extensions/agents.ts", starter.AGENTS);
   write("src/extensions/permission-gate.ts", starter.permissionGate());
-  // `builtin` for this CLI's registry: the project resolves it wherever it is cloned (SPEC §10.3).
+  // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
   const location = recordedLocation(projectDir, registry.root);
   if (!isPortable(location)) log.warn(notPortable(location));
   writeProjectManifest(projectDir, emptyManifest(location, kitCommit(), targets));

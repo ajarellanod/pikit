@@ -36,7 +36,7 @@ A directory per agent keeps the agents' files apart when they behave. It is not 
   app's `.pikit/credentials.json`.
 
 Real isolation needs each agent's tools in a sandbox of their own: an `execution-*` component that
-runs them in a container (`execution-docker`, planned after M2). Until then, give `bash` only to the
+runs them in a container (`execution-docker`, a planned feature: `features/sandboxed-execution.md`). Until then, give `bash` only to the
 agents that need it, and see `execution-local`'s README.
 
 ## Config

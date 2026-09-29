@@ -1,7 +1,7 @@
 /**
  * channel-telegram's step of `pikit configure`: everything a person needs to do, asked in order,
  * checked on the spot. The CLI finds this file in an installed component and calls `configure(io)`;
- * it knows nothing about Telegram (SPEC §11).
+ * it knows nothing about Telegram.
  *
  * 1. The bot token. Without one, it explains @BotFather in three lines and asks for it; every token
  *    is checked with `getMe` at once, so a typo shows now and not at `pikit up`.

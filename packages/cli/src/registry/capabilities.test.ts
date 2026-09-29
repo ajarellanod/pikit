@@ -78,6 +78,6 @@ test("a stable contract needs two providers in the registry; one the project pro
   expect(checkStability([usage("agent.definition", [])])).toEqual([]);
 });
 
-test("the repository's registry backs every stable contract (SPEC §4.9)", () => {
+test("the repository's registry backs every stable contract", () => {
   expect(checkStability(capabilityUsage(readManifests(DEFAULT_REGISTRY)))).toEqual([]);
 });

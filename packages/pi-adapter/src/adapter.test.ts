@@ -122,7 +122,8 @@ describe("conversations", () => {
     await s.runtime.dispatch({ requestId: "r2", conversation: a, prompt: "again" }, s.app.context());
     await s.result("r2");
 
-    // Idle between the two messages: closed, then opened again (SPEC §7.1, invariant 5).
+    // Idle between the two messages: closed, then opened again (an idle conversation holds no
+    // open session: MANIFESTO, principle 2).
     expect(s.opens()).toBe(2);
     const stats = async (sessionId: string) => {
       const metadata = (await s.sessions.list(undefined, ctx)).find((m: { id: string }) => m.id === sessionId);
@@ -268,7 +269,7 @@ describe("caches", () => {
     await s.runtime.dispatch({ requestId: "r2", conversation, prompt: "two" }, s.app.context());
     const second = await s.result("r2");
 
-    // Closed in between (SPEC §7.1, invariant 5), then reopened from the session.
+    // Closed in between (MANIFESTO, principle 2), then reopened from the session.
     expect(s.opens()).toBe(2);
     const [before, after] = requests;
     if (before === undefined || after === undefined) throw new Error("expected two model requests");
@@ -284,7 +285,7 @@ describe("caches", () => {
   });
 });
 
-describe("contexts (SPEC §6.2)", () => {
+describe("contexts (SPEC K5)", () => {
   test("a pikit context keeps its cancellation when Pi derives from it only through the bridge", () => {
     const { context, cancel } = withCancel(BACKGROUND_CONTEXT);
 
@@ -372,7 +373,7 @@ describe("opening a conversation's session", () => {
   });
 });
 
-describe("a killed worker (SPEC §8.4: replay is Pi's)", () => {
+describe("a killed worker (replay is Pi's)", () => {
   test("replay: safe — the interrupted tool runs again in the new worker and the run completes", async () => {
     const root = mkdtempSync(join(tmpdir(), "pikit-replay-"));
     try {
@@ -416,7 +417,7 @@ describe("a killed worker (SPEC §8.4: replay is Pi's)", () => {
   }, 20_000);
 });
 
-describe("messages left in Pi's inbox (SPEC §6.4, gap 2)", () => {
+describe("messages left in Pi's inbox (pi-gaps.test.ts, gap 2)", () => {
   /** A conversation whose worker died after `steer` and before `accept`: its message waits in the inbox. */
   async function steeredAndDied(s: Awaited<ReturnType<typeof setup>>) {
     const conversation = await s.conversation();

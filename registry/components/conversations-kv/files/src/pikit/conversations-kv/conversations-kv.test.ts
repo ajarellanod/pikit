@@ -109,7 +109,7 @@ async function started(r: ReturnType<typeof records>, storage: KeyValueStorage =
   return { app, registry, ctx: app.context(), resets };
 }
 
-// The conversations.registry contract (SPEC §14), including the sessions it creates in the store.
+// The conversations.registry contract, including the sessions it creates in the store.
 for (const c of createConversationRegistryConformance(() => {
   const r = records();
   return { components: [kvProvider(r.kv), r.sessions, conversationsKv], sessionIds: () => sessionIds(r.sessions) };

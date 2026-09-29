@@ -1,6 +1,6 @@
 /**
  * The models every agent may name, from the `model.provider` components installed. Providers are
- * pi-ai's, imported by subpath in their own components (bundle size on Cloudflare, SPEC §6.2).
+ * pi-ai's, imported by subpath in their own components (bundle size on Cloudflare, SPEC §4).
  *
  * Credentials are pi-ai's too. With a `CredentialStore` (`model.credentials`), a stored credential
  * owns its provider: pi-ai reads the environment only when nothing is stored, refreshes OAuth

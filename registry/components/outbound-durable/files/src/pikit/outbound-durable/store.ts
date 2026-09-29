@@ -5,12 +5,13 @@
  *
  * The dialect is SQLite's (`INTEGER PRIMARY KEY` as the order of arrival, `AUTOINCREMENT`,
  * `ON CONFLICT`). A Postgres port changes this file only; its receipts need a cursor that follows
- * commit order, which a sequence under concurrent writers does not (SPEC §4.8).
+ * commit order, which a sequence under concurrent writers does not (`Feed`, in
+ * @pikit/contracts' feed.ts).
  */
 
 import type { DeliveryReceipt, FeedPage, SqlDatabase, SqlRow, SqlStatements } from "@pikit/contracts";
 
-/** `pending` → `sending` → `delivered` | `abandoned` (SPEC §5, "Outbound delivery"). */
+/** `pending` → `sending` → `delivered` | `abandoned` (@pikit/contracts' outbound.ts). */
 export type PieceState = "pending" | "sending" | "delivered" | "abandoned";
 
 export interface Piece {
@@ -90,7 +91,7 @@ const MIGRATIONS: readonly ((tx: SqlStatements) => Promise<void>)[] = [
     )`);
     await tx.run("CREATE INDEX IF NOT EXISTS outbound_pieces_open ON outbound_pieces (state, conversation_key, seq)");
   },
-  // 2. The receipts (SPEC §4.8, §5). A table of their own: a piece's `seq` is given when it is stored,
+  // 2. The receipts (`Feed`; outbound.ts). A table of their own: a piece's `seq` is given when it is stored,
   // not when it settles (an older piece may settle later), and SQLite reuses the highest rowid once
   // that row is pruned. `AUTOINCREMENT` never reuses one, so `seq` follows the order pieces settled.
   async (tx) => {

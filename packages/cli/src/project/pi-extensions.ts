@@ -1,5 +1,6 @@
 /**
- * What a project's Pi extensions use that pikit does not provide (SPEC §6.2b), for `pikit doctor`,
+ * What a project's Pi extensions use that pikit does not provide (tier A, @pikit/pi-adapter's
+ * `extensions/surface.ts`), for `pikit doctor`,
  * so an extension copied from Pi fails there, with its reason, and not at run time with a cryptic
  * error.
  *
@@ -109,7 +110,7 @@ export function inspectExtension(source: string): ExtensionFindings {
 
 /**
  * Problems and notes for the project's Pi extensions: its source files, outside installed
- * components (they may not import Pi at all, S1), that import the alias.
+ * components (they may not import Pi at all), that import the alias.
  */
 export function checkPiExtensions(projectDir: string, files: readonly string[]): { problems: string[]; notes: string[] } {
   const problems: string[] = [];
@@ -120,14 +121,14 @@ export function checkPiExtensions(projectDir: string, files: readonly string[]):
     if (!scanImports(source).some((specifier) => packageName(specifier) === EXTENSION_ALIAS)) continue;
     const { missing, subpaths, unsupported, registersTools } = inspectExtension(source);
     for (const specifier of subpaths) {
-      problems.push(`${file} imports "${specifier}", which pikit does not provide: only ${EXTENSION_ALIAS} itself (SPEC §6.2b)`);
+      problems.push(`${file} imports "${specifier}", which pikit does not provide: only ${EXTENSION_ALIAS} itself (runtime-pi's README, "Pi extensions")`);
     }
     if (missing.length > 0) {
       const names = missing.map((name) => `\`${name}\``).join(", ");
-      problems.push(`${file} imports ${names} from ${EXTENSION_ALIAS}, which pikit does not provide (SPEC §6.2b)`);
+      problems.push(`${file} imports ${names} from ${EXTENSION_ALIAS}, which pikit does not provide (runtime-pi's README, "Pi extensions")`);
     }
     if (unsupported.length > 0) {
-      notes.push(`${file} uses what pikit does not provide to Pi extensions; it does nothing or fails when called (SPEC §6.2b): ${unsupported.join(", ")}`);
+      notes.push(`${file} uses what pikit does not provide to Pi extensions; it does nothing or fails when called (runtime-pi's README, "Pi extensions"): ${unsupported.join(", ")}`);
     }
     if (registersTools) {
       notes.push(

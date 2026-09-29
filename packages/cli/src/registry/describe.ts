@@ -1,5 +1,5 @@
 /**
- * What a component's `setup` declares, read without starting anything (SPEC §4.2: setup is the
+ * What a component's `setup` declares, read without starting anything (setup is the
  * manifest).
  *
  * The answer comes from the app's own `describe()`, the function `pikit doctor` uses, so the
@@ -16,7 +16,7 @@
  * its root config schema (`Type.Object({ ... }, { examples: [config, ...] })`): the manifest says
  * what it can declare, the union of the default config's and every example's. The tools only an
  * example provides are not in `replay.tools`: their names are the example's, and `pikit new` gives
- * those names to the starter agent. Their replay is still checked (S10).
+ * those names to the starter agent. Their replay is still checked.
  */
 
 import { pathToFileURL } from "node:url";
@@ -28,7 +28,7 @@ import { type Generated, schemaProblems } from "./manifest.ts";
 /**
  * The component a registry entry installs: the default export of `src/pikit/<name>/index.ts`.
  * `undefined` when `index.ts` has no default export at all: a component that is not an app
- * component (a `deployment-*`, which runs the app instead of running inside it, SPEC §9.1) has no
+ * component (a `deployment-*`, which runs the app instead of running inside it) has no
  * `setup`, so it provides, requires and uses nothing. A default export that is not a component is
  * still an error.
  */
@@ -171,7 +171,7 @@ function record(component: ComponentDefinition, target: Target, config: Record<s
     provideKeyed: (name, key, impl) => {
       recorded.provides.add(name);
       if (name !== "agent.tool") return;
-      // S10: every tool states whether a resumed run may call it again. A missing or unknown value
+      // Every tool states whether a resumed run may call it again. A missing or unknown value
       // is written as-is so `validate` can name it.
       const replay = (impl as { replay?: unknown }).replay;
       recorded.tools = { ...recorded.tools, [key]: typeof replay === "string" ? replay : String(replay) };

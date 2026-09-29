@@ -2,7 +2,7 @@
  * Characterisation of what pi-agent-core 0.99.0 does NOT do for pikit. These tests assert Pi's
  * behaviour on purpose, called directly. The adapter bridges each gap with Pi's own mechanisms
  * (`inbound.ts`, `conversation.ts`), or states the rule it leaves (a tool throws on failure,
- * `tools/index.ts`); if Pi changes, a test fails and the bridge or rule is revisited (SPEC §6.4).
+ * `tools/index.ts`); if Pi changes, a test fails and the bridge or rule is revisited.
  * The bridges go when the adapter moves to `pi-durable`.
  */
 

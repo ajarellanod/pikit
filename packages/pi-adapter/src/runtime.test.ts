@@ -1,5 +1,5 @@
 /**
- * The adapter's runtime against the `agent.runtime` conformance suite (SPEC §14), on Pi 0.99.0,
+ * The adapter's runtime against the `agent.runtime` conformance suite, on Pi 0.99.0,
  * with a killed process for the dead-worker cases. The wiring below is the least a component needs;
  * `runtime-pi` in the registry is the real one and runs the same suite.
  */

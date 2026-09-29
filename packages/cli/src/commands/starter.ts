@@ -1,11 +1,11 @@
 /**
  * The files `pikit new` writes before it installs any component: the project's own part, which no
  * registry has. Every project starts the same way whatever preset it uses; a preset is only the
- * list of components `new` then adds (SPEC §11).
+ * list of components `new` then adds.
  *
  * - `pikit.config.ts`, the composition root, listing the project's agents;
  * - one agent, `assistant` (`src/agents/assistant/agent.ts`), provided by `src/extensions/agents.ts`;
- * - Pi's own `permission-gate` example, unmodified (SPEC §6.2b), for agents that have `bash`;
+ * - Pi's own `permission-gate` example, unmodified, for agents that have `bash`;
  * - `package.json`, `tsconfig.json`, `.gitignore`, a README.
  *
  * Two lines depend on what gets installed, and only on that: `runtime-pi` is listed with the
@@ -56,7 +56,7 @@ export function packageJson(name: string, kit: Record<string, string>): string {
       typescript: pin("typescript"),
     },
     // Kit packages depend on each other by version, which npm does not have yet: every one of them
-    // resolves to its tarball in vendor/, and there is one copy of each (SPEC §10.5).
+    // resolves to its tarball in vendor/, and there is one copy of each (`project/vendor.ts`).
     overrides: kit,
   };
   return `${JSON.stringify(pkg, null, 2)}\n`;
@@ -86,7 +86,7 @@ export function gitignore(target = "server"): string {
 }
 
 export const CONFIG = `/**
- * The composition root (SPEC §4.1): everything that runs is listed in \`components\`, and nothing
+ * The composition root: everything that runs is listed in \`components\`, and nothing
  * else runs. Follow the imports to read it all.
  *
  * \`pikit add\` and \`pikit remove\` edit this file: one import line per component, one entry per line
@@ -99,7 +99,7 @@ import agents from "./src/extensions/agents.ts";
 // \`bash\`. A policy, not a sandbox.
 import permissionGate from "./src/extensions/permission-gate.ts";
 
-/** Values, not behaviour (SPEC §12), under each component's name. Paths are relative to the project. */
+/** Values, not behaviour, under each component's name. Paths are relative to the project. */
 export const config = {};
 
 export default defineApp({
@@ -116,7 +116,7 @@ export default defineApp({
  * (or themselves) in `worker`.
  */
 export const CLOUDFLARE_CONFIG = `/**
- * The composition root (SPEC §4.1) of a project on Cloudflare: two Apps (SPEC C1), and everything
+ * The composition root of a project on Cloudflare: two Apps (SPEC C1), and everything
  * that runs is listed in their \`components\`. Follow the imports to read it all.
  *
  * - The default export runs in each conversation's Durable Object: the channel's other half, the
@@ -138,7 +138,7 @@ import agents from "./src/extensions/agents.ts";
 // \`bash\`. A policy, not a sandbox.
 import permissionGate from "./src/extensions/permission-gate.ts";
 
-/** Values, not behaviour (SPEC §12), under each component's name: the object's App. */
+/** Values, not behaviour, under each component's name: the object's App. */
 export const config = {};
 
 /** Each conversation's Durable Object runs this App. */
@@ -187,7 +187,7 @@ export function agent(tools: string[], target = "server"): string {
  * Your agent. Pi runs the loop; this file says who the agent is. It names the installed tools it may
  * use (\`tool-*\` components); installing a tool gives it to no agent that does not name it.
  * Change the model, the prompt and the tools here. \`defineAgent({ state, prepare })\` changes them per
- * run (SPEC §6.2a).
+ * run.
  */
 export default defineAgent({
   name: "${STARTER_AGENT}",
@@ -201,7 +201,7 @@ export default defineAgent({
 }
 
 export const AGENTS = `/**
- * The project's agents, provided to the runtime under \`agent.definition\` (SPEC §6.1). A project
+ * The project's agents, provided to the runtime under \`agent.definition\`. A project
  * component: it lives here, not in \`src/pikit/\`, because the agents are yours.
  */
 

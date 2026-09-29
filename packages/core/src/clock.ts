@@ -1,4 +1,4 @@
-/** Time source (SPEC §4.5 `clock`). Injectable for tests and for Durable Object alarms. */
+/** Time source (the kernel's clock, SPEC §3). Injectable for tests and for Durable Object alarms. */
 export interface Clock {
   /** Milliseconds since epoch. */
   now(): number;

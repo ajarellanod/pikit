@@ -1,6 +1,6 @@
 /**
- * Runs Pi extensions for one conversation (SPEC §6.2b). Pi gives each session its own extension
- * runtime; pikit does the same for each conversation it opens, so `pi.sendMessage()` and every
+ * Runs Pi extensions for one conversation (tier A, `surface.ts`). Pi gives each session its own
+ * extension runtime; pikit does the same for each conversation it opens, so `pi.sendMessage()` and every
  * other action is bound to the conversation whose harness is open, with no ambient "current
  * conversation".
  *

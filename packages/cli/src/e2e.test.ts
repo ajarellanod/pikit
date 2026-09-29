@@ -1,6 +1,6 @@
 /**
- * The M1 proof, end to end, as a user runs it (ROADMAP M1): `pikit new my-agent --preset http`,
- * `pikit configure`, then the agent answers. And S3: a component added and removed leaves the
+ * Five minutes, end to end, as a user runs it (SPEC P2): `pikit new my-agent --preset http`,
+ * `pikit configure`, then the agent answers. And P3: a component added and removed leaves the
  * project exactly as it was.
  *
  * Slow (it runs `bun install` and the generated project's own tests), so it runs only with
@@ -66,12 +66,12 @@ test.skipIf(!E2E)(
     expect(config).toContain("createRuntimePi({ extensions: [permissionGate] }),");
     expect(config).not.toContain("deploymentDocker");
     // HTTP answers in the response: nothing offers it durable delivery, so none is installed. The
-    // runtime brings its record of submissions, and the storage it needs (SPEC §10.5).
+    // runtime brings its record of submissions, and the storage it needs (`offers.ts`).
     const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
     expect(Object.keys(manifest.components)).not.toContain("outbound-durable");
     expect(manifest.components["submissions-sql"].installedFor).toEqual(["runtime-pi"]);
     expect(manifest.components["storage-sqlite"].installedFor).toEqual(["submissions-sql"]);
-    // Portable: the registry is this CLI's, by name, not by this machine's path (SPEC §10.3).
+    // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
   },
   TIMEOUT,
@@ -148,7 +148,7 @@ test.skipIf(!E2E)(
 );
 
 test.skipIf(!E2E)(
-  "S3: add then remove leaves no trace, and remove refuses to leave a required capability unprovided",
+  "P3: add then remove leaves no trace, and remove refuses to leave a required capability unprovided",
   async () => {
     expect(git("init", "-q").code).toBe(0);
     expect(git("add", "-A").code).toBe(0);
@@ -204,7 +204,7 @@ test.skipIf(!E2E)(
     git("checkout", "--", ".");
     expect(git("status", "--porcelain").out).toBe("");
 
-    // A component that brings providers (SPEC §10.5): they are installed for it, and leave with it.
+    // A component that brings providers (`offers.ts`): they are installed for it, and leave with it.
     const brought = await pikit(["add", "channel-telegram", "--yes"]);
     expect(brought.code).toBe(0);
     const components = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components;

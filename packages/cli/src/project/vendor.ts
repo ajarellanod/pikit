@@ -1,5 +1,5 @@
 /**
- * The kit packages in a project, until they are published (SPEC §10.5, "M1: vendored kit").
+ * The kit packages in a project, until they are published.
  *
  * `@pikit/core`, `@pikit/contracts`, `@pikit/pi-adapter` and `@pikit/pi-extension-shim` are not on npm yet. The CLI
  * packs them from its own checkout into the project's `vendor/` (`bun pm pack`), and the project
@@ -13,7 +13,7 @@
  * The version stays `0.0.0` until the kit is published, so a tarball's name also carries a hash of
  * the package's files (`pikit-core-0.0.0-<hash>.tgz`). A project whose tarballs are another kit's
  * gets this CLI's when a component is added (`refreshKit`): the component and the core it needs come
- * from the same checkout. The core only grows within a major (SPEC §12a), so the components already
+ * from the same checkout. The core only grows within a major (SPEC P7), so the components already
  * installed keep working.
  *
  * A hash says two kits differ, not which is newer. Meanwhile the kit's identity is the commit of the
@@ -40,7 +40,7 @@ export const KIT_PACKAGES: Record<string, string> = {
 
 /**
  * Pi extensions import `@earendil-works/pi-coding-agent`; a project installs the shim under that
- * name (SPEC §6.2b), so the 19 MB coding agent is never a dependency.
+ * name, so the 19 MB coding agent is never a dependency.
  */
 export const EXTENSION_ALIAS = "@earendil-works/pi-coding-agent";
 

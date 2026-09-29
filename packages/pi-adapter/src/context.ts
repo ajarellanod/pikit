@@ -1,5 +1,5 @@
 /**
- * Contexts crossing into Pi (SPEC §6.2).
+ * Contexts crossing into Pi: pikit's `Context` matches Chord's, and the adapter bridges it (SPEC K5).
  */
 
 import { type Context as PiContext, withAbortSignal, withoutAbortSignal } from "@earendil-works/pi-agent-core";

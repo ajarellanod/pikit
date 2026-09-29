@@ -1,5 +1,5 @@
 /**
- * The kernel's public surface, held (S2, SPEC §4.9). The kernel is what `createApp` runs itself, with
+ * The kernel's public surface, held (SPEC §3, §3.2). The kernel is what `createApp` runs itself, with
  * no word of the domain; it should hardly ever change. A change to this list is a [decision]: record
  * it in SPEC.md, then update the list. A name the components share belongs in @pikit/contracts.
  *
@@ -64,7 +64,7 @@ function exported(source: string): string[] {
   return names;
 }
 
-test("the kernel exports exactly its list: a change is a [decision] (S2)", () => {
+test("the kernel exports exactly its list: a change is a [decision] (SPEC §3.2)", () => {
   const source = readFileSync(join(import.meta.dir, "index.ts"), "utf8");
   expect(source).not.toMatch(/export\s+\*/);
   expect(exported(source).sort()).toEqual([...KERNEL].sort());

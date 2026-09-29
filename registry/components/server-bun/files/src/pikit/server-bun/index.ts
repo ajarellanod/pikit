@@ -1,5 +1,5 @@
 /**
- * server-bun: the HTTP server of the server target (SPEC §9.1), with Hono on `Bun.serve`.
+ * server-bun: the HTTP server of the server target, with Hono on `Bun.serve`.
  *
  * It serves every `http.route` that other components provide (a channel's webhook, an admin page),
  * plus two routes of its own:
@@ -34,7 +34,7 @@ const Config = Type.Object({
   idleTimeoutSeconds: Type.Integer({ minimum: 1, maximum: 255, default: 255 }),
 });
 
-/** `"METHOD /path"` as SPEC §9.1 defines it. */
+/** `"METHOD /path"` as `http.route` defines it (@pikit/contracts' http.ts). */
 const ROUTE_KEY = /^(GET|POST|PUT|PATCH|DELETE) (\/|(\/([A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9]*))+)$/;
 /** This server's own routes. */
 const RESERVED = new Set(["GET /health", "GET /ready"]);
@@ -67,7 +67,7 @@ export function createServerBun(options: ServerBunOptions = {}) {
       return {
         start(ctx) {
           ctx.abortSignal?.throwIfAborted();
-          // Requests must not inherit start's deadline (SPEC §4.7); each derives its own context.
+          // Requests must not inherit start's deadline; each derives its own context.
           const base: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
           const shutdown = new AbortController();
 

@@ -1,6 +1,6 @@
 /**
  * outbound-durable: every answer is stored before it is sent, and delivered even across crashes and
- * platform outages (SPEC §5, "Outbound delivery"). It provides `outbound.queue` on `storage.sql`.
+ * platform outages (@pikit/contracts' outbound.ts). It provides `outbound.queue` on `storage.sql`.
  *
  * - A channel attaches its transport while it runs; its answers are enqueued (stored), then sent by
  *   one loop, each conversation's pieces in order.
@@ -11,7 +11,7 @@
  *   (idempotent transports) or the reader sees a marker. At-least-once.
  * - Abandoned pieces stay in `outbound_pieces` for 30 days, with their reason; delivered ones for 7.
  * - Every piece that settles gets one receipt, in the same transaction (`outbound_receipts`), read as a
- *   feed through `receipts` (SPEC §4.8): what a component that must not miss a delivery reads.
+ *   feed through `receipts` (`Feed`, SPEC K3): what a component that must not miss a delivery reads.
  * - Its tables carry a schema version (`outbound_meta`), so an existing database gains new tables.
  *
  * It follows Hermes' delivery ledger, with what NanoClaw and OpenClaw lack: backoff, order per
@@ -64,7 +64,7 @@ export default defineComponent({
         const prune = (now: number) => store.prune(now, config.keepDeliveredDays * DAY, config.keepAbandonedDays * DAY);
         await prune(ctx.clock.now());
 
-        // Deliveries outlive start: they get the app's context, not start's (SPEC §4.7).
+        // Deliveries outlive start: they get the app's context, not start's.
         const background: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
         queue = createQueue({
           store,

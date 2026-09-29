@@ -11,7 +11,7 @@
  * The dialect is SQLite's (`AUTOINCREMENT`, `ON CONFLICT … DO UPDATE … WHERE`). A Postgres port changes
  * this file only, and must handle:
  * - the feed's cursor: it must follow commit order, which a sequence under concurrent writers does not
- *   (SPEC §4.8);
+ *   (`Feed`, in @pikit/contracts' feed.ts);
  * - `INTEGER` is 64-bit in SQLite and 32-bit in Postgres: `settled_at`, `admitted_at` (epoch
  *   milliseconds) and `submissions_meta.value` need `BIGINT`;
  * - the "one snapshot" reads in `get` and `readAnswers` rely on SQLite's transaction being one

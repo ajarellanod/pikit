@@ -1,5 +1,5 @@
 /**
- * Pi's JSONL session repository (SPEC §7.5) as a `sessions.store`: one JSONL file per session
+ * Pi's JSONL session repository as a `sessions.store`: one JSONL file per session
  * under `root`, written by Pi. The adapter adds two things:
  * - every JSONL session records a working directory, and callers that do not know one (the
  *   conversation registry creates sessions for channels) get `cwd`;
@@ -7,8 +7,8 @@
  *   the file name holds a timestamp besides the id, so without the index every conversation the
  *   runtime opens (every message to an idle one) would list, reading the first line of every
  *   session file ever written. The index is filled by this store's own `create` and `fork`, and by
- *   one listing the first time an id is missing (after a restart). One process owns `root` (SPEC
- *   §7.2), so nothing else adds or deletes files behind it.
+ *   one listing the first time an id is missing (after a restart). One process owns `root`,
+ *   so nothing else adds or deletes files behind it.
  */
 
 import {

@@ -10,12 +10,12 @@
  *    own flow, stored by the project's `model.credentials` component (`credentials-file`), or an
  *    API key in `.env`. The login runs where the app will run: through the deployment's `exec` for
  *    `pikit up` (in Docker, its volume), or on this machine for `pikit dev`. Each place keeps its
- *    own copy; nothing is copied between them (SPEC §11). A project with no `model.credentials`
+ *    own copy; nothing is copied between them. A project with no `model.credentials`
  *    component (on Cloudflare) has nowhere to keep a login: it is offered the API key only.
  *
  * Without a terminal (or with `--yes`) it asks nothing: a variable comes from the process
  * environment or from `--generate <NAME>`, and a missing required one fails the command. It never
- * prints a value, and never reads or writes Pi's own `~/.pi/agent/auth.json` (SPEC §13).
+ * prints a value, and never reads or writes Pi's own `~/.pi/agent/auth.json`.
  */
 
 import type { EnvironmentVariable } from "../registry/manifest.ts";

@@ -10,7 +10,7 @@ import { type SecretStore, WORKERS_HOST } from "@pikit/contracts";
 import { createSecretStoreConformance, withWorkersHost } from "@pikit/contracts/testing";
 import secretsCloudflare from "./index.ts";
 
-// The secrets contract (SPEC §14), over an env seeded by the suite.
+// The secrets contract, over an env seeded by the suite.
 for (const c of createSecretStoreConformance((secrets) => ({ components: withWorkersHost({ env: secrets }, [secretsCloudflare]) }))) {
   test(`secrets-cloudflare ${c.group}: ${c.name}`, () => c.run());
 }

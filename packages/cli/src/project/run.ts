@@ -70,7 +70,7 @@ async function withResultFile<T>(script: string, run: (output: string, dir: stri
   }
 }
 
-/** The app `pikit.config.ts` composes, created and described without starting (SPEC §4.6). */
+/** The app `pikit.config.ts` composes, created and described without starting. */
 export function probe(projectDir: string): Promise<ProbeResult> {
   return runScript<ProbeResult>("probe.ts", projectDir, []);
 }

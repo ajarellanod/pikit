@@ -68,7 +68,7 @@ async function started(r: ReturnType<typeof records>): Promise<{ app: App; regis
   return { app, registry };
 }
 
-// The conversations.registry contract (SPEC §14), including the sessions it creates in the store.
+// The conversations.registry contract, including the sessions it creates in the store.
 for (const c of createConversationRegistryConformance(() => {
   const r = records();
   return {

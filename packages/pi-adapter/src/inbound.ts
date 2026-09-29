@@ -1,5 +1,5 @@
 /**
- * The admission bridge (SPEC §6.4, gaps 1–4). `pi-agent-core` 0.99.0 has no submissions: no
+ * The admission bridge (gaps 1–4 of `pi-gaps.test.ts`). `pi-agent-core` 0.99.0 has no submissions: no
  * request id on queued messages, no atomic "run if idle, otherwise queue", no duplicate check, and
  * `abort()` drops queued messages without a trace. Pi's durable runtime (`pi-durable`) has all of
  * them. Until the adapter moves there, these helpers rebuild that behaviour from records Pi

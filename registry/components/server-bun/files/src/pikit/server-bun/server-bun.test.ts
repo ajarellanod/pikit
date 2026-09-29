@@ -42,7 +42,7 @@ function routes(entries: Record<string, HttpRoute>) {
   });
 }
 
-// What every handler can rely on (SPEC §9.1, §14).
+// What every handler can rely on (`http.route`).
 for (const c of createHttpRouteConformance(() => {
   const server = listening();
   return { components: [server.component], config: LOCAL, fetch: server.fetch };

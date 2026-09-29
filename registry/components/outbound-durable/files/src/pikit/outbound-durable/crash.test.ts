@@ -1,6 +1,6 @@
 /**
  * The process dies during a send (SIGKILL: no stop, no cleanup), and the next process delivers the
- * answer anyway: the piece in flight as a possible duplicate, the one behind it as new (SPEC §5).
+ * answer anyway: the piece in flight as a possible duplicate, the one behind it as new (@pikit/contracts' outbound.ts).
  */
 
 import { afterAll, expect, test } from "bun:test";

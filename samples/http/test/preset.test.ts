@@ -1,7 +1,7 @@
 /**
- * The `http` preset is this sample's composition (ROADMAP M1): exactly the registry components
+ * The `http` preset is this sample's composition: exactly the registry components
  * `pikit.config.ts` lists, plus `deployment-docker`, which runs it and is not in `pikit.config.ts`,
- * less the providers `runtime-pi` brings itself (offered providers, SPEC §10.5), which `pikit new`
+ * less the providers `runtime-pi` brings itself (offered providers), which `pikit new`
  * installs with it. A chat channel chosen instead of `channel-http` brings its durable delivery the
  * same way.
  */

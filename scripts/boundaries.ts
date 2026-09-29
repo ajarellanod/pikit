@@ -1,7 +1,8 @@
 /**
- * The packages' import boundaries (AGENTS.md, "The rules" 1 and 5), checked on every source file
- * under `packages/*`, as `registry validate` checks components (S1, S5). `scripts/boundaries.test.ts`
- * runs it on the repository, so `bun test` fails the moment a package crosses one:
+ * The packages' import boundaries (Pi only through the adapter; neutral layers, SPEC §4), checked
+ * on every source file under `packages/*`, as `registry validate` checks components.
+ * `scripts/boundaries.test.ts` runs it on the repository, so `bun test` fails the moment a package
+ * crosses one:
  *
  * - **Declared**: a package imports only itself and its `dependencies` (tests also their
  *   `devDependencies`), and runtime modules by scheme (`node:fs`, never `fs`). A type-only import
@@ -12,8 +13,8 @@
  *   `SERVER_ONLY` names it, so a new export is held to the rule until someone decides otherwise.
  * - **Inside the package**: source files do not import relative paths outside their package; a
  *   package reaches another only through its exports. Tests may (they read registry fixtures).
- * - **Layers** (SPEC §3, §4.9): the kit's packages depend only downwards, kernel → contracts →
- *   adapter, and the kernel's only dependency is `typebox` (ROADMAP, "Budgets"). The kernel cannot
+ * - **Layers** (SPEC §3): the kit's packages depend only downwards, kernel → contracts →
+ *   adapter, and the kernel's only dependency is `typebox` (SPEC §3). The kernel cannot
  *   reach the vocabulary: an import needs a dependency, and this rule refuses that dependency.
  *
  * Specifiers with `${` are the CLI's templates for generated code, not imports, and are skipped.
@@ -42,7 +43,7 @@ export const ALLOWED: readonly { dir: string; files: string; specifier: string; 
     dir: "pi-adapter",
     files: "src/extensions/pi-examples/",
     specifier: "@earendil-works/pi-coding-agent",
-    why: "Pi's example extensions, unmodified: a project aliases that name to @pikit/pi-extension-shim (SPEC §6.2b)",
+    why: "Pi's example extensions, unmodified: a project aliases that name to @pikit/pi-extension-shim",
   },
   {
     dir: "cli",
@@ -94,7 +95,7 @@ export function checkBoundaries(packagesDir: string): string[] {
         }
         const name = packageName(specifier);
         if (name.startsWith("@earendil-works/") && pkg.name !== "@pikit/pi-adapter" && !allowed(dir, own, specifier)) {
-          problems.push(`${at(file)} imports "${specifier}": only @pikit/pi-adapter imports Pi (rule 1)`);
+          problems.push(`${at(file)} imports "${specifier}": only @pikit/pi-adapter imports Pi`);
           continue;
         }
         const declared = name === pkg.name || dependencies.has(name) || (test && devDependencies.has(name));
@@ -109,7 +110,7 @@ export function checkBoundaries(packagesDir: string): string[] {
       if (serverOnly.includes(exported)) continue;
       const entry = `${pkg.name}${exported === "." ? "" : exported.slice(1)}`;
       for (const { file, specifier } of platformImports(resolve(root, target))) {
-        problems.push(`${at(file)} imports "${specifier}", but ${entry} reaches it and must run on every target (rule 5)`);
+        problems.push(`${at(file)} imports "${specifier}", but ${entry} reaches it and must run on every target (SPEC §4)`);
       }
     }
   }
@@ -130,7 +131,7 @@ function layerProblems(pkg: PackageJson, at: string): string[] {
   if (layer === 0) {
     for (const dependency of Object.keys(pkg.dependencies ?? {})) {
       if (!KERNEL_DEPENDENCIES.includes(dependency)) {
-        problems.push(`${at}: the kernel depends on ${dependency}; its only dependency is ${KERNEL_DEPENDENCIES.join(", ")} (ROADMAP, "Budgets")`);
+        problems.push(`${at}: the kernel depends on ${dependency}; its only dependency is ${KERNEL_DEPENDENCIES.join(", ")} (SPEC §3)`);
       }
     }
   }

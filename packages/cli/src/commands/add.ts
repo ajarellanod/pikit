@@ -1,7 +1,7 @@
 /**
- * `pikit add <component>`: the install flow of SPEC §10.5.
+ * `pikit add <component>`: the install flow.
  *
- *   1. resolve the registry (`builtin`, or a local path in M1) and the component's version and commit
+ *   1. resolve the registry (`builtin`, or a local path) and the component's version and commit
  *   2. read the component's package
  *   3. check its targets and `requires.pikit`, and that this CLI's kit is not older than the
  *      project's (`checkKit`); warn for each required capability nothing provides
@@ -206,7 +206,7 @@ function planInstall(
   const { project } = draft;
   const manifest = registry.manifest(name);
   if (name in project.components && options.force !== true) {
-    throw new CliError(`${name} is already installed; \`pikit upgrade\` arrives in M3 (or pass --force to reinstall it)`);
+    throw new CliError(`${name} is already installed; \`pikit upgrade\` is not built yet (pass --force to reinstall it)`);
   }
   checkCompatible(project.targets, manifest);
   warnUnprovided(project, registry, manifest);
@@ -214,7 +214,7 @@ function planInstall(
   const files = registry.files(name);
   checkConflicts(projectDir, project, name, files, options.force === true);
 
-  // An app component has a default export (SPEC §10.2); a `deployment-*` does not, and is not listed.
+  // An app component has a default export; a `deployment-*` does not, and is not listed.
   const entry = files.get(`src/pikit/${name}/index.ts`);
   if (entry !== undefined && hasDefaultExport(entry)) {
     if (draft.config === undefined) throw new CliError(`${CONFIG_FILE} is missing: ${name} is listed in it`);
@@ -475,7 +475,7 @@ function checkConflicts(projectDir: string, project: ProjectManifest, name: stri
   const conflicts: string[] = [];
   for (const [target, source] of files) {
     const owner = Object.entries(project.components).find(([other, c]) => other !== name && target in c.files)?.[0];
-    if (owner !== undefined) throw new CliError(`${name} would write ${target}, which ${owner} installed (SPEC §10.2)`);
+    if (owner !== undefined) throw new CliError(`${name} would write ${target}, which ${owner} installed`);
     const path = join(projectDir, target);
     if (!existsSync(path) || hashFile(path) === hashFile(source)) continue;
     // A reinstall may overwrite what it installed itself, when nobody changed it since.

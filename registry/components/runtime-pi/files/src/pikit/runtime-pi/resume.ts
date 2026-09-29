@@ -1,5 +1,5 @@
 /**
- * At start, resume the conversations holding a message nobody answered (SPEC §7), with
+ * At start, resume the conversations holding a message nobody answered (SPEC P5), with
  * `agent.submissions` installed. The platform was told "received" (Telegram will not send the message
  * again), the process died, and without this the user would wait until they write again.
  *

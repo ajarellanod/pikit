@@ -1,5 +1,5 @@
 /**
- * `pikit.json`, the project manifest (SPEC §10.3): which components are installed, from which
+ * `pikit.json`, the project manifest: which components are installed, from which
  * registry, at which version and commit, and the hash of every file each one wrote.
  *
  * It is the install record, so it keeps what `pikit remove` and `pikit doctor` need later without
@@ -9,7 +9,7 @@
  *
  * Version 2 records registries by what resolves on any machine (`registry-location.ts`). Version 1
  * recorded the path of the CLI's checkout; it is read and converted in memory, and the next write
- * saves version 2 (SPEC §12a).
+ * saves version 2.
  */
 
 import { createHash } from "node:crypto";
@@ -40,14 +40,14 @@ export interface InstalledComponent {
    */
   hooks?: { afterDeploy: string };
   /**
-   * The components it was installed for, when it was offered rather than asked for (SPEC §10.5,
-   * "Offered providers"): it leaves with the last of them, when nothing else uses it.
+   * The components it was installed for, when it was offered rather than asked for (`offers.ts`):
+   * it leaves with the last of them, when nothing else uses it.
    */
   installedFor?: string[];
 }
 
 export interface ProjectManifest {
-  /** Schema version of `pikit.json` (SPEC §12a). */
+  /** Schema version of `pikit.json`. */
   version: 2;
   /**
    * The kit in `vendor/`: the commit of the pikit checkout it was packed from (`vendor.ts`, `kitCommit`),

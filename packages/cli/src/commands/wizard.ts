@@ -1,5 +1,5 @@
 /**
- * `pikit new` in a terminal, with no directory: the guided path (SPEC §11). The installer runs it
+ * `pikit new` in a terminal, with no directory: the guided path. The installer runs it
  * when it finishes, so pasting the install line is the only command a person types.
  *
  * It asks, in order: the agent's name (its folder), where it runs (its target, only when the registry

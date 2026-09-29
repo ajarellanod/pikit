@@ -1,5 +1,5 @@
 /**
- * Pi's `NodeExecutionEnv` (SPEC §8.3) as the execution environment of a server: this machine's
+ * Pi's `NodeExecutionEnv` as the execution environment of a server: this machine's
  * filesystem and shell, in a working directory.
  *
  * One difference from Pi's default: commands start from `env`, the variables the caller chose, not

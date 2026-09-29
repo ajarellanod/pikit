@@ -1,7 +1,7 @@
 /**
  * One pikit conversation (the actor) is one `AgentHarness` over one Pi session, driving the lane
- * "main" (SPEC §6.4). This object is the worker's cache of it: everything it knows is in the
- * session, and closing it never resets the conversation.
+ * "main" (features/pi-durable-migration.md). This object is the worker's cache of it: everything
+ * it knows is in the session, and closing it never resets the conversation.
  *
  * Every run of the conversation is driven by this worker, whoever admitted it: a run started by a
  * `dispatch`, a run a dead worker left open, which is resumed as soon as the conversation opens, or
@@ -44,7 +44,7 @@ import { settlementOf, toResult } from "./result.ts";
 import { sessionState } from "./state.ts";
 import { Turns } from "./turns.ts";
 
-/** Called with each conversation's harness when it opens: where Pi hooks attach (§6.2b). */
+/** Called with each conversation's harness when it opens: where Pi hooks attach. */
 export type HarnessHook = (harness: AgentHarness<undefined>, conversation: ConversationRef) => void;
 
 export interface ConversationHost {
@@ -53,8 +53,9 @@ export interface ConversationHost {
   /** Where a run ends up when no caller context is known. */
   events: AppContext;
   /**
-   * Records that a run ended, with `agent.submissions` installed (SPEC §6.1). Never rejects: a failure
-   * is the host's to retry and log. Called in the conversation's line, before the run's event.
+   * Records that a run ended, with `agent.submissions` installed (@pikit/contracts'
+   * submissions.ts). Never rejects: a failure is the host's to retry and log. Called in the
+   * conversation's line, before the run's event.
    */
   settled?(run: RunSettlement, ctx: AppContext): Promise<void>;
   /**
@@ -77,7 +78,7 @@ export interface OpenOptions {
   models: Models;
   host: ConversationHost;
   onHarness?: HarnessHook | undefined;
-  /** Pi extensions, loaded for this conversation as Pi loads them for a session (§6.2b). */
+  /** Pi extensions, loaded for this conversation as Pi loads them for a session. */
   extensions?: readonly PiExtension[] | undefined;
 }
 
@@ -178,11 +179,12 @@ export class PiConversation {
   }
 
   /**
-   * Admit one message (SPEC §6.1): duplicate check, then enqueue as `steer`, then `accept()`. On an
-   * idle lane Pi starts a run that drains the inbox; on a busy one it answers `LaneBusy` and the run
-   * in progress takes the message at a boundary. A message that run does not take (it failed, or the
-   * message landed after its last boundary: gap 2) gets the next run from `reconcile`. The caller runs
-   * this in the conversation's line, so two deliveries of one request never both pass the check.
+   * Admit one message (`dispatch`, @pikit/contracts' agent.ts): duplicate check, then enqueue as
+   * `steer`, then `accept()`. On an idle lane Pi starts a run that drains the inbox; on a busy one
+   * it answers `LaneBusy` and the run in progress takes the message at a boundary. A message that
+   * run does not take (it failed, or the message landed after its last boundary: gap 2) gets the
+   * next run from `reconcile`. The caller runs this in the conversation's line, so two deliveries
+   * of one request never both pass the check.
    */
   async admit(request: AgentRequest, ctx: AppContext): Promise<Admitted> {
     const { requestId } = request;
@@ -238,13 +240,13 @@ export class PiConversation {
 
   /**
    * Start a run for the inbound messages waiting in Pi's inbox when no run is going to take them
-   * (SPEC §6.4, gap 2). Pi 0.99.0 leaves the inbox as it is when a run ends: a message queued behind
-   * a run that failed, or steered after the run's last boundary, or steered by a worker that died
-   * before its `accept()`, would wait for the next message. `accept()` with an empty prompt takes
-   * them out of the inbox into the new run, which is named after the oldest one and answers them all
-   * (`AgentResult.requestIds`). Nothing is queued here: this only asks Pi's inbox. A run that fails
-   * again cannot loop, since its messages are in the transcript by then, no longer in the inbox.
-   * Called in the conversation's line.
+   * (`pi-gaps.test.ts`, gap 2). Pi 0.99.0 leaves the inbox as it is when a run ends: a message
+   * queued behind a run that failed, or steered after the run's last boundary, or steered by a
+   * worker that died before its `accept()`, would wait for the next message. `accept()` with an
+   * empty prompt takes them out of the inbox into the new run, which is named after the oldest one
+   * and answers them all (`AgentResult.requestIds`). Nothing is queued here: this only asks Pi's
+   * inbox. A run that fails again cannot loop, since its messages are in the transcript by then, no
+   * longer in the inbox. Called in the conversation's line.
    */
   private async reconcile(ctx: AppContext): Promise<void> {
     if (this.closed) return;
@@ -479,7 +481,7 @@ export class PiConversation {
   }
 }
 
-/** A run's context: the caller's values and logger, without its cancellation (SPEC §6.1). */
+/** A run's context: the caller's values and logger, without its cancellation. */
 export function runContext(ctx: AppContext): AppContext {
   return ctx.derive((inner) => detached(inner));
 }

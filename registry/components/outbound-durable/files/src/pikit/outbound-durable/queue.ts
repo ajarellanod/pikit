@@ -1,5 +1,5 @@
 /**
- * The delivery loop and the `OutboundQueue` it serves (SPEC §5, "Outbound delivery").
+ * The delivery loop and the `OutboundQueue` it serves (@pikit/contracts' outbound.ts).
  *
  * One loop, one send path: `enqueue` only stores, and the loop sends. Each turn it reads the head of
  * every conversation (its oldest open piece), sends the heads that are due and whose channel has a

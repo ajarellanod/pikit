@@ -1,6 +1,6 @@
 /**
  * The installed `deployment-*` component, as the CLI sees it: the functions its
- * `src/pikit/<name>/index.ts` exports (SPEC §11). The CLI holds no Docker knowledge; it calls these.
+ * `src/pikit/<name>/index.ts` exports. The CLI holds no Docker knowledge; it calls these.
  */
 
 import { existsSync } from "node:fs";

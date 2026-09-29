@@ -1,5 +1,5 @@
 /**
- * `pikit registry validate | generate | capabilities [root]` (SPEC §10.2, §10.4, §14). The
+ * `pikit registry validate | generate | capabilities [root]`. The
  * repository's `bun run registry …` is a thin caller of this same function, so the two cannot
  * disagree.
  */

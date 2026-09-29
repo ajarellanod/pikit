@@ -1,5 +1,5 @@
 /**
- * The dependency graph derived from setup (SPEC §4.2, §4.5). There is no manifest: each setup
+ * The dependency graph derived from setup (SPEC §3). There is no manifest: each setup
  * records what it provides and uses, and the graph is derived from those records. Which
  * provider a use reaches is the capability registry's decision (`resolveProvider`); this file
  * only orders components by it.

@@ -1,7 +1,7 @@
 # storage-do
 
 The app's SQL database on Cloudflare: each conversation's Durable Object keeps its records in its own
-SQLite. It provides `storage.sql` (SPEC §4.5, §4.1 C5), so what uses `storage.sql` on a server
+SQLite. It provides `storage.sql` (SPEC §4.1, C5), so what uses `storage.sql` on a server
 (`submissions-sql`, `storage-kv-sql`, sessions) runs unchanged in the object.
 
 - **Provides:** `storage.sql`.

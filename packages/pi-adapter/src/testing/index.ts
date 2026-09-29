@@ -1,6 +1,6 @@
 // Public surface of @pikit/pi-adapter/testing: what a component's tests need to run Pi without
-// importing it (rule 1). Server-only: it uses the filesystem and child processes. What runs on every
-// target is also `@pikit/pi-adapter/testing/neutral`, re-exported here.
+// importing it (only the adapter does). Server-only: it uses the filesystem and child processes.
+// What runs on every target is also `@pikit/pi-adapter/testing/neutral`, re-exported here.
 
 export * from "./neutral.ts";
 export { createPiRuntimeFixture, killMidRun } from "./fixture.ts";

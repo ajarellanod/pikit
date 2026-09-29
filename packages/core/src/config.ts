@@ -1,5 +1,5 @@
 /**
- * What `defineApp` checks synchronously, before any setup runs (SPEC §4.1, §4.6): unique
+ * What `defineApp` checks synchronously, before any setup runs (SPEC K4): unique
  * component names, the shape of `config.capabilities`, and the config against the merged
  * schema. Whether a selection names a provider is known only after setup, so the capability
  * registry checks it (`validateSelection`).

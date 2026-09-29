@@ -2,7 +2,7 @@
  * Every module specifier a source file imports, type-only imports included.
  *
  * Why not `Bun.Transpiler.scanImports`: it drops `import type`, and a type-only import still needs
- * its package installed to typecheck, so it counts as a dependency and as coupling (S4). Why strip
+ * its package installed to typecheck, so it counts as a dependency and as coupling (SPEC P4). Why strip
  * comments first: component files document themselves with examples such as
  * `import x from "..."`, which must not count as imports.
  */

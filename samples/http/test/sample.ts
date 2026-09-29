@@ -33,7 +33,7 @@ export const TOKEN = "sample-test-token-0123456789abcdef";
 export interface SampleOptions {
   /** The agents; the first one is the router's default. */
   agents: AgentDefinition[];
-  /** Pi extensions for the runtime, unmodified (SPEC §6.2b). */
+  /** Pi extensions for the runtime, unmodified. */
   extensions?: PiExtension[];
   /** Reuse a previous sample's state: a restart. Default: a new temporary directory. */
   dataDir?: string;

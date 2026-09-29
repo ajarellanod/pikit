@@ -175,7 +175,7 @@ A harness is the part of your system you least want to rewrite. pikit commits to
 programming model that does not change within a major version: additive evolution, real
 deprecation periods, rare majors with migrations. The core is small precisely so that it can
 afford to be boring. Excitement belongs in the components — which are yours, and which you
-upgrade when you decide. See `SPEC.md` §12a.
+upgrade when you decide. See `SPEC.md`: P7, K8 and K10.
 
 ## Who it's for
 
@@ -247,5 +247,5 @@ not a machine you buy.
 
 ## Next steps
 
-See `MANIFESTO.md` for the principles, `SPEC.md` for the technical specification, and
-`ROADMAP.md` for the standards every milestone must meet and what each one proves.
+See `MANIFESTO.md` for the principles, `SPEC.md` for what must hold, and `features/` for
+everything else, one file each.

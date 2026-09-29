@@ -1,9 +1,9 @@
 /**
- * @pikit/pi-adapter/tools: Pi's own `read`, `write`, `edit` and `bash` tools (SPEC §6.3), for the
+ * @pikit/pi-adapter/tools: Pi's own `read`, `write`, `edit` and `bash` tools, for the
  * `tool-*` components. pikit does not reimplement them; a component adds only what the kit owns:
  * - the environment the tool works on: the agent's `workspace` when one is installed, otherwise the
  *   capability it declares (`execution`, or `execution.shell` for `bash`);
- * - its `replay`, which Pi applies when a run is resumed after a crash (SPEC §8.4). Pi's tools
+ * - its `replay`, which Pi applies when a run is resumed after a crash. Pi's tools
  *   declare none, so they would default to `"never"`.
  *
  * Pi's tools read their environment from the harness's `toolContext.env`. A bound tool ignores the
@@ -78,7 +78,7 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
  * the short way to add a tool of your own, in the shape Pi's `defineTool` uses. Its component is
  * `tool-<name>` (`_` becomes `-`: `web_search` is `tool-web-search`).
  *
- * `replay` is required, because pikit resumes runs after a crash (SPEC §8.4): `"safe"` runs it again
+ * `replay` is required, because pikit resumes runs after a crash: `"safe"` runs it again
  * (it only reads), `"never"` tells the model it was interrupted (it changes something; derive an
  * idempotency key from the run's conversation and `toolCallId`). A Pi extension's tools are always
  * `"never"`.

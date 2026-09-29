@@ -11,7 +11,7 @@
  * It carries no credentials: it adds no cookie, token or key of its own, so the agent reaches only
  * what anyone could, plus the headers it writes itself.
  *
- * Its replay is `"never"` (SPEC §8.4): a POST, PUT, PATCH or DELETE may have had its effect before a
+ * Its replay is `"never"` (`agentTool`'s replay): a POST, PUT, PATCH or DELETE may have had its effect before a
  * crash, so a resumed run is told the call was interrupted instead of sending it twice.
  *
  * Targets: `server` and `cloudflare`: it uses only `fetch`, streams and `HTMLRewriter`, which Workers

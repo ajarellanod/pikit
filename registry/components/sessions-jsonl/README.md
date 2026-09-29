@@ -15,8 +15,7 @@ Pi writes the sessions: this component is Pi's own `JsonlSessionRepo`, reached t
 transcript, its inbox of queued messages, its open runs and its values. The agent runtime opens
 conversations from it, and the conversation registry creates new sessions in it.
 
-A session records the directory the agent works in. Until workspaces exist (SPEC §8), that is the
-server's working directory.
+A session records the directory the agent works in: the server's working directory.
 
 Pi opens a session in one process at a time, and two processes on the same files are not
 supported. Run one server replica over one `root`.

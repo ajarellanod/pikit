@@ -2,7 +2,7 @@
  * The names agents give by key: tools (`agent.tool`), extensions (`agent.extension`) and the model's
  * provider (`model.provider`, the part of `provider/modelId` before the first slash). The runtime
  * resolves them only at start, so a name with no installed key is a project that composes and does
- * not start. `doctor` reports them; `remove` refuses to break one (SPEC §10.5).
+ * not start. `doctor` reports them; `remove` refuses to break one.
  *
  * What is not checked, because it is known only at start or at run time:
  * - a model id within its provider: the provider's model list is Pi's (`pi-ai`), read by the adapter;

@@ -1,8 +1,8 @@
 # Sample: talk to an agent over HTTP
 
-Scenario 1 of SPEC §15. Claude (through Pi) behind an HTTP API, with a bearer token, conversations
-that survive restarts, and an honest `/ready`. The agent has tools: it reads, writes and edits
-files and runs commands in its workspace.
+Scenario 1 (`test/scenario-1.test.ts`). Claude (through Pi) behind an HTTP API, with a bearer
+token, conversations that survive restarts, and an honest `/ready`. The agent has tools: it reads,
+writes and edits files and runs commands in its workspace.
 
 This is a fixture of the repository, not a generated project. There is no CLI yet, so
 `pikit.config.ts` imports the components straight from `registry/`. `pikit new --preset http` will
@@ -44,7 +44,7 @@ bun samples/http/scripts/login.ts
 bun samples/http/main.ts
 ```
 
-`main.ts` runs `pikit.config.ts` through `deployment-docker`'s entrypoint (SPEC §9.1). It starts
+`main.ts` runs `pikit.config.ts` through `deployment-docker`'s entrypoint. It starts
 with a 30 s deadline and stops with a 10 s one, and exits non-zero when either fails. It logs one
 JSON object per line; pipe it through `jq` to read it. The app refuses to start without
 `PIKIT_HTTP_TOKEN`, or when Claude has no credentials, and the error line says which one is

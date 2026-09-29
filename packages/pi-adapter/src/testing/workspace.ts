@@ -1,5 +1,5 @@
 /**
- * `workspace` conformance (SPEC §8.2, §14). The contract is typed by the adapter (its `env` is Pi's
+ * `workspace` conformance. The contract is typed by the adapter (its `env` is Pi's
  * `ExecutionEnv`), so its suite lives here, next to `execution`'s. Runner-independent:
  *
  *   for (const c of createWorkspaceConformance(() => myFixture()))

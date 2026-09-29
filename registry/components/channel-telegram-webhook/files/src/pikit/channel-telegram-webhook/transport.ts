@@ -1,5 +1,5 @@
 /**
- * How this channel sends one piece of an answer (`ChannelTransport`, SPEC §5 "Outbound delivery"):
+ * How this channel sends one piece of an answer (`ChannelTransport`, @pikit/contracts' outbound.ts):
  * what `outbound.queue` calls when it is installed, and what the delivery in `delivery.ts` sends
  * through when it is not. Copied from channel-telegram's `transport.ts` (components never import each
  * other, C6); only the error's prefix changed.

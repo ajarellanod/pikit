@@ -1,6 +1,7 @@
 /**
  * What an agent has for each run: its static definition, or what its `prepare(state)` returns
- * (SPEC §6.2a). Pi provides every mechanism; this file only decides when to use them:
+ * (`defineAgent` in @pikit/contracts' agent.ts, `agent.state` in agent-state.ts). Pi provides every
+ * mechanism; this file only decides when to use them:
  * - `prepare` runs in Pi's `before_run` hook, before the run's first model call;
  * - the model and the active tools are Pi's lane configuration (`setModel`, `setActiveTools`),
  *   persisted by Pi, so a resumed run keeps them;

@@ -1,5 +1,5 @@
 /**
- * The registry's manifests, generated and checked (SPEC §10.2, §10.4, §14).
+ * The registry's manifests, generated and checked (`pikit registry generate | validate`).
  *
  *   bun run registry generate [root]   rewrite the fields setup declares, rebuild registry.json
  *   bun run registry validate [root]   check every component, preset and schema; exit 1 on any problem

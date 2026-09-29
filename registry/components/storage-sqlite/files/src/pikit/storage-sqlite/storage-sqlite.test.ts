@@ -26,7 +26,7 @@ function temporaryPath(name = "pikit.db"): string {
 
 const configFor = (path: string) => ({ "storage-sqlite": { path } });
 
-// The storage.sql contract (SPEC §14), including data that outlives the app.
+// The storage.sql contract, including data that outlives the app.
 for (const c of createSqlDatabaseConformance(() => ({ components: [storageSqlite], config: configFor(temporaryPath()) }))) {
   test(`storage-sqlite ${c.group}: ${c.name}`, () => c.run());
 }

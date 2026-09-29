@@ -2,7 +2,7 @@
 
 Every answer your agent gives is stored before it is sent, and delivered even if the process dies,
 the platform is down for ten minutes, or it asks you to slow down. It provides `outbound.queue`
-(SPEC §5, "Outbound delivery") on `storage.sql`.
+(@pikit/contracts' `outbound.ts`) on `storage.sql`.
 
 ```sh
 pikit add storage-sqlite      # the database it keeps its records in
@@ -43,7 +43,7 @@ runtime has the same gap; it closes when Pi can enqueue in the same commit as th
 
 Every piece that settles, delivered or abandoned, gets one receipt, written in the same transaction
 as its new state (`outbound_receipts`). Components that must not miss a delivery read them through
-`outbound.queue`'s `receipts`, a feed (SPEC §4.8), from a cursor of their own. A decision bound to the
+`outbound.queue`'s `receipts`, a feed (`Feed`, SPEC K3), from a cursor of their own. A decision bound to the
 message that carries it, a reply that quotes an answer, an alert on an abandoned one: each reads
 the receipts when it starts and whenever `outbound.delivered` wakes it, so a crash only delays it.
 

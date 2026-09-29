@@ -1,6 +1,6 @@
-// Public surface of @pikit/core, the kernel (SPEC §4, §12a): what `createApp` runs itself, with no
+// Public surface of @pikit/core, the kernel (SPEC §3; K8, K10): what `createApp` runs itself, with no
 // word of the domain. The vocabulary components share is in @pikit/contracts. Additive changes only
-// within a major; a new export needs a [decision] (S2), and `exports.test.ts` holds this list.
+// within a major; a new export needs a [decision] (SPEC §3.2), and `exports.test.ts` holds this list.
 
 export { defineComponent, defineApp } from "./app.ts";
 export type {

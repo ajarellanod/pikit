@@ -1,13 +1,13 @@
 /**
- * router-rules: each message goes to the agent of the first rule it matches (SPEC §5, "Routing to
- * many agents").
+ * router-rules: each message goes to the agent of the first rule it matches (`route.resolve`, in
+ * @pikit/contracts' inbound.ts).
  *
  * It adds a stage to `route.resolve` at priority 1: after the project stages the docs show (10 and
  * up), which can still route around it, and right before `router-basic` (0), which answers what no
  * rule matched. A message no rule matches is left undecided, so without `router-basic` it is
  * `no_route`. A decision an earlier stage made is left as it is.
  *
- * Rules are values, not strategies (S7): choosing the agent from the chat itself is another
+ * Rules are values, not strategies (MANIFESTO, principle 8): choosing the agent from the chat itself is another
  * component. A rule matches on `channel` (an instance, `telegram:support`, or a kind, `telegram`,
  * which matches every account of it), `conversation` and `actor`; a rule with none of them matches
  * everything. `thread` waits for `InboundMessage.threadId`: until then a rule naming it is invalid

@@ -2,12 +2,13 @@
  * tool-edit: Pi's own `edit` tool, for the agents that name it (`tools: ["edit"]`). It replaces exact
  * pieces of text in a file, each one unique in it.
  *
- * pikit does not reimplement it (SPEC §6.3). This component adds only what the kit owns:
+ * pikit does not reimplement it (SPEC P1). This component adds only what the kit owns:
  * - the environment it works on, read when the tool runs: the agent's own `workspace` when one is
- *   installed (`workspace-local`: a directory per agent, SPEC §8.2), otherwise `execution`. Any
+ *   installed (`workspace-local`: a directory per agent), otherwise `execution`. Any
  *   `execution` will do, with or without a shell;
  * - its replay, `"never"`: applying an edit twice is not the same as applying it once, so after a
- *   crash Pi reports the call as interrupted, and the model decides (SPEC §8.4).
+ *   crash Pi reports the call as interrupted, and the model decides (`agentTool`'s replay, in
+ *   @pikit/pi-adapter).
  *
  * Targets: `server` and `cloudflare`, wherever an `execution` provider is installed.
  */

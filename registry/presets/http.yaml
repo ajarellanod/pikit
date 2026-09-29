@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../schema/preset.schema.json
-# An agent over HTTP, run in Docker (SPEC §11): `pikit new my-agent --preset http`.
+# An agent over HTTP, run in Docker: `pikit new my-agent --preset http`.
 # A preset is only the list of `pikit add` calls, in order. Nothing branches on which preset a
 # project came from. Its composition is samples/http's, plus the deployment and the log lines.
 # The agents (src/agents/, src/extensions/agents.ts) belong to the project, not to the registry.
@@ -18,8 +18,8 @@ components:
   - tool-bash
   - runtime-pi
   - router-basic
-  # A chat channel chosen instead brings durable delivery with it (`outbound.queue` is offered, SPEC
-  # §10.5): channel-http answers in the HTTP response and needs none.
+  # A chat channel chosen instead brings durable delivery with it (`outbound.queue` is offered by
+  # `pikit add`): channel-http answers in the HTTP response and needs none.
   - channel-http
   - server-bun
   - log-events

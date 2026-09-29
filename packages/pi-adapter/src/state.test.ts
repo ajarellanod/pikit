@@ -1,5 +1,5 @@
 /**
- * The adapter's `agent.state`, a Pi session value, against the `agent.state` suite (SPEC §6.2a), on
+ * The adapter's `agent.state`, a Pi session value, against the `agent.state` suite, on
  * Pi's in-memory repo and on JSONL files, where a new worker reads the state back from disk.
  */
 

@@ -1,5 +1,6 @@
 /**
- * execution-local: the agent's tools work on this server's filesystem and shell (SPEC §8.3).
+ * execution-local: the agent's tools work on this server's filesystem and shell (Pi's `ExecutionEnv`,
+ * held by `createExecutionConformance`).
  *
  * It provides both `execution` (files) and `execution.shell` (commands) with Pi's own
  * `NodeExecutionEnv`, in a working directory. Relative paths and commands start there.

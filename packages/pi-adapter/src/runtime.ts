@@ -1,13 +1,14 @@
 /**
- * `agent.runtime` on Pi (SPEC §6.1): one worker's conversations.
+ * `agent.runtime` on Pi (@pikit/contracts' agent.ts): one worker's conversations.
  *
  * Conversations are opened on demand and closed as soon as they are idle (no run being driven), so
- * an idle conversation holds no open session (SPEC §7.1, invariant 5). Everything that touches one
+ * an idle conversation holds no open session (MANIFESTO, principle 2). Everything that touches one
  * conversation (opening, admissions, aborts, settlements, closing) runs in that conversation's
  * line, one step at a time: that is what makes the duplicate check sound (gap 1) and keeps a
  * closing harness from racing a new admission. Runs themselves execute outside the line.
  *
- * One process owns a conversation (SPEC §7.2). Several replicas need `conversations.ownership`.
+ * One process owns a conversation. Several replicas need `conversations.ownership`
+ * (features/replicas.md).
  */
 
 import type { Models } from "@earendil-works/pi-ai";
@@ -45,8 +46,8 @@ export interface PiRuntimeOptions {
   /** Attach Pi hooks to each conversation's harness when it opens (tests). */
   onHarness?: HarnessHook;
   /**
-   * Pi extensions, unmodified (SPEC §6.2b), for every agent. Each conversation loads them when it
-   * opens, as Pi loads them for each session, and they see every run of it.
+   * Pi extensions, unmodified (tier A, `extensions/surface.ts`), for every agent. Each conversation
+   * loads them when it opens, as Pi loads them for each session, and they see every run of it.
    */
   extensions?: readonly PiExtension[];
   /**
@@ -55,7 +56,8 @@ export interface PiRuntimeOptions {
    */
   extension?(name: string): PiExtension | undefined;
   /**
-   * Where admissions and run ends are recorded (`agent.submissions`), when it is installed (SPEC §6.1).
+   * Where admissions and run ends are recorded (`agent.submissions`, @pikit/contracts'
+   * submissions.ts), when it is installed.
    * `dispatch` records a message once Pi holds it and before it resolves; every run's end is recorded
    * before its `agent.settled` / `agent.failed`, and a request `abort()` withdrew as aborted. A duplicate
    * whose end it does not hold is settled from the session (two crashes lost both records). Without
@@ -81,7 +83,7 @@ const SETTLED_RETRY_MS = [1_000, 5_000, 30_000, 120_000] as const;
 export interface PiRuntime extends AgentRuntime {
   /**
    * Open a conversation that has requests admitted and never settled (`agent.submissions`' pending),
-   * as a host does at start (SPEC §7): a run a dead worker left open is resumed, messages waiting in
+   * as a host does at start (SPEC P5): a run a dead worker left open is resumed, messages waiting in
    * Pi's inbox get a run, and a request whose run ended but whose end was never recorded is settled
    * from the result Pi stored, with its `agent.settled` / `agent.failed` (one `agent.submissions` holds
    * settled already is skipped). Resolves once the runs opening the conversation resumed or started

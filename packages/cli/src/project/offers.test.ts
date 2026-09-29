@@ -1,5 +1,5 @@
 /**
- * Offered providers (SPEC §10.5), against this repository's registry: what a component brings is
+ * Offered providers (`offers.ts`), against this repository's registry: what a component brings is
  * decided by the capabilities it can use and the catalogue's `offer`, never by names.
  */
 

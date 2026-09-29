@@ -79,5 +79,5 @@
     }
   ],
   "title": "pikit preset",
-  "description": "A preset of a pikit registry (SPEC §11): a base, or an alias of one."
+  "description": "A preset of a pikit registry: a base, or an alias of one."
 }

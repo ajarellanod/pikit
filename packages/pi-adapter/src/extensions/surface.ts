@@ -1,6 +1,6 @@
 /**
- * The Pi events pikit fires to extensions: the events of tier A, the surface pikit promises
- * (SPEC §6.2b). An extension may register any other event, and it never fires.
+ * The Pi events pikit fires to extensions: the events of tier A, the surface pikit promises.
+ * An extension may register any other event, and it never fires.
  *
  * Data only, with no imports: `pikit doctor` needs the same list and must not load the adapter, so
  * the CLI keeps a generated copy (`packages/cli/src/project/pi-extension-surface.ts`, written by

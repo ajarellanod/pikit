@@ -36,7 +36,7 @@ function tinyProject(): string {
   return dir;
 }
 
-test("--version, help, unknown commands and commands of later milestones", () => {
+test("--version, help, unknown commands and commands not built yet", () => {
   const cwd = temp();
   expect(pikit(["--version"], cwd).out).toMatch(/^pikit \d+\.\d+\.\d+/);
   expect(pikit(["--help"], cwd).code).toBe(0);
@@ -44,7 +44,7 @@ test("--version, help, unknown commands and commands of later milestones", () =>
   expect(pikit(["add", "--bogus"], cwd).code).toBe(2);
   const later = pikit(["upgrade"], cwd);
   expect(later.code).toBe(1);
-  expect(later.out).toContain("not yet; it arrives in M3");
+  expect(later.out).toContain("pikit upgrade: not built yet (see SPEC P6)");
 });
 
 test("pikit registry validate runs the repository's registry checks", () => {
@@ -411,14 +411,14 @@ test("doctor fails on a Pi extension importing what the shim lacks, and notes wh
     `import type { ExtensionAPI } from ${alias};\n\nexport default function (pi: ExtensionAPI) {\n  pi.on("input", (_event, ctx) => ctx.ui.custom(() => undefined));\n}\n`,
   );
   const noted = pikit(["doctor"], dir);
-  expect(noted.out).toContain('src/extensions/tui.ts uses what pikit does not provide to Pi extensions; it does nothing or fails when called (SPEC §6.2b): pi.on("input"), ctx.ui.custom');
+  expect(noted.out).toContain('src/extensions/tui.ts uses what pikit does not provide to Pi extensions; it does nothing or fails when called (runtime-pi\'s README, "Pi extensions"): pi.on("input"), ctx.ui.custom');
   expect(noted.out).toContain("pikit doctor: green");
   expect(noted.code).toBe(0);
 
   writeFileSync(join(dir, "src/extensions/header.ts"), `import { VERSION, type ExtensionAPI } from ${alias};\n\nexport default (pi: ExtensionAPI) => void VERSION;\n`);
   const broken = pikit(["doctor"], dir);
   expect(broken.code).toBe(1);
-  expect(broken.err).toContain("src/extensions/header.ts imports `VERSION` from @earendil-works/pi-coding-agent, which pikit does not provide (SPEC §6.2b)");
+  expect(broken.err).toContain("src/extensions/header.ts imports `VERSION` from @earendil-works/pi-coding-agent, which pikit does not provide (runtime-pi's README, \"Pi extensions\")");
 });
 
 test("remove refuses to take a tool an agent names; with --force it removes it, and doctor reports the name", () => {

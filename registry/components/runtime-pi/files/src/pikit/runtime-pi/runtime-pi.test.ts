@@ -26,7 +26,7 @@ import { createPiRuntimeFixture, holdTool, killMidRun, recordingBash, scriptedAg
 import Type from "typebox";
 import runtimePi, { createRuntimePi, DRIVE } from "./index.ts";
 
-// The agent.runtime contract, including a worker killed mid-run (SPEC §14).
+// The agent.runtime contract, including a worker killed mid-run.
 for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture(({ onHarness }) => [createRuntimePi({ onHarness })]))) {
   test(`runtime-pi ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
@@ -629,7 +629,7 @@ test("it refuses to start when a tool is provided under another name", async () 
   expect(await startFailure(app)).toContain('the agent.tool "shell" is a tool named "bash"');
 });
 
-/** Moves the conversation's state to the phase it is called with (SPEC §6.2a). */
+/** Moves the conversation's state to the phase it is called with (`agent.state`). */
 const advance: AgentTool = {
   name: "advance",
   label: "advance",

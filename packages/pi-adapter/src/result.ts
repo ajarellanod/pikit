@@ -71,7 +71,8 @@ async function runEntries(lane: AgentLane, record: OperationResultRecord, ctx: C
  * Pi 0.99.0 does not tie its other ledger rows to an operation (a hook's own model request, an
  * extension's `recordUsage` without an entry), so a run cannot claim them; the session's totals
  * (`getStats`) still count them. Pi's durable runtime keeps a completed attempt's usage on its entry
- * (SPEC §6.4), so this reading survives the move. A run that called no model reports zero.
+ * (features/pi-durable-migration.md), so this reading survives the move. A run that called no
+ * model reports zero.
  */
 export function runUsage(entries: readonly Entry[]): Usage {
   let total = ZERO;

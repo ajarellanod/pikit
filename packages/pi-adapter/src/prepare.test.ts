@@ -1,7 +1,8 @@
 /**
- * Dynamic agents on Pi (SPEC §6.2a): `prepare(state)` runs in Pi's `before_run` and changes the
- * run's model, system prompt and tools; tools update the state through `AGENT_STATE`; the state
- * lives in the Pi session, so it survives a new worker and starts fresh on a new session.
+ * Dynamic agents on Pi (`agent.state`, `defineAgent`'s `prepare`): `prepare(state)` runs in Pi's
+ * `before_run` and changes the run's model, system prompt and tools; tools update the state through
+ * `AGENT_STATE`; the state lives in the Pi session, so it survives a new worker and starts fresh on
+ * a new session.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -119,7 +120,7 @@ function providers(result: Result): string[] {
   return result.messages.flatMap((message) => (message.role === "assistant" ? [message.provider] : []));
 }
 
-describe("prepare (SPEC §6.2a)", () => {
+describe("prepare", () => {
   test("a tool updates the state, and the next run's prepare changes model, prompt and tools", async () => {
     const s = await setup();
     const conversation = await s.conversation();
@@ -187,7 +188,8 @@ describe("prepare (SPEC §6.2a)", () => {
       const after = await setup({ sessions: jsonl() });
       expect(providers(await after.ask(conversation, "r2", "hello"))).toEqual(["other"]);
 
-      // A reset points the conversation to a new session (SPEC §7.6): the state is the initial one.
+      // A reset points the conversation to a new session (`conversations.registry`'s `reset`): the
+      // state is the initial one.
       const reset = await after.conversation();
       expect(providers(await after.ask(reset, "r3", "hello"))).toEqual(["faux"]);
       expect(sent(after.requests.at(-1))).toEqual({ systemPrompt: "testing prompt", tools: ["advance"] });
@@ -245,7 +247,7 @@ test("a Pi extension's getActiveTools() sees the tools prepare chose", async () 
   await s.runtime.close(s.app.context());
 });
 
-describe("a resumed run is prepared again (SPEC §6.2a)", () => {
+describe("a resumed run is prepared again", () => {
   const WORKER = fileURLToPath(new URL("./testing/prepared-worker.ts", import.meta.url));
 
   /** Run `preparedAgent` in another process until its `hold` tool runs, then SIGKILL it. */

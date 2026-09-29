@@ -1,4 +1,4 @@
-/** `bun install` in the project: after `package.json` changed, as step 7 of SPEC §10.5. */
+/** `bun install` in the project: after `package.json` changed, as step 7 of `pikit add`'s install flow (`add.ts`). */
 
 import { CliError, log } from "../ui.ts";
 

@@ -41,7 +41,7 @@ async function started(config: Record<string, unknown>): Promise<{ app: App; fil
   return { app, ...found };
 }
 
-// Pi's ExecutionEnv contract, with a shell (SPEC §14).
+// Pi's ExecutionEnv contract, with a shell.
 for (const c of createExecutionConformance(async () => {
   const { app, shell } = await started({ root: temporaryRoot() });
   return { env: shell, shell: true, dispose: () => app.stop() };

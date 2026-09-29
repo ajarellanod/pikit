@@ -1,12 +1,12 @@
 /**
- * Scenario 7, the HTTP half (SPEC §15): an existing Pi extension, unmodified, loaded with
+ * Scenario 7, the HTTP half: an existing Pi extension, unmodified, loaded with
  * `createRuntimePi({ extensions })`, fires during scenario 1. Pi's own `permission-gate` example
  * (byte for byte from Pi v0.87.1, kept in `@pikit/pi-adapter`'s tests) stops Pi's real `bash` tool
  * (`tool-bash` on `execution-local`) from running `rm -rf` asked for over HTTP: with no terminal UI
  * to ask, it blocks. Other commands run, in the workspace.
  *
  * In a project, the extension file sits in `src/extensions/` and imports
- * `@earendil-works/pi-coding-agent`, which resolves to `@pikit/pi-extension-shim` (SPEC §6.2b).
+ * `@earendil-works/pi-coding-agent`, which resolves to `@pikit/pi-extension-shim`.
  * This fixture imports Pi's copy in the adapter instead of a second copy.
  */
 

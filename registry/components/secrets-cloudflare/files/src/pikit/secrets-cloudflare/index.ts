@@ -1,5 +1,5 @@
 /**
- * secrets-cloudflare: secrets from the Worker's `env` (SPEC §4.5, §13, §4.1 C5).
+ * secrets-cloudflare: secrets from the Worker's `env` (SPEC §4.1, C5).
  *
  * On Cloudflare a secret (`wrangler secret put`, `.dev.vars` locally) or a variable (`vars` in
  * `wrangler.jsonc`) reaches the Worker as a property of its `env`, which `deployment-cloudflare`'s

@@ -56,7 +56,7 @@ export function createRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) =>
 
   let end: { reach(): void; released: Promise<void> } | undefined;
   const onHarness: HarnessHook = (harness) => {
-    // After the final answer, before Pi commits the run's end: the window of SPEC §6.4, gap 2.
+    // After the final answer, before Pi commits the run's end: the window of gap 2 in `pi-gaps.test.ts`.
     harness.hooks.on("before_run_end", async () => {
       const paused = end;
       end = undefined;

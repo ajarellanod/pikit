@@ -1,5 +1,5 @@
 /**
- * Model credentials, in the two places an app can run (SPEC §11):
+ * Model credentials, in the two places an app can run:
  * - on this machine, for `pikit dev`: `.pikit/` here and the shell's environment;
  * - where the deployment runs the app, for `pikit up`: through its `exec` (in Docker, the volume
  *   and `.env`). A login made here never reaches it, and one made there never reaches this machine:

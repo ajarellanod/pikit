@@ -2,11 +2,11 @@
  * tool-read: Pi's own `read` tool, for the agents that name it (`tools: ["read"]`). It reads a text
  * file (from a line, up to a number of lines) or an image, and truncates long files for the model.
  *
- * pikit does not reimplement it (SPEC §6.3). This component adds only what the kit owns:
+ * pikit does not reimplement it (SPEC P1). This component adds only what the kit owns:
  * - the environment it works on, read when the tool runs: the agent's own `workspace` when one is
- *   installed (`workspace-local`: a directory per agent, SPEC §8.2), otherwise `execution`. Any
+ *   installed (`workspace-local`: a directory per agent), otherwise `execution`. Any
  *   `execution` will do, with or without a shell;
- * - its replay, `"safe"`: it only reads, so a run resumed after a crash reads again (SPEC §8.4).
+ * - its replay, `"safe"`: it only reads, so a run resumed after a crash reads again (`agentTool`'s replay).
  *
  * Targets: `server` and `cloudflare`, wherever an `execution` provider is installed.
  */

@@ -1,7 +1,7 @@
 /**
- * `pikit.json` version 2 (SPEC §10.3): registries recorded by what resolves on any machine. A
+ * `pikit.json` version 2: registries recorded by what resolves on any machine. A
  * version 1 file (absolute paths, the installing machine's) is read in version 2's shape, and the next
- * write saves version 2 (SPEC §12a).
+ * write saves version 2.
  */
 
 import { afterAll, expect, test } from "bun:test";

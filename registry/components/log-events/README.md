@@ -46,7 +46,7 @@ deployment gives the app (the console, or `deployment-docker`'s JSON lines) prin
 ## What it never logs
 
 No line carries the text of a message, a prompt, an answer or an error's message, and nothing
-here reads a secret (SPEC §13). A failed run logs its `errorCode`, not its message, because a
+here reads a secret. A failed run logs its `errorCode`, not its message, because a
 provider's error message may quote the request. The fields are picked by name in `fields.ts`, so a
 field added to an event later is not logged until someone adds it there.
 

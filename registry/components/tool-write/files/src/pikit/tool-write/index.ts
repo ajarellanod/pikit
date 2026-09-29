@@ -2,12 +2,12 @@
  * tool-write: Pi's own `write` tool, for the agents that name it (`tools: ["write"]`). It creates or
  * overwrites a file, creating its parent directories.
  *
- * pikit does not reimplement it (SPEC §6.3). This component adds only what the kit owns:
+ * pikit does not reimplement it (SPEC P1). This component adds only what the kit owns:
  * - the environment it works on, read when the tool runs: the agent's own `workspace` when one is
- *   installed (`workspace-local`: a directory per agent, SPEC §8.2), otherwise `execution`. Any
+ *   installed (`workspace-local`: a directory per agent), otherwise `execution`. Any
  *   `execution` will do, with or without a shell;
  * - its replay, `"never"`: it changes files, so after a crash Pi reports the call as interrupted,
- *   and the model decides whether to write again (SPEC §8.4).
+ *   and the model decides whether to write again (`agentTool`'s replay, in @pikit/pi-adapter).
  *
  * Targets: `server` and `cloudflare`, wherever an `execution` provider is installed.
  */

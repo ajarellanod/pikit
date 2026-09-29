@@ -10,10 +10,11 @@
  *   an entry for a capability that no longer exists, or the wrong mode fails `tsc`.
  * - `registry validate` rejects a component that provides or uses a capability with no entry here.
  *
- * Each entry also says how settled its contract is (SPEC §4.9, §12a). A contract is `experimental`
- * until two independent providers in this registry pass its suite; only then may it be `stable`
- * (`checkStability`, run by this repository's tests on its own registry). The kernel defines no
- * capability: every contract is in `@pikit/contracts`, or in `@pikit/pi-adapter` when its type is Pi's.
+ * Each entry also says how settled its contract is (the contracts version on their own schedule,
+ * SPEC K8). A contract is `experimental` until two independent providers in this registry pass its
+ * suite; only then may it be `stable` (`checkStability`, run by this repository's tests on its own
+ * registry). The kernel defines no capability: every contract is in `@pikit/contracts`, or in
+ * `@pikit/pi-adapter` when its type is Pi's.
  *
  * The Pi-owned capabilities (`sessions.store`, `execution`…) are declared by `@pikit/pi-adapter`,
  * which the repository's single type-check program includes. It is deliberately not imported here:
@@ -26,7 +27,7 @@ import type { AppCapabilities, AppKeyedCapabilities, CapabilityMode } from "@pik
 import type { Manifest } from "./manifest.ts";
 
 /**
- * How settled a contract is (SPEC §12a). `experimental`: it may still change with any milestone.
+ * How settled a contract is. `experimental`: it may still change with any release.
  * `stable`: it changes only additively, and a breaking change needs a [decision] and a major of its
  * package. A contract becomes stable once two independent providers pass its suite, or, for one the
  * project provides, by a [decision].
@@ -44,9 +45,9 @@ export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
   summary: string;
   /**
    * Offered: when a component that can use it (`useOptional`) or requires it (`use`) is added and
-   * nothing provides it, `pikit add` and `pikit new` offer its provider (SPEC §10.5, "Offered
-   * providers"). For a capability with one obvious provider that changes nothing else; not for a
-   * choice like a per-agent workspace.
+   * nothing provides it, `pikit add` and `pikit new` offer its provider (`project/offers.ts`).
+   * For a capability with one obvious provider that changes nothing else; not for a choice like a
+   * per-agent workspace.
    */
   offer?: true;
 }
@@ -159,7 +160,7 @@ export const CAPABILITIES: Catalogue = {
   "agent.definition": {
     mode: "keyed",
     definedIn: "@pikit/contracts",
-    // The programming model (`defineAgent`, `prepare`): stable by [decision], SPEC §12a.
+    // The programming model (`defineAgent`, `prepare`): stable by [decision] (the former SPEC §12a).
     stability: "stable",
     providedBy: "project",
     summary: "One agent per name (model, prompt, tools); provided by the project, not the registry.",
@@ -230,7 +231,7 @@ export function capabilityUsage(manifests: readonly Manifest[]): CapabilityUsage
 }
 
 /**
- * A `stable` contract has two providers in the registry (SPEC §4.9): one implementation cannot show
+ * A `stable` contract has two providers in the registry: one implementation cannot show
  * that the contract is not shaped by it. Capabilities the project provides are promoted by decision.
  */
 export function checkStability(usage: readonly CapabilityUsage[]): string[] {

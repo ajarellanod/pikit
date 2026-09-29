@@ -107,7 +107,7 @@ test("checkPiExtensions: a missing name is a problem, unsupported surface a note
     writeFileSync(join(dir, file), text);
   }
   const { problems, notes } = checkPiExtensions(dir, Object.keys(files));
-  expect(problems).toEqual(["src/extensions/header.ts imports `VERSION` from @earendil-works/pi-coding-agent, which pikit does not provide (SPEC §6.2b)"]);
+  expect(problems).toEqual(["src/extensions/header.ts imports `VERSION` from @earendil-works/pi-coding-agent, which pikit does not provide (runtime-pi's README, \"Pi extensions\")"]);
   expect(notes).toHaveLength(1);
   expect(notes[0]).toStartWith("src/extensions/tui.ts uses what pikit does not provide");
   expect(notes[0]).toEndWith(': pi.on("user_bash"), ctx.ui.custom');

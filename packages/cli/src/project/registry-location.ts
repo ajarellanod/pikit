@@ -1,12 +1,12 @@
 /**
- * Where `pikit.json`'s registries are (SPEC §10.3). A project is committed and cloned elsewhere, so a
+ * Where `pikit.json`'s registries are. A project is committed and cloned elsewhere, so a
  * registry is recorded by what works on any machine, and resolved here, at run time:
  *
  * - `"builtin"`: the registry of the pikit checkout the running CLI comes from (`DEFAULT_REGISTRY`);
  * - `"./<path>"`: a registry inside the project, relative to it;
  * - an absolute path: a registry elsewhere on this machine. It works only here: `add` says so.
  *
- * Git and HTTP registries come with M3's `upgrade` (SPEC §10.3).
+ * Git and HTTP registries are a feature (`features/open-registries.md`).
  */
 
 import { existsSync, readFileSync, realpathSync } from "node:fs";
@@ -37,7 +37,7 @@ export function isPortable(location: string): boolean {
 }
 
 /**
- * A `pikit.json` version 1 location (always an absolute path, SPEC §10.3) that names the registry of a
+ * A `pikit.json` version 1 location (always an absolute path) that names the registry of a
  * pikit checkout, which version 2 records as `builtin`. Version 1 recorded the checkout the CLI ran
  * from, so the path is often of another machine: it is the running CLI's registry, the `registry/` of
  * any pikit checkout that still exists (its `packages/cli` is `@pikit/cli`), or, gone or not, the
