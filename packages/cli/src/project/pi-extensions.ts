@@ -10,6 +10,9 @@
  *   subpath of it. The module does not load (a value) or does not typecheck (a type).
  * - **Notes** are heuristics, so they never fail the command: events pikit never fires, `pi.*` and
  *   `ctx.*` members it lacks or leaves inert, terminal UI calls. One note per file lists them.
+ *   Another note says when a file registers tools (`pi.registerTool`): pikit runs them, but an
+ *   extension's tools are never run again when a run resumes (`replay: "never"`), and a tool of the
+ *   project's own can choose with `toolComponent` instead.
  */
 
 import { readFileSync } from "node:fs";
@@ -46,6 +49,11 @@ export interface ExtensionFindings {
   subpaths: string[];
   /** What the file uses that pikit does not provide or leaves inert, as written (`pi.on("input")`). */
   unsupported: string[];
+  /**
+   * It registers tools (`pi.registerTool`). Supported, so not `unsupported`: but an extension's tools
+   * are never run again when a run resumes after a crash or an eviction (`replay: "never"`).
+   */
+  registersTools: boolean;
 }
 
 /** The findings of one source file that imports the alias. */
@@ -63,11 +71,13 @@ export function inspectExtension(source: string): ExtensionFindings {
   }
 
   const unsupported = new Set<string>();
+  let registersTools = false;
   // The names the file gives the API object; Pi's convention is `pi`.
   const apiNames = new Set([...code.matchAll(/\b([\w$]+)\s*:\s*ExtensionAPI\b/g)].map((m) => m[1] ?? ""));
   if (apiNames.size === 0) apiNames.add("pi");
   for (const api of apiNames) {
     const at = api.replace(/\$/g, "\\$");
+    if (new RegExp(`(?<![\\w$.])${at}\\.registerTool\\(`).test(code)) registersTools = true;
     for (const [, event = ""] of code.matchAll(new RegExp(`(?<![\\w$.])${at}\\.on\\(\\s*["'\`]([\\w:-]+)["'\`]`, "g"))) {
       if (!supportedEvents.has(event)) unsupported.add(`pi.on("${event}")`);
     }
@@ -86,7 +96,7 @@ export function inspectExtension(source: string): ExtensionFindings {
   for (const [, method = ""] of code.matchAll(/\.ui\.([\w$]+)/g)) {
     if (!UI_ANSWERED.has(method)) unsupported.add(`ctx.ui.${method}`);
   }
-  return { missing: [...missing], subpaths, unsupported: [...unsupported] };
+  return { missing: [...missing], subpaths, unsupported: [...unsupported], registersTools };
 }
 
 /**
@@ -100,7 +110,7 @@ export function checkPiExtensions(projectDir: string, files: readonly string[]):
     if (file.startsWith("src/pikit/")) continue;
     const source = readFileSync(join(projectDir, file), "utf8");
     if (!scanImports(source).some((specifier) => packageName(specifier) === EXTENSION_ALIAS)) continue;
-    const { missing, subpaths, unsupported } = inspectExtension(source);
+    const { missing, subpaths, unsupported, registersTools } = inspectExtension(source);
     for (const specifier of subpaths) {
       problems.push(`${file} imports "${specifier}", which pikit does not provide: only ${EXTENSION_ALIAS} itself (SPEC §6.2b)`);
     }
@@ -110,6 +120,13 @@ export function checkPiExtensions(projectDir: string, files: readonly string[]):
     }
     if (unsupported.length > 0) {
       notes.push(`${file} uses what pikit does not provide to Pi extensions; it does nothing or fails when called (SPEC §6.2b): ${unsupported.join(", ")}`);
+    }
+    if (registersTools) {
+      notes.push(
+        `${file} registers tools with pi.registerTool: pikit runs them, but never again when a run resumes after a crash ` +
+          '(an extension\'s tools are replay "never"; the model is told the call was interrupted). For a tool of your own, ' +
+          'toolComponent from @pikit/pi-adapter/tools chooses its replay ("safe" for one that only reads)',
+      );
     }
   }
   return { problems, notes };
