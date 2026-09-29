@@ -119,4 +119,25 @@ describe("Pi gaps (pi-agent-core 0.87.1)", () => {
     expect(entries.some((entry) => entry.id === queued.value.entryId)).toBe(false);
     await harness.close(ctx);
   });
+
+  test("tools: a result with `isError: true` is recorded as a success", async () => {
+    // pi-agent-core's `AgentToolResult.isError` ("report a failure without throwing") is honoured by
+    // its `agent-loop`, not by the harness the adapter drives (`harness/execution/tools.ts`). So a
+    // pikit tool throws on failure (`tools/index.ts`, `ToolDefinition.execute`).
+    const failing: ReturnType<typeof holdTool> = {
+      ...holdTool(async () => ""),
+      async execute() {
+        return { content: [{ type: "text", text: "it failed" }], details: undefined, isError: true };
+      },
+    };
+    const { harness, lane } = await openLane([failing]);
+    const ended = await lane.prompt("hold", undefined, ctx);
+    expect(ended.ok).toBe(true);
+
+    const results = (await lane.findEntries(undefined, ctx)).flatMap((entry) =>
+      entry.type === "message" && entry.message.role === "toolResult" ? [entry.message] : [],
+    );
+    expect(results.map((result) => [result.content, result.isError])).toEqual([[[{ type: "text", text: "it failed" }], false]]);
+    await harness.close(ctx);
+  });
 });
