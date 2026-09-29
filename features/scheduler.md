@@ -29,9 +29,9 @@ are scheduled prompts defined as files next to the agent, reviewed and versioned
 
 ## Pi first
 One Pi process cannot wake itself when it is not running, and Pi has no clock-driven triggers.
-Pi's durable runtime will have `sleep(until)` inside a task (`pico-v5.md` §5), which covers "remind
-me in two hours" inside one conversation: pikit must not build that. A schedule that starts runs
-across conversations is the host's.
+Pi's durable runtime has `sleep(until)` inside a task (`pi-durable` 0.99.0, which the adapter does not
+run yet; `pico-v5.md` §5), which covers "remind me in two hours" inside one conversation: pikit
+must not build that. A schedule that starts runs across conversations is the host's.
 
 ## Open questions
 - The agent creating a job from natural language: a `tool-schedule` (`replay: "never"`), or a

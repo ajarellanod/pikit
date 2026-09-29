@@ -1,11 +1,11 @@
 /**
- * `outbound.queue` conformance (SPEC §5 "Outbound delivery", §14): what every queue must do, wherever
+ * `outbound.queue` conformance: what every queue must do, wherever
  * it keeps its records. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createOutboundQueueConformance(() => myFixture(), { retry: MY_RETRY }))
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
- * How long to wait and when to give up is the provider's policy, not the contract's (SPEC §4.9):
+ * How long to wait and when to give up is the provider's policy, not the contract's:
  * the provider declares it (`retry`), and the suite holds it to what it declared. What every queue
  * must do is the rest: order, retry after a transient failure, no retry after a permanent one, rate
  * limits that do not count as failures, possible duplicates marked, receipts.
@@ -14,7 +14,7 @@
  * waiting, and the transport, which it scripts: a piece's send succeeds, fails with a given kind, or
  * hangs until aborted. It observes only the capability and the `outbound.*` events.
  *
- * The queue's `receipts` are checked here too (SPEC §4.8): what they record, and the feed suite
+ * The queue's `receipts` are checked here too (SPEC K3): what they record, and the feed suite
  * (`createFeedConformance`) over them, restarts included.
  */
 
@@ -368,7 +368,7 @@ export function createOutboundQueueConformance(
     }),
   ];
 
-  // The receipts are a feed: the feed suite holds them to §4.8, across restarts of the queue.
+  // The receipts are a feed: the feed suite holds them to `Feed`'s rules, across restarts of the queue.
   const receipts = createFeedConformance<DeliveryReceipt>(
     async () => {
       const fixture = await factory();
@@ -514,7 +514,7 @@ function createSubject(fixture: OutboundQueueFixture, clock: ManualClock, apps: 
       return { queue: tracked, delivered, abandoned, attempts: () => attached.reduce((n, t) => n + t.calls.length, 0) };
     },
     async stopAll() {
-      // A process that exits has a stop deadline (SPEC §9.1): a send still hanging is aborted, and
+      // A process that exits has a stop deadline (SPEC K2): a send still hanging is aborted, and
       // the stop is reported as late. The process exits all the same.
       for (const app of apps.splice(0)) await app.stop(withAbortSignal(AbortSignal.timeout(200), BACKGROUND_CONTEXT)).catch(() => {});
     },

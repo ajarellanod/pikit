@@ -1,5 +1,5 @@
 /**
- * `conversations.registry` conformance (SPEC §7.4, §7.6, §14): what every conversation registry
+ * `conversations.registry` conformance: what every conversation registry
  * must do, wherever it keeps its pointers. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createConversationRegistryConformance(() => myFixture()))

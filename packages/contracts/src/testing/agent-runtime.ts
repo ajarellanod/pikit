@@ -1,5 +1,5 @@
 /**
- * `agent.runtime` conformance (SPEC §6.1, §14): what every `AgentRuntime` must do, whatever runs
+ * `agent.runtime` conformance: what every `AgentRuntime` must do, whatever runs
  * the agent. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createAgentRuntimeConformance(() => myFixture()))

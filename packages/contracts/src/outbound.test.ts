@@ -1,5 +1,5 @@
 /**
- * `answerKey` (SPEC §5): the one formula for a run's answer key, shared by the channel that enqueues
+ * `answerKey`: the one formula for a run's answer key, shared by the channel that enqueues
  * the answer and whoever waits for its delivery.
  */
 

@@ -24,9 +24,11 @@ posted and edited as the model writes, then replaced by the final answer.
 - Absent: "typing…", then the answer, as today.
 
 ## Pi first
-Pi streams: `message_update` events carry the deltas, and Pi's extension API after 0.87.1 adds
-`provider_stream_event` (SPEC §6.2b). pikit forwards what Pi emits; it builds no streaming of model
-calls. The adapter needs to re-emit message updates as an `agent.*` event, which today it does not.
+Pi streams: `message_update` events carry the deltas (pi-agent-core 0.99.0's `AgentHarness` emits them,
+and the adapter forwards them to extensions), and Pi 0.99.0 adds `provider_stream_event` to its
+extension API and `onProviderStreamEvent` to pi-agent-core and pi-ai, for the provider's parsed events
+before normalization. pikit forwards what Pi emits; it builds no streaming of model calls. The adapter
+needs to re-emit message updates as an `agent.*` event, which today it does not.
 
 ## Open questions
 - Edit rate limits (Telegram allows about one edit per second per chat) and long answers split

@@ -1,5 +1,5 @@
 /**
- * Channel conformance (SPEC §5, §14): what every channel does with a message, whatever the
+ * Channel conformance: what every channel does with a message, whatever the
  * platform. Runner-independent, like the other suites:
  *
  *   for (const c of createChannelConformance((setup) => myChannelFixture(setup)))

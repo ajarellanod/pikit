@@ -10,7 +10,8 @@
 
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
-import type { JsonValue, KeyValueStorage } from "../storage.ts";
+import type { JsonValue } from "../json.ts";
+import type { KeyValueStorage } from "../storage.ts";
 import { checker, expecter } from "./assert.ts";
 
 /** A fresh, empty storage, built for one case. */

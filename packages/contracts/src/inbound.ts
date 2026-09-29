@@ -1,5 +1,5 @@
 /**
- * The inbound path (SPEC §5): what a channel makes of a platform request, and the pipelines it
+ * The inbound path: what a channel makes of a platform request, and the pipelines it
  * runs before handing the message to its conversation.
  *
  *   inbound.normalize      the platform's payload as an `InboundMessage`
@@ -7,7 +7,7 @@
  *
  * Authentication comes first and is the channel's own: each platform proves a sender its way (a
  * bearer token, a signed webhook, a bot API that only delivers real users), so it is not a shared
- * contract. `channel-http` declares its own pipeline for it (SPEC §4.9).
+ * contract. `channel-http` declares its own pipeline for it.
  *
  * The shapes start with what the first channel needs. A field is added, optional, with the
  * component that produces it (threads, attachments, tenants): adding one is compatible, removing
@@ -24,7 +24,7 @@ import { type AppContext, Halt } from "@pikit/core";
 import type { Admission, AgentRuntime, ConversationRef } from "./agent.ts";
 import type { ConversationRegistry } from "./conversations.ts";
 
-/** One message from a channel, whatever the platform (SPEC §5). */
+/** One message from a channel, whatever the platform. */
 export interface InboundMessage {
   /**
    * The message's identity: the platform's delivery id, or the client's own message id. It becomes
@@ -44,7 +44,7 @@ export interface InboundMessage {
   receivedAt: number;
 }
 
-/** Which agent answers a message, and whether it may (SPEC §5). */
+/** Which agent answers a message, and whether it may. */
 export interface RouteDecision {
   /** Name of the `agent.definition` that answers. */
   agent: string;
@@ -63,7 +63,7 @@ declare module "@pikit/core" {
 }
 
 /**
- * What happened to one inbound message (SPEC §5). A producer handles every kind: a channel tells its
+ * What happened to one inbound message. A producer handles every kind: a channel tells its
  * sender, a scheduler logs. `admitted` and `duplicate` carry the conversation the message is in.
  */
 export type InboundOutcome =
@@ -81,7 +81,7 @@ export type InboundOutcome =
 export interface AdmitOptions {
   conversations: ConversationRegistry;
   runtime: AgentRuntime;
-  /** The conversation's key. The channel builds it (SPEC §7.4): `telegram:<chat id>`, `http:<id>`. */
+  /** The conversation's key. The channel builds it: `telegram:<chat id>`, `http:<id>`. */
   key: string;
   /**
    * Called with the conversation once it resolved, right before `dispatch`: the last moment to start
@@ -92,7 +92,7 @@ export interface AdmitOptions {
 }
 
 /**
- * The inbound path after authentication (SPEC §5): `inbound.normalize`, `route.resolve`, the
+ * The inbound path after authentication: `inbound.normalize`, `route.resolve`, the
  * conversation, `dispatch`. Resolves once the message is durable (the ack point) or stopped; throws
  * when a stage breaks the path's rules (it changed which message or conversation this is) or when a
  * capability fails, as the channel's own code would.

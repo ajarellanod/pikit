@@ -1,5 +1,5 @@
 /**
- * `storage.sql` (SPEC §4.5, §16): a SQL database for the components that must keep records across
+ * `storage.sql` (SPEC §4.1, C5): a SQL database for the components that must keep records across
  * restarts: the outbox's deliveries, a scheduler's jobs, approvals. SQLite on a server
  * (`storage-sqlite`), a Durable Object's SQL on Cloudflare, Postgres later: each is a component
  * providing this contract.
@@ -16,6 +16,8 @@
  * - The SQL dialect is the common subset of SQLite and Postgres a component chooses to use; this
  *   contract does not translate it.
  */
+
+import type { JsonValue } from "./json.ts";
 
 /** A value bound to a parameter or read from a column. Integers read back as `number`. */
 export type SqlValue = string | number | null | Uint8Array;
@@ -54,7 +56,6 @@ export interface SqlDatabase extends SqlStatements {
  * Pi first: Pi's durable documents are scoped to a session, a conversation or a task; this is a
  * component's own state, across conversations, which Pi does not keep.
  */
-export type JsonValue = null | boolean | number | string | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
 /** One component's namespace in `storage.kv`. */
 export interface KeyValueStore {

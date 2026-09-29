@@ -1,5 +1,5 @@
 /**
- * The inbound pipelines are typed on `AppPipelines` (SPEC §5): a channel and a router meet on
+ * The inbound pipelines are typed on `AppPipelines`: a channel and a router meet on
  * them without importing each other.
  */
 

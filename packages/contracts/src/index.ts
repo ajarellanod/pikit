@@ -1,6 +1,7 @@
-// Public surface of @pikit/contracts (SPEC §4.9): the vocabulary components share. Types, identities,
-// names of events and pipelines, capability interfaces, and one protocol function (`admitInbound`).
-// No implementation, no policy. Each contract has a stability level (SPEC §12a); the capabilities'
+// Public surface of @pikit/contracts (SPEC §3): the vocabulary components share. Types, identities,
+// names of events and pipelines, capability interfaces, one protocol function (`admitInbound`), and the
+// check of what the contracts take as a JSON object (`isJsonObject`), so that no provider has its own.
+// No implementation, no policy. Each contract has a stability level (SPEC K8); the capabilities'
 // levels are in the catalogue (`packages/cli/src/registry/capabilities.ts`).
 
 export { defineAgent } from "./agent.ts";
@@ -30,7 +31,9 @@ export { WORKERS_HOST } from "./workers-host.ts";
 export type { ConversationRegistry, ConversationReset } from "./conversations.ts";
 export type { HttpRoute } from "./http.ts";
 export type { SecretStore } from "./secrets.ts";
-export type { JsonValue, KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
+export type { JsonValue } from "./json.ts";
+export { isJsonObject } from "./json.ts";
+export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
 export type { Feed, FeedItem, FeedPage } from "./feed.ts";
 export type { ActorInbox, ActorInboxHandler, ActorMailbox } from "./actor.ts";
 export type { WakeupHandler, Wakeups } from "./wakeups.ts";

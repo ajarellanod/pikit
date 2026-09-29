@@ -18,7 +18,7 @@
  */
 
 import { type ContextKey, createContextKey } from "@pikit/core";
-import type { JsonValue } from "./storage.ts";
+import type { JsonValue } from "./json.ts";
 
 export interface WorkersHost {
   /** The Worker's bindings, variables and secrets. */
