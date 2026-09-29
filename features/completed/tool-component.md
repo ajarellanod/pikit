@@ -37,9 +37,9 @@ export default toolComponent(
 - **It is a component**, `tool-<name>` (`_` becomes `-`: `web_search` is `tool-web-search`), that
   provides `agent.tool` under the tool's name. `pikit doctor` lists it; removing it is removing the
   file. No new verb, no registration by import (no magic).
-- **`replay` is required** (SPEC §8.4): `"safe"` runs it again after a crash (it only reads);
-  `"never"` tells the model it was interrupted (it changes something: derive an idempotency key from
-  the run's conversation and `toolCallId`).
+- **`replay` is required** (`agentTool`, `packages/pi-adapter/src/tools/index.ts`): `"safe"` runs it
+  again after a crash (it only reads); `"never"` tells the model it was interrupted (it changes
+  something: derive an idempotency key from the run's conversation and `toolCallId`).
 - **The fifth `execute` argument is the run's context**: its conversation
   (`context.value(CONVERSATION)`) and its cancellation. `signal` is the same cancellation, in Pi's
   place.

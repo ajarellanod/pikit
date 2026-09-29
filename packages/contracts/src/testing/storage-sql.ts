@@ -1,5 +1,5 @@
 /**
- * `storage.sql` conformance (SPEC §4.5, §14): what every `SqlDatabase` must do, wherever its data
+ * `storage.sql` conformance (SPEC §4.1, C5): what every `SqlDatabase` must do, wherever its data
  * lives. Runner-independent, like the lifecycle suite:
  *
  *   for (const c of createSqlDatabaseConformance(() => myFixture()))

@@ -11,9 +11,9 @@ A Discord bot that answers in direct messages and, when mentioned, in server cha
 
 ## How it fits pikit
 - `channel-discord`: authenticates, builds the key (`discord:<channel>[:<thread>]`), calls
-  `admitInbound`, answers every outcome, passes `createChannelConformance` (SPEC §5, §14), and
-  attaches its `ChannelTransport` to `outbound.queue`. Several bots are instances
-  (`discord:<account>`, SPEC §5).
+  `admitInbound`, answers every outcome, passes `createChannelConformance`
+  (`@pikit/contracts/testing`), and attaches its `ChannelTransport` to `outbound.queue`. Several
+  bots are instances (`discord:<account>`).
 - Receiving messages needs the Gateway (a long-lived WebSocket with the message content intent):
   server first. The Interactions endpoint (signed webhooks) carries only slash commands and buttons.
 - Sends: REST message create; `rate_limited` from Discord's `retry_after`. Whether a create with a
@@ -23,7 +23,7 @@ A Discord bot that answers in direct messages and, when mentioned, in server cha
 - Senders are authorized (allowlist, roles, [pairing](pairing.md)); a public server is strangers.
 
 ## Pi first
-Nothing in Pi: channels are pikit's (SPEC §6.2 table).
+Nothing in Pi: channels are pikit's (SPEC P1).
 
 ## Open questions
 - Cloudflare: the Gateway socket needs a Durable Object that holds it, or the channel stays

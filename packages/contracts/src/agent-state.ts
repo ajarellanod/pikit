@@ -1,5 +1,5 @@
 /**
- * `agent.state` (SPEC §6.2a): the per-conversation JSON document an agent's `prepare(state)` reads
+ * `agent.state`: the per-conversation JSON document an agent's `prepare(state)` reads
  * and its tools update. It lives in the conversation's Pi session, so it commits with the session,
  * survives restarts and eviction, and starts fresh after a reset (a new session). The runtime
  * provides it; pikit keeps no store of its own.
@@ -32,24 +32,3 @@ export interface AgentState<S extends object = Record<string, unknown>> {
 
 /** Where a run's context carries its conversation's `AgentState`. */
 export const AGENT_STATE: ContextKey<AgentState> = createContextKey<AgentState>("pikit.agent.state");
-
-/**
- * Whether `value` is a plain JSON object whose values are all JSON: what `agent.state` holds and what
- * a patch may contain. Internal to the core (the adapter checks its own writes).
- */
-export function isJsonObject(value: unknown): value is Record<string, unknown> {
-  return isPlainObject(value) && Object.values(value).every(isJson);
-}
-
-function isJson(value: unknown): boolean {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJson);
-  return isJsonObject(value);
-}
-
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return proto === Object.prototype || proto === null;
-}

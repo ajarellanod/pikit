@@ -34,7 +34,7 @@
  */
 
 import type { AppContext } from "@pikit/core";
-import type { JsonValue } from "./storage.ts";
+import type { JsonValue } from "./json.ts";
 
 export interface ActorMailbox {
   /**

@@ -17,7 +17,7 @@ A tool to open a page, read it, take a screenshot and act on it, for the agents 
   (new, suite first), with providers per target: a headless browser in a container (server), the
   Cloudflare Browser Rendering binding (Cloudflare), or a hosted browser service over
   `network.fetch`.
-- Reading a page without a browser is `tool-http-fetch` (SPEC §6.3), on `network.fetch`.
+- Reading a page without a browser is `tool-fetch` (its README), on the platform's `fetch`.
 - Replay: reading is `safe`; a click or a submitted form is `never`.
 - Pages are untrusted input (prompt injection); a browser profile holds no credential unless the
   project puts one there on purpose.

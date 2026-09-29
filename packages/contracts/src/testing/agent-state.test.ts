@@ -4,7 +4,8 @@
  */
 
 import { test } from "bun:test";
-import { type AgentState, isJsonObject } from "../agent-state.ts";
+import type { AgentState } from "../agent-state.ts";
+import { isJsonObject } from "../json.ts";
 import { createAgentStateConformance } from "./agent-state.ts";
 
 /** A session's stored values: what survives a worker, and what a reset replaces. */

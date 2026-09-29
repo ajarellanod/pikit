@@ -3,32 +3,151 @@
 **Public appeal:** ⭐ Connect the agent to any MCP server (GitHub, Linear, a database) without writing
 a tool. Hermes supports MCP, and users look for it in any agent's tool list.
 
-**Specified:** idea
+**Specified:** partly (phase 1 built: `tool-mcp` and `@pikit/pi-adapter/mcp`, Streamable HTTP with a
+bearer token from `secrets`, on both targets; strict at deploy (`pikit doctor` reaches each server),
+tolerant at run time (tool listings kept in `storage.kv`); OAuth and stdio are the open questions
+below)
 
 **Needed by:** nothing required.
 
 ## What it gives
 The tools of remote MCP servers, available to the agents that name them.
 
-## How it fits pikit
-- `tool-mcp` connects to the servers listed in its config (values) and provides their tools under
-  `agent.tool`. An agent gets a tool only by naming it (SPEC §6.3).
-- Keys of a keyed capability are fixed at `setup` (SPEC §4.5), but an MCP server reveals its tools
-  when it is reached, in `start`. So either the tool names are listed in config, or one proxy tool
-  per server takes the remote tool's name as an argument.
-- Transport: Streamable HTTP over `network.fetch`, on both targets. A stdio server is a process:
-  server only, through `execution.shell`, ideally [sandboxed](sandboxed-execution.md).
-- Credentials from `secrets`, or a stored OAuth login; never in config.
-- Replay: `never` unless the server marks a tool read-only (`readOnlyHint`), then `safe`.
-- Absent: no connection, no tool.
-
 ## Pi first
-Pi deliberately ships no MCP client: neither `pi-agent-core` nor `pi-coding-agent` 0.87.1 has one;
-Pi's way is extensions, skills and CLIs. A Pi extension that registers MCP tools with
-`registerTool` (tier A) and uses only `fetch` would run unmodified through `agent.extension`
-(SPEC §6.2b): adopt one before writing `tool-mcp`.
+Pi now ships an MCP client: `@earendil-works/pi-mcp` (0.99), standalone (no other Pi package, no
+official SDK; one dependency, `cross-spawn`, for stdio), `sideEffects: false`. Exports: `.` (the
+client core, Streamable HTTP and stdio transports, `toLlmContent`), `./oauth` (discovery, PKCE flow,
+dynamic registration, refresh, a provider with an injectable state store, and a Node callback
+server), `./testing` (an in-memory transport pair). pikit uses it and writes no MCP client (P1). Only
+`transports/stdio.ts` (`node:child_process`) and `oauth/callback.ts` (`node:http`) need Node; the rest
+uses `fetch`.
+
+## How it fits pikit (built)
+- **`@pikit/pi-adapter/mcp`**, a neutral export: pi-mcp's client, its HTTP transport, `toLlmContent`
+  and their types, never `StdioTransport` nor the OAuth callback server. It adds:
+  - `mcpHttpTransport(options)`: Pi's transport with `fetch` called unbound and `openGetStream: false`
+    (below);
+  - `mcpAgentTool({ name, label, call })`: one remote tool as the `agent.tool` object, provided at
+    setup and described at start (`describe(tool, replay)` fills label, description, parameters and
+    replay on the same object);
+  - `mcpToolName` (`<server>_<tool>`, `[A-Za-z0-9_-]`, 64 characters), `mcpParameters` (an object
+    schema with `properties`, as pi-mcp's README advises), `mcpToolResult` (below);
+  - `@pikit/pi-adapter/mcp/testing`: a fake Streamable HTTP server as a `fetch` handler, for the
+    component's tests, the adapter's and the workerd lane's.
+- **`tool-mcp`** (targets server and cloudflare). Config names each server (`url`, `tools`, and
+  optionally `secret`, `headers`, `timeoutMs`); each tool named becomes the `agent.tool`
+  `<server>_<tool>`. An agent gets a tool only by naming it (SPEC §6.3).
+  - **Named in config, not a proxy.** Keyed capabilities' keys are fixed at `setup` (SPEC §4.5), so
+    tools are provided then and described at `start`, from the server's `tools/list`.
+  - **Strict at deploy, tolerant at run time** (decided). On Cloudflare every conversation's Durable
+    Object starts its App when it wakes: a start that reaches each server would make an MCP outage
+    stop every conversation, and every cold start pay `initialize` + `tools/list`. So:
+    - **Before a deploy**, `tool-mcp/doctor.ts` is the component's check of `pikit doctor`, which
+      `pikit up` and `pikit dev` run first (and refuse on a problem). It reaches each server from the
+      deploying machine, with the token from `.env` or the environment, and reports one that cannot be
+      reached, refuses the token, or lacks a named tool; never the token's value. The CLI runs
+      `src/pikit/<name>/doctor.ts` of any installed component, as it runs `configure.ts` for
+      `pikit configure` (`packages/cli/src/project/component-doctor.ts`); a project without such a
+      file starts no process and reaches no network. `add`, `remove` and `new` run doctor without
+      these checks: they change the composition, not the servers.
+    - **With `storage.kv`** (optional capability; namespace `tool-mcp`, key `server/<name>`), the
+      listing of each server's named tools (name, title, description, inputSchema, annotations) is
+      kept with its URL and `listedAt`. A start that finds it complete for the same URL describes the
+      tools from it and makes **no request**; a server that is down then fails only its tools'
+      calls. Each connection (the first call after such a start, a call after a forgotten session)
+      lists the tools again and updates the tool objects and the kept listing (Pi reads description
+      and parameters per model call). A named tool the server no longer lists is logged as an error
+      and its calls fail naming what the server has; its last description stays kept, so a later
+      start does not stop the app over it.
+    - **Without a complete kept listing** (no `storage.kv`, the first start, a new URL or tool in
+      config), start reaches the server as before, and a server that cannot be reached, or lacks a
+      named tool, stops the start (P5): the model could get the tool's schema from nowhere.
+  - **When Pi reads a tool.** runtime-pi resolves agents' tool names when a conversation opens, which
+    is after every start (tool-mcp provides `agent.tool`, so it starts before runtime-pi); Pi reads
+    `description` and `parameters` from that object at each model call (Pi 0.99 records them in the
+    transcript as a system message's `toolsAdded`), and `replay` when a call runs or a run resumes.
+    Filling the object at start is therefore what the model sees; a test proves it on a real run.
+  - **Replay:** `never`, `safe` when the server marks the tool `annotations.readOnlyHint: true`.
+  - **Failures:** Pi's `AgentHarness` (0.99) takes a tool's failure only from a throw; an `isError`
+    it returns is recorded as a success. So `mcpToolResult` throws with the result's text.
+  - **Connections:** one client per server, in memory, connected on first use (at start without a
+    kept listing). A call whose session the server forgot (404) connects again and is sent once more
+    (the server ran nothing); nothing else is retried. A server that cannot be reached fails the call
+    with a clear error; the next call tries again. Calls honour the run's cancellation (`notifications/cancelled`); stop ends sessions.
+  - **Credentials:** `secret` names a secret read through `secrets` (optional capability) before each
+    request and sent as a bearer token; never a token in config. Absent: no server, no tool.
+
+## On Cloudflare
+- **Tree-shaking.** The root export re-exports `StdioTransport`, but with `sideEffects: false` a bundle
+  keeps only what is imported: tool-mcp adds 48 KiB (11 KiB gzip) to a conversation object's bundle,
+  with no Node module (`tests/workerd/README.md`; `mcp.test.ts` bundles the adapter export to hold it).
+- **"Illegal invocation".** pi-mcp 0.99 stores `options.fetch ?? globalThis.fetch` and calls
+  `this.fetch(...)`; Workers refuse the platform `fetch` called on another object.
+  `mcpHttpTransport` passes `(input, init) => fetch(input, init)`. The workerd lane pins the gap (it
+  fails the day Pi fixes it upstream, and the wrapper may go).
+- **No server-to-client stream.** `openGetStream: false` always: a Durable Object does not stay alive
+  for an outbound stream (C4), and each held stream takes one of its six outbound connections. A
+  request's own response may still stream (SSE).
+- **`nodejs_compat`.** pi-mcp's SSE parser measures events with `Buffer.byteLength`, a Node global:
+  `deployment-cloudflare`'s `wrangler.jsonc` enables `nodejs_compat`, so it works; a Worker without it
+  would fail on the first SSE answer.
+- **Cold start** (measured against `https://mcp.deepwiki.com/mcp`, no auth, from a laptop in Europe;
+  one `initialize`, one `notifications/initialized` (awaited: a full round trip) and one `tools/list`,
+  about 175 ms each here):
+
+  | | runs | median | min | max |
+  |---|---|---|---|---|
+  | Bun, a fresh process each (DNS + TLS included) | 10 | 882 ms | 862 ms | 1872 ms |
+  | Bun, one process, pooled connection | 7 | 547 ms | 544 ms | 553 ms |
+  | workerd (`wrangler dev`, pi-mcp's transport with `fetch: (i, init) => fetch(i, init)`, `openGetStream: false`) | 10 | 862 ms | 839 ms | 1213 ms |
+  | tool-mcp `app.start()`, no kept listing, Bun | 5 | 968 ms | 948 ms | 1032 ms |
+  | tool-mcp `app.start()` from the kept listing, Bun, 0 requests | 5 | 0.16 ms | 0.12 ms | 0.27 ms |
+  | tool-mcp `app.start()`, workerd: no kept listing, then from it (0 requests) | 1 | 846 ms, then ≤ 1 ms | | |
+
+  `tools/list` alone is 167–185 ms. Without `storage.kv` one server takes most of the 1 s budget, so a
+  Cloudflare project with tool-mcp should install `storage-kv-sql` (over `storage-do`): an object's
+  later wakes then start with no MCP request, and the first call pays the connection instead (about
+  0.9 s here, before `tools/call`).
+  In `wrangler dev` every request paid about a fresh process's time (no reused connection showed);
+  from Cloudflare's edge the round trips may be shorter (not measured deployed).
 
 ## Open questions
-- Named tools in config or a proxy per server.
-- Per-agent server lists, and servers per tenant ([multi-tenant isolation](multi-tenant-isolation.md)).
-- MCP's OAuth flow through `pikit configure`.
+- **OAuth (phase 2).** pi-mcp's `./oauth` provider is neutral (the callback server is not): a
+  `tool-mcp-oauth` (or an option of tool-mcp) would take the redirect through an `http.route` (Worker
+  half on Cloudflare), keep tokens and client registration in `storage.kv` through pi-mcp's
+  `McpOAuthStateStore`, and start the login from `pikit configure` or the dashboard. Where a token
+  lives across a project's Durable Objects (per tenant, per server) is to decide with
+  [multi-tenant isolation](multi-tenant-isolation.md).
+- **stdio** is a process: a separate, server-only `tool-mcp-stdio` component over pi-mcp's
+  `StdioTransport` (it may import it from the adapter's `./node` export), ideally through
+  [sandboxed execution](sandboxed-execution.md). Never a flag of `tool-mcp`.
+- **Pi's gaps (upstream issue pending the user's decision).** pi-mcp 0.99 calls `globalThis.fetch` as
+  a method of its transport ("Illegal invocation" on Workers) and measures SSE events with
+  `Buffer.byteLength` (needs `nodejs_compat`). Whether to report them to Pi is the user's call; until
+  Pi fixes them, `mcpHttpTransport`'s wrapper and the workerd case that pins the gap stay.
+- **On Cloudflare the kept listing is per conversation.** `storage.kv` there is `storage-kv-sql` on
+  the object's own SQLite: each conversation's object keeps its own listing. A new conversation's
+  first start (and one after the object's storage is wiped) still reaches every server, pays about
+  0.9 s, and is stopped by a server that is down. Proposal: `pikit up` writes the listing its doctor
+  check fetched into a generated file of the bundle, which start uses when the object has none; or a
+  project-wide `storage.kv` (a Workers KV binding) for listings. Not built.
+- **The kept listing has no time to live.** It is refreshed on each connection, which every object
+  makes on its first call; a schema that changed on the server and was never called since stays
+  kept until then. A server that changed a tool's arguments fails that call (the server says why) and
+  the next connection fixes the schema. A time to live, or a background refresh, was not needed.
+- **The first call after a cached start pays the connection** (`initialize`, `notifications/initialized`,
+  `tools/list`) before `tools/call`: about 0.9 s against deepwiki. Only calls pay it, not answers
+  that use no MCP tool.
+- **The doctor check runs from the deploying machine**, with the token from `.env` or the
+  environment: a server reachable only from Cloudflare's network, or a secret set in Cloudflare and
+  not in `.env`, is reported as a problem. A way to skip it (a flag of `up`) was not added.
+- **Components' own doctor checks are found by file** (`src/pikit/<name>/doctor.ts`), like
+  `configure.ts`, not declared in `component.json` like `hooks.afterDeploy`: declaring it would let
+  `registry validate` check the export. SPEC §11 should mention both files (SPEC is edited elsewhere).
+- **The manifest.** `registry generate` describes `setup` with an empty config, so `component.json`
+  lists no `provides` for tool-mcp. The config schema now carries one full example (`examples`:
+  deepwiki with `ask_wiki_question`, `read_wiki_structure`); `registry generate` learning to describe
+  setup with each example is in progress separately, and will list those keys.
+- **Per-agent server lists**, and servers per tenant ([multi-tenant isolation](multi-tenant-isolation.md)).
+- **Resources, prompts and tool-list changes** (`notifications/tools/list_changed`) are not used: with
+  tools named in config, a new server tool needs a config change anyway.

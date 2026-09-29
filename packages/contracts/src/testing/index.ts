@@ -1,6 +1,6 @@
-// Public surface of @pikit/contracts/testing (SPEC §14): the conformance suites of the contracts.
+// Public surface of @pikit/contracts/testing: the conformance suites of the contracts.
 // Every provider of a contract passes its suite. A suite checks what every provider must do, never
-// the policy of one provider (SPEC §4.9).
+// the policy of one provider.
 
 export type { AgentRuntimeConformanceOptions, AgentRuntimeFixture } from "./agent-runtime.ts";
 export { createAgentRuntimeConformance } from "./agent-runtime.ts";

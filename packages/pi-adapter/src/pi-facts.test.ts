@@ -1,5 +1,5 @@
 /**
- * Facts about pi-agent-core 0.87.1 that the adapter relies on (SPEC §6.4). Asserted on Pi
+ * Facts about pi-agent-core 0.99.0 that the adapter relies on (SPEC §6.4). Asserted on Pi
  * directly, so a Pi bump that changes one fails here before it breaks the adapter.
  */
 
@@ -17,7 +17,7 @@ function scripted() {
   return { models, model };
 }
 
-describe("Pi facts (pi-agent-core 0.87.1)", () => {
+describe("Pi facts (pi-agent-core 0.99.0)", () => {
   test("AgentHarness.close() closes the session it was given; the next owner reopens it from the repo", async () => {
     const repo = new MemorySessionRepo();
     const session = await repo.create({}, ctx);

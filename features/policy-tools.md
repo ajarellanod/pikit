@@ -2,7 +2,7 @@
 
 **Public appeal:** — (Hermes' command allowlist with approval patterns is the nearest)
 
-**Specified:** partly (moved from SPEC §18; SPEC §13 states what it is not)
+**Specified:** partly (moved from the former SPEC §18; its §13 stated what it is not)
 
 **Needed by:** nothing required.
 
@@ -12,26 +12,29 @@ place for the whole project.
 
 ## How it fits pikit
 - `policy-tools` intercepts tool calls: the adapter's translation of Pi's `before_tool` into the
-  interceptable `agent.tool.call` (SPEC §6.2), and, to take tools away per role before a run, the
-  `agent.prepare` pipeline ([pipeline anchors](pipeline-anchors.md)).
-- Rules are values in its config (S7): roles, command and path patterns, allow and deny lists.
-- It is policy mediation, not a sandbox (SPEC §13); isolation is an `execution` provider's
+  interceptable `agent.tool.call` (planned in the former SPEC §6.2; not in the code), and, to take
+  tools away per role before a run, the `agent.prepare` pipeline
+  ([pipeline anchors](pipeline-anchors.md)).
+- Rules are values in its config (MANIFESTO.md, principle 8): roles, command and path patterns,
+  allow and deny lists.
+- It is policy mediation, not a sandbox; isolation is an `execution` provider's
   ([sandboxed execution](sandboxed-execution.md)).
 - Absent: agents have the tools they name, and the Pi extensions they name.
 
 ## Pi first
 Pi's `tool_call` hook blocks or patches a call, and Pi's own `permission-gate` and `protected-paths`
-extensions already run unmodified per agent (SPEC §6.2b, scenarios 7 and 8). A project may need
-nothing more. `policy-tools` adds only rules by role across agents in one place; before building
-it, check that a Pi extension named per agent does not already cover the case.
+extensions already run unmodified per agent (`samples/http/test/scenario-7.test.ts` and
+`scenario-8.test.ts`). A project may need nothing more. `policy-tools` adds only rules by role
+across agents in one place; before building it, check that a Pi extension named per agent does not
+already cover the case.
 
 ## Open questions
-- "Hot-reloadable" (below) against a deep-frozen config (SPEC-CORE K4): a reload is a restart, or
+- "Hot-reloadable" (below) against a deep-frozen config (SPEC K4): a reload is a restart, or
   the rules are data in `storage.sql`.
 - Where roles come from: the agent, the actor, or both.
 
-## Moved from SPEC
-SPEC §18, "Higher-level components":
+## Moved from the former SPEC
+The former SPEC §18, "Higher-level components":
 
 | Component | What it encodes |
 |---|---|

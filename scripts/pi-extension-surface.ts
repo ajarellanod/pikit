@@ -116,6 +116,26 @@ export function interfaceMembers(source: string, name: string): string[] {
   return [...members].sort();
 }
 
+/**
+ * The members of the tool interfaces: `ToolDefinition` (what `pi.registerTool()` takes) and
+ * `ExtensionToolContext` (the `ctx` of a tool's `execute()`: its own members, over `ExtensionContext`).
+ * A source without `ExtensionToolContext` (Pi before 0.99) has none of the latter.
+ */
+export function toolMembers(source: string): { toolDefinition: string[]; toolContext: string[] } {
+  const hasToolContext = /\binterface\s+ExtensionToolContext\b/.test(stripComments(source));
+  return {
+    toolDefinition: interfaceMembers(source, "ToolDefinition"),
+    toolContext: hasToolContext ? interfaceMembers(source, "ExtensionToolContext") : [],
+  };
+}
+
+/** What Pi has that pikit lacks, and the reverse, of two lists of names. */
+export function drift(pi: readonly string[], pikit: readonly string[]): { lacks: string[]; extra: string[] } {
+  const theirs = new Set(pi);
+  const ours = new Set(pikit);
+  return { lacks: pi.filter((name) => !ours.has(name)), extra: pikit.filter((name) => !theirs.has(name)) };
+}
+
 /** The events an interface's `on(event: "…", …)` overloads name. */
 export function eventNames(source: string, name = "ExtensionAPI"): string[] {
   const body = interfaceBody(source, name);

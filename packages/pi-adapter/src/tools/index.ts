@@ -36,11 +36,17 @@ export interface BindOptions {
 
 /**
  * A tool in the shape of Pi's `defineTool` (`@earendil-works/pi-coding-agent`), for `toolComponent`:
- * the same fields and the same `execute` order. Only its fifth argument differs: the run's context
- * (its conversation, `context.value(CONVERSATION)`; its cancellation), not Pi's `ExtensionContext`,
- * which only an extension's host has. So a Pi tool's object moves in as it is, written inside
- * `toolComponent`; one typed by Pi's `defineTool` promises that context and does not compile here,
- * and a tool that uses it stays an extension's tool.
+ * the subset of Pi's `ToolDefinition` a pikit tool needs (`name`, `label`, `description`,
+ * `parameters`, `prepareArguments`, `execute`), with the same `execute` order. Pi's (0.99.0) has more,
+ * all for its CLI and its extension host: `promptSnippet`, `promptGuidelines`, `constrainedSampling`,
+ * `outputSchema`, `exposure`, `namespace`, `annotations`, `defaultActive`, `prepareLoadout`,
+ * `executionMode`, `renderShell` and the renderers. Only `execute`'s fifth argument differs: the run's
+ * context (its conversation, `context.value(CONVERSATION)`; its cancellation), not Pi's
+ * `ExtensionToolContext`, which only an extension's host has. So a Pi tool's object with only those
+ * core fields moves in unchanged, written inside `toolComponent`; one typed by Pi's `defineTool`
+ * promises that context and does not compile here, and a tool that uses it stays an extension's tool.
+ * `executionMode` is not taken: the harness ignores a tool's mode (`pi-gaps.test.ts`, "tools"), and
+ * only the extension host holds sequential calls, when a conversation has extensions.
  *
  * Deleted with `toolComponent` when the adapter moves to Pi's durable runtime, whose `ToolRegistration`
  * is then the one shape of a tool (see `toolComponent`, "Migration").
@@ -52,6 +58,12 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
   description: string;
   parameters: TParams;
   prepareArguments?: (args: unknown) => Static<TParams>;
+  /**
+   * Runs one call. On failure it throws: the model then gets the error's message as an error result.
+   * A result with `isError: true` (pi-agent-core's `AgentToolResult`, "report a failure without
+   * throwing") is recorded as a success by Pi's harness on 0.99.0, which only its `agent-loop` honours
+   * (`pi-gaps.test.ts`, "tools").
+   */
   execute(
     toolCallId: string,
     params: Static<TParams>,
@@ -80,14 +92,18 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
  * shim exports it so those extensions load; it is not pikit's way to write a tool.
  *
  * **Migration: a bridge until Pi's durable runtime.** In `@earendil-works/pi-durable` (Pi's Pico
- * runtime: `ToolRegistration`, `packages/durable/docs/pico-v5.md` §7 in Pi's repository), a tool is
- * one object that carries its own `replay` (`"safe" | "unsafe"`, `"unsafe"` by default) and learns its
- * conversation from its `api` (`api.conversationId`): the two things this function adds today. When
- * the adapter moves to it:
+ * runtime: `ToolRegistration`, `packages/durable/src/harness/types.ts` and `docs/pico-v5.md` §7.3 in
+ * Pi's repository, checked on 0.99.0), a tool is one object that carries its own `replay`
+ * (`"safe" | "unsafe"`, `"unsafe"` by default) and learns its conversation from its `api`
+ * (`api.conversationId`): the two things this function adds today. Its `execute(args, api, context)`
+ * returns `{ content?, isError?, details?, control? }`, and `api` also commits (`api.commit`) and
+ * keeps durable memos (`api.memo`). When the adapter moves to it:
  * - a tool is Pi's object, unchanged: an agent takes it in `tools: [tool]`, or a `defineComponent`
  *   provides it as `agent.tool` when it is shared by name or needs a capability;
  * - `toolComponent`, `agentTool` and `ToolDefinition` are deleted, and `replay` takes Pi's words (`"unsafe"` for
  *   `"never"`), in that one change;
+ * - an `"unsafe"` tool's idempotency key is kept in `api.memo`, not derived from the conversation and
+ *   `toolCallId`;
  * - if Pi ships a helper that types such an object, it is used under Pi's own name.
  * Until then, nothing is added here: no rename, and no second word for `"never"`.
  */

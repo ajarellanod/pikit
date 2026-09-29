@@ -114,7 +114,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   await bunInstall(projectDir, { quiet: options.quiet === true });
 
   step("pikit doctor");
-  const report = await doctor(projectDir, { quiet: true });
+  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
   for (const problem of report.problems) log.problem(problem);
   if (report.problems.length > 0) throw new CliError(`the new project has ${report.problems.length} problem(s)`);
   if (options.quiet !== true) log.ok(`created ${name} with ${installed.length} component(s); the app composes`);

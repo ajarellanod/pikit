@@ -32,7 +32,7 @@ import {
 } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
 import type { ActorInboxHandler, ActorMailbox } from "../actor.ts";
-import type { JsonValue } from "../storage.ts";
+import type { JsonValue } from "../json.ts";
 import type { Wakeups } from "../wakeups.ts";
 import { checker, expecter } from "./assert.ts";
 

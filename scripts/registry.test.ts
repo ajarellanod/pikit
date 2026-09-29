@@ -5,7 +5,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { generate, validate } from "../packages/cli/src/registry/commands.ts";
@@ -353,6 +353,30 @@ test("tools: replay is generated, and a tool without one fails (S10)", async () 
 
   const missing = await fixture({ name: "tool-vague", setup: `\n    pikit.provideKeyed("agent.tool", "poke", {});` });
   expect(await problems(missing)).toContain(`the agent.tool "poke" has replay "undefined"`);
+});
+
+test("config examples: what setup provides only when configured is generated; an invalid example is a problem naming the component", async () => {
+  // A plain JSON Schema: the fixture imports nothing at runtime. Its tools are named in config.
+  const index = (examples: string) =>
+    `import type { ComponentDefinition } from "@pikit/core";\n\n` +
+    `const component: ComponentDefinition = {\n  name: "tool-configured",\n` +
+    `  config: { type: "object", properties: { tools: { type: "array", items: { type: "string", minLength: 1 } } }, examples: ${examples} },\n` +
+    `  setup(pikit, config) {\n    for (const tool of (config as { tools?: string[] } | undefined)?.tools ?? []) pikit.provideKeyed("agent.tool", tool, { replay: "safe" });\n  },\n};\nexport default component;\n`;
+  const f = await fixture({ name: "tool-configured", index: index(`[{ tools: ["look"] }]`) });
+  // Provided with the example's config; not a tool the project has, so not in replay.tools.
+  expect(f.manifest()).toMatchObject({ provides: ["agent.tool"] });
+  expect(f.manifest().replay).toBeUndefined();
+  expect(await problems(f)).toBe("");
+
+  // An invalid example, in a registry of its own (a module is imported once per path).
+  const root = mkdtempSync(join(tmpdir(), "pikit-registry-"));
+  roots.push(root);
+  const dir = join(root, "components", "tool-configured");
+  cpSync(f.dir, dir, { recursive: true });
+  writeFileSync(join(dir, "files", "src", "pikit", "tool-configured", "index.ts"), index(`[{ tools: ["look"] }, { tools: [""] }]`));
+  const refused = "tool-configured: examples[1] of tool-configured's config schema is not a valid config: /tools/0:";
+  expect((await generate(root)).problems.join("\n")).toContain(refused);
+  expect((await validate(root)).problems.join("\n")).toContain("tool-configured: setup could not be described: examples[1] of tool-configured's config schema is not a valid config: /tools/0:");
 });
 
 test("the CLI exits 1 and names the problem, 0 when valid", async () => {

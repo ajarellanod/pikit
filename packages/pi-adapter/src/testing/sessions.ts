@@ -30,7 +30,7 @@ export function storageOf(session: Session): Storage {
 }
 
 /**
- * Cases of `createSessionRepoConformance` that Pi's `JsonlSessionRepo` 0.87.1 fails. Pi's own JSONL
+ * Cases of `createSessionRepoConformance` that Pi's `JsonlSessionRepo` 0.99.0 fails. Pi's own JSONL
  * test does not run its fork destination-reservation cases (`createSessionRepoForkDestination
  * ReservationConformance`), and this one fails: a `create` racing a `fork` for the same new id. pikit
  * neither forks nor chooses session ids, so it does not reach it. A JSONL store registers these with

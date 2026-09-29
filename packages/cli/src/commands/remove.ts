@@ -92,7 +92,7 @@ export async function remove(projectDir: string, name: string, options: RemoveOp
   }
 
   log.ok(`${name} removed${removed.length > 0 ? ` (and the npm packages only it used: ${removed.join(", ")})` : ""}`);
-  const report = await doctor(projectDir, { quiet: true });
+  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
   for (const problem of report.problems) log.problem(problem);
   if (report.problems.length > 0) throw new CliError(`\`pikit doctor\` found ${report.problems.length} problem(s) after removing ${name}`);
 

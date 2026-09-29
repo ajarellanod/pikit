@@ -46,7 +46,7 @@ function memoryServer() {
           });
           const stopping = new AbortController();
           shutdown = stopping;
-          // Requests get a context of their own, never start's (SPEC §4.7).
+          // Requests get a context of their own, never start's.
           const base: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
           const handle = async (request: Request): Promise<Response> => {
             const route = routes.find((r) => matches(r, request.method, new URL(request.url).pathname));

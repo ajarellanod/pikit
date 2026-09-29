@@ -1,5 +1,5 @@
 /**
- * `http.route` (SPEC §9.1): one HTTP endpoint, as a standard fetch handler. A keyed capability:
+ * `http.route`: one HTTP endpoint, as a standard fetch handler. A keyed capability:
  * each route is provided under its key, `"METHOD /path"` (`"POST /v1/messages"`), and one server
  * component serves them all. Channels and admin components provide routes; they never import the
  * server, and the same handler runs behind `Bun.serve` or a Cloudflare Worker.

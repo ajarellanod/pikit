@@ -46,6 +46,7 @@ test("registering tools is noted, under whatever name the API has, and is not un
   expect(notes[0]).toStartWith("src/extensions/weather.ts registers tools with pi.registerTool");
   expect(notes[0]).toContain('replay "never"');
   expect(notes[0]).toContain("toolComponent from @pikit/pi-adapter/tools");
+  expect(notes[0]).toContain("Only tools registered while the extension loads (in its factory) reach the model");
 });
 
 test("a name or a subpath the shim does not export is missing, a type included; comments are not imports", () => {
@@ -71,6 +72,8 @@ test("unsupported surface is listed as written, under whatever name the API has"
     '  api.registerCommand("x", {});',
     '  api.registerProvider("proxy", {});',
     "  api.unregisterProvider('proxy');",
+    '  api.registerMcpServer("jira", { url: "https://mcp.example.com" });',
+    "  api.getMcpServers();",
     '  api.on("session_start", async (_event, ctx) => {',
     "    ctx.sessionManager.getEntries();",
     "    ctx.ui.custom(() => undefined);",
@@ -83,6 +86,7 @@ test("unsupported surface is listed as written, under whatever name the API has"
     'pi.on("input")',
     "pi.registerCommand",
     "pi.unregisterProvider",
+    "pi.registerMcpServer",
     "pi.registerProvider(name, config)",
     "ctx.sessionManager",
     "ctx.ui.custom",

@@ -1,8 +1,12 @@
 pikit includes software from Pi (https://github.com/earendil-works/pi), under the MIT License
-below, copied from tag v0.87.1:
+below, copied from tag v0.87.1 unless stated otherwise:
 
 - packages/pi-adapter/src/extensions/api.ts: a subset of the extension API types of
-  packages/coding-agent/src/core/extensions/types.ts, adapted to what pikit supports.
+  packages/coding-agent/src/core/extensions/types.ts, adapted to what pikit supports; the tool
+  exposure types (ToolExposure, ToolAnnotations, ToolNamespace, ToolLoadout, ToolLoadoutChanges),
+  ExecuteToolOptions and ExtensionToolContext, and ToolDefinition.executionMode, with their
+  comments, from tag v0.99.0; ToolExecutionMode and its comment from
+  packages/agent/src/types.ts at tag v0.99.0.
 - packages/pi-adapter/src/extensions/pi-examples/*.ts: packages/coding-agent/examples/extensions/,
   unmodified.
 

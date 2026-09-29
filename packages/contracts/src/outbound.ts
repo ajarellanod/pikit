@@ -1,5 +1,5 @@
 /**
- * Outbound delivery (SPEC §5, "Outbound delivery"): how an answer reaches a chat platform.
+ * Outbound delivery: how an answer reaches a chat platform.
  *
  * - A channel knows its platform: it offers a `ChannelTransport` (split a text into pieces the
  *   platform takes, send one, classify a failure).
@@ -108,7 +108,7 @@ export interface OutboundQueue {
    */
   detach(channel: string, signal?: AbortSignal): Promise<void>;
   /**
-   * Every piece that settled, delivered or abandoned, in the order it settled (SPEC §4.8): one receipt
+   * Every piece that settled, delivered or abandoned, in the order it settled (SPEC K3): one receipt
    * per piece, committed with its new state. Kept as long as the pieces are. What a component that
    * must not miss a delivery reads; `outbound.delivered` and `outbound.abandoned` are only notices.
    */

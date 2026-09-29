@@ -1,0 +1,34 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "tool-mcp",
+  "version": "0.0.0",
+  "description": "The tools of remote MCP servers (Streamable HTTP), for the agents that name them: each tool named in config becomes the agent tool <server>_<tool>.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": [
+      "secrets",
+      "storage.kv"
+    ]
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

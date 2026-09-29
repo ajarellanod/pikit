@@ -20,7 +20,7 @@ channels, ready to review.
   - channels → the matching `channel-*` components, installed with `pikit add`, and their values
     through `pikit configure`;
   - memories and profiles → [memory](memory.md), only when it is installed;
-  - API keys → `.env` or `model.credentials`, only with explicit consent, never printed (SPEC §13).
+  - API keys → `.env` or `model.credentials`, only with explicit consent, never printed.
 - What has no pikit counterpart is listed, not guessed.
 
 ## Pi first
