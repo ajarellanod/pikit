@@ -5,6 +5,7 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- contracts: the agent runtime and HTTP route suites compile against Workers' runtime types too.
 - component/secrets-cloudflare: new. `secrets` from the Worker's `env` (its secrets and variables;
   bindings and empty strings read `undefined`), in either App of a Cloudflare project. Target
   `cloudflare`.
