@@ -1,5 +1,5 @@
 /**
- * The `agent.state` suite run against an in-memory double (S12): proof that the suite asks nothing
+ * The `agent.state` suite run against an in-memory double: proof that the suite asks nothing
  * specific to Pi. The real state lives in the conversation's Pi session (`@pikit/pi-adapter`).
  */
 

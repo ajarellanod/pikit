@@ -1,6 +1,6 @@
 /**
  * The `storage.sql` suite against the smallest database that could pass it: `node:sqlite` in memory,
- * one statement at a time. It proves the suite asks only what the contract promises (S12);
+ * one statement at a time. It proves the suite asks only what the contract promises;
  * `storage-sqlite` is the real component, with a file.
  */
 

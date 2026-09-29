@@ -1,5 +1,5 @@
 /**
- * The `secrets` suite run against an in-memory double (S12): proof that the suite asks nothing
+ * The `secrets` suite run against an in-memory double: proof that the suite asks nothing
  * specific to one store. A real project reads secrets through a component such as `secrets-env`.
  */
 

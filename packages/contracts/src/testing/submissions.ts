@@ -350,7 +350,7 @@ export interface MemorySubmissions {
 
 /**
  * The in-memory double of `agent.submissions`. Its records live as long as the object: it survives no
- * process, so it is only for tests (S9). Built outside a component's setup, it outlives the apps of a
+ * process, so it is only for tests (SPEC P5). Built outside a component's setup, it outlives the apps of a
  * test, as a database would.
  */
 export function createMemorySubmissions(): MemorySubmissions {

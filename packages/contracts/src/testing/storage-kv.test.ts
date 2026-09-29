@@ -1,6 +1,6 @@
 /**
  * The `storage.kv` suite against the memory storage the other tests use. It proves the suite asks
- * only what the contract promises (S12); `storage-kv-sql` is the real component.
+ * only what the contract promises; `storage-kv-sql` is the real component.
  */
 
 import { test } from "bun:test";

@@ -1,5 +1,5 @@
 /**
- * The `conversations.registry` suite run against an in-memory double (S12): proof that the suite
+ * The `conversations.registry` suite run against an in-memory double: proof that the suite
  * asks nothing specific to one store. The double's records (pointers and a set of session ids)
  * live in the fixture, so a second app over them is a restart. A real project uses a component
  * such as `conversations-file`, whose records survive the process.

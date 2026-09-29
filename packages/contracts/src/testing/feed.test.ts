@@ -1,6 +1,6 @@
 /**
  * The feed suite against its in-memory double: it proves the suite asks only what the contract
- * promises (S12). `outbound-durable`'s receipts are the first real feed.
+ * promises. `outbound-durable`'s receipts are the first real feed.
  */
 
 import { test } from "bun:test";

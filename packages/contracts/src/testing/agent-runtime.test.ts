@@ -1,5 +1,5 @@
 /**
- * The `agent.runtime` suite run against an in-memory double (S12: a contract is proven by an
+ * The `agent.runtime` suite run against an in-memory double (a contract is proven by an
  * implementation plus a double passing the same suite). The double follows the suite's script
  * with a plain transcript and inbox; it exists only to show that the suite asks nothing Pi-specific.
  * It is not an agent runtime: pikit's only runtime is Pi, through the adapter.

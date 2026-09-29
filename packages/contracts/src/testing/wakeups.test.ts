@@ -1,6 +1,6 @@
 /**
  * The `wakeups` suite against the memory wakeups the other tests use, forgetful and durable. It proves
- * the suite asks only what the contract promises (S12); `wakeups-timers` is the real component.
+ * the suite asks only what the contract promises; `wakeups-timers` is the real component.
  */
 
 import { test } from "bun:test";

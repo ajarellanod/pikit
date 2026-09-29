@@ -198,7 +198,7 @@ export interface MemoryFeed<T> {
 
 /**
  * The in-memory double of `Feed`. Its records live as long as the object: it survives no process, so
- * it is only for tests (S9).
+ * it is only for tests (SPEC P5).
  */
 export function createMemoryFeed<T>(): MemoryFeed<T> {
   const facts: { seq: number; fact: T }[] = [];

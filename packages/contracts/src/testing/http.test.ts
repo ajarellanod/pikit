@@ -1,5 +1,5 @@
 /**
- * The `http.route` suite run against an in-memory double (S12): a "server" that routes a `Request`
+ * The `http.route` suite run against an in-memory double: a "server" that routes a `Request`
  * to its handler with no socket. It proves the suite asks nothing specific to one server. A real
  * project serves routes with a component such as `server-bun`.
  */

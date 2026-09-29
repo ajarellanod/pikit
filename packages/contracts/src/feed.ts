@@ -27,7 +27,7 @@ export interface Feed<T> {
 export interface FeedPage<T> {
   items: readonly FeedItem<T>[];
   /**
-   * Facts after `after` were pruned before this read: the reader missed some and must say so (S9).
+   * Facts after `after` were pruned before this read: the reader missed some and must say so (SPEC P5).
    * The page still holds what is left. Never true when reading from `undefined`.
    */
   gap: boolean;
