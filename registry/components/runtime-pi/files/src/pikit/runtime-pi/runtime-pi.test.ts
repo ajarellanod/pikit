@@ -23,6 +23,12 @@ for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture(({ on
   test(`runtime-pi ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
 
+// The same contract with sessions on storage.sql (the store sessions-sql provides, on a SQLite file held
+// to a Durable Object's limits), including a worker killed mid-run over that database.
+for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture(({ onHarness }) => [createRuntimePi({ onHarness })], { sessions: "sql" }))) {
+  test(`runtime-pi on sql sessions ${c.group}: ${c.name}`, () => c.run(), 30_000);
+}
+
 /** `agent.submissions` in memory, outliving the apps of a test as a database would. */
 function memorySubmissions(submissions: AgentSubmissions = createMemorySubmissions().submissions) {
   return defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", submissions) });
