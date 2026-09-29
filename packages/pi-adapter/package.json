@@ -9,6 +9,8 @@
     "./testing/neutral": "./src/testing/neutral.ts",
     "./execution": "./src/execution/index.ts",
     "./extensions": "./src/extensions/index.ts",
+    "./mcp": "./src/mcp/index.ts",
+    "./mcp/testing": "./src/mcp/testing.ts",
     "./node": "./src/node/index.ts",
     "./sql": "./src/sql/index.ts",
     "./providers/anthropic": "./src/providers/anthropic.ts",
@@ -24,6 +26,7 @@
   "dependencies": {
     "@earendil-works/pi-agent-core": "0.99.0",
     "@earendil-works/pi-ai": "0.99.0",
+    "@earendil-works/pi-mcp": "0.99.0",
     "@pikit/contracts": "workspace:*",
     "@pikit/core": "workspace:*"
   }

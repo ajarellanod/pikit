@@ -7,9 +7,16 @@
 
 import { cloudflareTest } from "@cloudflare/vitest-plugin";
 import { defineConfig } from "vitest/config";
+import { mcpOutbound } from "./test/mcp-outbound.ts";
 
 export default defineConfig({
-  plugins: [cloudflareTest({ wrangler: { configPath: "./wrangler.jsonc" } })],
+  plugins: [
+    cloudflareTest({
+      wrangler: { configPath: "./wrangler.jsonc" },
+      // The Worker's real `fetch` reaches only the fake MCP servers of tool-mcp.workerd.ts (test/mcp-outbound.ts).
+      miniflare: { outboundService: mcpOutbound },
+    }),
+  ],
   test: {
     include: ["test/**/*.workerd.ts"],
     // The conformance suites start several apps per case; workerd is fast, a cold start is not.
