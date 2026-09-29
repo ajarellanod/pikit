@@ -177,6 +177,24 @@ test("imports: node:* only when targets are exactly [\"server\"]; tests are exem
   expect(found).not.toContain("node:fs");
 });
 
+test("imports: a deployment component's commands.ts runs on the deploying machine, so it may import node:* on any target (S5)", async () => {
+  const index = `export async function up(): Promise<void> {}\n`;
+  const f = await fixture({ name: "deployment-sample", index });
+  f.writeManifest({ ...f.manifest(), targets: ["cloudflare"] });
+  writeFileSync(join(f.own, "commands.ts"), `import "node:child_process";\n`);
+  await generate(f.root);
+  expect((await validate(f.root)).problems).toEqual([]);
+
+  // Only that file, and only in a deployment component: its entrypoint still runs on the target.
+  f.append("index.ts", `import "node:path";`);
+  expect(await problems(f)).toContain(`index.ts imports "node:path", but targets are ["cloudflare"]`);
+  const other = await fixture();
+  other.writeManifest({ ...other.manifest(), targets: ["server", "cloudflare"] });
+  writeFileSync(join(other.own, "commands.ts"), `import "node:child_process";\n`);
+  await generate(other.root);
+  expect(await problems(other)).toContain(`commands.ts imports "node:child_process"`);
+});
+
 test("imports: test support (*.test-support.ts) is held like tests, and only tests may import it (S5)", async () => {
   const f = await fixture();
   f.writeManifest({ ...f.manifest(), targets: ["server", "cloudflare"] });
