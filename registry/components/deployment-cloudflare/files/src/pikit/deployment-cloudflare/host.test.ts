@@ -136,7 +136,7 @@ test("a start past its deadline, with a rollback that hangs, still ends within b
   expect(Date.now() - started).toBeLessThan(1_000);
 });
 
-test("the Worker's App starts once per isolate with WORKERS_HOST { env }, and serves its routes with contexts of their own", async () => {
+test("the Worker's App starts once per isolate with WORKERS_HOST { env, origin }, and serves its routes with contexts of their own", async () => {
   let starts = 0;
   let startSignal: AbortSignal | undefined;
   let hostSeen: WorkersHost | undefined;
@@ -167,7 +167,8 @@ test("the Worker's App starts once per isolate with WORKERS_HOST { env }, and se
   expect(hello.status).toBe(200);
   // Handlers never get start's context, nor WORKERS_HOST (it is for start, SPEC C5).
   expect(await hello.json()).toEqual({ env: [], sameSignal: false, url: "/hello" });
-  expect(hostSeen).toEqual({ env });
+  // The origin of the request that started it: where the Worker is reached.
+  expect(hostSeen).toEqual({ env, origin: "https://w.example" });
   expect(await (await worker.fetch(new Request("https://w.example/chats/new"), env)).json()).toEqual({ route: "literal" });
   expect(await (await worker.fetch(new Request("https://w.example/chats/42"), env)).json()).toEqual({ route: "param", path: "/chats/42" });
   expect((await worker.fetch(new Request("https://w.example/nothing"), env)).status).toBe(404);
@@ -219,6 +220,12 @@ test("GET /health starts the Worker's App and one object's App, and answers { ok
   expect(objects.names).toEqual([HEALTH_OBJECT]);
   // Without a Worker App, the Worker serves /health only.
   expect((await worker.fetch(new Request("https://w.example/other"), env)).status).toBe(404);
+
+  // /health starts the Worker's App too, with its origin: the first request a version serves may be it.
+  let hostSeen: WorkersHost | undefined;
+  const reader = defineComponent({ name: "reader", setup: () => ({ start: (ctx) => void (hostSeen = ctx.value(WORKERS_HOST)) }) });
+  await createWorkerHost(defineApp({ components: [reader] }), { logger: silentLogger }).fetch(new Request("https://bot.acme.workers.dev/health"), env);
+  expect(hostSeen?.origin).toBe("https://bot.acme.workers.dev");
 });
 
 test("GET /health says which half did not start, never why", async () => {

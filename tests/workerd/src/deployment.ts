@@ -36,15 +36,17 @@ const objectProbe = defineComponent({
 });
 
 let workerVariable: unknown;
+let workerOrigin: string | undefined;
 const workerProbe = defineComponent({
   name: "worker-probe",
   setup(pikit) {
     pikit.provideKeyed("http.route", "GET /probe/:name", (request) =>
-      Response.json({ variable: workerVariable, name: new URL(request.url).pathname.split("/").at(-1) }),
+      Response.json({ variable: workerVariable, origin: workerOrigin, name: new URL(request.url).pathname.split("/").at(-1) }),
     );
     return {
       start(ctx) {
         workerVariable = ctx.value(WORKERS_HOST)?.env.PIKIT_WORKERD_VAR;
+        workerOrigin = ctx.value(WORKERS_HOST)?.origin;
       },
     };
   },

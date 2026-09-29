@@ -23,6 +23,15 @@ export function secretProblem(value: string): string | undefined {
   return undefined;
 }
 
+/** Shorter claim codes (`claim.ts`) are refused: they could be guessed. */
+export const CLAIM_CODE_MIN_LENGTH = 8;
+
+/** What is wrong with `value` as a claim code, or `undefined` when it is a good one. */
+export function claimCodeProblem(value: string): string | undefined {
+  if (value.trim().length < CLAIM_CODE_MIN_LENGTH) return `it is shorter than ${CLAIM_CODE_MIN_LENGTH} characters, so it could be guessed`;
+  return undefined;
+}
+
 /** A new secret: 32 random bytes, as 64 hexadecimal characters. */
 export function generateSecret(): string {
   return [...crypto.getRandomValues(new Uint8Array(32))].map((byte) => byte.toString(16).padStart(2, "0")).join("");

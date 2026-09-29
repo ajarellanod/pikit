@@ -180,3 +180,20 @@ test("accounts: each bot is configured with its own variables, its own secret in
   expect(done.env.get("TELEGRAM_OPS_WEBHOOK_SECRET")).toMatch(GENERATED);
   expect(done.env.get("TELEGRAM_OPS_WEBHOOK_SECRET")).not.toBe(done.env.get("TELEGRAM_WEBHOOK_SECRET"));
 });
+
+test("a claim code, if one is given, is checked and saved to .env, never asked for; one that could be guessed is named", async () => {
+  const telegram = fake();
+  const saved = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_CLAIM_CODE: "  correct horse battery staple " } });
+  expect(await configure(saved.io)).toEqual([]);
+  expect(saved.env.get("TELEGRAM_CLAIM_CODE")).toBe("correct horse battery staple");
+  expect(saved.said.join("\n")).toContain("TELEGRAM_CLAIM_CODE: set; a private chat that sends /claim followed by it may talk to the bot");
+  expect(saved.said.join("\n")).not.toContain("correct horse");
+
+  const short = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_CLAIM_CODE: "1234" } });
+  expect(await configure(short.io)).toEqual(["TELEGRAM_CLAIM_CODE: choose a passphrase of at least 8 characters, or remove it"]);
+  expect(short.said.join("\n")).toContain("TELEGRAM_CLAIM_CODE is not usable: it is shorter than 8 characters");
+
+  const none = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001" } });
+  expect(await configure(none.io)).toEqual([]);
+  expect(none.env.has("TELEGRAM_CLAIM_CODE")).toBe(false);
+});

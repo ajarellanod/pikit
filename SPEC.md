@@ -188,8 +188,8 @@ written here. Status (built or not) is tracked apart, as for the kernel.
   is `storage-do` (`storage.sql` on the object's SQLite, whose transactions pass the `storage.sql`
   suite unchanged). Platform objects reach components through one context key in
   `@pikit/contracts`, `WORKERS_HOST`, which `deployment-cloudflare`'s entrypoints put on each App's
-  start context: the Worker's `env`, and in an object its id, its storage, and the hooks its alarm and
-  RPC call. Its types are structural: no `cloudflare:*` import leaves the entrypoints. *Why:* the
+  start context: the Worker's `env` (and, in the Worker's App, the origin its first request reached),
+  and in an object its id, its storage, and the hooks its alarm and RPC call. Its types are structural: no `cloudflare:*` import leaves the entrypoints. *Why:* the
   components that must touch the platform are few and say so by reading one key; everything else is
   the same code on both targets.
   `sessions-sql` is transitional (P1): when the adapter moves to Pi's durable runtime (`pi-durable`),
@@ -214,8 +214,11 @@ written here. Status (built or not) is tracked apart, as for the kernel.
   object's own, within C4's budgets.
 - **C8. A deploy is finished when the new version answers.** A new version takes seconds to reach
   every request (measured), so `deployment-cloudflare`'s `up` waits until `/health` answers with the
-  version it deployed before it registers anything outside (a Telegram webhook). *Why:* registering
-  against the previous version fails for no reason a user can see.
+  version it deployed before it registers anything outside (a Telegram webhook). Where no `up` runs (a
+  "Deploy to Cloudflare" button, Workers Builds), the new version registers itself: the Worker's App
+  checks its webhook as it starts, once per isolate, and changes it only when Telegram has another
+  (`channel-telegram-webhook`). *Why:* registering against the previous version fails for no reason a
+  user can see; the version that registers itself is by definition the one answering.
 
 ## 5. The dashboard is required
 

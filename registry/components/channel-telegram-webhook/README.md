@@ -2,7 +2,8 @@
 
 Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.
 
-- **Provides:** `http.route` (`POST /telegram`, and `POST /telegram/<name>` per extra bot).
+- **Provides:** `http.route` (`POST /telegram`, and `POST /telegram/<name>` per extra bot, where
+  Telegram posts; `GET /telegram/setup`, which registers the webhooks).
 - **Requires:** in the Worker's half, `secrets` and `actor.mailbox`; in the object's half, `secrets`,
   `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv`, `wakeups` and
   `actor.inbox`, where it registers the handler of `telegram.update`. A router (such as
@@ -14,10 +15,13 @@ Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each m
 - **npm dependencies:** `typebox`.
 - **Environment:**
   - `TELEGRAM_BOT_TOKEN` (secret, required): the bot's token from @BotFather.
-  - `TELEGRAM_ALLOWED_USERS` (required): the Telegram user ids allowed to talk to the bot,
-    separated by commas.
+  - `TELEGRAM_ALLOWED_USERS` (required by `pikit doctor`): the Telegram user ids allowed to talk to
+    the bot, separated by commas. `pikit configure` fills it. Deployed without the CLI it may be
+    empty: the owner claims the bot instead.
   - `TELEGRAM_WEBHOOK_SECRET` (secret, required): what Telegram sends with every update, so only
     Telegram reaches your agent. `pikit configure` generates it.
+  - `TELEGRAM_CLAIM_CODE` (secret, optional): a passphrase, 8 characters at least. A private chat
+    that sends `/claim <passphrase>` may talk to the bot from then on ("Claiming the bot" below).
 
 ## Two halves, one per App
 
@@ -28,7 +32,7 @@ and routes, and the Durable Object's, which owns one conversation. This componen
 |---|---|---|
 | Export of `index.ts` | `worker` (named in `component.json`'s `apps.worker`) | the default export |
 | Component name, and its config's key | `channel-telegram-webhook-worker` | `channel-telegram-webhook` |
-| Does | the route, the secret, the allowed users, strangers, `actor.mailbox` | commands, `admitInbound`, delivering answers |
+| Does | the route, the secret, the allowed users, strangers, `actor.mailbox`, registering the webhook | commands, `admitInbound`, delivering answers, claims |
 
 ```ts
 import channelTelegramWebhook, { worker as channelTelegramWebhookWorker } from "./src/pikit/channel-telegram-webhook/index.ts";
@@ -58,6 +62,11 @@ It also runs with both halves in one App on a server (with `mailbox-local`, `wak
 
 ## Set it up
 
+Two ways, the same component: with pikit's CLI, or with a "Deploy to Cloudflare" button, where
+nobody runs pikit.
+
+### With the CLI
+
 ```sh
 pikit add channel-telegram-webhook
 pikit configure
@@ -74,8 +83,62 @@ pikit up
    refuses while the bot has a webhook: if a deploy already set one, it offers to remove it (the
    Worker answers nobody while nobody is allowed, and the next `pikit up` sets it again).
 
-`pikit up` deploys, waits until the new version answers, then registers the webhook: see
-"Registering the webhook" below.
+It also checks a `TELEGRAM_CLAIM_CODE` you set and saves it to `.env`; it never asks for one (with
+the CLI, step 3 is how you are allowed).
+
+`pikit up` deploys, waits until the new version answers, then registers the webhook (`afterDeploy`):
+see "Registering the webhook" below.
+
+### With a "Deploy to Cloudflare" button
+
+The button clones a template (a project made with `pikit new --target cloudflare --preset
+telegram-cloudflare`, published as a public repository) into the user's GitHub, asks for its secrets
+in a form, and builds and deploys it with Workers Builds (`wrangler deploy`), again on every push.
+There is no `pikit configure` and no `pikit up`, so the template does three things:
+
+1. **The form.** Its `.dev.vars.example` lists the secrets, and `package.json`'s `cloudflare.bindings`
+   describes them. `TELEGRAM_ALLOWED_USERS` is not asked: nobody knows their Telegram id. The owner
+   claims the bot instead, with the claim code they type here.
+
+   ```ini
+   TELEGRAM_BOT_TOKEN=
+   TELEGRAM_WEBHOOK_SECRET=
+   TELEGRAM_CLAIM_CODE=
+   OPENROUTER_API_KEY=
+   ```
+
+   ```json
+   "cloudflare": {
+     "bindings": {
+       "TELEGRAM_BOT_TOKEN": { "description": "In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot`, and paste the token it answers." },
+       "TELEGRAM_WEBHOOK_SECRET": { "description": "Any random string of 16 to 256 letters, digits, `_` or `-`. Telegram sends it with every message, so only Telegram reaches your bot. You never type it again." },
+       "TELEGRAM_CLAIM_CODE": { "description": "A passphrase of 8 characters or more. Once deployed, send `/claim <passphrase>` to your bot: your chat is the one it answers." },
+       "OPENROUTER_API_KEY": { "description": "Your [OpenRouter](https://openrouter.ai/keys) API key: the model your agent runs on." }
+     }
+   }
+   ```
+
+2. **The webhook registers itself.** The new version checks its webhook as it starts, on its first
+   request ("Registering the webhook"). So that the first deploy needs no visit, the template's deploy
+   command runs `setup-webhook.mjs` after `wrangler deploy`; the button pre-fills the deploy command
+   from `package.json`'s `deploy` script:
+
+   ```json
+   "scripts": { "deploy": "wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs" }
+   ```
+
+   It passes wrangler's output through, reads the Worker's URL and the version deployed from it,
+   waits until `/health` answers that version (C8), then calls `GET /telegram/setup`, prints one line
+   per bot and fails the build when a bot could not be registered (the version stays deployed). The
+   build has no runtime secrets, and needs none: the Worker registers itself with its own. Given the
+   URL instead (`node …/setup-webhook.mjs https://my-bot.acme.workers.dev`), it does the same by hand.
+
+   The template's `wrangler.jsonc` also names the Worker (`"name"`): pikit's leaves it out, since its
+   commands pass `--name`, and Workers Builds runs wrangler without them.
+
+3. **The owner claims the bot.** Once deployed, they open the bot in Telegram. It answers that it is
+   private, with their id, and that its owner sends `/claim` followed by the claim code. They send
+   `/claim <passphrase>`, and the bot talks to them from then on ("Claiming the bot").
 
 ## What it does
 
@@ -85,9 +148,11 @@ pikit up
 - **What gets through:** messages with text from people in private chats. Group messages, bots and
   other updates are acknowledged (`200`) and dropped. A message without text gets "I can only read
   text messages for now."
-- **Who may talk** is the list in `TELEGRAM_ALLOWED_USERS`, checked in the Worker. A stranger is
-  told their user id, so you can add it, and nothing reaches the agent. The Worker keeps no state, so
-  a stranger who keeps writing may be told again after its isolate is recycled.
+- **Who may talk** is the list in `TELEGRAM_ALLOWED_USERS`, checked in the Worker, and the chats that
+  claimed the bot, kept in their objects ("Claiming the bot"). A stranger is told their user id, so
+  you can add it, and nothing reaches the agent. When the bot cannot be claimed (no claim code, and
+  users listed: the CLI's way), the Worker tells them itself and reaches no object; it keeps no state,
+  so a stranger who keeps writing may be told again after its isolate is recycled.
 - **The way to the conversation.** The Worker sends the update to the conversation's actor,
   `actor.mailbox.send("telegram:<chat>", "telegram.update", update)`: on Cloudflare, the Durable
   Object `idFromName("telegram:<chat>")`. It answers Telegram `200` once the conversation holds the
@@ -100,7 +165,8 @@ pikit up
 - **Conversations:** each private chat is one conversation, `telegram:<chat id>`, the keys
   `channel-telegram` makes.
 - **Commands:** `/new` (or `/reset`) starts a new conversation; the old one is kept in its session.
-  `/start` and `/help` explain. Any other command goes to the agent as text.
+  `/start` and `/help` explain. `/claim` in a chat that may talk already says so, and never reaches
+  the agent (it may hold the claim code). Any other command goes to the agent as text.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`). When the agent
   will not answer, the chat is told: "I can't take that message." when a stage stops it, "Sorry, I
   can't answer that here." when the router denies it, "This bot is not set up to answer yet." when no
@@ -137,15 +203,76 @@ whenever a run of its conversations ends.
 - The first time it opens its cursor, it starts at the feed's end: answers already there ended before
   the channel was installed.
 
-It refuses to start: the Worker's half without a token, an allowed user, or a usable webhook secret;
-the object's half without a token. Neither calls Telegram to start: on Cloudflare every object runs
-the start, and each call is a subrequest.
+It refuses to start: the Worker's half without a token or a usable webhook secret, with an allowed
+users list that is not ids, or with a claim code shorter than 8 characters; the object's half without
+a token. With nobody listed and no claim code the Worker starts and logs that only chats that claimed
+the bot before can talk to it. The object's half never calls Telegram to start: on Cloudflare every
+object runs the start, and each call is a subrequest. The Worker's half checks its webhook at start
+on Cloudflare, once per isolate ("Registering the webhook").
+
+## Claiming the bot
+
+With the button nobody reads the owner's first message, so nobody knows their user id and
+`TELEGRAM_ALLOWED_USERS` stays empty. `TELEGRAM_CLAIM_CODE` is a passphrase the owner chose: a private
+chat that sends `/claim <passphrase>` may talk to the bot from then on (`claim.ts`).
+
+- **Where claims live.** The Worker has no storage (C1); each chat's object has `storage.kv`. So when
+  the bot can be claimed (a claim code is set, or nobody is listed) the Worker lets the listed users
+  through as before and hands everyone else's private messages to their chat's object
+  (`actor.mailbox.send("telegram:<chat>", "telegram.stranger", update)`), which decides. A claim is
+  kept in the channel's namespace of `storage.kv` (`claim:<conversation>`): it survives restarts,
+  evictions and deploys.
+- **A claimed chat** is handled as an allowed one: commands, the agent, answers.
+- **`/claim <code>`** is compared in constant time (SHA-256 digests). A wrong code is told "That is
+  not the claim code."; after 5 in a row the chat waits 15 minutes, during which every `/claim` is
+  refused unchecked. Telegram delivering the same message again is not another guess. The code never
+  reaches the agent nor a log line; the bot suggests deleting the message that holds it.
+- **Strangers** are told their id once (remembered per chat), and `/claim` only when a claim code is
+  set. Without one, `/claim` is a stranger's message like any other.
+- **Closing and revoking.** A claim holds while the claim code it was made with is set, or while none
+  is:
+  - remove `TELEGRAM_CLAIM_CODE` (the Worker's secret, in the dashboard or `wrangler secret delete`)
+    to close new claims: the chats that claimed keep talking while `TELEGRAM_ALLOWED_USERS` is empty.
+    With ids listed, the Worker decides alone again, and only those ids talk;
+  - change it to revoke every claim made with the old one: those chats `/claim` again with the new
+    code, which you tell only to whom you choose.
+- **`TELEGRAM_ALLOWED_USERS`** works as before and needs no claim; both can be used together.
 
 ## Registering the webhook
 
 Telegram must be told where to post (`setWebhook`), and only once the new version answers: right after
-a deploy the previous version still answers for a few seconds, and would refuse the new secret (C8). So
-`deploy.ts` exports `afterDeploy`, and `component.json` names it (`"hooks": { "afterDeploy": "deploy.ts" }`):
+a deploy the previous version still answers for a few seconds, and would refuse the new secret (C8).
+Three ways, all idempotent, all with `<origin>/telegram[/<name>]`, the bot's secret and
+`allowed_updates: ["message"]`, keeping the updates Telegram holds:
+
+| Who | When | Calls |
+|---|---|---|
+| `pikit up` (`afterDeploy`) | once `/health` answers the new version | `setWebhook`, `getWebhookInfo` |
+| the Worker, as its App starts on Cloudflare | once per isolate: its first request, `/health` included | `getWebhookInfo`; `setWebhook` and `getWebhookInfo` only when Telegram has another URL or other updates |
+| `GET /telegram/setup` (a person, a build's `setup-webhook.mjs`) | when asked | `setWebhook`, `getWebhookInfo` |
+
+**The Worker registering itself** (`webhook.ts`) is what makes a deploy without `pikit up` work. Its
+App starts on its first request, so a new version checks once in each isolate: one subrequest when all
+is well (of the 50 an invocation has on the Free plan), three when it registers. "Done for this
+version" is not stored anywhere (the Worker has no storage, C1): Telegram's `getWebhookInfo` is the
+truth it compares with, and an isolate runs one version. The origin is the one its first request
+reached (`WORKERS_HOST.origin`); only an `https:` one is registered, since Telegram posts nowhere else
+(`wrangler dev` asks Telegram nothing). A failure is logged with the setup URL to open, and the Worker
+starts anyway. Anything else that runs this Worker with the same token and serves an HTTPS request
+takes the webhook the same way (another deployment, a tunnel to `wrangler dev`): give it another bot.
+
+`getWebhookInfo` never shows the secret, so a new `TELEGRAM_WEBHOOK_SECRET` alone is not noticed: open
+`/telegram/setup` once after changing it (or `pikit up`).
+
+**`GET /telegram/setup`** always sets every bot's webhook at the origin it was called at, then checks
+it, and answers `{ "ok": true, "version": "<version id>", "bots": [{ "bot": "telegram", "webhook":
+"https://…/telegram", "ok": true }] }` (`502` with each bot's `problem` when Telegram refused). It needs
+no auth: it can only point the bot at the Worker that answers, with that Worker's own secret; it
+names no token and no secret; and a stranger calling it costs three subrequests. Asking for a secret
+would also break the build step, which has none. A Worker with Durable Objects has no preview URLs, so
+the only origins that reach it serve the deployed version.
+
+**`pikit up`**: `deploy.ts` exports `afterDeploy`, and `component.json` names it (`"hooks": { "afterDeploy": "deploy.ts" }`):
 `pikit add` records it in `pikit.json`, and `deployment-cloudflare`'s `up` calls it once `/health`
 answers with the version it deployed (its README, "After the deploy"). `pikit up` prints what it says,
 and fails with its problems. Called by hand:
@@ -193,7 +320,8 @@ As in `channel-telegram`, the default bot is `TELEGRAM_BOT_TOKEN` and its conver
 | token | `TELEGRAM_OPS_BOT_TOKEN` |
 | allowed users | `TELEGRAM_OPS_ALLOWED_USERS` |
 | webhook secret | `TELEGRAM_OPS_WEBHOOK_SECRET` |
-| webhook | `POST /telegram/ops` |
+| claim code | `TELEGRAM_OPS_CLAIM_CODE` |
+| webhook | `POST /telegram/ops` (registered by the same `GET /telegram/setup`) |
 | conversations | `telegram:ops:<chat>` |
 
 An update for a bot the object's half does not run is refused (`500`, and an error in the log): keep
@@ -211,8 +339,8 @@ the Cloudflare spike that ran in production (September 2026).
 
 The tests are copied with the component and run in your project against
 `fake-telegram.test-support.ts`, a local stand-in of the Bot API extended with `setWebhook`,
-`getWebhookInfo` and `deleteWebhook`, which posts each update to the webhook with its secret: no bot,
-token or network needed. Only tests import it.
+`getWebhookInfo` and `deleteWebhook` (counting both), which posts each update to the webhook with its
+secret: no bot, token or network needed. Only tests import it.
 - `channel-telegram-webhook.test.ts` covers the whole conversation, with the in-memory doubles of
   `actor.mailbox`, `wakeups`, `storage.kv` and `agent.submissions`: a bad secret (`401`), strangers,
   groups and messages without text, a message reaching the runtime and its answer delivered,
@@ -220,10 +348,16 @@ token or network needed. Only tests import it.
   commands, failed runs, long answers split, an answer that ended while no wakeup ran delivered at the
   next one, a piece found `sending` sent again with `↻ `, a refused send tried again, the outbox,
   several bots, the halves in two Apps as on Cloudflare, the start failures, the lifecycle suite
-  for each half, and `registerInbox` reached through the mailbox.
+  for each half, and `registerInbox` reached through the mailbox. The webhook registering itself:
+  `GET /telegram/setup` (every bot, again, refused), the start on Cloudflare (once per isolate, not
+  again when Telegram has it, back when it was moved, nothing over HTTP or off Cloudflare, a refusal
+  logged), and `setup-webhook.mjs` run as a build runs it. Claims: strangers told `/claim` only with a
+  code, a claim and its redelivery, an allowed chat's `/claim`, wrong codes and the cool-down, a claim
+  kept across restarts and after the code is removed, revoked by a new code.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`.
 - `configure.test.ts` covers the setup: a checked token, the generated secret, allowing whoever
-  messages the bot, a bot that already has a webhook, and the same without a terminal.
+  messages the bot, a bot that already has a webhook, the same without a terminal, and a claim code
+  checked and saved.
 - `deploy.test.ts` covers `afterDeploy`: every bot's webhook set and checked, and what it reports.
 - `format.test.ts` is `channel-telegram`'s, for the copied `format.ts`.
 

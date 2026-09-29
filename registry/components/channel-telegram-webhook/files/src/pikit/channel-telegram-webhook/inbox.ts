@@ -1,10 +1,12 @@
 /**
  * One update, in the actor that owns its conversation (the object's half, SPEC §4.1, C1). The Worker
  * already checked the secret, kept only private messages with text, and let through only the allowed
- * users; this is the rest of what channel-telegram's `inbound.ts` does:
+ * users (or `claim.ts` found the chat claimed the bot); this is the rest of what channel-telegram's
+ * `inbound.ts` does:
  *
  * 1. Commands the channel answers itself: `/start` and `/help` explain, `/new` (or `/reset`) starts
- *    the conversation over (a reset: a new session, the old one kept). Other commands go to the agent
+ *    the conversation over (a reset: a new session, the old one kept), `/claim` says the chat is in
+ *    already (it may hold the claim code: it never reaches the agent). Other commands go to the agent
  *    as text. A command Telegram delivers again (its 200 was lost) is recognised by its message id and
  *    not run twice.
  * 2. Everything else takes the inbound path every channel takes (`admitInbound`: `inbound.normalize`,
@@ -37,6 +39,12 @@ export interface InboxDeps {
 /** What became of the update: `dispatched` when its conversation has it, and its answer is to come. */
 export type InboxOutcome = "dispatched" | "answered";
 
+/** The reply to a message with no text. */
+export const NO_TEXT = "I can only read text messages for now.";
+
+/** Where the last command handled in a chat is kept: its message id. */
+export const commandSeenKey = (conversation: string): string => `command:${conversation}`;
+
 const HELP = ["Send me a message and I'll answer.", "", "/new: start a new conversation (I forget this one)", "/help: this message"].join("\n");
 
 export async function handleMessage(message: TelegramMessage, deps: InboxDeps, ctx: AppContext): Promise<InboxOutcome> {
@@ -48,13 +56,15 @@ export async function handleMessage(message: TelegramMessage, deps: InboxDeps, c
   if (text === undefined || message.from === undefined) throw new Error(`channel-telegram-webhook: message ${message.message_id} of ${key} has no text or no sender`);
 
   const command = await commandOf(text, bot);
-  if (command === "start" || command === "help" || command === "new") {
-    const seenKey = `command:${key}`;
+  if (command === "start" || command === "help" || command === "new" || command === "claim") {
+    const seenKey = commandSeenKey(key);
     const last = await deps.store.get<number>(seenKey);
     if (last !== undefined && message.message_id <= last) return "answered";
     if (command === "new") {
       const reset = await deps.conversations.reset(key, ctx);
       await reply(bot, chatId, reset === undefined ? "This is already a new conversation." : "Started a new conversation.", ctx);
+    } else if (command === "claim") {
+      await reply(bot, chatId, "This chat can talk to me already.", ctx);
     } else {
       const name = message.from.first_name;
       await reply(bot, chatId, command === "start" ? `Hi${name ? ` ${name}` : ""}! ${HELP}` : HELP, ctx);
@@ -90,7 +100,7 @@ export async function handleMessage(message: TelegramMessage, deps: InboxDeps, c
 }
 
 /** Sends the channel's own short reply once; a failure is logged, not thrown. */
-async function reply(bot: Bot, chatId: number, text: string, ctx: AppContext): Promise<void> {
+export async function reply(bot: Bot, chatId: number, text: string, ctx: AppContext): Promise<void> {
   const signal = within(TELEGRAM_TIMEOUT_MS, ctx.abortSignal);
   const conversationKey = conversationKeyOf(bot.account.instance, chatId);
   try {
@@ -106,7 +116,7 @@ async function reply(bot: Bot, chatId: number, text: string, ctx: AppContext): P
  * `/new` or `/new@this_bot` → `new`; `/reset` is `new`. A command for another bot, or no command, →
  * `undefined`. The bot's username is asked (`getMe`) only when a command names one.
  */
-async function commandOf(text: string, bot: Bot): Promise<string | undefined> {
+export async function commandOf(text: string, bot: Bot): Promise<string | undefined> {
   const match = /^\/([A-Za-z0-9_]+)(?:@([A-Za-z0-9_]+))?(?:\s|$)/.exec(text.trim());
   if (match === null) return undefined;
   const [, name = "", target] = match;

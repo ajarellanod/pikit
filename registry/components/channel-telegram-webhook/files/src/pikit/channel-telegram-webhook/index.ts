@@ -9,6 +9,8 @@
  *   (on Cloudflare, the Durable Object `idFromName("telegram:<chat>")`):
  *   - the `actor.inbox` handler of `telegram.update` (`inbox.ts`): the commands, then `admitInbound`;
  *     it resolves once the message is durable, and asks for the delivery wakeup;
+ *   - the `actor.inbox` handler of `telegram.stranger` (`claim.ts`), for a bot that can be claimed:
+ *     a chat that claimed it is handled as above, `/claim <code>` claims it, anyone else is told;
  *   - the wakeup `channel-telegram-webhook.deliver` (`delivery.ts`), registered with `wakeups.handle`
  *     at start: the answers from `agent.submissions`' feed, from a cursor in `storage.kv`, "typing…"
  *     while a message waits for its run, and a new request while work remains. With `outbound.queue`
@@ -21,7 +23,7 @@
  * It reuses channel-telegram's client, format, transport and accounts as copies of its own
  * (`api.ts`, `format.ts`, `transport.ts`, `account.ts`): components never import each other.
  * `configure.ts` is its step of `pikit configure`; `deploy.ts` registers the webhook once a deploy
- * answers (C8).
+ * answers (C8), and without `pikit up` the Worker registers it itself (`webhook.ts`).
  *
  * It refuses to start when a bot has no token. It does not call Telegram to start: on Cloudflare every
  * object runs this start, and each call is a subrequest.
@@ -34,13 +36,14 @@ import { ACCOUNT_NAME, accountsOf } from "./account.ts";
 import { registerInbox } from "./actor-inbox.ts";
 import { createTelegramApi } from "./api.ts";
 import { type Bot, createBot, findBot } from "./bot.ts";
+import { type ClaimCode, claimCodeOf, handleStranger } from "./claim.ts";
 import { createDelivery, DELIVER, type Delivery, openCursors } from "./delivery.ts";
-import { handleMessage } from "./inbox.ts";
-import { isPrivateMessage, readUpdate, UPDATE_TYPE } from "./update.ts";
+import { handleMessage, type InboxOutcome } from "./inbox.ts";
+import { isPrivateMessage, type PrivateUpdate, readUpdate, STRANGER_TYPE, UPDATE_TYPE } from "./update.ts";
 
-export { worker, WORKER_NAME } from "./worker.ts";
+export { SETUP_ROUTE, worker, WORKER_NAME } from "./worker.ts";
 export { DELIVER } from "./delivery.ts";
-export { UPDATE_TYPE } from "./update.ts";
+export { STRANGER_TYPE, UPDATE_TYPE } from "./update.ts";
 
 export const NAME = "channel-telegram-webhook";
 
@@ -53,6 +56,8 @@ const Config = Type.Object({
 
 interface Running {
   bots: Bot[];
+  /** Each bot's claim code, by instance; absent when none is set. */
+  codes: Map<string, ClaimCode>;
   delivery: Delivery;
   queue: OutboundQueue | undefined;
 }
@@ -74,22 +79,39 @@ export default defineComponent({
     const accounts = accountsOf(config.accounts);
     let running: Running | undefined;
 
+    /**
+     * One update the Worker sent, checked (the mailbox carries JSON), handled by `handle`. Once it is
+     * durable in the conversation, its answer is delivered by the wakeup (a duplicate's too, if still due).
+     */
+    const receive =
+      (handle: (update: PrivateUpdate, bot: Bot, now: Running, ctx: AppContext) => Promise<InboxOutcome>) =>
+      async (key: string, message: unknown, ctx: AppContext): Promise<void> => {
+        const now = running;
+        if (now === undefined) throw new Error("channel-telegram-webhook: an update arrived while the channel is not running");
+        const found = findBot(now.bots, key);
+        if (found === undefined) {
+          throw new Error(`channel-telegram-webhook: "${key}" is not a chat of a bot this channel runs (${accounts.map((a) => a.instance).join(", ")}); the Worker's and the object's accounts must be the same`);
+        }
+        const update = readUpdate(message);
+        if (update === undefined || !isPrivateMessage(update) || update.message.chat.id !== found.chatId) {
+          throw new Error(`channel-telegram-webhook: the message for "${key}" is not a private message of its chat`);
+        }
+        if ((await handle(update, found.bot, now, ctx)) === "dispatched") await now.delivery.kick(ctx);
+      };
+    const depsOf = (bot: Bot) => ({ bot, conversations: conversations.get(), runtime: runtime.get(), store: storage.get().namespace(NAME) });
+
     // Registered with actor.inbox in start (`actor-inbox.ts`): the mailbox depends on no handler.
-    const inbox = registerInbox(pikit, UPDATE_TYPE, async (key, message, ctx) => {
-      const now = running;
-      if (now === undefined) throw new Error("channel-telegram-webhook: an update arrived while the channel is not running");
-      const found = findBot(now.bots, key);
-      if (found === undefined) {
-        throw new Error(`channel-telegram-webhook: "${key}" is not a chat of a bot this channel runs (${accounts.map((a) => a.instance).join(", ")}); the Worker's and the object's accounts must be the same`);
-      }
-      const update = readUpdate(message);
-      if (update === undefined || !isPrivateMessage(update) || update.message.chat.id !== found.chatId) {
-        throw new Error(`channel-telegram-webhook: the message for "${key}" is not a private message of its chat`);
-      }
-      const outcome = await handleMessage(update.message, { bot: found.bot, conversations: conversations.get(), runtime: runtime.get(), store: storage.get().namespace(NAME) }, ctx);
-      // Durable in the conversation: its answer is delivered by the wakeup (a duplicate's too, if it is still due).
-      if (outcome === "dispatched") await now.delivery.kick(ctx);
-    });
+    const inbox = registerInbox(
+      pikit,
+      UPDATE_TYPE,
+      receive((update, bot, _now, ctx) => handleMessage(update.message, depsOf(bot), ctx)),
+    );
+    // Someone the Worker does not list, of a bot that can be claimed: the claims are kept here.
+    const strangers = registerInbox(
+      pikit,
+      STRANGER_TYPE,
+      receive((update, bot, now, ctx) => handleStranger(update.message, { ...depsOf(bot), code: now.codes.get(bot.account.instance) }, ctx)),
+    );
 
     const ended = async (result: AgentResult, ctx: AppContext): Promise<void> => {
       const now = running;
@@ -107,10 +129,13 @@ export default defineComponent({
     return {
       async start(ctx) {
         const bots: Bot[] = [];
+        const codes = new Map<string, ClaimCode>();
         for (const account of accounts) {
           const token = await secrets.get().get(account.tokenSecret);
           if (token === undefined) throw new Error(`channel-telegram-webhook: ${account.tokenSecret} is not set. Create a bot with @BotFather, then run \`pikit configure\``);
           bots.push(createBot(account, createTelegramApi(token, config.apiBase)));
+          const code = await claimCodeOf(await secrets.get().get(account.claimSecret));
+          if (code !== undefined) codes.set(account.instance, code);
         }
         const store = storage.get().namespace(NAME);
         const recorded = submissions.get();
@@ -120,8 +145,9 @@ export default defineComponent({
         for (const bot of bots) queue?.attach(bot.account.instance, bot.transport);
         try {
           wakeups.get().handle(DELIVER, (run) => delivery.run(run));
-          running = { bots, delivery, queue };
+          running = { bots, codes, delivery, queue };
           inbox.start();
+          strangers.start();
           // Whatever ended while nothing ran (a restart, an eviction, a deploy) is delivered now.
           await wakeups.get().at(DELIVER, ctx.clock.now(), ctx);
         } catch (error) {
