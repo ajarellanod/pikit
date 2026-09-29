@@ -1,5 +1,5 @@
 /**
- * Lifecycle conformance (SPEC §4.6, §14): does a component honour `ctx.abortSignal`?
+ * Lifecycle conformance (SPEC K2): does a component honour `ctx.abortSignal`?
  *
  * The app stops waiting for a hook that outlives its deadline, but JavaScript cannot stop
  * the hook: a component that ignores the abort keeps running and may acquire resources nobody

@@ -1,4 +1,4 @@
-/** Structured logger (SPEC §4.5 `logger`). Fields are data, never interpolated into the message. */
+/** Structured logger (SPEC §3). Fields are data, never interpolated into the message. */
 export interface Logger {
   debug(message: string, fields?: Record<string, unknown>): void;
   info(message: string, fields?: Record<string, unknown>): void;

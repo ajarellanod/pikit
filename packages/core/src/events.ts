@@ -1,5 +1,5 @@
 /**
- * Events are notifications (SPEC §4.3): every listener receives the payload, return values
+ * Events are notifications (SPEC K3): every listener receives the payload, return values
  * are ignored, and a listener that throws is reported but does not stop the others.
  *
  * The bus is generic over the event map and the context so it can be tested on its own;

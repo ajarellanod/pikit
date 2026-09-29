@@ -1,5 +1,5 @@
 /**
- * Start and stop (SPEC §4.6): `start()` runs each component's `start` in dependency order and
+ * Start and stop (SPEC K2, K6): `start()` runs each component's `start` in dependency order and
  * rolls back on failure; `stop()` runs each `stop` in reverse, even after a failure.
  *
  * Deadlines belong to whoever runs the app (systemd, a Durable Object constructor), so

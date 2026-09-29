@@ -1,5 +1,5 @@
 /**
- * Pipelines are ordered transformations (SPEC §4.4). Each stage receives the previous
+ * Pipelines are ordered transformations (SPEC §3). Each stage receives the previous
  * stage's output and returns the next value. A stage may return `halt(reason)` to stop the
  * chain; the registry reports it through `onHalt` (the app emits `pipeline.halted`).
  *

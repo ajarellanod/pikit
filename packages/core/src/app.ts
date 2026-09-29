@@ -1,5 +1,5 @@
 /**
- * Composition root and lifecycle (SPEC §4.1, §4.2, §4.6).
+ * Composition root and lifecycle (SPEC §3; K2, K4, K7).
  *
  *   defineApp({ components, config })   checks names and config (sync, throws)
  *     .create()                              runs every setup, derives the dependency graph
@@ -56,7 +56,7 @@ declare module "./events.ts" {
 
 export type Target = "server" | "cloudflare";
 
-/** What every handler receives (SPEC §4.7). `emit`/`run` propagate this same context. */
+/** What every handler receives (SPEC K5). `emit`/`run` propagate this same context. */
 export interface AppContext extends Context {
   target: Target;
   /** Resolved, validated global config. Component config lives under `config[name]`. */
@@ -140,7 +140,7 @@ export interface ComponentLifecycle {
    * `start()`. When `ctx.abortSignal` fires (the start deadline, or `stop()` during boot) the
    * app stops waiting: release what was acquired and throw.
    * `ctx` carries the start deadline: do not keep it for later work (a server's requests); derive
-   * a context per invocation with `ctx.derive(...)` (SPEC §4.7).
+   * a context per invocation with `ctx.derive(...)`.
    */
   start?(ctx: AppContext): void | Promise<void>;
   /**

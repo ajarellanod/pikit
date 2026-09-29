@@ -1,5 +1,5 @@
 /**
- * Capabilities are named services (SPEC §4.5). A capability is either:
+ * Capabilities are named services (SPEC §3). A capability is either:
  *
  * - **single**: exactly one provider is used. When several installed components provide it,
  *   `config.capabilities` must select one by component name.

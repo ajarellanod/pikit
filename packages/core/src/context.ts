@@ -1,5 +1,5 @@
 /**
- * Invocation context (SPEC §4.7): cancellation plus invocation-scoped values, passed
+ * Invocation context (SPEC K5): cancellation plus invocation-scoped values, passed
  * explicitly and derived immutably.
  *
  * The shape and the semantics of the helpers match Chord's `Context`
@@ -10,7 +10,7 @@
  *
  * The reverse does not hold: Chord's `withContextValue` looks the signal up by a private key
  * and would drop ours. The Pi adapter therefore bridges once, at its boundary, with Chord's
- * `withAbortSignal` (SPEC §6.2).
+ * `withAbortSignal` (@pikit/pi-adapter's context.ts).
  */
 
 /** Typed identity for one value carried by a {@link Context}. */
