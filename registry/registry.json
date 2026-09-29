@@ -178,6 +178,15 @@
       ],
       "path": "components/tool-edit"
     },
+    "tool-fetch": {
+      "version": "0.0.0",
+      "description": "The `fetch` tool, for the agents that name it: one HTTP(S) request to a web page or an API, with HTML as readable text and links, JSON pretty-printed, and binary content refused.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-fetch"
+    },
     "tool-read": {
       "version": "0.0.0",
       "description": "Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.",

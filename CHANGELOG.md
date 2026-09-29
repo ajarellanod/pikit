@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/tool-fetch: new. The `fetch` tool: one HTTP(S) request, GET by default (HEAD, POST, PUT,
+  PATCH, DELETE allowed; the model is asked to confirm any but GET and HEAD with the user), 20 s,
+  2 MB read, HTML as readable text with its links, JSON pretty-printed, binary refused, no
+  credentials of its own; `replay: "never"`; targets `server` and `cloudflare`.
 - component/provider-openrouter: new. OpenRouter's models for your agents, named
   `openrouter/<vendor>/<model>` (`openrouter/z-ai/glm-5.3-flash`), with `OPENROUTER_API_KEY` or a key
   in `model.credentials`; targets `server` and `cloudflare`. Your OpenRouter account's guardrails
