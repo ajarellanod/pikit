@@ -1,8 +1,9 @@
 /**
- * Characterisation of what pi-agent-core 0.87.1 does NOT do for pikit. These tests assert Pi's
+ * Characterisation of what pi-agent-core 0.99.0 does NOT do for pikit. These tests assert Pi's
  * behaviour on purpose, called directly. The adapter bridges each gap with Pi's own mechanisms
- * (`inbound.ts`, `conversation.ts`); if Pi changes, a test fails and the bridge is revisited
- * (SPEC §6.4). The bridges go when the adapter moves to `pi-durable`.
+ * (`inbound.ts`, `conversation.ts`), or states the rule it leaves (a tool throws on failure,
+ * `tools/index.ts`); if Pi changes, a test fails and the bridge or rule is revisited (SPEC §6.4).
+ * The bridges go when the adapter moves to `pi-durable`.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -21,7 +22,7 @@ async function openLane(tools = [] as ReturnType<typeof holdTool>[], provider = 
   return { harness, lane: await harness.lane("main", ctx) };
 }
 
-describe("Pi gaps (pi-agent-core 0.87.1)", () => {
+describe("Pi gaps (pi-agent-core 0.99.0)", () => {
   test("gap 1: accept() does not reject a reused operationId; the same request runs twice", async () => {
     const { harness, lane } = await openLane();
     const first = await lane.accept({ kind: "prompt", operationId: "req-1", prompt: "hello" }, ctx);
@@ -117,6 +118,27 @@ describe("Pi gaps (pi-agent-core 0.87.1)", () => {
     expect(watch.snapshot.queues).toEqual([]);
     const entries = await lane.findEntries(undefined, ctx);
     expect(entries.some((entry) => entry.id === queued.value.entryId)).toBe(false);
+    await harness.close(ctx);
+  });
+
+  test("tools: a result with `isError: true` is recorded as a success", async () => {
+    // pi-agent-core's `AgentToolResult.isError` ("report a failure without throwing") is honoured by
+    // its `agent-loop`, not by the harness the adapter drives (`harness/execution/tools.ts`). So a
+    // pikit tool throws on failure (`tools/index.ts`, `ToolDefinition.execute`).
+    const failing: ReturnType<typeof holdTool> = {
+      ...holdTool(async () => ""),
+      async execute() {
+        return { content: [{ type: "text", text: "it failed" }], details: undefined, isError: true };
+      },
+    };
+    const { harness, lane } = await openLane([failing]);
+    const ended = await lane.prompt("hold", undefined, ctx);
+    expect(ended.ok).toBe(true);
+
+    const results = (await lane.findEntries(undefined, ctx)).flatMap((entry) =>
+      entry.type === "message" && entry.message.role === "toolResult" ? [entry.message] : [],
+    );
+    expect(results.map((result) => [result.content, result.isError])).toEqual([[[{ type: "text", text: "it failed" }], false]]);
     await harness.close(ctx);
   });
 });

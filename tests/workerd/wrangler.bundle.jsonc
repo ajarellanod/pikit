@@ -1,0 +1,16 @@
+// The Worker `bun run bundle` measures (README.md, "Bundle size"): src/bundle.ts, dry-run only, never
+// deployed. Its own config because wrangler.jsonc binds the suites' classes, which src/bundle.ts does not
+// export; only what a conversation's object needs to bundle is kept.
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "pikit-workerd-bundle",
+  "main": "src/bundle.ts",
+  "compatibility_date": "2026-09-01",
+  // execution-do uses Buffer (isomorphic-git).
+  "compatibility_flags": ["nodejs_compat"],
+  // execution-do's QuickJS, bundled as a compiled module, as in wrangler.jsonc (execution-do's README).
+  "rules": [{ "type": "CompiledWasm", "globs": ["@jitl/quickjs-wasmfile-release-sync/wasm"], "fallthrough": true }],
+  "durable_objects": { "bindings": [{ "name": "OBJECTS", "class_name": "TestObject" }] },
+  // SQLite-backed, as a conversation's object is on Cloudflare (SPEC C1, C5).
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["TestObject"] }]
+}

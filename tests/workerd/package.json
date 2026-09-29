@@ -5,7 +5,7 @@
   "scripts": {
     "typecheck": "wrangler types && tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "bundle": "wrangler deploy src/bundle.ts --dry-run --outdir dist"
+    "bundle": "wrangler deploy --config wrangler.bundle.jsonc --dry-run --outdir dist"
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "1.3.1",
