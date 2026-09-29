@@ -5,7 +5,8 @@
  * touches the network.
  *
  * Each server is `createFakeMcpServer` (`@pikit/pi-adapter/mcp/testing`, by path: this file is loaded by
- * Vitest's config, in Node), under a host of its own. `POST /__expire` makes one forget its sessions.
+ * Vitest's config, in Node), under a host of its own. `POST /__expire` makes one forget its sessions;
+ * `GET /__requests` answers how many requests it received.
  */
 
 import { createFakeMcpServer, type FakeMcpServer, type FakeMcpTool } from "../../../packages/pi-adapter/src/mcp/testing.ts";
@@ -51,5 +52,6 @@ export async function mcpOutbound(request: Request): Promise<Response> {
     server.expireSessions();
     return new Response("expired");
   }
+  if (url.pathname === "/__requests") return Response.json(server.requests.length);
   return server.fetch(request);
 }

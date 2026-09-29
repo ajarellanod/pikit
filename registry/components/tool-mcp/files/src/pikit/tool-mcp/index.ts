@@ -5,18 +5,28 @@
  * (`tools: ["deepwiki_ask_wiki_question"]`).
  *
  * - **Tools are named in config.** A keyed capability's keys are fixed at `setup`, before any server
- *   is reached, so the tools come from config and are provided then. At `start` each server is
- *   reached once (`initialize`, `tools/list`) and each tool gets what only the server knows: its
- *   description and parameters. A server that cannot be reached, or that lacks a tool named here,
- *   stops the app (P5): an agent would otherwise lose a tool it names without anyone knowing.
+ *   is reached, so the tools come from config and are provided then. At `start` each tool gets what
+ *   only the server knows: its description and parameters, from the server's `tools/list`.
+ * - **Strict at deploy, tolerant at run time.** `pikit doctor` (so `pikit up` and `pikit dev`) reaches
+ *   every server and refuses one that cannot be reached or lacks a tool (`doctor.ts`). Once deployed:
+ *   - with `storage.kv` installed, each server's listing of the named tools is kept there (namespace
+ *     `tool-mcp`, key `server/<name>`), and a start that finds it complete describes the tools from
+ *     it and reaches no server: a cold start makes no MCP request, and a server that is down does not
+ *     stop the app, only the calls to its tools fail. Each connection (the first call after such a
+ *     start, or after the server forgot the session) lists the tools again and updates both the tools
+ *     and the kept listing; a named tool the server no longer lists is logged as an error and its calls
+ *     fail, naming the tools it has.
+ *   - without a kept listing (or without `storage.kv`), start reaches each server (`initialize`,
+ *     `tools/list`), and one that cannot be reached, or lacks a named tool, stops the app (P5): the
+ *     model would get a tool with no description or parameters.
  * - **Replay** (SPEC §8.4): `"never"`, unless the server marks the tool read-only
  *   (`annotations.readOnlyHint`), then `"safe"`: a run resumed after a crash calls it again.
  * - **Credentials never in config.** `secret` names a secret, read through `secrets` at each request,
  *   holding a bearer token for the server. The model never sees it, nor any error that mentions it.
- * - **One client per server, in memory**, connected at start. When the server forgets the session (it
- *   restarted, or it expires idle ones) the call connects again and is sent once more: the server ran
- *   nothing. On Cloudflare a Durable Object may lose its memory at any time; its next start connects
- *   again (SPEC K6).
+ * - **One client per server, in memory**, connected on first use. When the server forgets the session
+ *   (it restarted, or it expires idle ones) the call connects again and is sent once more: the server
+ *   ran nothing. On Cloudflare a Durable Object may lose its memory at any time; its next call
+ *   connects again (SPEC K6).
  * - **A failure the server reports** (an MCP result with `isError`) fails the call with its text.
  *
  * Transport: Streamable HTTP over `fetch`, through Pi's MCP client (`@pikit/pi-adapter/mcp`), with no
@@ -24,7 +34,8 @@
  * as a local process (stdio) is not this component's.
  */
 
-import { type AppContext, defineComponent } from "@pikit/core";
+import type { JsonValue, KeyValueStore } from "@pikit/contracts";
+import { type AppContext, defineComponent, type Logger } from "@pikit/core";
 import {
   type CallToolResult,
   McpClient,
@@ -42,7 +53,9 @@ export const DEFAULT_TIMEOUT_MS = 60_000;
 /** What a server's name in config may hold: it starts the names of its tools. */
 const SERVER_NAME = /^[A-Za-z0-9_-]+$/;
 /** How the client introduces itself to servers. */
-const CLIENT = { name: "pikit", version: "0.0.0" };
+export const CLIENT = { name: "pikit", version: "0.0.0" };
+/** The `storage.kv` namespace of the kept listings: the component's name. */
+const NAMESPACE = "tool-mcp";
 
 const Server = Type.Object(
   {
@@ -69,7 +82,7 @@ const Config = Type.Object({
   servers: Type.Record(Type.String(), Server, { default: {} }),
 });
 
-type ServerConfig = Static<typeof Server>;
+export type ServerConfig = Static<typeof Server>;
 
 export default defineComponent({
   name: "tool-mcp",
@@ -77,6 +90,9 @@ export default defineComponent({
   setup(pikit, config) {
     // Optional: only a server with a `secret` needs it, and start says so when it is missing.
     const secrets = pikit.useOptional("secrets");
+    // Optional: with it, a start reads each server's listing from there instead of the server.
+    const storage = pikit.useOptional("storage.kv");
+    let cache: KeyValueStore | undefined;
     const servers: ServerEntry[] = [];
     const names = new Map<string, string>();
 
@@ -93,18 +109,26 @@ export default defineComponent({
               if (value === undefined || value === "") throw new Error(`tool-mcp: the secret ${secret}, the token of the MCP server "${name}", is not set`);
               return value;
             };
-      const connection = connectionTo(name, settings, token);
-      const tools = settings.tools.map((remote) => {
+      const server: ServerEntry = {
+        name,
+        url: settings.url,
+        secret,
+        tools: [],
+        started: false,
+        // Each connection lists the tools: they and the kept listing follow what the server says now.
+        connection: connectionTo(name, settings, token, (listed) => refreshed(server, listed, cache, pikit.logger)),
+      };
+      for (const remote of settings.tools) {
         const agentName = mcpToolName(name, remote);
         const other = names.get(agentName);
         if (other !== undefined) throw new Error(`tool-mcp: "${other}" and "${name}/${remote}" would both be the tool "${agentName}"`);
         names.set(agentName, `${name}/${remote}`);
-        const mcp = mcpAgentTool({ name: agentName, label: `${name}: ${remote}`, call: (params, signal) => connection.call(remote, params, signal) });
+        const mcp = mcpAgentTool({ name: agentName, label: `${name}: ${remote}`, call: (params, signal) => server.connection.call(remote, params, signal) });
         // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
         pikit.provideKeyed("agent.tool", agentName, mcp.tool);
-        return { remote, mcp };
-      });
-      servers.push({ name, secret, connection, tools });
+        server.tools.push({ remote, mcp });
+      }
+      servers.push(server);
     }
 
     return {
@@ -113,7 +137,9 @@ export default defineComponent({
         if (missing !== undefined) {
           throw new Error(`tool-mcp: the MCP server "${missing.name}" needs the secret ${missing.secret}, but no component provides secrets (install one: secrets-env, secrets-cloudflare)`);
         }
-        await Promise.all(servers.map((server) => describe(server, ctx)));
+        cache = storage.get()?.namespace(NAMESPACE);
+        await Promise.all(servers.map((server) => describe(server, cache, ctx)));
+        for (const server of servers) server.started = true;
       },
       async stop() {
         await Promise.all(servers.map((server) => server.connection.close()));
@@ -124,31 +150,119 @@ export default defineComponent({
 
 interface ServerEntry {
   name: string;
+  url: string;
   secret: string | undefined;
   connection: Connection;
   tools: { remote: string; mcp: McpAgentTool }[];
+  /** Whether start is over: from then on a listing that lacks a named tool is logged (start throws instead). */
+  started: boolean;
 }
 
-/** Fills each tool of `server` from its `tools/list`; throws when it cannot be reached or lacks one. */
-async function describe(server: ServerEntry, ctx: AppContext): Promise<void> {
+/** What `storage.kv` keeps of a server's `tools/list`: the named tools only, as the server described them. */
+interface KeptListing {
+  /** The URL listed: a listing kept for another URL is not used. */
+  url: string;
+  /** When the server listed them (ISO 8601). */
+  listedAt: string;
+  /** By MCP name. */
+  tools: Record<string, KeptTool>;
+}
+
+type KeptTool = Pick<Tool, "name" | "title" | "description" | "inputSchema" | "annotations">;
+
+const keyOf = (server: ServerEntry): string => `server/${server.name}`;
+
+/**
+ * Describes each tool of `server` at start: from its kept listing when that holds every named tool
+ * (no request), else from the server (`initialize`, `tools/list`). Throws when the server must be
+ * reached and cannot be, or lacks a named tool.
+ */
+async function describe(server: ServerEntry, cache: KeyValueStore | undefined, ctx: AppContext): Promise<void> {
+  const kept = await read(cache, server, ctx.logger);
+  if (kept !== undefined && server.tools.every(({ remote }) => kept.tools[remote] !== undefined)) {
+    for (const { remote, mcp } of server.tools) describeTool(mcp, kept.tools[remote] as KeptTool);
+    return;
+  }
   let listed: Tool[];
   try {
     listed = await server.connection.list(ctx.abortSignal);
   } catch (error) {
     throw new Error(`tool-mcp: the MCP server "${server.name}" could not list its tools: ${messageOf(error)}`);
   }
+  // The connection described the tools it found, and kept the listing when it was complete.
+  const lacking = missingFrom(server, listed);
+  if (lacking !== undefined) throw new Error(`tool-mcp: the MCP server "${server.name}" has no tool "${lacking}" (it has: ${namesOf(listed)})`);
+}
+
+/**
+ * A new connection's `tools/list`: describes the named tools it holds and keeps the listing, merged
+ * over the kept one (a tool the server stopped listing keeps its last description, so a later start
+ * does not stop the app over it: its calls fail instead). Never throws.
+ */
+async function refreshed(server: ServerEntry, listed: Tool[], cache: KeyValueStore | undefined, logger: Logger): Promise<void> {
+  const found: Record<string, KeptTool> = {};
   for (const { remote, mcp } of server.tools) {
-    const found = listed.find((tool) => tool.name === remote);
-    if (found === undefined) {
-      const has = listed.map((tool) => tool.name).join(", ") || "none";
-      throw new Error(`tool-mcp: the MCP server "${server.name}" has no tool "${remote}" (it has: ${has})`);
-    }
-    mcp.describe(found, found.annotations?.readOnlyHint === true ? "safe" : "never");
+    const tool = listed.find((candidate) => candidate.name === remote);
+    if (tool === undefined) continue;
+    describeTool(mcp, tool);
+    found[remote] = kept(tool);
+  }
+  const lacking = missingFrom(server, listed);
+  if (server.started && lacking !== undefined) {
+    logger.error(`tool-mcp: the MCP server "${server.name}" no longer lists the tool "${lacking}": its calls fail`, { server: server.name, has: namesOf(listed) });
+  }
+  if (cache === undefined) return;
+  try {
+    const previous = await read(cache, server, logger);
+    const tools = { ...previous?.tools, ...found };
+    // Only a complete listing is kept: a start uses nothing less.
+    if (!server.tools.every(({ remote }) => tools[remote] !== undefined)) return;
+    const listing: KeptListing = { url: server.url, listedAt: new Date().toISOString(), tools };
+    // JSON: what the server sent, parsed from JSON.
+    await cache.set(keyOf(server), listing as unknown as JsonValue);
+  } catch (error) {
+    logger.warn(`tool-mcp: could not keep the tools of the MCP server "${server.name}" in storage.kv`, { error: messageOf(error) });
   }
 }
 
+/** The kept listing of `server` for its URL, or `undefined` (none, another URL, unreadable). */
+async function read(cache: KeyValueStore | undefined, server: ServerEntry, logger: Logger): Promise<KeptListing | undefined> {
+  if (cache === undefined) return undefined;
+  try {
+    const listing = (await cache.get(keyOf(server))) as KeptListing | undefined;
+    return listing?.url === server.url && typeof listing.tools === "object" && listing.tools !== null ? listing : undefined;
+  } catch (error) {
+    logger.warn(`tool-mcp: could not read the kept tools of the MCP server "${server.name}" from storage.kv`, { error: messageOf(error) });
+    return undefined;
+  }
+}
+
+function describeTool(mcp: McpAgentTool, tool: KeptTool): void {
+  mcp.describe(tool, tool.annotations?.readOnlyHint === true ? "safe" : "never");
+}
+
+/** What is kept of `tool`: JSON, without the fields the server left out. */
+function kept(tool: Tool): KeptTool {
+  return {
+    name: tool.name,
+    ...(tool.title !== undefined && { title: tool.title }),
+    ...(tool.description !== undefined && { description: tool.description }),
+    inputSchema: tool.inputSchema,
+    ...(tool.annotations !== undefined && { annotations: tool.annotations }),
+  };
+}
+
+/** The first named tool `listed` lacks, if any. */
+function missingFrom(server: ServerEntry, listed: Tool[]): string | undefined {
+  return server.tools.find(({ remote }) => !listed.some((tool) => tool.name === remote))?.remote;
+}
+
+function namesOf(listed: Tool[]): string {
+  return listed.map((tool) => tool.name).join(", ") || "none";
+}
+
 interface Connection {
-  /** The server's tools, connecting first when needed. */
+  /** The server's tools, as listed when the client in use connected (connecting first when needed). */
   list(signal: AbortSignal | undefined): Promise<Tool[]>;
   /** Calls `tool`, connecting (again) when needed. */
   call(tool: string, args: Record<string, unknown>, signal: AbortSignal | undefined): Promise<CallToolResult>;
@@ -156,29 +270,39 @@ interface Connection {
   close(): Promise<void>;
 }
 
-/** One server's client, connected on first use and again when its session is gone. */
-function connectionTo(server: string, settings: ServerConfig, token: (() => Promise<string>) | undefined): Connection {
-  /** The client in use, or being connected. */
-  let current: Promise<McpClient> | undefined;
+/** A connected client and what the server listed when it connected. */
+interface Session {
+  client: McpClient;
+  tools: Tool[];
+}
+
+/**
+ * One server's client, connected on first use and again when its session is gone. Each connection
+ * lists the server's tools and hands them to `listed` before it is used.
+ */
+function connectionTo(
+  server: string,
+  settings: ServerConfig,
+  token: (() => Promise<string>) | undefined,
+  listed: (tools: Tool[]) => Promise<void>,
+): Connection {
+  /** The session in use, or being opened. */
+  let current: Promise<Session> | undefined;
   /** Every client not closed yet, connecting ones included: `close` ends them all. */
   const clients = new Set<McpClient>();
   let closed = false;
 
-  const open = async (): Promise<McpClient> => {
+  const open = async (): Promise<Session> => {
     const client = new McpClient({ ...CLIENT, requestTimeoutMs: settings.timeoutMs ?? DEFAULT_TIMEOUT_MS });
     clients.add(client);
     client.onClose(() => clients.delete(client));
-    const transport = mcpHttpTransport({
-      url: settings.url,
-      ...(settings.headers !== undefined && { headers: { ...settings.headers } }),
-      // Asked before each request: a rotated secret is used at once.
-      ...(token !== undefined && { authProvider: { token } }),
-    });
-    await client.connect(transport);
-    return client;
+    await client.connect(transportTo(settings, token));
+    const tools = await client.listTools();
+    await listed(tools);
+    return { client, tools };
   };
 
-  const connected = (): Promise<McpClient> => {
+  const connected = (): Promise<Session> => {
     if (closed) return Promise.reject(new Error(`tool-mcp: the MCP server "${server}" is not connected: the app is stopping`));
     if (current === undefined) {
       const opening = open();
@@ -189,30 +313,32 @@ function connectionTo(server: string, settings: ServerConfig, token: (() => Prom
     return current;
   };
 
-  /** Drops `used` if it is still the client in use, and closes it. */
-  const forget = (used: Promise<McpClient>): void => {
+  /** Drops `used` if it is still the session in use, and closes its client. */
+  const forget = (used: Promise<Session>): void => {
     if (current !== used) return;
     current = undefined;
-    used.then((client) => client.close()).catch(() => {});
+    used.then((session) => session.client.close()).catch(() => {});
   };
 
   return {
     async list(signal) {
-      const client = await untilAborted(connected(), signal);
-      return client.listTools(signal === undefined ? {} : { signal });
+      return (await untilAborted(connected(), signal)).tools;
     },
     async call(tool, args, signal) {
       for (let attempt = 0; ; attempt++) {
         const using = connected();
-        let client: McpClient;
+        let session: Session;
         try {
-          client = await untilAborted(using, signal);
+          session = await untilAborted(using, signal);
         } catch (error) {
           if (signal?.aborted === true) throw error;
           throw new Error(`tool-mcp: the MCP server "${server}" could not be reached: ${messageOf(error)}`);
         }
+        if (!session.tools.some((listedTool) => listedTool.name === tool)) {
+          throw new Error(`tool-mcp: the MCP server "${server}" no longer lists the tool "${tool}" (it has: ${namesOf(session.tools)})`);
+        }
         try {
-          return await client.callTool(tool, args, signal === undefined ? {} : { signal });
+          return await session.client.callTool(tool, args, signal === undefined ? {} : { signal });
         } catch (error) {
           // The server forgot the session and ran nothing: connect again and send it once more.
           if (error instanceof McpSessionExpiredError && attempt === 0) {
@@ -230,6 +356,16 @@ function connectionTo(server: string, settings: ServerConfig, token: (() => Prom
       await Promise.all([...clients].map((client) => client.close().catch(() => {})));
     },
   };
+}
+
+/** The Streamable HTTP transport to a server, as `settings` say; `token` is asked before each request. */
+export function transportTo(settings: ServerConfig, token: (() => Promise<string>) | undefined) {
+  return mcpHttpTransport({
+    url: settings.url,
+    ...(settings.headers !== undefined && { headers: { ...settings.headers } }),
+    // Asked before each request: a rotated secret is used at once.
+    ...(token !== undefined && { authProvider: { token } }),
+  });
 }
 
 /** `promise`, or the abort's reason as soon as `signal` aborts (what `promise` does goes on). */
@@ -252,6 +388,6 @@ function untilAborted<T>(promise: Promise<T>, signal: AbortSignal | undefined): 
   });
 }
 
-function messageOf(error: unknown): string {
+export function messageOf(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }

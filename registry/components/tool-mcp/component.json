@@ -13,7 +13,8 @@
   },
   "optional": {
     "capabilities": [
-      "secrets"
+      "secrets",
+      "storage.kv"
     ]
   },
   "provides": [],
