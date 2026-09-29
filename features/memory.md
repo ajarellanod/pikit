@@ -18,7 +18,7 @@ profile per person (name, preferences, what they work on); search over past conv
 - Tools from `tool-memory`: `memory_read` (`replay: "safe"`) and `memory_write` (`replay: "never"`,
   idempotent by `${sessionId}:${runId}:${toolCallId}`). An agent gets them only by naming them.
 - Recall into the prompt: through the `agent.prepare` pipeline ([pipeline anchors](pipeline-anchors.md))
-  or a Pi extension's `before_agent_start` (tier A, SPEC §6.2b).
+  or a Pi extension's `before_agent_start` (tier A: `packages/pi-adapter/src/extensions/surface.ts`).
 - Memory is neither `agent.state` (one conversation, reset by `/reset`) nor the registry's metadata.
 - A person seen on two channels is two actor ids; linking them is its own decision (below).
 - Absent: no tools, no table, nothing injected.

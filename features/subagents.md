@@ -3,10 +3,11 @@
 **Public appeal:** ⭐ The agent splits a large job into parallel workers and merges their results.
 Hermes spawns isolated subagents for parallel workstreams.
 
-**Specified:** idea (SPEC §6.4 table: "Deferred"; SPEC §7.1: "a subagent is a child conversation")
+**Specified:** idea (the former SPEC §6.4 table: "Deferred"; its §7.1: "a subagent is a child
+conversation")
 
 **Needed by:** nothing required. The budget "≤ 6 concurrent outbound connections" on Cloudflare
-caps its fan-out (ROADMAP, Budgets; SPEC §9.2).
+caps its fan-out (SPEC §4).
 
 ## What it gives
 An agent delegates part of its work, to a helper of its own or to another agent of the project, and
@@ -19,8 +20,8 @@ Two different things:
 - **Delegation to another pikit agent** (its own prompt, tools and workspace): routing between
   agents, which is pikit's. A tool sends a message to a conversation of that agent through
   `admitInbound`, with a request id derived from the calling tool call, and reads the answer from
-  `agent.submissions`' `answers` (SPEC §4.8, §6.1). The tool is `replay: "never"`; a repeat is the
-  same request id, so the same submission.
+  `agent.submissions`' `answers` (a `Feed`, K3; `packages/contracts/src/submissions.ts`). The tool
+  is `replay: "never"`; a repeat is the same request id, so the same submission.
 
 ## Pi first
 Pi's durable runtime has subagents: foreground and background child conversations owned by a tool

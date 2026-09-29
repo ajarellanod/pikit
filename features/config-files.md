@@ -2,10 +2,10 @@
 
 **Public appeal:** —
 
-**Specified:** partly (moved from SPEC §12 and §16)
+**Specified:** partly (moved from the former SPEC §12 and §16)
 
 **Needed by:** nothing required. The kernel takes a plain, validated object whatever it came from
-(SPEC-CORE K4).
+(SPEC K4).
 
 ## What it gives
 Values in YAML next to the project (`config/<profile>.yaml`), with a profile per environment
@@ -13,11 +13,11 @@ Values in YAML next to the project (`config/<profile>.yaml`), with a profile per
 
 ## How it fits pikit
 - The CLI (and the `deployment-*` entrypoint) reads the file, merges the profile, and passes the
-  object to `defineApp`; the kernel never reads a file (SPEC §12, SPEC-CORE K4).
+  object to `defineApp`; the kernel never reads a file (SPEC K4).
 - YAML is parsed with a YAML 1.2 parser (never `Bun.YAML`, which is YAML 1.1), so `on` / `off` /
   `yes` / `no` stay strings.
 - `pikit config check` validates it against the merged schemas without starting anything.
-- Only values: a key that selects a strategy is a capability selector (S7).
+- Only values: a key that selects a strategy is a capability selector (MANIFESTO.md, principle 8).
 - Absent: `pikit.config.ts` holds the values, as today.
 
 ## Pi first
@@ -27,8 +27,8 @@ Nothing to take from Pi: Pi's `settings.json` configures one agent process, not 
 - YAML or TypeScript only (below).
 - How a profile merges: deep or per component.
 
-## Moved from SPEC
-SPEC §12:
+## Moved from the former SPEC
+The former SPEC §12:
 
 First bullet, its last sentence:
 
@@ -39,7 +39,7 @@ Third bullet:
 - When a values file exists: `config/<profile>.yaml` overlays for `--profile`, and YAML is parsed
   with a YAML 1.2 parser, so `on/off/yes/no` are strings. `[decision]`
 
-SPEC §16, "Open questions":
+The former SPEC §16, "Open questions":
 
 - Config format for values (YAML or TypeScript only): a CLI question, not the kernel's, which takes a
-  plain object (SPEC-CORE K4).
+  plain object (SPEC K4).

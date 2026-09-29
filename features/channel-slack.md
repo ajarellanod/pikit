@@ -11,12 +11,13 @@ A Slack app that answers in direct messages and, when mentioned, in channels and
 
 ## How it fits pikit
 - `channel-slack`: authenticates, builds the key (`slack:<channel>[:<thread_ts>]`), calls
-  `admitInbound`, answers every outcome, passes `createChannelConformance` (SPEC §5, §14), and
-  attaches its `ChannelTransport` to `outbound.queue`. Workspaces are instances (SPEC §5).
+  `admitInbound`, answers every outcome, passes `createChannelConformance`
+  (`@pikit/contracts/testing`), and attaches its `ChannelTransport` to `outbound.queue`. Workspaces
+  are instances.
 - Two ways in:
   - **Events API**: signed webhooks (`X-Slack-Signature`), an ack within 3 seconds, retries marked
     by `X-Slack-Retry-Num`; deduplicated by `event_id` with [inbound dedup](inbound-dedup.md)
-    (SPEC §5 already names it), and a public URL;
+    (whose file already names it), and a public URL;
   - **Socket Mode**: a WebSocket, no public URL, the way `channel-telegram` polls.
 - Sends: `chat.postMessage`, which has no idempotency key: at-least-once with a marker; `429` with
   `Retry-After` is `rate_limited`.
@@ -25,7 +26,7 @@ A Slack app that answers in direct messages and, when mentioned, in channels and
   Slash commands: [slash commands](slash-commands.md).
 
 ## Pi first
-Nothing in Pi: channels are pikit's (SPEC §6.2 table).
+Nothing in Pi: channels are pikit's (SPEC P1).
 
 ## Open questions
 - Events API or Socket Mode first; Cloudflare needs the Events API.
