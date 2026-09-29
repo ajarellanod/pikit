@@ -162,12 +162,17 @@ written here. Status (built or not) is tracked apart, as for the kernel.
 - **C2. `actor.mailbox`: a channel reaches an actor without knowing where it runs.** A contract in
   `@pikit/contracts`: `send(key, type, message, ctx)` resolves once the actor owning `key` holds the
   message durably (the point where a channel acknowledges its platform), and rejects otherwise, so the
-  platform retries. The actor handles it with the keyed capability `actor.inbox` (`type` →
-  `(key, message, ctx)`). A message is JSON. On a server the mailbox calls the inbox in the same App
-  (`mailbox-local`); on Cloudflare it is an RPC to the object `idFromName(key)` (`platform-cloudflare`).
-  *Why:* one channel component serves both targets, and no channel names a Durable Object.
+  platform retries. The actor handles it with the handler it registered for `type` on `actor.inbox`
+  (`handle(type, (key, message, ctx) => …)`, in its `start`). A message is JSON. On a server the
+  mailbox calls the inbox in the same App (`mailbox-local`); on Cloudflare it is an RPC to the object
+  `idFromName(key)` (`platform-cloudflare`). *Why:* one channel component serves both targets, and no
+  channel names a Durable Object. Handlers are registered by method, not provided as a keyed
+  capability, because a keyed capability makes the mailbox depend on every handler's component: a
+  handler admits to the runtime, which on Cloudflare wakes through `platform-cloudflare`, the
+  mailbox's own component, so that was a dependency cycle.
 - **C3. `wakeups`: durable timers, one alarm underneath.** A contract in `@pikit/contracts`:
-  `at(name, time, ctx)` asks for the handler `name` (keyed capability `wakeup`) to run at or after
+  `at(name, time, ctx)` asks for the handler registered as `name` (`handle(name, handler)`, in the
+  owner's `start`, as for `actor.inbox`, so the provider depends on no handler) to run at or after
   `time`, replacing an earlier request for that name; `cancel(name, ctx)` drops it. Delivery is
   at-least-once and may be late; a handler that fails runs again with backoff. On a server they are
   timers (`wakeups-timers`: a process that restarts reschedules at start, per K6); on Cloudflare they
