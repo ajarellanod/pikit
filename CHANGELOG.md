@@ -5,6 +5,7 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/runtime-pi: uses `wakeups` when installed (SPEC C4): every run is driven inside the wakeup handler `runtime-pi.drive`, asked for by a dispatch or resume that leaves a run going, by start with `agent.submissions` (instead of resuming in the background) and by Pi's retry backoff; each run of it resumes what is due or pending, waits for the App's runs until its slice ends, and asks again at once while runs remain. Without `wakeups`, nothing changes. Its README has a Cloudflare section.
 - adapter: `createPiRuntime({ retryAt })` continues a run past Pi's retry backoff from outside the process (the run stops being driven at the wait, and is resumed at or after `notBefore`) instead of a timer; `runtime.holds(conversation)` and `runtime.whenIdle(ctx)` tell a host whether this worker still drives runs, for one that must wait for them inside an event.
 - cli: `pikit add` and `pikit new` also offer the provider of a capability a component requires when the catalogue marks it `offer`: `pikit add conversations-kv` offers `storage-kv-sql` (and `storage-sqlite`).
 - component/conversations-kv: new. `conversations.registry` on `storage.kv` (namespace `conversations-kv`) and `sessions.store`; targets `server` and `cloudflare`. A first pointer is written with `setIfAbsent`, a reset emits `conversation.reset` once its pointer is stored, and its README says what holds when resets and resolves race across processes.
