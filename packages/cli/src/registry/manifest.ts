@@ -10,6 +10,9 @@
  * Generated from `setup` (S14), rewritten by `generate`, checked by `validate`: `$schema`,
  * `provides`, `requires.capabilities`, `optional.capabilities`, `halves` and `replay.tools`. Everything
  * else is written by hand and `generate` never changes it.
+ *
+ * `setup` runs with the default config, and with each config in the `examples` of the component's
+ * root config schema (describe.ts): a component that declares by config says so with examples.
  */
 
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
@@ -93,7 +96,10 @@ export const ManifestSchema = Type.Object(
       { capabilities: Type.Array(Type.String(), { description: "Generated from setup's useOptional() and useKeyed() calls." }) },
       { additionalProperties: false },
     ),
-    provides: Type.Array(Type.String(), { description: "Generated from setup's provide() and provideKeyed() calls." }),
+    provides: Type.Array(Type.String(), {
+      description:
+        "Generated from setup's provide() and provideKeyed() calls, with the default config and with each config in the `examples` of the component's config schema (for what it provides only when configured).",
+    }),
     apps: Type.Optional(
       Type.Object(
         {
@@ -137,7 +143,11 @@ export const ManifestSchema = Type.Object(
     ),
     replay: Type.Optional(
       Type.Object(
-        { tools: Type.Record(Type.String(), Type.String(), { description: "Generated: each agent.tool's replay (S10, SPEC §8.4)." }) },
+        {
+          tools: Type.Record(Type.String(), Type.String(), {
+            description: "Generated: each agent.tool's replay (S10, SPEC §8.4), with the default config; not the tools only the config schema's `examples` name.",
+          }),
+        },
         { additionalProperties: false },
       ),
     ),
@@ -182,8 +192,13 @@ export interface Generated {
   provides: string[];
   requires: string[];
   optional: string[];
-  /** Tool name → its replay; absent when the component provides no tool. */
+  /** Tool name → its replay; absent when the component provides no tool with its default config. */
   tools?: Record<string, string>;
+  /**
+   * The tools only its config schema's `examples` provide → their replay: checked (S10), never
+   * written, since their names are the example's.
+   */
+  exampleTools?: Record<string, string>;
   /** What each App's half declares; absent unless `apps.worker` names a half. */
   halves?: Record<AppName, Half>;
 }

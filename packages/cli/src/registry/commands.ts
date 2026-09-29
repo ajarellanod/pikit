@@ -11,7 +11,7 @@ import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, readPreset } from "../project/registry-source.ts";
 import { checkCapabilities, checkDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
-import { describeSetup, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
+import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
   BOTH_APPS,
   buildIndex,
@@ -67,7 +67,7 @@ async function generatedFor(componentDir: string, name: string, manifest: Manife
   // Not an app component (no setup): nothing to derive.
   if (component === undefined) return { provides: [], requires: [], optional: [] };
   const target = describeTarget(manifest);
-  const own = await describeSetup(component, target);
+  const own = await describeComponent(component, target);
   // A component with a half for the Worker's App (C1): the manifest covers both halves, and says what
   // each declares. The default export in both Apps (`"default"`) is one component: nothing to add.
   const exported = manifest?.apps?.worker;
@@ -77,7 +77,7 @@ async function generatedFor(componentDir: string, name: string, manifest: Manife
   if (half.name !== `${name}-worker`) {
     throw new Error(`the export "${exported}" (apps.worker) is the component "${half.name}": the Worker's half of ${name} is named "${name}-worker", its config key in workerConfig`);
   }
-  const worker = await describeSetup(half, target);
+  const worker = await describeComponent(half, target);
   const declared = ({ provides, requires, optional }: Generated) => ({ provides, requires, optional });
   return { ...mergeGenerated([own, worker]), halves: { default: declared(own), worker: declared(worker) } };
 }
@@ -262,7 +262,7 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
       );
     }
   }
-  for (const [tool, replay] of Object.entries(generated.tools ?? {})) {
+  for (const [tool, replay] of Object.entries({ ...generated.tools, ...generated.exampleTools })) {
     if (replay !== "safe" && replay !== "never") {
       problems.push(`the agent.tool "${tool}" has replay ${JSON.stringify(replay)}; every tool declares "safe" or "never" (S10)`);
     }

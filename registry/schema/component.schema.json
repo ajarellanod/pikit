@@ -97,7 +97,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Generated from setup's provide() and provideKeyed() calls."
+      "description": "Generated from setup's provide() and provideKeyed() calls, with the default config and with each config in the `examples` of the component's config schema (for what it provides only when configured)."
     },
     "apps": {
       "type": "object",
@@ -211,7 +211,7 @@
               "type": "string"
             }
           },
-          "description": "Generated: each agent.tool's replay (S10, SPEC §8.4)."
+          "description": "Generated: each agent.tool's replay (S10, SPEC §8.4), with the default config; not the tools only the config schema's `examples` name."
         }
       },
       "additionalProperties": false
