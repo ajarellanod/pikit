@@ -41,6 +41,8 @@ import Type from "typebox";
 const SECOND = 1_000;
 /** The waits after a handler's 1st, 2nd, 3rd and 4th consecutive failure; the last repeats. */
 export const BACKOFF_MS = [SECOND, 5 * SECOND, 30 * SECOND, 60 * SECOND] as const;
+/** The slice deadline's watcher never sleeps longer: no alarm leaves a longer timer behind. */
+const LONGEST_SLEEP_MS = SECOND;
 /** The rows of `wakeups`, one per name. */
 export const WAKEUPS_TABLE = "platform_cloudflare_wakeups";
 
@@ -192,13 +194,30 @@ export default defineComponent({
     const slice = async (r: Running): Promise<void> => {
       const { storage } = objectOf(r);
       const cut = new AbortController();
-      // One timer per slice. A clock's sleep cannot be cancelled: after a short slice it fires later
-      // on a controller nobody listens to.
-      void clock.sleep(config.sliceMs).then(() =>
-        cut.abort(new Error(`platform-cloudflare: the slice deadline (${config.sliceMs} ms) passed; ask again for what remains`)),
-      );
+      const deadline = clock.now() + config.sliceMs;
+      let ended = false;
+      // The deadline's watcher sleeps a second at most: a clock's sleep cannot be cancelled, and a
+      // pending timer keeps the object from being evicted, so a slice leaves none longer behind.
+      void (async () => {
+        for (let left = config.sliceMs; !ended; left = deadline - clock.now()) {
+          if (left <= 0) {
+            cut.abort(new Error(`platform-cloudflare: the slice deadline (${config.sliceMs} ms) passed; ask again for what remains`));
+            return;
+          }
+          await clock.sleep(Math.min(left, LONGEST_SLEEP_MS));
+        }
+      })();
       const ctx = r.wakeup.derive((inner) => withAbortSignal(cut.signal, inner));
-      while (running === r && !cut.signal.aborted) {
+      try {
+        await runDue(r, storage, ctx, cut.signal);
+      } finally {
+        ended = true;
+      }
+    };
+
+    /** Runs the due requests whose handler is registered, one at a time, until none is due or `signal` aborts. */
+    const runDue = async (r: Running, storage: ObjectStorage, ctx: AppContext, signal: AbortSignal): Promise<void> => {
+      while (running === r && !signal.aborted) {
         const now = clock.now();
         const row = rows(storage).find((candidate) => candidate.time <= now && handlers.has(candidate.name));
         if (row === undefined) return;

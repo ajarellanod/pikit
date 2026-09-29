@@ -177,6 +177,24 @@ test("imports: node:* only when targets are exactly [\"server\"]; tests are exem
   expect(found).not.toContain("node:fs");
 });
 
+test("imports: a deployment component's commands.ts runs on the deploying machine, so it may import node:* on any target (S5)", async () => {
+  const index = `export async function up(): Promise<void> {}\n`;
+  const f = await fixture({ name: "deployment-sample", index });
+  f.writeManifest({ ...f.manifest(), targets: ["cloudflare"] });
+  writeFileSync(join(f.own, "commands.ts"), `import "node:child_process";\n`);
+  await generate(f.root);
+  expect((await validate(f.root)).problems).toEqual([]);
+
+  // Only that file, and only in a deployment component: its entrypoint still runs on the target.
+  f.append("index.ts", `import "node:path";`);
+  expect(await problems(f)).toContain(`index.ts imports "node:path", but targets are ["cloudflare"]`);
+  const other = await fixture();
+  other.writeManifest({ ...other.manifest(), targets: ["server", "cloudflare"] });
+  writeFileSync(join(other.own, "commands.ts"), `import "node:child_process";\n`);
+  await generate(other.root);
+  expect(await problems(other)).toContain(`commands.ts imports "node:child_process"`);
+});
+
 test("imports: test support (*.test-support.ts) is held like tests, and only tests may import it (S5)", async () => {
   const f = await fixture();
   f.writeManifest({ ...f.manifest(), targets: ["server", "cloudflare"] });
@@ -222,6 +240,33 @@ test("a component with no default export is not an app component: it provides an
 
   expect(f.manifest()).toMatchObject({ provides: [], requires: { capabilities: [] }, optional: { capabilities: [] } });
   expect(await problems(f)).toBe("");
+});
+
+test("apps: a half for the Worker's App is a named export, and the generated fields cover both halves (C1)", async () => {
+  const half = (name: string, body: string) => `export const ${name}: ComponentDefinition = { name: "${name}", setup(pikit) {${body}} };\n`;
+  const index =
+    `import type { ComponentDefinition } from "@pikit/core";\n` +
+    half("objectHalf", `pikit.use("agent.runtime"); pikit.useOptional("storage.kv"); pikit.provideKeyed("actor.inbox", "sample.message", {});`) +
+    half("workerHalf", `pikit.use("actor.mailbox"); pikit.use("storage.kv"); pikit.provideKeyed("http.route", "POST /sample", {});`) +
+    "export default objectHalf;\n";
+  const f = await fixture({ name: "channel-halves", index });
+  expect(f.manifest()).toMatchObject({ provides: ["actor.inbox"], requires: { capabilities: ["agent.runtime"] } });
+
+  f.writeManifest({ ...f.manifest(), apps: { worker: "workerHalf" } });
+  expect((await generate(f.root)).problems).toEqual([]);
+  expect(f.manifest()).toMatchObject({
+    provides: ["actor.inbox", "http.route"],
+    // Required by one half and optional in the other: required.
+    requires: { capabilities: ["agent.runtime", "actor.mailbox", "storage.kv"] },
+    optional: { capabilities: [] },
+    apps: { worker: "workerHalf" },
+  });
+  expect(await problems(f)).toBe("");
+
+  f.writeManifest({ ...f.manifest(), apps: { worker: "missingHalf" } });
+  expect(await problems(f)).toContain('has no export "missingHalf" made with defineComponent');
+  f.writeManifest({ ...f.manifest(), apps: { worker: "objectHalf", edge: "x" } as never });
+  expect(await problems(f)).toContain("component.json /apps/edge: is not a known field");
 });
 
 test("tools: replay is generated, and a tool without one fails (S10)", async () => {

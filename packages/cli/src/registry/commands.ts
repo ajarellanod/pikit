@@ -10,7 +10,7 @@ import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, readPreset } from "../project/registry-source.ts";
 import { checkCapabilities, checkDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
-import { describeSetup, loadComponent } from "./describe.ts";
+import { describeSetup, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
   buildIndex,
   COMPONENT_SCHEMA_FILE,
@@ -60,10 +60,18 @@ function describeTarget(manifest: Manifest | undefined): Target {
 }
 
 async function generatedFor(componentDir: string, name: string, manifest: Manifest | undefined): Promise<Generated> {
-  const component = await loadComponent(entryOf(componentDir, name));
+  const entry = entryOf(componentDir, name);
+  const component = await loadComponent(entry);
   // Not an app component (no setup): nothing to derive.
   if (component === undefined) return { provides: [], requires: [], optional: [] };
-  return describeSetup(component, describeTarget(manifest));
+  const target = describeTarget(manifest);
+  const own = await describeSetup(component, target);
+  // A component with a half for another App (C1): the manifest covers both halves.
+  const exports = Object.values(manifest?.apps ?? {});
+  if (exports.length === 0) return own;
+  const halves = [own];
+  for (const exported of exports) halves.push(await describeSetup(await loadExport(entry, exported), target));
+  return mergeGenerated(halves);
 }
 
 export interface Outcome {

@@ -1,0 +1,64 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "channel-telegram-webhook",
+  "version": "0.0.0",
+  "title": "Telegram by webhook: chat with your agent from the Telegram app, on Cloudflare",
+  "description": "Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.",
+  "targets": [
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "secrets",
+      "conversations.registry",
+      "agent.runtime",
+      "agent.submissions",
+      "storage.kv",
+      "wakeups",
+      "actor.inbox",
+      "actor.mailbox"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "outbound.queue"
+    ]
+  },
+  "provides": [
+    "http.route"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "TELEGRAM_BOT_TOKEN",
+      "secret": true,
+      "required": true,
+      "description": "The bot's token from @BotFather; `pikit configure` asks for it and checks it."
+    },
+    {
+      "name": "TELEGRAM_ALLOWED_USERS",
+      "secret": false,
+      "required": true,
+      "description": "Telegram user ids allowed to talk to the bot, separated by commas; `pikit configure` fills it when you message the bot."
+    },
+    {
+      "name": "TELEGRAM_WEBHOOK_SECRET",
+      "secret": true,
+      "required": true,
+      "description": "What Telegram sends with every update, so only Telegram reaches your agent; `pikit configure` generates it, and `pikit up` gives it to Telegram."
+    }
+  ]
+}

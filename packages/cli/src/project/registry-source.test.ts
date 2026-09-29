@@ -125,7 +125,10 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   expect(checkPresets(DEFAULT_REGISTRY)).toEqual([]);
   const r = openRegistry(DEFAULT_REGISTRY);
   expect(r.preset("telegram")).toEqual(r.preset("http", ["channel-telegram"]));
-  expect(r.slots("http")[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram"]);
+  expect(r.slots("http")[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram", "channel-telegram-webhook"]);
+  // A server project is not offered the webhook (it runs on cloudflare only), a Cloudflare one not the poller.
+  expect(r.slots("http", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram"]);
+  expect(r.slots("http", ["cloudflare"])[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram-webhook"]);
 });
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {

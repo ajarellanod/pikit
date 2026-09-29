@@ -85,9 +85,16 @@ async function chooseProject(parentDir: string): Promise<{ dir: string; name: st
   }
 }
 
-/** A base preset: aliases are answers to its questions, which `answerSlots` asks. One base is not a question. */
+/**
+ * A base preset: aliases are answers to its questions, which `answerSlots` asks. One base is not a
+ * question. Only presets whose components run on a new project's target: a Cloudflare preset is for
+ * `pikit new <dir> --target cloudflare`.
+ */
 async function choosePreset(registryPath: string): Promise<string> {
-  const bases = openRegistry(registryPath).presets().filter((preset) => preset.extends === undefined);
+  const registry = openRegistry(registryPath);
+  const runsHere = (preset: string) =>
+    registry.preset(preset).every((component) => NEW_PROJECT_TARGETS.every((target) => registry.manifest(component).targets.includes(target)));
+  const bases = registry.presets().filter((preset) => preset.extends === undefined && runsHere(preset.name));
   if (bases.length === 0) throw new CliError(`the registry ${registryPath} has no presets to choose from`);
   if (bases.length === 1) return (bases[0] as { name: string }).name;
   return await choose("Which preset do you start from?", bases.map((preset) => option(preset.name, preset.title)));

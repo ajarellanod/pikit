@@ -54,12 +54,15 @@ export interface ProjectManifest {
   components: Record<string, InstalledComponent>;
 }
 
-/** A new project's targets (M1 has one; `--target` arrives with the cloudflare target). */
+/** A new project's targets unless `pikit new --target` says otherwise. */
 export const NEW_PROJECT_TARGETS: readonly string[] = ["server"];
 
-/** A new project's manifest; `registry` is a recorded location (`recordedLocation`), `kit` the vendored kit's commit. */
-export function emptyManifest(registry: string = BUILTIN_REGISTRY, kit?: string): ProjectManifest {
-  return { version: 2, ...(kit !== undefined && { kit: { commit: kit } }), targets: [...NEW_PROJECT_TARGETS], registries: { default: registry }, components: {} };
+/**
+ * A new project's manifest; `registry` is a recorded location (`recordedLocation`), `kit` the vendored
+ * kit's commit, `targets` where it runs (`pikit new --target`).
+ */
+export function emptyManifest(registry: string = BUILTIN_REGISTRY, kit?: string, targets: readonly string[] = NEW_PROJECT_TARGETS): ProjectManifest {
+  return { version: 2, ...(kit !== undefined && { kit: { commit: kit } }), targets: [...targets], registries: { default: registry }, components: {} };
 }
 
 export function readProjectManifest(projectDir: string): ProjectManifest {

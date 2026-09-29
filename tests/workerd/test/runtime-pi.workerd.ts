@@ -1,6 +1,7 @@
 /**
  * runtime-pi on Cloudflare: a conversation object's App as a Cloudflare project composes it, in a real
- * SQLite-backed Durable Object (`ConversationDouble`): sessions on `sessions-sql` over `storage-do`,
+ * SQLite-backed Durable Object of deployment-cloudflare's `Conversation` class (`PlatformConversation`,
+ * `src/platform.ts`): sessions on `sessions-sql` over `storage-do`,
  * `platform-cloudflare` for `actor.inbox` and `wakeups`, `runtime-pi` driving its runs in wakeups, the
  * scripted model, and a channel's object half that handles its messages and uses `wakeups` itself.
  * The Worker's App sends a message by RPC; the run is driven in the object's real alarm, and answers.
@@ -19,10 +20,10 @@ import platformCloudflare from "../../../registry/components/platform-cloudflare
 import runtimePi, { DRIVE } from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import sessionsSql from "../../../registry/components/sessions-sql/files/src/pikit/sessions-sql/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
-import { composeObjects, stopObjects } from "../src/worker.ts";
-import { workerEnv } from "./host.ts";
+import { composeObjects, PLATFORM_BINDING } from "../src/platform.ts";
+import { resetObjects, workerEnv } from "./host.ts";
 
-afterEach(() => stopObjects());
+afterEach(() => resetObjects());
 
 /** The scripted agent and model: each run answers `answer: <message>`. */
 function model() {
@@ -66,7 +67,7 @@ function channelActor(answers: (string | undefined)[], drives: string[]) {
 it("runtime-pi runs on platform-cloudflare's wakeups in a real object: a message sent from the Worker is answered in the object's alarm", async () => {
   const answers: (string | undefined)[] = [];
   const drives: string[] = [];
-  composeObjects({ components: [storageDo, sessionsSql, platformCloudflare, ...model(), runtimePi, channelActor(answers, drives)] });
+  composeObjects([storageDo, sessionsSql, platformCloudflare, ...model(), runtimePi, channelActor(answers, drives)]);
 
   let mailbox: ActorMailbox | undefined;
   const channel = defineComponent({
@@ -76,7 +77,7 @@ it("runtime-pi runs on platform-cloudflare's wakeups in a real object: a message
       return { start: () => void (mailbox = handle.get()) };
     },
   });
-  const worker = await defineApp({ components: [platformCloudflare, channel], logger: silentLogger }).create();
+  const worker = await defineApp({ components: [platformCloudflare, channel], config: { "platform-cloudflare": { binding: PLATFORM_BINDING } }, logger: silentLogger }).create();
   await worker.start(withContextValue(WORKERS_HOST, { env: workerEnv }, BACKGROUND_CONTEXT));
   try {
     const key = `test:${crypto.randomUUID()}`;
@@ -85,7 +86,7 @@ it("runtime-pi runs on platform-cloudflare's wakeups in a real object: a message
     expect(drives).toContain(DRIVE);
     await vi.waitFor(() => expect(answers).toEqual(["answer: hello"]), { timeout: 10_000 });
     // The object's alarm ran the drive handler, which resolved: its request is done.
-    const object = env.CONVERSATION.get(env.CONVERSATION.idFromName(key));
+    const object = env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.idFromName(key));
     await vi.waitFor(
       () =>
         runInDurableObject(object, async (_instance, state) => {

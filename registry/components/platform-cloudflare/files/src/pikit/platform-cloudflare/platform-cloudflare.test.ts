@@ -359,3 +359,22 @@ test("it refuses to start off Cloudflare, in a Worker without the namespace bind
 test("sliceMs stays under the platform's 15-minute cut of an alarm", () => {
   expect(() => defineApp({ components: [platformCloudflare], config: { "platform-cloudflare": { sliceMs: 15 * 60 * 1_000 } } })).toThrow("invalid config");
 });
+
+test("a slice leaves no timer longer than a second: a pending timer keeps an object from being evicted", async () => {
+  const manual = createManualClock();
+  const sleeps: number[] = [];
+  const clock: Clock = { now: () => manual.now(), sleep: (ms) => (sleeps.push(ms), manual.sleep(ms)) };
+  const object = simulatedObject(fakeSql());
+  let cut = false;
+  const waitForCut: WakeupHandler = (ctx) => new Promise<void>((resolve) => ctx.abortSignal?.addEventListener("abort", () => void ((cut = true), resolve()), { once: true }));
+  const { app, wakeups, ctx } = await openObject(object, clock, { long: waitForCut }, { sliceMs: 5 * 60 * 1_000 });
+  try {
+    await wakeups.at("long", manual.now(), ctx);
+    await manual.advance(0);
+    for (let i = 0; i < 5 * 60 && !cut; i++) await manual.advance(1_000);
+    expect(cut).toBe(true);
+    expect(Math.max(...sleeps)).toBeLessThanOrEqual(1_000);
+  } finally {
+    await app.stop();
+  }
+});

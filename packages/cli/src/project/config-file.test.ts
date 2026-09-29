@@ -4,6 +4,7 @@
  */
 
 import { expect, test } from "bun:test";
+import { CLOUDFLARE_CONFIG } from "../commands/starter.ts";
 import { addComponent, boundNames, identifierFor, removeComponent, removeConfigEntry, setConfigEntry } from "./config-file.ts";
 
 const BASE = `import { defineApp } from "@pikit/core";
@@ -68,6 +69,23 @@ test("unrecognised shapes are errors that say what to change", () => {
 
   const shared = addComponent(BASE, { name: "channel-http" }).replace("    agents,\n    channelHttp,\n", "    agents, channelHttp,\n");
   expect(() => removeComponent(shared, "channel-http")).toThrow(/shares its line/);
+});
+
+test("with two Apps (a Cloudflare project, SPEC C1), add and remove edit the default export's list and config, never the Worker's", () => {
+  let text = addComponent(CLOUDFLARE_CONFIG, { name: "storage-do" });
+  text = setConfigEntry(text, "storage-do", "{}");
+  expect(text).toContain("export default defineApp({\n  components: [\n    agents,\n    storageDo,\n  ],");
+  expect(text).toContain('export const config = {\n  "storage-do": {},\n};');
+  expect(text).toContain("export const worker = defineApp({\n  components: [\n  ],\n  config: workerConfig,\n});");
+  expect(removeConfigEntry(removeComponent(text, "storage-do"), "storage-do")).toBe(CLOUDFLARE_CONFIG);
+
+  // A component listed in the Worker by hand is still used there: removing it is refused, not half done.
+  const inWorker = text.replace("  components: [\n  ],\n  config: workerConfig", "  components: [\n    storageDo,\n  ],\n  config: workerConfig");
+  expect(() => removeComponent(inWorker, "storage-do")).toThrow(/still used outside the components list/);
+  // Several lists and no default export: nothing to choose, said so.
+  expect(() => addComponent(CLOUDFLARE_CONFIG.replace("export default defineApp", "export const object = defineApp"), { name: "storage-do" })).toThrow(
+    /exactly one `components: \[` list in its default export, found 2/,
+  );
 });
 
 test("an entry written over several lines is removed whole", () => {

@@ -1,0 +1,30 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "deployment-cloudflare",
+  "version": "0.0.0",
+  "description": "Runs a pikit project on Cloudflare: the Worker and its Durable Objects running the project's two Apps, wrangler.jsonc, and the commands `pikit up | down | logs | status | dev` delegate to.",
+  "targets": [
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    },
+    {
+      "source": "files/wrangler.jsonc",
+      "target": "wrangler.jsonc"
+    }
+  ]
+}

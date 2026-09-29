@@ -18,6 +18,14 @@
       ],
       "path": "components/channel-telegram"
     },
+    "channel-telegram-webhook": {
+      "version": "0.0.0",
+      "description": "Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/channel-telegram-webhook"
+    },
     "conversations-file": {
       "version": "0.0.0",
       "description": "The conversation registry in one JSON file: which Pi session each conversation is in now.",
@@ -43,6 +51,14 @@
       ],
       "path": "components/credentials-file"
     },
+    "deployment-cloudflare": {
+      "version": "0.0.0",
+      "description": "Runs a pikit project on Cloudflare: the Worker and its Durable Objects running the project's two Apps, wrangler.jsonc, and the commands `pikit up | down | logs | status | dev` delegate to.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/deployment-cloudflare"
+    },
     "deployment-docker": {
       "version": "0.0.0",
       "description": "Runs a pikit project in Docker on a server: the image, the container, the process entrypoint, its logs, and the commands `pikit up | down | restart | logs | status` delegate to.",
@@ -50,6 +66,14 @@
         "server"
       ],
       "path": "components/deployment-docker"
+    },
+    "execution-do": {
+      "version": "0.0.0",
+      "description": "The agent's workspace and shell inside its Durable Object, on Cloudflare: files in the object's SQL, a bash without processes, git with fenced pushes, and node in QuickJS.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/execution-do"
     },
     "execution-local": {
       "version": "0.0.0",

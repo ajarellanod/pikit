@@ -1,6 +1,6 @@
 /**
  * Runs a conformance case inside a fresh SQLite-backed Durable Object, with that object in
- * `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint will put it: the Worker's `env`, the
+ * `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint puts it: the Worker's `env`, the
  * object's id and storage, and hooks for its alarm and RPC (recorded, never called here).
  *
  * The suites build their fixtures in a factory the case calls, so a fixture reads the object it runs
@@ -10,10 +10,11 @@
  *     it(`${c.group}: ${c.name}`, () => inObject(c));
  */
 
-import { runInDurableObject } from "cloudflare:test";
+import { abortAllDurableObjects, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import type { WorkersHost } from "@pikit/contracts";
 import type { ConformanceCase } from "@pikit/core/testing";
+import { forgetComposition } from "../src/platform.ts";
 
 /** The Worker's env as the entrypoint puts it in `WORKERS_HOST` (typed by `wrangler types`). */
 export const workerEnv: WorkersHost["env"] = { ...env };
@@ -45,4 +46,15 @@ export function inObject(c: ConformanceCase | ((host: WorkersHost) => Promise<vo
       current = undefined;
     }
   });
+}
+
+/**
+ * After a test of `PlatformConversation` (`src/platform.ts`): forgets what its objects were composed of
+ * and resets every object's instance (their storage stays), so the next event starts a new instance
+ * that composes what is composed next. Resets, not evictions: an eviction waits for the object's last
+ * reference to go, and a stub whose RPC rejected keeps one.
+ */
+export async function resetObjects(): Promise<void> {
+  forgetComposition();
+  await abortAllDurableObjects();
 }

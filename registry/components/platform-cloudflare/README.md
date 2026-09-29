@@ -138,9 +138,10 @@ Copied with the component, they run in your project under `bun test`, over doubl
 Object (its alarm on the app's clock, its RPC, its SQL in `node:sqlite`): the `wakeups` conformance
 suite (with the slice deadline and requests that survive a restart), the `actor.mailbox` and
 `actor.inbox` suite from a Worker's App to the objects (whose actor also sends and wakes itself), the
-lifecycle suite, and the alarm set again, a slice, the backoff rows, a request waiting for its
-handler, deliveries to `actor.inbox`, the object's own mailbox and what it refuses at start. pikit
-also runs both suites in workerd on real Durable Objects, and there the real alarm, an eviction, the
-slice and the backoff (`tests/workerd`); and, beside the component, an object's App with `runtime-pi`
-on these wakeups and an actor that handles and wakes, which answers a delivered message in an alarm
-(here and in workerd).
+lifecycle suite, and the alarm set again, a slice (which leaves no timer longer than a second), the
+backoff rows, a request waiting for its handler, deliveries to `actor.inbox`, the object's own mailbox
+and what it refuses at start. pikit also runs both suites in workerd, by RPC and alarm to
+deployment-cloudflare's real `Conversation` class, and there the real alarm, an eviction, the slice
+and the backoff (`tests/workerd`). Beside the component (`object-app.test.ts`), object Apps with
+`runtime-pi` on these wakeups: with an actor that handles and wakes (in workerd too), and a Telegram
+project's whole object App with `channel-telegram-webhook`'s object half, which answers an update.
