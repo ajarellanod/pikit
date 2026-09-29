@@ -1,5 +1,5 @@
 /**
- * A JSON-lines `Logger` (SPEC §4.5 `logger`) for a container: one JSON object per line, so
+ * A JSON-lines `Logger` for a container: one JSON object per line, so
  * `docker compose logs` and `pikit logs` can be filtered by level or field (`jq`, a log shipper).
  *
  *   {"time":"2026-01-01T00:00:00.000Z","level":"info","msg":"pikit: started","components":15}
@@ -8,7 +8,7 @@
  * - A field is data, never interpolated into the message. An `Error` keeps its name, message,
  *   stack and cause, which `JSON.stringify` alone would drop.
  * - A field whose name looks like a secret (`token`, `accessToken`, `authorization`, `apiKey`,
- *   `password`…) is written as `"[redacted]"`, at any depth (SPEC §13: logs redact by name). Names
+ *   `password`…) is written as `"[redacted]"`, at any depth (logs redact by name). Names
  *   are compared word by word, so counts such as `totalTokens` or `tokenCount` stay readable. This
  *   is a net, not a guarantee: never put a secret's value in a message or under an innocent name.
  * - Logging never throws. A field that cannot be serialized (a cycle, a `BigInt`, a throwing

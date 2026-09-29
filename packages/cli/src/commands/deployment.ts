@@ -1,10 +1,13 @@
 /**
- * `pikit up | down | restart | logs | status` and `pikit dev` (SPEC §9.1, §11).
+ * `pikit up | down | restart | logs | status` and `pikit dev`.
  *
  * The CLI only delegates `[decision]`: `up`, `down`, `restart`, `logs` and `status` are the functions
  * of the same names that the installed `deployment-*` component exports from
  * `src/pikit/<name>/index.ts`. The CLI holds no Docker or systemd knowledge; changing how a project
  * is deployed is editing or swapping that component.
+ * That component's `up` also runs the installed components' deploy hooks (`hooks.beforeDeploy` before
+ * it builds, `hooks.afterDeploy` once the new version answers, as `pikit.json` records them); the CLI
+ * runs only their `hooks.doctor`, through `pikit doctor`, first.
  *
  * `pikit dev` runs the app locally: the deployment component's `dev` when it exports one
  * (`deployment-cloudflare`: `wrangler dev`), or else its process entrypoint, `src/pikit/<name>/main.ts`,

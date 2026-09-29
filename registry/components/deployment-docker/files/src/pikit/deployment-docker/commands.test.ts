@@ -3,8 +3,14 @@
  * one would run, and a fake `fetch` answers the probes. `spawnRunner` itself runs Bun, not Docker.
  */
 
-import { expect, test } from "bun:test";
-import { down, exec, logs, parseContainers, restart, type Runner, spawnRunner, status, up } from "./commands.ts";
+import { afterAll, expect, test } from "bun:test";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { beforeDeployHooks, down, exec, logs, parseContainers, restart, type Runner, spawnRunner, status, up } from "./commands.ts";
+
+const dirs: string[] = [];
+afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 function recorder(stdout = "", code = 0) {
   const calls: { command: readonly string[]; cwd: string; capture: boolean }[] = [];
@@ -21,6 +27,54 @@ test("up builds, starts detached and waits for the healthcheck", async () => {
   await up({ cwd: "/srv/my-agent", run });
 
   expect(calls).toEqual([{ command: ["docker", "compose", "up", "--detach", "--build", "--wait"], cwd: "/srv/my-agent", capture: false }]);
+});
+
+/**
+ * A project whose `tool-a` has a before-deploy hook, as `pikit add` records it in pikit.json: it writes
+ * `seed.ts` in its own directory from its config and `.env`, or reports `TOOL_A_PROBLEM` when set.
+ */
+function projectWithBeforeHook(env: string): string {
+  const cwd = mkdtempSync(join(tmpdir(), "pikit-docker-commands-"));
+  dirs.push(cwd);
+  writeFileSync(join(cwd, ".env"), env);
+  const components = { "tool-a": { hooks: { beforeDeploy: "src/pikit/tool-a/deploy.ts" } }, "deployment-docker": {} };
+  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 2, targets: ["server"], registries: {}, components }));
+  writeFileSync(join(cwd, "pikit.config.ts"), `export default { config: { "tool-a": { server: "wiki" } } };\n`);
+  mkdirSync(join(cwd, "src", "pikit", "tool-a"), { recursive: true });
+  writeFileSync(
+    join(cwd, "src", "pikit", "tool-a", "deploy.ts"),
+    `export async function beforeDeploy(io) {
+  const problem = io.get("TOOL_A_PROBLEM");
+  if (problem !== undefined) return [problem];
+  io.say(io.write("seed.ts", \`export const seed = \${JSON.stringify({ ...io.config, token: io.get("HOOK_TEST_TOKEN") })};\\n\`) ? "written" : "unchanged");
+  return [];
+}
+`,
+  );
+  return cwd;
+}
+
+test("up runs each component's beforeDeploy before it builds: its own files are written, once, then the image is built", async () => {
+  const cwd = projectWithBeforeHook("HOOK_TEST_TOKEN=t\n");
+  expect(beforeDeployHooks(cwd)).toEqual([{ component: "tool-a", file: "src/pikit/tool-a/deploy.ts" }]);
+  const said: string[] = [];
+  let seedWhenBuilt = "";
+  const run: Runner = async () => {
+    seedWhenBuilt = readFileSync(join(cwd, "src", "pikit", "tool-a", "seed.ts"), "utf8");
+    return { code: 0, stdout: "" };
+  };
+  await up({ cwd, run, say: (line) => said.push(line) });
+  await up({ cwd, run, say: (line) => said.push(line) });
+  expect(seedWhenBuilt).toBe('export const seed = {"server":"wiki","token":"t"};\n');
+  expect(said).toEqual(["written", "unchanged"]);
+});
+
+test("a beforeDeploy problem stops up before the build, naming the component", async () => {
+  const { calls, run } = recorder();
+  await expect(up({ cwd: projectWithBeforeHook("TOOL_A_PROBLEM=the MCP server is down\n"), run, say: () => {} })).rejects.toThrow(
+    "what runs before a deploy failed, so nothing was built:\n  tool-a: the MCP server is down\n",
+  );
+  expect(calls).toEqual([]);
 });
 
 test("down keeps the .pikit volume; restart restarts the same containers", async () => {

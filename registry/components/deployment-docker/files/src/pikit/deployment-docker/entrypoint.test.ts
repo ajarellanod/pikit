@@ -1,5 +1,5 @@
 /**
- * The entrypoint in a real child process (SPEC §9.1): exit codes, signals and deadlines can only be
+ * The entrypoint in a real child process (SPEC K2): exit codes, signals and deadlines can only be
  * seen from outside the process. Each test runs `entrypoint-fixture.ts` (or `main.ts` in a
  * throwaway project) and reads its JSON-lines logs.
  */

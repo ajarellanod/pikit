@@ -1,5 +1,5 @@
 /**
- * deployment-docker: runs a pikit project in Docker on a server (SPEC §9.1, §11).
+ * deployment-docker: runs a pikit project in Docker on a server.
  *
  * It is not an app component: it runs the app rather than running inside it, so it is not listed in
  * `pikit.config.ts`. It owns three things:

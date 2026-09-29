@@ -171,7 +171,7 @@ project's `node_modules/.bin/wrangler` in the project's directory, without a she
 | Function | Runs |
 |---|---|
 | `login()` | Nothing with a `CLOUDFLARE_API_TOKEN`; else `wrangler whoami --json`, and at a terminal `wrangler login` if it is not logged in. `up`, `down`, `logs` and `status` run it first |
-| `up({ url })` | `wrangler deploy --secrets-file <.env's secrets>`, then `GET /health` every 2 s until it answers ok from the version it deployed (3 min at most), then the components' `afterDeploy` hooks. Resolves with `{ version, url }` |
+| `up({ url })` | The components' `beforeDeploy` hooks, then `wrangler deploy --secrets-file <.env's secrets>`, then `GET /health` every 2 s until it answers ok from the version it deployed (3 min at most), then the components' `afterDeploy` hooks. Resolves with `{ version, url }` |
 | `down()` | `wrangler delete`, only at a terminal (see below) |
 | `logs()` | `wrangler tail`: live, until Ctrl-C |
 | `status({ url })` | `wrangler deployments list --json`, plus `GET /health` |
@@ -193,6 +193,16 @@ back is yours. `/health` is asked at the `workers.dev` URL wrangler reports; pas
 domain. `up` notes the version and URL in `.pikit/deployment-cloudflare.json` for `status`.
 
 A deploy cuts the alarms in progress; Cloudflare retries them, and runs resume (C4).
+
+**Before the deploy: the components' `beforeDeploy` hooks.** Some components write what the bundle
+must carry (`tool-mcp` writes `seed.ts`, its MCP servers' tools, so that a new conversation's object
+starts without reaching them). So, once logged in and before wrangler bundles anything, `up` runs each
+installed component's `beforeDeploy`, declared and recorded as `afterDeploy` below
+(`"hooks": { "beforeDeploy": "deploy.ts" }`, `deployHooks(cwd, "beforeDeploy")`). Its `io` has
+`config`, `get` and `say` as below, and `write(file, text)`, which writes a file of the component's own
+`src/pikit/<name>/` (nothing else) only when its text changes, and says whether it did
+(`BeforeDeployIO` in `commands.ts`). A problem, or a hook that throws, fails `up` with every hook's
+problems, and nothing is deployed. `dev` runs none: it is not a deploy.
 
 **After the deploy: the components' hooks (C8).** Some components register the Worker with
 something outside it (`channel-telegram-webhook` tells Telegram where to post), and that must reach
@@ -247,8 +257,9 @@ The tests are copied with the component and run in your project:
   App starts, what `WORKERS_HOST` carries, alarms and deliveries, a failed start and a late one with a
   rollback that hangs (both deadlines hold), the Worker's routes and `/health`.
 - `commands.test.ts`: the exact `wrangler` argv of every command, the secrets file, the wait for the
-  new version, the components' hooks run after it (with their URL, config and secrets, their problems
-  failing `up`, none for a version that does not answer), the rollback and `status`, the login each
+  new version, the components' hooks run before it (writing only their own files, once; a problem
+  deploying nothing) and after it (with their URL, config and secrets, their problems failing `up`,
+  none for a version that does not answer), the rollback and `status`, the login each
   command checks first (a token, `whoami`, `wrangler login` offered at a terminal, what to do without
   one, no Node.js), and a first deploy without a `workers.dev` subdomain, with a fake runner and a
   fake `fetch`. No wrangler, no account.
@@ -260,8 +271,10 @@ In the pikit repository, the workerd lane (`tests/workerd/test/deployment-cloudf
 the entrypoint on real SQLite-backed Durable Objects: `/health`, `WORKERS_HOST`, `deliver` and the
 alarm reaching their handlers, an evicted object starting again, and a failed start resetting it. And
 `packages/cli/src/deploy-hooks.test.ts` runs `up` with a fake wrangler against
-`channel-telegram-webhook`'s fake Telegram: its webhook registered only once the new version answers.
+`channel-telegram-webhook`'s fake Telegram: its webhook registered only once the new version answers;
+and against a fake MCP server, `tool-mcp`'s seed written before wrangler bundles, and a server that is
+down stopping `up` before it.
 
 `component.json` is generated, not written by hand. With no `setup`, it provides and requires
 nothing. Its `files` maps `files/src` to `src` and names `wrangler.jsonc`; its `devDependencies`,
-written by hand, name `wrangler` (SPEC §10.2).
+written by hand, name `wrangler`.

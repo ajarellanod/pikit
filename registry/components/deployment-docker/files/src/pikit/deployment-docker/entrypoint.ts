@@ -1,5 +1,5 @@
 /**
- * The process entrypoint of the server target (SPEC §9.1). The core never times out and never
+ * The process entrypoint of the server target (SPEC K2). The core never times out and never
  * restarts on its own; this file passes the deadlines, and Docker restarts the process.
  *
  * - `start(ctx)` with a deadline. If it rejects, exit 1: the container restarts (compose's
@@ -7,7 +7,7 @@
  * - On SIGTERM (`docker stop`, `docker compose down`) or SIGINT (Ctrl-C), `stop(ctx)` with a
  *   deadline shorter than compose's `stop_grace_period`, so the process exits by itself before
  *   Docker sends SIGKILL. Exit 0 if every component stopped, 1 if one failed or was abandoned.
- * - A signal during the start cancels it (SPEC §4.6) and counts as a stop.
+ * - A signal during the start cancels it and counts as a stop.
  * - A second signal during the stop exits at once, with 1: whoever sent it has stopped waiting.
  *
  * The app is recomposed from `pikit.config.ts`'s components and config with this deployment's

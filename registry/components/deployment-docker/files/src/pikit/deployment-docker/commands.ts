@@ -1,12 +1,20 @@
 /**
- * `pikit up | down | restart | logs | status` for Docker (SPEC §11): plain functions the CLI
+ * `pikit up | down | restart | logs | status` for Docker: plain functions the CLI
  * delegates to, each one `docker compose …` in the project's directory. They run on the machine
  * that hosts the containers, never inside the app.
+ *
+ * Before it builds, `up` runs the installed components' `beforeDeploy` hooks (tool-mcp writes the seed
+ * the image then carries): each one is named in its `component.json`'s `hooks`, and `pikit add`
+ * records its file in `pikit.json`.
  *
  * Every command goes through a `Runner`, so tests check the exact `docker` argv without Docker.
  */
 
 import { spawn } from "node:child_process";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { parseEnv } from "node:util";
 
 export interface RunResult {
   code: number;
@@ -27,11 +35,94 @@ export interface CommandOptions {
   run?: Runner;
 }
 
-/** Builds the image and starts the containers, then waits until their healthcheck passes. */
-export async function up(options: CommandOptions = {}): Promise<void> {
+export interface UpOptions extends CommandOptions {
+  /** Where the components' `beforeDeploy` hooks' lines go. Default: `console.log`. */
+  say?: (line: string) => void;
+}
+
+/**
+ * Runs the components' `beforeDeploy` hooks, then builds the image and starts the containers, and
+ * waits until their healthcheck passes. A hook's problem stops it before the build.
+ */
+export async function up(options: UpOptions = {}): Promise<void> {
+  await beforeDeploy(options.cwd ?? process.cwd(), options.say ?? ((line) => console.log(line)));
   // `--wait` makes `up` fail when the app never becomes healthy, instead of reporting success for
   // a container that is crash-looping.
   await compose(["up", "--detach", "--build", "--wait"], options);
+}
+
+/**
+ * What a component's `beforeDeploy` receives (`component.json`'s `hooks.beforeDeploy` names its file).
+ * It resolves with its problems, one line each: empty when done.
+ */
+export interface BeforeDeployIO {
+  /** The component's config in `pikit.config.ts` (its default export's). */
+  config: Readonly<Record<string, unknown>>;
+  /** A variable exported in the environment, or else in `.env`. */
+  get(name: string): string | undefined;
+  /**
+   * Writes `text` to `file`, a file name of the component's own `src/pikit/<name>/`, unless it already
+   * holds it; resolves whether it changed. What it writes is what the image takes.
+   */
+  write(file: string, text: string): boolean;
+  say(line: string): void;
+}
+
+/** The installed components' `beforeDeploy` hooks (project-relative files), in `pikit.json`'s order. */
+export function beforeDeployHooks(cwd: string): { component: string; file: string }[] {
+  const path = join(cwd, "pikit.json");
+  if (!existsSync(path)) return [];
+  const { components } = JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, { hooks?: { beforeDeploy?: unknown } }> };
+  return Object.entries(components ?? {}).flatMap(([component, installed]) => {
+    const file = installed.hooks?.beforeDeploy;
+    return typeof file === "string" ? [{ component, file }] : [];
+  });
+}
+
+/** Runs every hook, then fails with all their problems: nothing is built. */
+async function beforeDeploy(cwd: string, say: (line: string) => void): Promise<void> {
+  const hooks = beforeDeployHooks(cwd);
+  if (hooks.length === 0) return;
+  const configPath = join(cwd, "pikit.config.ts");
+  const app = existsSync(configPath) ? ((await import(pathToFileURL(configPath).href)) as { default?: { config?: unknown } }).default : undefined;
+  const config = typeof app?.config === "object" && app.config !== null ? (app.config as Record<string, unknown>) : {};
+  const envPath = join(cwd, ".env");
+  const env = existsSync(envPath) ? parseEnv(readFileSync(envPath, "utf8")) : {};
+  const get = (name: string): string | undefined => process.env[name] || env[name] || undefined;
+  const problems: string[] = [];
+  for (const hook of hooks) {
+    try {
+      const module = (await import(pathToFileURL(join(cwd, hook.file)).href)) as { beforeDeploy?: unknown };
+      if (typeof module.beforeDeploy !== "function") {
+        problems.push(`${hook.component}: ${hook.file} does not export beforeDeploy`);
+        continue;
+      }
+      const own = config[hook.component];
+      const io: BeforeDeployIO = {
+        config: typeof own === "object" && own !== null ? (own as Record<string, unknown>) : {},
+        get,
+        write: (file, text) => writeOwnFile(cwd, hook.component, file, text),
+        say,
+      };
+      const found = (await (module.beforeDeploy as (io: BeforeDeployIO) => Promise<unknown>)(io)) ?? [];
+      if (!Array.isArray(found)) throw new Error("beforeDeploy did not resolve with a list of problems");
+      for (const problem of found) problems.push(`${hook.component}: ${String(problem)}`);
+    } catch (error) {
+      problems.push(`${hook.component}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`what runs before a deploy failed, so nothing was built:\n  ${problems.join("\n  ")}\nFix it, then \`pikit up\` again`);
+  }
+}
+
+/** `beforeDeploy`'s `write`: only a file of the component's own directory, and only when its text changes. */
+function writeOwnFile(cwd: string, component: string, file: string, text: string): boolean {
+  if (!/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/.test(file)) throw new Error(`beforeDeploy may write only a file of src/pikit/${component}/, not "${file}"`);
+  const path = join(cwd, "src", "pikit", component, file);
+  if (existsSync(path) && readFileSync(path, "utf8") === text) return false;
+  writeFileSync(path, text);
+  return true;
 }
 
 /**
@@ -82,7 +173,7 @@ export interface ExecOptions extends CommandOptions {
 /**
  * Runs a one-off command where the app runs, and resolves with its exit code: the app's image
  * (rebuilt first when the source changed), its `.env` and its `.pikit/` volume. `pikit configure`
- * logs in to a model provider this way, so the tokens land in the volume the app reads (SPEC §11),
+ * logs in to a model provider this way, so the tokens land in the volume the app reads,
  * and `pikit up` checks there that the app has credentials.
  *
  * `docker compose run --rm` starts a separate, short-lived container of the same service: it
