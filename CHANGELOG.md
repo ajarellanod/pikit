@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/provider-openrouter: new. OpenRouter's models for your agents, named
+  `openrouter/<vendor>/<model>` (`openrouter/z-ai/glm-5.3-flash`), with `OPENROUTER_API_KEY` or a key
+  in `model.credentials`; targets `server` and `cloudflare`. Your OpenRouter account's guardrails
+  may refuse some models at their first request.
 - adapter: `agentTool(tool, { replay })` in `@pikit/pi-adapter/tools`: the tool `toolComponent`
   provides, without the component, for a `defineComponent` of your own that needs config or a
   capability (a secret) and names itself (`tool-websearch-brave` provides `websearch`).
