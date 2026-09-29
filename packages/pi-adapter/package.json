@@ -9,6 +9,7 @@
     "./extensions": "./src/extensions/index.ts",
     "./node": "./src/node/index.ts",
     "./providers/anthropic": "./src/providers/anthropic.ts",
+    "./providers/openrouter": "./src/providers/openrouter.ts",
     "./tools": "./src/tools/index.ts"
   },
   "files": [

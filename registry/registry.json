@@ -85,6 +85,15 @@
       ],
       "path": "components/provider-anthropic"
     },
+    "provider-openrouter": {
+      "version": "0.0.0",
+      "description": "The models OpenRouter serves, for your agents. An agent names one as `openrouter/<vendor>/<model>`, for example `openrouter/z-ai/glm-5.3-flash`.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/provider-openrouter"
+    },
     "router-basic": {
       "version": "0.0.0",
       "description": "Every message goes to one agent: `defaultAgent`.",
@@ -178,6 +187,15 @@
       ],
       "path": "components/tool-edit"
     },
+    "tool-fetch": {
+      "version": "0.0.0",
+      "description": "The `fetch` tool, for the agents that name it: one HTTP(S) request to a web page or an API, with HTML as readable text and links, JSON pretty-printed, and binary content refused.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-fetch"
+    },
     "tool-read": {
       "version": "0.0.0",
       "description": "Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.",
@@ -186,6 +204,15 @@
         "cloudflare"
       ],
       "path": "components/tool-read"
+    },
+    "tool-websearch-brave": {
+      "version": "0.0.0",
+      "description": "The `websearch` tool, for the agents that name it: searches the web with the Brave Search API, whose key the model never sees.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-websearch-brave"
     },
     "tool-write": {
       "version": "0.0.0",

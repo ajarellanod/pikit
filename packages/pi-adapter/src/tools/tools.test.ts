@@ -13,7 +13,7 @@ import { Type } from "@earendil-works/pi-ai";
 import { type Context, defineApp, defineComponent, silentLogger, withCancel } from "@pikit/core";
 import type { AgentTool } from "@pikit/contracts";
 import { defineTool } from "../extensions/index.ts";
-import { bindTool, createBashTool, createReadTool, createWriteTool, toolComponent } from "./index.ts";
+import { agentTool, bindTool, createBashTool, createReadTool, createWriteTool, toolComponent } from "./index.ts";
 
 const invocation: AgentHarnessToolInvocation = {
   invocationId: "i1",
@@ -92,6 +92,37 @@ test("toolComponent: a tool in Pi's shape, provided as agent.tool under its name
   expect(calls).toEqual([{ toolCallId: "c1", params: { query: "pikit" }, signal: run.abortSignal, context: run }]);
   expect(updates).toEqual([{ content: [{ type: "text", text: "searching" }], details: undefined }]);
   cancel();
+  await app.stop();
+});
+
+test("agentTool: the same tool for a component of your own, which names itself and uses a capability", async () => {
+  const secrets = defineComponent({ name: "secrets-test", setup: (pikit) => pikit.provide("secrets", { get: async () => "s3cret" }) });
+  const search = defineComponent({
+    name: "tool-web-search-brave",
+    setup(pikit) {
+      const store = pikit.use("secrets");
+      const tool = agentTool(
+        {
+          name: "web_search",
+          label: "Web search",
+          description: "Searches the web",
+          parameters: Type.Object({ query: Type.String() }),
+          async execute(_toolCallId, params) {
+            const key = await store.get().get("KEY");
+            return { content: [{ type: "text", text: `${params.query} with a key of ${key?.length}` }], details: undefined };
+          },
+        },
+        { replay: "never" },
+      );
+      pikit.provideKeyed("agent.tool", tool.name, tool);
+    },
+  });
+  const { app, tools } = await toolsOf(secrets, search);
+
+  expect(app.describe().components.find((c) => c.name === "tool-web-search-brave")).toMatchObject({ provides: ["agent.tool"], requires: ["secrets"] });
+  const tool = tools.get("web_search") as AgentHarnessTool<undefined>;
+  expect([tool.name, tool.replay]).toEqual(["web_search", "never"]);
+  expect(textOf(await tool.execute("c1", { query: "pikit" }, () => {}, undefined, invocation, BACKGROUND_CONTEXT))).toBe("pikit with a key of 6");
   await app.stop();
 });
 

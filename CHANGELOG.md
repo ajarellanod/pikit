@@ -7,6 +7,22 @@ line names its area (AGENTS.md, "Git and docs").
 
 - cli: `pikit add` and `pikit new` also offer the provider of a capability a component requires when the catalogue marks it `offer`: `pikit add conversations-kv` offers `storage-kv-sql` (and `storage-sqlite`).
 - component/conversations-kv: new. `conversations.registry` on `storage.kv` (namespace `conversations-kv`) and `sessions.store`; targets `server` and `cloudflare`. A first pointer is written with `setIfAbsent`, a reset emits `conversation.reset` once its pointer is stored, and its README says what holds when resets and resolves race across processes.
+- component/tool-websearch-brave: new. The `websearch` tool on the Brave Search API; its key,
+  `BRAVE_API_KEY`, is read through `secrets` and never reaches the model, and a search without it
+  fails saying so. `replay: "safe"`, `apiBase` in config; targets `server` and `cloudflare`.
+- component/tool-fetch: new. The `fetch` tool: one HTTP(S) request, GET by default (HEAD, POST, PUT,
+  PATCH, DELETE allowed; the model is asked to confirm any but GET and HEAD with the user), 20 s,
+  2 MB read, HTML as readable text with its links, JSON pretty-printed, binary refused, no
+  credentials of its own; `replay: "never"`; targets `server` and `cloudflare`.
+- component/provider-openrouter: new. OpenRouter's models for your agents, named
+  `openrouter/<vendor>/<model>` (`openrouter/z-ai/glm-5.3-flash`), with `OPENROUTER_API_KEY` or a key
+  in `model.credentials`; targets `server` and `cloudflare`. Your OpenRouter account's guardrails
+  may refuse some models at their first request.
+- adapter: `agentTool(tool, { replay })` in `@pikit/pi-adapter/tools`: the tool `toolComponent`
+  provides, without the component, for a `defineComponent` of your own that needs config or a
+  capability (a secret) and names itself (`tool-websearch-brave` provides `websearch`).
+- adapter: `@pikit/pi-adapter/providers/openrouter` exposes pi-ai's OpenRouter provider by
+  subpath, so a bundle carries only the providers it installs. Its module imports nothing node-only.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an

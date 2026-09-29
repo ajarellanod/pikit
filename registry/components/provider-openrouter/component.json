@@ -1,0 +1,37 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "provider-openrouter",
+  "version": "0.0.0",
+  "description": "The models OpenRouter serves, for your agents. An agent names one as `openrouter/<vendor>/<model>`, for example `openrouter/z-ai/glm-5.3-flash`.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "model.provider"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "OPENROUTER_API_KEY",
+      "secret": true,
+      "required": false,
+      "description": "An OpenRouter API key (openrouter.ai/settings/keys). Read by pi-ai only when model.credentials stores nothing for openrouter."
+    }
+  ]
+}
