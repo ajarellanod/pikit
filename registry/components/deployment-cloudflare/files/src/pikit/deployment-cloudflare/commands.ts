@@ -8,7 +8,8 @@
  * without a shell.
  *
  * The Worker is named after `package.json`'s `name`, passed as `--name` to every command, so two
- * projects on one account never deploy over each other.
+ * projects on one account never deploy over each other; or `wrangler.jsonc`'s `name` when it has one
+ * (a Deploy to Cloudflare template's, which Workers Builds deploys under), so both deploy one Worker.
  *
  * After a deploy answers, `up` runs the installed components' `afterDeploy` hooks (C8): each one is
  * named in its `component.json`'s `hooks`, and `pikit add` records its file in `pikit.json`.
@@ -426,8 +427,14 @@ export async function dev(options: CommandOptions = {}): Promise<number> {
   return (await run(["wrangler", "dev", "--name", workerName(cwd)], options, false)).code;
 }
 
-/** The Worker's name: `package.json`'s `name`, in the letters Cloudflare accepts (`my_bot.v2` → `my-bot-v2`). */
+/**
+ * The Worker's name: `wrangler.jsonc`'s `name` when it has one (a Deploy to Cloudflare template's: Workers
+ * Builds deploys under it, and the button's setup page may have changed it), else `package.json`'s
+ * `name`, in the letters Cloudflare accepts (`my_bot.v2` → `my-bot-v2`).
+ */
 export function workerName(cwd: string): string {
+  const named = wranglerName(cwd);
+  if (named !== undefined) return named;
   const path = join(cwd, "package.json");
   if (!existsSync(path)) throw new Error(`${cwd} has no package.json: the Worker is named after its "name"`);
   const { name } = JSON.parse(readFileSync(path, "utf8")) as { name?: unknown };
@@ -439,6 +446,43 @@ export function workerName(cwd: string): string {
     .slice(0, 63);
   if (worker === "") throw new Error(`package.json's name "${name}" has no letter or digit to name a Worker with`);
   return worker;
+}
+
+/** The top-level `name` of the project's `wrangler.jsonc`, if it has one; undefined when it cannot be read. */
+function wranglerName(cwd: string): string | undefined {
+  const path = join(cwd, "wrangler.jsonc");
+  if (!existsSync(path)) return undefined;
+  try {
+    const { name } = parseJsonc(readFileSync(path, "utf8")) as { name?: unknown };
+    return typeof name === "string" && name !== "" ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** JSON with comments and trailing commas, as wrangler reads it. */
+export function parseJsonc(text: string): unknown {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i] as string;
+    if (c === '"') {
+      const start = i;
+      for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === "\\") i++;
+      out += text.slice(start, i + 1);
+    } else if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+    } else if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      if (end < 0) throw new Error("an unterminated /* comment");
+      i = end + 1;
+    } else if (c === "}" || c === "]") {
+      out = `${out.replace(/,\s*$/, "")}${c}`;
+    } else {
+      out += c;
+    }
+  }
+  return JSON.parse(out);
 }
 
 /** `.env`'s values for the Worker: set, and not wrangler's own `CLOUDFLARE_*` credentials. */

@@ -1,0 +1,70 @@
+# Keeps the Deploy to Cloudflare template (templates/README.md) in step with main: checks it as
+# Workers Builds takes it, regenerates it into its own repository, and pushes when it changed.
+#
+# Off until this repository has both (Settings → Secrets and variables → Actions):
+#   - the variable PIKIT_TEMPLATE_REPO, the template's repository (ajarellanod/pikit-telegram-cloudflare).
+#     Without it the job is skipped: no runner starts.
+#   - the secret PIKIT_TEMPLATE_TOKEN, a fine-grained token with "Contents: read and write" on that
+#     repository only. Without it the job stops at its first step, saying so.
+# Nothing here deploys: every user's copy deploys from their own repository.
+name: Template
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: template
+  cancel-in-progress: false
+
+jobs:
+  telegram-cloudflare:
+    if: ${{ vars.PIKIT_TEMPLATE_REPO != '' }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: The token is set
+        env:
+          TOKEN: ${{ secrets.PIKIT_TEMPLATE_TOKEN }}
+        run: |
+          if [ -z "$TOKEN" ]; then
+            echo "::error::PIKIT_TEMPLATE_REPO is set but the secret PIKIT_TEMPLATE_TOKEN is not (templates/README.md, Publishing)"
+            exit 1
+          fi
+      - uses: actions/checkout@v4
+      # The Bun the installer pins; wrangler (in the check) runs on Node >= 22.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - run: bun install --frozen-lockfile
+      # Made twice, npm ci in a clean copy, the bundle, and the bot in workerd against fakes.
+      - name: The template works as Workers Builds takes it
+        run: bun test scripts/template.test.ts
+        env:
+          PIKIT_E2E: "1"
+          WRANGLER_SEND_METRICS: "false"
+      - uses: actions/checkout@v4
+        with:
+          repository: ${{ vars.PIKIT_TEMPLATE_REPO }}
+          token: ${{ secrets.PIKIT_TEMPLATE_TOKEN }}
+          path: .template
+      - name: Regenerate
+        run: bun scripts/template.ts telegram-cloudflare .template --repo "https://github.com/${{ vars.PIKIT_TEMPLATE_REPO }}"
+      - name: Push when it changed
+        working-directory: .template
+        run: |
+          git add -A
+          if git diff --cached --quiet; then
+            echo "The template is unchanged."
+            exit 0
+          fi
+          git -c user.name="github-actions[bot]" -c user.email="41898282+github-actions[bot]@users.noreply.github.com" \
+            commit -q -m "pikit ${GITHUB_SHA::7}: regenerate" -m "https://github.com/${GITHUB_REPOSITORY}/commit/${GITHUB_SHA}"
+          git push

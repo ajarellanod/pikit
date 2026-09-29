@@ -155,7 +155,9 @@ One Durable Object class, `Conversation`, bound as `CONVERSATION`, created SQLit
 that import `.md` files as text and bundle `.wasm` files compiled. A rule matches an import as it is
 written, so `execution-do`'s QuickJS, imported by a package export without `.wasm`
 (`@jitl/quickjs-wasmfile-release-sync/wasm`), is named in it. It has no `name`: the commands name
-the Worker after `package.json`'s `name`. Running wrangler by hand, pass `--name`.
+the Worker after `package.json`'s `name`. Running wrangler by hand, pass `--name`. A Deploy to
+Cloudflare template adds a `name` (Workers Builds runs wrangler without `--name`); the commands then
+use that one, so `pikit up` and the builds deploy the same Worker.
 
 This file is yours: add bindings, routes, a custom domain. Keep the migration: a migration is
 forever; add new ones after it. `files.test.ts` checks what the entrypoint relies on.
@@ -164,7 +166,7 @@ forever; add new ones after it. `files.test.ts` checks what the entrypoint relie
 
 The CLI delegates to these functions; you can call them from a script too. Each one runs the
 project's `node_modules/.bin/wrangler` in the project's directory, without a shell, with
-`--name <package.json name>` (`my_bot.v2` → `my-bot-v2`).
+`--name <package.json name>` (`my_bot.v2` → `my-bot-v2`), or `wrangler.jsonc`'s `name` when it has one.
 
 | Function | Runs |
 |---|---|

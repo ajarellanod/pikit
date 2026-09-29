@@ -286,6 +286,22 @@ test("the Worker is named after package.json's name, in the letters Cloudflare a
   expect(() => workerName(unnamed)).toThrow(/package.json has no "name"/);
 });
 
+test("wrangler.jsonc's own name, when it has one (a Deploy to Cloudflare template's), names the Worker instead", async () => {
+  const cwd = project();
+  const jsonc = (name: string) =>
+    `{\n  "$schema": "node_modules/wrangler/config-schema.json", // a comment with "quotes" and a // in it\n  /* the setup page's name */\n  ${name}\n  "durable_objects": { "bindings": [{ "name": "CONVERSATION", "class_name": "Conversation" },] },\n  "vars": { "URL": "https://example.com/*/" },\n}\n`;
+  writeFileSync(join(cwd, "wrangler.jsonc"), jsonc(`"name": "my-telegram-bot",`));
+  expect(workerName(cwd)).toBe("my-telegram-bot");
+  const wrangler = fakeWrangler();
+  await dev({ cwd, run: wrangler.run });
+  expect(wrangler.calls).toEqual([{ command: ["wrangler", "dev", "--name", "my-telegram-bot"], capture: false }]);
+  // Without one (pikit's own file), or unreadable, it is package.json's, as before.
+  writeFileSync(join(cwd, "wrangler.jsonc"), jsonc(""));
+  expect(workerName(cwd)).toBe("my-bot-v2");
+  writeFileSync(join(cwd, "wrangler.jsonc"), "{ /* never closed");
+  expect(workerName(cwd)).toBe("my-bot-v2");
+});
+
 test("deploySecrets reads nothing without a .env", () => {
   expect(deploySecrets(project())).toEqual({});
 });
