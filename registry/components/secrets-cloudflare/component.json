@@ -1,0 +1,31 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "secrets-cloudflare",
+  "version": "0.0.0",
+  "description": "Secrets from the Worker's env on Cloudflare: its secrets and variables, never its bindings.",
+  "targets": [
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "secrets"
+  ],
+  "apps": {
+    "worker": "default"
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

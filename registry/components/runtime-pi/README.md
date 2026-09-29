@@ -14,14 +14,17 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
     tokens). pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read
     only their environment variables (`ANTHROPIC_API_KEY`);
   - `agent.submissions`, if installed (`submissions-sql`, which `pikit add runtime-pi` offers): where
-    each admitted message and each run's end are recorded ("Nothing admitted goes unanswered" below).
+    each admitted message and each run's end are recorded ("Nothing admitted goes unanswered" below);
+  - `wakeups`, if installed: runs are driven inside wakeups, in slices, instead of by promises left
+    running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes.
 
   It refuses to start without an agent, when an agent names a model that no provider has, when an
   agent names a tool or an extension that no component provides, or when an agent's provider has no credentials at
   all. That last check makes no network call and
   refreshes nothing: it only asks whether a credential is stored or an environment variable is
   set.
-- **Target:** `server`. Cloudflare comes in M4, when Durable Object alarms drive runs.
+- **Target:** `server` and `cloudflare`. On Cloudflare it goes in the conversation object's App,
+  with `platform-cloudflare` for `wakeups` ("Cloudflare" below).
 - **Installs to:** `src/pikit/runtime-pi/`.
 - **npm dependencies:** `@pikit/pi-adapter`, which is pinned with Pi.
 
@@ -61,7 +64,8 @@ With `agent.submissions` installed (`submissions-sql`):
   four at a time (`RESUME_AT_ONCE` in `resume.ts`): a run the last process left open continues, a
   message waiting in Pi's inbox gets a run, and a run that ended without its end being recorded is
   settled from the session and announced. Start does not wait for them; stop cancels what has not
-  started. Progress and failures are logged.
+  started. Progress and failures are logged. With `wakeups`, start asks for a wakeup instead, and its
+  handler resumes them ("Cloudflare" below).
 - a message nothing can answer is **abandoned**: settled unanswered (`failed`, code `abandoned`) and
   announced as `agent.failed`, so its channel asks the user to send it again, instead of being retried
   at every start. At once when its conversation's agent is no longer defined (`agent_removed`) or its
@@ -76,6 +80,58 @@ With `agent.submissions` installed (`submissions-sql`):
 Channels deliver from its `answers` feed, so an answer that ends while they are stopped (a deploy) is
 delivered when they start again. Without it, a run the last process left open waits for the next
 message to its conversation, and an answer that ends while its channel is stopped stays in the session.
+
+## Cloudflare: runs driven by wakeups, in slices
+
+A Durable Object keeps running only while an event is in progress (a request, an RPC, an alarm). A
+promise left running after its event is killed when the object is evicted, 70 to 140 s after it went
+idle, and waiting on an outbound `fetch` (a model call) does not keep it alive: measured, a 180 s run
+was lost. So on Cloudflare (SPEC §4.1, C4) a run is driven inside an event: install a `wakeups`
+provider (`platform-cloudflare`: the object's alarm, multiplexed) and `agent.submissions`
+(`submissions-sql` over the object's SQL), and runtime-pi does the rest. pikit's workerd lane runs it
+so in a real Durable Object (`tests/workerd/test/runtime-pi.workerd.ts`): sessions on `sessions-sql`
+over `storage-do`, a message sent from the Worker's App by RPC, and its run driven in the object's
+alarm until it answers.
+
+It registers the wakeup handler `runtime-pi.drive` at start and asks for it whenever a run may be left
+going: after a `dispatch` or a `resume` that leaves a run in the conversation (before `dispatch`
+resolves, so a channel acknowledges its platform only once a wakeup will drive it), at start with
+`agent.submissions`, and for a run waiting out a retry. The handler:
+
+1. resumes the conversations whose retry wait is due;
+2. resumes the conversations `agent.submissions` holds pending that this App is not driving: a run an
+   evicted object left open, a message it never answered (as at start: four at a time, abandoned
+   after `abandonPendingAfterHours`);
+3. waits until this App drives no run, or until its context is cancelled: the provider's slice
+   deadline, or the App stopping;
+4. asks again at once if runs are still going, or for the earliest retry wait left, and resolves.
+
+A request carries nothing: each run of the handler reads what to do from the sessions and
+`agent.submissions`. So a handler that runs twice (delivery is at least once), late, or in a new
+object after an eviction does the right thing. An object evicted mid-run is started again by its
+alarm, and the run resumes from its session, once, under Pi's replay rules.
+
+**Pi's retry backoff is a wakeup, not a timer.** Before retrying a failed model call Pi waits 1 s,
+2 s, 4 s… up to a minute. With `wakeups` the run stops being driven at that wait (Pi keeps it in
+the session), its conversation closes, and a wakeup at the retry's time continues it. Pi's clock
+(`Date.now()`) and the App's are the same wall clock outside tests.
+
+**How slices meet the budgets.** Each alarm is an invocation with its own budget, measured on the Free
+plan: 30 s of CPU (waiting on the network does not count), 50 subrequests, 15 minutes of wall clock,
+about 200 MB of memory. The slice deadline is the provider's (60 to 90 s on Cloudflare): a slice
+mostly waits on the model, so its CPU stays far under 30 s; a few model and tool calls fit in 50
+subrequests; and it ends long before 15 minutes. A long run is a sequence of short alarms, each with
+a fresh budget. An alarm the platform cuts (a deploy) is retried, and a cut slice has asked for the
+next one already or is run again: either way the run continues from its session.
+
+**What still runs in memory, and why that is fine.** The run itself, while a handler waits for it
+(the handler's alarm is the event that keeps the object alive); events to listeners; and recording a
+run's end again after `agent.submissions` failed to (1, 5, 30 and 120 s later). If the object is
+evicted before such a retry, the request stays pending, and the next run of the handler (the next
+message, at the latest) settles it from the session and announces it.
+
+Without `agent.submissions`, the handler keeps this App's runs alive, but after an eviction nothing
+knows which conversation had one: it waits for its next message, as on a server.
 
 ## Pi extensions
 
@@ -195,6 +251,9 @@ from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
   `agent.submissions`;
 - the lifecycle conformance suite, with and without it;
 - a run killed mid-way resumed at start, with no new message, from what `agent.submissions` holds;
+- with `wakeups`: the `agent.runtime` and lifecycle suites again; a run killed mid-way completed by
+  the next App's wakeup; a long run driven over several slices, each cut asking again at once; Pi's
+  retry backoff as a wakeup at its time; and a stop that cancels a waiting handler, which asks again;
 - the start failures above, and a stored credential reaching the provider;
 - an agent whose `prepare` gives it a tool once another tool has moved its state on.
 

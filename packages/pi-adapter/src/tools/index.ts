@@ -11,8 +11,9 @@
  * the runtime passes none, and each tool works on exactly what its component chose for that run.
  *
  * `toolComponent` is the short way to a tool of your own: one written as Pi's `defineTool` writes it,
- * provided as `agent.tool` by a component, with the `replay` pikit needs. It is a bridge until the
- * adapter moves to Pi's durable runtime: see its documentation, "Migration".
+ * provided as `agent.tool` by a component, with the `replay` pikit needs. `agentTool` is the same tool
+ * without the component, for a `defineComponent` of your own that needs config or a capability. Both
+ * are a bridge until the adapter moves to Pi's durable runtime: see `toolComponent`, "Migration".
  */
 
 import type { AgentHarnessTool, AgentToolResult, AgentToolUpdateCallback, ExecutionEnv } from "@earendil-works/pi-agent-core";
@@ -70,8 +71,8 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
  * idempotency key from the run's conversation and `toolCallId`). A Pi extension's tools are always
  * `"never"`.
  *
- * A tool that needs a capability (an environment, a secret) is a `defineComponent` of its own that
- * `use`s it; this one declares none.
+ * A tool that needs a capability (an environment, a secret) or config is a `defineComponent` of its
+ * own that `use`s it and provides `agentTool(tool, { replay })`; this one declares none.
  *
  * **Which to use.** A tool of your own for pikit: `toolComponent`, or a `defineComponent` when it needs
  * a capability. Pi's `defineTool` (imported from `@earendil-works/pi-coding-agent`, pikit's shim) only
@@ -85,12 +86,34 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
  * the adapter moves to it:
  * - a tool is Pi's object, unchanged: an agent takes it in `tools: [tool]`, or a `defineComponent`
  *   provides it as `agent.tool` when it is shared by name or needs a capability;
- * - `toolComponent` and `ToolDefinition` are deleted, and `replay` takes Pi's words (`"unsafe"` for
+ * - `toolComponent`, `agentTool` and `ToolDefinition` are deleted, and `replay` takes Pi's words (`"unsafe"` for
  *   `"never"`), in that one change;
  * - if Pi ships a helper that types such an object, it is used under Pi's own name.
  * Until then, nothing is added here: no rename, and no second word for `"never"`.
  */
 export function toolComponent<TParams extends TSchema, TDetails = unknown>(tool: ToolDefinition<TParams, TDetails>, options: { replay: "safe" | "never" }): ComponentDefinition {
+  const agentToolObject = agentTool(tool, options);
+  return defineComponent({
+    name: `tool-${tool.name.replaceAll("_", "-")}`,
+    setup(pikit) {
+      pikit.provideKeyed("agent.tool", tool.name, agentToolObject);
+    },
+  });
+}
+
+/**
+ * `tool`, in the shape of Pi's `defineTool`, as the object a component provides as `agent.tool`
+ * (under `tool.name`), with its `replay`. `toolComponent` is this plus the component; use it directly
+ * in a `defineComponent` of your own when the tool needs config or a capability (a secret):
+ *
+ * ```ts
+ * setup(pikit, config) {
+ *   const secrets = pikit.use("secrets");
+ *   pikit.provideKeyed("agent.tool", "websearch", agentTool({ name: "websearch", … }, { replay: "safe" }));
+ * }
+ * ```
+ */
+export function agentTool<TParams extends TSchema, TDetails = unknown>(tool: ToolDefinition<TParams, TDetails>, options: { replay: "safe" | "never" }): AgentTool {
   const harnessTool: AgentHarnessTool<undefined, TParams, TDetails> = {
     name: tool.name,
     label: tool.label,
@@ -101,12 +124,7 @@ export function toolComponent<TParams extends TSchema, TDetails = unknown>(tool:
     execute: (toolCallId, params, onUpdate, _toolContext, _invocation, context) =>
       tool.execute(toolCallId, params, context.abortSignal, (partial) => onUpdate(partial), context),
   };
-  return defineComponent({
-    name: `tool-${tool.name.replaceAll("_", "-")}`,
-    setup(pikit) {
-      pikit.provideKeyed("agent.tool", tool.name, harnessTool as unknown as AgentTool);
-    },
-  });
+  return harnessTool as unknown as AgentTool;
 }
 
 // biome-ignore lint/suspicious/noExplicitAny: Pi's tool types vary by parameters and details

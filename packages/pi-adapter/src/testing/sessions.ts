@@ -7,6 +7,12 @@
 import type { Session, Storage } from "@earendil-works/pi-agent-core";
 
 export { createSessionRepoConformance, createStorageConformance } from "@earendil-works/pi-agent-core/harness/session/testing";
+/**
+ * Pi's fork cases that `createSessionRepoConformance` does not include yet (Pi runs them for its
+ * memory and JSONL repositories): forks of application lists, of application state on a branch, and
+ * of a session with malformed unrelated lanes. A store that forks runs them too.
+ */
+export { createSessionRepoStreamingForkConformance } from "@earendil-works/pi-agent-core/harness/session/testing";
 export type { StorageFixture } from "@earendil-works/pi-agent-core/harness/session/testing";
 
 /**

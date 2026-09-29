@@ -51,7 +51,8 @@ interface KeyValueStore {
   (`namespace`, `entry_key`, `json`), created at start; one statement per call, no cache;
   `setIfAbsent` is `INSERT … ON CONFLICT DO NOTHING`. Targets `server` and `cloudflare`.
 - **Offered.** The catalogue marks `storage.kv` `offer`: `pikit add channel-telegram` brings
-  `storage-kv-sql` (and `storage-sqlite` when nothing provides `storage.sql`).
+  `storage-kv-sql` (and `storage-sqlite` when nothing provides `storage.sql`), and so does
+  `pikit add conversations-kv`, which requires it.
 - **`channel-telegram`** keeps its answers' cursor at the key `answers-cursor` of its namespace. It
   reads answers from the feed only with `agent.submissions` and `storage.kv`; without either, from
   events, with a warning (absence, not flags).
@@ -66,7 +67,8 @@ provider moves onto it and the contract stays.
 - Suite and memory storage: `packages/contracts/src/testing/storage-kv.ts` (+ `.test.ts`).
 - Provider: `registry/components/storage-kv-sql/` (README, conformance, lifecycle, two processes
   over one database).
-- Consumer: `registry/components/channel-telegram/` (`answers.ts`, `index.ts`).
+- Consumers: `registry/components/channel-telegram/` (`answers.ts`, `index.ts`) and
+  `registry/components/conversations-kv/` (the conversation registry).
 
 ## Open questions
 - **Upgrading `channel-telegram`.** Its old table, `channel_telegram_cursors`, is not read: a project

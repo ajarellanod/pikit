@@ -43,7 +43,8 @@ export function createHttpRouteConformance(
     const timeout = new Promise<never>((_, reject) => {
       timer = setTimeout(() => reject(new Error(`${GROUP}: timed out after ${timeoutMs} ms waiting for ${what}`)), timeoutMs);
     });
-    return Promise.race([promise, timeout]).finally(() => clearTimeout(timer));
+    // Workers' clearTimeout takes no `undefined`: the suites also compile against its types.
+    return Promise.race([promise, timeout]).finally(() => timer !== undefined && clearTimeout(timer));
   };
 
   /** A case over a started server; `build` makes its routes and checks afresh for each run. */

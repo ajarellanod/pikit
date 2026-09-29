@@ -43,8 +43,10 @@ export default toolComponent(
 - **The fifth `execute` argument is the run's context**: its conversation
   (`context.value(CONVERSATION)`) and its cancellation. `signal` is the same cancellation, in Pi's
   place.
-- **A tool that needs a capability** (an environment, a secret) is a `defineComponent` of its own that
-  `use`s it, as `tool-read` does with `bindTool`; `toolComponent` declares none.
+- **A tool that needs a capability** (an environment, a secret) or config is a `defineComponent` of
+  its own that `use`s it and provides `agentTool(tool, { replay })`, the same tool without the
+  component (`tool-websearch-brave` reads its key through `secrets`); `toolComponent` declares none.
+  Pi's own tools bound to an environment use `bindTool` instead, as `tool-read` does.
 
 ## Pi first
 Pi already has `defineTool` (`@earendil-works/pi-coding-agent`, re-exported by
@@ -111,7 +113,7 @@ Decided on the way there (September 2026):
   left is the current `ToolDefinition` of Pi's extension API, which that migration replaces.
 
 ## Where it is
-- `packages/pi-adapter/src/tools/index.ts` (`ToolDefinition`, `toolComponent`).
+- `packages/pi-adapter/src/tools/index.ts` (`ToolDefinition`, `toolComponent`, `agentTool`).
 - `packages/pi-adapter/src/tools/tools.test.ts`: component name, key, `replay`, Pi's argument order,
   `onUpdate`; Pi's `hello` object unchanged; the one typed by `defineTool` refused
   (`@ts-expect-error`).
@@ -119,7 +121,8 @@ Decided on the way there (September 2026):
   run's conversation.
 
 ## Open questions
-- Config for such a tool (an API URL, a limit): today it is a `defineComponent`. Not added to a
-  bridge; after the migration, a `defineComponent` with a config schema provides Pi's object.
+- Config for such a tool (an API URL, a limit): today it is a `defineComponent` providing
+  `agentTool(...)` (as `tool-websearch-brave` does). Not added to a bridge; after the migration, a
+  `defineComponent` with a config schema provides Pi's object.
 - When the adapter moves to `pi-durable`: decided with the rest of that move (sessions, submissions,
-  Cloudflare storage), not for tools alone.
+  Cloudflare storage; `features/pi-durable-migration.md`), not for tools alone.

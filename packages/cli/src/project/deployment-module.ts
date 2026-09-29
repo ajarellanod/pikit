@@ -11,8 +11,12 @@ import { CliError } from "../ui.ts";
 
 /** The installed `deployment-*` component: exactly one. */
 export function deploymentComponent(projectDir: string): string {
-  const names = Object.keys(readProjectManifest(projectDir).components).filter((name) => name.startsWith("deployment-"));
-  if (names.length === 0) throw new CliError("no deployment-* component is installed; add one, e.g. `pikit add deployment-docker`");
+  const project = readProjectManifest(projectDir);
+  const names = Object.keys(project.components).filter((name) => name.startsWith("deployment-"));
+  if (names.length === 0) {
+    const example = project.targets.includes("cloudflare") ? "deployment-cloudflare" : "deployment-docker";
+    throw new CliError(`no deployment-* component is installed; add one, e.g. \`pikit add ${example}\``);
+  }
   if (names.length > 1) throw new CliError(`several deployment components are installed (${names.join(", ")}); remove all but one`);
   return names[0] as string;
 }

@@ -35,6 +35,31 @@ export async function loadComponent(entry: string): Promise<ComponentDefinition 
   return component as ComponentDefinition;
 }
 
+/**
+ * The named export `name` of `entry`: the half of a two-App component that its `component.json`'s
+ * `apps` names (SPEC §4.1, C1). Missing, or not a component, is an error.
+ */
+export async function loadExport(entry: string, name: string): Promise<ComponentDefinition> {
+  const module = (await import(pathToFileURL(entry).href)) as Record<string, unknown>;
+  const component = module[name] as Partial<ComponentDefinition> | undefined;
+  if (typeof component?.name !== "string" || typeof component.setup !== "function") {
+    throw new Error(`${entry} has no export "${name}" made with defineComponent({ name, setup }), which apps names`);
+  }
+  return component as ComponentDefinition;
+}
+
+/** What several halves declare together: each list in order, without repeats. */
+export function mergeGenerated(halves: readonly Generated[]): Generated {
+  const union = (lists: string[][]): string[] => [...new Set(lists.flat())];
+  const tools = halves.reduce<Record<string, string> | undefined>((all, half) => (half.tools === undefined ? all : { ...all, ...half.tools }), undefined);
+  return {
+    provides: union(halves.map((h) => h.provides)),
+    requires: union(halves.map((h) => h.requires)),
+    optional: union(halves.map((h) => h.optional)).filter((name) => !halves.some((h) => h.requires.includes(name))),
+    ...(tools !== undefined && { tools }),
+  };
+}
+
 export async function describeSetup(component: ComponentDefinition, target: Target): Promise<Generated> {
   // A placeholder config only for describing: defaults where the schema has them, typebox's
   // minimal valid values for required fields (router-basic's `defaultAgent`).

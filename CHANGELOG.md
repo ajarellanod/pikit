@@ -5,6 +5,128 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- repository: `e2e-telegram-cloudflare.test.ts` (`PIKIT_E2E=1`) makes the bot from the preset, configures it without and with a terminal against a fake Telegram, bundles it, and runs it in workerd (`wrangler dev`): `up`'s after-deploy hook sets the webhook, and a signed update posted to `/telegram` is answered at the fake's `sendMessage` through the mailbox, the chat's object, its inbox, the runtime in the object's alarm, and delivery, with a fake OpenRouter as the model.
+- preset/telegram-cloudflare: new. `pikit new my-bot --target cloudflare --preset telegram-cloudflare`: a Telegram bot on Cloudflare, `pikit configure`, `pikit up`. secrets-cloudflare and platform-cloudflare in both Apps, channel-telegram-webhook's Worker half in the Worker's, and in each chat's Durable Object storage-do, storage-kv-sql, submissions-sql, sessions-sql, conversations-kv, provider-openrouter, runtime-pi, router-basic, the channel (with outbound-durable, offered), execution-do and tool-read, -write, -edit, -bash, -fetch and -websearch-brave; deployment-cloudflare runs it. The starter agent names every installed tool. deployment-cloudflare's README has "Your Telegram bot on Cloudflare": new, configure, up, and what `up` does.
+- cli: `pikit new --target cloudflare` starts the agent on `openrouter/z-ai/glm-5.3-flash` (provider-anthropic is server-only); on a server it stays `anthropic/claude-sonnet-4-6`.
+- cli: `pikit new --preset <p>` without `--target`, for a preset that runs on another target, is still refused, and now says the command that makes it (`pikit new <dir> --target cloudflare --preset <p>`).
+- cli: `pikit configure` offers a model login only where a `model.credentials` component can keep it: on Cloudflare it asks for the API key instead of offering a login that fails.
+- component/tool-websearch-brave: `BRAVE_API_KEY` is optional, as the app already started without it (`pikit doctor` no longer fails without it), and a `pikit configure` step asks for it in a terminal, where Enter skips.
+- component/provider-openrouter: `apiBase` in config (OpenRouter's API by default) moves every model under a proxy or a test double; `fake-openrouter.test-support.ts` is a local OpenRouter for tests.
+- component/deployment-cloudflare: `wrangler.jsonc` bundles execution-do's QuickJS (`@jitl/quickjs-wasmfile-release-sync/wasm`, a package export without `.wasm`), so a project with execution-do builds under `wrangler dev` and `deploy`.
+- component/platform-cloudflare: new. `actor.mailbox`, `actor.inbox` and `wakeups` on Cloudflare, in both Apps: from the Worker, `send` is an RPC to the conversation's object (`env.CONVERSATION`, configurable; its `actor.inbox` and `wakeups` throw, saying they belong in the object); in the object, `deliver` calls the handler registered with `actor.inbox` for the type, `actor.mailbox` sends to its own key locally and to others by RPC, and `wakeups` are rows in `platform_cloudflare_wakeups` over the object's one alarm, run one at a time in slices (`sliceMs`, 60 s by default) with backoff rows. Target `cloudflare`; new kind `platform`. A slice leaves no timer longer than a second behind (a pending timer keeps an object from being evicted). Both suites also run in the workerd lane, by RPC and alarm to deployment-cloudflare's real `Conversation` class.
+- component/runtime-pi: targets `cloudflare` too: in workerd, in a real Durable Object with sessions on `sessions-sql` over `storage-do`, a message sent from the Worker by RPC is answered by a run driven in `platform-cloudflare`'s alarm.
+- docs: `sessions-sql` is transitional: when the adapter moves to Pi's durable runtime (`pi-durable`), sessions become its storage and `sessions-sql` goes (SPEC C5, `features/pi-durable-migration.md`). On Cloudflare they will sit on the object's SQL directly, since `pi-durable`'s SQLite core needs a synchronous database and `storage.sql` is asynchronous.
+- registry: `component.json`'s `apps.worker` may be `"default"`: the component itself goes in both Apps of a Cloudflare project, under its own name and config key in each (SPEC C1). When it names a Worker half, `registry generate` writes what each half declares in `halves` (`default`, `worker`), and `registry validate` checks it and that the half is the component `<name>-worker`, its config key in `workerConfig`.
+- cli: on Cloudflare, `pikit add` lists a component's Worker half in `export const worker` too (`import channelTelegramWebhook, { worker as channelTelegramWebhookWorker }`), or the component itself in both lists when `apps.worker` is `"default"`; what each half requires is warned about and offered in its own App; `pikit remove` takes its entries out of every list and its keys out of `config` and `workerConfig`, and refuses when something in either App requires what only it provides; `pikit doctor` prints the Worker's App too. Server projects are unchanged.
+- registry: `component.json` may name an after-deploy hook, `"hooks": { "afterDeploy": "deploy.ts" }` (a file of the component exporting `afterDeploy({ url, config, get, say })` that resolves with its problems); `registry validate` checks the file exports it, and `pikit add` records it in `pikit.json` by project path.
+- component/deployment-cloudflare: `up` runs the installed components' `afterDeploy` hooks once `/health` answers the new version (C8), with the deployed URL, each component's config and a reader of the environment and `.env`; it prints what they say and fails with all their problems, leaving the version deployed. `deployHooks(cwd)` lists them.
+- component/channel-telegram-webhook: `component.json` names `deploy.ts` as its after-deploy hook, so `pikit up` registers each bot's webhook once the new version answers; `pikit add` puts each half in its App.
+- component/secrets-cloudflare: `apps.worker` is `"default"`: `pikit add` lists it in both Apps.
+- component/platform-cloudflare: `apps.worker` is `"default"`: `pikit add` lists it in both Apps (the mailbox in the Worker's; `wakeups`, `actor.inbox` and the mailbox in the object's).
+- component/runtime-pi: uses `wakeups` when installed (SPEC C4): every run is driven inside the wakeup handler `runtime-pi.drive`, asked for by a dispatch or resume that leaves a run going, by start with `agent.submissions` (instead of resuming in the background) and by Pi's retry backoff; each run of it resumes what is due or pending, waits for the App's runs until its slice ends, and asks again at once while runs remain. Without `wakeups`, nothing changes. Its README has a Cloudflare section.
+- adapter: `createPiRuntime({ retryAt })` continues a run past Pi's retry backoff from outside the process (the run stops being driven at the wait, and is resumed at or after `notBefore`) instead of a timer; `runtime.holds(conversation)` and `runtime.whenIdle(ctx)` tell a host whether this worker still drives runs, for one that must wait for them inside an event.
+- cli: `pikit new <dir> --target cloudflare` records `targets: ["cloudflare"]` in `pikit.json` (components and offered providers are then those that run there), writes a two-App `pikit.config.ts` (the default export for each conversation's Durable Object, `export const worker` for the Worker, SPEC C1), `wrangler` in devDependencies and `.wrangler/`/`.dev.vars*` in `.gitignore`. `pikit add`/`remove` edit the default export's list in a file with several Apps; `pikit doctor` also composes `export const worker`; `pikit dev` runs the deployment's own `dev` when it exports one (`wrangler dev`); `pikit status` prints Cloudflare deployments; the guided `pikit new` offers only presets that run on a server. The server path is unchanged.
+- preset/cloudflare-minimal: new. `pikit new <dir> --target cloudflare --preset cloudflare-minimal`: `storage-do`, `sessions-sql`, `conversations-kv` (with `storage-kv-sql`) and `deployment-cloudflare`; no channel or runtime yet.
+- component/deployment-cloudflare: new. Runs a project on Cloudflare: `wrangler.jsonc` (one SQLite-backed `Conversation` Durable Object class, `nodejs_compat`, `version_metadata`, `.md`/`.wasm` rules) and an entrypoint that composes `pikit.config.ts`'s default export in each object (lazily, inside `blockConcurrencyWhile`, 20 s start and 5 s rollback deadlines, a failed start rethrown so the object resets) and `export const worker` in the Worker (its `http.route`s served), with `WORKERS_HOST` on each start context; `alarm()` and the RPC `deliver()` call the handlers registered with `onAlarm`/`onDeliver`; public `GET /health` answers `{ ok, version }`. Commands: `up` (`wrangler deploy --secrets-file` with `.env`'s secrets but `CLOUDFLARE_*`, then waits until `/health` answers the new version, rolling back one that answers its App does not start), `down` (`wrangler delete`, only at a terminal), `logs`, `status`, `dev`. Target `cloudflare`.
+- repository: `wrangler` 4.143.0 in the root devDependencies (the version the workerd lane pins), for `deployment-cloudflare`'s bundle test and the Worker of new Cloudflare projects; the workerd lane runs `deployment-cloudflare`'s entrypoint on real Durable Objects.
+- registry: a deployment component's `commands.ts` runs on the machine that deploys (the CLI loads it), so `registry validate` lets it import `node:*` whatever the component's targets, as it does tests; every other file stays held to them (S5).
+- component/channel-telegram-webhook: its object half registers `telegram.update` with `actor.inbox`'s `handle` in its start: `actor.inbox` moves from its `provides` to its `requires`. It starts in one object App with `platform-cloudflare` and `runtime-pi`, and answers an update there.
+- component/channel-telegram-webhook: new. Telegram by webhook for Cloudflare (SPEC §4.1, C6), in two halves: the Worker's (the export `worker`: `POST /telegram` and `/telegram/<name>`, the webhook's secret checked in constant time, private text messages from allowed users only, a stranger told their id, then `actor.mailbox.send("telegram:<chat>", "telegram.update", update)`, `200` once the conversation holds it and `500` otherwise) and the object's (the `actor.inbox` handler: `/start`, `/help`, `/new`, `admitInbound`; the wakeup `channel-telegram-webhook.deliver`: answers from `agent.submissions`' feed with a cursor in `storage.kv`, pieces marked `sending`/`sent` and one found `sending` sent again with `↻ `, "typing…" while a message waits, `outbound.queue` if installed). `pikit configure` checks the token, generates `TELEGRAM_WEBHOOK_SECRET` and allows you; `deploy.ts`'s `afterDeploy({ url, config, get, say })` registers and checks each bot's webhook once a deploy answers (C8). Target `cloudflare`.
+- registry: `component.json` may name a half for another App, `"apps": { "worker": "<export>" }` (SPEC §4.1, C1): the named export of `index.ts` goes in the Worker's App, the default export in the default one; `registry generate` and `validate` describe both halves, so `provides`, `requires` and `optional` cover the component as a whole, and a named export that is missing or not a component is a problem.
+- repository: the workerd lane also runs Pi's session conformance on `sessions-sql` over `storage-do`
+  (the Durable Object session backend passes it, SPEC §4) and `agent.runtime` on `runtime-pi` over
+  those sessions, and `execution-do` with Pi's own tools on it; `bun run --cwd tests/workerd bundle`
+  measures a conversation object's bundle (1,002 KiB gzip with `execution-do`, 216 KiB without).
+- component/execution-do: new. `execution` and `execution.shell` in the conversation's Durable
+  Object: files in its SQL (`execution_do_*` tables, 1 MB chunks), a shell without processes
+  (just-bash) with `git` (isomorphic-git: clone, status, diff, commit, log, push, pr), `node` (QuickJS
+  in WebAssembly, with an interrupt budget and a heap limit) and `curl`. Only `git` writes inside
+  `.git`; pushes go only to `git.pushRepositories`, on `pikit/self/` branches, with a token read
+  through `secrets` that never reaches the shell. Pi's `bash`, `read`, `write` and `edit` run on it
+  unchanged. Target `cloudflare`; the Worker needs `nodejs_compat` and a `CompiledWasm` rule (README).
+- adapter: `@pikit/pi-adapter/execution` gives an `execution` provider Pi's `ok`, `err`, `FileError`,
+  `ExecutionError`, `truncateTail` and `truncateHead` without importing Pi; `@pikit/pi-adapter/testing/neutral`
+  is the part of the test kit that runs in workerd too (Pi's session and execution suites, the scripted
+  agent, `createRuntimeFixture` over records of your own, and `interruptInProcess`).
+
+- cli: `pikit add` and `pikit new` also offer the provider of a capability a component requires when the catalogue marks it `offer`: `pikit add conversations-kv` offers `storage-kv-sql` (and `storage-sqlite`).
+- component/conversations-kv: new. `conversations.registry` on `storage.kv` (namespace `conversations-kv`) and `sessions.store`; targets `server` and `cloudflare`. A first pointer is written with `setIfAbsent`, a reset emits `conversation.reset` once its pointer is stored, and its README says what holds when resets and resolves race across processes.
+- component/tool-websearch-brave: new. The `websearch` tool on the Brave Search API; its key,
+  `BRAVE_API_KEY`, is read through `secrets` and never reaches the model, and a search without it
+  fails saying so. `replay: "safe"`, `apiBase` in config; targets `server` and `cloudflare`.
+- component/tool-fetch: new. The `fetch` tool: one HTTP(S) request, GET by default (HEAD, POST, PUT,
+  PATCH, DELETE allowed; the model is asked to confirm any but GET and HEAD with the user), 20 s,
+  2 MB read, HTML as readable text with its links, JSON pretty-printed, binary refused, no
+  credentials of its own; `replay: "never"`; targets `server` and `cloudflare`.
+- component/provider-openrouter: new. OpenRouter's models for your agents, named
+  `openrouter/<vendor>/<model>` (`openrouter/z-ai/glm-5.3-flash`), with `OPENROUTER_API_KEY` or a key
+  in `model.credentials`; targets `server` and `cloudflare`. Your OpenRouter account's guardrails
+  may refuse some models at their first request.
+- adapter: `agentTool(tool, { replay })` in `@pikit/pi-adapter/tools`: the tool `toolComponent`
+  provides, without the component, for a `defineComponent` of your own that needs config or a
+  capability (a secret) and names itself (`tool-websearch-brave` provides `websearch`).
+- adapter: `@pikit/pi-adapter/providers/openrouter` exposes pi-ai's OpenRouter provider by
+  subpath, so a bundle carries only the providers it installs. Its module imports nothing node-only.
+- component/submissions-sql: targets `cloudflare` too: unmodified, over `storage-do`, it passes its
+  `agent.submissions` suite (with the feed, pruning and restarts) in workerd. On Cloudflare its
+  records are the conversation object's.
+- repository: the workerd lane (`bun run test:workerd`, `tests/workerd/`, a CI job): Vitest with
+  `@cloudflare/vitest-plugin` runs, offline in workerd on a real SQLite-backed Durable Object, the
+  `storage.sql` suite on `storage-do`, `storage.kv` on `storage-kv-sql` and `agent.submissions` (with
+  its feed) on `submissions-sql` over it, and `secrets` on `secrets-cloudflare`, and typechecks them
+  against Workers' runtime types.
+- contracts: the agent runtime and HTTP route suites compile against Workers' runtime types too.
+- component/secrets-cloudflare: new. `secrets` from the Worker's `env` (its secrets and variables;
+  bindings and empty strings read `undefined`), in either App of a Cloudflare project. Target
+  `cloudflare`.
+- component/storage-do: new. `storage.sql` in a Durable Object's own SQLite (`ctx.storage.sql`), for
+  the conversation object's App on Cloudflare; its README lists the object's SQL limits (2 MB per
+  row, short `LIKE` patterns, 10 GB per object, 1 GB on Free). Target `cloudflare`.
+- cli: `pikit add` and `pikit new` offer only providers that run on the project's targets, so a
+  Cloudflare provider in the registry (`storage-do`) does not stop `storage-sqlite` from being
+  offered on a server.
+- contracts: the context key `WORKERS_HOST` (SPEC C5): on Cloudflare, each App's start context carries
+  the Worker's `env` and, in a Durable Object's App, the object (its id, its storage, and hooks for
+  its alarm and RPC deliveries), typed structurally. `withWorkersHost` in `@pikit/contracts/testing`
+  puts it in the context of components under test.
+- component/sessions-sql: new. `sessions.store` on `storage.sql` (the adapter's SQL store), so
+  sessions live in the app's database on a server and in a Durable Object alike; tables
+  `sessions_sql_*`, versioned and migrated at start; targets `server` and `cloudflare`. Optional
+  `cwd` config.
+- component/runtime-pi: its tests also run the `agent.runtime` conformance on sessions in
+  `storage.sql`, including a worker killed mid-run.
+- adapter: `createSqlSessionStore(db, { cwd })` in `@pikit/pi-adapter/sql` (neutral: server and
+  Cloudflare): Pi sessions on `storage.sql`, a `sessions.store` with `find(id)` and `migrate()`. It
+  passes Pi's session suites (repository, forks, storage) on SQLite held to a Durable Object's limits;
+  a record over 256 Ki characters is stored in parts. In `@pikit/pi-adapter/testing`:
+  `createPiRuntimeFixture(runtime, { sessions: "sql" })` and `killMidRun(…, "sql")` run the runtime
+  and its killed workers on it, `openSqliteDatabase(path, { durableObjectLimits })` is a `storage.sql`
+  for tests, and `createSessionRepoStreamingForkConformance` is Pi's fork cases the repository suite
+  does not include yet.
+- contracts: `actor.mailbox` and `actor.inbox` (experimental, SPEC C2): the component that handles a
+  type of message registers its handler with `actor.inbox`'s `handle(type, handler)` in its `start`
+  (one handler per type, dropped at stop), as `wakeups` registers its own, so it may also send, wake
+  itself or use the runtime with no dependency cycle. `send(key, type, message, ctx)` resolves once
+  the actor owning `key` holds the JSON message durably (its handler for `type` resolved), and
+  rejects otherwise, with an error naming the type when nothing handles it. The handler gets a copy
+  and a context of its own. Its conformance suite (with `wakeups: true`, an actor that also wakes
+  itself) and a memory mailbox for tests are in `@pikit/contracts/testing`.
+- contracts: `wakeups` (experimental, SPEC C3, C4): the component that owns the work registers a
+  handler with `handle(name, handler)` in its `start` (one owner per name, dropped at stop) and asks
+  with `at(name, time, ctx)`, replacing its earlier request; `cancel(name, ctx)` drops it. A request
+  may come before its handler and waits for it. At least once, never early, one run per name at a
+  time; a handler that rejects runs again with the provider's backoff, and its context may be
+  cancelled at a slice deadline, after which it asks again. Its conformance suite (on a manual clock)
+  and a memory wakeups for tests, forgetful or durable, are in `@pikit/contracts/testing`.
+- component/mailbox-local: new. `actor.mailbox` and `actor.inbox` on a server: `send` calls the
+  handler registered for the type in the same app with a JSON copy and resolves when it does; `stop`
+  cancels the handlers still running and drops them. Targets `server`. `mailbox` is a new component kind.
+- component/wakeups-timers: new. `wakeups` on a server as in-process timers on the app's clock: a
+  failed handler runs again after 1 s, 5 s, 30 s, then every 60 s, logged each time; optional
+  `sliceMs` cancels a running handler's context as Cloudflare would, and no timer outlives a stop by
+  more than a second. Nothing is persisted: components register and ask again at start. Targets
+  `server`. `wakeups` is a new component kind.
+- spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - cli: `pikit doctor` notes a project file that registers tools with `pi.registerTool`: pikit runs
   them, but an extension's tools are never run again when a run resumes after a crash (`replay:
   "never"`), and a tool of your own chooses with `toolComponent`. A note, never a failure.

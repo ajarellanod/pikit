@@ -8,6 +8,9 @@ pikit add storage-sqlite      # the database it keeps its records in
 pikit add submissions-sql
 ```
 
+**Target:** `server` and `cloudflare`. On Cloudflare its database is the conversation's Durable
+Object (`storage-do`), and the records are that conversation's.
+
 `pikit add runtime-pi` offers it (with `storage-sqlite`). The runtime and the channels that support it
 (`channel-telegram`, `channel-http`) use it as soon as it is installed; remove it and they work as
 before, from events only.
@@ -96,4 +99,5 @@ Copied with the component, they run in your project: the `agent.submissions` con
 `answers`, the lifecycle suite, the retention, a database from a newer version, two processes
 migrating at once, and the convergence
 suite (the process killed after each of its commits in turn: every message still settled and its
-answer delivered).
+answer delivered). pikit also runs the `agent.submissions` suite, with its feed, pruning and
+restarts, in workerd over `storage-do` on a real SQLite-backed Durable Object (`tests/workerd`).

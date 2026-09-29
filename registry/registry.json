@@ -18,6 +18,14 @@
       ],
       "path": "components/channel-telegram"
     },
+    "channel-telegram-webhook": {
+      "version": "0.0.0",
+      "description": "Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/channel-telegram-webhook"
+    },
     "conversations-file": {
       "version": "0.0.0",
       "description": "The conversation registry in one JSON file: which Pi session each conversation is in now.",
@@ -25,6 +33,15 @@
         "server"
       ],
       "path": "components/conversations-file"
+    },
+    "conversations-kv": {
+      "version": "0.0.0",
+      "description": "The conversation registry in storage.kv: which Pi session each conversation is in now, on a server or in a Durable Object.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/conversations-kv"
     },
     "credentials-file": {
       "version": "0.0.0",
@@ -34,6 +51,14 @@
       ],
       "path": "components/credentials-file"
     },
+    "deployment-cloudflare": {
+      "version": "0.0.0",
+      "description": "Runs a pikit project on Cloudflare: the Worker and its Durable Objects running the project's two Apps, wrangler.jsonc, and the commands `pikit up | down | logs | status | dev` delegate to.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/deployment-cloudflare"
+    },
     "deployment-docker": {
       "version": "0.0.0",
       "description": "Runs a pikit project in Docker on a server: the image, the container, the process entrypoint, its logs, and the commands `pikit up | down | restart | logs | status` delegate to.",
@@ -41,6 +66,14 @@
         "server"
       ],
       "path": "components/deployment-docker"
+    },
+    "execution-do": {
+      "version": "0.0.0",
+      "description": "The agent's workspace and shell inside its Durable Object, on Cloudflare: files in the object's SQL, a bash without processes, git with fenced pushes, and node in QuickJS.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/execution-do"
     },
     "execution-local": {
       "version": "0.0.0",
@@ -59,6 +92,14 @@
       ],
       "path": "components/log-events"
     },
+    "mailbox-local": {
+      "version": "0.0.0",
+      "description": "Hands a channel's message to the actor that owns its conversation, in the same app: actor.mailbox and actor.inbox on a server.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/mailbox-local"
+    },
     "outbound-durable": {
       "version": "0.0.0",
       "description": "Every answer is stored before it is sent, then delivered in order per conversation, retried, and sent again after a crash.",
@@ -68,6 +109,14 @@
       ],
       "path": "components/outbound-durable"
     },
+    "platform-cloudflare": {
+      "version": "0.0.0",
+      "description": "Reaches each conversation's Durable Object from the Worker, and wakes components in it on its one alarm: actor.mailbox, actor.inbox and wakeups on Cloudflare.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/platform-cloudflare"
+    },
     "provider-anthropic": {
       "version": "0.0.0",
       "description": "Anthropic's Claude models for your agents. An agent names one as `anthropic/<modelId>`, for example `anthropic/claude-sonnet-4-6`.",
@@ -75,6 +124,15 @@
         "server"
       ],
       "path": "components/provider-anthropic"
+    },
+    "provider-openrouter": {
+      "version": "0.0.0",
+      "description": "The models OpenRouter serves, for your agents. An agent names one as `openrouter/<vendor>/<model>`, for example `openrouter/z-ai/glm-5.3-flash`.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/provider-openrouter"
     },
     "router-basic": {
       "version": "0.0.0",
@@ -98,9 +156,18 @@
       "version": "0.0.0",
       "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
       "targets": [
-        "server"
+        "server",
+        "cloudflare"
       ],
       "path": "components/runtime-pi"
+    },
+    "secrets-cloudflare": {
+      "version": "0.0.0",
+      "description": "Secrets from the Worker's env on Cloudflare: its secrets and variables, never its bindings.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/secrets-cloudflare"
     },
     "secrets-env": {
       "version": "0.0.0",
@@ -126,6 +193,23 @@
       ],
       "path": "components/sessions-jsonl"
     },
+    "sessions-sql": {
+      "version": "0.0.0",
+      "description": "Each conversation's Pi session in the app's SQL database: on a server's SQLite or in a Cloudflare Durable Object alike.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/sessions-sql"
+    },
+    "storage-do": {
+      "version": "0.0.0",
+      "description": "The app's SQL database (storage.sql) in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",
+      "targets": [
+        "cloudflare"
+      ],
+      "path": "components/storage-do"
+    },
     "storage-kv-sql": {
       "version": "0.0.0",
       "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",
@@ -147,7 +231,8 @@
       "version": "0.0.0",
       "description": "No admitted message ends without its answer: unanswered conversations resume at start, and channels deliver every answer from a feed, even one that ended while they were stopped.",
       "targets": [
-        "server"
+        "server",
+        "cloudflare"
       ],
       "path": "components/submissions-sql"
     },
@@ -169,6 +254,15 @@
       ],
       "path": "components/tool-edit"
     },
+    "tool-fetch": {
+      "version": "0.0.0",
+      "description": "The `fetch` tool, for the agents that name it: one HTTP(S) request to a web page or an API, with HTML as readable text and links, JSON pretty-printed, and binary content refused.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-fetch"
+    },
     "tool-read": {
       "version": "0.0.0",
       "description": "Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.",
@@ -178,6 +272,15 @@
       ],
       "path": "components/tool-read"
     },
+    "tool-websearch-brave": {
+      "version": "0.0.0",
+      "description": "The `websearch` tool, for the agents that name it: searches the web with the Brave Search API, whose key the model never sees.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/tool-websearch-brave"
+    },
     "tool-write": {
       "version": "0.0.0",
       "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",
@@ -186,6 +289,14 @@
         "cloudflare"
       ],
       "path": "components/tool-write"
+    },
+    "wakeups-timers": {
+      "version": "0.0.0",
+      "description": "Wakes your components at the time they ask for, retrying failed handlers: wakeups as in-process timers on a server.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/wakeups-timers"
     },
     "workspace-local": {
       "version": "0.0.0",

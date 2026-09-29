@@ -2,7 +2,8 @@
  * `pikit doctor` (SPEC §4.6, §11): everything up to and including setup, never a start.
  *
  * It creates the app `pikit.config.ts` composes, in a child process, and prints the component
- * graph, the capability providers, the pipelines and the config. Then it checks:
+ * graph, the capability providers, the pipelines and the config; on Cloudflare, of each App (C1).
+ * Then it checks:
  * - the app composes: every required capability has a provider, selections are valid, the config
  *   matches the merged schema (the core's own `create()` decides, SPEC §4.6);
  * - every tool, extension and model provider an agent names statically is an installed key, when a
@@ -25,7 +26,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { packageName, scanImports } from "../registry/imports.ts";
 import { projectEnv, probe } from "../project/run.ts";
-import type { ProbeResult } from "../project/probe.ts";
+import type { AppDescription, ProbeResult } from "../project/probe.ts";
 import { brokenReferences } from "../project/references.ts";
 import { checkPiExtensions } from "../project/pi-extensions.ts";
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
@@ -52,7 +53,13 @@ export async function doctor(projectDir: string, options: { quiet?: boolean } = 
   const result = await probe(projectDir);
   if (!result.ok) problems.push(`pikit.config.ts does not compose: ${result.error}`);
   else {
-    if (options.quiet !== true) printGraph(result);
+    if (options.quiet !== true) {
+      printGraph(result.description);
+      if (result.worker !== undefined) {
+        log.info("The Worker's App (export const worker):");
+        printGraph(result.worker, "  ");
+      }
+    }
     for (const name of Object.keys(project.components)) {
       const listable = existsSync(join(projectDir, "src", "pikit", name, "index.ts")) && !name.startsWith("deployment-");
       if (listable && !result.listed.includes(name)) notes.push(`${name} is installed but not listed in pikit.config.ts`);
@@ -94,30 +101,30 @@ function unusedProviders(components: Extract<ProbeResult, { ok: true }>["descrip
     .map((c) => `${c.name} provides ${c.provides.join(", ")}, which no component uses: \`pikit remove ${c.name}\` if you do not need it`);
 }
 
-function printGraph(result: Extract<ProbeResult, { ok: true }>): void {
-  const { components, capabilities, pipelines, config } = result.description;
+function printGraph(description: AppDescription, indent = ""): void {
+  const { components, capabilities, pipelines, config } = description;
   const width = Math.max(...components.map((c) => c.name.length), 10);
-  log.info("Components, in start order:");
+  log.info(`${indent}Components, in start order:`);
   for (const c of components) {
     const parts = [
       c.provides.length > 0 ? `provides ${c.provides.join(", ")}` : "",
       c.requires.length > 0 ? `requires ${c.requires.join(", ")}` : "",
       c.optional.length > 0 ? `uses if present ${c.optional.join(", ")}` : "",
     ].filter((p) => p !== "");
-    log.info(`  ${c.name.padEnd(width)}  ${parts.join(" · ")}`);
+    log.info(`${indent}  ${c.name.padEnd(width)}  ${parts.join(" · ")}`);
   }
-  log.info("Capabilities:");
+  log.info(`${indent}Capabilities:`);
   for (const [name, capability] of Object.entries(capabilities).sort(([a], [b]) => a.localeCompare(b))) {
     const provider = capability.keys
       ? Object.entries(capability.keys).map(([key, owner]) => `${key} → ${owner}`).join(", ") || "(no keys)"
       : (capability.selected ?? capability.providers.join(", "));
-    log.info(`  ${name}: ${provider}`);
+    log.info(`${indent}  ${name}: ${provider}`);
   }
-  log.info("Pipelines:");
+  log.info(`${indent}Pipelines:`);
   for (const [name, stages] of Object.entries(pipelines)) {
-    log.info(`  ${name}: ${stages.map((s) => `${s.id} (${s.priority})`).join(" → ")}`);
+    log.info(`${indent}  ${name}: ${stages.map((s) => `${s.id} (${s.priority})`).join(" → ")}`);
   }
-  log.info(`Config:\n${JSON.stringify(config, null, 2).replace(/^/gm, "  ")}`);
+  log.info(`${indent}Config:\n${JSON.stringify(config, null, 2).replace(/^/gm, `${indent}  `)}`);
 }
 
 /** S1 in the project: `@earendil-works/*` is imported only by the adapter, and by Pi extensions under their alias. */

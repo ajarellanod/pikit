@@ -57,7 +57,16 @@ export interface ConversationHost {
    * is the host's to retry and log. Called in the conversation's line, before the run's event.
    */
   settled?(run: RunSettlement, ctx: AppContext): Promise<void>;
+  /**
+   * Continues runs past Pi's backoff from outside this process (`PiRuntimeOptions.retryAt`). Present:
+   * a run that must wait before retrying a model call stops being driven there, and this is told when
+   * the retry is due (epoch ms, Pi's clock). Absent: the run waits in this process.
+   */
+  retryAt?(notBefore: number, ctx: AppContext): Promise<void>;
 }
+
+/** What driving an operation returns when it stopped at a retry wait the host continues (`retryAt`). */
+const RETRY_WAIT = Symbol("retry wait");
 
 export interface OpenOptions {
   ref: ConversationRef;
@@ -200,17 +209,31 @@ export class PiConversation {
 
   /** Drive the run `accept()` just started as `operationId`; its end is reported after `started`. */
   private driveAccepted(operationId: string, ctx: AppContext, started: Promise<void>): void {
-    this.drive(
-      operationId,
-      runContext(ctx),
-      () =>
-        this.lane.drive({ operationId, waitForRetry: true }, this.runScope(ctx)).then((driven) => {
-          if (!driven.ok) throw driven.error;
-          if (driven.value.kind !== "settled") return undefined;
-          return driven.value.outcome;
-        }),
-      started,
+    this.drive(operationId, runContext(ctx), () => this.driveOperation(operationId, false, ctx), started);
+  }
+
+  /**
+   * Drive one operation of the lane until it ends (its result record), or until it waits: on a deferred
+   * response (`undefined`: it stays open), or, when the host continues runs itself (`retryAt`), before
+   * Pi retries a model call (`RETRY_WAIT`: it stays open, and the host was told when). Without
+   * `retryAt`, Pi waits out its backoff here, in this process.
+   */
+  private async driveOperation(
+    operationId: string,
+    pollDeferred: boolean,
+    ctx: AppContext,
+  ): Promise<OperationResultRecord | typeof RETRY_WAIT | undefined> {
+    const retryAt = this.host.retryAt;
+    const driven = await this.lane.drive(
+      { operationId, waitForRetry: retryAt === undefined, ...(pollDeferred && { pollDeferred }) },
+      this.runScope(ctx),
     );
+    if (!driven.ok) throw driven.error;
+    const outcome = driven.value;
+    if (outcome.kind === "settled") return outcome.outcome;
+    if (outcome.reason !== "retry" || retryAt === undefined) return undefined;
+    await retryAt(outcome.notBefore, runContext(ctx));
+    return RETRY_WAIT;
   }
 
   /**
@@ -345,6 +368,10 @@ export class PiConversation {
     await this.harness.close(toPi(ctx));
   }
 
+  /**
+   * Continue the operation a dead worker left open, or one left at a retry wait (`retryAt`): each time
+   * the conversation opens with it, so its `agent.started` (`resumed`) may be announced more than once.
+   */
   private resumeOpen(operationId: string, isRun: boolean, ctx: AppContext): void {
     const runCtx = runContext(ctx);
     const started = isRun ? runCtx.emit("agent.started", { conversation: this.ref, requestId: operationId, resumed: true }) : undefined;
@@ -352,10 +379,13 @@ export class PiConversation {
       isRun ? operationId : undefined,
       runCtx,
       () =>
-        this.lane.resume(this.runScope(ctx)).then((resumed) => {
-          if (!resumed.ok) throw resumed.error;
-          return "kind" in resumed.value ? resumed.value : undefined;
-        }),
+        // Pi's `resume()` waits out a retry in this process; with `retryAt` the lane is driven directly.
+        this.host.retryAt !== undefined
+          ? this.driveOperation(operationId, true, ctx)
+          : this.lane.resume(this.runScope(ctx)).then((resumed) => {
+              if (!resumed.ok) throw resumed.error;
+              return "kind" in resumed.value ? resumed.value : undefined;
+            }),
       started,
     );
   }
@@ -373,7 +403,7 @@ export class PiConversation {
   private drive(
     runId: string | undefined,
     runCtx: AppContext,
-    work: () => Promise<OperationResultRecord | undefined>,
+    work: () => Promise<OperationResultRecord | typeof RETRY_WAIT | undefined>,
     started: Promise<void> = Promise.resolve(),
   ): void {
     this.driving++;
@@ -420,12 +450,15 @@ export class PiConversation {
 
   private async settle(
     runId: string | undefined,
-    record: OperationResultRecord | undefined,
+    driven: OperationResultRecord | typeof RETRY_WAIT | undefined,
     runCtx: AppContext,
     ended: () => void,
   ): Promise<AgentResult | undefined> {
     try {
-      // `undefined` record: suspended on a deferred response; it stays open. No runId: not a run.
+      // At a retry wait the host continues, the run stays open, unless an `abort()` in the line before
+      // this step ended it: nothing else drives it, so its result is reported here.
+      const record = driven === RETRY_WAIT ? (runId === undefined ? undefined : await this.lane.getResult(runId, toPi(runCtx))) : driven;
+      // `undefined` record: suspended on a deferred response, or waiting for a retry; it stays open. No runId: not a run.
       if (record === undefined || runId === undefined) return undefined;
       const result = await toResult(this.lane, this.ref, record, toPi(runCtx));
       // Before the event: a channel the event wakes reads it from `agent.submissions`' answers.

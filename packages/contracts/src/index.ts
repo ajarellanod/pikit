@@ -25,11 +25,15 @@ export type { AdmitOptions, InboundMessage, InboundOutcome, RouteDecision } from
 export type { AgentState } from "./agent-state.ts";
 export { AGENT_STATE } from "./agent-state.ts";
 export { CONVERSATION } from "./conversation-context.ts";
+export type { WorkersHost } from "./workers-host.ts";
+export { WORKERS_HOST } from "./workers-host.ts";
 export type { ConversationRegistry, ConversationReset } from "./conversations.ts";
 export type { HttpRoute } from "./http.ts";
 export type { SecretStore } from "./secrets.ts";
 export type { JsonValue, KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
 export type { Feed, FeedItem, FeedPage } from "./feed.ts";
+export type { ActorInbox, ActorInboxHandler, ActorMailbox } from "./actor.ts";
+export type { WakeupHandler, Wakeups } from "./wakeups.ts";
 export type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "./submissions.ts";
 export type {
   ChannelTransport,

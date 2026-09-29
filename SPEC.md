@@ -145,6 +145,78 @@ What it requires:
 - **The proof runs.** Scenario 6 deploys and answers; a run killed by eviction mid-drive completes
   after `resume()`; the Durable Object session backend passes Pi's session conformance.
 
+### 4.1 Decisions
+
+Each decision was proven by a spike on Cloudflare (September 2026, Workers Free plan) before it was
+written here. Status (built or not) is tracked apart, as for the kernel.
+
+- **C1. A thin Worker, and one Durable Object per conversation running the App.** A project on
+  Cloudflare has two Apps (K7), both in `pikit.config.ts`: the default export is the Durable
+  Object's App (the channel's other half, the router, the registry, the runtime, sessions, storage,
+  delivery), and `export const worker` is the Worker's App (the ingress half of each channel, the
+  mailbox, secrets). A component with a half for each exports the Worker's half by the name its
+  `component.json` declares, and `pikit add` puts each half in its App. The Worker checks and routes;
+  the object owns the conversation. *Why:* events, feeds and the outbox stay local to the object
+  that owns the conversation, so nothing crosses objects but the message itself; two explicit Apps
+  are composition, not magic.
+- **C2. `actor.mailbox`: a channel reaches an actor without knowing where it runs.** A contract in
+  `@pikit/contracts`: `send(key, type, message, ctx)` resolves once the actor owning `key` holds the
+  message durably (the point where a channel acknowledges its platform), and rejects otherwise, so the
+  platform retries. The actor handles it with the keyed capability `actor.inbox` (`type` →
+  `(key, message, ctx)`). A message is JSON. On a server the mailbox calls the inbox in the same App
+  (`mailbox-local`); on Cloudflare it is an RPC to the object `idFromName(key)` (`platform-cloudflare`).
+  *Why:* one channel component serves both targets, and no channel names a Durable Object.
+- **C3. `wakeups`: durable timers, one alarm underneath.** A contract in `@pikit/contracts`:
+  `at(name, time, ctx)` asks for the handler `name` (keyed capability `wakeup`) to run at or after
+  `time`, replacing an earlier request for that name; `cancel(name, ctx)` drops it. Delivery is
+  at-least-once and may be late; a handler that fails runs again with backoff. On a server they are
+  timers (`wakeups-timers`: a process that restarts reschedules at start, per K6); on Cloudflare they
+  are rows in the object's SQL multiplexed onto its one alarm (`platform-cloudflare`). *Why:* the
+  runtime, delivery and outbox all need to wake, and an object has a single alarm.
+- **C4. Work happens inside an event, in slices.** On Cloudflare an object keeps running only while
+  an event (a request, an RPC, an alarm) is in progress: a promise left running after it is killed
+  within minutes of idleness, and outbound `fetch` does not keep the object alive (measured). So a run
+  is driven by a wakeup whose handler waits for it, and stops at a slice deadline (its context is
+  cancelled) to be woken again at once. Each invocation has its own budget; measured on the Free plan:
+  30 s of CPU (waiting on the network does not count), 50 subrequests, about 200 MB of memory before
+  the object is reset, 15 minutes of wall clock for an alarm (a cut alarm is retried), and a deploy
+  cuts every alarm in progress (it is retried). Slices keep every one of these far away. *Why:* K6
+  already makes a reset lose nothing; slices make a long conversation a sequence of short events.
+- **C5. State through neutral contracts; the platform through one context key.** Sessions
+  (`sessions-sql`, Pi's `Storage` on `storage.sql`) and conversations (`conversations-kv`, on
+  `storage.kv`) have neutral providers that run on both targets; the only Cloudflare-specific storage
+  is `storage-do` (`storage.sql` on the object's SQLite, whose transactions pass the `storage.sql`
+  suite unchanged). Platform objects reach components through one context key in
+  `@pikit/contracts`, `WORKERS_HOST`, which `deployment-cloudflare`'s entrypoints put on each App's
+  start context: the Worker's `env`, and in an object its id, its storage, and the hooks its alarm and
+  RPC call. Its types are structural: no `cloudflare:*` import leaves the entrypoints. *Why:* the
+  components that must touch the platform are few and say so by reading one key; everything else is
+  the same code on both targets.
+  `sessions-sql` is transitional (P1): when the adapter moves to Pi's durable runtime (`pi-durable`),
+  sessions are that runtime's own storage and `sessions-sql` goes (`features/pi-durable-migration.md`).
+  `pi-durable`'s SQLite core takes a synchronous database facade, which a Durable Object's SQLite
+  and Bun's can implement and an asynchronous API cannot: sessions will then sit on the object's SQL
+  directly, through `WORKERS_HOST`, not on `storage.sql`, which stays asynchronous so that Postgres fits
+  and keeps the records components own.
+- **C6. Telegram by webhook is its own component.** `channel-telegram-webhook` (Worker half: the
+  route, the secret Telegram echoes, the allowed users, `actor.mailbox`; object half: the inbox
+  handler and delivery from `agent.submissions`' answers) reuses `channel-telegram`'s client, format
+  and transport as its own copied source; `channel-telegram` keeps long polling for servers. *Why:*
+  absence, not flags (P4): a server project never carries a webhook, nor a Worker a poller.
+- **C7. Execution on Cloudflare: a workspace in the object, a shell without processes.**
+  `execution-do` provides `execution` and `execution.shell` over a filesystem in the object's SQL
+  (binary files in chunks: a row holds at most 2 MB): a simulated shell (just-bash) with `git`
+  (isomorphic-git), `curl` (`fetch`) and `node` (QuickJS compiled to WebAssembly, bundled: a Worker
+  cannot compile at run time) as host commands. Pi's own `bash`, `read`, `write` and `edit` tools run
+  on it unchanged. Files inside `.git` change only through `git`. There are no processes or native
+  binaries; a real Linux is another `execution` provider (`features/sandboxed-execution.md`), not a
+  flag of this one. *Why:* the agent keeps the tools it has on a server, at no cost beyond the
+  object's own, within C4's budgets.
+- **C8. A deploy is finished when the new version answers.** A new version takes seconds to reach
+  every request (measured), so `deployment-cloudflare`'s `up` waits until `/health` answers with the
+  version it deployed before it registers anything outside (a Telegram webhook). *Why:* registering
+  against the previous version fails for no reason a user can see.
+
 ## 5. The dashboard is required
 
 A visual dashboard to see and operate a running pikit service, built from

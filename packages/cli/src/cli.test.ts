@@ -79,7 +79,7 @@ test("new with no directory asks only on a terminal; the presets it offers have 
   expect(readdirSync(parent)).toEqual([]);
 
   const presets = openRegistry(DEFAULT_REGISTRY).presets();
-  expect(presets.map((p) => p.name)).toEqual(["http", "telegram"]);
+  expect(presets.map((p) => p.name)).toEqual(["cloudflare-minimal", "http", "telegram", "telegram-cloudflare"]);
   for (const preset of presets) expect(preset.title).not.toBe(preset.name);
 });
 
@@ -126,6 +126,123 @@ test("new refuses a preset component that does not run on a new project's target
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 
+test("new --target: an unknown target, and a preset that does not run on the chosen one, are refused before writing anything", () => {
+  const parent = temp();
+  const mars = pikit(["new", "fresh", "--target", "mars"], parent);
+  expect(mars.code).toBe(2);
+  expect(mars.err).toContain('--target is one of server, cloudflare, not "mars"');
+
+  const server = pikit(["new", "fresh", "--target", "cloudflare", "--preset", "http"], parent);
+  expect(server.code).toBe(1);
+  expect(server.err).toContain("runs on server, not on this project's cloudflare target");
+  const edge = pikit(["new", "fresh", "--preset", "cloudflare-minimal"], parent);
+  expect(edge.code).toBe(1);
+  expect(edge.err).toContain("storage-do runs on cloudflare, not on this project's server target");
+  // The target is never guessed from the preset, but the refusal says which one it runs on.
+  expect(edge.err).toContain('the preset "cloudflare-minimal" runs on cloudflare: pikit new fresh --target cloudflare --preset cloudflare-minimal');
+  const bot = pikit(["new", "fresh", "--preset", "telegram-cloudflare"], parent);
+  expect(bot.code).toBe(1);
+  expect(bot.err).toContain("pikit new fresh --target cloudflare --preset telegram-cloudflare");
+  // A target that was chosen gets no hint: it was not forgotten.
+  expect(server.err).not.toContain("runs on server: pikit new");
+  expect(existsSync(join(parent, "fresh"))).toBe(false);
+});
+
+test("new --target cloudflare records the target, and writes two Apps, wrangler and the Cloudflare components", () => {
+  const parent = temp();
+  // Nothing resolves: `bun install` fails at once, after every file is written.
+  const run = Bun.spawnSync([process.execPath, MAIN, "new", "edge", "--target", "cloudflare", "--preset", "cloudflare-minimal"], {
+    cwd: parent,
+    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(run.stderr.toString()).toContain("`bun install` failed");
+  const project = join(parent, "edge");
+  const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
+  expect(manifest.targets).toEqual(["cloudflare"]);
+  expect(Object.keys(manifest.components).sort()).toEqual(["conversations-kv", "deployment-cloudflare", "sessions-sql", "storage-do", "storage-kv-sql"]);
+  // Offered among the providers that run on Cloudflare: storage-kv-sql, never storage-sqlite.
+  expect(manifest.components["storage-kv-sql"].installedFor).toEqual(["conversations-kv"]);
+  expect(Object.keys(manifest.components["deployment-cloudflare"].files)).toContain("wrangler.jsonc");
+
+  const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
+  expect(config).toContain("export default defineApp({\n  components: [\n    agents,\n    storageDo,\n    sessionsSql,\n    storageKvSql,\n    conversationsKv,\n  ],");
+  expect(config).toContain("export const worker = defineApp({\n  components: [\n  ],\n  config: workerConfig,\n});");
+  expect(config).not.toContain("deploymentCloudflare");
+  expect(JSON.parse(readFileSync(join(project, "package.json"), "utf8")).devDependencies.wrangler).toBe("4.143.0");
+  expect(readFileSync(join(project, ".gitignore"), "utf8")).toContain(".wrangler/\n");
+  expect(existsSync(join(project, "wrangler.jsonc"))).toBe(true);
+  // The starter's model is one whose provider runs on Cloudflare: provider-anthropic is server-only.
+  expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
+}, 60_000);
+
+test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each half in its App, its agent naming the installed tools", () => {
+  const parent = temp();
+  // Nothing resolves: `bun install` fails at once, after every file is written.
+  const run = Bun.spawnSync([process.execPath, MAIN, "new", "bot", "--target", "cloudflare", "--preset", "telegram-cloudflare"], {
+    cwd: parent,
+    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(run.stderr.toString()).toContain("`bun install` failed");
+  // Every add was accepted: nothing refused, nothing missing in either App along the way.
+  expect(run.stderr.toString()).not.toContain("is not provided");
+  expect(run.stdout.toString()).toContain("outbound-durable, for channel-telegram-webhook");
+  const project = join(parent, "bot");
+  const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
+  expect(manifest.targets).toEqual(["cloudflare"]);
+  expect(Object.keys(manifest.components).sort()).toEqual([
+    "secrets-cloudflare",
+    "platform-cloudflare",
+    "storage-do",
+    "storage-kv-sql",
+    "submissions-sql",
+    "sessions-sql",
+    "conversations-kv",
+    "provider-openrouter",
+    "runtime-pi",
+    "router-basic",
+    "outbound-durable",
+    "channel-telegram-webhook",
+    "execution-do",
+    "tool-read",
+    "tool-write",
+    "tool-edit",
+    "tool-bash",
+    "tool-fetch",
+    "tool-websearch-brave",
+    "deployment-cloudflare",
+  ].sort());
+  expect(manifest.components["outbound-durable"].installedFor).toEqual(["channel-telegram-webhook"]);
+  expect(manifest.components["channel-telegram-webhook"].hooks).toEqual({ afterDeploy: "src/pikit/channel-telegram-webhook/deploy.ts" });
+
+  const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
+  // The Worker checks and routes: secrets, the mailbox, the channel's ingress half (C1).
+  expect(config).toContain(
+    "export const worker = defineApp({\n  components: [\n    secretsCloudflare,\n    platformCloudflare,\n    channelTelegramWebhookWorker,\n  ],\n  config: workerConfig,\n});",
+  );
+  // The object owns the conversation: everything else, and the router sends every message to the agent.
+  expect(config).toContain(
+    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    submissionsSql,\n    sessionsSql,\n    conversationsKv,\n    providerOpenrouter,\n    createRuntimePi({ extensions: [permissionGate] }),\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n  ],",
+  );
+  expect(config).toContain('"router-basic": { defaultAgent: "assistant" },');
+  expect(config).not.toContain("deploymentCloudflare");
+
+  const agent = readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8");
+  expect(agent).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
+  expect(agent).toContain('tools: ["read","write","edit","bash","fetch","websearch"],');
+  // The Telegram variables are the channel's; the Brave key is optional, and so is the model's key.
+  const optional = Object.values(manifest.components as Record<string, { environment: { name: string; required: boolean }[] }>)
+    .flatMap((c) => c.environment)
+    .filter((v) => !v.required)
+    .map((v) => v.name);
+  expect(optional.sort()).toEqual(["BRAVE_API_KEY", "OPENROUTER_API_KEY"]);
+}, 60_000);
+
 test("add without a terminal needs --yes, and writes nothing without it", () => {
   const dir = tinyProject();
   const before = readdirSync(dir).sort();
@@ -147,6 +264,8 @@ test("new records the builtin registry, not this machine's path to it", () => {
     stderr: "pipe",
   });
   expect(run.stderr.toString()).toContain("`bun install` failed");
+  // On a server, the starter's model stays Anthropic's.
+  expect(readFileSync(join(parent, "fresh", "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "anthropic/claude-sonnet-4-6",');
   const manifest = JSON.parse(readFileSync(join(parent, "fresh", "pikit.json"), "utf8"));
   expect(manifest.version).toBe(2);
   expect(manifest.registries).toEqual({ default: "builtin" });

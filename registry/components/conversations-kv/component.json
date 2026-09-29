@@ -1,0 +1,34 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "conversations-kv",
+  "version": "0.0.0",
+  "description": "The conversation registry in storage.kv: which Pi session each conversation is in now, on a server or in a Durable Object.",
+  "targets": [
+    "server",
+    "cloudflare"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": [
+      "storage.kv",
+      "sessions.store"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "conversations.registry"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

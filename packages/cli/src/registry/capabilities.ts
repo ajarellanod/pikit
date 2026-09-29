@@ -43,9 +43,10 @@ export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
   /** One line: what a consumer gets from it. */
   summary: string;
   /**
-   * Offered: when a component that can use it (`useOptional`) is added and nothing provides it,
-   * `pikit add` and `pikit new` offer its provider (SPEC §10.5, "Offered providers"). For what a
-   * component is better with and changes nothing else; not for a choice like a per-agent workspace.
+   * Offered: when a component that can use it (`useOptional`) or requires it (`use`) is added and
+   * nothing provides it, `pikit add` and `pikit new` offer its provider (SPEC §10.5, "Offered
+   * providers"). For a capability with one obvious provider that changes nothing else; not for a
+   * choice like a per-agent workspace.
    */
   offer?: true;
 }
@@ -106,6 +107,24 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Small JSON values a component keeps across restarts, by key, in a namespace of its own (a cursor, a token).",
     offer: true,
+  },
+  "actor.mailbox": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Delivers a JSON message to the actor owning a key, wherever it runs; resolves once the actor holds it durably.",
+  },
+  "actor.inbox": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Where an actor registers one handler per message type it receives through actor.mailbox; a handler resolves once the message is durable.",
+  },
+  wakeups: {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Timers: a component registers a named handler and asks for it to run at or after a time, at least once, retried with backoff.",
   },
   "sessions.store": {
     mode: "single",

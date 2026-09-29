@@ -33,6 +33,11 @@ export interface InstalledComponent {
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
   /**
+   * Its manifest's `hooks`, by project path: `afterDeploy` is the file whose `afterDeploy` the
+   * deployment's `up` calls once the new version answers (`deployment-cloudflare`, SPEC C8).
+   */
+  hooks?: { afterDeploy: string };
+  /**
    * The components it was installed for, when it was offered rather than asked for (SPEC §10.5,
    * "Offered providers"): it leaves with the last of them, when nothing else uses it.
    */
@@ -54,12 +59,15 @@ export interface ProjectManifest {
   components: Record<string, InstalledComponent>;
 }
 
-/** A new project's targets (M1 has one; `--target` arrives with the cloudflare target). */
+/** A new project's targets unless `pikit new --target` says otherwise. */
 export const NEW_PROJECT_TARGETS: readonly string[] = ["server"];
 
-/** A new project's manifest; `registry` is a recorded location (`recordedLocation`), `kit` the vendored kit's commit. */
-export function emptyManifest(registry: string = BUILTIN_REGISTRY, kit?: string): ProjectManifest {
-  return { version: 2, ...(kit !== undefined && { kit: { commit: kit } }), targets: [...NEW_PROJECT_TARGETS], registries: { default: registry }, components: {} };
+/**
+ * A new project's manifest; `registry` is a recorded location (`recordedLocation`), `kit` the vendored
+ * kit's commit, `targets` where it runs (`pikit new --target`).
+ */
+export function emptyManifest(registry: string = BUILTIN_REGISTRY, kit?: string, targets: readonly string[] = NEW_PROJECT_TARGETS): ProjectManifest {
+  return { version: 2, ...(kit !== undefined && { kit: { commit: kit } }), targets: [...targets], registries: { default: registry }, components: {} };
 }
 
 export function readProjectManifest(projectDir: string): ProjectManifest {

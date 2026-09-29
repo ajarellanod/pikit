@@ -13,13 +13,19 @@
  * What was installed *for* it (an offered provider, SPEC §10.5) goes with it when nothing else uses
  * it, so `add` then `remove` leaves no trace even when `add` brought a provider along. When another
  * component uses it now, it stays, installed for that one.
+ *
+ * On Cloudflare it undoes both Apps (SPEC C1): its entries leave every `components` list, its config
+ * keys leave `config` and `workerConfig` (its Worker half's is `<name>-worker`), and what depends on
+ * it is looked for in each App.
  */
 
 import { existsSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { packageName, scanImports } from "../registry/imports.ts";
 import { BASES_DIR, unreferencedBases } from "../project/bases.ts";
-import { CONFIG_FILE, removeComponent, removeConfigEntry } from "../project/config-file.ts";
+import { workerHalfName } from "../project/apps.ts";
+import { CONFIG_FILE, removeComponent, removeConfigEntry, WORKER_CONFIG } from "../project/config-file.ts";
+import type { AppDescription } from "../project/probe.ts";
 import { ENV_EXAMPLE, removeExampleBlock } from "../project/env-file.ts";
 import { readPackageJson, removeDependencies, writePackageJson } from "../project/package-json.ts";
 import { type ProjectManifest, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
@@ -40,7 +46,7 @@ export async function remove(projectDir: string, name: string, options: RemoveOp
   const installed = project.components[name];
   if (installed === undefined) throw new CliError(`${name} is not installed (pikit.json has ${Object.keys(project.components).join(", ") || "nothing"})`);
 
-  await checkNoDependents(projectDir, name, options.force === true);
+  await checkNoDependents(projectDir, project, name, options.force === true);
 
   const modified = modifiedFiles(projectDir, installed);
   if (modified.length > 0 && options.force !== true) {
@@ -50,7 +56,11 @@ export async function remove(projectDir: string, name: string, options: RemoveOp
   // pikit.config.ts first: if its shape is not recognised, nothing has been deleted yet.
   const configPath = join(projectDir, CONFIG_FILE);
   const config = readFileSync(configPath, "utf8");
-  const nextConfig = removeConfigEntry(removeComponent(config, name), name);
+  let nextConfig = removeConfigEntry(removeComponent(config, name), name);
+  // The Worker's App's keys: its own (in both Apps) and its Worker half's, unless that is another component.
+  for (const key of [name, workerHalfName(name)].filter((key) => key === name || !(key in project.components))) {
+    nextConfig = removeConfigEntry(nextConfig, key, WORKER_CONFIG);
+  }
   if (nextConfig !== config) writeFileSync(configPath, nextConfig);
 
   for (const file of Object.keys(installed.files)) {
@@ -98,10 +108,16 @@ async function installedOnlyFor(projectDir: string, name: string): Promise<strin
   const candidates = Object.entries(project.components).filter(([, c]) => c.installedFor?.includes(name));
   if (candidates.length === 0) return [];
   const result = await probe(projectDir);
-  const components = result.ok ? result.description.components : [];
+  const apps = result.ok ? appsOf(result) : [];
+  // In each App: what uses what the component provides there, by installed component.
   const usersOf = (component: string): string[] => {
-    const provides = new Set(components.find((c) => c.name === component)?.provides ?? []);
-    return components.filter((c) => c.name !== component && [...c.requires, ...c.optional].some((cap) => provides.has(cap))).map((c) => c.name);
+    const users = apps.flatMap(({ components }) => {
+      const provides = new Set(components.filter((c) => installedName(project, c.name) === component).flatMap((c) => c.provides));
+      return components
+        .filter((c) => installedName(project, c.name) !== component && [...c.requires, ...c.optional].some((cap) => provides.has(cap)))
+        .map((c) => installedName(project, c.name));
+    });
+    return [...new Set(users)];
   };
   const leftovers: string[] = [];
   for (const [component, installed] of candidates) {
@@ -118,21 +134,23 @@ async function installedOnlyFor(projectDir: string, name: string): Promise<strin
  * Refuses when a remaining component requires a capability only this component provides, and,
  * unless forced, when an agent names a key only it provides.
  */
-async function checkNoDependents(projectDir: string, name: string, force: boolean): Promise<void> {
+async function checkNoDependents(projectDir: string, project: ProjectManifest, name: string, force: boolean): Promise<void> {
   const result = await probe(projectDir);
   if (!result.ok) {
     if (force) return;
     throw new CliError(`the app does not compose now, so what depends on ${name} is unknown: ${result.error}\nFix it (\`pikit doctor\`) or pass --force`);
   }
-  const { components, capabilities, config } = result.description;
+  const own = (component: string) => installedName(project, component) === name;
   const blockers: string[] = [];
-  for (const [capability, { providers }] of Object.entries(capabilities)) {
-    if (!providers.includes(name) || providers.some((p) => p !== name)) continue;
-    for (const c of components) if (c.name !== name && c.requires.includes(capability)) blockers.push(`${c.name} requires ${capability}`);
-  }
-  const selection = (config.capabilities ?? {}) as Record<string, string>;
-  for (const [capability, chosen] of Object.entries(selection)) {
-    if (chosen === name) blockers.push(`config.capabilities selects ${name} for ${capability}`);
+  for (const { where, components, capabilities, config } of appsOf(result)) {
+    for (const [capability, { providers }] of Object.entries(capabilities)) {
+      if (!providers.some(own) || providers.some((p) => !own(p))) continue;
+      for (const c of components) if (!own(c.name) && c.requires.includes(capability)) blockers.push(`${c.name} requires ${capability}${where}`);
+    }
+    const selection = (config.capabilities ?? {}) as Record<string, string>;
+    for (const [capability, chosen] of Object.entries(selection)) {
+      if (own(chosen)) blockers.push(`config.capabilities selects ${chosen} for ${capability}${where}`);
+    }
   }
   if (blockers.length > 0) {
     throw new CliError(`${name} cannot be removed; it is the only provider of what the app needs:\n  ${blockers.join("\n  ")}\nInstall another provider first.`);
@@ -141,6 +159,18 @@ async function checkNoDependents(projectDir: string, name: string, force: boolea
   if (references.length > 0 && !force) {
     throw new CliError(`${name} cannot be removed; agents name what only it provides, and the app would not start:\n  ${references.join("\n  ")}\nChange those agents first, or pass --force.`);
   }
+}
+
+/** Each App the probe described, with how a blocker names it: the Worker's is named. */
+function appsOf(result: Extract<Awaited<ReturnType<typeof probe>>, { ok: true }>): (AppDescription & { where: string })[] {
+  return [{ ...result.description, where: "" }, ...(result.worker === undefined ? [] : [{ ...result.worker, where: " in the Worker's App" }])];
+}
+
+/** The installed component a name in an App belongs to: itself, or the one whose Worker half it is. */
+function installedName(project: ProjectManifest, component: string): string {
+  if (component in project.components) return component;
+  const base = component.endsWith("-worker") ? component.slice(0, -"-worker".length) : undefined;
+  return base !== undefined && base in project.components && workerHalfName(base) === component ? base : component;
 }
 
 /**
