@@ -14,6 +14,22 @@ line names its area (AGENTS.md, "Git and docs").
 - registry: a deployment component's `commands.ts` runs on the machine that deploys (the CLI loads it), so `registry validate` lets it import `node:*` whatever the component's targets, as it does tests; every other file stays held to them (S5).
 - component/channel-telegram-webhook: new. Telegram by webhook for Cloudflare (SPEC §4.1, C6), in two halves: the Worker's (the export `worker`: `POST /telegram` and `/telegram/<name>`, the webhook's secret checked in constant time, private text messages from allowed users only, a stranger told their id, then `actor.mailbox.send("telegram:<chat>", "telegram.update", update)`, `200` once the conversation holds it and `500` otherwise) and the object's (the `actor.inbox` handler: `/start`, `/help`, `/new`, `admitInbound`; the wakeup `channel-telegram-webhook.deliver`: answers from `agent.submissions`' feed with a cursor in `storage.kv`, pieces marked `sending`/`sent` and one found `sending` sent again with `↻ `, "typing…" while a message waits, `outbound.queue` if installed). `pikit configure` checks the token, generates `TELEGRAM_WEBHOOK_SECRET` and allows you; `deploy.ts`'s `afterDeploy({ url, config, get, say })` registers and checks each bot's webhook once a deploy answers (C8). Target `cloudflare`.
 - registry: `component.json` may name a half for another App, `"apps": { "worker": "<export>" }` (SPEC §4.1, C1): the named export of `index.ts` goes in the Worker's App, the default export in the default one; `registry generate` and `validate` describe both halves, so `provides`, `requires` and `optional` cover the component as a whole, and a named export that is missing or not a component is a problem.
+- repository: the workerd lane also runs Pi's session conformance on `sessions-sql` over `storage-do`
+  (the Durable Object session backend passes it, SPEC §4) and `agent.runtime` on `runtime-pi` over
+  those sessions, and `execution-do` with Pi's own tools on it; `bun run --cwd tests/workerd bundle`
+  measures a conversation object's bundle (1,002 KiB gzip with `execution-do`, 216 KiB without).
+- component/execution-do: new. `execution` and `execution.shell` in the conversation's Durable
+  Object: files in its SQL (`execution_do_*` tables, 1 MB chunks), a shell without processes
+  (just-bash) with `git` (isomorphic-git: clone, status, diff, commit, log, push, pr), `node` (QuickJS
+  in WebAssembly, with an interrupt budget and a heap limit) and `curl`. Only `git` writes inside
+  `.git`; pushes go only to `git.pushRepositories`, on `pikit/self/` branches, with a token read
+  through `secrets` that never reaches the shell. Pi's `bash`, `read`, `write` and `edit` run on it
+  unchanged. Target `cloudflare`; the Worker needs `nodejs_compat` and a `CompiledWasm` rule (README).
+- adapter: `@pikit/pi-adapter/execution` gives an `execution` provider Pi's `ok`, `err`, `FileError`,
+  `ExecutionError`, `truncateTail` and `truncateHead` without importing Pi; `@pikit/pi-adapter/testing/neutral`
+  is the part of the test kit that runs in workerd too (Pi's session and execution suites, the scripted
+  agent, `createRuntimeFixture` over records of your own, and `interruptInProcess`).
+
 - cli: `pikit add` and `pikit new` also offer the provider of a capability a component requires when the catalogue marks it `offer`: `pikit add conversations-kv` offers `storage-kv-sql` (and `storage-sqlite`).
 - component/conversations-kv: new. `conversations.registry` on `storage.kv` (namespace `conversations-kv`) and `sessions.store`; targets `server` and `cloudflare`. A first pointer is written with `setIfAbsent`, a reset emits `conversation.reset` once its pointer is stored, and its README says what holds when resets and resolves race across processes.
 - component/tool-websearch-brave: new. The `websearch` tool on the Brave Search API; its key,

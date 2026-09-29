@@ -4,8 +4,11 @@
   "name": "pikit-workerd-tests",
   "main": "src/worker.ts",
   "compatibility_date": "2026-09-01",
-  // Vitest's runner inside workerd needs it; the components under test do not.
+  // Vitest's runner inside workerd needs it, and so does execution-do (isomorphic-git uses Buffer).
   "compatibility_flags": ["nodejs_compat"],
+  // execution-do's QuickJS, bundled as a compiled module: wrangler's own rule matches only specifiers
+  // ending in .wasm, and this one is a package export (execution-do's README).
+  "rules": [{ "type": "CompiledWasm", "globs": ["@jitl/quickjs-wasmfile-release-sync/wasm"], "fallthrough": true }],
   "durable_objects": {
     "bindings": [
       { "name": "OBJECTS", "class_name": "TestObject" },
