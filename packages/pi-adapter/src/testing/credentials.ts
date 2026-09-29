@@ -1,5 +1,5 @@
 /**
- * `model.credentials` conformance (SPEC §4.5, §14). The contract is pi-ai's `CredentialStore`, so
+ * `model.credentials` conformance. The contract is pi-ai's `CredentialStore`, so
  * the suite lives with the adapter, and pi-ai's own `InMemoryCredentialStore` is its double.
  * Runner-independent, like the core's suites:
  *

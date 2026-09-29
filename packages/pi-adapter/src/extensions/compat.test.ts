@@ -1,8 +1,8 @@
 /**
- * Scenario 7 (SPEC §15): existing Pi extensions run in pikit unmodified. The three extensions in
- * `pi-examples/` are Pi's own examples, byte for byte; they import `@earendil-works/pi-coding-agent`,
- * which resolves to `@pikit/pi-extension-shim`. The rest of the file checks the mapping of Pi's
- * extension events onto the harness (SPEC §6.2b).
+ * Scenario 7 (samples/http/test/scenario-7.test.ts): existing Pi extensions run in pikit
+ * unmodified. The three extensions in `pi-examples/` are Pi's own examples, byte for byte; they
+ * import `@earendil-works/pi-coding-agent`, which resolves to `@pikit/pi-extension-shim`. The rest
+ * of the file checks the mapping of Pi's extension events onto the harness (tier A, `surface.ts`).
  */
 
 import { describe, expect, test } from "bun:test";
@@ -211,7 +211,7 @@ describe("scenario 7: Pi's own example extensions, unmodified", () => {
   });
 });
 
-describe("the mapping of Pi's extension events (SPEC §6.2b)", () => {
+describe("the mapping of Pi's extension events (tier A)", () => {
   test("a conversation sees session, run, turn and tool events in Pi's order", async () => {
     const seen: string[] = [];
     const recorder: PiExtension = (pi: ExtensionAPI) => {
@@ -370,7 +370,7 @@ describe("the mapping of Pi's extension events (SPEC §6.2b)", () => {
   });
 });
 
-describe("Pi 0.99's tool exposure: what reaches the model (SPEC \u00a76.2b)", () => {
+describe("Pi 0.99's tool exposure: what reaches the model (tier A)", () => {
   const NONE = Type.Object({});
 
   /** A tool that says it ran, with `fields` over it. */
@@ -566,7 +566,7 @@ describe("Pi 0.99's tool exposure: what reaches the model (SPEC \u00a76.2b)", ()
   });
 });
 
-describe("taking a conversation up again, with extensions loaded (SPEC §6.2b)", () => {
+describe("taking a conversation up again, with extensions loaded (tier A)", () => {
   /** An extension that records every event it sees, in order. */
   function recorder(seen: string[]): PiExtension {
     return (pi) => {

@@ -1,4 +1,4 @@
-// Public surface of @pikit/pi-adapter (SPEC §6.2): the only package that imports Pi.
+// Public surface of @pikit/pi-adapter: the only package that imports Pi.
 // Its pikit-facing surface follows the core's stability rule; its Pi-facing internals do not.
 
 export { createPiRuntime } from "./runtime.ts";

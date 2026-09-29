@@ -1,6 +1,6 @@
 /**
- * Facts about pi-agent-core 0.99.0 that the adapter relies on (SPEC §6.4). Asserted on Pi
- * directly, so a Pi bump that changes one fails here before it breaks the adapter.
+ * Facts about pi-agent-core 0.99.0 that the adapter relies on (features/pi-durable-migration.md).
+ * Asserted on Pi directly, so a Pi bump that changes one fails here before it breaks the adapter.
  */
 
 import { describe, expect, test } from "bun:test";
@@ -32,7 +32,7 @@ describe("Pi facts (pi-agent-core 0.99.0)", () => {
     await reopened.close(ctx);
   });
 
-  test("session values survive a new harness and start empty in a new session (agent.state, SPEC §6.2a)", async () => {
+  test("session values survive a new harness and start empty in a new session (agent.state)", async () => {
     const STATE = value<JsonValue>("pikit", "agent.state");
     const repo = new MemorySessionRepo();
     const session = await repo.create({}, ctx);
@@ -45,7 +45,7 @@ describe("Pi facts (pi-agent-core 0.99.0)", () => {
     expect((await reopened.getValue(STATE, ctx))?.value).toEqual({ phase: "deploying" });
     await reopened.close(ctx);
 
-    // A reset is a new session (SPEC §7.6): nothing carries over.
+    // A reset is a new session (`conversations.registry`'s `reset`): nothing carries over.
     const fresh = await repo.create({}, ctx);
     expect(await fresh.getValue(STATE, ctx)).toBeUndefined();
     await fresh.close(ctx);

@@ -1,5 +1,5 @@
 /**
- * An agent names the Pi extensions it uses (`agent.extension`, SPEC §6.2b), as it names its tools;
+ * An agent names the Pi extensions it uses (`agent.extension`), as it names its tools;
  * the runtime loads them, after its own, when a conversation of that agent opens.
  */
 

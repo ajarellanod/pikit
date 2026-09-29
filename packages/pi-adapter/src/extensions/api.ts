@@ -1,5 +1,5 @@
 /**
- * The part of Pi's extension API that pikit supports (SPEC §6.2b), vendored from
+ * The part of Pi's extension API that pikit supports (tier A, `extensions/surface.ts`), vendored from
  * `@earendil-works/pi-coding-agent` (`src/core/extensions/types.ts`; MIT, © Mario Zechner, see
  * NOTICE): first from 0.87.1, then checked against 0.99.0, from which the tool exposure types,
  * `executionMode`, `ExtensionToolContext` and the MCP server, virtual model and settings members of `ExtensionAPI`

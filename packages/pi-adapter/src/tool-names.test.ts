@@ -1,5 +1,5 @@
 /**
- * An agent names installed tools (`agent.tool`) next to tool objects of its own (SPEC §6.3); the
+ * An agent names installed tools (`agent.tool`) next to tool objects of its own; the
  * runtime resolves the names when a conversation opens.
  */
 

@@ -4,7 +4,7 @@
  * Pi's `StorageBackedSession` is the session; `SqlStorage` (storage.ts) is what it stores through.
  *
  * - **One open handle per session in this process**, as Pi's repositories enforce: `open` refuses a
- *   session already open, and `delete` one that is. A session belongs to one process (SPEC §7.2):
+ *   session already open, and `delete` one that is. A session belongs to one process (SPEC C1):
  *   one server over its database, or the Durable Object that owns the conversation. Two processes
  *   opening one session is not detected; each commit is still one transaction, so neither can
  *   corrupt the other's sequence numbers, but their runs would interleave.

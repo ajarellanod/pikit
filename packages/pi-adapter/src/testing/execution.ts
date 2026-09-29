@@ -1,5 +1,5 @@
 /**
- * `execution` / `execution.shell` conformance (SPEC §8.3, §14). The contract is Pi's `ExecutionEnv`
+ * `execution` / `execution.shell` conformance. The contract is Pi's `ExecutionEnv`
  * and Pi ships no suite for it, so this one lives with the adapter, and Pi's own `NodeExecutionEnv`
  * is its double. Runner-independent, like the core's suites:
  *

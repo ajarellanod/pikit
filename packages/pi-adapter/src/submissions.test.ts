@@ -1,7 +1,8 @@
 /**
- * The runtime with `agent.submissions` (SPEC §6.1): what it records, when, and how `recover` brings
- * back the work a dead process left: a run left open, and a run whose end Pi stored but nobody recorded.
- * Without the option, nothing here happens (the rest of the adapter's tests run without it).
+ * The runtime with `agent.submissions` (@pikit/contracts' submissions.ts): what it records, when,
+ * and how `recover` brings back the work a dead process left: a run left open, and a run whose end
+ * Pi stored but nobody recorded. Without the option, nothing here happens (the rest of the
+ * adapter's tests run without it).
  */
 
 import { expect, test } from "bun:test";

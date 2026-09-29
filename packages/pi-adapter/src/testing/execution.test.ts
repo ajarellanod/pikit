@@ -1,5 +1,5 @@
 /**
- * The `execution` suite run against Pi's own `NodeExecutionEnv` (S12: Pi's implementation is the
+ * The `execution` suite run against Pi's own `NodeExecutionEnv` (Pi's implementation is the
  * double), with a shell and without one (its `exec` answering `shell_unavailable`, as an
  * environment with no shell must).
  */

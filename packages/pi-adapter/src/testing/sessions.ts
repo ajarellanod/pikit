@@ -1,5 +1,5 @@
 /**
- * Pi's own conformance suites for session stores (SPEC §7.5, §14), for `sessions.*` components to
+ * Pi's own conformance suites for session stores (`sessions.store`), for `sessions.*` components to
  * run without importing Pi (rule 1). Every `sessions.store` passes `createSessionRepoConformance`
  * and `createStorageConformance`, as Pi's own repositories do.
  */

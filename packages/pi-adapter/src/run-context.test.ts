@@ -1,6 +1,6 @@
 /**
- * Every run's context names its conversation (`CONVERSATION`, SPEC §6.3), and Pi hands that context
- * to each tool call: a bound tool can then work in its agent's own environment (SPEC §8.2).
+ * Every run's context names its conversation (`CONVERSATION`), and Pi hands that context
+ * to each tool call: a bound tool can then work in its agent's own environment (`workspace`).
  */
 
 import { afterAll, expect, test } from "bun:test";

@@ -1,7 +1,7 @@
 /**
  * Pi's exact types for the contracts' opaque agent payloads and for the capabilities whose contract
- * is Pi's own (SPEC §6.1, "Who owns these types"; §4.9: a contract whose type is Pi's lives here). Importing `@pikit/pi-adapter` anywhere in a project
- * makes them precise everywhere, by declaration merging, as `AppEvents` is extended.
+ * is Pi's own (a contract whose type is Pi's lives here). Importing `@pikit/pi-adapter` anywhere in
+ * a project makes them precise everywhere, by declaration merging, as `AppEvents` is extended.
  */
 
 import type { AgentHarnessTool, AgentMessage, Context, ExecutionEnv, SessionMetadata, SessionRepo } from "@earendil-works/pi-agent-core";
@@ -26,7 +26,7 @@ export interface SessionStore extends SessionRepo<any, any, any> {
 }
 
 /**
- * The `workspace` capability (SPEC §8.2): where an agent's tools work. The tool components ask it for
+ * The `workspace` capability: where an agent's tools work. The tool components ask it for
  * the workspace of the conversation a run belongs to (`CONVERSATION` in the run's context); without a
  * provider they work on `execution`, as every agent did before.
  *
@@ -53,7 +53,7 @@ export interface Workspace {
 declare module "@pikit/contracts" {
   interface AgentPayloads {
     message: AgentMessage;
-    // The tool context (Pi's own tools take `{ env }`) is decided with the tool-* components (§6.3).
+    // The tool context (Pi's own tools take `{ env }`) is decided with the tool-* components.
     // biome-ignore lint/suspicious/noExplicitAny: see above
     tool: AgentHarnessTool<any>;
     usage: Usage;
@@ -62,7 +62,7 @@ declare module "@pikit/contracts" {
 
 declare module "@pikit/core" {
   interface AppCapabilities {
-    /** Pi's `SessionRepo` (SPEC §7.5): where conversations' sessions live. */
+    /** Pi's `SessionRepo`: where conversations' sessions live. */
     "sessions.store": SessionStore;
     /**
      * pi-ai's `CredentialStore`: the credentials the model providers use, stored per provider id.
@@ -71,14 +71,14 @@ declare module "@pikit/core" {
      */
     "model.credentials": CredentialStore;
     /**
-     * Pi's `ExecutionEnv` (SPEC §8.3): the filesystem the agent's tools work on. Its `exec` may answer
+     * Pi's `ExecutionEnv`: the filesystem the agent's tools work on. Its `exec` may answer
      * `shell_unavailable`.
      */
     execution: ExecutionEnv;
     /** The same contract, provided only when `exec` really runs commands. Shell tools require it. */
     "execution.shell": ExecutionEnv;
     /**
-     * Where each agent's tools work (SPEC §8.2): the file and shell tools resolve it per run, from the
+     * Where each agent's tools work: the file and shell tools resolve it per run, from the
      * run's conversation. Optional for them: without it they work on `execution`.
      */
     workspace: WorkspaceProvider;
@@ -87,8 +87,8 @@ declare module "@pikit/core" {
     /** One pi-ai model provider per key (its id): `anthropic`, `openai`, `faux` in tests. */
     "model.provider": Provider;
     /**
-     * One Pi extension factory per key (its name), unmodified (SPEC §6.2b). An agent loads it only if
-     * it names it in `AgentDefinition.extensions`.
+     * One Pi extension factory per key (its name), unmodified (tier A, `extensions/surface.ts`). An
+     * agent loads it only if it names it in `AgentDefinition.extensions`.
      */
     "agent.extension": PiExtension;
   }
