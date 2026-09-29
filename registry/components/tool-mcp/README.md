@@ -9,6 +9,7 @@ you want from it; each becomes the agent tool `<server>_<tool>`. Pi's own MCP cl
   from your config.
 - **Uses, if installed:** `secrets`, for a server that needs a bearer token (`secrets-env`,
   `secrets-cloudflare`). A server with a `secret` and no `secrets` provider stops the start.
+  `storage.kv`, to keep each server's tool listing: a start then reaches no server (below).
 - **Targets:** `server` and `cloudflare`: Streamable HTTP over `fetch`. A server run as a local
   process (stdio) is not this component's (see `features/mcp.md`).
 - **Installs to:** `src/pikit/tool-mcp/`.
@@ -58,23 +59,46 @@ defineAgent({ name: "research", model: "openrouter/z-ai/glm-5.3-flash", tools: [
 
 - **At setup** each tool named in config is provided, under its name: a keyed capability's keys are
   fixed then, before any server is reached.
-- **At start** each server is reached once (`initialize`, `tools/list`), and each tool takes from it
-  what only the server knows: its title, description and parameters (its `inputSchema`). The tools
-  are the same objects runtime-pi hands to Pi when a conversation opens, after every start, so the
-  model sees what the server described. A server that cannot be reached, refuses the token, or lacks
-  a tool named here **stops the app** (P5), naming the tools it has.
+- **At start** each tool takes what only the server knows: its title, description and parameters
+  (its `inputSchema`), from the server's `tools/list`. The tools are the same objects runtime-pi
+  hands to Pi when a conversation opens, after every start, so the model sees what the server
+  described.
+  - **With `storage.kv`**, each server's listing of the named tools is kept (namespace `tool-mcp`,
+    key `server/<name>`, with its URL and when it was listed). A start that finds it complete, for
+    the same URL, describes the tools from it and **reaches no server**: a cold start makes no MCP
+    request, and a server that is down does not stop the app; only calls to its tools fail.
+  - **Otherwise** (no `storage.kv`, the first start, a new URL or a new tool in config), each server
+    is reached (`initialize`, `tools/list`), and the listing is kept. A server that cannot be
+    reached, refuses the token, or lacks a tool named here **stops the app** (P5), naming the tools
+    it has: the model could get the tool's description from nowhere.
+- **Each connection lists the tools again**: the first call after a start from the kept listing,
+  and a call after the server forgot the session. The tools and the kept listing follow what the
+  server says now (Pi reads description and parameters at each model call). A named tool the server
+  no longer lists is logged as an error, and its calls fail naming the tools the server has; its
+  last description stays kept, so the next start does not stop the app over it.
+- **Strict before a deploy**: `doctor.ts` is this component's step of `pikit doctor`, which `pikit up`
+  and `pikit dev` run first. It reaches each server with the token from `.env` (or the environment)
+  and reports one that cannot be reached, or lacks a named tool, as a problem: the deploy stops
+  there, not the app once deployed. The token's value is never printed.
 - **A call** sends `tools/call` and gives the model the result's text and images. A failure the
-  server reports (a result with `isError`) fails the call with its text; a cancelled run cancels the
-  call and tells the server.
+  server reports (a result with `isError`) fails the call with its text; a server that cannot be
+  reached fails the call (the app keeps answering, and the next call tries again); a cancelled run
+  cancels the call and tells the server.
 - **One client per server**, kept in memory. When the server forgets the session (it restarted, or
   it expires idle ones), the call connects again and is sent once more: the server ran nothing. Any
   other failure is not retried: the tool may have run.
 - **At stop** each session is ended (`DELETE`).
 
-On Cloudflare the component goes in the conversation's Durable Object App. The object connects to
-each server when its App starts (one `initialize` and one `tools/list` per server, part of its cold
-start), and keeps no stream open between requests: the server-to-client stream of MCP is not opened,
-since an object does not stay alive for it (SPEC §4.1, C4).
+On Cloudflare the component goes in the conversation's Durable Object App, and every conversation's
+object starts its App when it wakes. Install `storage.kv` there (`storage-kv-sql` over
+`storage-do`): an object then keeps the listing in its own storage, and each later wake starts from
+it, with no MCP request in its cold start and no stop when a server is down, and connects on its
+first call. The listing is the object's: a new conversation's first start still reaches the
+servers (and a server down stops that one start). Without it each object's start makes one `initialize`, one
+`notifications/initialized` and one `tools/list` per server (about 0.9 s against
+`mcp.deepwiki.com`, measured in `features/mcp.md`). No stream stays open between requests: the
+server-to-client stream of MCP is not opened, since an object does not stay alive for it (SPEC
+§4.1, C4).
 
 ## Replay
 
@@ -91,4 +115,7 @@ provided under the right keys, their description, parameters and replay filled a
 their results, a reported failure, a tool the server lacks and a server that cannot be reached
 stopping the start, a forgotten session reconnected, the token read from `secrets` (and missing, or
 without `secrets`), config headers, cancellation, stop, and a real run where the model sees what the
-server described and a reported failure is recorded as a failed call.
+server described and a reported failure is recorded as a failed call. With `storage.kv` (in memory):
+the listing kept at start, a start from it with no request, a server down that fails its calls but
+not the start, the tools and the listing refreshed on each connection, and a tool the server no
+longer lists failing its calls. `doctor.test.ts` covers the doctor step.
