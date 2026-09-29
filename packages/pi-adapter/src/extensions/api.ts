@@ -321,6 +321,15 @@ export interface ToolInfo {
   description: string;
 }
 
+/** An MCP server an extension registered. None in pikit: see `pi.registerMcpServer()`. */
+export interface RegisteredMcpServer {
+  name: string;
+  /** An `mcpServers` entry of Pi's `mcp.json`. */
+  config: unknown;
+  /** Path of the extension that registered the server. */
+  extensionPath: string;
+}
+
 // ----------------------------------------------------------------------------------------------
 // The API
 // ----------------------------------------------------------------------------------------------
@@ -378,6 +387,11 @@ export interface ExtensionAPI {
   setThinkingLevel(level: ThinkingLevel): void;
   /** A pi-ai provider object. Registered for every conversation of the runtime. */
   registerProvider(provider: Provider): void;
+  /**
+   * No-op in pikit: a provider is shared by every conversation of the runtime, and pikit cannot
+   * restore the one it replaced.
+   */
+  unregisterProvider(name: string): void;
   events: EventBus;
 
   /** Tier B/C, no-ops in pikit: slash commands, shortcuts, flags, renderers. */
@@ -388,6 +402,26 @@ export interface ExtensionAPI {
   registerMessageRenderer(customType: string, renderer: unknown): void;
   registerEntryRenderer(customType: string, renderer: unknown): void;
   registerMarkdownTransformer(transformer: unknown): void;
+  /** The slash commands: none in pikit, where `registerCommand` is a no-op. */
+  getCommands(): { name: string; description?: string }[];
+  /**
+   * Pi's settings (`settings.json`). pikit has none: an empty object, where every setting reads as
+   * unset, so an extension takes Pi's default for it. The conversation's own model and thinking
+   * level are `ctx.model` and `pi.getThinkingLevel()`.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: Pi's `Settings`, of which pikit has no field
+  getSettings(): { [setting: string]: any };
+
+  /** No-op in pikit, which connects MCP servers with its `tool-mcp` component. */
+  registerMcpServer(name: string, config: unknown): void;
+  /** No-op in pikit. */
+  unregisterMcpServer(name: string): void;
+  /** The MCP servers extensions registered: none in pikit. */
+  getMcpServers(): RegisteredMcpServer[];
+  /** No-op in pikit, which has no virtual models. */
+  registerVirtualModel<TState = unknown>(model: unknown): void;
+  /** No-op in pikit. */
+  unregisterVirtualModel(provider: string, id: string): void;
 }
 
 /** A Pi extension: the default export of an extension module. */

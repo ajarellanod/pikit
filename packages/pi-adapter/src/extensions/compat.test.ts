@@ -317,6 +317,35 @@ describe("the mapping of Pi's extension events (SPEC §6.2b)", () => {
     await s.close();
   });
 
+  test("Pi 0.99's MCP server, virtual model, settings and command members load, answer neutrally and warn once", async () => {
+    const warnings: { what: unknown; detail: unknown }[] = [];
+    const logger: Logger = { ...silentLogger, warn: (_message, fields) => void warnings.push({ what: fields?.what, detail: fields?.detail }) };
+    const answers: unknown[] = [];
+    const modern: PiExtension = (pi) => {
+      pi.registerMcpServer("jira", { url: "https://mcp.example.com/jira" });
+      pi.registerMcpServer("jira", { url: "https://mcp.example.com/jira" });
+      pi.unregisterMcpServer("jira");
+      pi.registerVirtualModel({ provider: "router", id: "auto", route: () => ({}) });
+      pi.unregisterVirtualModel("router", "auto");
+      pi.unregisterProvider("proxy");
+      answers.push(pi.getMcpServers(), pi.getCommands(), pi.getSettings(), pi.getSettings().defaultModel);
+    };
+    const s = await setup([modern], { logger });
+
+    expect((await s.say("hi")).text).toBe("answer: hi");
+    expect(answers).toEqual([[], [], {}, undefined]);
+    expect(warnings.map((warning) => warning.what)).toEqual([
+      'pi.registerMcpServer("jira")',
+      'pi.unregisterMcpServer("jira")',
+      "pi.registerVirtualModel",
+      "pi.unregisterVirtualModel",
+      'pi.unregisterProvider("proxy")',
+      "pi.getSettings",
+    ]);
+    expect(String(warnings[0]?.detail)).toContain("tool-mcp");
+    await s.close();
+  });
+
   test("actions are not available while an extension loads", async () => {
     let failure: unknown;
     const eager: PiExtension = (pi) => {

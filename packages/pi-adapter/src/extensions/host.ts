@@ -82,10 +82,10 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
   const handlers = new Map<string, AnyHandler[]>();
   const definitions: ToolDefinition[] = [];
   const warned = new Set<string>();
-  const unsupported = (what: string) => {
+  const unsupported = (what: string, detail?: string) => {
     if (warned.has(what)) return;
     warned.add(what);
-    logger.warn("a Pi extension uses something pikit does not provide; it does nothing", { what });
+    logger.warn("a Pi extension uses something pikit does not provide; it does nothing", { what, ...(detail !== undefined && { detail }) });
   };
   const channels = new Map<string, Set<(data: unknown) => void>>();
   const events: EventBus = {
@@ -132,6 +132,8 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
       if (models.setProvider === undefined) return unsupported("pi.registerProvider on read-only models");
       models.setProvider(provider);
     },
+    unregisterProvider: (name) =>
+      unsupported(`pi.unregisterProvider("${name}")`, "the provider is shared by the runtime's conversations and stays registered"),
     events,
     sendMessage: (message, send) => conversation("sendMessage").sendMessage(message, send),
     sendUserMessage: (content, send) => conversation("sendUserMessage").sendUserMessage(content, send),
@@ -159,6 +161,18 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
     registerMessageRenderer: () => unsupported("pi.registerMessageRenderer"),
     registerEntryRenderer: () => unsupported("pi.registerEntryRenderer"),
     registerMarkdownTransformer: () => unsupported("pi.registerMarkdownTransformer"),
+    // Accurate answers, not stand-ins: pikit has no slash commands and no extension MCP servers.
+    getCommands: () => [],
+    getMcpServers: () => [],
+    getSettings: () => {
+      unsupported("pi.getSettings", "pikit has no Pi settings: every setting reads as unset");
+      return {};
+    },
+    registerMcpServer: (name) =>
+      unsupported(`pi.registerMcpServer("${name}")`, "pikit connects MCP servers with its tool-mcp component: configure the server there"),
+    unregisterMcpServer: (name) => unsupported(`pi.unregisterMcpServer("${name}")`),
+    registerVirtualModel: () => unsupported("pi.registerVirtualModel"),
+    unregisterVirtualModel: () => unsupported("pi.unregisterVirtualModel"),
   };
 
   for (const extension of extensions) await extension(pi);
