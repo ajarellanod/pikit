@@ -243,6 +243,8 @@ function planInstall(
     environment: manifest.environment ?? [],
     // What `pikit doctor` and the deployment's `up` run for it, by its project path.
     ...(manifest.hooks !== undefined && { hooks: projectHooks(name, manifest.hooks) }),
+    // Files a hook rewrites: never reported as the user's edits.
+    ...(manifest.generated !== undefined && { generated: manifest.generated.map((file) => `${ownDir(name)}${file}`) }),
   };
   return { name, registry, manifest, files };
 }

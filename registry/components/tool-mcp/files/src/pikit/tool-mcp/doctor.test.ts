@@ -6,6 +6,7 @@
 import { afterAll, expect, test } from "bun:test";
 import { createFakeMcpServer, type FakeMcpServer } from "@pikit/pi-adapter/mcp/testing";
 import { doctor } from "./doctor.ts";
+import { keptTool, type McpSeed } from "./index.ts";
 
 const TOKEN = "mcp-doctor-token-0123456789";
 const TOOLS = [
@@ -27,19 +28,19 @@ function serve(server: FakeMcpServer): string {
 const env = (values: Record<string, string>) => (name: string) => values[name];
 
 test("no servers: no problem", async () => {
-  expect(await doctor({ config: {}, get: env({}) })).toEqual([]);
-  expect(await doctor({ config: { servers: {} }, get: env({}) })).toEqual([]);
+  expect(await doctor({ config: {}, get: env({}) })).toEqual({ problems: [], notes: [] });
+  expect(await doctor({ config: { servers: {} }, get: env({}) })).toEqual({ problems: [], notes: [] });
 });
 
 test("a server that lists every named tool: no problem, and its session is ended", async () => {
   const server = createFakeMcpServer({ tools: TOOLS });
-  expect(await doctor({ config: { servers: { wiki: { url: serve(server), tools: ["ask_question", "open_issue"] } } }, get: env({}) })).toEqual([]);
+  expect((await doctor({ config: { servers: { wiki: { url: serve(server), tools: ["ask_question", "open_issue"] } } }, get: env({}) })).problems).toEqual([]);
   expect(server.requests.map((r) => r.rpc ?? r.method)).toEqual(["initialize", "notifications/initialized", "tools/list", "DELETE"]);
 });
 
 test("a named tool the server lacks, and a server that cannot be reached, are problems naming the server", async () => {
   const url = serve(createFakeMcpServer({ tools: TOOLS }));
-  const problems = await doctor({
+  const { problems } = await doctor({
     config: {
       servers: {
         wiki: { url, tools: ["ask_question", "delete_everything"] },
@@ -56,15 +57,42 @@ test("a named tool the server lacks, and a server that cannot be reached, are pr
 test("the token comes from the environment by the secret's name; missing or refused is a problem that never shows it", async () => {
   const server = createFakeMcpServer({ tools: TOOLS, token: TOKEN });
   const config = { servers: { wiki: { url: serve(server), secret: "WIKI_MCP_TOKEN", tools: ["ask_question"] } } };
-  expect(await doctor({ config, get: env({ WIKI_MCP_TOKEN: TOKEN }) })).toEqual([]);
+  expect((await doctor({ config, get: env({ WIKI_MCP_TOKEN: TOKEN }) })).problems).toEqual([]);
   expect(server.requests.every((r) => r.authorization === `Bearer ${TOKEN}`)).toBe(true);
 
-  expect(await doctor({ config, get: env({}) })).toEqual([
+  expect((await doctor({ config, get: env({}) })).problems).toEqual([
     'the MCP server "wiki" needs the secret WIKI_MCP_TOKEN, which is not set in .env or the environment: run `pikit configure` or set it',
   ]);
-  const refused = await doctor({ config, get: env({ WIKI_MCP_TOKEN: "wrong-token" }) });
+  const refused = (await doctor({ config, get: env({ WIKI_MCP_TOKEN: "wrong-token" }) })).problems;
   expect(refused).toHaveLength(1);
   expect(refused[0]).toContain('the MCP server "wiki"');
   expect(refused[0]).toContain("could not list its tools");
   expect(refused[0]).not.toContain("wrong-token");
+});
+
+test("a seed that does not hold what a server lists now is a note, never a problem; one that does is quiet", async () => {
+  const url = serve(createFakeMcpServer({ tools: TOOLS }));
+  const config = { servers: { wiki: { url, tools: ["ask_question"] } } };
+  const current: McpSeed = { wiki: { url, tools: { ask_question: keptTool(TOOLS[0] as never) as never } } };
+
+  expect(await doctor({ config, get: env({}) }, current)).toEqual({ problems: [], notes: [] });
+
+  const stale: Record<string, McpSeed> = {
+    empty: {},
+    otherUrl: { wiki: { ...(current.wiki as McpSeed[string]), url: "http://127.0.0.1:1/mcp" } },
+    otherSchema: { wiki: { url, tools: { ask_question: { name: "ask_question", inputSchema: { type: "object", properties: { q: { type: "string" } } } } } } },
+    moreTools: { wiki: { url, tools: { ...(current.wiki as McpSeed[string]).tools, open_issue: keptTool(TOOLS[1] as never) as never } } },
+  };
+  for (const seed of Object.values(stale)) {
+    const report = await doctor({ config, get: env({}) }, seed);
+    expect(report.problems).toEqual([]);
+    expect(report.notes).toHaveLength(1);
+    expect(report.notes[0]).toStartWith('src/pikit/tool-mcp/seed.ts does not hold what the MCP server "wiki" lists now: `pikit up` rewrites it');
+  }
+});
+
+test("a server that cannot be reached gives its problem, and no note about the seed", async () => {
+  const report = await doctor({ config: { servers: { gone: { url: "http://127.0.0.1:9/mcp", tools: ["anything"] } } }, get: env({}) }, {});
+  expect(report.problems).toHaveLength(1);
+  expect(report.notes).toEqual([]);
 });

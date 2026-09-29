@@ -27,9 +27,12 @@ export { deploymentComponent };
 export const DEPLOYMENT_COMMANDS = ["up", "down", "restart", "logs", "status"] as const;
 export type DeploymentCommand = (typeof DEPLOYMENT_COMMANDS)[number];
 
-/** `up` and `dev` start the app: refuse before that when doctor would. */
-async function checkReady(projectDir: string): Promise<void> {
-  const report = await doctor(projectDir, { quiet: true });
+/**
+ * `up` and `dev` start the app: refuse before that when doctor would. `up` leaves the check of a
+ * component with a `beforeDeploy` hook to that hook, which it runs right before the build.
+ */
+async function checkReady(projectDir: string, command: "up" | "dev"): Promise<void> {
+  const report = await doctor(projectDir, { quiet: true, componentChecks: command === "up" ? "unless-before-deploy" : true });
   for (const problem of report.problems) log.problem(problem);
   for (const missing of report.unconfigured) log.problem(missing);
   if (report.problems.length + report.unconfigured.length > 0) throw new CliError("fix what `pikit doctor` reports first");
@@ -60,7 +63,7 @@ export interface DeploymentOptions {
 export async function deployment(projectDir: string, command: DeploymentCommand, options: DeploymentOptions = {}): Promise<void> {
   const { name, module } = await loadDeployment(projectDir);
   if (command === "up") {
-    await checkReady(projectDir);
+    await checkReady(projectDir, "up");
     await checkAppCredentials(projectDir);
   }
 
@@ -113,7 +116,7 @@ export async function dev(projectDir: string): Promise<number> {
   const name = deploymentComponent(projectDir);
   const own = existsSync(join(projectDir, "src", "pikit", name, "index.ts")) ? (await loadDeployment(projectDir)).module.dev : undefined;
   if (typeof own === "function") {
-    await checkReady(projectDir);
+    await checkReady(projectDir, "dev");
     // The command shares this terminal: Ctrl-C reaches it directly, and it owns its shutdown. The CLI
     // stays until it has exited.
     const wait = () => {};
@@ -126,7 +129,7 @@ export async function dev(projectDir: string): Promise<number> {
   }
   const main = join("src", "pikit", name, "main.ts");
   if (!existsSync(join(projectDir, main))) throw new CliError(`${name} has no ${main}, the process entrypoint \`pikit dev\` runs`);
-  await checkReady(projectDir);
+  await checkReady(projectDir, "dev");
 
   log.step(`bun --watch ${main}`);
   const child = Bun.spawn([process.execPath, "--watch", main], {

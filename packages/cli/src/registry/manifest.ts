@@ -133,14 +133,14 @@ export const ManifestSchema = Type.Object(
             Type.String({
               pattern: OWN_FILE,
               description:
-                "A file of src/pikit/<name>/ exporting `doctor({ config, get })`, which resolves with its problems (empty when fine). `pikit doctor` (so `pikit up` and `pikit dev`) calls it once the app composes, with this component's config in pikit.config.ts and a reader of .env and the environment. It may reach the network; it writes nothing.",
+                "A file of src/pikit/<name>/ exporting `doctor({ config, get })`, which resolves with its problems (empty when fine), or with `{ problems, notes }` when it also has information to give (notes never stop anything). `pikit doctor` (so `pikit dev`) calls it once the app composes, with this component's config in pikit.config.ts and a reader of .env and the environment; `pikit up` skips it when the component has a `beforeDeploy`, which checks the same right before the build. It may reach the network; it writes nothing.",
             }),
           ),
           beforeDeploy: Type.Optional(
             Type.String({
               pattern: OWN_FILE,
               description:
-                "A file of src/pikit/<name>/ exporting `beforeDeploy({ config, get, write, say })`, which resolves with its problems (empty when done). The deployment's `up` calls it before it builds or bundles, and deploys nothing on a problem. `write(file, text)` writes a file of src/pikit/<name>/ (what the build then takes), and only when its text changes.",
+                "A file of src/pikit/<name>/ exporting `beforeDeploy({ config, get, write, say })`, which resolves with its problems (empty when done). The deployment's `up` calls it before it builds or bundles, and deploys nothing on a problem; `up` runs it instead of this component's `doctor` hook, so it reports at least what that one does. `write(file, text)` writes a file of src/pikit/<name>/ (what the build then takes, listed in `generated`), and only when its text changes.",
             }),
           ),
           afterDeploy: Type.Optional(
@@ -157,6 +157,13 @@ export const ManifestSchema = Type.Object(
             "Steps the CLI and the deployment run for this component, each a file of src/pikit/<name>/ exporting a function of the hook's name. `pikit add` records them in pikit.json, by project path.",
         },
       ),
+    ),
+    generated: Type.Optional(
+      Type.Array(Type.String({ pattern: OWN_FILE }), {
+        uniqueItems: true,
+        description:
+          "Files of src/pikit/<name>/ that a hook rewrites (tool-mcp's seed.ts): shipped as a starting point, then the CLI's or the deployment's, never the user's edits. `pikit doctor` does not list them as modified, and `pikit remove` deletes them without --force.",
+      }),
     ),
     replay: Type.Optional(
       Type.Object(

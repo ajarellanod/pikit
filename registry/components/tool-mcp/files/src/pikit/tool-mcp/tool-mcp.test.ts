@@ -415,6 +415,28 @@ test("with a seed for the server's URL and nothing kept, a start makes no reques
   expect(await storage.namespace("tool-mcp").get("server/wiki")).toMatchObject({ url, tools: { ask_question: { description: "Asks a question about a repository." } } });
 });
 
+test("a seed without this server's listing (written before config changed) is said at start; an empty seed is quiet", async () => {
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const url = serve(server);
+  const warned = (): Logger & { warnings: string[] } => {
+    const warnings: string[] = [];
+    return { ...silentLogger, warnings, warn: (message) => void warnings.push(message) };
+  };
+  const config = { servers: { wiki: { url, tools: ["ask_question"] } } };
+
+  const quiet = warned();
+  await installed(config, [], quiet);
+  expect(quiet.warnings).toEqual([]);
+
+  await withSeed({ other: seededWiki("http://127.0.0.1:1/mcp") }, async () => {
+    const logger = warned();
+    await installed(config, [], logger);
+    expect(logger.warnings).toEqual([
+      'tool-mcp: seed.ts has no listing of the MCP server "wiki" for its URL and tools: this start reaches it; run `pikit up` (or commit the seed.ts it writes)',
+    ]);
+  });
+});
+
 test("the kept listing wins over the seed: it is refreshed on each connection", async () => {
   const storage = createMemoryKeyValueStorage();
   const server = createFakeMcpServer({ tools: WIKI_TOOLS });

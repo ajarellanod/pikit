@@ -28,7 +28,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { packageName, scanImports } from "../registry/imports.ts";
-import { type ComponentDoctorResult, doctorHooks } from "../project/component-doctor.ts";
+import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from "../project/component-doctor.ts";
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
 import { brokenReferences } from "../project/references.ts";
@@ -51,8 +51,10 @@ export interface DoctorOptions {
   /**
    * Whether the components' own checks run (default: yes). `add`, `remove` and `new` check what
    * they changed, the composition: an MCP server down elsewhere is not theirs to report.
+   * `"unless-before-deploy"` (`pikit up`): not those of components with a `beforeDeploy` hook, which
+   * `up` runs right before the build and which checks the same.
    */
-  componentChecks?: boolean;
+  componentChecks?: boolean | "unless-before-deploy";
 }
 
 export async function doctor(projectDir: string, options: DoctorOptions = {}): Promise<DoctorReport> {
@@ -79,7 +81,11 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
     }
     notes.push(...unusedProviders(result.description.components));
     problems.push(...brokenReferences(result));
-    if (options.componentChecks !== false) problems.push(...(await componentChecks(projectDir)));
+    if (options.componentChecks !== false) {
+      const checked = await componentChecks(projectDir, options.componentChecks === "unless-before-deploy");
+      problems.push(...checked.problems);
+      notes.push(...checked.notes);
+    }
   }
 
   const env = projectEnv(projectDir);
@@ -107,11 +113,11 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
   return { problems, unconfigured, notes, probe: result };
 }
 
-/** The problems the installed components' own checks find; none, and no process, without a check. */
-async function componentChecks(projectDir: string): Promise<string[]> {
-  if (doctorHooks(projectDir).length === 0) return [];
-  const result = await runScript<ComponentDoctorResult>("component-doctor.ts", projectDir, []);
-  return result.ok ? result.problems : [`the components' own checks could not run: ${result.error}`];
+/** What the installed components' own checks find; nothing, and no process, without a check to run. */
+async function componentChecks(projectDir: string, unlessBeforeDeploy: boolean): Promise<{ problems: string[]; notes: string[] }> {
+  if (doctorHooks(projectDir, { unlessBeforeDeploy }).length === 0) return { problems: [], notes: [] };
+  const result = await runScript<ComponentDoctorResult>("component-doctor.ts", projectDir, unlessBeforeDeploy ? [UNLESS_BEFORE_DEPLOY] : []);
+  return result.ok ? result : { problems: [`the components' own checks could not run: ${result.error}`], notes: [] };
 }
 
 /** Components that provide capabilities no other component uses: installed, and doing nothing. */

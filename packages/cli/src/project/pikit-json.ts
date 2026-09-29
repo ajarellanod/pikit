@@ -41,6 +41,11 @@ export interface InstalledComponent {
    */
   hooks?: Partial<Record<Hook, string>>;
   /**
+   * Its manifest's `generated`, by project path: files a hook rewrites (tool-mcp's `seed.ts`), which are
+   * never the user's edits. Absent when it declared none.
+   */
+  generated?: string[];
+  /**
    * The components it was installed for, when it was offered rather than asked for (`offers.ts`):
    * it leaves with the last of them, when nothing else uses it.
    */
@@ -118,10 +123,14 @@ export function hashFile(path: string): string {
   return hashOf(readFileSync(path));
 }
 
-/** Installed files whose content no longer has the hash recorded at install (the user's edits). */
+/**
+ * Installed files whose content no longer has the hash recorded at install (the user's edits). A file
+ * the component declares `generated` is its hooks', not the user's: never one of them.
+ */
 export function modifiedFiles(projectDir: string, component: InstalledComponent): string[] {
+  const generated = new Set(component.generated ?? []);
   return Object.entries(component.files)
-    .filter(([file, { hash }]) => existsSync(join(projectDir, file)) && hashFile(join(projectDir, file)) !== hash)
+    .filter(([file, { hash }]) => !generated.has(file) && existsSync(join(projectDir, file)) && hashFile(join(projectDir, file)) !== hash)
     .map(([file]) => file);
 }
 

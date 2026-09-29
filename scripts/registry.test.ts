@@ -362,6 +362,22 @@ test("hooks: doctor and beforeDeploy, each a file exporting a function of the ho
   expect(await problems(f)).toContain("component.json /hooks/onStart:");
 });
 
+test("generated: files of the component's own directory that a hook rewrites; not a missing file nor a test file", async () => {
+  const f = await fixture({ name: "tool-seeded" });
+  writeFileSync(join(f.own, "seed.ts"), "export const seed = {};\n");
+  f.writeManifest({ ...f.manifest(), generated: ["seed.ts"] });
+  expect((await generate(f.root)).problems).toEqual([]);
+  expect(await problems(f)).toBe("");
+
+  f.writeManifest({ ...f.manifest(), generated: ["gone.ts"] });
+  expect(await problems(f)).toContain('generated "gone.ts" is not a file of files/src/pikit/tool-seeded/');
+  writeFileSync(join(f.own, "seed.test.ts"), "export {};\n");
+  f.writeManifest({ ...f.manifest(), generated: ["seed.test.ts"] });
+  expect(await problems(f)).toContain('generated "seed.test.ts" is a test file');
+  f.writeManifest({ ...f.manifest(), generated: ["../index.ts"] });
+  expect(await problems(f)).toContain("component.json /generated/0:");
+});
+
 test("tools: replay is generated, and a tool without one fails", async () => {
   const safe = await fixture({ name: "tool-safe", setup: `\n    pikit.provideKeyed("agent.tool", "look", { replay: "safe" });` });
   expect(safe.manifest().replay).toEqual({ tools: { look: "safe" } });

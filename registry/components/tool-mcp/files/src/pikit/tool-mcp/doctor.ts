@@ -8,12 +8,18 @@
  * value `pikit up` gives the app. Each failure is one problem naming the server; the token's value
  * never appears in one. Nothing is written: `pikit up` writes the seed (`deploy.ts`).
  *
+ * It also compares what each server listed with `seed.ts` and gives a note (never a problem) when the
+ * seed is out of date: a build without the CLI (Workers Builds, a "Deploy to Cloudflare" button,
+ * `docker build`) would bundle it as it is, and a new conversation would have to reach that server at
+ * start. `pikit up` does not run this check: its `beforeDeploy` checks the same and rewrites the seed.
+ *
  * `component.json` declares it (`"hooks": { "doctor": "doctor.ts" }`), and the CLI calls `doctor(io)`
  * in the project's process tree. Never part of the app: the app imports nothing of this file.
  */
 
 import { McpClient, type Tool } from "@pikit/pi-adapter/mcp";
-import { CLIENT, messageOf, type ServerConfig, transportTo } from "./index.ts";
+import { CLIENT, keptTool, type McpSeed, messageOf, type ServerConfig, transportTo } from "./index.ts";
+import { seed as bundled } from "./seed.ts";
 
 /** How long one request of the check may take, unless the server's config says otherwise. */
 export const DOCTOR_TIMEOUT_MS = 15_000;
@@ -24,10 +30,32 @@ export interface DoctorIO {
   get(name: string): string | undefined;
 }
 
-/** The problems of the servers in config: none when each answers and lists every named tool. */
-export async function doctor(io: DoctorIO): Promise<string[]> {
-  const listed = await Promise.all(Object.entries(serversOf(io.config)).map(([name, settings]) => listNamed(name, settings, io.get)));
-  return listed.flatMap((result) => ("problems" in result ? result.problems : []));
+/**
+ * The problems of the servers in config (none when each answers and lists every named tool), and a
+ * note for each server whose listing `seed.ts` does not hold as it is now.
+ */
+export async function doctor(io: DoctorIO, seed: McpSeed = bundled): Promise<{ problems: string[]; notes: string[] }> {
+  const servers = Object.entries(serversOf(io.config));
+  const listed = await Promise.all(servers.map(([name, settings]) => listNamed(name, settings, io.get)));
+  const problems = listed.flatMap((result) => ("problems" in result ? result.problems : []));
+  const stale = servers.filter(([name, settings], index) => {
+    const result = listed[index];
+    return result !== undefined && "tools" in result && !seeded(seed, name, settings.url, result.tools);
+  });
+  const notes = stale.map(
+    ([name]) =>
+      `src/pikit/tool-mcp/seed.ts does not hold what the MCP server "${name}" lists now: \`pikit up\` rewrites it; commit it before a deploy without the CLI (Workers Builds, a Deploy button, docker build), or a new conversation reaches "${name}" at start`,
+  );
+  return { problems, notes };
+}
+
+/** Whether `seed` holds, for server `name` at `url`, exactly the listing of `tools` (what `deploy.ts` would write). */
+export function seeded(seed: McpSeed, name: string, url: string, tools: readonly Tool[]): boolean {
+  const listing = Object.hasOwn(seed, name) ? seed[name] : undefined;
+  if (listing === undefined || listing.url !== url) return false;
+  const held = Object.keys(listing.tools);
+  if (held.length !== tools.length) return false;
+  return tools.every((tool) => Object.hasOwn(listing.tools, tool.name) && JSON.stringify(listing.tools[tool.name]) === JSON.stringify(keptTool(tool)));
 }
 
 /** The servers of this component's config. */

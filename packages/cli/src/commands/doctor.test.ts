@@ -8,7 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { emptyManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { emptyManifest, hashOf, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 
 const MAIN = join(import.meta.dir, "..", "main.ts");
 const dirs: string[] = [];
@@ -94,4 +94,46 @@ test("only a declared check runs: a doctor.ts pikit.json does not name is not ca
   const run = pikit(["doctor"], gone);
   expect(run.code).toBe(1);
   expect(run.err).toContain("checked: its doctor check failed:");
+});
+
+test("a check may also give notes: they are printed and fail nothing", () => {
+  const dir = project('export async function doctor() {\n  return { problems: [], notes: ["the seed is out of date"] };\n}\n');
+  const run = pikit(["doctor"], dir);
+  expect(run.code).toBe(0);
+  expect(run.out).toContain("checked: the seed is out of date");
+  expect(run.out).toContain("pikit doctor: green");
+  const bad = pikit(["doctor"], project('export async function doctor() {\n  return { notes: [] };\n}\n'));
+  expect(bad.err).toContain("checked: its doctor check failed: doctor did not resolve with a list of problems, nor with { problems, notes }");
+});
+
+test("pikit up leaves a component with a beforeDeploy hook to that hook (one check per deploy); pikit doctor still runs its check", () => {
+  const dir = project(REPORTS);
+  const manifest = readProjectManifest(dir);
+  (manifest.components.checked as { hooks?: Record<string, string> }).hooks = { doctor: "src/pikit/checked/doctor.ts", beforeDeploy: "src/pikit/checked/deploy.ts" };
+  writeProjectManifest(dir, manifest);
+  expect(pikit(["doctor"], dir).err).toContain("checked: the config says so");
+  const deployed = pikit(["up"], dir);
+  expect(deployed.err).toBe("");
+  expect(deployed.code).toBe(0);
+  expect(existsSync(join(dir, "deployed"))).toBe(true);
+});
+
+test("a generated file (the manifest's `generated`) is never reported modified; any other edited file is", () => {
+  const dir = project(undefined);
+  const seed = "src/pikit/checked/seed.ts";
+  const edited = "src/pikit/checked/index.ts";
+  writeFileSync(join(dir, seed), "export const seed = {};\n");
+  const manifest = readProjectManifest(dir);
+  const checked = manifest.components.checked as NonNullable<(typeof manifest.components)[string]>;
+  checked.files = { [seed]: { hash: hashOf("export const seed = {};\n") }, [edited]: { hash: hashOf("as installed\n") } };
+  writeProjectManifest(dir, manifest);
+  writeFileSync(join(dir, seed), 'export const seed = { wiki: {} };\n');
+
+  expect(modifiedFiles(dir, checked).sort()).toEqual([edited, seed].sort());
+  checked.generated = [seed];
+  writeProjectManifest(dir, manifest);
+  expect(modifiedFiles(dir, checked)).toEqual([edited]);
+  const run = pikit(["doctor"], dir);
+  expect(run.out).toContain(`modified: ${edited} (checked)`);
+  expect(run.out).not.toContain(`modified: ${seed}`);
 });

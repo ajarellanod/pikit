@@ -24,6 +24,9 @@
     "doctor": "doctor.ts",
     "beforeDeploy": "deploy.ts"
   },
+  "generated": [
+    "seed.ts"
+  ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "@pikit/pi-adapter": "0.0.0",

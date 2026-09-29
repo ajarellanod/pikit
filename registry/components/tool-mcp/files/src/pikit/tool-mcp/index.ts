@@ -219,6 +219,13 @@ async function describe(server: ServerEntry, cache: KeyValueStore | undefined, c
     for (const { remote, mcp } of server.tools) describeTool(mcp, known[remote] as KeptTool);
     return;
   }
+  // A seed that holds other servers but not this one's listing was written before its URL or tools
+  // changed: say so, since a build without `pikit up` bundled it. An empty seed (no deploy yet) is quiet.
+  if (Object.keys(seed).length > 0) {
+    ctx.logger.warn(`tool-mcp: seed.ts has no listing of the MCP server "${server.name}" for its URL and tools: this start reaches it; run \`pikit up\` (or commit the seed.ts it writes)`, {
+      server: server.name,
+    });
+  }
   let listed: Tool[];
   try {
     listed = await server.connection.list(ctx.abortSignal);

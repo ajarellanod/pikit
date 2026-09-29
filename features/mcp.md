@@ -149,13 +149,15 @@ uses `fetch`.
   what stays open:
   - a config change (a new server, URL or tool) deployed without `pikit up` (Workers Builds from a
     commit whose `seed.ts` is older) has no seed for it: every new conversation reaches the server
-    at its first start, as before, until `pikit up` runs and its `seed.ts` is committed;
+    at its first start, as before, until `pikit up` runs and its `seed.ts` is committed. It is said,
+    not silent: `pikit doctor` gives a note when `seed.ts` does not hold what a server lists now, and
+    such a start logs a warning;
   - the kept listing wins over the seed even when the seed is newer (an object last connected before
     the deploy): its first call fixes it, as a stale kept listing always was. Preferring the newer by
     `listedAt` would need a time in the seed, and the churn that comes with it;
-  - `pikit doctor` lists `seed.ts` as a modified file after a deploy wrote it (true, by design), and
-    `pikit upgrade` merges it like any other: an upstream change to its header would meet the
-    generated body;
+  - `seed.ts` is declared `generated`: `pikit doctor` does not list it as modified and `pikit
+    remove` deletes it without `--force`. How a future `pikit upgrade` treats generated files (keep
+    the project's) is for that command;
   - a project-wide `storage.kv` (a Workers KV binding) for listings was not needed.
 - **The kept listing has no time to live.** It is refreshed on each connection, which every object
   makes on its first call; a schema that changed on the server and was never called since stays
@@ -167,8 +169,8 @@ uses `fetch`.
 - **The doctor check and the seed run from the deploying machine**, with the token from `.env` or
   the environment: a server reachable only from Cloudflare's network, or a secret set in Cloudflare
   and not in `.env`, is reported as a problem and stops `up`. A way to skip them (a flag of `up`) was
-  not added. `pikit up` reaches each server twice (the doctor check, then `beforeDeploy`): one
-  listing each, about 1 s per server here.
+  not added. `pikit up` reaches each server once: it leaves tool-mcp's doctor check to
+  `beforeDeploy`, which checks the same right before the build (about 1 s per server here).
 - **Components' CLI steps** (decided, SPEC §3.2): the doctor check is declared as `hooks.doctor`,
   like `hooks.beforeDeploy` and `hooks.afterDeploy`, so `registry validate` checks its export and
   only what `pikit.json` records runs. `configure.ts` is still found by its path; declaring it as

@@ -129,8 +129,12 @@ so a deploy changes it only when a server's tools changed.
 - **The kept listing wins** over the seed: it is refreshed on each connection, so it is at least as
   recent unless the object has not connected since the deploy. Either way, the first call connects
   and updates the tools.
-- `pikit doctor` lists it as `modified` once a deploy wrote it: it is, by design. `pikit dev` does
-  not rewrite it.
+- It is declared `generated` (`component.json`): `pikit doctor` never lists it as modified, and
+  `pikit remove tool-mcp` deletes it without `--force`. `pikit dev` does not rewrite it.
+- **Out of date:** `pikit doctor` compares what each server lists with `seed.ts` and gives a note
+  (never a problem) when they differ: run `pikit up`, or commit the `seed.ts` it writes, before a
+  deploy without the CLI. A start whose seed holds other servers but not this one's listing logs a
+  warning, and reaches that server.
 
 ## Replay
 

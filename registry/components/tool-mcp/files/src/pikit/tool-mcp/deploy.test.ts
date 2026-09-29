@@ -10,6 +10,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createFakeMcpServer, type FakeMcpServer } from "@pikit/pi-adapter/mcp/testing";
 import { type BeforeDeployIO, beforeDeploy, SEED_FILE, seedModule } from "./deploy.ts";
+import { doctor } from "./doctor.ts";
 import type { McpSeed } from "./index.ts";
 
 const TOKEN = "mcp-deploy-token-0123456789";
@@ -83,6 +84,8 @@ test("it writes each server's named tools, and only what a start needs, into see
       },
     },
   });
+  // What it wrote is what the doctor check calls up to date: no note.
+  expect(await doctor({ config, get: (name) => ({ WIKI_MCP_TOKEN: TOKEN })[name] }, seed as never)).toEqual({ problems: [], notes: [] });
 });
 
 test("a deploy whose servers list the same tools leaves seed.ts as it is", async () => {

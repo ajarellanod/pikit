@@ -104,6 +104,14 @@ async function checkHooks(componentDir: string, name: string, manifest: Manifest
   return problems;
 }
 
+/** Each of `generated` is a file of the component's own directory, not a test file. */
+function checkGeneratedFiles(componentDir: string, name: string, manifest: Manifest): string[] {
+  return (manifest.generated ?? []).flatMap((file) => {
+    if (!existsSync(join(componentDir, "files", "src", "pikit", name, file))) return [`generated "${file}" is not a file of files/src/pikit/${name}/`];
+    return /\.test(-support)?\.ts$/.test(file) ? [`generated "${file}" is a test file`] : [];
+  });
+}
+
 export interface Outcome {
   /** Files written (generate) or nothing (validate). */
   written: string[];
@@ -192,6 +200,7 @@ export async function validate(root: string, options: { coreVersion?: string } =
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
     }
     (await checkHooks(dir, name, manifest)).forEach(report);
+    checkGeneratedFiles(dir, name, manifest).forEach(report);
   }
 
   const indexPath = join(root, "registry.json");
