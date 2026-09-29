@@ -11,6 +11,11 @@
  *    harness hooks and events of `AgentHarness`, the class pikit runs (Pi's coding agent still
  *    runs the legacy `Agent`), and actions reach the conversation's lane.
  *
+ * Tools follow Pi's exposure (`ToolDefinition.exposure`): a `direct` or `model-only` tool is
+ * activated when registered (unless `defaultActive: false`); a `codemode` or `deferred` one is not,
+ * and reaches the model only if an extension activates it, since pikit has neither codemode nor
+ * tool search; a `hidden` one is not given to the harness at all.
+ *
  * A notification handler that throws is logged and skipped: an extension cannot fail a run. A
  * `tool_call` handler that throws blocks the call, as in Pi (its `beforeToolCall` rethrows, and the
  * call ends as an error result): a policy that cannot answer must not let the tool run.
@@ -33,11 +38,14 @@ import type {
   ExtensionAPI,
   ExtensionContext,
   ExtensionHandler,
+  ExtensionToolContext,
   ExtensionUIContext,
   PiExtension,
   ToolCallEvent,
   ToolCallEventResult,
   ToolDefinition,
+  ToolExposure,
+  ToolInfo,
   ToolResultEventResult,
 } from "./api.ts";
 import { SUPPORTED_EVENTS } from "./surface.ts";
@@ -125,7 +133,10 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
       };
     },
     registerTool(tool) {
-      definitions.push(tool as unknown as ToolDefinition);
+      // Registering a name again replaces the tool, as in Pi (which withdraws one this way, as `hidden`).
+      const at = definitions.findIndex((existing) => existing.name === tool.name);
+      if (at === -1) definitions.push(tool as unknown as ToolDefinition);
+      else definitions[at] = tool as unknown as ToolDefinition;
     },
     registerProvider(provider: Provider) {
       const models = options.models as Models & { setProvider?(provider: Provider): void };
@@ -177,12 +188,31 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
 
   for (const extension of extensions) await extension(pi);
 
-  const tools = definitions.map((definition) => harnessTool(definition, (signal) => conversation("tool").context(signal)));
+  const exposed = definitions.filter((definition) => {
+    const exposure = exposureOf(definition);
+    if (exposure === "hidden") {
+      logger.info("a Pi extension's tool is hidden: it is not given to the model", { tool: definition.name });
+      return false;
+    }
+    if (exposure === "codemode" || exposure === "deferred") {
+      const reached = exposure === "codemode" ? "codemode" : "tool search";
+      unsupported(`exposure "${exposure}" (tool "${definition.name}")`, `pikit has no ${reached}: the model sees the tool only if an extension activates it`);
+    }
+    if (definition.prepareLoadout !== undefined) unsupported(`prepareLoadout (tool "${definition.name}")`);
+    return true;
+  });
+  const tools = exposed.map((definition) =>
+    harnessTool(definition, (signal) => conversation("tool").context(signal), () =>
+      unsupported("ctx.executeTool", "pikit does not run nested tool calls: the call ends as an error"),
+    ),
+  );
+  // What Pi activates when the tool is registered.
+  const activated = new Set(exposed.filter(activeOnRegistration).map((definition) => definition.name));
 
   return {
     tools,
     async bind(target, ctx) {
-      const current = await Bound.create(target, { handlers, definitions, logger }, ctx);
+      const current = await Bound.create(target, { handlers, definitions, activated, logger }, ctx);
       bound = current;
       await current.emit("session_start", { type: "session_start", reason: "resume" }, ctx);
       // A run a dead worker left open is continued right after this, and Pi emits no `run_start`
@@ -201,29 +231,66 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
   };
 }
 
+function exposureOf(definition: ToolDefinition): ToolExposure {
+  return definition.exposure ?? "direct";
+}
+
+/** Pi activates a `direct` or `model-only` tool when it is registered, unless `defaultActive: false`. */
+function activeOnRegistration(definition: ToolDefinition): boolean {
+  const exposure = exposureOf(definition);
+  return (exposure === "direct" || exposure === "model-only") && definition.defaultActive !== false;
+}
+
+/** What `ctx.executeTool()` tells a tool: pikit runs no nested calls. */
+export const NESTED_CALLS_UNSUPPORTED = "pikit does not run nested tool calls (ctx.executeTool)";
+
 /** Pi's tool definition as a harness tool. Extension tools are not replayed after a crash (Pi's default). */
-function harnessTool(definition: ToolDefinition, context: (signal: AbortSignal | undefined) => ExtensionContext): AgentHarnessTool<undefined> {
+function harnessTool(
+  definition: ToolDefinition,
+  context: (signal: AbortSignal | undefined) => ExtensionContext,
+  nestedCall: () => void,
+): AgentHarnessTool<undefined> {
   return {
     name: definition.name,
     label: definition.label,
     description: definition.description,
     parameters: definition.parameters,
     ...(definition.prepareArguments !== undefined && { prepareArguments: definition.prepareArguments }),
+    ...(definition.outputSchema !== undefined && { outputSchema: definition.outputSchema }),
     replay: "never",
-    execute: (toolCallId, params, onUpdate, _toolContext, _invocation, piContext) =>
-      definition.execute(toolCallId, params, piContext.abortSignal, (partial) => onUpdate(partial), context(piContext.abortSignal)),
+    execute: (toolCallId, params, onUpdate, _toolContext, _invocation, piContext) => {
+      let nested = 0;
+      const toolContext: ExtensionToolContext = {
+        ...context(piContext.abortSignal),
+        tools: [],
+        // Never rejects, as in Pi: the failure is the outcome.
+        executeTool: async (name, args) => {
+          nestedCall();
+          return {
+            toolCall: { type: "toolCall", id: `${toolCallId}/${++nested}`, name, arguments: (args ?? {}) as Record<string, JsonValue> },
+            result: { content: [{ type: "text", text: `${NESTED_CALLS_UNSUPPORTED}: "${name}" was not run` }], details: undefined, isError: true },
+            isError: true,
+          };
+        },
+      };
+      return definition.execute(toolCallId, params, piContext.abortSignal, (partial) => onUpdate(partial), toolContext);
+    },
   } as AgentHarnessTool<undefined>;
 }
 
 interface Registry {
   handlers: Map<string, AnyHandler[]>;
   definitions: ToolDefinition[];
+  /** The tools Pi activates when they are registered. */
+  activated: ReadonlySet<string>;
   logger: Logger;
 }
 
 /** The extensions bound to one open conversation: its hooks, its events and its actions. */
 class Bound {
   activeTools: string[] = [];
+  /** The harness's tools, which alone can be activated. */
+  private toolNames: ReadonlySet<string> = new Set();
   name: string | undefined;
   thinkingLevel: Awaited<ReturnType<AgentLane["getThinkingLevel"]>> = "off";
   private model: Model<Api> | undefined;
@@ -257,6 +324,7 @@ class Bound {
     const bound = new Bound(target.harness, target.lane, target, registry, ctx);
     const { lane, harness } = target;
     bound.activeTools = await lane.getActiveTools(ctx);
+    bound.toolNames = new Set((await harness.getTools(ctx)).map((tool) => tool.name));
     bound.name = await harness.getName(ctx);
     bound.thinkingLevel = await lane.getThinkingLevel(ctx);
     bound.model = await lane.getModel(ctx);
@@ -265,9 +333,15 @@ class Bound {
       bound.resuming = true;
       bound.idle = false;
     }
+    // A new lane starts with every tool of the harness active: deactivate those Pi does not activate
+    // on registration. A lane with entries keeps what it has, including what extensions activated.
+    const active =
+      (await lane.getTipId(ctx)) === null
+        ? bound.activeTools.filter((name) => registry.activated.has(name) || !registry.definitions.some((tool) => tool.name === name))
+        : bound.activeTools;
     // A lane created before an extension was installed has its tools inactive: activate them.
-    const missing = registry.definitions.map((tool) => tool.name).filter((name) => !bound.activeTools.includes(name));
-    if (missing.length > 0) await bound.setActiveTools([...bound.activeTools, ...missing]);
+    const missing = [...registry.activated].filter((name) => !active.includes(name));
+    if (missing.length > 0 || active.length !== bound.activeTools.length) await bound.setActiveTools([...active, ...missing]);
     bound.wire();
     return bound;
   }
@@ -341,9 +415,10 @@ class Bound {
     this.act((c) => c.harness.setName(name, c.pi));
   }
 
+  /** Unknown names, `hidden` tools among them, are ignored as in Pi: the harness would refuse to run. */
   async setActiveTools(names: string[]): Promise<void> {
-    this.activeTools = [...names];
-    await this.lane.setActiveTools(names, this.pi);
+    this.activeTools = names.filter((name, at) => this.toolNames.has(name) && names.indexOf(name) === at);
+    await this.lane.setActiveTools(this.activeTools, this.pi);
   }
 
   setThinkingLevel(level: Bound["thinkingLevel"]): void {
@@ -351,8 +426,14 @@ class Bound {
     this.act((c) => c.lane.setThinkingLevel(level, c.pi));
   }
 
-  allTools(): { name: string; description: string }[] {
-    return this.registry.definitions.map(({ name, description }) => ({ name, description }));
+  allTools(): ToolInfo[] {
+    return this.registry.definitions.map((tool) => ({
+      name: tool.name,
+      description: tool.description,
+      exposure: exposureOf(tool),
+      ...(tool.namespace !== undefined && { namespace: tool.namespace }),
+      ...(tool.annotations !== undefined && { annotations: tool.annotations }),
+    }));
   }
 
   /** While a run is in progress a message is steered (or queued as asked); idle, it waits for the next run. */
@@ -436,6 +517,7 @@ class Bound {
         this.systemPromptOverride = undefined;
         // An agent's `prepare` sets the run's tools in its own `before_run`, which runs first.
         this.activeTools = await this.lane.getActiveTools(ctx);
+        this.toolNames = new Set((await this.harness.getTools(ctx)).map((tool) => tool.name));
         if (!handled("before_agent_start")) return undefined;
         const added: AgentMessage[] = [];
         const start = { type: "before_agent_start", prompt: promptText(event.prompt), systemPrompt: this.target.systemPrompt ?? "" };
