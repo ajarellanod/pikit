@@ -86,7 +86,7 @@ test("generate writes what setup declares and keeps every hand-written field, ev
     provides: ["conversations.registry"],
   });
 
-  const edited = { ...f.manifest(), license: "MIT", provides: ["stale"], custom: { kept: true } };
+  const edited = { ...f.manifest(), license: "MIT", provides: ["stale"], devDependencies: { wrangler: "4.143.0" }, custom: { kept: true } };
   f.writeManifest(edited);
   await generate(f.root);
   expect(f.manifest()).toEqual({ ...edited, provides: ["conversations.registry"] });
@@ -95,7 +95,7 @@ test("generate writes what setup declares and keeps every hand-written field, ev
   await generate(f.root);
   expect(readFileSync(join(f.dir, "component.json"), "utf8")).toBe(once);
   expect(Object.keys(f.manifest())).toEqual([
-    "$schema", "name", "version", "description", "license", "targets", "requires", "optional", "provides", "dependencies", "files", "custom",
+    "$schema", "name", "version", "description", "license", "targets", "requires", "optional", "provides", "dependencies", "devDependencies", "files", "custom",
   ]);
   // Kept, so nothing written by hand is lost; refused, so a typo is not silence.
   expect(await problems(f)).toContain("component.json /custom: is not a known field");
@@ -215,6 +215,33 @@ test("dependencies: exactly the npm packages the files import", async () => {
   const found = await problems(f);
   expect(found).toContain(`files import "hono", which dependencies does not list`);
   expect(found).toContain(`dependencies lists "left-pad", which no file imports`);
+});
+
+test("devDependencies: exact versions, none of its dependencies, never the kit; what the files import is a dependency", async () => {
+  const f = await fixture();
+  f.writeManifest({ ...f.manifest(), devDependencies: { wrangler: "4.143.0" } });
+  await generate(f.root);
+  expect(await problems(f)).toBe("");
+
+  f.writeManifest({ ...f.manifest(), devDependencies: { wrangler: "^4.143.0" } });
+  expect(await problems(f)).toContain("component.json /devDependencies/wrangler: must match pattern");
+
+  f.append("index.ts", `import type { Hono } from "hono";`);
+  f.writeManifest({ ...f.manifest(), dependencies: { hono: "4.13.9" }, devDependencies: { hono: "4.13.9", "@pikit/contracts": "0.0.0" } });
+  await generate(f.root);
+  const found = await problems(f);
+  expect(found).toContain(`"hono" is in both dependencies and devDependencies: a package its files import is a dependency`);
+  expect(found).toContain(`devDependencies lists the kit package "@pikit/contracts"`);
+  // Imported only as a dev dependency: it is still one of its dependencies.
+  f.writeManifest({ ...f.manifest(), dependencies: {}, devDependencies: { hono: "4.13.9" } });
+  await generate(f.root);
+  expect(await problems(f)).toContain(`files import "hono", which dependencies does not list`);
+});
+
+test("deployment-cloudflare declares wrangler, the version this repository checks it with", () => {
+  const manifest = JSON.parse(readFileSync(join(REPO, "registry", "components", "deployment-cloudflare", "component.json"), "utf8")) as Manifest;
+  const root = JSON.parse(readFileSync(join(REPO, "package.json"), "utf8")) as { devDependencies: Record<string, string> };
+  expect(manifest.devDependencies).toEqual({ wrangler: root.devDependencies.wrangler as string });
 });
 
 test("manifest: no requires.components (SPEC §10.2)", async () => {

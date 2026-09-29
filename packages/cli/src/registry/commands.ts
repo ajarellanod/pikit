@@ -10,7 +10,7 @@ import { pathToFileURL } from "node:url";
 import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, readPreset } from "../project/registry-source.ts";
-import { checkCapabilities, checkDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
+import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeSetup, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
   BOTH_APPS,
@@ -167,6 +167,7 @@ export async function validate(root: string, options: { coreVersion?: string } =
     const scan = checkImports(dir, name, manifest.targets);
     scan.problems.forEach(report);
     checkDependencies(manifest.dependencies, scan.packages).forEach(report);
+    checkDevDependencies(manifest).forEach(report);
 
     try {
       const drift = checkDrift(manifest, await generatedFor(dir, name, manifest));

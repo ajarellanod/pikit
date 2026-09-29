@@ -22,7 +22,7 @@ import { Cancelled, CliError, isInteractive, log } from "./ui.ts";
 const USAGE = `pikit: a kit for Pi.
 
 Usage:
-  pikit new                           a new agent, step by step (in a terminal)
+  pikit new [--target <t>] [--preset <p>]   a new agent, step by step (in a terminal); flags answer its questions
   pikit new <dir> [--target server|cloudflare] [--preset <name> [--with <component>]...] [--registry <path>]   a new project
   pikit add <component> [--registry <path>] [--force] [--yes]
   pikit remove <component> [--force]
@@ -93,9 +93,15 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case "new":
-      if (rest.length === 0 && values.preset === undefined && values.target === undefined) {
+      // Without a directory, the guided path asks; `--target`, `--preset` and `--with` answer its questions.
+      if (rest.length === 0) {
         if (!isInteractive()) throw new CliError("usage: pikit new <dir> [--preset <name>] (without <dir>, run it in a terminal: it asks)", 2);
-        return await newWizard(cwd, { ...(values.registry !== undefined && { registry: values.registry }) });
+        return await newWizard(cwd, {
+          ...(values.registry !== undefined && { registry: values.registry }),
+          ...(values.target !== undefined && { target: values.target }),
+          ...(values.preset !== undefined && { preset: values.preset }),
+          ...(values.with !== undefined && { with: values.with }),
+        });
       }
       await newProject(one("dir"), {
         ...(values.target !== undefined && { target: values.target }),

@@ -39,9 +39,10 @@ it("GET /health starts the health object's App, with the object in WORKERS_HOST,
   expect(await stored(stub, "host")).toEqual({ id, variable: "from wrangler vars", bound: true, target: "cloudflare" });
 });
 
-it("the Worker's App starts with WORKERS_HOST { env } and serves its http.route", async () => {
+it("the Worker's App starts with WORKERS_HOST { env, origin } and serves its http.route", async () => {
   const response = await entrypoint.handler.fetch(new Request("https://lane.example/probe/alice"), env);
-  expect(await response.json()).toEqual({ variable: "from wrangler vars", name: "alice" });
+  // The origin of the request that started the Worker's App (this test's or /health's: both lane.example).
+  expect(await response.json()).toEqual({ variable: "from wrangler vars", origin: "https://lane.example", name: "alice" });
   expect((await entrypoint.handler.fetch(new Request("https://lane.example/nothing"), env)).status).toBe(404);
 });
 

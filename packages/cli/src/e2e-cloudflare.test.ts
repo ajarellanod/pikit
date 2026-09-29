@@ -6,8 +6,9 @@
  * platform-cloudflare (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
  * is already OpenRouter's: the Anthropic provider is server-only), runtime-pi and channel-telegram-webhook (with what they offer)
  * put each half in its App (C1), every add is green, the project installs, typechecks and passes its
- * tests, and `pikit remove` undoes both Apps. Nothing reaches a Cloudflare account: `pikit up` is never
- * run.
+ * tests, and `pikit remove` undoes both Apps. wrangler is deployment-cloudflare's dev dependency: removing
+ * the component takes it out, and adding it back puts it back, bundling again. Nothing reaches a
+ * Cloudflare account: `pikit up` is never run.
  *
  * Slow (it runs `bun install`), so it runs only with `PIKIT_E2E=1`. It needs port 8787 free and Node
  * on the PATH (wrangler runs on it).
@@ -41,6 +42,10 @@ test.skipIf(!E2E)(
     expect(created.err).not.toContain("✗");
     expect(created.code).toBe(0);
     expect(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).targets).toEqual(["cloudflare"]);
+    // wrangler comes with deployment-cloudflare, which declares it: the starter adds none.
+    expect(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components["deployment-cloudflare"].devDependencies).toEqual({ wrangler: "4.143.0" });
+    expect(devDependencies().wrangler).toBe("4.143.0");
+    expect(existsSync(join(project, "node_modules", ".bin", "wrangler"))).toBe(true);
 
     const doctor = await run([process.execPath, MAIN, "doctor"]);
     expect(doctor.out).toContain("pikit doctor: green");
@@ -79,6 +84,11 @@ test.skipIf(!E2E)(
   },
   TIMEOUT,
 );
+
+/** The project's package.json devDependencies. */
+function devDependencies(): Record<string, string> {
+  return JSON.parse(readFileSync(join(project, "package.json"), "utf8")).devDependencies ?? {};
+}
 
 /** The two lists of `pikit.config.ts`: the default export's (the object's App) and `worker`'s. */
 function lists(): { object: string[]; worker: string[] } {
@@ -170,6 +180,32 @@ test.skipIf(!E2E)(
     );
     expect(readFileSync(agentPath, "utf8")).toBe(agentBefore);
     expect((await run([process.execPath, MAIN, "doctor"])).out).toContain("pikit doctor: green");
+  },
+  TIMEOUT,
+);
+
+test.skipIf(!E2E)(
+  "wrangler is deployment-cloudflare's: remove takes it out of devDependencies, and add puts it back and the Worker bundles again",
+  async () => {
+    const removed = await run([process.execPath, MAIN, "remove", "deployment-cloudflare"]);
+    expect(removed.err).not.toContain("\u2717");
+    expect(removed.out).toContain("the npm packages only it used: wrangler");
+    expect(removed.code).toBe(0);
+    expect(devDependencies()).toEqual({ "@types/bun": expect.any(String), typescript: expect.any(String) });
+    // `bun install` ran: the lockfile has no wrangler. (Bun leaves the hoisted copy in node_modules.)
+    expect(readFileSync(join(project, "bun.lock"), "utf8")).not.toContain('"wrangler"');
+    expect(existsSync(join(project, "wrangler.jsonc"))).toBe(false);
+
+    // Added to an existing project, it brings its wrangler itself.
+    const added = await add("deployment-cloudflare");
+    expect(added.out).toContain("npm (dev): wrangler@4.143.0");
+    expect(devDependencies().wrangler).toBe("4.143.0");
+    expect(readFileSync(join(project, "bun.lock"), "utf8")).toContain('"wrangler": "4.143.0"');
+    // Its tests bundle the Worker with that wrangler (`wrangler deploy --dry-run`).
+    const tests = await run([process.execPath, "test", "src/pikit/deployment-cloudflare"]);
+    expect(tests.err).toContain("bundle.test.ts");
+    expect(tests.err).toContain(" 0 fail");
+    expect(tests.code).toBe(0);
   },
   TIMEOUT,
 );

@@ -9,7 +9,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyManifest, hashOf, writeProjectManifest } from "./project/pikit-json.ts";
-import { DEFAULT_REGISTRY } from "./paths.ts";
+import { DEFAULT_REGISTRY, PIKIT_ROOT } from "./paths.ts";
 import { openRegistry } from "./project/registry-source.ts";
 import { kitCommit, kitSpecifier } from "./project/vendor.ts";
 
@@ -171,7 +171,15 @@ test("new --target cloudflare records the target, and writes two Apps, wrangler 
   expect(config).toContain("export default defineApp({\n  components: [\n    agents,\n    storageDo,\n    sessionsSql,\n    storageKvSql,\n    conversationsKv,\n  ],");
   expect(config).toContain("export const worker = defineApp({\n  components: [\n  ],\n  config: workerConfig,\n});");
   expect(config).not.toContain("deploymentCloudflare");
-  expect(JSON.parse(readFileSync(join(project, "package.json"), "utf8")).devDependencies.wrangler).toBe("4.143.0");
+  // wrangler is deployment-cloudflare's dev dependency, installed by `add` like any other: not the starter's.
+  expect(manifest.components["deployment-cloudflare"].devDependencies).toEqual({ wrangler: "4.143.0" });
+  expect(JSON.parse(readFileSync(join(project, "package.json"), "utf8")).devDependencies).toEqual({
+    "@types/bun": expect.any(String),
+    typescript: expect.any(String),
+    wrangler: "4.143.0",
+  });
+  // The version this repository checks deployment-cloudflare with (its bundle test, the workerd lane).
+  expect(JSON.parse(readFileSync(join(PIKIT_ROOT, "package.json"), "utf8")).devDependencies.wrangler).toBe("4.143.0");
   expect(readFileSync(join(project, ".gitignore"), "utf8")).toContain(".wrangler/\n");
   expect(existsSync(join(project, "wrangler.jsonc"))).toBe(true);
   // The starter's model is one whose provider runs on Cloudflare: provider-anthropic is server-only.
@@ -235,12 +243,13 @@ test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each ha
   const agent = readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8");
   expect(agent).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
   expect(agent).toContain('tools: ["read","write","edit","bash","fetch","websearch"],');
-  // The Telegram variables are the channel's; the Brave key is optional, and so is the model's key.
+  // The Telegram variables are the channel's; the Brave key is optional, and so are the model's key
+  // and the Telegram claim code (the Deploy to Cloudflare button's way to let the owner in).
   const optional = Object.values(manifest.components as Record<string, { environment: { name: string; required: boolean }[] }>)
     .flatMap((c) => c.environment)
     .filter((v) => !v.required)
     .map((v) => v.name);
-  expect(optional.sort()).toEqual(["BRAVE_API_KEY", "OPENROUTER_API_KEY"]);
+  expect(optional.sort()).toEqual(["BRAVE_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_CLAIM_CODE"]);
 }, 60_000);
 
 test("add without a terminal needs --yes, and writes nothing without it", () => {
@@ -269,6 +278,8 @@ test("new records the builtin registry, not this machine's path to it", () => {
   const manifest = JSON.parse(readFileSync(join(parent, "fresh", "pikit.json"), "utf8"));
   expect(manifest.version).toBe(2);
   expect(manifest.registries).toEqual({ default: "builtin" });
+  // No component of a server project declares wrangler, so it has none.
+  expect(Object.keys(JSON.parse(readFileSync(join(parent, "fresh", "package.json"), "utf8")).devDependencies)).toEqual(["@types/bun", "typescript"]);
   // The kit it vendored, by the commit it was packed from.
   expect(manifest.kit).toEqual(kitCommit() === undefined ? undefined : { commit: kitCommit() });
 }, 60_000);

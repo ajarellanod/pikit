@@ -8,16 +8,22 @@
  * without a shell.
  *
  * The Worker is named after `package.json`'s `name`, passed as `--name` to every command, so two
- * projects on one account never deploy over each other.
+ * projects on one account never deploy over each other; or `wrangler.jsonc`'s `name` when it has one
+ * (a Deploy to Cloudflare template's, which Workers Builds deploys under), so both deploy one Worker.
  *
  * After a deploy answers, `up` runs the installed components' `afterDeploy` hooks (C8): each one is
  * named in its `component.json`'s `hooks`, and `pikit add` records its file in `pikit.json`.
+ *
+ * `up`, `down`, `logs` and `status` reach the Cloudflare account, so each first checks that wrangler
+ * can (`login`): a `CLOUDFLARE_API_TOKEN`, or wrangler's own login. At a terminal it offers
+ * `wrangler login`; without one it says what to set.
  */
 
 import { spawn } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
 
@@ -40,6 +46,82 @@ export interface CommandOptions {
   run?: Runner;
 }
 
+/** What the commands that reach the account need to log in (`login`). */
+export interface AccountOptions extends CommandOptions {
+  /** A person is at a terminal: they can log in in a browser. Default: stdin and stdout are TTYs and `CI` is unset. */
+  interactive?: boolean;
+  /** Asks a yes-or-no question at the terminal. Default: a `[Y/n]` line on stdin. */
+  confirm?: (question: string) => Promise<boolean>;
+  /** Where `CLOUDFLARE_API_TOKEN` is looked for, before `.env`. Default: `process.env`. */
+  env?: Readonly<Record<string, string | undefined>>;
+}
+
+/** What to do when wrangler cannot reach the account: both ways, with and without a terminal. */
+export const LOGIN_HELP =
+  "At a terminal, log in once: `bunx wrangler login` (it opens your browser). Without one (a server, CI): " +
+  'create an API token from the "Edit Cloudflare Workers" template at https://dash.cloudflare.com/profile/api-tokens ' +
+  "and export it as CLOUDFLARE_API_TOKEN, or put it in .env (it stays on this machine; with several accounts, CLOUDFLARE_ACCOUNT_ID too)";
+
+/**
+ * Makes sure wrangler can reach the Cloudflare account. A `CLOUDFLARE_API_TOKEN` (exported, or in
+ * `.env`, which wrangler reads) is used as it is. Otherwise `wrangler whoami --json` says whether
+ * wrangler's own login holds; if not, at a terminal it offers `wrangler login`, which opens the
+ * browser, and checks again. Without a terminal it throws what to do (`LOGIN_HELP`).
+ */
+export async function login(options: AccountOptions = {}): Promise<void> {
+  const cwd = options.cwd ?? process.cwd();
+  if (apiToken(cwd, options.env ?? process.env) !== undefined) return;
+  if (await loggedIn(options)) return;
+  const interactive = options.interactive ?? isTerminal();
+  if (!interactive) throw new Error(`wrangler is not logged in to Cloudflare. ${LOGIN_HELP}. Then run this again`);
+  const ask = options.confirm ?? askAtTerminal;
+  if (!(await ask("wrangler is not logged in to Cloudflare. Log in now? It opens your browser"))) {
+    throw new Error(`not logged in to Cloudflare. ${LOGIN_HELP}. Then run this again`);
+  }
+  const done = await run(["wrangler", "login"], options, false);
+  if (done.code !== 0 || !(await loggedIn(options))) {
+    throw new Error(`\`wrangler login\` did not log in (exit code ${done.code}). ${LOGIN_HELP}. Then run this again`);
+  }
+}
+
+/** `CLOUDFLARE_API_TOKEN`, exported or in `.env`: wrangler reads both. */
+function apiToken(cwd: string, env: Readonly<Record<string, string | undefined>>): string | undefined {
+  return env.CLOUDFLARE_API_TOKEN || readDotEnv(cwd).CLOUDFLARE_API_TOKEN || undefined;
+}
+
+/** `wrangler whoami --json`: it prints `{ "loggedIn": true, … }`, or exits non-zero with `{ "loggedIn": false }`. */
+async function loggedIn(options: CommandOptions): Promise<boolean> {
+  const result = await run(["wrangler", "whoami", "--json"], options, true);
+  // `#!/usr/bin/env node` found no `node`: wrangler never started.
+  if (result.code === 127) throw new Error("wrangler did not start: it runs on Node.js >= 22, which is not on the PATH. Install it (https://nodejs.org), then run this again");
+  const text = result.stdout.trim();
+  const json = text.slice(text.indexOf("{"), text.lastIndexOf("}") + 1);
+  let answer: { loggedIn?: unknown } | undefined;
+  try {
+    answer = JSON.parse(json) as { loggedIn?: unknown };
+  } catch {
+    answer = undefined;
+  }
+  if (answer?.loggedIn === true && result.code === 0) return true;
+  if (answer?.loggedIn === false) return false;
+  throw new Error(`could not check the Cloudflare login: \`wrangler whoami --json\` exited with code ${result.code}. Is this machine online?`);
+}
+
+function isTerminal(): boolean {
+  return process.stdin.isTTY === true && process.stdout.isTTY === true && (process.env.CI ?? "") === "";
+}
+
+/** A `[Y/n]` question on the terminal: Enter is yes. */
+async function askAtTerminal(question: string): Promise<boolean> {
+  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    const answer = (await terminal.question(`${question} [Y/n] `)).trim().toLowerCase();
+    return answer === "" || answer === "y" || answer === "yes";
+  } finally {
+    terminal.close();
+  }
+}
+
 /** What `up` deployed, and where it answers. */
 export interface Deployed {
   /** The Worker version wrangler uploaded, as `/health` reports it. */
@@ -48,7 +130,7 @@ export interface Deployed {
   url: string;
 }
 
-export interface UpOptions extends CommandOptions {
+export interface UpOptions extends AccountOptions {
   /** Where the Worker answers. Default: the `https://…workers.dev` URL wrangler reports. */
   url?: string | URL;
   /** Default: the global `fetch`. */
@@ -93,6 +175,7 @@ export interface AfterDeployIO {
 export async function up(options: UpOptions = {}): Promise<Deployed> {
   const cwd = options.cwd ?? process.cwd();
   const name = workerName(cwd);
+  await login(options);
   // Private to this user (mkdtemp is 0700): the secrets file and wrangler's output file.
   const work = mkdtempSync(join(tmpdir(), "pikit-cloudflare-"));
   try {
@@ -104,7 +187,8 @@ export async function up(options: UpOptions = {}): Promise<Deployed> {
       writeFileSync(file, JSON.stringify(secrets), { mode: 0o600 });
       args.push("--secrets-file", file);
     }
-    await wrangler(args, options, { WRANGLER_OUTPUT_FILE_PATH: output });
+    const deploy = await run(["wrangler", ...args], options, false, { WRANGLER_OUTPUT_FILE_PATH: output });
+    if (deploy.code !== 0) throw new Error(deployFailure(output, name, deploy.code));
     const deployed = readDeployOutput(output, options.url);
     writeFileSync(recordPath(cwd, true), `${JSON.stringify(deployed, null, 2)}\n`);
 
@@ -199,7 +283,40 @@ function readDotEnv(cwd: string): Record<string, string | undefined> {
   return existsSync(path) ? parseEnv(readFileSync(path, "utf8")) : {};
 }
 
-export interface DownOptions extends CommandOptions {
+/**
+ * Why `wrangler deploy` failed, from its output file's `command-failed` entry, with what to do when
+ * pikit knows: a first deploy on an account that has no workers.dev subdomain yet (wrangler asks for
+ * one at a terminal, and fails without one), or no login.
+ */
+export function deployFailure(outputPath: string, name: string, code: number): string {
+  const failed = existsSync(outputPath)
+    ? readFileSync(outputPath, "utf8")
+        .split("\n")
+        .filter((line) => line.trim() !== "")
+        .map((line) => {
+          try {
+            return JSON.parse(line) as { type?: unknown; message?: unknown };
+          } catch {
+            return {};
+          }
+        })
+        .filter((entry) => entry.type === "command-failed")
+        .at(-1)
+    : undefined;
+  const message = typeof failed?.message === "string" ? failed.message : "";
+  const plain = `\`wrangler deploy --name ${name}\` exited with code ${code}`;
+  if (/workers\.dev subdomain/i.test(message)) {
+    const link = /https:\/\/dash\.cloudflare\.com\/\S+/.exec(message)?.[0] ?? "https://dash.cloudflare.com/?to=/:account/workers/onboarding";
+    return (
+      `${plain}: your Cloudflare account has no workers.dev subdomain yet, where the Worker is published. ` +
+      `Choose one, once per account (it is free): run \`pikit up\` at a terminal and answer wrangler's question, or register it at ${link}. Then \`pikit up\` again`
+    );
+  }
+  if (/CLOUDFLARE_API_TOKEN|not logged in|Authentication error|\[code: 10000\]/i.test(message)) return `${plain}: ${message.split("\n")[0]}\n${LOGIN_HELP}`;
+  return message === "" ? plain : `${plain}: ${message}`;
+}
+
+export interface DownOptions extends AccountOptions {
   /** A person is at a terminal to answer wrangler's question. Default: stdin is a TTY and `CI` is unset. */
   interactive?: boolean;
 }
@@ -218,10 +335,12 @@ export async function down(options: DownOptions = {}): Promise<void> {
         "It asks a person: run it at a terminal, outside CI",
     );
   }
-  await wrangler(["delete", "--name", workerName(options.cwd ?? process.cwd())], options);
+  const name = workerName(options.cwd ?? process.cwd());
+  await login(options);
+  await wrangler(["delete", "--name", name], options);
 }
 
-export interface LogsOptions extends CommandOptions {
+export interface LogsOptions extends AccountOptions {
   /** Accepted for the CLI's sake: `wrangler tail` always follows. */
   follow?: boolean;
   /** Refused: Cloudflare keeps no lines to replay here (Workers Logs in the dashboard has them). */
@@ -233,7 +352,9 @@ export async function logs(options: LogsOptions = {}): Promise<void> {
   if (options.tail !== undefined) {
     throw new Error("--tail: `wrangler tail` streams from now on and replays nothing; past logs are in the dashboard (Workers Logs)");
   }
-  await wrangler(["tail", workerName(options.cwd ?? process.cwd())], options);
+  const name = workerName(options.cwd ?? process.cwd());
+  await login(options);
+  await wrangler(["tail", name], options);
 }
 
 /** One deployment: which versions serve, and how much of the traffic each one gets. */
@@ -258,7 +379,7 @@ export interface Status {
   version?: string | null;
 }
 
-export interface StatusOptions extends CommandOptions {
+export interface StatusOptions extends AccountOptions {
   url?: string | URL;
   fetch?: typeof fetch;
   /** Default: 30 000 ms: `/health` starts an object's App. */
@@ -268,7 +389,9 @@ export interface StatusOptions extends CommandOptions {
 /** The Worker's deployments as Cloudflare lists them, and what `/health` answers. */
 export async function status(options: StatusOptions = {}): Promise<Status> {
   const cwd = options.cwd ?? process.cwd();
-  const listed = await wrangler(["deployments", "list", "--name", workerName(cwd), "--json"], options, {}, true);
+  const name = workerName(cwd);
+  await login(options);
+  const listed = await wrangler(["deployments", "list", "--name", name, "--json"], options, {}, true);
   const deployments = parseDeployments(listed.stdout);
   const url = options.url?.toString() ?? readRecord(cwd)?.url;
   if (url === undefined) return { deployments, health: "unknown" };
@@ -304,8 +427,14 @@ export async function dev(options: CommandOptions = {}): Promise<number> {
   return (await run(["wrangler", "dev", "--name", workerName(cwd)], options, false)).code;
 }
 
-/** The Worker's name: `package.json`'s `name`, in the letters Cloudflare accepts (`my_bot.v2` → `my-bot-v2`). */
+/**
+ * The Worker's name: `wrangler.jsonc`'s `name` when it has one (a Deploy to Cloudflare template's: Workers
+ * Builds deploys under it, and the button's setup page may have changed it), else `package.json`'s
+ * `name`, in the letters Cloudflare accepts (`my_bot.v2` → `my-bot-v2`).
+ */
 export function workerName(cwd: string): string {
+  const named = wranglerName(cwd);
+  if (named !== undefined) return named;
   const path = join(cwd, "package.json");
   if (!existsSync(path)) throw new Error(`${cwd} has no package.json: the Worker is named after its "name"`);
   const { name } = JSON.parse(readFileSync(path, "utf8")) as { name?: unknown };
@@ -317,6 +446,43 @@ export function workerName(cwd: string): string {
     .slice(0, 63);
   if (worker === "") throw new Error(`package.json's name "${name}" has no letter or digit to name a Worker with`);
   return worker;
+}
+
+/** The top-level `name` of the project's `wrangler.jsonc`, if it has one; undefined when it cannot be read. */
+function wranglerName(cwd: string): string | undefined {
+  const path = join(cwd, "wrangler.jsonc");
+  if (!existsSync(path)) return undefined;
+  try {
+    const { name } = parseJsonc(readFileSync(path, "utf8")) as { name?: unknown };
+    return typeof name === "string" && name !== "" ? name : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** JSON with comments and trailing commas, as wrangler reads it. */
+export function parseJsonc(text: string): unknown {
+  let out = "";
+  for (let i = 0; i < text.length; i++) {
+    const c = text[i] as string;
+    if (c === '"') {
+      const start = i;
+      for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === "\\") i++;
+      out += text.slice(start, i + 1);
+    } else if (c === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      out += "\n";
+    } else if (c === "/" && text[i + 1] === "*") {
+      const end = text.indexOf("*/", i + 2);
+      if (end < 0) throw new Error("an unterminated /* comment");
+      i = end + 1;
+    } else if (c === "}" || c === "]") {
+      out = `${out.replace(/,\s*$/, "")}${c}`;
+    } else {
+      out += c;
+    }
+  }
+  return JSON.parse(out);
 }
 
 /** `.env`'s values for the Worker: set, and not wrangler's own `CLOUDFLARE_*` credentials. */

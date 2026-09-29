@@ -1,14 +1,15 @@
 /**
  * The commands with a fake wrangler runner and a fake `fetch`: the exact argv, the secrets file, the
- * wait for the deployed version (C8), the components' after-deploy hooks, the rollback, and `status`'s
- * parsing. No wrangler, no account.
+ * wait for the deployed version (C8), the components' after-deploy hooks, the rollback, `status`'s
+ * parsing, the Cloudflare login each command that reaches the account checks first, and what a
+ * failed first deploy says. No wrangler, no account.
  */
 
 import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Runner, deployHooks, deploySecrets, down, dev, logs, parseDeployments, status, up, workerName } from "./commands.ts";
+import { type Runner, deployHooks, deploySecrets, down, dev, login, logs, parseDeployments, status, up, workerName } from "./commands.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -29,21 +30,51 @@ interface Call {
   secrets?: Record<string, string>;
 }
 
-/** A wrangler that succeeds, reports `version` for a deploy, and prints `stdout` when captured. */
-function fakeWrangler(options: { version?: string; code?: (command: readonly string[]) => number; stdout?: string } = {}) {
+/**
+ * A wrangler that succeeds, reports `version` for a deploy, and prints `stdout` when captured. It is
+ * logged in unless `loggedIn` says otherwise; `wrangler login` logs it in when `loginWorks`. `calls` are
+ * the commands under test; `all` has the login's (`whoami`, `login`) too, in order.
+ */
+function fakeWrangler(
+  options: {
+    version?: string;
+    code?: (command: readonly string[]) => number;
+    stdout?: string;
+    loggedIn?: boolean;
+    loginWorks?: boolean;
+    whoami?: { code: number; stdout: string };
+    deployFailure?: string;
+  } = {},
+) {
   const calls: Call[] = [];
+  const all: string[] = [];
+  let loggedIn = options.loggedIn ?? true;
   const run: Runner = async (command, { capture, env }) => {
+    all.push(command.slice(1).join(" "));
+    if (command[1] === "whoami") {
+      expect(capture).toBe(true);
+      return options.whoami ?? { code: loggedIn ? 0 : 1, stdout: loggedIn ? JSON.stringify({ loggedIn: true, email: "ada@example.com" }, null, 2) : '\n{"loggedIn":false}\n' };
+    }
+    if (command[1] === "login") {
+      expect(capture).toBe(false);
+      if (options.loginWorks !== false) loggedIn = true;
+      return { code: options.loginWorks === false ? 1 : 0, stdout: "" };
+    }
     const call: Call = { command, capture, ...(env !== undefined && { env }) };
     const secretsAt = command.indexOf("--secrets-file");
     if (secretsAt !== -1) call.secrets = JSON.parse(readFileSync(command[secretsAt + 1] as string, "utf8")) as Record<string, string>;
     calls.push(call);
     const output = env?.WRANGLER_OUTPUT_FILE_PATH;
+    if (command[1] === "deploy" && output !== undefined && options.deployFailure !== undefined) {
+      writeFileSync(output, `${JSON.stringify({ type: "wrangler-session" })}\n${JSON.stringify({ type: "command-failed", version: 1, message: options.deployFailure })}\n`);
+      return { code: 1, stdout: "" };
+    }
     if (command[1] === "deploy" && output !== undefined) {
       writeFileSync(output, `${JSON.stringify({ type: "wrangler-session" })}\n${JSON.stringify({ type: "deploy", version_id: options.version ?? "v2", targets: ["https://my-bot-v2.acme.workers.dev", "example.com/*"] })}\n`);
     }
     return { code: options.code?.(command) ?? 0, stdout: capture ? (options.stdout ?? "") : "" };
   };
-  return { calls, run };
+  return { calls, all, run };
 }
 
 /** A `/health` that answers each body in turn, then the last one forever. */
@@ -255,6 +286,106 @@ test("the Worker is named after package.json's name, in the letters Cloudflare a
   expect(() => workerName(unnamed)).toThrow(/package.json has no "name"/);
 });
 
+test("wrangler.jsonc's own name, when it has one (a Deploy to Cloudflare template's), names the Worker instead", async () => {
+  const cwd = project();
+  const jsonc = (name: string) =>
+    `{\n  "$schema": "node_modules/wrangler/config-schema.json", // a comment with "quotes" and a // in it\n  /* the setup page's name */\n  ${name}\n  "durable_objects": { "bindings": [{ "name": "CONVERSATION", "class_name": "Conversation" },] },\n  "vars": { "URL": "https://example.com/*/" },\n}\n`;
+  writeFileSync(join(cwd, "wrangler.jsonc"), jsonc(`"name": "my-telegram-bot",`));
+  expect(workerName(cwd)).toBe("my-telegram-bot");
+  const wrangler = fakeWrangler();
+  await dev({ cwd, run: wrangler.run });
+  expect(wrangler.calls).toEqual([{ command: ["wrangler", "dev", "--name", "my-telegram-bot"], capture: false }]);
+  // Without one (pikit's own file), or unreadable, it is package.json's, as before.
+  writeFileSync(join(cwd, "wrangler.jsonc"), jsonc(""));
+  expect(workerName(cwd)).toBe("my-bot-v2");
+  writeFileSync(join(cwd, "wrangler.jsonc"), "{ /* never closed");
+  expect(workerName(cwd)).toBe("my-bot-v2");
+});
+
 test("deploySecrets reads nothing without a .env", () => {
   expect(deploySecrets(project())).toEqual({});
+});
+
+/** `interactive: false` and a `confirm` that fails the test: nobody is asked. */
+const NOBODY = { interactive: false, confirm: () => Promise.reject(new Error("asked")) };
+
+test("up checks the login first: a CLOUDFLARE_API_TOKEN, exported or in .env, is used as it is; otherwise wrangler whoami", async () => {
+  const exported = fakeWrangler({ loggedIn: false });
+  await up({ cwd: project(), run: exported.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, env: { CLOUDFLARE_API_TOKEN: "cf-token" }, ...NOBODY });
+  expect(exported.all).toEqual(["deploy --name my-bot-v2"]);
+
+  const inDotEnv = fakeWrangler({ loggedIn: false });
+  await up({ cwd: project("CLOUDFLARE_API_TOKEN=cf-token\n"), run: inDotEnv.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, env: {}, ...NOBODY });
+  expect(inDotEnv.all).toEqual(["deploy --name my-bot-v2"]);
+
+  const oauth = fakeWrangler();
+  await up({ cwd: project(), run: oauth.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, env: {}, ...NOBODY });
+  expect(oauth.all).toEqual(["whoami --json", "deploy --name my-bot-v2"]);
+});
+
+test("not logged in and no terminal: up, down, logs and status say how to log in, and reach nothing", async () => {
+  const wrangler = fakeWrangler({ loggedIn: false });
+  const options = { cwd: project(), run: wrangler.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, env: {}, ...NOBODY };
+  for (const command of [() => up(options), () => logs(options), () => status(options)]) {
+    const failure = command();
+    await expect(failure).rejects.toThrow("wrangler is not logged in to Cloudflare. At a terminal, log in once: `bunx wrangler login` (it opens your browser).");
+    await expect(failure).rejects.toThrow(/"Edit Cloudflare Workers" template at https:\/\/dash\.cloudflare\.com\/profile\/api-tokens and export it as CLOUDFLARE_API_TOKEN/);
+  }
+  // down asks a person first: it never gets to the login without one; with one, the login comes first.
+  await expect(down(options)).rejects.toThrow(/It asks a person/);
+  await expect(down({ ...options, interactive: true, confirm: async () => false })).rejects.toThrow(/not logged in to Cloudflare/);
+  expect(wrangler.calls).toEqual([]);
+  expect(wrangler.all.every((command) => command === "whoami --json")).toBe(true);
+});
+
+test("not logged in at a terminal: it offers wrangler login, runs it, checks again, then deploys", async () => {
+  const wrangler = fakeWrangler({ loggedIn: false });
+  const asked: string[] = [];
+  const confirm = async (question: string) => (asked.push(question), true);
+  await up({ cwd: project(), run: wrangler.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, env: {}, interactive: true, confirm });
+  expect(asked).toEqual(["wrangler is not logged in to Cloudflare. Log in now? It opens your browser"]);
+  expect(wrangler.all).toEqual(["whoami --json", "login", "whoami --json", "deploy --name my-bot-v2"]);
+});
+
+test("a declined login, or one that does not complete, fails before anything reaches the account", async () => {
+  const declined = fakeWrangler({ loggedIn: false });
+  await expect(login({ cwd: project(), run: declined.run, env: {}, interactive: true, confirm: async () => false })).rejects.toThrow(
+    /^not logged in to Cloudflare\. At a terminal, log in once: `bunx wrangler login`/,
+  );
+  expect(declined.all).toEqual(["whoami --json"]);
+
+  const failed = fakeWrangler({ loggedIn: false, loginWorks: false });
+  const failure = up({ cwd: project(), run: failed.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, env: {}, interactive: true, confirm: async () => true });
+  await expect(failure).rejects.toThrow(/^`wrangler login` did not log in \(exit code 1\)\. At a terminal/);
+  expect(failed.calls).toEqual([]);
+});
+
+test("a wrangler that cannot say who is logged in: without Node.js, or offline, it is named", async () => {
+  const options = { cwd: project(), env: {}, ...NOBODY };
+  await expect(login({ ...options, run: fakeWrangler({ whoami: { code: 127, stdout: "" } }).run })).rejects.toThrow(
+    "wrangler did not start: it runs on Node.js >= 22, which is not on the PATH",
+  );
+  await expect(login({ ...options, run: fakeWrangler({ whoami: { code: 1, stdout: "" } }).run })).rejects.toThrow(
+    "could not check the Cloudflare login: `wrangler whoami --json` exited with code 1",
+  );
+});
+
+test("a first deploy on an account without a workers.dev subdomain says how to choose one", async () => {
+  // wrangler's own error, without a terminal to answer its question ("Would you like to register a workers.dev subdomain now?").
+  const message =
+    "You can either deploy your worker to one or more routes by specifying them in your wrangler.jsonc file, or register a workers.dev subdomain here:\nhttps://dash.cloudflare.com/0123abcd/workers/onboarding";
+  const wrangler = fakeWrangler({ deployFailure: message });
+  const health = fakeHealth({ ok: true, version: "v2" });
+  const failure = up({ cwd: project(), run: wrangler.run, fetch: health.fetcher, env: {}, ...NOBODY });
+  await expect(failure).rejects.toThrow(
+    "`wrangler deploy --name my-bot-v2` exited with code 1: your Cloudflare account has no workers.dev subdomain yet, where the Worker is published. " +
+      "Choose one, once per account (it is free): run `pikit up` at a terminal and answer wrangler's question, or register it at https://dash.cloudflare.com/0123abcd/workers/onboarding. Then `pikit up` again",
+  );
+  expect(health.urls).toEqual([]);
+
+  // Any other failure keeps wrangler's own words.
+  const other = fakeWrangler({ deployFailure: "Your Worker failed validation" });
+  await expect(up({ cwd: project(), run: other.run, fetch: health.fetcher, env: {}, ...NOBODY })).rejects.toThrow(
+    "`wrangler deploy --name my-bot-v2` exited with code 1: Your Worker failed validation",
+  );
 });

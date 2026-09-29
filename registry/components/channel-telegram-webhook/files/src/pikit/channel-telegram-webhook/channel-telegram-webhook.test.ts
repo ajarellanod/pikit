@@ -12,7 +12,8 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { join } from "node:path";
+import { type App, type AppContext, BACKGROUND_CONTEXT, type Clock, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import {
   type ActorMailbox,
   type AgentRuntime,
@@ -24,11 +25,13 @@ import {
   type KeyValueStorage,
   type OutboundMessage,
   type OutboundQueue,
+  type WorkersHost,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createMemoryFeed, createMemoryKeyValueStorage, createMemoryMailbox, createMemorySubmissions, createMemoryWakeups } from "@pikit/contracts/testing";
+import { createMemoryFeed, createMemoryKeyValueStorage, createMemoryMailbox, createMemorySubmissions, createMemoryWakeups, withWorkersHost } from "@pikit/contracts/testing";
 import { accountsOf } from "./account.ts";
 import { registerInbox } from "./actor-inbox.ts";
+import { CLAIM_COOL_DOWN_MS } from "./claim.ts";
 import { afterDeploy } from "./deploy.ts";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.test-support.ts";
 import channelTelegramWebhook, { NAME, worker, WORKER_NAME } from "./index.ts";
@@ -214,6 +217,7 @@ interface StartOptions {
   seen?: Set<string>;
   queue?: ReturnType<typeof recordingQueue>;
   logger?: Logger;
+  clock?: Clock;
 }
 
 /** Both halves in one App, as on a server: the mailbox hands each update to the same App. */
@@ -242,6 +246,7 @@ async function started(options: StartOptions = {}) {
     ],
     config: configFor(telegram, options.accounts),
     logger: options.logger ?? silentLogger,
+    ...(options.clock !== undefined && { clock: options.clock }),
   }).create();
   apps.push(app);
   await app.start();
@@ -373,7 +378,14 @@ test("each half refuses to start without what it needs, and names it", async () 
   const { TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS } = secretsFor(telegram);
 
   expect(await startError(halves, { TELEGRAM_ALLOWED_USERS, TELEGRAM_WEBHOOK_SECRET: SECRET })).toContain("TELEGRAM_BOT_TOKEN is not set");
-  expect(await startError(halves, { TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET })).toContain("TELEGRAM_ALLOWED_USERS is empty");
+  // Nobody listed is no longer a failure: the bot can be claimed (see "Claiming the bot"). A claim
+  // code that could be guessed is.
+  expect(await startError(halves, { TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TELEGRAM_CLAIM_CODE: "1234567" })).toContain(
+    "TELEGRAM_CLAIM_CODE is not usable: it is shorter than 8 characters",
+  );
+  expect(await startError(halves, { TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS: "not-an-id", TELEGRAM_WEBHOOK_SECRET: SECRET })).toContain(
+    'TELEGRAM_ALLOWED_USERS: "not-an-id" is not a Telegram user id',
+  );
   expect(await startError(halves, { TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS })).toContain("TELEGRAM_WEBHOOK_SECRET is not set. Run `pikit configure`");
   expect(await startError(halves, { TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, TELEGRAM_WEBHOOK_SECRET: "short" })).toContain("shorter than 16 characters");
   expect(await startError(halves, { TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS, TELEGRAM_WEBHOOK_SECRET: "has spaces in it, not allowed" })).toContain("only letters, digits");
@@ -691,7 +703,338 @@ test("an update for a bot the object's half does not run is refused, loudly", as
 
 test("accounts: the default bot's path and secrets; a named one gets its own", () => {
   expect(accountsOf(["ops"])).toEqual([
-    { name: undefined, instance: "telegram", tokenSecret: "TELEGRAM_BOT_TOKEN", allowedSecret: "TELEGRAM_ALLOWED_USERS", webhookSecret: "TELEGRAM_WEBHOOK_SECRET", path: "/telegram" },
-    { name: "ops", instance: "telegram:ops", tokenSecret: "TELEGRAM_OPS_BOT_TOKEN", allowedSecret: "TELEGRAM_OPS_ALLOWED_USERS", webhookSecret: "TELEGRAM_OPS_WEBHOOK_SECRET", path: "/telegram/ops" },
+    {
+      name: undefined,
+      instance: "telegram",
+      tokenSecret: "TELEGRAM_BOT_TOKEN",
+      allowedSecret: "TELEGRAM_ALLOWED_USERS",
+      webhookSecret: "TELEGRAM_WEBHOOK_SECRET",
+      claimSecret: "TELEGRAM_CLAIM_CODE",
+      path: "/telegram",
+    },
+    {
+      name: "ops",
+      instance: "telegram:ops",
+      tokenSecret: "TELEGRAM_OPS_BOT_TOKEN",
+      allowedSecret: "TELEGRAM_OPS_ALLOWED_USERS",
+      webhookSecret: "TELEGRAM_OPS_WEBHOOK_SECRET",
+      claimSecret: "TELEGRAM_OPS_CLAIM_CODE",
+      path: "/telegram/ops",
+    },
   ]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// The webhook registering itself, without `pikit up` (webhook.ts): GET /telegram/setup, and the
+// Worker's start on Cloudflare.
+
+/** The Worker's half alone, as in the Worker's App: a mailbox that records, served on a local port. `host` is its WORKERS_HOST. */
+async function workerOnly(options: { telegram: FakeTelegram; secrets?: Record<string, string>; accounts?: string[]; host?: WorkersHost; logger?: Logger; extra?: ComponentDefinition[] }) {
+  const sent: [string, string][] = [];
+  const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", { send: async (key, type) => void sent.push([key, type]) }) });
+  const server = httpServer();
+  const app = await defineApp({
+    components: [
+      secretsWith(options.secrets ?? secretsFor(options.telegram)),
+      mailbox,
+      ...(options.host === undefined ? [worker] : withWorkersHost(options.host, [worker])),
+      server.component,
+      ...(options.extra ?? []),
+    ],
+    config: { [WORKER_NAME]: { apiBase: options.telegram.url, accounts: options.accounts ?? [] } },
+    logger: options.logger ?? silentLogger,
+  }).create();
+  apps.push(app);
+  await app.start();
+  return { app, url: server.url(), sent };
+}
+
+const CLOUDFLARE: WorkersHost = { env: { CF_VERSION_METADATA: { id: "version-1", tag: "", timestamp: "" } }, origin: "https://bot.acme.workers.dev" };
+
+test("GET /telegram/setup points every bot at this Worker's origin, with its secret, and says what it did; again, it sets it again", async () => {
+  const telegram = fake();
+  const ops = telegram.addBot(OPS_TOKEN, OPS_BOT);
+  const secrets = { ...secretsFor(telegram), TELEGRAM_OPS_BOT_TOKEN: OPS_TOKEN, TELEGRAM_OPS_ALLOWED_USERS: String(OPERATOR.id), TELEGRAM_OPS_WEBHOOK_SECRET: OPS_SECRET };
+  const w = await workerOnly({ telegram, secrets, accounts: ["ops"] });
+
+  const response = await fetch(`${w.url}/telegram/setup`);
+  expect(response.status).toBe(200);
+  const body = await response.text();
+  expect(JSON.parse(body)).toEqual({
+    ok: true,
+    version: null,
+    bots: [
+      { bot: "telegram", webhook: `${w.url}/telegram`, ok: true },
+      { bot: "telegram:ops", webhook: `${w.url}/telegram/ops`, ok: true },
+    ],
+  });
+  expect([telegram.webhookUrl, telegram.webhookSecret, telegram.allowedUpdates]).toEqual([`${w.url}/telegram`, SECRET, ["message"]]);
+  expect([ops.webhookUrl, ops.webhookSecret, ops.allowedUpdates]).toEqual([`${w.url}/telegram/ops`, OPS_SECRET, ["message"]]);
+  for (const secret of [SECRET, OPS_SECRET, telegram.token, OPS_TOKEN]) expect(body).not.toContain(secret);
+
+  // Harmless to repeat, and it always sets: how a new secret reaches Telegram, which never shows it.
+  expect((await fetch(`${w.url}/telegram/setup`)).status).toBe(200);
+  expect([telegram.webhooksSet, ops.webhooksSet]).toEqual([2, 2]);
+  // Telegram's updates reach the webhook it set.
+  expect((await telegram.write(OWNER, "hello")).status).toBe(200);
+  expect(w.sent).toEqual([[`telegram:${OWNER.id}`, "telegram.update"]]);
+});
+
+test("GET /telegram/setup that Telegram refuses answers 502 with what Telegram said, and never the token", async () => {
+  const telegram = fake();
+  const unknown = "999999:not-a-token-telegram-knows";
+  const w = await workerOnly({ telegram, secrets: { ...secretsFor(telegram), TELEGRAM_BOT_TOKEN: unknown } });
+
+  const response = await fetch(`${w.url}/telegram/setup`);
+  expect(response.status).toBe(502);
+  const body = await response.text();
+  expect(JSON.parse(body)).toEqual({
+    ok: false,
+    version: null,
+    bots: [{ bot: "telegram", webhook: `${w.url}/telegram`, ok: false, problem: `Telegram refused the webhook ${w.url}/telegram (telegram setWebhook: 401 Unauthorized)` }],
+  });
+  expect(body).not.toContain(unknown);
+});
+
+test("on Cloudflare the Worker's start registers its webhook at its origin, once per isolate; an isolate finding it registered only asks", async () => {
+  const telegram = fake();
+
+  const first = await workerOnly({ telegram, host: CLOUDFLARE });
+  expect([telegram.webhookUrl, telegram.webhookSecret, telegram.allowedUpdates]).toEqual(["https://bot.acme.workers.dev/telegram", SECRET, ["message"]]);
+  // Asked, set, checked.
+  expect([telegram.webhookInfoAsked, telegram.webhooksSet]).toEqual([2, 1]);
+  // The isolate's requests ask nothing more.
+  const update = telegram.message(OWNER, "hello");
+  const posted = await fetch(`${first.url}/telegram`, { method: "POST", headers: { "x-telegram-bot-api-secret-token": SECRET }, body: JSON.stringify(update) });
+  expect(posted.status).toBe(200);
+  expect(telegram.webhookInfoAsked).toBe(2);
+
+  // Another isolate, of the same version or a new one: Telegram has this webhook, so one question and no setWebhook.
+  await workerOnly({ telegram, host: { ...CLOUDFLARE, env: { CF_VERSION_METADATA: { id: "version-2" } } } });
+  expect([telegram.webhookInfoAsked, telegram.webhooksSet]).toEqual([3, 1]);
+
+  // Pointed elsewhere meanwhile, or with other updates: the next isolate sets it back.
+  telegram.webhookUrl = "https://elsewhere.example/telegram";
+  await workerOnly({ telegram, host: CLOUDFLARE });
+  expect([telegram.webhookUrl, telegram.webhooksSet]).toEqual(["https://bot.acme.workers.dev/telegram", 2]);
+  telegram.allowedUpdates = ["message", "edited_message"];
+  await workerOnly({ telegram, host: CLOUDFLARE });
+  expect([telegram.allowedUpdates, telegram.webhooksSet]).toEqual([["message"], 3]);
+});
+
+test("the Worker's start asks Telegram nothing off Cloudflare or over plain HTTP; a refusal is logged, and it starts anyway", async () => {
+  const telegram = fake();
+  await workerOnly({ telegram });
+  await workerOnly({ telegram, host: { env: {}, origin: "http://127.0.0.1:8787" } });
+  expect(telegram.webhookInfoAsked).toBe(0);
+
+  const logger = recordingLogger();
+  const refused = await workerOnly({ telegram, secrets: { ...secretsFor(telegram), TELEGRAM_BOT_TOKEN: "999999:not-a-token-telegram-knows" }, host: CLOUDFLARE, logger });
+  expect(logger.lines.join("\n")).toContain("the webhook could not be registered; open https://bot.acme.workers.dev/telegram/setup to try again");
+  // Running: a request without the secret is refused (401), not "not running" (503).
+  expect((await fetch(`${refused.url}/telegram`, { method: "POST", body: "{}" })).status).toBe(401);
+});
+
+test("setup-webhook.mjs, piped after wrangler deploy: waits for the version deployed, then has the Worker register itself", async () => {
+  const telegram = fake();
+  let version = "version-1";
+  const health = defineComponent({ name: "health-test", setup: (pikit) => pikit.provideKeyed("http.route", "GET /health", () => Response.json({ ok: true, version })) });
+  const w = await workerOnly({ telegram, extra: [health] });
+  let setBeforeTheVersion: number | undefined;
+  setTimeout(() => {
+    setBeforeTheVersion = telegram.webhooksSet;
+    version = "version-2";
+  }, 300);
+
+  const wrangler = [`Uploaded tg-bot (1.20 sec)`, `Deployed tg-bot triggers (0.31 sec)`, `  ${w.url}`, `Current Version ID: version-2`, ``].join("\n");
+  const script = Bun.spawn([process.execPath, join(import.meta.dir, "setup-webhook.mjs")], {
+    stdin: new Blob([wrangler]),
+    stdout: "pipe",
+    stderr: "pipe",
+    env: { ...process.env, SETUP_INTERVAL_MS: "50", SETUP_WAIT_MS: "10000" },
+  });
+  const [out, err, code] = await Promise.all([new Response(script.stdout).text(), new Response(script.stderr).text(), script.exited]);
+
+  expect(err).toBe("");
+  expect(code).toBe(0);
+  // wrangler's output passes through, then what the Worker did.
+  expect(out).toBe(`${wrangler}✓ Telegram telegram: webhook ${w.url}/telegram\n`);
+  expect(setBeforeTheVersion).toBe(0);
+  expect([telegram.webhookUrl, telegram.webhookSecret]).toEqual([`${w.url}/telegram`, SECRET]);
+});
+
+test("setup-webhook.mjs fails, saying why, when the deploy printed no URL or the Worker could not register", async () => {
+  const telegram = fake();
+  const script = (args: string[], stdin: string) =>
+    Bun.spawn([process.execPath, join(import.meta.dir, "setup-webhook.mjs"), ...args], { stdin: new Blob([stdin]), stdout: "pipe", stderr: "pipe", env: { ...process.env, SETUP_INTERVAL_MS: "20", SETUP_WAIT_MS: "2000" } });
+  const outcome = async (child: ReturnType<typeof script>) => {
+    const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+    return { out, err, code };
+  };
+
+  const failed = await outcome(script([], "✘ [ERROR] A request to the Cloudflare API failed.\n"));
+  expect(failed.code).toBe(1);
+  expect(failed.err).toContain("no Worker URL in wrangler's output");
+  // A link in a warning above the deploy is not the Worker's URL.
+  const warned = await outcome(script([], "▲ [WARNING] see https://developers.cloudflare.com/workers/\n✘ [ERROR] A request to the Cloudflare API failed.\n"));
+  expect(warned.code).toBe(1);
+  expect(warned.err).toContain("no Worker URL in wrangler's output");
+
+  const health = defineComponent({ name: "health-test", setup: (pikit) => pikit.provideKeyed("http.route", "GET /health", () => Response.json({ ok: true, version: "v1" })) });
+  const w = await workerOnly({ telegram, secrets: { ...secretsFor(telegram), TELEGRAM_BOT_TOKEN: "999999:not-a-token-telegram-knows" }, extra: [health] });
+  const refused = await outcome(script([w.url], ""));
+  expect(refused.code).toBe(1);
+  expect(refused.out).toBe(`✗ Telegram telegram: Telegram refused the webhook ${w.url}/telegram (telegram setWebhook: 401 Unauthorized)\n`);
+
+  const late = await outcome(script([w.url, "v2"], ""));
+  expect(late.code).toBe(1);
+  expect(late.err).toContain(`${w.url}/health did not answer from version v2 in time; open ${w.url}/telegram/setup once it does`);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Claiming the bot from Telegram (claim.ts): /claim <code>, kept by the chat's actor.
+
+const CODE = "correct horse battery staple";
+const claimSecrets = (telegram: FakeTelegram, extra: Record<string, string> = {}): Record<string, string> => ({
+  TELEGRAM_BOT_TOKEN: telegram.token,
+  TELEGRAM_WEBHOOK_SECRET: SECRET,
+  TELEGRAM_CLAIM_CODE: CODE,
+  ...extra,
+});
+const privateBot = (id: number) => `This bot is private. Your Telegram user id is ${id}: its owner can let you in by adding it to TELEGRAM_ALLOWED_USERS.`;
+const claimHint = " If you are its owner, send /claim followed by the claim code.";
+const texts = (telegram: FakeTelegram) => telegram.sent.map((m) => m.text);
+
+test("with a claim code, a stranger is told their id and /claim, once; nothing reaches the agent", async () => {
+  const telegram = fake();
+  const s = await started({ telegram, secrets: claimSecrets(telegram) });
+
+  expect((await telegram.write(OWNER, "hello?")).status).toBe(200);
+  expect((await telegram.write(OWNER, "anyone?")).status).toBe(200);
+  expect((await telegram.write(OWNER, undefined)).status).toBe(200);
+  await Bun.sleep(50);
+
+  expect(telegram.sent).toMatchObject([{ chatId: OWNER.id, text: privateBot(OWNER.id) + claimHint }]);
+  expect(s.runtime.dispatched).toEqual([]);
+});
+
+test("/claim with the right code: the chat talks to the agent, the code reaches neither the agent nor a log, and a redelivery is not answered twice", async () => {
+  const telegram = fake();
+  const logger = recordingLogger();
+  const s = await started({ telegram, secrets: claimSecrets(telegram), logger });
+
+  const { update } = await telegram.write(OWNER, `/claim   ${CODE}  `);
+  await telegram.sentCount(1);
+  expect(texts(telegram)).toEqual(["✓ This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."]);
+  expect(await telegram.post(update)).toBe(200);
+
+  await telegram.write(OWNER, "hello");
+  expect((await telegram.sentCount(2))[1]).toEqual({ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true });
+  await telegram.write(OWNER, undefined);
+  expect((await telegram.sentCount(3))[2]?.text).toBe("I can only read text messages for now.");
+  // /claim again is the channel's to answer.
+  await telegram.write(OWNER, `/claim ${CODE}`);
+  expect((await telegram.sentCount(4))[3]?.text).toBe("This chat can talk to me already.");
+  // Someone else is still a stranger.
+  await telegram.write(STRANGER, "me too?");
+  expect((await telegram.sentCount(5))[4]).toMatchObject({ chatId: STRANGER.id, text: privateBot(STRANGER.id) + claimHint });
+  await Bun.sleep(50);
+
+  expect(telegram.sent).toHaveLength(5);
+  expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello"]);
+  expect(logger.lines.join("\n")).not.toContain(CODE);
+});
+
+test("an allowed user's /claim is answered by the channel, never by the agent; a stranger may still claim beside the list", async () => {
+  const telegram = fake();
+  const s = await started({ telegram, secrets: { ...secretsFor(telegram), TELEGRAM_CLAIM_CODE: CODE } });
+
+  await telegram.write(OWNER, `/claim ${CODE}`);
+  await telegram.write(STRANGER, `/claim ${CODE}`);
+  await telegram.write(STRANGER, "hi");
+  await telegram.sentCount(3);
+
+  expect(texts(telegram).slice(0, 2)).toEqual(["This chat can talk to me already.", "✓ This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."]);
+  expect(s.runtime.dispatched.map((d) => [d.key, d.prompt])).toEqual([[`telegram:${STRANGER.id}`, "hi"]]);
+});
+
+test("wrong codes: each is told; the fifth starts a cool-down in which even the right code is refused; after it, the right code claims", async () => {
+  const telegram = fake();
+  let offset = 0;
+  const clock: Clock = { now: () => Date.now() + offset, sleep: (ms) => Bun.sleep(ms) };
+  const s = await started({ telegram, secrets: claimSecrets(telegram), clock });
+
+  const first = await telegram.write(OWNER, "/claim correct horse battery stapler");
+  for (let i = 2; i <= 5; i++) await telegram.write(OWNER, `/claim guess number ${i}`);
+  // Telegram delivering a wrong code again is not another guess.
+  expect(await telegram.post(first.update)).toBe(200);
+  await telegram.write(OWNER, `/claim ${CODE}`);
+  await telegram.write(OWNER, "/claim");
+  await telegram.sentCount(7);
+  await Bun.sleep(50);
+
+  expect(texts(telegram)).toEqual([
+    ...Array.from({ length: 4 }, () => "That is not the claim code."),
+    "That is not the claim code. Too many wrong codes: try again in 15 minutes.",
+    "Too many wrong claim codes: try again in 15 minute(s).",
+    "Too many wrong claim codes: try again in 15 minute(s).",
+  ]);
+
+  offset = CLAIM_COOL_DOWN_MS;
+  await telegram.write(OWNER, "/claim");
+  await telegram.write(OWNER, `/claim ${CODE}`);
+  await telegram.write(OWNER, "hello");
+  await telegram.sentCount(10);
+  expect(texts(telegram).slice(7, 9)).toEqual(["Send /claim followed by the claim code, in one message.", "✓ This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."]);
+  expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello"]);
+});
+
+test("a claimed chat stays allowed after a restart and after the claim code is removed; a new claim code revokes it", async () => {
+  const telegram = fake();
+  const kv = createMemoryKeyValueStorage();
+  const submissions = createMemorySubmissions().submissions;
+  const first = await started({ telegram, kv, submissions, secrets: claimSecrets(telegram) });
+  await telegram.write(OWNER, `/claim ${CODE}`);
+  await telegram.sentCount(1);
+  await first.app.stop();
+
+  // Restarted (a deploy, an eviction) with the same code: still allowed.
+  const second = await started({ telegram, kv, submissions, secrets: claimSecrets(telegram) });
+  await telegram.write(OWNER, "after a restart");
+  expect((await telegram.sentCount(2))[1]?.text).toBe("answer: <b>after a restart</b>");
+  expect(second.runtime.dispatched.map((d) => d.prompt)).toEqual(["after a restart"]);
+  // Stopped once the answer is marked delivered: otherwise it would go again, marked "↻".
+  await until(async () => (await kv.namespace(NAME).get("answers-cursor")) === "1", "the cursor past the answer");
+  await second.app.stop();
+
+  // The claim code removed, nobody listed: no new claim, and the chat that claimed still talks.
+  const logger = recordingLogger();
+  const third = await started({ telegram, kv, submissions, secrets: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_WEBHOOK_SECRET: SECRET }, logger });
+  expect(logger.lines).toContain("channel-telegram-webhook: nobody is in TELEGRAM_ALLOWED_USERS and TELEGRAM_CLAIM_CODE is not set: only chats that claimed the bot before can talk to it");
+  await telegram.write(OWNER, "without the code");
+  expect((await telegram.sentCount(3))[2]?.text).toBe("answer: <b>without the code</b>");
+  await telegram.write(STRANGER, `/claim ${CODE}`);
+  expect((await telegram.sentCount(4))[3]).toMatchObject({ chatId: STRANGER.id, text: privateBot(STRANGER.id) });
+  expect(third.runtime.dispatched.map((d) => d.prompt)).toEqual(["without the code"]);
+  await until(async () => (await kv.namespace(NAME).get("answers-cursor")) === "2", "the cursor past the answer");
+  await third.app.stop();
+
+  // Another claim code: the claims made with the old one are revoked, and the chat may claim again.
+  const fourth = await started({ telegram, kv, submissions, secrets: claimSecrets(telegram, { TELEGRAM_CLAIM_CODE: "a brand new passphrase" }) });
+  await telegram.write(OWNER, "and now?");
+  expect((await telegram.sentCount(5))[4]).toMatchObject({ chatId: OWNER.id, text: privateBot(OWNER.id) + claimHint });
+  await telegram.write(OWNER, "/claim a brand new passphrase");
+  await telegram.write(OWNER, "back");
+  expect((await telegram.sentCount(7))[6]?.text).toBe("answer: <b>back</b>");
+  expect(fourth.runtime.dispatched.map((d) => d.prompt)).toEqual(["back"]);
+});
+
+test("without a claim code, /claim claims nothing: with users listed, the Worker tells the stranger alone, with no word of /claim", async () => {
+  const s = await started();
+
+  expect((await s.telegram.write(STRANGER, `/claim ${CODE}`)).status).toBe(200);
+  expect((await s.telegram.write(STRANGER, "/claim")).status).toBe(200);
+
+  expect(s.telegram.sent).toEqual([{ chatId: STRANGER.id, text: privateBot(STRANGER.id), html: false }]);
+  expect(s.runtime.dispatched).toEqual([]);
 });

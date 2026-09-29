@@ -74,8 +74,9 @@ export const worker = defineApp({
   return dir;
 }
 
-/** `wrangler deploy` succeeds with version v2 at URL; nothing else runs. */
+/** Logged in; `wrangler deploy` succeeds with version v2 at URL; nothing else runs. */
 const wrangler: Runner = async (command, { env }) => {
+  if (command[1] === "whoami") return { code: 0, stdout: JSON.stringify({ loggedIn: true }) };
   const output = env?.WRANGLER_OUTPUT_FILE_PATH;
   if (command[1] === "deploy" && output !== undefined) writeFileSync(output, `${JSON.stringify({ type: "deploy", version_id: "v2", targets: [URL] })}\n`);
   return { code: 0, stdout: "" };

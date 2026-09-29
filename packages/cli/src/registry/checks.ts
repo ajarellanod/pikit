@@ -180,6 +180,20 @@ export function checkDependencies(declared: Record<string, string>, imported: Se
   return problems;
 }
 
+/**
+ * `devDependencies` are the tools a component needs besides what its files import: a package its files
+ * import is a dependency (`checkDependencies`), so none is in both; and the kit is never one, it comes
+ * with `requires.pikit` and `dependencies`.
+ */
+export function checkDevDependencies(manifest: Manifest): string[] {
+  const problems: string[] = [];
+  for (const pkg of Object.keys(manifest.devDependencies ?? {}).sort()) {
+    if (pkg in manifest.dependencies) problems.push(`"${pkg}" is in both dependencies and devDependencies: a package its files import is a dependency`);
+    if (pkg.startsWith("@pikit/")) problems.push(`devDependencies lists the kit package "${pkg}": the kit comes with requires.pikit and dependencies`);
+  }
+  return problems;
+}
+
 /** Relative paths of every file below `dir` (forward slashes), `node_modules` excluded. */
 export function listFiles(dir: string): string[] {
   if (!isDirectory(dir)) return [];

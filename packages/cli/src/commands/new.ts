@@ -80,7 +80,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   mkdirSync(join(projectDir, "src", "extensions"), { recursive: true });
   const kit = vendorKit(projectDir);
   const write = (file: string, text: string) => writeFileSync(join(projectDir, file), text);
-  write("package.json", starter.packageJson(name, kit, target));
+  write("package.json", starter.packageJson(name, kit));
   write("tsconfig.json", starter.tsconfig());
   write(".gitignore", starter.gitignore(target));
   write("README.md", starter.readme(name, components, target));

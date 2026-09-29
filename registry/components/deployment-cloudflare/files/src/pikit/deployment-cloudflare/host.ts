@@ -11,7 +11,8 @@
  *   object and the next event starts over (K2, K6). The App is never stopped otherwise: an object is
  *   evicted without warning, and whatever must survive is already committed.
  * - **The Worker** (`createWorkerHost`) composes `export const worker` once per isolate, on its first
- *   request, with `WORKERS_HOST` `{ env }` on its start context, and serves its `http.route`s, as
+ *   request, with `WORKERS_HOST` `{ env, origin }` on its start context (`origin`: that request's, where
+ *   the Worker is reached), and serves its `http.route`s, as
  *   `server-bun` does on a server. `GET /health` is its own: public, it starts the Worker's App and
  *   one object's App, and answers `{ ok, version }` with the version Cloudflare is running, which is
  *   how `up` knows a deploy has reached every request (C8).
@@ -156,8 +157,8 @@ export interface WorkerHost {
 export function createWorkerHost(definition: AppDefinition | undefined, options: HostOptions = {}): WorkerHost {
   const logger = options.logger ?? consoleLogger;
   let serving: Promise<Router> | undefined;
-  /** Once per isolate; a failed start is retried by the next request. */
-  const boot = (env: WorkersHost["env"]): Promise<Router> =>
+  /** Once per isolate, from its first request (`/health` too); a failed start is retried by the next request. */
+  const boot = (env: WorkersHost["env"], origin: string): Promise<Router> =>
     (serving ??= (async () => {
       let router: Router | undefined;
       // The Worker's server: the entrypoint's own component, so the routes are the App's `http.route`s as
@@ -175,7 +176,7 @@ export function createWorkerHost(definition: AppDefinition | undefined, options:
         },
       });
       const app = await compose(definition, [server], logger);
-      await startWithin(app, withContextValue(WORKERS_HOST, { env }, BACKGROUND_CONTEXT), options, logger);
+      await startWithin(app, withContextValue(WORKERS_HOST, { env, origin }, BACKGROUND_CONTEXT), options, logger);
       if (router === undefined) throw new Error("deployment-cloudflare: the Worker's App started without its server");
       logger.info("pikit: Worker started", { routes: router.keys });
       return router;
@@ -185,13 +186,13 @@ export function createWorkerHost(definition: AppDefinition | undefined, options:
       throw error;
     }));
 
-  const health = async (env: WorkersHost["env"]): Promise<Response> => {
+  const health = async (env: WorkersHost["env"], origin: string): Promise<Response> => {
     const version = (env[VERSION_BINDING] as { id?: unknown } | undefined)?.id;
     const answer = (ok: boolean, error?: string) =>
       Response.json({ ok, version: typeof version === "string" ? version : null, ...(error !== undefined && { error }) }, { status: ok ? 200 : 503, headers: { "cache-control": "no-store" } });
     // Public: it says which half failed, never why. The why is in the logs (`pikit logs`).
     try {
-      await boot(env);
+      await boot(env, origin);
     } catch {
       return answer(false, "the Worker's App did not start");
     }
@@ -209,10 +210,10 @@ export function createWorkerHost(definition: AppDefinition | undefined, options:
   return {
     async fetch(request, env) {
       const url = new URL(request.url);
-      if (request.method === "GET" && url.pathname === "/health") return await health(env);
+      if (request.method === "GET" && url.pathname === "/health") return await health(env, url.origin);
       let router: Router;
       try {
-        router = await boot(env);
+        router = await boot(env, url.origin);
       } catch {
         return Response.json({ error: "unavailable" }, { status: 503 });
       }

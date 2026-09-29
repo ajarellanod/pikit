@@ -21,10 +21,17 @@
  * that URL. Updates Telegram holds are kept (no `drop_pending_updates`): they are delivered to the new
  * webhook, and a message sent while the bot had none is not lost. Setting the same webhook again is
  * harmless, so every deploy calls it.
+ *
+ * Without `pikit up` (a "Deploy to Cloudflare" button, Workers Builds), the Worker registers itself
+ * instead (`webhook.ts`): the new version checks its webhook on its first request, and
+ * `GET /telegram/setup` sets it.
  */
 
 import { createTelegramApi, TelegramError } from "./api.ts";
 import { settingsOf } from "./configure.ts";
+import { ALLOWED_UPDATES } from "./webhook.ts";
+
+export { ALLOWED_UPDATES };
 
 /** What `afterDeploy` needs. Structural, so this file imports nothing from the deployment component. */
 export interface AfterDeployIO {
@@ -36,9 +43,6 @@ export interface AfterDeployIO {
   get(name: string): string | undefined;
   say(line: string): void;
 }
-
-/** What Telegram posts to the webhook: messages only, what the Worker handles. */
-export const ALLOWED_UPDATES = ["message"];
 
 /** Registers and checks every bot's webhook; returns what went wrong (empty when done). */
 export async function afterDeploy(io: AfterDeployIO): Promise<string[]> {
