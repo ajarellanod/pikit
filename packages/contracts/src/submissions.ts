@@ -11,11 +11,17 @@
  *
  * Shaped like the submissions of Pi's durable runtime (`packages/durable/docs/pico-v5.md` §6):
  * `pending` is its `queued` and `placed`; a `completed` settlement is `done` with its answer; `failed`,
- * `aborted` and `abandoned` are `unanswered` with a reason. Pi's submissions are not implemented yet (package 18 of
- * `pico-v5-handoff.md`, checked at `c1449660`). When the adapter moves to them, `admitted` and
- * `settled` become Pi's own records and this contract is bridged or deleted; what stays is what one
- * Pi session cannot know: which sessions hold pending work (`pending`, an index across sessions), and
- * the feed channels deliver from.
+ * `aborted` and `abandoned` are `unanswered` with a reason. `@earendil-works/pi-durable` 0.99.0 ships
+ * them: `Conversation.submit()` deduplicates by request id and returns a `Submission` (`status`,
+ * `wait`, `abort`), `Harness.submission()` reacquires one after a reopen, run tasks settle the inputs
+ * they answer with `Tx.settleSubmission()`, `Storage.scanSubmissions()` lists them by conversation and
+ * status, `Harness.resume()` starts scheduling (the tasks a reopen found running included), and a run
+ * the scheduler ends `faulted` or `orphaned` settles its submissions `unanswered`. The adapter cannot
+ * use them yet: `pi-agent-core` 0.99.0, whose `AgentHarness` it drives, does not depend on
+ * `pi-durable` (`features/pi-durable-migration.md`). When the adapter moves to them, `admitted` and `settled`
+ * become Pi's own records and this contract is bridged or deleted; what stays is what one Pi session
+ * cannot know: which sessions hold pending work (`pending`, an index across sessions;
+ * `scanSubmissions` sees one storage), and the feed channels deliver from.
  *
  * The session stays the source of truth. A settlement carries the run's final text, not its
  * transcript (`messages`) or usage: what a channel needs to deliver it after a restart, kept only as
