@@ -242,6 +242,33 @@ test("a component with no default export is not an app component: it provides an
   expect(await problems(f)).toBe("");
 });
 
+test("apps: a half for the Worker's App is a named export, and the generated fields cover both halves (C1)", async () => {
+  const half = (name: string, body: string) => `export const ${name}: ComponentDefinition = { name: "${name}", setup(pikit) {${body}} };\n`;
+  const index =
+    `import type { ComponentDefinition } from "@pikit/core";\n` +
+    half("objectHalf", `pikit.use("agent.runtime"); pikit.useOptional("storage.kv"); pikit.provideKeyed("actor.inbox", "sample.message", {});`) +
+    half("workerHalf", `pikit.use("actor.mailbox"); pikit.use("storage.kv"); pikit.provideKeyed("http.route", "POST /sample", {});`) +
+    "export default objectHalf;\n";
+  const f = await fixture({ name: "channel-halves", index });
+  expect(f.manifest()).toMatchObject({ provides: ["actor.inbox"], requires: { capabilities: ["agent.runtime"] } });
+
+  f.writeManifest({ ...f.manifest(), apps: { worker: "workerHalf" } });
+  expect((await generate(f.root)).problems).toEqual([]);
+  expect(f.manifest()).toMatchObject({
+    provides: ["actor.inbox", "http.route"],
+    // Required by one half and optional in the other: required.
+    requires: { capabilities: ["agent.runtime", "actor.mailbox", "storage.kv"] },
+    optional: { capabilities: [] },
+    apps: { worker: "workerHalf" },
+  });
+  expect(await problems(f)).toBe("");
+
+  f.writeManifest({ ...f.manifest(), apps: { worker: "missingHalf" } });
+  expect(await problems(f)).toContain('has no export "missingHalf" made with defineComponent');
+  f.writeManifest({ ...f.manifest(), apps: { worker: "objectHalf", edge: "x" } as never });
+  expect(await problems(f)).toContain("component.json /apps/edge: is not a known field");
+});
+
 test("tools: replay is generated, and a tool without one fails (S10)", async () => {
   const safe = await fixture({ name: "tool-safe", setup: `\n    pikit.provideKeyed("agent.tool", "look", { replay: "safe" });` });
   expect(safe.manifest().replay).toEqual({ tools: { look: "safe" } });

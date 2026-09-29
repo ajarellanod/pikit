@@ -28,6 +28,8 @@ export const COMPONENT_SCHEMA_REF = `../../${COMPONENT_SCHEMA_FILE}`;
 const KEBAB = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
 const SEMVER = "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$";
 const ENV_NAME = "^[A-Z][A-Z0-9_]*$";
+/** A JavaScript identifier: the name of an export. */
+const IDENTIFIER = "^[A-Za-z_$][A-Za-z0-9_$]*$";
 const TEXT = "\\S";
 
 const EnvironmentVariableSchema = Type.Object(
@@ -71,6 +73,21 @@ export const ManifestSchema = Type.Object(
       { additionalProperties: false },
     ),
     provides: Type.Array(Type.String(), { description: "Generated from setup's provide() and provideKeyed() calls." }),
+    apps: Type.Optional(
+      Type.Object(
+        {
+          worker: Type.String({
+            pattern: IDENTIFIER,
+            description: "The export of index.ts that goes in the Worker's App (`export const worker` of pikit.config.ts).",
+          }),
+        },
+        {
+          additionalProperties: false,
+          description:
+            "A component with a half for each App (SPEC §4.1, C1): the App → the named export of index.ts `pikit add` lists in it. The default export goes in the default App (on Cloudflare, the Durable Object's). provides, requires and optional cover every half.",
+        },
+      ),
+    ),
     replay: Type.Optional(
       Type.Object(
         { tools: Type.Record(Type.String(), Type.String(), { description: "Generated: each agent.tool's replay (S10, SPEC §8.4)." }) },
