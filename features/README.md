@@ -45,6 +45,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |
 | [second-agent-runtime](second-agent-runtime.md) | | Another agent loop behind `AgentRuntime` | No |
 | [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
+| [pi-durable-migration](pi-durable-migration.md) | | The adapter on Pi's durable runtime; `sessions-sql` and part of `submissions-sql` removed | No: it removes pikit code once Pi carries it |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql` and `sessions.store` | Yes: M3's swap proof (scenario 4) |
 | [threads](threads.md) | | Platform threads as conversations; replies in their thread | No |
 | [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation | Open: track S's git workspace |
