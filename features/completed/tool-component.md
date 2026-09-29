@@ -2,7 +2,8 @@
 
 **Public appeal:** —
 
-**Status:** built, in `@pikit/pi-adapter/tools`. No change to the kernel or the contracts.
+**Status:** built, in `@pikit/pi-adapter/tools`. No change to the kernel or the contracts. **A bridge:**
+it is deleted when the adapter moves to Pi's durable runtime ("Migration" below).
 
 **Needed by:** anyone who adds a tool to an agent. Before, the choices were a Pi extension's tool
 (always `replay: "never"`, hidden inside the extension, the agent names the extension) or a full
@@ -59,6 +60,56 @@ extension's host has. Pi's `defineTool` always types it, so:
   so, not a conversation;
 - a tool that really uses the `ExtensionContext` stays an extension's tool.
 
+## Which to use
+
+| You want | Use |
+|---|---|
+| A tool of your own for pikit that needs nothing from the app | `toolComponent` |
+| A tool that needs a capability (a secret, `execution`, `workspace`, `storage.kv`) | a `defineComponent` that `use`s it and provides `agent.tool` (as `tool-read` does) |
+| A Pi extension brought unchanged, or one that must also run in Pi's CLI | Pi's `defineTool` + `pi.registerTool`, inside the extension |
+
+Pi's `defineTool` is in a pikit project only because the shim (`@earendil-works/pi-coding-agent`)
+exports Pi's extension API, so extensions written for Pi load unmodified. It is not pikit's way to
+write a tool: an extension's tools are always `replay: "never"`, so after a crash or an eviction the
+model is told the call was interrupted, even for one that only reads. `pikit doctor` notes every
+project file that calls `pi.registerTool`, and points to `toolComponent`.
+
+## Migration: a bridge until Pi's durable runtime
+
+Pi is moving to a durable runtime, `@earendil-works/pi-durable` (Pico; published, still changing:
+its changelog lists unreleased breaking changes; Pi's coding agent is being moved onto it,
+`packages/durable/docs/pico-v5-handoff.md` §16). There, extension code registers tools through one
+registry (`registry.tools.add(tool)`, `packages/durable/docs/pico-v5.md` §7), and a tool is one object:
+
+```ts
+type ToolRegistration = Tool & {
+  readonly replay?: "safe" | "unsafe"; // omitted: "unsafe"
+  execute(args: JsonValue, api: ToolExecutionApi, context: Context): Promise<ToolExecutionResult>;
+};
+```
+
+It carries its own `replay`, and its `api` knows its conversation (`api.conversationId`): the two things
+`toolComponent` adds today. On recovery it reruns only when the stored intent and the current
+declaration both say `safe`, as pi-agent-core does now. So, when pikit's adapter moves to it:
+
+- **A tool is Pi's object, unchanged.** An agent takes it directly (`tools: ["read", clima]`;
+  `AgentDefinition.tools` already accepts objects), or a `defineComponent` provides it as `agent.tool`
+  when it is shared by name, installed from a registry, or needs a capability.
+- **`toolComponent` and its `ToolDefinition` are deleted**, and `replay` takes Pi's words (`"unsafe"`
+  where pikit says `"never"`), in that one change, with the other `tool-*` components.
+- **If Pi ships a helper that types such an object**, it is used under Pi's own name: pikit adds none.
+
+Decided on the way there (September 2026):
+- `toolComponent` is not renamed (`createToolComponent` was considered): a name for something that
+  goes away is not worth a change.
+- No second word for `"never"` now: two words for one thing is the confusion this avoids, and Pi's
+  vocabulary may still change before the migration.
+- `defineTool` stays exported by `@pikit/pi-adapter/extensions`: that module is the shim's source, and
+  removing it there would mean re-implementing it in the shim for no gain.
+- No issue or pull request to Pi: its contribution gate closes new contributors' issues and PRs
+  (a PR needs a maintainer's `lgtm` first), and `pi-durable` already gives tools a `replay`. What is
+  left is the current `ToolDefinition` of Pi's extension API, which that migration replaces.
+
 ## Where it is
 - `packages/pi-adapter/src/tools/index.ts` (`ToolDefinition`, `toolComponent`).
 - `packages/pi-adapter/src/tools/tools.test.ts`: component name, key, `replay`, Pi's argument order,
@@ -68,6 +119,7 @@ extension's host has. Pi's `defineTool` always types it, so:
   run's conversation.
 
 ## Open questions
-- Config for such a tool (an API URL, a limit): today it is a `defineComponent`. An optional
-  `config` schema could come if users ask for it.
-- Whether `pikit add` should scaffold one (`pikit new tool <name>`).
+- Config for such a tool (an API URL, a limit): today it is a `defineComponent`. Not added to a
+  bridge; after the migration, a `defineComponent` with a config schema provides Pi's object.
+- When the adapter moves to `pi-durable`: decided with the rest of that move (sessions, submissions,
+  Cloudflare storage), not for tools alone.

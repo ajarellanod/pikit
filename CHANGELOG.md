@@ -5,6 +5,14 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- cli: `pikit doctor` notes a project file that registers tools with `pi.registerTool`: pikit runs
+  them, but an extension's tools are never run again when a run resumes after a crash (`replay:
+  "never"`), and a tool of your own chooses with `toolComponent`. A note, never a failure.
+- docs: `toolComponent` is a bridge. When the adapter moves to Pi's durable runtime
+  (`@earendil-works/pi-durable`), a tool is Pi's own object with its `replay` inside (`"safe"` /
+  `"unsafe"`), `toolComponent` is deleted, and `replay` takes Pi's words. Until then: tools of your
+  own with `toolComponent` (or `defineComponent` when they need a capability); Pi's `defineTool`
+  only inside Pi extensions (`features/completed/tool-component.md`, `runtime-pi`'s README).
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an
   agent names it in `tools`. Unlike a Pi extension's tool, it may be `replay: "safe"`, and `pikit
