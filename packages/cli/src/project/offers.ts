@@ -12,9 +12,14 @@
  * (`storage-sqlite` on a server, `storage-do` on Cloudflare): with several, choosing is the user's,
  * and `pikit doctor` says what is missing. What is installed this way is recorded as installed *for* the
  * component that brought it, and leaves with it when nothing else uses it (`pikit remove`).
+ *
+ * Per App (`apps.ts`): on Cloudflare, what a component's Worker half needs must be provided in the
+ * Worker's App, by a component that goes there, and what its object's half needs in the default App.
  */
 
 import { capabilityEntry } from "../registry/capabilities.ts";
+import type { Manifest } from "../registry/manifest.ts";
+import { type AppName, declaredByApp } from "./apps.ts";
 import { NEW_PROJECT_TARGETS } from "./pikit-json.ts";
 import type { Registry } from "./registry-source.ts";
 
@@ -27,6 +32,8 @@ export interface Offer {
   for: string;
   /** `recommended`: an optional capability marked `offer`; `required`: an offered component needs it. */
   why: "recommended" | "required";
+  /** Where it is missing, when not the default App: the Worker's (a Cloudflare project, SPEC C1). */
+  app?: "worker";
 }
 
 /**
@@ -40,7 +47,7 @@ export function offeredProviders(
   installed: readonly string[] = [],
   targets: readonly string[] = NEW_PROJECT_TARGETS,
 ): Offer[] {
-  const provided = new Set<string>();
+  const provided: Record<AppName, Set<string>> = { default: new Set(), worker: new Set() };
   const known = (name: string) => {
     try {
       return registry.manifest(name);
@@ -48,32 +55,44 @@ export function offeredProviders(
       return undefined; // Installed from another registry: `pikit doctor` checks the real app.
     }
   };
-  for (const name of [...installed, ...names]) for (const capability of known(name)?.provides ?? []) provided.add(capability);
+  const provide = (manifest: Manifest) => {
+    for (const [app, half] of declaredByApp(manifest, targets)) for (const capability of half.provides) provided[app].add(capability);
+  };
+  for (const name of [...installed, ...names]) {
+    const manifest = known(name);
+    if (manifest !== undefined) provide(manifest);
+  }
 
   const runsHere = (name: string) => targets.every((target) => known(name)?.targets.includes(target) === true);
-  const providersOf = (capability: string) => registry.names().filter((name) => known(name)?.provides.includes(capability) === true && runsHere(name));
+  /** The components that provide `capability` in `app`: a provider of the other App does not help. */
+  const providersOf = (capability: string, app: AppName) =>
+    registry.names().filter((name) => {
+      const manifest = known(name);
+      if (manifest === undefined || !runsHere(name)) return false;
+      return declaredByApp(manifest, targets).some(([where, half]) => where === app && half.provides.includes(capability));
+    });
   const offers: Offer[] = [];
   const visit = (name: string, depth: number): void => {
     const manifest = known(name);
     if (manifest === undefined) return;
-    const wanted: [string, Offer["why"]][] = [
-      // What an offered component requires comes with it. What a component the user chose requires
-      // is theirs to provide (`pikit add` warns, `pikit doctor` fails), unless the catalogue marks
-      // it `offer`: `conversations-kv` brings `storage-kv-sql` as `channel-telegram` does.
-      ...manifest.requires.capabilities
-        .filter((c) => depth > 0 || capabilityEntry(c)?.offer === true)
-        .map((c): [string, Offer["why"]] => [c, "required"]),
-      ...manifest.optional.capabilities.filter((c) => capabilityEntry(c)?.offer === true).map((c): [string, Offer["why"]] => [c, "recommended"]),
-    ];
-    for (const [capability, why] of wanted) {
-      if (provided.has(capability) || capabilityEntry(capability)?.mode !== "single") continue;
-      const providers = providersOf(capability);
-      if (providers.length !== 1) continue;
-      const component = providers[0] as string;
-      for (const c of known(component)?.provides ?? []) provided.add(c);
-      const offer: Offer = { component, capability, for: name, why };
-      visit(component, depth + 1);
-      offers.push(offer);
+    for (const [app, half] of declaredByApp(manifest, targets)) {
+      const wanted: [string, Offer["why"]][] = [
+        // What an offered component requires comes with it. What a component the user chose requires
+        // is theirs to provide (`pikit add` warns, `pikit doctor` fails), unless the catalogue marks
+        // it `offer`: `conversations-kv` brings `storage-kv-sql` as `channel-telegram` does.
+        ...half.requires.filter((c) => depth > 0 || capabilityEntry(c)?.offer === true).map((c): [string, Offer["why"]] => [c, "required"]),
+        ...half.optional.filter((c) => capabilityEntry(c)?.offer === true).map((c): [string, Offer["why"]] => [c, "recommended"]),
+      ];
+      for (const [capability, why] of wanted) {
+        if (provided[app].has(capability) || capabilityEntry(capability)?.mode !== "single") continue;
+        const providers = providersOf(capability, app);
+        if (providers.length !== 1) continue;
+        const component = providers[0] as string;
+        provide(known(component) as Manifest);
+        const offer: Offer = { component, capability, for: name, why, ...(app === "worker" && { app }) };
+        visit(component, depth + 1);
+        offers.push(offer);
+      }
     }
   };
   for (const name of names) visit(name, 0);

@@ -2,7 +2,9 @@
  * A project on Cloudflare, end to end on this machine (SPEC §4.1): `pikit new --target cloudflare
  * --preset cloudflare-minimal`, `pikit doctor`, the project's own tests (with its `wrangler deploy
  * --dry-run`) and typecheck, then `pikit dev` (wrangler dev, workerd) answering `/health` from the
- * object's App. Nothing reaches a Cloudflare account: `pikit up` is never run.
+ * object's App. Then `pikit add secrets-cloudflare` and `pikit add channel-telegram-webhook` (with what
+ * it offers) put each half in its App (C1), the project installs, typechecks and passes its tests, and
+ * `pikit remove` undoes both Apps. Nothing reaches a Cloudflare account: `pikit up` is never run.
  *
  * Slow (it runs `bun install`), so it runs only with `PIKIT_E2E=1`. It needs port 8787 free and Node
  * on the PATH (wrangler runs on it).
@@ -11,7 +13,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -71,6 +73,79 @@ test.skipIf(!E2E)(
       Bun.spawnSync(["pkill", "-INT", "-f", "wrangler dev --name edge-bot"]);
       await dev.exited;
     }
+  },
+  TIMEOUT,
+);
+
+/** The two lists of `pikit.config.ts`: the default export's (the object's App) and `worker`'s. */
+function lists(): { object: string[]; worker: string[] } {
+  const text = readFileSync(join(project, "pikit.config.ts"), "utf8");
+  const list = (app: string) => {
+    const at = text.indexOf(app);
+    const body = /components: \[\n([^\]]*)\]/.exec(text.slice(at))?.[1] ?? "";
+    return body.split("\n").map((line) => line.trim().replace(/,$/, "")).filter((line) => line !== "");
+  };
+  return { object: list("export default defineApp"), worker: list("export const worker = defineApp") };
+}
+
+test.skipIf(!E2E)(
+  "pikit add channel-telegram-webhook puts each half in its App, with what it offers; the project installs, typechecks and passes its tests; remove undoes both",
+  async () => {
+    const configPath = join(project, "pikit.config.ts");
+    const before = readFileSync(configPath, "utf8");
+    const preset = lists();
+
+    // secrets-cloudflare works in both Apps: it goes in both.
+    const secrets = await run([process.execPath, MAIN, "add", "secrets-cloudflare", "--yes"]);
+    expect(secrets.err).not.toContain("\u2717");
+    expect(secrets.code).toBe(0);
+    const withSecrets = readFileSync(configPath, "utf8");
+    expect(lists()).toEqual({ object: [...preset.object, "secretsCloudflare"], worker: ["secretsCloudflare"] });
+
+    const added = await run([process.execPath, MAIN, "add", "channel-telegram-webhook", "--yes"]);
+    // What it offers, for its object's half: the record of submissions and durable delivery (storage-do has their storage).
+    expect(added.out).toContain("submissions-sql, for channel-telegram-webhook (agent.submissions)");
+    expect(added.out).toContain("outbound-durable, for channel-telegram-webhook (outbound.queue)");
+    // Checked per App: the Worker's half needs actor.mailbox in the Worker's App, and the object's half
+    // a runtime and wakeups in the object's. No component of this registry provides them on Cloudflare
+    // yet (platform-cloudflare and a Cloudflare runtime are not in it), so doctor says the object's App
+    // does not compose, and `add` exits 1 with everything installed.
+    expect(added.err).toContain('channel-telegram-webhook requires "actor.mailbox" in the Worker\'s App (export const worker), which no installed component provides there yet');
+    expect(added.err).toContain('channel-telegram-webhook requires "agent.runtime" in the default App, which no installed component provides there yet');
+    expect(added.err).not.toContain('"secrets"');
+    expect(added.err).toContain("pikit.config.ts does not compose");
+    expect(added.err).toContain("channel-telegram-webhook is installed, but `pikit doctor` found 1 problem(s)");
+    expect(added.code).toBe(1);
+
+    const text = readFileSync(configPath, "utf8");
+    expect(text).toContain('import channelTelegramWebhook, { worker as channelTelegramWebhookWorker } from "./src/pikit/channel-telegram-webhook/index.ts";\n');
+    expect(lists()).toEqual({
+      object: [...preset.object, "secretsCloudflare", "channelTelegramWebhook", "submissionsSql", "outboundDurable"],
+      worker: ["secretsCloudflare", "channelTelegramWebhookWorker"],
+    });
+    const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
+    expect(manifest.components["channel-telegram-webhook"].hooks).toEqual({ afterDeploy: "src/pikit/channel-telegram-webhook/deploy.ts" });
+    expect(manifest.components["submissions-sql"].installedFor).toEqual(["channel-telegram-webhook"]);
+
+    // The project installs (the add ran `bun install`), typechecks with both halves imported, and passes its tests.
+    expect(existsSync(join(project, "node_modules", "typebox"))).toBe(true);
+    const typecheck = await run([process.execPath, "run", "typecheck"]);
+    expect(typecheck.err + typecheck.out).not.toContain("error TS");
+    expect(typecheck.code).toBe(0);
+    const tests = await run([process.execPath, "test"]);
+    expect(tests.err).toContain(" 0 fail");
+    expect(tests.err).toContain("channel-telegram-webhook.test.ts");
+    expect(tests.code).toBe(0);
+
+    // remove undoes both Apps, and what came for it; the app composes again (--force: it does not now).
+    const removed = await run([process.execPath, MAIN, "remove", "channel-telegram-webhook", "--force"]);
+    expect(removed.err).not.toContain("\u2717");
+    expect(removed.code).toBe(0);
+    expect(readFileSync(configPath, "utf8")).toBe(withSecrets);
+    expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components)).not.toContain("submissions-sql");
+    expect((await run([process.execPath, MAIN, "remove", "secrets-cloudflare"])).code).toBe(0);
+    expect(readFileSync(configPath, "utf8")).toBe(before);
+    expect((await run([process.execPath, MAIN, "doctor"])).out).toContain("pikit doctor: green");
   },
   TIMEOUT,
 );

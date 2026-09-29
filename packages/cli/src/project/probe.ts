@@ -9,8 +9,8 @@
  * a component may log while it is set up.
  *
  * A project on Cloudflare has a second App, `export const worker` (SPEC C1): it is created too, so a
- * Worker that does not compose fails here and not at deploy. The description is the default export's;
- * `listed` names the components of both.
+ * Worker that does not compose fails here and not at deploy. `description` is the default export's,
+ * `worker` the Worker's; `listed` names the components of both.
  *
  * It also reports what each agent names by key (tools, extensions, model), read from the
  * `agent.definition`s provided during setup: the names the runtime resolves only at start, which
@@ -21,17 +21,23 @@ import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
+/** An App's `describe()`, the parts the CLI reads. */
+export interface AppDescription {
+  components: { name: string; provides: string[]; requires: string[]; optional: string[] }[];
+  capabilities: Record<string, { providers: string[]; selected?: string; keys?: Record<string, string> }>;
+  pipelines: Record<string, { id: string; priority: number }[]>;
+  config: Record<string, unknown>;
+}
+
 export type ProbeResult =
   | {
       ok: true;
-      /** The names in `components`, as listed. */
+      /** The names in `components`, as listed, of every App. */
       listed: string[];
-      description: {
-        components: { name: string; provides: string[]; requires: string[]; optional: string[] }[];
-        capabilities: Record<string, { providers: string[]; selected?: string; keys?: Record<string, string> }>;
-        pipelines: Record<string, { id: string; priority: number }[]>;
-        config: Record<string, unknown>;
-      };
+      /** The default export's App. */
+      description: AppDescription;
+      /** The Worker's App (`export const worker`), in a project that has one. */
+      worker?: AppDescription;
       /** Every `agent.definition` provided during setup: its static fields, never `prepare`'s. */
       agents: AgentReferences[];
     }
@@ -99,15 +105,17 @@ if (import.meta.main) {
     }
     const agents = recordAgents(definition.components);
     const app = await definition.create();
+    let workerApp: { describe(): unknown } | undefined;
     try {
-      await worker?.create?.();
+      workerApp = await worker?.create?.();
     } catch (error) {
       throw new Error(`the Worker's App (export const worker): ${error instanceof Error ? error.message : String(error)}`);
     }
     result = {
       ok: true,
       listed: [...definition.components, ...(worker?.components ?? [])].map((c) => c.name),
-      description: app.describe() as Extract<ProbeResult, { ok: true }>["description"],
+      description: app.describe() as AppDescription,
+      ...(workerApp !== undefined && { worker: workerApp.describe() as AppDescription }),
       agents,
     };
   } catch (error) {

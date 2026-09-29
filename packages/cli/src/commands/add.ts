@@ -10,10 +10,11 @@
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
  *   6. write its files; refuse to overwrite a file that differs without `--force`
  *   7. add its npm dependencies; `bun install`
- *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not)
+ *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not);
+ *      on Cloudflare, also in the Worker's App when its `component.json`'s `apps.worker` says so (C1)
  *   9. append its variables to `.env.example`
- *  10. record the registry, version, commit and file hashes in `pikit.json`, and keep each file as
- *      installed, its base, in `pikit-bases/` (`bases.ts`)
+ *  10. record the registry, version, commit, file hashes and hooks in `pikit.json`, and keep each file
+ *      as installed, its base, in `pikit-bases/` (`bases.ts`)
  *  11. `pikit doctor`
  *
  * Every refusal (steps 1–5, for the component and the providers it brings) comes before the first
@@ -25,9 +26,10 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { dirname, join } from "node:path";
 import { stripComments } from "../registry/imports.ts";
 import { coreVersion } from "../registry/commands.ts";
-import type { Manifest } from "../registry/manifest.ts";
+import { BOTH_APPS, type Manifest } from "../registry/manifest.ts";
+import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { basePath, unreferencedBases } from "../project/bases.ts";
-import { addComponent, CONFIG_FILE, type ComponentEntry } from "../project/config-file.ts";
+import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
 import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-file.ts";
 import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
 import { hashFile, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
@@ -124,10 +126,11 @@ async function acceptedOffers(registry: Registry, name: string, installed: reado
       continue;
     }
     const what = (capabilityEntry(offer.capability)?.summary ?? offer.capability).replace(/\.$/, "");
+    const who = offer.app === "worker" ? `${offer.for}'s Worker half` : offer.for;
     const question =
       (offer.why === "recommended"
-        ? `${offer.for} can use ${offer.capability} (${what}). Install ${offer.component}?`
-        : `${offer.for} requires ${offer.capability}. Install ${offer.component}?`) + alsoWrites(offer.component, registry.files(offer.component));
+        ? `${who} can use ${offer.capability} (${what}). Install ${offer.component}?`
+        : `${who} requires ${offer.capability}. Install ${offer.component}?`) + alsoWrites(offer.component, registry.files(offer.component));
     if (options.yes === true || (isInteractive() && (await confirm(question, true)))) {
       log.step(`${offer.component}, for ${offer.for} (${offer.capability})`);
       accepted.push(offer);
@@ -216,7 +219,9 @@ function planInstall(
   if (entry !== undefined && hasDefaultExport(entry)) {
     if (draft.config === undefined) throw new CliError(`${CONFIG_FILE} is missing: ${name} is listed in it`);
     // A `ShapeError` refuses the install here, before a file is copied.
-    if (!draft.config.after.includes(`"./src/pikit/${name}/index.ts"`)) draft.config.after = addComponent(draft.config.after, { name, ...options.wiring });
+    if (!draft.config.after.includes(`"./src/pikit/${name}/index.ts"`)) {
+      draft.config.after = addComponent(draft.config.after, { name, ...workerWiring(name, manifest, project.targets), ...options.wiring });
+    }
   }
 
   if (!draft.example.after.split("\n").includes(`# ${name}`)) {
@@ -235,8 +240,25 @@ function planInstall(
     files: hashes,
     dependencies: manifest.dependencies,
     environment: manifest.environment ?? [],
+    // What the deployment runs for it (`deployment-cloudflare`'s `up`), by its project path.
+    ...(manifest.hooks !== undefined && { hooks: { afterDeploy: `${ownDir(name)}${manifest.hooks.afterDeploy}` } }),
   };
   return { name, registry, manifest, files };
+}
+
+/**
+ * How a component goes in the Worker's App too, on Cloudflare (SPEC C1), as `component.json`'s
+ * `apps.worker` says: its default export as it is (`"default"`), or its named Worker half, imported
+ * under its component's name (`channel-telegram-webhook-worker` → `channelTelegramWebhookWorker`),
+ * which is its config key in `workerConfig`. On a server, or without `apps`, only the default App.
+ */
+function workerWiring(name: string, manifest: Manifest, targets: readonly string[]): Omit<ComponentEntry, "name"> {
+  const exported = manifest.apps?.worker;
+  if (exported === undefined || !hasWorkerApp(targets)) return {};
+  const identifier = identifierFor(name);
+  if (exported === BOTH_APPS) return { worker: identifier };
+  const half = identifierFor(workerHalfName(name));
+  return { importClause: `${identifier}, { ${exported === half ? half : `${exported} as ${half}`} }`, worker: half };
 }
 
 /**
@@ -416,18 +438,33 @@ export function checkCompatible(targets: readonly string[], manifest: Manifest):
   }
 }
 
-/** Information, not failure: the provider may come next, or from the project's own components. */
+/**
+ * Information, not failure: the provider may come next, or from the project's own components. Per App
+ * on Cloudflare: what the Worker's half requires must be provided in the Worker's App.
+ */
 function warnUnprovided(project: ProjectManifest, registry: Registry, manifest: Manifest): void {
-  const provided = new Set(manifest.provides);
+  const provided: Record<AppName, Set<string>> = { default: new Set(), worker: new Set() };
+  const provide = (m: Manifest) => {
+    for (const [app, half] of declaredByApp(m, project.targets)) for (const capability of half.provides) provided[app].add(capability);
+  };
+  provide(manifest);
   for (const installed of Object.keys(project.components)) {
     try {
-      for (const capability of registry.manifest(installed).provides) provided.add(capability);
+      provide(registry.manifest(installed));
     } catch {
       // Installed from another registry: `pikit doctor` checks the real app anyway.
     }
   }
-  for (const capability of manifest.requires.capabilities) {
-    if (!provided.has(capability)) log.warn(`${manifest.name} requires "${capability}", which no installed component provides yet`);
+  const apps = declaredByApp(manifest, project.targets);
+  for (const [app, half] of apps) {
+    for (const capability of half.requires) {
+      if (provided[app].has(capability)) continue;
+      log.warn(
+        apps.length === 1
+          ? `${manifest.name} requires "${capability}", which no installed component provides yet`
+          : `${manifest.name} requires "${capability}" in ${APP_LABEL[app]}, which no installed component provides there yet`,
+      );
+    }
   }
 }
 

@@ -33,6 +33,11 @@ export interface InstalledComponent {
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
   /**
+   * Its manifest's `hooks`, by project path: `afterDeploy` is the file whose `afterDeploy` the
+   * deployment's `up` calls once the new version answers (`deployment-cloudflare`, SPEC C8).
+   */
+  hooks?: { afterDeploy: string };
+  /**
    * The components it was installed for, when it was offered rather than asked for (SPEC §10.5,
    * "Offered providers"): it leaves with the last of them, when nothing else uses it.
    */
