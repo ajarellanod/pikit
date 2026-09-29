@@ -10,7 +10,7 @@
  */
 
 import { type Context, type JsonValue, type Session, value } from "@earendil-works/pi-agent-core";
-import type { AgentState } from "@pikit/contracts";
+import { type AgentState, isJsonObject } from "@pikit/contracts";
 import { toPi } from "./context.ts";
 
 const STATE = value<JsonValue>("pikit", "agent.state");
@@ -42,17 +42,4 @@ export function sessionState(session: Session, initial: object = {}): AgentState
       return next;
     },
   };
-}
-
-function isJsonObject(value: unknown): value is Record<string, JsonValue> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) return false;
-  const proto = Object.getPrototypeOf(value);
-  return (proto === Object.prototype || proto === null) && Object.values(value).every(isJson);
-}
-
-function isJson(value: unknown): boolean {
-  if (value === null || typeof value === "string" || typeof value === "boolean") return true;
-  if (typeof value === "number") return Number.isFinite(value);
-  if (Array.isArray(value)) return value.every(isJson);
-  return isJsonObject(value);
 }
