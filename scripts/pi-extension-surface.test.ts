@@ -90,7 +90,10 @@ test("the tool interfaces: ToolDefinition, and ExtensionToolContext's own member
 
 test("pikit's tool interfaces have what Pi 0.99 added to them", () => {
   const local = toolMembers(readFileSync(join(EXTENSIONS_DIR, "api.ts"), "utf8"));
-  const added = ["annotations", "defaultActive", "exposure", "namespace", "outputSchema", "prepareLoadout"];
+  const added = ["annotations", "defaultActive", "executionMode", "exposure", "namespace", "outputSchema", "prepareLoadout"];
   expect(drift(added, local.toolDefinition).lacks).toEqual([]);
+  // Left out on purpose: `constrainedSampling` waits for a codemode component (features/codemode.md),
+  // `renderShell` is Pi's TUI. At run time they are ignored; in a typed object literal they fail typecheck.
+  expect(local.toolDefinition).not.toContain("constrainedSampling");
   expect(local.toolContext).toEqual(["executeTool", "tools"]);
 });

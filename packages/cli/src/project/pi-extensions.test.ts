@@ -46,6 +46,7 @@ test("registering tools is noted, under whatever name the API has, and is not un
   expect(notes[0]).toStartWith("src/extensions/weather.ts registers tools with pi.registerTool");
   expect(notes[0]).toContain('replay "never"');
   expect(notes[0]).toContain("toolComponent from @pikit/pi-adapter/tools");
+  expect(notes[0]).toContain("Only tools registered while the extension loads (in its factory) reach the model");
 });
 
 test("a name or a subpath the shim does not export is missing, a type included; comments are not imports", () => {

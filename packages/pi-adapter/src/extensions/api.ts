@@ -2,7 +2,7 @@
  * The part of Pi's extension API that pikit supports (SPEC §6.2b), vendored from
  * `@earendil-works/pi-coding-agent` (`src/core/extensions/types.ts`; MIT, © Mario Zechner, see
  * NOTICE): first from 0.87.1, then checked against 0.99.0, from which the tool exposure types,
- * `ExtensionToolContext` and the MCP server, virtual model and settings members of `ExtensionAPI`
+ * `executionMode`, `ExtensionToolContext` and the MCP server, virtual model and settings members of `ExtensionAPI`
  * come. `bun scripts/pi-extension-drift.ts <tag>` lists what a Pi release has that this file
  * lacks. An existing Pi extension imports these names from `@earendil-works/pi-coding-agent`;
  * the project aliases that package to `@pikit/pi-extension-shim`, which re-exports this file, so
@@ -352,6 +352,19 @@ export interface ToolLoadoutChanges {
   hiddenDeclarations?: readonly string[];
 }
 
+/**
+ * Configuration for how tool calls from a single assistant message are executed.
+ *
+ * - "sequential": each tool call is prepared, executed, and finalized before the next one starts.
+ * - "parallel": tool calls are prepared sequentially, then allowed tools execute concurrently.
+ */
+export type ToolExecutionMode = "sequential" | "parallel";
+
+/**
+ * What `pi.registerTool()` takes. pikit gives the model only the tools registered while the
+ * extensions load (their factories): one registered later, from a handler such as `session_start`,
+ * is ignored with a warning (`features/codemode.md`).
+ */
 export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown, TState = unknown> {
   name: string;
   label: string;
@@ -376,6 +389,16 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
   defaultActive?: boolean;
   /** For tools that orchestrate other tools (codemode, tool search): ignored by pikit, which has none. */
   prepareLoadout?: (loadout: ToolLoadout) => ToolLoadoutChanges | undefined;
+  /**
+   * Per-tool execution mode override.
+   * - "sequential": this tool must execute one at a time with other tool calls.
+   * - "parallel": this tool can execute concurrently with other tool calls.
+   *
+   * If omitted, the default execution mode applies: in pikit, "parallel". A "sequential" call waits
+   * for the calls started before it, and the calls after it wait for it; the other calls of its batch
+   * still overlap one another, where Pi's CLI runs the whole batch one call at a time.
+   */
+  executionMode?: ToolExecutionMode;
   execute(
     toolCallId: string,
     params: Static<TParams>,
@@ -468,6 +491,10 @@ export interface ExtensionAPI {
   // biome-ignore lint/suspicious/noExplicitAny: events pikit does not implement
   on(event: string, handler: ExtensionHandler<any, any>): () => void;
 
+  /**
+   * Register a tool, or replace the one with its name. Only while the extension loads (in its
+   * factory): pikit ignores, with a warning, a tool registered later, from a handler.
+   */
   // biome-ignore lint/suspicious/noExplicitAny: Pi's signature
   registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any>(
     tool: ToolDefinition<TParams, TDetails, TState>,

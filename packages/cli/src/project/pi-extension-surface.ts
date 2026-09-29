@@ -42,6 +42,7 @@ export const SHIM_EXPORTS: readonly string[] = [
   "ToolCallEventResult",
   "ToolDefinition",
   "ToolExecutionEndEvent",
+  "ToolExecutionMode",
   "ToolExecutionStartEvent",
   "ToolExecutionUpdateEvent",
   "ToolExposure",

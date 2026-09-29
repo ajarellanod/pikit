@@ -45,6 +45,8 @@ export interface BindOptions {
  * `ExtensionToolContext`, which only an extension's host has. So a Pi tool's object with only those
  * core fields moves in unchanged, written inside `toolComponent`; one typed by Pi's `defineTool`
  * promises that context and does not compile here, and a tool that uses it stays an extension's tool.
+ * `executionMode` is not taken: the harness ignores a tool's mode (`pi-gaps.test.ts`, "tools"), and
+ * only the extension host holds sequential calls, when a conversation has extensions.
  *
  * Deleted with `toolComponent` when the adapter moves to Pi's durable runtime, whose `ToolRegistration`
  * is then the one shape of a tool (see `toolComponent`, "Migration").

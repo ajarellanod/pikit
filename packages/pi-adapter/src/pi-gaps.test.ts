@@ -8,6 +8,7 @@
 
 import { describe, expect, test } from "bun:test";
 import { AgentHarness, BACKGROUND_CONTEXT, MemorySessionRepo } from "@earendil-works/pi-agent-core";
+import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { modelsFrom } from "./models.ts";
 import { holdTool, scriptedProvider } from "./testing/index.ts";
 
@@ -139,6 +140,35 @@ describe("Pi gaps (pi-agent-core 0.99.0)", () => {
       entry.type === "message" && entry.message.role === "toolResult" ? [entry.message] : [],
     );
     expect(results.map((result) => [result.content, result.isError])).toEqual([[[{ type: "text", text: "it failed" }], false]]);
+    await harness.close(ctx);
+  });
+
+  test('tools: a tool\'s executionMode "sequential" is ignored; its calls overlap', async () => {
+    // Pi's `agent-loop` runs a batch one call at a time when a tool of it is sequential; the harness
+    // reads only its own `toolExecution` ("parallel" by default). The extension host holds such calls
+    // itself (`extensions/host.ts`, `SequentialCalls`).
+    let running = 0;
+    let most = 0;
+    const alone: ReturnType<typeof holdTool> = {
+      ...holdTool(async () => ""),
+      name: "alone",
+      executionMode: "sequential",
+      async execute() {
+        most = Math.max(most, ++running);
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        running--;
+        return { content: [{ type: "text", text: "done" }], details: undefined };
+      },
+    };
+    const faux = fauxProvider({ provider: "faux", models: [{ id: "scripted" }] });
+    faux.setResponses([
+      fauxAssistantMessage([fauxToolCall("alone", {}), fauxToolCall("alone", {})], { stopReason: "toolUse" }),
+      fauxAssistantMessage("both ran"),
+    ]);
+    const { harness, lane } = await openLane([alone], faux.provider);
+    expect((await lane.prompt("go", undefined, ctx)).ok).toBe(true);
+
+    expect(most).toBe(2);
     await harness.close(ctx);
   });
 });
