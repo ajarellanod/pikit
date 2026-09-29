@@ -1,9 +1,9 @@
 /**
- * `agent.state` over the Pi session (SPEC §6.2a, §6.4). Pi's durable runtime will hold it as a
- * conversation-scoped document; until the adapter moves there it is one session value,
- * `pikit` / `agent.state`. A session value survives a new harness over the same stored session and
- * a new session starts without it (`pi-facts.test.ts`), which is exactly "survives restarts, starts
- * fresh after a reset". pikit keeps no store of its own.
+ * `agent.state` (`@pikit/contracts`' `agent-state.ts`) over the Pi session. Pi's durable runtime
+ * will hold it as a conversation-scoped document (`features/pi-durable-migration.md`); until the
+ * adapter moves there it is one session value, `pikit` / `agent.state`. A session value survives a
+ * new harness over the same stored session and a new session starts without it (`pi-facts.test.ts`),
+ * which is exactly "survives restarts, starts fresh after a reset". pikit keeps no store of its own.
  *
  * Only what was updated is stored: `get()` merges it over the agent's initial state, so a key an
  * agent adds to its initial state later reaches conversations that already have a state.
@@ -18,7 +18,8 @@ const STATE = value<JsonValue>("pikit", "agent.state");
 /**
  * The state of the conversation whose session is `session`. One per open conversation: its updates
  * run one at a time, so concurrent tools never lose each other's keys. A conversation has one worker
- * (SPEC §7.2), so no other writer exists.
+ * (one process on a server, its own Durable Object on Cloudflare: SPEC C1), so no other writer
+ * exists.
  */
 export function sessionState(session: Session, initial: object = {}): AgentState {
   let line: Promise<unknown> = Promise.resolve();

@@ -2,11 +2,11 @@
 
 **Public appeal:** —
 
-**Specified:** partly (moved from SPEC §16)
+**Specified:** partly (moved from the former SPEC §16)
 
-**Needed by:** track D (the dashboard shows what is up, degraded or failing, SPEC-CORE §5), track S
-(a deploy rolls back when health fails, SPEC-CORE §6), and ROADMAP M2 ("Runtime availability is
-decided here"). Health stays out of the kernel (SPEC-CORE §3.2), so it is this component.
+**Needed by:** the dashboard (it shows what is up, degraded or failing, SPEC §5) and
+self-improvement (a deploy rolls back when health fails, SPEC §6). Health stays out of the kernel
+(SPEC §3.2), so it is this component.
 
 ## What it gives
 A component that breaks after `start` (a stuck poller, a dead connection) becomes visible, and the
@@ -16,22 +16,23 @@ process is restarted when what broke is essential.
 - A `health` capability and a `health-registry` component (the kind `health` is new: a naming
   decision). Components report through `useOptional("health")`, so its absence changes nothing.
 - The registry owns the policy: degrade what can be tolerated, fail `/health` for what is essential
-  so that the supervisor restarts the process (`server-bun`'s `/health` and `/ready`, SPEC §9.1).
-- The dashboard reads it through the admin API (SPEC-CORE §5); track S reads it after a deploy.
+  so that the supervisor restarts the process (`server-bun`'s `/health` and `/ready`).
+- The dashboard reads it through the admin API (SPEC §5); self-improvement reads it after a deploy
+  (SPEC §6).
 - A conformance suite proves a component reports its failures.
 
 ## Pi first
 Chord has the consumer half: stable handles, `unavailable` / `replaced`, calls that fail fast
-without queueing, `ready()`. pikit follows its semantics so that the move to Pi's runtime (SPEC
-§6.4) does not leave two models. A model provider's outage is not a component failure: Pi retries
-model calls itself (`RetryPolicy`).
+without queueing, `ready()`. pikit follows its semantics so that the move to Pi's runtime
+([pi-durable migration](pi-durable-migration.md)) does not leave two models. A model provider's
+outage is not a component failure: Pi retries model calls itself (`RetryPolicy`).
 
 ## Open questions
 Listed in the moved text: grace periods against flapping, where "essential" is declared, and the
 suite.
 
-## Moved from SPEC
-SPEC §16, "Open questions":
+## Moved from the former SPEC
+The former SPEC §16, "Open questions":
 
 - Runtime availability and degradation: how a component that breaks after `start` (a stuck
   poller, a dead connection) becomes visible, and who decides between degrading and

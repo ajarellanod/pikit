@@ -15,7 +15,7 @@ the same thread.
 - `channel-email`: receives by IMAP polling (server, no public URL) or a provider's inbound webhook
   (on Cloudflare, Email Routing hands a message to a Worker). It builds the key from the thread
   (`Message-ID`, `In-Reply-To`, `References`), calls `admitInbound`, and passes
-  `createChannelConformance` (SPEC §5, §14).
+  `createChannelConformance` (`@pikit/contracts/testing`).
 - `Message-ID` is the delivery id; a redelivered message is a duplicate by request id.
 - `From` can be forged: senders are authorized by an allowlist plus the receiving server's SPF,
   DKIM and DMARC results, never by `From` alone.
@@ -24,7 +24,7 @@ the same thread.
 - Attachments: [rich content](rich-content.md).
 
 ## Pi first
-Nothing in Pi: channels are pikit's (SPEC §6.2 table).
+Nothing in Pi: channels are pikit's (SPEC P1).
 
 ## Open questions
 - HTML to text, and stripping quoted history before it reaches the model.

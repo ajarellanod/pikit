@@ -2,7 +2,7 @@
 
 **Public appeal:** —
 
-**Specified:** specified (moved from SPEC §6.2b; tier B)
+**Specified:** specified (moved from the former SPEC §6.2b; tier B)
 
 **Needed by:** nothing required.
 
@@ -15,7 +15,8 @@ answer from the person in the conversation's chat, unmodified.
   component (the kind `interaction` is new: a naming decision). The contract is below.
 - The question goes out as a message with a `choice` part and the answer comes back with `replyTo`
   ([rich content](rich-content.md)).
-- Absent: extensions keep the no-op UI (`hasUI: false`, SPEC §6.2b), and `permission-gate` blocks.
+- Absent: extensions keep the no-op UI (`hasUI: false`, `runtime-pi`'s README), and `permission-gate`
+  blocks.
 - An answer that may take days is not a question: it is [approvals](approvals.md).
 
 ## Pi first
@@ -27,8 +28,9 @@ answers them from a client (`docs/rpc-extension-ui.md` of `pi-coding-agent`). pi
 - The deadline of a question, and what the run sees when it passes (`undefined`, as with no UI).
 - Several questions in flight in one conversation.
 
-## Moved from SPEC
-SPEC §6.2b, verbatim (section numbers are SPEC.md's; §18 is now `features/`):
+## Moved from the former SPEC
+The former SPEC §6.2b, verbatim (section numbers and S3 are the former SPEC's and ROADMAP's; §18 is
+now `features/`):
 
 **Questions from extensions, in the chat.** `[planned]` (tier B), with the first `interaction-*`
 component. Pi's `ctx.ui.select` / `confirm` / `input` / `notify` are how an extension asks its user

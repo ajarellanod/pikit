@@ -2,8 +2,9 @@
 
 **Public appeal:** —
 
-**Specified:** partly (SPEC §5: the key `<instance>:<conversation id>[:<thread id>]` is decided;
-`InboundMessage.threadId` and `router-rules`' `thread` are `[planned]`)
+**Specified:** partly (the key `<instance>:<conversation id>[:<thread id>]` was decided in the former
+SPEC §5, and `ConversationRef.key` documents its thread part; `InboundMessage.threadId` and
+`router-rules`' `thread` are `[planned]`)
 
 **Needed by:** nothing required.
 
@@ -13,17 +14,17 @@ lands in the thread it answers. A later reply can quote an earlier answer.
 
 ## How it fits pikit
 - `InboundMessage.threadId` arrives with the first channel that produces it, and the key gains the
-  thread (SPEC §5). Whether a thread is its own conversation is a value in the channel's config.
+  thread. Whether a thread is its own conversation is a value in the channel's config.
 - `router-rules` accepts `thread` in a rule once `threadId` exists; until then a rule naming it is
-  invalid config (SPEC §5).
+  invalid config.
 - Replies find their thread from `conversationKey`; the receipts of `outbound.queue` say which
-  message and thread an answer landed in (SPEC §5, "Correlation from identities that exist"), so a
-  reply can quote or thread against it with `replyTo`.
+  message and thread an answer landed in (`DeliveryReceipt`, `packages/contracts/src/outbound.ts`),
+  so a reply can quote or thread against it with `replyTo`.
 - Absent: one conversation per chat, as today.
 
 ## Pi first
 A platform thread is not a Pi fork: one pikit conversation is one Pi session, and Pi's forks are
-transcript scopes inside it (AGENTS.md). Whether a thread should start as a fork of its channel's
+transcript scopes inside it. Whether a thread should start as a fork of its channel's
 conversation, sharing context, is open.
 
 ## Open questions
@@ -31,8 +32,8 @@ conversation, sharing context, is open.
 - Channels: [Slack](channel-slack.md), [Discord](channel-discord.md),
   [Google Chat](channel-google-chat.md), [email](channel-email.md).
 
-## Moved from SPEC
-SPEC §18, "Higher-level components". `outbound-durable` is built (SPEC §5, "Outbound delivery");
+## Moved from the former SPEC
+The former SPEC §18, "Higher-level components". `outbound-durable` is built (its README);
 what it did not build is quoting and threading against its records:
 
 | Component | What it encodes |
