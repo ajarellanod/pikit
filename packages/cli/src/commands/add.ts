@@ -26,13 +26,13 @@ import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync,
 import { dirname, join } from "node:path";
 import { stripComments } from "../registry/imports.ts";
 import { coreVersion } from "../registry/commands.ts";
-import { BOTH_APPS, type Manifest } from "../registry/manifest.ts";
+import { BOTH_APPS, HOOKS, type Manifest } from "../registry/manifest.ts";
 import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { basePath, unreferencedBases } from "../project/bases.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
 import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-file.ts";
 import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
-import { hashFile, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { hashFile, type InstalledComponent, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import { type Offer, offeredProviders } from "../project/offers.ts";
@@ -241,8 +241,8 @@ function planInstall(
     dependencies: manifest.dependencies,
     ...(manifest.devDependencies !== undefined && { devDependencies: manifest.devDependencies }),
     environment: manifest.environment ?? [],
-    // What the deployment runs for it (`deployment-cloudflare`'s `up`), by its project path.
-    ...(manifest.hooks !== undefined && { hooks: { afterDeploy: `${ownDir(name)}${manifest.hooks.afterDeploy}` } }),
+    // What `pikit doctor` and the deployment's `up` run for it, by its project path.
+    ...(manifest.hooks !== undefined && { hooks: projectHooks(name, manifest.hooks) }),
   };
   return { name, registry, manifest, files };
 }
@@ -302,6 +302,11 @@ async function confirmPlan(plan: Plan, options: AddOptions): Promise<void> {
 }
 
 /** Where a component's own files go; the plan names every file it writes anywhere else. */
+/** A manifest's `hooks` (files of the component's own directory) by project path, in the order they run. */
+function projectHooks(name: string, hooks: NonNullable<Manifest["hooks"]>): NonNullable<InstalledComponent["hooks"]> {
+  return Object.fromEntries(HOOKS.flatMap((hook) => (hooks[hook] === undefined ? [] : [[hook, `${ownDir(name)}${hooks[hook]}`]])));
+}
+
 function ownDir(name: string): string {
   return `src/pikit/${name}/`;
 }

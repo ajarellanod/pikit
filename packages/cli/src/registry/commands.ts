@@ -21,6 +21,7 @@ import {
   formatManifest,
   formatSchema,
   type Generated,
+  HOOKS,
   type Manifest,
   ManifestSchema,
   manifestPath,
@@ -82,15 +83,25 @@ async function generatedFor(componentDir: string, name: string, manifest: Manife
   return { ...mergeGenerated([own, worker]), halves: { default: declared(own), worker: declared(worker) } };
 }
 
-/** `hooks.afterDeploy` names a file of the component that exports `afterDeploy`, a function. */
+/** Each of `hooks` names a file of the component that exports a function of the hook's name. */
 async function checkHooks(componentDir: string, name: string, manifest: Manifest): Promise<string[]> {
-  const file = manifest.hooks?.afterDeploy;
-  if (file === undefined) return [];
-  const path = join(componentDir, "files", "src", "pikit", name, file);
-  if (!existsSync(path)) return [`hooks.afterDeploy "${file}" is not a file of files/src/pikit/${name}/`];
-  if (/\.test(-support)?\.ts$/.test(file)) return [`hooks.afterDeploy "${file}" is a test file`];
-  const module = (await import(pathToFileURL(path).href)) as { afterDeploy?: unknown };
-  return typeof module.afterDeploy === "function" ? [] : [`hooks.afterDeploy "${file}" does not export a function afterDeploy`];
+  const problems: string[] = [];
+  for (const hook of HOOKS) {
+    const file = manifest.hooks?.[hook];
+    if (file === undefined) continue;
+    const path = join(componentDir, "files", "src", "pikit", name, file);
+    if (!existsSync(path)) problems.push(`hooks.${hook} "${file}" is not a file of files/src/pikit/${name}/`);
+    else if (/\.test(-support)?\.ts$/.test(file)) problems.push(`hooks.${hook} "${file}" is a test file`);
+    else {
+      try {
+        const module = (await import(pathToFileURL(path).href)) as Record<string, unknown>;
+        if (typeof module[hook] !== "function") problems.push(`hooks.${hook} "${file}" does not export a function ${hook}`);
+      } catch (error) {
+        problems.push(`hooks.${hook} could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  return problems;
 }
 
 export interface Outcome {
@@ -180,11 +191,7 @@ export async function validate(root: string, options: { coreVersion?: string } =
     } catch (error) {
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
     }
-    try {
-      (await checkHooks(dir, name, manifest)).forEach(report);
-    } catch (error) {
-      report(`hooks.afterDeploy could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
-    }
+    (await checkHooks(dir, name, manifest)).forEach(report);
   }
 
   const indexPath = join(root, "registry.json");

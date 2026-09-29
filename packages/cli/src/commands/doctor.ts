@@ -1,23 +1,23 @@
 /**
- * `pikit doctor` (SPEC §4.6, §11): everything up to and including setup, never a start.
+ * `pikit doctor`: everything up to and including setup, never a start.
  *
  * It creates the app `pikit.config.ts` composes, in a child process, and prints the component
  * graph, the capability providers, the pipelines and the config; on Cloudflare, of each App (C1).
  * Then it checks:
  * - the app composes: every required capability has a provider, selections are valid, the config
- *   matches the merged schema (the core's own `create()` decides, SPEC §4.6);
+ *   matches the merged schema (the core's own `create()` decides);
  * - every tool, extension and model provider an agent names statically is an installed key, when a
  *   component (the runtime) uses it: the runtime would refuse to start otherwise (`references.ts`);
  * - every variable a component marks required is set in the environment or in `.env` (names
  *   only, never a value);
  * - the Pi import rule (S1): only `@pikit/pi-adapter` imports Pi. Components never import
  *   `@earendil-works/*`; project code only imports `@earendil-works/pi-coding-agent`, the name Pi
- *   extensions use, which resolves to `@pikit/pi-extension-shim` (SPEC §6.2b);
+ *   extensions use, which resolves to `@pikit/pi-extension-shim`;
  * - a Pi extension of the project imports nothing the shim lacks (`pi-extensions.ts`). What an
  *   extension uses that pikit does not provide (an event it never fires, `ctx.sessionManager`,
  *   terminal UI) is listed as information, one line per extension: it is read by heuristics;
- * - each installed component's own check, `src/pikit/<name>/doctor.ts` (`component-doctor.ts`), once
- *   the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
+ * - each installed component's own check, the file its `hooks.doctor` names (`component-doctor.ts`),
+ *   once the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
  *   network; a project without one runs none.
  * Installed files that differ from what was installed are listed as information: they are yours.
  *
@@ -28,7 +28,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { packageName, scanImports } from "../registry/imports.ts";
-import { type ComponentDoctorResult, componentsWithChecks } from "../project/component-doctor.ts";
+import { type ComponentDoctorResult, doctorHooks } from "../project/component-doctor.ts";
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
 import { brokenReferences } from "../project/references.ts";
@@ -109,7 +109,7 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
 
 /** The problems the installed components' own checks find; none, and no process, without a check. */
 async function componentChecks(projectDir: string): Promise<string[]> {
-  if (componentsWithChecks(projectDir).length === 0) return [];
+  if (doctorHooks(projectDir).length === 0) return [];
   const result = await runScript<ComponentDoctorResult>("component-doctor.ts", projectDir, []);
   return result.ok ? result.problems : [`the components' own checks could not run: ${result.error}`];
 }

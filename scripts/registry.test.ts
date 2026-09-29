@@ -346,6 +346,22 @@ test("hooks: afterDeploy names a file of the component that exports it", async (
   expect(await problems(f)).toContain("component.json /hooks/afterDeploy:");
 });
 
+test("hooks: doctor and beforeDeploy, each a file exporting a function of the hook's name", async () => {
+  const f = await fixture({ name: "tool-hooked" });
+  writeFileSync(join(f.own, "doctor.ts"), "export async function doctor(): Promise<string[]> {\n  return [];\n}\n");
+  writeFileSync(join(f.own, "deploy.ts"), "export async function beforeDeploy(): Promise<string[]> {\n  return [];\n}\n");
+  f.writeManifest({ ...f.manifest(), hooks: { doctor: "doctor.ts", beforeDeploy: "deploy.ts" } });
+  expect((await generate(f.root)).problems).toEqual([]);
+  expect(await problems(f)).toBe("");
+
+  f.writeManifest({ ...f.manifest(), hooks: { doctor: "deploy.ts", beforeDeploy: "doctor.ts" } });
+  const found = await problems(f);
+  expect(found).toContain('hooks.doctor "deploy.ts" does not export a function doctor');
+  expect(found).toContain('hooks.beforeDeploy "doctor.ts" does not export a function beforeDeploy');
+  f.writeManifest({ ...f.manifest(), hooks: { onStart: "doctor.ts" } as never });
+  expect(await problems(f)).toContain("component.json /hooks/onStart:");
+});
+
 test("tools: replay is generated, and a tool without one fails (S10)", async () => {
   const safe = await fixture({ name: "tool-safe", setup: `\n    pikit.provideKeyed("agent.tool", "look", { replay: "safe" });` });
   expect(safe.manifest().replay).toEqual({ tools: { look: "safe" } });
