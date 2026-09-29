@@ -23,12 +23,12 @@ const USAGE = `pikit: a kit for Pi.
 
 Usage:
   pikit new                           a new agent, step by step (in a terminal)
-  pikit new <dir> [--preset <name> [--with <component>]...] [--registry <path>]   a new project
+  pikit new <dir> [--target server|cloudflare] [--preset <name> [--with <component>]...] [--registry <path>]   a new project
   pikit add <component> [--registry <path>] [--force] [--yes]
   pikit remove <component> [--force]
   pikit doctor                        the component graph, and what is missing
   pikit configure [--yes] [--generate <NAME>]... [--login <provider> [--local]]
-  pikit dev                           run the project here, reloading on change
+  pikit dev                           run the project here, reloading on change (on Cloudflare: wrangler dev)
   pikit up | down | restart | status  delegate to the installed deployment-* component
   pikit logs [--follow] [--tail <n>]
   pikit registry validate | generate | capabilities [<registry-root>]
@@ -61,6 +61,7 @@ async function main(argv: string[]): Promise<number> {
     strict: true,
     options: {
       preset: { type: "string" },
+      target: { type: "string" },
       with: { type: "string", multiple: true },
       registry: { type: "string" },
       force: { type: "boolean" },
@@ -92,11 +93,12 @@ async function main(argv: string[]): Promise<number> {
 
   switch (command) {
     case "new":
-      if (rest.length === 0 && values.preset === undefined) {
+      if (rest.length === 0 && values.preset === undefined && values.target === undefined) {
         if (!isInteractive()) throw new CliError("usage: pikit new <dir> [--preset <name>] (without <dir>, run it in a terminal: it asks)", 2);
         return await newWizard(cwd, { ...(values.registry !== undefined && { registry: values.registry }) });
       }
       await newProject(one("dir"), {
+        ...(values.target !== undefined && { target: values.target }),
         ...(values.preset !== undefined && { preset: values.preset }),
         ...(values.with !== undefined && { with: values.with }),
         ...(values.registry !== undefined && { registry: values.registry }),

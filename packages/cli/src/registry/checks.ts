@@ -30,6 +30,13 @@ const TEST = /\.test\.[cm]?[jt]sx?$/;
 /** Test support (fakes, fixtures, doubles): held like tests, and never imported by a shipped file. */
 const TEST_SUPPORT = /\.test-support\.[cm]?[jt]sx?$/;
 const forTests = (file: string): boolean => TEST.test(file) || TEST_SUPPORT.test(file);
+/**
+ * A deployment component's commands (`src/pikit/deployment-*\/commands.ts`) run on the machine that
+ * deploys, loaded by the CLI under Bun (SPEC §11), never in the app: `deployment-cloudflare`'s spawn
+ * `wrangler` with `node:child_process` while its entrypoint runs in workerd. Like tests, that one file
+ * is not held to the component's targets (S5).
+ */
+const forMachine = (file: string, name: string): boolean => name.startsWith("deployment-") && file === `src/pikit/${name}/commands.ts`;
 
 /** Packages that are the kit itself: `requires.pikit` covers them, so `dependencies` does not. */
 const KIT_PACKAGES = new Set(["@pikit/core"]);
@@ -128,7 +135,7 @@ export function checkImports(componentDir: string, name: string, targets: readon
       if (scheme !== undefined) {
         // Tests run under Bun's test runner in the project (they import bun:test), never in a
         // deployed bundle, so only shipped files are held to the targets (S5).
-        if (forTests(file)) continue;
+        if (forTests(file) || forMachine(file, name)) continue;
         if ((scheme === "node" || scheme === "bun") && !serverOnly) {
           problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: node:* and bun:* need targets ["server"] (S5)`);
         }

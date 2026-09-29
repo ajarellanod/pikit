@@ -6,8 +6,9 @@
  * `src/pikit/<name>/index.ts`. The CLI holds no Docker or systemd knowledge; changing how a project
  * is deployed is editing or swapping that component.
  *
- * `pikit dev` runs the same process locally, with Bun's `--watch`: the deployment component's
- * entrypoint, `src/pikit/<name>/main.ts`, with `.env` loaded.
+ * `pikit dev` runs the app locally: the deployment component's `dev` when it exports one
+ * (`deployment-cloudflare`: `wrangler dev`), or else its process entrypoint, `src/pikit/<name>/main.ts`,
+ * with Bun's `--watch` and `.env` loaded (`deployment-docker`).
  */
 
 import { existsSync } from "node:fs";
@@ -70,19 +71,56 @@ export async function deployment(projectDir: string, command: DeploymentCommand,
   }
   const result: unknown = await run(args);
   if (command === "status") printStatus(result);
-  else if (command !== "logs") log.ok(`${command}: done`);
+  else if (command !== "logs") log.ok(`${command}: done${deployedAt(result)}`);
 }
 
+/** What `up` says it deployed, when it says (`deployment-cloudflare`: the version, answering at its URL). */
+function deployedAt(result: unknown): string {
+  const deployed = (result ?? {}) as { version?: unknown; url?: unknown };
+  return typeof deployed.version === "string" && typeof deployed.url === "string" ? `: version ${deployed.version} answers at ${deployed.url}` : "";
+}
+
+/** A deployment's status: containers (Docker) or deployments (Cloudflare), then its probes. */
 function printStatus(result: unknown): void {
-  const status = result as { containers?: { name: string; state: string; health: string; status: string }[]; health?: unknown; ready?: unknown };
+  const status = result as {
+    containers?: { name: string; state: string; health: string; status: string }[];
+    deployments?: { id: string; created: string; message?: string; versions: { id: string; percentage: number }[] }[];
+    url?: string;
+    health?: unknown;
+    ready?: unknown;
+    version?: unknown;
+  };
+  if (status.deployments !== undefined) {
+    for (const d of status.deployments) {
+      const versions = d.versions.map((v) => `${v.id} (${v.percentage}%)`).join(", ");
+      log.info(`${d.created}  ${versions}${d.message ? ` · ${d.message}` : ""}`);
+    }
+    if (status.deployments.length === 0) log.info("no deployments");
+    const at = status.url === undefined ? " (no URL yet: `pikit up` records it)" : ` at ${status.url}`;
+    log.info(`GET /health${at}: ${String(status.health)}${typeof status.version === "string" ? ` from version ${status.version}` : ""}`);
+    return;
+  }
   for (const c of status.containers ?? []) log.info(`${c.name}: ${c.state}${c.health ? ` (${c.health})` : ""} · ${c.status}`);
   if ((status.containers ?? []).length === 0) log.info("no containers");
   log.info(`GET /health: ${String(status.health)}\nGET /ready:  ${String(status.ready)}`);
 }
 
-/** Runs the deployment's entrypoint with `bun --watch` until Ctrl-C; resolves with its exit code. */
+/** Runs the app here until Ctrl-C; resolves with its exit code. */
 export async function dev(projectDir: string): Promise<number> {
   const name = deploymentComponent(projectDir);
+  const own = existsSync(join(projectDir, "src", "pikit", name, "index.ts")) ? (await loadDeployment(projectDir)).module.dev : undefined;
+  if (typeof own === "function") {
+    await checkReady(projectDir);
+    // The command shares this terminal: Ctrl-C reaches it directly, and it owns its shutdown. The CLI
+    // stays until it has exited.
+    const wait = () => {};
+    process.on("SIGINT", wait);
+    try {
+      return await (own as (args: Record<string, unknown>) => Promise<number>)({ cwd: projectDir });
+    } finally {
+      process.off("SIGINT", wait);
+    }
+  }
   const main = join("src", "pikit", name, "main.ts");
   if (!existsSync(join(projectDir, main))) throw new CliError(`${name} has no ${main}, the process entrypoint \`pikit dev\` runs`);
   await checkReady(projectDir);
