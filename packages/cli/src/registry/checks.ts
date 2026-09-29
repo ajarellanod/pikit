@@ -20,6 +20,8 @@ export const KINDS = [
   "channel", "router", "sessions", "storage", "workspace", "execution", "scheduler", "deployment",
   "tool", "policy", "admin", "inbound", "outbound", "log",
   "conversations", "credentials", "provider", "runtime", "secrets", "server", "submissions",
+  // SPEC §4.1, C2 and C3: `mailbox-local`, `wakeups-timers`.
+  "mailbox", "wakeups",
 ];
 
 const KEBAB = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;

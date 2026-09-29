@@ -59,6 +59,14 @@
       ],
       "path": "components/log-events"
     },
+    "mailbox-local": {
+      "version": "0.0.0",
+      "description": "Hands a channel's message to the actor that owns its conversation, in the same app: actor.mailbox on a server.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/mailbox-local"
+    },
     "outbound-durable": {
       "version": "0.0.0",
       "description": "Every answer is stored before it is sent, then delivered in order per conversation, retried, and sent again after a crash.",

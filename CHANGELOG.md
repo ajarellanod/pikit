@@ -16,6 +16,9 @@ line names its area (AGENTS.md, "Git and docs").
   provider's backoff, and its context may be cancelled at a slice deadline, after which it asks again.
   Its conformance suite (on a manual clock) and a memory wakeups for tests are in
   `@pikit/contracts/testing`.
+- component/mailbox-local: new. `actor.mailbox` on a server: `send` calls the same app's
+  `actor.inbox` handler for the type with a JSON copy and resolves when it does; `stop` cancels the
+  handlers still running. Targets `server`. `mailbox` is a new component kind.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an
