@@ -34,9 +34,9 @@ function textOf(message: Message | undefined): string {
 }
 
 /**
- * A model that calls tools on request: `bash: <command>`, `write: <path>`, `hello: <name>`, and
- * `call <tool>` with no arguments. After a tool it says `tool said: <result>`; otherwise
- * `answer: <message>`.
+ * A model that calls tools on request: `bash: <command>`, `write: <path>`, `hello: <name>`,
+ * `call <tool>` with no arguments, and `calls <tool> <tool>…` for one batch of such calls. After a
+ * tool it says `tool said: <result>`; otherwise `answer: <message>`.
  */
 function toolCallingProvider(requests: ModelRequest[]) {
   const faux = fauxProvider({ provider: "compat", models: [{ id: "tools" }] });
@@ -53,6 +53,8 @@ function toolCallingProvider(requests: ModelRequest[]) {
     if (tool === "hello") return fauxAssistantMessage(fauxToolCall("hello", { name: argument }), { stopReason: "toolUse" });
     const [, called] = /^call ([\w-]+)$/.exec(said) ?? [];
     if (called !== undefined) return fauxAssistantMessage(fauxToolCall(called, {}), { stopReason: "toolUse" });
+    const batch = /^calls ([\w-]+(?: [\w-]+)+)$/.exec(said)?.[1]?.split(" ");
+    if (batch !== undefined) return fauxAssistantMessage(batch.map((name) => fauxToolCall(name, {})), { stopReason: "toolUse" });
     return fauxAssistantMessage(`answer: ${said}`);
   };
   faux.setResponses(Array.from({ length: 200 }, () => step));
@@ -492,6 +494,52 @@ describe("Pi 0.99's tool exposure: what reaches the model (SPEC \u00a76.2b)", ()
     expect(outcome?.toolCall.id).toEndWith("/1");
     expect(result.text).toContain(NESTED_CALLS_UNSUPPORTED);
     expect(warnings).toEqual(["ctx.executeTool"]);
+  });
+
+  /** Tools that take 20 ms and record, when each starts, the calls already running. */
+  function timedTools(names: string[], sequential: string[]) {
+    const running = new Set<string>();
+    const alongside: Record<string, string[]> = {};
+    const extension: PiExtension = (pi) => {
+      for (const name of names) {
+        pi.registerTool(
+          tool(name, {
+            ...(sequential.includes(name) && { executionMode: "sequential" as const }),
+            execute: async () => {
+              alongside[name] = [...running];
+              running.add(name);
+              await new Promise((resolve) => setTimeout(resolve, 20));
+              running.delete(name);
+              return { content: [{ type: "text", text: `${name} ran` }], details: undefined };
+            },
+          }),
+        );
+      }
+    };
+    return { extension, alongside };
+  }
+
+  test('executionMode "sequential": the call waits for the calls before it, and the calls after it wait for it', async () => {
+    const { extension, alongside } = timedTools(["a", "b", "alone", "c", "d"], ["alone"]);
+    const s = await setup([extension]);
+
+    expect((await within(s.say("calls a b alone c d"), "the batch")).text).toBe("tool said: d ran");
+    await s.close();
+
+    // The others overlap one another as before; nothing overlaps `alone`.
+    expect(alongside).toEqual({ a: [], b: ["a"], alone: [], c: [], d: ["c"] });
+  });
+
+  test("executionMode: the default and parallel still overlap, with a sequential tool registered", async () => {
+    const { extension, alongside } = timedTools(["a", "b", "c", "alone"], ["alone"]);
+    const parallel: PiExtension = (pi) => pi.registerTool(tool("p", { executionMode: "parallel" }));
+    const s = await setup([extension, parallel]);
+
+    await within(s.say("calls a b c"), "the batch");
+    await within(s.say("calls alone alone"), "two sequential calls");
+    await s.close();
+
+    expect(alongside).toMatchObject({ a: [], b: ["a"], c: ["a", "b"], alone: [] });
   });
 });
 

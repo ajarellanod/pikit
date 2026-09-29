@@ -16,6 +16,8 @@
  * and reaches the model only if an extension activates it, since pikit has neither codemode nor
  * tool search; a `hidden` one is not given to the harness at all.
  *
+ * A tool's `executionMode: "sequential"` is honoured here, not by the harness (see `SequentialCalls`).
+ *
  * A notification handler that throws is logged and skipped: an extension cannot fail a run. A
  * `tool_call` handler that throws blocks the call, as in Pi (its `beforeToolCall` rethrows, and the
  * call ends as an error result): a policy that cannot answer must not let the tool run.
@@ -257,6 +259,8 @@ function harnessTool(
     parameters: definition.parameters,
     ...(definition.prepareArguments !== undefined && { prepareArguments: definition.prepareArguments }),
     ...(definition.outputSchema !== undefined && { outputSchema: definition.outputSchema }),
+    // The harness reads none of it (its batch mode is the harness's own): `SequentialCalls` does.
+    ...(definition.executionMode !== undefined && { executionMode: definition.executionMode }),
     replay: "never",
     execute: (toolCallId, params, onUpdate, _toolContext, _invocation, piContext) => {
       let nested = 0;
@@ -278,6 +282,73 @@ function harnessTool(
   } as AgentHarnessTool<undefined>;
 }
 
+/**
+ * Pi's `executionMode: "sequential"` ("this tool must execute one at a time with other tool calls")
+ * on the harness pikit drives, which ignores it: it runs a batch by its own `toolExecution`
+ * ("parallel"), and only Pi's `agent-loop` reads a tool's mode (`pi-gaps.test.ts`, "tools").
+ *
+ * The harness prepares a batch's calls in order and starts each one as soon as its `before_tool`
+ * hooks return, so holding `before_tool` holds the call: a sequential call waits until the calls
+ * started before it have ended (their `after_tool`), and the calls after it wait for it. The other
+ * calls of the batch still overlap one another, where Pi's `agent-loop` runs the whole batch one call
+ * at a time; either way a sequential call never runs alongside another. It covers every harness tool
+ * that declares the mode, while extensions are loaded. A call recovered after a crash skips
+ * `before_tool` and is not held; an extension's tool is never recovered (`replay: "never"`).
+ */
+class SequentialCalls {
+  /** The harness's tools with `executionMode: "sequential"`. None: nothing is held or tracked. */
+  sequential: ReadonlySet<string> = new Set();
+  /** The calls let through and not ended yet, by id. */
+  private readonly running = new Map<string, Running>();
+  /** The sequential call among them. */
+  private alone: Running | undefined;
+
+  /** Hold the call until it may run. An abort lets it through: the harness then does not run it. */
+  async before(toolCallId: string, toolName: string, signal: AbortSignal | undefined): Promise<void> {
+    if (this.sequential.size === 0) return;
+    const sequential = this.sequential.has(toolName);
+    for (;;) {
+      const waits = sequential ? [...this.running.values()] : this.alone !== undefined ? [this.alone] : [];
+      if (waits.length === 0 || signal?.aborted === true) break;
+      await untilAborted(Promise.all(waits.map((call) => call.ended)), signal);
+    }
+    let end!: () => void;
+    const call: Running = { ended: new Promise<void>((resolve) => (end = resolve)), end: () => end() };
+    this.running.set(toolCallId, call);
+    if (sequential) this.alone = call;
+  }
+
+  /** The call ended (or never ran). Unknown ids are ignored: calls that failed before `before_tool`. */
+  end(toolCallId: string): void {
+    const call = this.running.get(toolCallId);
+    if (call === undefined) return;
+    this.running.delete(toolCallId);
+    if (this.alone === call) this.alone = undefined;
+    call.end();
+  }
+
+  /** A run starts, or the conversation closes: nothing of an earlier run is still running. */
+  clear(): void {
+    for (const id of [...this.running.keys()]) this.end(id);
+  }
+}
+
+interface Running {
+  ended: Promise<void>;
+  end(): void;
+}
+
+function untilAborted(work: Promise<unknown>, signal: AbortSignal | undefined): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const done = () => {
+      signal?.removeEventListener("abort", done);
+      resolve();
+    };
+    signal?.addEventListener("abort", done, { once: true });
+    void work.then(done);
+  });
+}
+
 interface Registry {
   handlers: Map<string, AnyHandler[]>;
   definitions: ToolDefinition[];
@@ -291,6 +362,7 @@ class Bound {
   activeTools: string[] = [];
   /** The harness's tools, which alone can be activated. */
   private toolNames: ReadonlySet<string> = new Set();
+  private readonly calls = new SequentialCalls();
   name: string | undefined;
   thinkingLevel: Awaited<ReturnType<AgentLane["getThinkingLevel"]>> = "off";
   private model: Model<Api> | undefined;
@@ -324,7 +396,7 @@ class Bound {
     const bound = new Bound(target.harness, target.lane, target, registry, ctx);
     const { lane, harness } = target;
     bound.activeTools = await lane.getActiveTools(ctx);
-    bound.toolNames = new Set((await harness.getTools(ctx)).map((tool) => tool.name));
+    await bound.readTools(ctx);
     bound.name = await harness.getName(ctx);
     bound.thinkingLevel = await lane.getThinkingLevel(ctx);
     bound.model = await lane.getModel(ctx);
@@ -348,6 +420,14 @@ class Bound {
 
   dispose(): void {
     for (const off of this.unsubscribe.splice(0)) off();
+    this.calls.clear();
+  }
+
+  /** The harness's tools, which change when an agent's `prepare` sets a run's tools. */
+  private async readTools(ctx: Context): Promise<void> {
+    const tools = await this.harness.getTools(ctx);
+    this.toolNames = new Set(tools.map((tool) => tool.name));
+    this.calls.sequential = new Set(tools.filter((tool) => tool.executionMode === "sequential").map((tool) => tool.name));
   }
 
   /** Run every handler of `event` in order; each result goes to `fold`. */
@@ -462,8 +542,14 @@ class Bound {
     const { hooks, events } = this.harness;
     const handled = (event: string) => this.registry.handlers.has(event);
     const on = this.unsubscribe;
+    const mine = (event: { lane?: string }) => event.lane === undefined || event.lane === LANE;
 
     on.push(
+      // First, so a `tool_call` policy sees a call only once it may run.
+      hooks.on("before_tool", async (event, ctx) => {
+        if (mine(event)) await this.calls.before(event.toolCallId, event.toolName, ctx.abortSignal);
+        return undefined;
+      }),
       hooks.on("before_tool", async (event, ctx) => {
         if (!handled("tool_call")) return undefined;
         const input = structuredClone(event.args) as Record<string, unknown>;
@@ -513,11 +599,18 @@ class Bound {
         });
         return Object.keys(patch).length === 0 ? undefined : (patch as never);
       }),
+      // After `tool_result`: a call ends once its result is final.
+      hooks.on("after_tool", (event) => {
+        this.calls.end(event.toolCallId);
+        return undefined;
+      }),
       hooks.on("before_run", async (event, ctx) => {
+        // A run that failed mid-batch may have left calls with no `after_tool` or `tool_end`.
+        this.calls.clear();
         this.systemPromptOverride = undefined;
         // An agent's `prepare` sets the run's tools in its own `before_run`, which runs first.
         this.activeTools = await this.lane.getActiveTools(ctx);
-        this.toolNames = new Set((await this.harness.getTools(ctx)).map((tool) => tool.name));
+        await this.readTools(ctx);
         if (!handled("before_agent_start")) return undefined;
         const added: AgentMessage[] = [];
         const start = { type: "before_agent_start", prompt: promptText(event.prompt), systemPrompt: this.target.systemPrompt ?? "" };
@@ -569,7 +662,6 @@ class Bound {
       }),
     );
 
-    const mine = (event: { lane?: string }) => event.lane === undefined || event.lane === LANE;
     on.push(
       events.on("run_start", (event) => {
         if (!mine(event)) return;
@@ -620,6 +712,8 @@ class Bound {
       }),
       events.on("tool_end", (event) => {
         if (!mine(event)) return;
+        // A call blocked or aborted after `before_tool` has no `after_tool`, only this.
+        this.calls.end(event.toolCallId);
         this.toolArgs.delete(event.toolCallId);
         this.notify("tool_execution_end", {
           type: "tool_execution_end",
