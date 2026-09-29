@@ -5,6 +5,13 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/execution-do: new. `execution` and `execution.shell` in the conversation's Durable
+  Object: files in its SQL (`execution_do_*` tables, 1 MB chunks), a shell without processes
+  (just-bash) with `git` (isomorphic-git: clone, status, diff, commit, log, push, pr), `node` (QuickJS
+  in WebAssembly, with an interrupt budget and a heap limit) and `curl`. Only `git` writes inside
+  `.git`; pushes go only to `git.pushRepositories`, on `pikit/self/` branches, with a token read
+  through `secrets` that never reaches the shell. Pi's `bash`, `read`, `write` and `edit` run on it
+  unchanged. Target `cloudflare`; the Worker needs `nodejs_compat` and a `CompiledWasm` rule (README).
 - adapter: `@pikit/pi-adapter/execution` gives an `execution` provider Pi's `ok`, `err`, `FileError`,
   `ExecutionError`, `truncateTail` and `truncateHead` without importing Pi; `@pikit/pi-adapter/testing/neutral`
   is the part of the test kit that runs in workerd too (Pi's session and execution suites, the scripted
