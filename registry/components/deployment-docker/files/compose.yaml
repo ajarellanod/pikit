@@ -1,10 +1,10 @@
-# How this pikit project runs in Docker (deployment-docker, SPEC §9.1).
+# How this pikit project runs in Docker (deployment-docker).
 # `pikit up | down | restart | logs | status` run `docker compose` over this file.
 
 services:
   app:
     build: .
-    # Docker restarts the process when it exits: a failed start exits 1 (SPEC §9.1). The core never
+    # Docker restarts the process when it exits: a failed start exits 1 (SPEC P5). The core never
     # restarts an app inside the same process.
     restart: unless-stopped
     # A small init as PID 1: it forwards SIGTERM to Bun and reaps the commands the agent's tools run.

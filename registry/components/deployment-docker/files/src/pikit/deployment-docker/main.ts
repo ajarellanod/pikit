@@ -1,6 +1,6 @@
 /**
  * The container's process: `bun src/pikit/deployment-docker/main.ts` (the Dockerfile's `CMD`).
- * It runs the project's composition root, `pikit.config.ts`, through the entrypoint (SPEC §9.1).
+ * It runs the project's composition root, `pikit.config.ts`, through the entrypoint.
  * Change the deadlines or the logger here, in `runEntrypoint`'s options.
  */
 

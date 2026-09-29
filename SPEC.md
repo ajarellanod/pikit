@@ -123,6 +123,26 @@ Scheduling, approvals, health and degradation policy, deduplication, routing, st
 delivery, the dashboard, self-knowledge and self-change. Each is a capability in `@pikit/contracts` and a component. A new kernel
 export is a decision recorded here.
 
+**What a component asks of the CLI** stays out of the kernel and out of the CLI too: the component
+ships it as a file of its own directory, and the CLI (or the deployment component) calls it with a
+plain structural `io` (the component's config in `pikit.config.ts`, a reader of the environment and
+`.env`) and gets back its problems, one line each, never a secret's value. These files run on the
+machine that configures or deploys, never in the app:
+- `configure.ts` exports `configure(io)`, the component's step of `pikit configure` (it may ask, and
+  write `.env`). It is found by its path, as it was before the hooks; declaring it like them is the same
+  change, not made yet.
+- `component.json`'s `hooks` declare the others, each a file exporting a function of the hook's name;
+  `pikit add` records them in `pikit.json` by project path, only what is recorded runs, and `registry
+  validate` checks each export. `doctor`: its check in `pikit doctor` (so before `pikit up` and `pikit
+  dev`); it may reach the network and writes nothing. `beforeDeploy`: the deployment's `up` runs it
+  before it bundles or builds; it may write files of its own directory (through `io.write`, never
+  elsewhere), which the build then carries, and a problem deploys nothing. `afterDeploy`: `up` runs it
+  once the new version answers (C8).
+
+Where no CLI deploys (a "Deploy to Cloudflare" button, Workers Builds), no hook runs: what
+`beforeDeploy` writes is committed with the project, and what `afterDeploy` registers the app also
+registers itself (C8).
+
 ## 4. Cloudflare is required
 
 The same project, with the same agents, routing and channels, runs on Cloudflare Workers and

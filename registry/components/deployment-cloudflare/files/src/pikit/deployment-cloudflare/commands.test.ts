@@ -232,6 +232,62 @@ test("a new version that does not answer runs no hook", async () => {
   expect(events).toEqual([]);
 });
 
+/**
+ * A project whose `tool-a` has a before-deploy hook, as `pikit add` records it: it writes `seed.ts` in
+ * its own directory with its config and a secret, says so, and reports `TOOL_A_PROBLEM` when set.
+ */
+function projectWithBeforeHook(env: string, body?: string): string {
+  const cwd = project(env);
+  const components = { "tool-a": { hooks: { beforeDeploy: "src/pikit/tool-a/deploy.ts" } }, "storage-b": {} };
+  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 2, targets: ["cloudflare"], registries: {}, components }));
+  writeFileSync(join(cwd, "pikit.config.ts"), `export default { config: { "tool-a": { server: "wiki" } } };\n`);
+  mkdirSync(join(cwd, "src", "pikit", "tool-a"), { recursive: true });
+  writeFileSync(
+    join(cwd, "src", "pikit", "tool-a", "deploy.ts"),
+    body ??
+      `export async function beforeDeploy(io) {
+  const problem = io.get("TOOL_A_PROBLEM");
+  if (problem !== undefined) return [problem];
+  const changed = io.write("seed.ts", \`export const seed = \${JSON.stringify({ ...io.config, token: io.get("HOOK_TEST_TOKEN") })};\\n\`);
+  io.say(changed ? "tool-a: seed written" : "tool-a: seed unchanged");
+  return [];
+}
+`,
+  );
+  return cwd;
+}
+
+test("up runs each component's beforeDeploy before it deploys: it writes its own files, once, and says so", async () => {
+  const cwd = projectWithBeforeHook("HOOK_TEST_TOKEN=t\n");
+  expect(deployHooks(cwd, "beforeDeploy")).toEqual([{ component: "tool-a", file: "src/pikit/tool-a/deploy.ts" }]);
+  expect(deployHooks(cwd)).toEqual([]);
+  const said: string[] = [];
+  let seedWhenDeployed = "";
+  const wrangler = fakeWrangler();
+  const run: Runner = async (command, options) => {
+    if (command[1] === "deploy") seedWhenDeployed = readFileSync(join(cwd, "src", "pikit", "tool-a", "seed.ts"), "utf8");
+    return wrangler.run(command, options);
+  };
+  await up({ cwd, run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, say: (line) => said.push(line) });
+  expect(seedWhenDeployed).toBe('export const seed = {"server":"wiki","token":"t"};\n');
+  await up({ cwd, run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, say: (line) => said.push(line) });
+  expect(said).toEqual(["tool-a: seed written", "tool-a: seed unchanged"]);
+});
+
+test("a beforeDeploy problem, or a write outside the component's directory, stops up before anything is deployed", async () => {
+  const wrangler = fakeWrangler();
+  const failure = up({ cwd: projectWithBeforeHook("TOOL_A_PROBLEM=the MCP server is down\n"), run: wrangler.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, say: () => {} });
+  await expect(failure).rejects.toThrow("what runs before a deploy failed, so nothing was deployed:\n  tool-a: the MCP server is down\n");
+  expect(wrangler.calls).toEqual([]);
+
+  const escape = projectWithBeforeHook("", 'export async function beforeDeploy(io) {\n  io.write("../../../wrangler.jsonc", "{}");\n  return [];\n}\n');
+  await expect(up({ cwd: escape, run: wrangler.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, say: () => {} })).rejects.toThrow(
+    'tool-a: beforeDeploy may write only a file of src/pikit/tool-a/, not "../../../wrangler.jsonc"',
+  );
+  expect(existsSync(join(escape, "wrangler.jsonc"))).toBe(false);
+  expect(wrangler.calls).toEqual([]);
+});
+
 test("down deletes the Worker only when a person is there to answer wrangler", async () => {
   const wrangler = fakeWrangler();
   await expect(down({ cwd: project(), run: wrangler.run, interactive: false })).rejects.toThrow(/deletes the Worker and every conversation's Durable Object/);

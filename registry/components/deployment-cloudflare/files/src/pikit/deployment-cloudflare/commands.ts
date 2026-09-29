@@ -1,5 +1,5 @@
 /**
- * `pikit up | down | logs | status | dev` for Cloudflare (SPEC §11, C8): plain functions the CLI
+ * `pikit up | down | logs | status | dev` for Cloudflare (SPEC C8): plain functions the CLI
  * delegates to, each one `wrangler …` in the project's directory. They run on the machine that
  * deploys, never inside the app (the one file of this component that imports `node:*`).
  *
@@ -11,8 +11,9 @@
  * projects on one account never deploy over each other; or `wrangler.jsonc`'s `name` when it has one
  * (a Deploy to Cloudflare template's, which Workers Builds deploys under), so both deploy one Worker.
  *
- * After a deploy answers, `up` runs the installed components' `afterDeploy` hooks (C8): each one is
- * named in its `component.json`'s `hooks`, and `pikit add` records its file in `pikit.json`.
+ * Before it bundles, `up` runs the installed components' `beforeDeploy` hooks (tool-mcp writes the seed
+ * the bundle carries); after the deploy answers, their `afterDeploy` hooks (C8). Each one is named in
+ * its `component.json`'s `hooks`, and `pikit add` records its file in `pikit.json`.
  *
  * `up`, `down`, `logs` and `status` reach the Cloudflare account, so each first checks that wrangler
  * can (`login`): a `CLOUDFLARE_API_TOKEN`, or wrangler's own login. At a terminal it offers
@@ -141,7 +142,7 @@ export interface UpOptions extends AccountOptions {
   intervalMs?: number;
   /** Roll back (`wrangler rollback`) when the new version answers that its App does not start. Default: true. */
   rollback?: boolean;
-  /** Where the components' after-deploy hooks' lines go. Default: `console.log`. */
+  /** Where the components' deploy hooks' lines go. Default: `console.log`. */
   say?: (line: string) => void;
 }
 
@@ -176,6 +177,7 @@ export async function up(options: UpOptions = {}): Promise<Deployed> {
   const cwd = options.cwd ?? process.cwd();
   const name = workerName(cwd);
   await login(options);
+  await beforeDeploy(cwd, options.say ?? ((line) => console.log(line)));
   // Private to this user (mkdtemp is 0700): the secrets file and wrangler's output file.
   const work = mkdtempSync(join(tmpdir(), "pikit-cloudflare-"));
   try {
@@ -215,21 +217,85 @@ export async function up(options: UpOptions = {}): Promise<Deployed> {
   }
 }
 
-/** A component's after-deploy hook, as `pikit.json` records it: its project-relative file. */
+/** A component's deploy hook, as `pikit.json` records it: its project-relative file. */
 export interface DeployHook {
   component: string;
   file: string;
 }
 
-/** The installed components' `afterDeploy` hooks, in `pikit.json`'s order; none without `pikit.json`. */
-export function deployHooks(cwd: string): DeployHook[] {
+/** The installed components' `hook` hooks (default: `afterDeploy`), in `pikit.json`'s order; none without `pikit.json`. */
+export function deployHooks(cwd: string, hook: "beforeDeploy" | "afterDeploy" = "afterDeploy"): DeployHook[] {
   const path = join(cwd, "pikit.json");
   if (!existsSync(path)) return [];
-  const { components } = JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, { hooks?: { afterDeploy?: unknown } }> };
+  const { components } = JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, { hooks?: Record<string, unknown> }> };
   return Object.entries(components ?? {}).flatMap(([component, installed]) => {
-    const file = installed.hooks?.afterDeploy;
+    const file = installed.hooks?.[hook];
     return typeof file === "string" ? [{ component, file }] : [];
   });
+}
+
+/**
+ * What a component's `beforeDeploy` receives (`component.json`'s `hooks.beforeDeploy` names its file).
+ * It resolves with its problems, one line each: empty when done.
+ */
+export interface BeforeDeployIO {
+  /** The component's config in `pikit.config.ts` (its default export's). */
+  config: Readonly<Record<string, unknown>>;
+  /** A variable exported in the environment, or else in `.env`. */
+  get(name: string): string | undefined;
+  /**
+   * Writes `text` to `file`, a file name of the component's own `src/pikit/<name>/`, unless it already
+   * holds it; resolves whether it changed. What it writes is what the bundle takes.
+   */
+  write(file: string, text: string): boolean;
+  say(line: string): void;
+}
+
+/**
+ * Runs every installed component's `beforeDeploy` before anything is bundled or uploaded (tool-mcp
+ * writes the seed the bundle carries). Every hook runs, then `up` fails with all their problems, and
+ * nothing is deployed.
+ */
+async function beforeDeploy(cwd: string, say: (line: string) => void): Promise<void> {
+  const hooks = deployHooks(cwd, "beforeDeploy");
+  if (hooks.length === 0) return;
+  const config = await projectConfig(cwd);
+  const env = readDotEnv(cwd);
+  const get = (name: string): string | undefined => process.env[name] || env[name] || undefined;
+  const problems: string[] = [];
+  for (const hook of hooks) {
+    try {
+      const module = (await import(pathToFileURL(join(cwd, hook.file)).href)) as { beforeDeploy?: unknown };
+      if (typeof module.beforeDeploy !== "function") {
+        problems.push(`${hook.component}: ${hook.file} does not export beforeDeploy`);
+        continue;
+      }
+      const own = config[hook.component];
+      const io: BeforeDeployIO = {
+        config: typeof own === "object" && own !== null ? (own as Record<string, unknown>) : {},
+        get,
+        write: (file, text) => writeOwnFile(cwd, hook.component, file, text),
+        say,
+      };
+      const found = (await (module.beforeDeploy as (io: BeforeDeployIO) => Promise<unknown>)(io)) ?? [];
+      if (!Array.isArray(found)) throw new Error("beforeDeploy did not resolve with a list of problems");
+      for (const problem of found) problems.push(`${hook.component}: ${String(problem)}`);
+    } catch (error) {
+      problems.push(`${hook.component}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  if (problems.length > 0) {
+    throw new Error(`what runs before a deploy failed, so nothing was deployed:\n  ${problems.join("\n  ")}\nFix it, then \`pikit up\` again`);
+  }
+}
+
+/** `beforeDeploy`'s `write`: only a file of the component's own directory, and only when its text changes. */
+function writeOwnFile(cwd: string, component: string, file: string, text: string): boolean {
+  if (!/^[A-Za-z0-9_-]+(\.[A-Za-z0-9_-]+)*$/.test(file)) throw new Error(`beforeDeploy may write only a file of src/pikit/${component}/, not "${file}"`);
+  const path = join(cwd, "src", "pikit", component, file);
+  if (existsSync(path) && readFileSync(path, "utf8") === text) return false;
+  writeFileSync(path, text);
+  return true;
 }
 
 /**

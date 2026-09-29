@@ -1,5 +1,5 @@
 /**
- * `component.json` (SPEC §10.2) and `registry.json` (SPEC §10.4): their shape, their stable key
+ * `component.json` and `registry.json`: their shape, their stable key
  * order, and which fields are generated.
  *
  * The shape is one typebox schema, `ManifestSchema`: the `Manifest` type is derived from it,
@@ -90,7 +90,7 @@ export const ManifestSchema = Type.Object(
         pikit: Type.String({ minLength: 1, description: "The @pikit/core versions it works with (a semver range)." }),
         capabilities: Type.Array(Type.String(), { description: "Generated from setup's use() calls." }),
       },
-      { additionalProperties: false, description: "A component depends on capabilities, never on components (SPEC §10.2)." },
+      { additionalProperties: false, description: "A component depends on capabilities, never on components." },
     ),
     optional: Type.Object(
       { capabilities: Type.Array(Type.String(), { description: "Generated from setup's useOptional() and useKeyed() calls." }) },
@@ -129,15 +129,32 @@ export const ManifestSchema = Type.Object(
     hooks: Type.Optional(
       Type.Object(
         {
-          afterDeploy: Type.String({
-            pattern: OWN_FILE,
-            description:
-              "A file of src/pikit/<name>/ exporting `afterDeploy({ url, config, get, say })`, which resolves with its problems (empty when done). The deployment's `up` calls it once the new version answers (SPEC §4.1, C8), with the deployed URL, this component's config in pikit.config.ts and a reader of .env and the environment.",
-          }),
+          doctor: Type.Optional(
+            Type.String({
+              pattern: OWN_FILE,
+              description:
+                "A file of src/pikit/<name>/ exporting `doctor({ config, get })`, which resolves with its problems (empty when fine). `pikit doctor` (so `pikit up` and `pikit dev`) calls it once the app composes, with this component's config in pikit.config.ts and a reader of .env and the environment. It may reach the network; it writes nothing.",
+            }),
+          ),
+          beforeDeploy: Type.Optional(
+            Type.String({
+              pattern: OWN_FILE,
+              description:
+                "A file of src/pikit/<name>/ exporting `beforeDeploy({ config, get, write, say })`, which resolves with its problems (empty when done). The deployment's `up` calls it before it builds or bundles, and deploys nothing on a problem. `write(file, text)` writes a file of src/pikit/<name>/ (what the build then takes), and only when its text changes.",
+            }),
+          ),
+          afterDeploy: Type.Optional(
+            Type.String({
+              pattern: OWN_FILE,
+              description:
+                "A file of src/pikit/<name>/ exporting `afterDeploy({ url, config, get, say })`, which resolves with its problems (empty when done). The deployment's `up` calls it once the new version answers (SPEC §4.1, C8), with the deployed URL, this component's config in pikit.config.ts and a reader of .env and the environment.",
+            }),
+          ),
         },
         {
           additionalProperties: false,
-          description: "Steps the deployment runs for this component. `pikit add` records them in pikit.json.",
+          description:
+            "Steps the CLI and the deployment run for this component, each a file of src/pikit/<name>/ exporting a function of the hook's name. `pikit add` records them in pikit.json, by project path.",
         },
       ),
     ),
@@ -145,7 +162,7 @@ export const ManifestSchema = Type.Object(
       Type.Object(
         {
           tools: Type.Record(Type.String(), Type.String(), {
-            description: "Generated: each agent.tool's replay (S10, SPEC §8.4), with the default config; not the tools only the config schema's `examples` name.",
+            description: "Generated: each agent.tool's replay (S10), with the default config; not the tools only the config schema's `examples` name.",
           }),
         },
         { additionalProperties: false },
@@ -171,10 +188,14 @@ export const ManifestSchema = Type.Object(
     config: Type.Optional(Type.String({ description: "A component-relative path." })),
     migrations: Type.Optional(Type.String({ description: "A component-relative path." })),
   },
-  { additionalProperties: false, title: "pikit component.json", description: "A component of a pikit registry (SPEC §10.2)." },
+  { additionalProperties: false, title: "pikit component.json", description: "A component of a pikit registry." },
 );
 
 export type Manifest = Static<typeof ManifestSchema>;
+
+/** The hooks a component may declare, in the order they run; each file exports a function of that name. */
+export const HOOKS = ["doctor", "beforeDeploy", "afterDeploy"] as const;
+export type Hook = (typeof HOOKS)[number];
 export type EnvironmentVariable = Static<typeof EnvironmentVariableSchema>;
 export type Half = Static<typeof HalfSchema>;
 
@@ -264,7 +285,7 @@ export function writeManifest(componentDir: string, manifest: Manifest): void {
 }
 
 export interface RegistryIndex {
-  /** Schema version of `registry.json` (SPEC §12a). */
+  /** Schema version of `registry.json`. */
   version: 1;
   components: Record<string, { version: string; description: string; targets: string[]; path: string }>;
 }

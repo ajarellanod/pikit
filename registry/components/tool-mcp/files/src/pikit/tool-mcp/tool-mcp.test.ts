@@ -11,7 +11,8 @@ import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
 import { createPiRuntime, modelsFrom, type SessionStore } from "@pikit/pi-adapter";
 import { createFakeMcpServer, type FakeMcpServer, type FakeMcpTool } from "@pikit/pi-adapter/mcp/testing";
 import { type ModelRequest, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing/neutral";
-import toolMcp from "./index.ts";
+import toolMcp, { type SeedListing } from "./index.ts";
+import { seed } from "./seed.ts";
 
 const TOKEN = "mcp-test-token-0123456789";
 
@@ -356,6 +357,94 @@ test("a named tool the server no longer lists fails its calls and is logged; the
   const before = server.requests.length;
   await installed(config, [kvOf(storage)]);
   expect(server.requests.length).toBe(before);
+});
+
+/**
+ * Runs `body` with `listings` in the bundled seed (the object `seed.ts` exports, which index.ts reads
+ * at each start), then puts back what it held: your own `seed.ts` may hold servers of its own.
+ */
+async function withSeed(listings: Record<string, SeedListing>, body: () => Promise<void>): Promise<void> {
+  const before = { ...seed };
+  Object.assign(seed, listings);
+  try {
+    await body();
+  } finally {
+    for (const name of Object.keys(seed)) delete seed[name];
+    Object.assign(seed, before);
+  }
+}
+
+/** A seed's listing of the wiki's tools at `url`, as `beforeDeploy` writes it, with `description` for ask_question. */
+function seededWiki(url: string, description = "Asks, from the seed."): SeedListing {
+  const ask = WIKI_TOOLS[0] as FakeMcpTool;
+  const open = WIKI_TOOLS[1] as FakeMcpTool;
+  return {
+    url,
+    tools: {
+      ask_question: { name: ask.name, title: "Ask a question", description, inputSchema: ask.inputSchema, annotations: { readOnlyHint: true } },
+      open_issue: { name: open.name, description: "Opens an issue.", inputSchema: open.inputSchema },
+    },
+  };
+}
+
+test("with a seed for the server's URL and nothing kept, a start makes no request and describes the tools from the seed", async () => {
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const url = serve(server);
+  const storage = createMemoryKeyValueStorage();
+  await withSeed({ wiki: seededWiki(url) }, async () => {
+    // With storage.kv holding nothing (a new conversation's object), and without storage.kv.
+    for (const extra of [[kvOf(storage)], []]) {
+      const s = await installed({ servers: { wiki: { url, tools: ["ask_question", "open_issue"] } } }, extra);
+      expect(server.requests).toHaveLength(0);
+      const ask = s.tools.get("wiki_ask_question");
+      expect(ask?.label).toBe("Ask a question");
+      expect(ask?.description).toBe("Asks, from the seed.");
+      expect(ask?.parameters).toMatchObject({ properties: { repoName: { type: "string" } }, required: ["repoName", "question"] });
+      expect(ask?.replay).toBe("safe");
+      expect(s.tools.get("wiki_open_issue")?.replay).toBe("never");
+    }
+  });
+  expect(await storage.namespace("tool-mcp").get("server/wiki")).toBeUndefined();
+
+  // The first call connects and lists: the tools follow the server, and the listing is kept.
+  await withSeed({ wiki: seededWiki(url) }, async () => {
+    const s = await installed({ servers: { wiki: { url, tools: ["ask_question"] } } }, [kvOf(storage)]);
+    expect(textOf(await call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+    expect(s.tools.get("wiki_ask_question")?.description).toBe("Asks a question about a repository.");
+  });
+  expect(await storage.namespace("tool-mcp").get("server/wiki")).toMatchObject({ url, tools: { ask_question: { description: "Asks a question about a repository." } } });
+});
+
+test("the kept listing wins over the seed: it is refreshed on each connection", async () => {
+  const storage = createMemoryKeyValueStorage();
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const url = serve(server);
+  const config = { servers: { wiki: { url, tools: ["ask_question"] } } };
+  await storage.namespace("tool-mcp").set("server/wiki", { url, listedAt: "2026-09-01T00:00:00.000Z", tools: { ask_question: { name: "ask_question", description: "Asks, as kept.", inputSchema: { type: "object" } } } });
+  await withSeed({ wiki: seededWiki(url) }, async () => {
+    const s = await installed(config, [kvOf(storage)]);
+    expect(server.requests).toHaveLength(0);
+    expect(s.tools.get("wiki_ask_question")?.description).toBe("Asks, as kept.");
+  });
+});
+
+test("a seed for another URL, or without every named tool, is not used: the start reaches the server, and one that is down stops it", async () => {
+  const server = createFakeMcpServer({ tools: WIKI_TOOLS });
+  const url = serve(server);
+  await withSeed({ wiki: seededWiki("https://mcp.example.com/elsewhere") }, async () => {
+    const s = await installed({ servers: { wiki: { url, tools: ["ask_question"] } } });
+    expect(server.requests.filter((r) => r.rpc === "tools/list")).toHaveLength(1);
+    expect(s.tools.get("wiki_ask_question")?.description).toBe("Asks a question about a repository.");
+  });
+  await withSeed({ wiki: seededWiki(url) }, async () => {
+    await installed({ servers: { wiki: { url, tools: ["ask_question", "no_arguments"] } } });
+    expect(server.requests.filter((r) => r.rpc === "tools/list")).toHaveLength(2);
+  });
+  // An empty seed, or one for another server, is strict as before.
+  await withSeed({ other: seededWiki("http://127.0.0.1:9/mcp") }, async () => {
+    const message = await startError({ servers: { gone: { url: "http://127.0.0.1:9/mcp", tools: ["ask_question"] } } });
+    expect(message).toContain('the MCP server "gone" could not list its tools');
+  });
 });
 
 test("without storage.kv, every start reaches the server", async () => {

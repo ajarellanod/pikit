@@ -1,5 +1,5 @@
 /**
- * The components' own checks of `pikit doctor` (`src/pikit/<name>/doctor.ts`, `component-doctor.ts`):
+ * The components' own checks of `pikit doctor` (`hooks.doctor`, `component-doctor.ts`):
  * their problems fail doctor, and so `pikit up` refuses before deploying. The `pikit` binary, run as a
  * user runs it, on a small project with a fake component and a fake deployment. No network.
  */
@@ -21,9 +21,10 @@ function pikit(args: string[], cwd: string) {
 
 /**
  * A project with `checked` (a component whose `doctor.ts` reports the variable CHECKED_PROBLEM, when
- * set, and its config's `fail`) and `deployment-fake` (whose `up` writes `deployed`).
+ * set, and its config's `fail`) and `deployment-fake` (whose `up` writes `deployed`). `pikit.json`
+ * records the check as `pikit add` does, unless `declared` is false.
  */
-function project(check: string | undefined): string {
+function project(check: string | undefined, declared = check !== undefined): string {
   const dir = mkdtempSync(join(tmpdir(), "pikit-doctor-test-"));
   dirs.push(dir);
   mkdirSync(join(dir, "node_modules", "@pikit"), { recursive: true });
@@ -42,7 +43,10 @@ function project(check: string | undefined): string {
     writeFileSync(join(dir, file), text);
   }
   const manifest = emptyManifest();
-  for (const name of ["checked", "deployment-fake"]) manifest.components[name] = { registry: "default", version: "0.0.0", files: {}, dependencies: {}, environment: [] };
+  for (const name of ["checked", "deployment-fake"]) {
+    manifest.components[name] = { registry: "default", version: "0.0.0", files: {}, dependencies: {}, environment: [] };
+  }
+  if (declared) manifest.components.checked = { registry: "default", version: "0.0.0", files: {}, dependencies: {}, environment: [], hooks: { doctor: "src/pikit/checked/doctor.ts" } };
   writeProjectManifest(dir, manifest);
   return dir;
 }
@@ -80,4 +84,14 @@ test("a check that throws, or exports no doctor, is a problem; a component witho
   const plain = pikit(["doctor"], project(undefined));
   expect(plain.out).toContain("pikit doctor: green");
   expect(plain.code).toBe(0);
+});
+
+test("only a declared check runs: a doctor.ts pikit.json does not name is not called, a declared one that is gone is a problem", () => {
+  const undeclared = pikit(["doctor"], project(REPORTS, false));
+  expect(undeclared.out).toContain("pikit doctor: green");
+  expect(undeclared.code).toBe(0);
+  const gone = project(undefined, true);
+  const run = pikit(["doctor"], gone);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("checked: its doctor check failed:");
 });

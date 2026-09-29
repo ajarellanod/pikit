@@ -5,8 +5,8 @@ a tool. Hermes supports MCP, and users look for it in any agent's tool list.
 
 **Specified:** partly (phase 1 built: `tool-mcp` and `@pikit/pi-adapter/mcp`, Streamable HTTP with a
 bearer token from `secrets`, on both targets; strict at deploy (`pikit doctor` reaches each server),
-tolerant at run time (tool listings kept in `storage.kv`); OAuth and stdio are the open questions
-below)
+tolerant at run time (tool listings kept in `storage.kv`, and a seed of them `pikit up` bundles);
+OAuth and stdio are the open questions below)
 
 **Needed by:** nothing required.
 
@@ -36,8 +36,8 @@ uses `fetch`.
     component's tests, the adapter's and the workerd lane's.
 - **`tool-mcp`** (targets server and cloudflare). Config names each server (`url`, `tools`, and
   optionally `secret`, `headers`, `timeoutMs`); each tool named becomes the `agent.tool`
-  `<server>_<tool>`. An agent gets a tool only by naming it (SPEC §6.3).
-  - **Named in config, not a proxy.** Keyed capabilities' keys are fixed at `setup` (SPEC §4.5), so
+  `<server>_<tool>`. An agent gets a tool only by naming it.
+  - **Named in config, not a proxy.** Keyed capabilities' keys are fixed at `setup`, so
     tools are provided then and described at `start`, from the server's `tools/list`.
   - **Strict at deploy, tolerant at run time** (decided). On Cloudflare every conversation's Durable
     Object starts its App when it wakes: a start that reaches each server would make an MCP outage
@@ -45,11 +45,24 @@ uses `fetch`.
     - **Before a deploy**, `tool-mcp/doctor.ts` is the component's check of `pikit doctor`, which
       `pikit up` and `pikit dev` run first (and refuse on a problem). It reaches each server from the
       deploying machine, with the token from `.env` or the environment, and reports one that cannot be
-      reached, refuses the token, or lacks a named tool; never the token's value. The CLI runs
-      `src/pikit/<name>/doctor.ts` of any installed component, as it runs `configure.ts` for
-      `pikit configure` (`packages/cli/src/project/component-doctor.ts`); a project without such a
-      file starts no process and reaches no network. `add`, `remove` and `new` run doctor without
-      these checks: they change the composition, not the servers.
+      reached, refuses the token, or lacks a named tool; never the token's value. It writes nothing.
+      `component.json` declares it (`"hooks": { "doctor": "doctor.ts" }`), `pikit add` records it in
+      `pikit.json`, and the CLI runs the checks recorded there
+      (`packages/cli/src/project/component-doctor.ts`, SPEC §3.2); a project without one starts no
+      process and reaches no network. `add`, `remove` and `new` run doctor without these checks: they
+      change the composition, not the servers.
+    - **At each deploy, a seed** (built). `tool-mcp/deploy.ts` is the component's `beforeDeploy` hook
+      (`"hooks": { "beforeDeploy": "deploy.ts" }`), which the deployment's `up` runs before it bundles
+      (`deployment-cloudflare`) or builds (`deployment-docker`). It lists each server's tools again
+      from the deploying machine and writes the named ones into `src/pikit/tool-mcp/seed.ts` through
+      `io.write` (a file of the component's own directory, rewritten only when its text changes):
+      by server name, the URL and, per tool, name, title, description, inputSchema and annotations.
+      Never a token, a secret's name or a header, and no time, so a deploy changes it only when the
+      servers' tools do. `index.ts` imports it statically, so the Worker's bundle and the Docker image
+      carry it. A server that cannot be reached, or lacks a tool, fails `up` before anything is
+      deployed, and `seed.ts` stays as it was. Installed, `seed.ts` is empty (the static import never
+      breaks), and users commit it: a build without the CLI (Workers Builds, a Deploy to Cloudflare
+      button) bundles what is committed. `pikit dev` does not rewrite it.
     - **With `storage.kv`** (optional capability; namespace `tool-mcp`, key `server/<name>`), the
       listing of each server's named tools (name, title, description, inputSchema, annotations) is
       kept with its URL and `listedAt`. A start that finds it complete for the same URL describes the
@@ -59,9 +72,13 @@ uses `fetch`.
       and parameters per model call). A named tool the server no longer lists is logged as an error
       and its calls fail naming what the server has; its last description stays kept, so a later
       start does not stop the app over it.
-    - **Without a complete kept listing** (no `storage.kv`, the first start, a new URL or tool in
-      config), start reaches the server as before, and a server that cannot be reached, or lacks a
-      named tool, stops the start (P5): the model could get the tool's schema from nowhere.
+    - **Start's precedence.** Each server's tools are described from the first listing for its URL
+      that holds every named tool: this app's kept listing in `storage.kv` (the freshest: refreshed on
+      each connection), else the bundled seed, else the server. With a seed, a new conversation's
+      object on Cloudflare starts with **no request**, and a server that is down fails only calls.
+    - **With neither** (an empty seed, or a URL or tool in config since the last `pikit up`, and
+      nothing kept), start reaches the server as before, and a server that cannot be reached, or lacks
+      a named tool, stops the start (P5): the model could get the tool's schema from nowhere.
   - **When Pi reads a tool.** runtime-pi resolves agents' tool names when a conversation opens, which
     is after every start (tool-mcp provides `agent.tool`, so it starts before runtime-pi); Pi reads
     `description` and `parameters` from that object at each model call (Pi 0.99 records them in the
@@ -104,9 +121,11 @@ uses `fetch`.
   | tool-mcp `app.start()` from the kept listing, Bun, 0 requests | 5 | 0.16 ms | 0.12 ms | 0.27 ms |
   | tool-mcp `app.start()`, workerd: no kept listing, then from it (0 requests) | 1 | 846 ms, then ≤ 1 ms | | |
 
-  `tools/list` alone is 167–185 ms. Without `storage.kv` one server takes most of the 1 s budget, so a
-  Cloudflare project with tool-mcp should install `storage-kv-sql` (over `storage-do`): an object's
-  later wakes then start with no MCP request, and the first call pays the connection instead (about
+  `tools/list` alone is 167–185 ms. Without a listing one server takes most of the 1 s budget. The
+  seed `pikit up` bundles gives every object's start one (a start from it is the "from the kept
+  listing" row: no request; the workerd lane checks it, `tests/workerd/test/tool-mcp.workerd.ts`),
+  and a Cloudflare project with tool-mcp should also install `storage-kv-sql` (over `storage-do`), so
+  that an object keeps what its connections list. The first call pays the connection instead (about
   0.9 s here, before `tools/call`).
   In `wrangler dev` every request paid about a fresh process's time (no reused connection showed);
   from Cloudflare's edge the round trips may be shorter (not measured deployed).
@@ -125,12 +144,19 @@ uses `fetch`.
   a method of its transport ("Illegal invocation" on Workers) and measures SSE events with
   `Buffer.byteLength` (needs `nodejs_compat`). Whether to report them to Pi is the user's call; until
   Pi fixes them, `mcpHttpTransport`'s wrapper and the workerd case that pins the gap stay.
-- **On Cloudflare the kept listing is per conversation.** `storage.kv` there is `storage-kv-sql` on
-  the object's own SQLite: each conversation's object keeps its own listing. A new conversation's
-  first start (and one after the object's storage is wiped) still reaches every server, pays about
-  0.9 s, and is stopped by a server that is down. Proposal: `pikit up` writes the listing its doctor
-  check fetched into a generated file of the bundle, which start uses when the object has none; or a
-  project-wide `storage.kv` (a Workers KV binding) for listings. Not built.
+- **On Cloudflare the kept listing is per conversation** (`storage-kv-sql` on the object's own
+  SQLite). The seed `pikit up` bundles closes the cold start of a new conversation (built, above);
+  what stays open:
+  - a config change (a new server, URL or tool) deployed without `pikit up` (Workers Builds from a
+    commit whose `seed.ts` is older) has no seed for it: every new conversation reaches the server
+    at its first start, as before, until `pikit up` runs and its `seed.ts` is committed;
+  - the kept listing wins over the seed even when the seed is newer (an object last connected before
+    the deploy): its first call fixes it, as a stale kept listing always was. Preferring the newer by
+    `listedAt` would need a time in the seed, and the churn that comes with it;
+  - `pikit doctor` lists `seed.ts` as a modified file after a deploy wrote it (true, by design), and
+    `pikit upgrade` merges it like any other: an upstream change to its header would meet the
+    generated body;
+  - a project-wide `storage.kv` (a Workers KV binding) for listings was not needed.
 - **The kept listing has no time to live.** It is refreshed on each connection, which every object
   makes on its first call; a schema that changed on the server and was never called since stays
   kept until then. A server that changed a tool's arguments fails that call (the server says why) and
@@ -138,12 +164,15 @@ uses `fetch`.
 - **The first call after a cached start pays the connection** (`initialize`, `notifications/initialized`,
   `tools/list`) before `tools/call`: about 0.9 s against deepwiki. Only calls pay it, not answers
   that use no MCP tool.
-- **The doctor check runs from the deploying machine**, with the token from `.env` or the
-  environment: a server reachable only from Cloudflare's network, or a secret set in Cloudflare and
-  not in `.env`, is reported as a problem. A way to skip it (a flag of `up`) was not added.
-- **Components' own doctor checks are found by file** (`src/pikit/<name>/doctor.ts`), like
-  `configure.ts`, not declared in `component.json` like `hooks.afterDeploy`: declaring it would let
-  `registry validate` check the export. SPEC §11 should mention both files (SPEC is edited elsewhere).
+- **The doctor check and the seed run from the deploying machine**, with the token from `.env` or
+  the environment: a server reachable only from Cloudflare's network, or a secret set in Cloudflare
+  and not in `.env`, is reported as a problem and stops `up`. A way to skip them (a flag of `up`) was
+  not added. `pikit up` reaches each server twice (the doctor check, then `beforeDeploy`): one
+  listing each, about 1 s per server here.
+- **Components' CLI steps** (decided, SPEC §3.2): the doctor check is declared as `hooks.doctor`,
+  like `hooks.beforeDeploy` and `hooks.afterDeploy`, so `registry validate` checks its export and
+  only what `pikit.json` records runs. `configure.ts` is still found by its path; declaring it as
+  `hooks.configure` is the same change, not made.
 - **The manifest.** `registry generate` describes `setup` with an empty config, so `component.json`
   lists no `provides` for tool-mcp. The config schema now carries one full example (`examples`:
   deepwiki with `ask_wiki_question`, `read_wiki_structure`); `registry generate` learning to describe

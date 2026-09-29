@@ -8,7 +8,10 @@
  *   is reached, so the tools come from config and are provided then. At `start` each tool gets what
  *   only the server knows: its description and parameters, from the server's `tools/list`.
  * - **Strict at deploy, tolerant at run time.** `pikit doctor` (so `pikit up` and `pikit dev`) reaches
- *   every server and refuses one that cannot be reached or lacks a tool (`doctor.ts`). Once deployed:
+ *   every server and refuses one that cannot be reached or lacks a tool (`doctor.ts`); `pikit up` then
+ *   writes what they listed into `seed.ts` (`deploy.ts`), which the build bundles. Once deployed, a
+ *   start describes the tools from the freshest listing it has: this app's kept listing in
+ *   `storage.kv`, else the bundled seed, else the server.
  *   - with `storage.kv` installed, each server's listing of the named tools is kept there (namespace
  *     `tool-mcp`, key `server/<name>`), and a start that finds it complete describes the tools from
  *     it and reaches no server: a cold start makes no MCP request, and a server that is down does not
@@ -16,10 +19,13 @@
  *     start, or after the server forgot the session) lists the tools again and updates both the tools
  *     and the kept listing; a named tool the server no longer lists is logged as an error and its calls
  *     fail, naming the tools it has.
- *   - without a kept listing (or without `storage.kv`), start reaches each server (`initialize`,
+ *   - without a kept listing (or without `storage.kv`) but with a seed for the server's URL that holds
+ *     every named tool, the start reaches no server either: a new conversation's first start on
+ *     Cloudflare makes no MCP request. The first connection keeps its listing in `storage.kv`.
+ *   - with neither, start reaches each server (`initialize`,
  *     `tools/list`), and one that cannot be reached, or lacks a named tool, stops the app (P5): the
  *     model would get a tool with no description or parameters.
- * - **Replay** (SPEC §8.4): `"never"`, unless the server marks the tool read-only
+ * - **Replay**: `"never"`, unless the server marks the tool read-only
  *   (`annotations.readOnlyHint`), then `"safe"`: a run resumed after a crash calls it again.
  * - **Credentials never in config.** `secret` names a secret, read through `secrets` at each request,
  *   holding a bearer token for the server. The model never sees it, nor any error that mentions it.
@@ -47,6 +53,7 @@ import {
   type Tool,
 } from "@pikit/pi-adapter/mcp";
 import Type, { type Static } from "typebox";
+import { seed } from "./seed.ts";
 
 /** How long a request to a server may take, unless its config says otherwise. */
 export const DEFAULT_TIMEOUT_MS = 60_000;
@@ -176,17 +183,40 @@ interface KeptListing {
 
 type KeptTool = Pick<Tool, "name" | "title" | "description" | "inputSchema" | "annotations">;
 
+/**
+ * What `seed.ts` holds, as `beforeDeploy` (`deploy.ts`) writes it: by server name, a kept listing
+ * without `listedAt` (so a deploy rewrites the file only when a server's tools change). Typed loosely,
+ * so that whatever JSON a server sent type-checks in the generated file.
+ */
+export type McpSeed = Record<string, SeedListing>;
+
+export interface SeedListing {
+  /** The URL listed: a seed for another URL is not used. */
+  url: string;
+  /** By MCP name: the tools config names. */
+  tools: Record<string, SeedTool>;
+}
+
+export interface SeedTool {
+  name: string;
+  title?: string;
+  description?: string;
+  inputSchema: Record<string, unknown>;
+  annotations?: Record<string, unknown>;
+}
+
 const keyOf = (server: ServerEntry): string => `server/${server.name}`;
 
 /**
- * Describes each tool of `server` at start: from its kept listing when that holds every named tool
- * (no request), else from the server (`initialize`, `tools/list`). Throws when the server must be
- * reached and cannot be, or lacks a named tool.
+ * Describes each tool of `server` at start, from the first listing for its URL that holds every named
+ * tool, with no request: its kept listing in `storage.kv` (refreshed on each connection), else the
+ * seed bundled at deploy (`seed.ts`). Else from the server (`initialize`, `tools/list`). Throws when
+ * the server must be reached and cannot be, or lacks a named tool.
  */
 async function describe(server: ServerEntry, cache: KeyValueStore | undefined, ctx: AppContext): Promise<void> {
-  const kept = await read(cache, server, ctx.logger);
-  if (kept !== undefined && server.tools.every(({ remote }) => kept.tools[remote] !== undefined)) {
-    for (const { remote, mcp } of server.tools) describeTool(mcp, kept.tools[remote] as KeptTool);
+  const known = complete(server, await read(cache, server, ctx.logger)) ?? complete(server, Object.hasOwn(seed, server.name) ? seed[server.name] : undefined);
+  if (known !== undefined) {
+    for (const { remote, mcp } of server.tools) describeTool(mcp, known[remote] as KeptTool);
     return;
   }
   let listed: Tool[];
@@ -211,7 +241,7 @@ async function refreshed(server: ServerEntry, listed: Tool[], cache: KeyValueSto
     const tool = listed.find((candidate) => candidate.name === remote);
     if (tool === undefined) continue;
     describeTool(mcp, tool);
-    found[remote] = kept(tool);
+    found[remote] = keptTool(tool);
   }
   const lacking = missingFrom(server, listed);
   if (server.started && lacking !== undefined) {
@@ -231,6 +261,14 @@ async function refreshed(server: ServerEntry, listed: Tool[], cache: KeyValueSto
   }
 }
 
+/** The tools of `listing` when it is for the URL of `server` and holds each of its named tools. */
+function complete(server: ServerEntry, listing: { url?: unknown; tools?: unknown } | undefined): Record<string, KeptTool> | undefined {
+  if (typeof listing !== "object" || listing === null || listing.url !== server.url) return undefined;
+  const tools = listing.tools;
+  if (typeof tools !== "object" || tools === null) return undefined;
+  return server.tools.every(({ remote }) => Object.hasOwn(tools, remote)) ? (tools as Record<string, KeptTool>) : undefined;
+}
+
 /** The kept listing of `server` for its URL, or `undefined` (none, another URL, unreadable). */
 async function read(cache: KeyValueStore | undefined, server: ServerEntry, logger: Logger): Promise<KeptListing | undefined> {
   if (cache === undefined) return undefined;
@@ -247,8 +285,8 @@ function describeTool(mcp: McpAgentTool, tool: KeptTool): void {
   mcp.describe(tool, tool.annotations?.readOnlyHint === true ? "safe" : "never");
 }
 
-/** What is kept of `tool`: JSON, without the fields the server left out. */
-function kept(tool: Tool): KeptTool {
+/** What is kept of `tool` (in `storage.kv` and the seed): JSON, without the fields the server left out. */
+export function keptTool(tool: Tool): KeptTool {
   return {
     name: tool.name,
     ...(tool.title !== undefined && { title: tool.title }),

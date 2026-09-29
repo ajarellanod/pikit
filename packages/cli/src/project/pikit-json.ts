@@ -15,7 +15,7 @@
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import type { EnvironmentVariable } from "../registry/manifest.ts";
+import type { EnvironmentVariable, Hook } from "../registry/manifest.ts";
 import { BUILTIN_REGISTRY, isCheckoutRegistry, recordedLocation } from "./registry-location.ts";
 
 export const PIKIT_JSON = "pikit.json";
@@ -35,10 +35,11 @@ export interface InstalledComponent {
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
   /**
-   * Its manifest's `hooks`, by project path: `afterDeploy` is the file whose `afterDeploy` the
-   * deployment's `up` calls once the new version answers (`deployment-cloudflare`, SPEC C8).
+   * Its manifest's `hooks`, by project path: `doctor` is the file whose `doctor` `pikit doctor` calls,
+   * `beforeDeploy` and `afterDeploy` those the deployment's `up` calls before it builds and once the
+   * new version answers (SPEC C8).
    */
-  hooks?: { afterDeploy: string };
+  hooks?: Partial<Record<Hook, string>>;
   /**
    * The components it was installed for, when it was offered rather than asked for (`offers.ts`):
    * it leaves with the last of them, when nothing else uses it.

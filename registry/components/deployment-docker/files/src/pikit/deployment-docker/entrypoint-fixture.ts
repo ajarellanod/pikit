@@ -27,7 +27,7 @@ const fixture = defineComponent({
       async start(ctx) {
         if (mode === "start-fails") throw new Error("fixture: the start failed on purpose");
         if (mode === "start-hangs" || mode === "start-waits") {
-          // Honours the cancellation, as every component must (SPEC §4.6).
+          // Honours the cancellation, as every component must.
           await aborted(ctx.abortSignal);
           throw new Error("fixture: the start was cancelled");
         }

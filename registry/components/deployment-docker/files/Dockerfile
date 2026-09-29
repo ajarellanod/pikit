@@ -1,4 +1,4 @@
-# The image of this pikit project (deployment-docker, SPEC §9.1).
+# The image of this pikit project (deployment-docker).
 #
 # Secrets are never in the image: compose.yaml passes .env to the container when it starts, and
 # .dockerignore keeps .env out of the build context. State is never in the image either: .pikit/
@@ -14,7 +14,7 @@ ENV NODE_ENV=production
 # installs exactly what bun.lock says; `--production` leaves out devDependencies (tests, types).
 COPY package.json bun.lock ./
 # @pikit/* are not on npm yet: `pikit new` vendors them as tarballs in vendor/, and package.json
-# depends on them with `file:vendor/…` (SPEC §10.5, M1). They must be here before the install.
+# depends on them with `file:vendor/…`. They must be here before the install.
 COPY vendor/ ./vendor/
 RUN bun install --frozen-lockfile --production
 

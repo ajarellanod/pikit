@@ -19,7 +19,7 @@ logs, and the commands `pikit up | down | restart | logs | status` delegate to.
 ### The process (`main.ts`, `entrypoint.ts`)
 
 The container runs `bun src/pikit/deployment-docker/main.ts`, which runs your `pikit.config.ts`
-following SPEC §9.1:
+as SPEC K2 and P5 require:
 - It starts the app with a 30 s deadline. If the start fails, it exits 1, and Docker restarts the
   container. The app is never restarted inside the same process.
 - On SIGTERM (`docker compose down`, `docker stop`) or SIGINT (Ctrl-C), it stops the app with a
@@ -80,12 +80,21 @@ The CLI delegates to these functions; you can call them from a script too. Each 
 
 | Function | Runs |
 |---|---|
-| `up()` | `docker compose up --detach --build --wait`: fails if the app never becomes healthy |
+| `up({ say })` | The components' `beforeDeploy` hooks, then `docker compose up --detach --build --wait`: fails if the app never becomes healthy |
 | `down()` | `docker compose down`: the `.pikit/` volume stays |
 | `restart()` | `docker compose restart`: a clean stop and a new process; rebuilding is `up()` |
 | `logs({ follow, tail })` | `docker compose logs --no-log-prefix [--follow] [--tail N]` |
 | `status({ url })` | `docker compose ps --all --format json`, plus `GET /health` and `GET /ready` |
 | `exec({ command, share, interactive })` | `docker compose [--progress quiet] run --rm --build --no-deps [-T] [--volume dir:dir] app …`: a one-off container of the app, resolving with its exit code. Without a person, no terminal and a quiet build (Compose 5.5 fails a `run --build` whose stdout is not a terminal otherwise) |
+
+**Before the build: the components' `beforeDeploy` hooks.** A component may write what the image must
+carry before it is built (`tool-mcp` writes `seed.ts`, its MCP servers' tools). It names the file in
+its `component.json` (`"hooks": { "beforeDeploy": "deploy.ts" }`), `pikit add` records it in
+`pikit.json` by project path, and `up` calls its `beforeDeploy({ config, get, write, say })`: its
+config in `pikit.config.ts`, a reader of the environment and `.env`, `write(file, text)` for a file of
+its own `src/pikit/<name>/` (only when the text changes), and a line to print. It resolves with its
+problems; any problem, or a hook that throws, fails `up` before the build (`BeforeDeployIO` in
+`commands.ts`, the same shape as `deployment-cloudflare`'s). `pikit dev` runs none.
 
 `status()` returns the containers (name, state, health) and each probe's HTTP status, or
 `"unreachable"`. The default URL is `http://127.0.0.1:3000`, the port `compose.yaml` publishes.
@@ -111,11 +120,12 @@ The tests are copied with the component and run in your project:
   a failed stop exits 1, a second signal exits at once, a signal during the start cancels it. It
   also runs `main.ts` in a throwaway project to check that it runs the project's `pikit.config.ts`.
 - `logger.test.ts`: the shape of a line, levels, errors, redaction, and odd fields that never throw.
-- `commands.test.ts`: the exact `docker` argv of every command, `status`'s parsing and probes, with a
-  fake runner and a fake `fetch`. No Docker needed.
+- `commands.test.ts`: the exact `docker` argv of every command, `status`'s parsing and probes, the
+  components' `beforeDeploy` hooks run before the build (their own files written once, a problem
+  building nothing), with a fake runner and a fake `fetch`. No Docker needed.
 - `files.test.ts`: the root files keep their promises. Bun ≥ 1.4, a non-root user, no secret in the
   image, `.env` and `.pikit` ignored, a healthcheck on `/health`, and a `stop_grace_period` longer
   than the stop deadline.
 
 `component.json` is generated, not written by hand. With no `setup`, it provides and requires
-nothing. Its `files` maps `files/src` to `src` and names each root file (SPEC §10.2).
+nothing. Its `files` maps `files/src` to `src` and names each root file.

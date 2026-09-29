@@ -169,7 +169,7 @@ export function createWorkerHost(definition: AppDefinition | undefined, options:
           const routes = pikit.useKeyed("http.route");
           return {
             start(ctx) {
-              // Requests must not inherit the start's deadline (SPEC §4.7); each derives its own context.
+              // Requests must not inherit the start's deadline; each derives its own context.
               router = createRouter(routes, ctx.derive(() => BACKGROUND_CONTEXT));
             },
           };
