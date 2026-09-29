@@ -31,6 +31,12 @@ const INERT_API = new Set([
   "registerEntryRenderer",
   "registerMarkdownTransformer",
   "exec",
+  "unregisterProvider",
+  "getSettings",
+  "registerMcpServer",
+  "unregisterMcpServer",
+  "registerVirtualModel",
+  "unregisterVirtualModel",
 ]);
 /** `ctx.*` members that exist and do nothing in pikit. */
 const INERT_CONTEXT = new Set(["shutdown"]);

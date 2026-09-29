@@ -1,7 +1,10 @@
 /**
  * The part of Pi's extension API that pikit supports (SPEC §6.2b), vendored from
- * `@earendil-works/pi-coding-agent` 0.87.1 (`src/core/extensions/types.ts`; MIT, © Mario Zechner,
- * see NOTICE). An existing Pi extension imports these names from `@earendil-works/pi-coding-agent`;
+ * `@earendil-works/pi-coding-agent` (`src/core/extensions/types.ts`; MIT, © Mario Zechner, see
+ * NOTICE): first from 0.87.1, then checked against 0.99.0, from which the tool exposure types,
+ * `ExtensionToolContext` and the MCP server, virtual model and settings members of `ExtensionAPI`
+ * come. `bun scripts/pi-extension-drift.ts <tag>` lists what a Pi release has that this file
+ * lacks. An existing Pi extension imports these names from `@earendil-works/pi-coding-agent`;
  * the project aliases that package to `@pikit/pi-extension-shim`, which re-exports this file, so
  * the extension runs unmodified without the 19 MB coding agent.
  *
@@ -12,6 +15,8 @@
 
 import type {
   AgentMessage,
+  AgentTool,
+  AgentToolCallOutcome,
   AgentToolResult,
   AgentToolUpdateCallback,
   CustomMessage,
@@ -264,6 +269,89 @@ export interface ExtensionContext {
   shutdown(): void;
 }
 
+/** Options for {@link ExtensionToolContext.executeTool}. */
+export interface ExecuteToolOptions {
+  /** Defaults to the calling tool's signal. */
+  signal?: AbortSignal;
+  /** Receives partial results of the nested tool, in addition to `tool_execution_update` events. */
+  onUpdate?: AgentToolUpdateCallback;
+}
+
+/**
+ * What a tool's `execute()` receives: the extension context plus `executeTool()`, which in Pi runs
+ * another tool through the same validation and hooks as a model-issued call.
+ *
+ * pikit does not run nested tool calls: `tools` is empty, and `executeTool()` resolves to an
+ * `isError: true` outcome saying so. Like Pi's, it never rejects.
+ */
+export interface ExtensionToolContext extends ExtensionContext {
+  /** Tools {@link executeTool} can call: none in pikit. */
+  readonly tools: readonly AgentTool[];
+  executeTool(name: string, args: unknown, options?: ExecuteToolOptions): Promise<AgentToolCallOutcome>;
+}
+
+/**
+ * How the model reaches a tool. "Callable" means callable from other tools through
+ * `ctx.executeTool()`, as Pi's `codemode` tool does.
+ *
+ * - `direct`: declared to the model while active, and callable while active.
+ * - `model-only`: declared to the model while active, never callable.
+ * - `codemode`: callable whenever registered. Not declared to the model unless explicitly
+ *   activated. Codemode tools list it in their description.
+ * - `deferred`: like `codemode`, but codemode tools do not list it; tool search can find it.
+ * - `hidden`: registered but unreachable. Activating it has no effect.
+ *
+ * `direct` and `model-only` tools are activated when they are registered; the others are not.
+ * The active tool set (`getActiveTools`/`setActiveTools`) is the set declared to the model.
+ *
+ * In pikit, which has neither codemode nor tool search, `codemode` and `deferred` tools reach the
+ * model only when an extension activates them, and `hidden` tools are not given to the harness.
+ */
+export type ToolExposure = "direct" | "model-only" | "codemode" | "deferred" | "hidden";
+
+/**
+ * Hints about what a tool does, with the meaning of MCP tool annotations. They come from the tool's
+ * author and are not verified; permission extensions can use them to decide which calls to confirm.
+ */
+export interface ToolAnnotations {
+  /** The tool does not modify its environment. */
+  readOnlyHint?: boolean;
+  /** The tool may delete or overwrite data, rather than only add to it. Meaningful when not read-only. */
+  destructiveHint?: boolean;
+  /** Repeating a call with the same arguments has no further effect. Meaningful when not read-only. */
+  idempotentHint?: boolean;
+  /** The tool reaches an open world of external entities, such as the web, rather than a closed domain. */
+  openWorldHint?: boolean;
+}
+
+/** A group of related tools, such as the tools of one MCP server. Codemode tools list them together. */
+export interface ToolNamespace {
+  /** For example `mcp__docs`. */
+  name: string;
+  /** Shown once above the group's tools. */
+  description?: string;
+}
+
+/** The tools of a session as {@link ToolDefinition.prepareLoadout} sees them. */
+export interface ToolLoadout {
+  /** Tools declared to the model (the active tools), in order, with their original descriptions. */
+  readonly declared: readonly AgentTool[];
+  /** Tools callable through `ctx.executeTool()`. */
+  readonly callable: readonly AgentTool[];
+  /** Every registered tool. */
+  readonly registered: readonly AgentTool[];
+  getExposure(name: string): ToolExposure;
+  getNamespace(name: string): ToolNamespace | undefined;
+}
+
+/** Changes {@link ToolDefinition.prepareLoadout} makes to what the model sees. */
+export interface ToolLoadoutChanges {
+  /** Model-facing descriptions of declared tools, by tool name. */
+  descriptions?: Readonly<Record<string, string>>;
+  /** Declared tools whose declarations requests leave out. They stay active and callable. */
+  hiddenDeclarations?: readonly string[];
+}
+
 export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown, TState = unknown> {
   name: string;
   label: string;
@@ -272,12 +360,28 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
   promptGuidelines?: string[];
   parameters: TParams;
   prepareArguments?: (args: unknown) => Static<TParams>;
+  /** JSON Schema of `structuredContent` in successful results. Given to the harness as is. */
+  outputSchema?: TSchema;
+  /** How the model reaches the tool. Default: `"direct"`. See {@link ToolExposure}. */
+  exposure?: ToolExposure;
+  /** Group the tool belongs to, for example its MCP server. Reported by `pi.getAllTools()`. */
+  namespace?: ToolNamespace;
+  /** Hints about what the tool does. Reported by `pi.getAllTools()`. */
+  annotations?: ToolAnnotations;
+  /**
+   * Whether registering the tool activates it. Default: `true` for `direct` and `model-only` tools;
+   * other exposures are never activated on registration. A tool with `defaultActive: false` is
+   * activated with `setActiveTools()`.
+   */
+  defaultActive?: boolean;
+  /** For tools that orchestrate other tools (codemode, tool search): ignored by pikit, which has none. */
+  prepareLoadout?: (loadout: ToolLoadout) => ToolLoadoutChanges | undefined;
   execute(
     toolCallId: string,
     params: Static<TParams>,
     signal: AbortSignal | undefined,
     onUpdate: AgentToolUpdateCallback<TDetails> | undefined,
-    ctx: ExtensionContext,
+    ctx: ExtensionToolContext,
   ): Promise<AgentToolResult<TDetails>>;
   /** TUI rendering: ignored by pikit. */
   renderCall?: unknown;
@@ -319,6 +423,18 @@ export interface EventBus {
 export interface ToolInfo {
   name: string;
   description: string;
+  exposure: ToolExposure;
+  namespace?: ToolNamespace;
+  annotations?: ToolAnnotations;
+}
+
+/** An MCP server an extension registered. None in pikit: see `pi.registerMcpServer()`. */
+export interface RegisteredMcpServer {
+  name: string;
+  /** An `mcpServers` entry of Pi's `mcp.json`. */
+  config: unknown;
+  /** Path of the extension that registered the server. */
+  extensionPath: string;
 }
 
 // ----------------------------------------------------------------------------------------------
@@ -370,14 +486,22 @@ export interface ExtensionAPI {
   setLabel(entryId: string, label: string | undefined): void;
   /** Needs a shell (`execution.shell`), which pikit does not wire yet: it rejects. */
   exec(command: string, args: string[], options?: ExecOptions): Promise<ExecResult>;
+  /** The names of the active tools, which are the tools declared to the model. */
   getActiveTools(): string[];
+  /** The extensions' tools, `hidden` ones included. */
   getAllTools(): ToolInfo[];
+  /** Set the active tools by name. Unknown and `hidden` tools are ignored. */
   setActiveTools(toolNames: string[]): void;
   setModel(model: Model<Api>): Promise<boolean>;
   getThinkingLevel(): ThinkingLevel;
   setThinkingLevel(level: ThinkingLevel): void;
   /** A pi-ai provider object. Registered for every conversation of the runtime. */
   registerProvider(provider: Provider): void;
+  /**
+   * No-op in pikit: a provider is shared by every conversation of the runtime, and pikit cannot
+   * restore the one it replaced.
+   */
+  unregisterProvider(name: string): void;
   events: EventBus;
 
   /** Tier B/C, no-ops in pikit: slash commands, shortcuts, flags, renderers. */
@@ -388,6 +512,26 @@ export interface ExtensionAPI {
   registerMessageRenderer(customType: string, renderer: unknown): void;
   registerEntryRenderer(customType: string, renderer: unknown): void;
   registerMarkdownTransformer(transformer: unknown): void;
+  /** The slash commands: none in pikit, where `registerCommand` is a no-op. */
+  getCommands(): { name: string; description?: string }[];
+  /**
+   * Pi's settings (`settings.json`). pikit has none: an empty object, where every setting reads as
+   * unset, so an extension takes Pi's default for it. The conversation's own model and thinking
+   * level are `ctx.model` and `pi.getThinkingLevel()`.
+   */
+  // biome-ignore lint/suspicious/noExplicitAny: Pi's `Settings`, of which pikit has no field
+  getSettings(): { [setting: string]: any };
+
+  /** No-op in pikit, which connects MCP servers with its `tool-mcp` component. */
+  registerMcpServer(name: string, config: unknown): void;
+  /** No-op in pikit. */
+  unregisterMcpServer(name: string): void;
+  /** The MCP servers extensions registered: none in pikit. */
+  getMcpServers(): RegisteredMcpServer[];
+  /** No-op in pikit, which has no virtual models. */
+  registerVirtualModel<TState = unknown>(model: unknown): void;
+  /** No-op in pikit. */
+  unregisterVirtualModel(provider: string, id: string): void;
 }
 
 /** A Pi extension: the default export of an extension module. */

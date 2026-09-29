@@ -9,7 +9,7 @@ import { describe, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type AgentHarnessTool, BACKGROUND_CONTEXT, JsonlSessionRepo, MemorySessionRepo } from "@earendil-works/pi-agent-core";
+import { type AgentHarnessTool, type AgentToolCallOutcome, BACKGROUND_CONTEXT, JsonlSessionRepo, MemorySessionRepo } from "@earendil-works/pi-agent-core";
 import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { type Message, Type } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall, type FauxResponseFactory } from "@earendil-works/pi-ai/providers/faux";
@@ -17,7 +17,8 @@ import { type AppEvents, defineApp, defineComponent, type Logger, silentLogger }
 import { type AgentDefinition, defineAgent } from "@pikit/contracts";
 import { createPiRuntime, type ExtensionAPI, modelsFrom, type PiExtension, type SessionStore } from "../index.ts";
 import { holdTool, killMidRun, scriptedAgent, scriptedProvider } from "../testing/index.ts";
-import { TOOL_POLICY_FAILED } from "./host.ts";
+import { NESTED_CALLS_UNSUPPORTED, TOOL_POLICY_FAILED } from "./host.ts";
+import type { ToolDefinition } from "./api.ts";
 import hello from "./pi-examples/hello.ts";
 import permissionGate from "./pi-examples/permission-gate.ts";
 import protectedPaths from "./pi-examples/protected-paths.ts";
@@ -33,8 +34,9 @@ function textOf(message: Message | undefined): string {
 }
 
 /**
- * A model that calls tools on request: `bash: <command>`, `write: <path>`, `hello: <name>`. After a
- * tool it says `tool said: <result>`; otherwise `answer: <message>`.
+ * A model that calls tools on request: `bash: <command>`, `write: <path>`, `hello: <name>`, and
+ * `call <tool>` with no arguments. After a tool it says `tool said: <result>`; otherwise
+ * `answer: <message>`.
  */
 function toolCallingProvider(requests: ModelRequest[]) {
   const faux = fauxProvider({ provider: "compat", models: [{ id: "tools" }] });
@@ -49,6 +51,8 @@ function toolCallingProvider(requests: ModelRequest[]) {
       return fauxAssistantMessage(fauxToolCall("write", { path: argument, content: "x" }), { stopReason: "toolUse" });
     }
     if (tool === "hello") return fauxAssistantMessage(fauxToolCall("hello", { name: argument }), { stopReason: "toolUse" });
+    const [, called] = /^call ([\w-]+)$/.exec(said) ?? [];
+    if (called !== undefined) return fauxAssistantMessage(fauxToolCall(called, {}), { stopReason: "toolUse" });
     return fauxAssistantMessage(`answer: ${said}`);
   };
   faux.setResponses(Array.from({ length: 200 }, () => step));
@@ -317,6 +321,35 @@ describe("the mapping of Pi's extension events (SPEC §6.2b)", () => {
     await s.close();
   });
 
+  test("Pi 0.99's MCP server, virtual model, settings and command members load, answer neutrally and warn once", async () => {
+    const warnings: { what: unknown; detail: unknown }[] = [];
+    const logger: Logger = { ...silentLogger, warn: (_message, fields) => void warnings.push({ what: fields?.what, detail: fields?.detail }) };
+    const answers: unknown[] = [];
+    const modern: PiExtension = (pi) => {
+      pi.registerMcpServer("jira", { url: "https://mcp.example.com/jira" });
+      pi.registerMcpServer("jira", { url: "https://mcp.example.com/jira" });
+      pi.unregisterMcpServer("jira");
+      pi.registerVirtualModel({ provider: "router", id: "auto", route: () => ({}) });
+      pi.unregisterVirtualModel("router", "auto");
+      pi.unregisterProvider("proxy");
+      answers.push(pi.getMcpServers(), pi.getCommands(), pi.getSettings(), pi.getSettings().defaultModel);
+    };
+    const s = await setup([modern], { logger });
+
+    expect((await s.say("hi")).text).toBe("answer: hi");
+    expect(answers).toEqual([[], [], {}, undefined]);
+    expect(warnings.map((warning) => warning.what)).toEqual([
+      'pi.registerMcpServer("jira")',
+      'pi.unregisterMcpServer("jira")',
+      "pi.registerVirtualModel",
+      "pi.unregisterVirtualModel",
+      'pi.unregisterProvider("proxy")',
+      "pi.getSettings",
+    ]);
+    expect(String(warnings[0]?.detail)).toContain("tool-mcp");
+    await s.close();
+  });
+
   test("actions are not available while an extension loads", async () => {
     let failure: unknown;
     const eager: PiExtension = (pi) => {
@@ -332,6 +365,133 @@ describe("the mapping of Pi's extension events (SPEC §6.2b)", () => {
 
     expect(String(failure)).toContain("not available while an extension loads");
     await s.close();
+  });
+});
+
+describe("Pi 0.99's tool exposure: what reaches the model (SPEC \u00a76.2b)", () => {
+  const NONE = Type.Object({});
+
+  /** A tool that says it ran, with `fields` over it. */
+  function tool(name: string, fields: Partial<ToolDefinition> = {}): ToolDefinition {
+    return {
+      name,
+      label: name,
+      description: `The ${name} tool`,
+      parameters: NONE,
+      execute: async () => ({ content: [{ type: "text", text: `${name} ran` }], details: undefined }),
+      ...fields,
+    };
+  }
+
+  /** The tools a model request declares: its system messages add and remove them, in order. */
+  function declared(request: ModelRequest | undefined): string[] {
+    let tools: string[] = [];
+    for (const message of request?.messages ?? []) {
+      if (message.role !== "system") continue;
+      const removed = new Set((message.toolsRemoved ?? []).map(({ name }) => name));
+      tools = [...tools.filter((name) => !removed.has(name)), ...(message.toolsAdded ?? []).map(({ name }) => name)];
+    }
+    return tools;
+  }
+
+  test("direct and model-only tools are declared; codemode, deferred, defaultActive: false and hidden ones are not", async () => {
+    const warnings: unknown[] = [];
+    const hidden: unknown[] = [];
+    const logger: Logger = {
+      ...silentLogger,
+      warn: (_message, fields) => void warnings.push(fields?.what),
+      info: (_message, fields) => void hidden.push(fields?.tool),
+    };
+    const tools: PiExtension = (pi) => {
+      pi.registerTool(tool("plain"));
+      pi.registerTool(tool("asker", { exposure: "model-only" }));
+      pi.registerTool(tool("scripted", { exposure: "codemode" }));
+      pi.registerTool(tool("searched", { exposure: "deferred" }));
+      pi.registerTool(tool("optional", { defaultActive: false }));
+      pi.registerTool(tool("secret", { exposure: "hidden" }));
+    };
+    const s = await setup([tools], { logger });
+
+    await s.say("one");
+    const once = [...warnings];
+    // Reopened for the second message: the lane keeps the set it was given.
+    await s.say("two");
+    await s.close();
+
+    expect(declared(s.requests[0])).toEqual(["bash", "write", "plain", "asker"]);
+    expect(declared(s.requests[1])).toEqual(["bash", "write", "plain", "asker"]);
+    expect(once).toEqual(['exposure "codemode" (tool "scripted")', 'exposure "deferred" (tool "searched")']);
+    expect(hidden).toEqual(["secret", "secret"]);
+  });
+
+  test("an extension activates them; unknown and hidden names are ignored; the lane keeps them after a reopen", async () => {
+    let all: ReturnType<ExtensionAPI["getAllTools"]> = [];
+    const loader: PiExtension = (pi) => {
+      pi.registerTool(
+        tool("loader", {
+          execute: async () => {
+            pi.setActiveTools([...pi.getActiveTools(), "scripted", "optional", "secret", "nowhere"]);
+            all = pi.getAllTools();
+            return { content: [{ type: "text", text: "loaded" }], details: undefined };
+          },
+        }),
+      );
+      pi.registerTool(tool("scripted", { exposure: "codemode", annotations: { readOnlyHint: true } }));
+      pi.registerTool(tool("optional", { defaultActive: false }));
+      pi.registerTool(tool("secret", { exposure: "hidden" }));
+    };
+    const s = await setup([loader]);
+
+    expect((await s.say("call loader")).text).toBe("tool said: loaded");
+    expect((await s.say("call scripted")).text).toBe("tool said: scripted ran");
+    await s.close();
+
+    expect(declared(s.requests[0])).toEqual(["bash", "write", "loader"]);
+    expect(declared(s.requests.at(-1))).toEqual(["bash", "write", "loader", "scripted", "optional"]);
+    expect(all.map(({ name, exposure }) => `${name}:${exposure}`)).toEqual(["loader:direct", "scripted:codemode", "optional:direct", "secret:hidden"]);
+    expect(all.find(({ name }) => name === "scripted")?.annotations).toEqual({ readOnlyHint: true });
+  });
+
+  test("registering a name again replaces the tool: registered again as hidden, it is withdrawn", async () => {
+    const withdrawn: PiExtension = (pi) => {
+      pi.registerTool(tool("gone"));
+      pi.registerTool(tool("gone", { exposure: "hidden" }));
+    };
+    const s = await setup([withdrawn]);
+
+    expect((await s.say("hi")).text).toBe("answer: hi");
+    await s.close();
+
+    expect(declared(s.requests[0])).toEqual(["bash", "write"]);
+  });
+
+  test("ctx.executeTool() never rejects: pikit runs no nested call, and says so in an error outcome", async () => {
+    const warnings: unknown[] = [];
+    const logger: Logger = { ...silentLogger, warn: (_message, fields) => void warnings.push(fields?.what) };
+    let outcome: AgentToolCallOutcome | undefined;
+    let callable: unknown;
+    const nester: PiExtension = (pi) =>
+      pi.registerTool(
+        tool("nester", {
+          execute: async (_toolCallId, _params, _signal, _onUpdate, ctx) => {
+            callable = ctx.tools;
+            outcome = await ctx.executeTool("bash", { command: "rm -rf /" });
+            return { content: outcome.result.content, details: undefined };
+          },
+        }),
+      );
+    const s = await setup([nester], { logger });
+
+    const result = await s.say("call nester");
+    await s.close();
+
+    expect(s.ran).toEqual([]);
+    expect(callable).toEqual([]);
+    expect(outcome?.isError).toBe(true);
+    expect(outcome?.toolCall).toMatchObject({ type: "toolCall", name: "bash", arguments: { command: "rm -rf /" } });
+    expect(outcome?.toolCall.id).toEndWith("/1");
+    expect(result.text).toContain(NESTED_CALLS_UNSUPPORTED);
+    expect(warnings).toEqual(["ctx.executeTool"]);
   });
 });
 
