@@ -10,12 +10,13 @@ line names its area (AGENTS.md, "Git and docs").
   handler for `type` resolved), and rejects otherwise, with an error naming the type when nothing
   handles it. The handler gets a copy and a context of its own. Its conformance suite and a memory
   mailbox for tests are in `@pikit/contracts/testing`.
-- contracts: `wakeups` and the keyed `wakeup` (experimental, SPEC C3, C4): `at(name, time, ctx)` runs
-  the handler `name` at or after `time`, replacing its earlier request; `cancel(name, ctx)` drops it.
-  At least once, never early, one run per name at a time; a handler that rejects runs again with the
-  provider's backoff, and its context may be cancelled at a slice deadline, after which it asks again.
-  Its conformance suite (on a manual clock) and a memory wakeups for tests are in
-  `@pikit/contracts/testing`.
+- contracts: `wakeups` (experimental, SPEC C3, C4): the component that owns the work registers a
+  handler with `handle(name, handler)` in its `start` (one owner per name, dropped at stop) and asks
+  with `at(name, time, ctx)`, replacing its earlier request; `cancel(name, ctx)` drops it. A request
+  may come before its handler and waits for it. At least once, never early, one run per name at a
+  time; a handler that rejects runs again with the provider's backoff, and its context may be
+  cancelled at a slice deadline, after which it asks again. Its conformance suite (on a manual clock)
+  and a memory wakeups for tests, forgetful or durable, are in `@pikit/contracts/testing`.
 - component/mailbox-local: new. `actor.mailbox` on a server: `send` calls the same app's
   `actor.inbox` handler for the type with a JSON copy and resolves when it does; `stop` cancels the
   handlers still running. Targets `server`. `mailbox` is a new component kind.

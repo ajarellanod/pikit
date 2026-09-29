@@ -117,7 +117,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "Timers: run a named wakeup handler at or after a time, at least once, retried with backoff when it fails.",
+    summary: "Timers: a component registers a named handler and asks for it to run at or after a time, at least once, retried with backoff.",
   },
   "sessions.store": {
     mode: "single",
@@ -174,12 +174,6 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/contracts",
     stability: "experimental",
     summary: "One handler per message type an actor receives through actor.mailbox; it resolves once the message is durable.",
-  },
-  wakeup: {
-    mode: "keyed",
-    definedIn: "@pikit/contracts",
-    stability: "experimental",
-    summary: "One handler per name that wakeups runs when its time comes; named after the component providing it.",
   },
   "model.provider": {
     mode: "keyed",

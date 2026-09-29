@@ -11,9 +11,8 @@
  * a slice deadline (`sliceMs`) and requests that survive a restart (`durable`): the cases that need
  * them run only when the options say the provider has them.
  *
- * A handler that asks again for its own name needs `wakeups`, and a component cannot both provide a
- * `wakeup` handler and use `wakeups` (a dependency cycle, see `wakeups.ts`). So the suite installs two
- * components of one module: one provides the handlers, the other uses `wakeups` and hands it to them.
+ * The suite's handlers belong to one component that uses `wakeups`, registers them in its `start` and
+ * asks for them, as a component that owns its work does: no dependency cycle.
  *
  * `createMemoryWakeups` is the in-memory double: it passes this suite, and it stands in for a provider
  * in the tests of a component that wakes.
@@ -32,7 +31,7 @@ import {
   withCancel,
 } from "@pikit/core";
 import { type ConformanceCase, createManualClock, type ManualClock } from "@pikit/core/testing";
-import type { Wakeups } from "../wakeups.ts";
+import type { WakeupHandler, Wakeups } from "../wakeups.ts";
 import { checker, expecter } from "./assert.ts";
 
 /** A provider over fresh, empty requests, built for one case. */
@@ -61,9 +60,12 @@ const expect = expecter(GROUP);
 const check = checker(GROUP);
 
 const HOUR = 60 * 60 * 1_000;
-/** The handlers the suite provides. */
+/** The handlers the suite registers at start. */
 const A = "conformance.a";
 const B = "conformance.b";
+/** Names the suite registers late, or never. */
+const LATE = "conformance.late";
+const NEVER = "conformance.never";
 
 interface Run {
   name: string;
@@ -163,13 +165,57 @@ export function createWakeupsConformance(
       );
     }),
 
-    wakeupsCase("at rejects, recording nothing, for a name no handler has (naming it) or a time that is not finite", async (s) => {
-      const error = await rejection(s.at("conformance.nobody-handles-this", 0));
-      check(error instanceof Error && error.message.includes("conformance.nobody-handles-this"), `an error naming the handler, got ${String(error)}`);
+    wakeupsCase("at rejects, recording nothing, a time that is not finite or an empty name", async (s) => {
       check((await rejection(s.wakeups().at(A, Number.NaN, s.ctx()))) !== undefined, "at with NaN to reject");
       check((await rejection(s.wakeups().at(A, Number.POSITIVE_INFINITY, s.ctx()))) !== undefined, "at with Infinity to reject");
+      check((await rejection(s.wakeups().at("", 0, s.ctx()))) !== undefined, "at with an empty name to reject");
       await s.advance(HOUR);
       expect(s.runs, [], "runs");
+    }),
+
+    wakeupsCase("a name has one handler: registering it again throws, naming it; an empty name throws", async (s) => {
+      let error: unknown;
+      try {
+        s.wakeups().handle(A, async () => {});
+      } catch (thrown) {
+        error = thrown;
+      }
+      check(error instanceof Error && error.message.includes(A), `an error naming "${A}", got ${String(error)}`);
+      let empty: unknown;
+      try {
+        s.wakeups().handle("", async () => {});
+      } catch (thrown) {
+        empty = thrown;
+      }
+      check(empty !== undefined, "handle with an empty name to throw");
+      await s.at(A, 0);
+      await s.advance(0);
+      expect(s.times(A), [0], "runs of the first handler");
+    }),
+
+    wakeupsCase("a request for a name nobody handles yet waits, is never dropped, and runs once its handler is registered", async (s) => {
+      await s.at(LATE, 1_000);
+      await s.at(NEVER, 1_000);
+      await s.wakeups().cancel(NEVER, s.ctx());
+      await s.advance(HOUR);
+      expect(s.runs, [], "runs with no handler");
+      s.handle(LATE);
+      s.handle(NEVER);
+      await s.advance(0);
+      expect(
+        s.runs.map((r) => [r.name, r.at]),
+        [[LATE, HOUR]],
+        "runs once the handlers are registered",
+      );
+      await s.advance(HOUR);
+      expect(s.runs.length, 1, "runs an hour later");
+    }),
+
+    wakeupsCase("handlers are dropped when the app stops: a new app registers the same names again", async (s) => {
+      await s.restart();
+      await s.at(A, s.now());
+      await s.advance(0);
+      expect(s.times(A), [s.now()], "runs in the new app");
     }),
 
     wakeupsCase("a handler that rejects runs again after each declared wait until it resolves, and a success resets the count", async (s) => {
@@ -315,11 +361,16 @@ export function createWakeupsConformance(
 
   if (options.durable) {
     cases.push(
-      wakeupsCase("a request survives a restart and runs in the new process", async (s) => {
+      wakeupsCase("a request survives a restart, and one due before its handler is registered again runs once it is", async (s) => {
         await s.at(A, 1_000);
-        await s.restart();
-        await s.advance(1_000);
-        expect(s.times(A), [1_000], "runs after the restart");
+        await s.at(B, 5_000);
+        await s.stop();
+        await s.advance(2_000);
+        await s.open();
+        await s.advance(0);
+        expect(s.times(A), [2_000], "the request that came due while no app ran");
+        await s.advance(3_000);
+        expect(s.times(B), [5_000], "the request due after the restart");
       }),
     );
   }
@@ -337,6 +388,8 @@ interface Subject {
   wakeups(): Wakeups;
   /** An app context, over `parent` when given. */
   ctx(parent?: Context): AppContext;
+  /** Registers the suite's recording handler for `name`, as the owner does at start for A and B. */
+  handle(name: string): void;
   /** Asks for `name` at `offset` ms after the case began. */
   at(name: string, offset: number): Promise<void>;
   /** Now, in ms after the case began. */
@@ -358,24 +411,25 @@ function createSubject(fixture: WakeupsFixture): Subject {
   let app: App | undefined;
   let wakeups: Wakeups | undefined;
 
-  // Two components of one module: the handlers, and the one using `wakeups` that hands it to them.
-  const handler = (name: string) => async (ctx: AppContext) => {
-    const run = { name, at: clock.now() - start, ctx };
-    runs.push(run);
-    await (behaviours.get(name) ?? (async () => {}))(run);
-  };
-  const handlers = defineComponent({
-    name: "wakeups-conformance-handlers",
-    setup(pikit) {
-      pikit.provideKeyed("wakeup", A, handler(A));
-      pikit.provideKeyed("wakeup", B, handler(B));
-    },
-  });
-  const client = defineComponent({
-    name: "wakeups-conformance-client",
+  const handler =
+    (name: string): WakeupHandler =>
+    async (ctx) => {
+      const run = { name, at: clock.now() - start, ctx };
+      runs.push(run);
+      await (behaviours.get(name) ?? (async () => {}))(run);
+    };
+  // One component owns the work: it uses `wakeups`, registers its handlers at start, and asks.
+  const owner = defineComponent({
+    name: "wakeups-conformance-owner",
     setup(pikit) {
       const handle = pikit.use("wakeups");
-      return { start: () => void (wakeups = handle.get()) };
+      return {
+        start() {
+          wakeups = handle.get();
+          wakeups.handle(A, handler(A));
+          wakeups.handle(B, handler(B));
+        },
+      };
     },
   });
 
@@ -391,13 +445,14 @@ function createSubject(fixture: WakeupsFixture): Subject {
       if (app === undefined) throw new Error(`${GROUP}: no app is running`);
       return app.context(parent);
     },
+    handle: (name) => subject.wakeups().handle(name, handler(name)),
     at: (name, offset) => subject.wakeups().at(name, start + offset, subject.ctx()),
     now: () => clock.now() - start,
     advance: (ms) => clock.advance(ms),
     async open() {
       wakeups = undefined;
       app = await defineApp({
-        components: [handlers, ...fixture.components, client],
+        components: [...fixture.components, owner],
         ...(fixture.config !== undefined && { config: fixture.config }),
         logger: silentLogger,
         clock,
@@ -421,16 +476,20 @@ function createSubject(fixture: WakeupsFixture): Subject {
 /**
  * `wakeups` in memory, for tests: requests live as long as the app, and run on the app's clock (a
  * manual clock's `advance` runs what comes due). A handler that rejects runs again after `retryMs`
- * (1 s by default), every time. It has no slice deadline, and nothing survives a restart.
+ * (1 s by default), every time. It has no slice deadline. With `durable`, its requests outlive each
+ * app, for the next app created from the same component, as a durable provider's rows do: what a
+ * component that restarts must cope with. Its loop sleeps a second at most, so a stopped app leaves no
+ * timer longer than that.
  */
-export function createMemoryWakeups(options: { retryMs?: number } = {}): ComponentDefinition {
+export function createMemoryWakeups(options: { retryMs?: number; durable?: boolean } = {}): ComponentDefinition {
   const retryMs = options.retryMs ?? 1_000;
+  const kept = options.durable ? new Map<string, number>() : undefined;
   return defineComponent({
     name: "memory-wakeups",
     setup(pikit) {
-      const handlers = pikit.useKeyed("wakeup");
+      const handlers = new Map<string, WakeupHandler>();
       const clock = pikit.clock;
-      const requests = new Map<string, number>();
+      const requests = kept ?? new Map<string, number>();
       /** The runs in progress, by name; `touched` once `at` or `cancel` was called during the run. */
       const runs = new Map<string, { touched: boolean; done: Promise<void> }>();
       let stopping: AbortController | undefined;
@@ -448,7 +507,7 @@ export function createMemoryWakeups(options: { retryMs?: number } = {}): Compone
         const run = { touched: false, done: Promise.resolve() };
         runs.set(name, run);
         run.done = Promise.resolve()
-          .then(() => (handlers.get(name) as (ctx: AppContext) => Promise<void>)(ctx))
+          .then(() => (handlers.get(name) as WakeupHandler)(ctx))
           .then(
             () => {},
             () => {
@@ -465,8 +524,14 @@ export function createMemoryWakeups(options: { retryMs?: number } = {}): Compone
       };
 
       pikit.provide("wakeups", {
+        handle(name, handler) {
+          if (name === "") throw new TypeError("memory-wakeups: a wakeup's name is a non-empty string");
+          if (handlers.has(name)) throw new Error(`memory-wakeups: "${name}" already has a handler`);
+          handlers.set(name, handler);
+          kick();
+        },
         async at(name, time) {
-          if (handlers.get(name) === undefined) throw new Error(`memory-wakeups: no "wakeup" handler is named "${name}"`);
+          if (name === "") throw new TypeError("memory-wakeups: a wakeup's name is a non-empty string");
           if (!Number.isFinite(time)) throw new TypeError(`memory-wakeups: the time for "${name}" must be a finite number, got ${time}`);
           requests.set(name, time);
           const run = runs.get(name);
@@ -493,7 +558,7 @@ export function createMemoryWakeups(options: { retryMs?: number } = {}): Compone
               const now = clock.now();
               let next = now + 1_000;
               for (const [name, time] of requests) {
-                if (runs.has(name)) continue;
+                if (runs.has(name) || !handlers.has(name)) continue; // waits for its run to end, or its handler
                 if (time <= now) begin(name, running);
                 else next = Math.min(next, time);
               }
@@ -506,6 +571,7 @@ export function createMemoryWakeups(options: { retryMs?: number } = {}): Compone
           kick();
           await loop;
           await Promise.all([...runs.values()].map((run) => run.done));
+          handlers.clear();
         },
       };
     },

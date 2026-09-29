@@ -18,9 +18,11 @@
  * and a handler recognises a message it already holds (by an id inside the message: Telegram's
  * `update_id`, an HTTP `messageId`).
  *
- * The mailbox's provider depends on every inbox handler (it calls them), so one component cannot both
- * provide an `actor.inbox` handler and use `actor.mailbox` (a dependency cycle): a channel's ingress
- * half sends and its actor half handles, as C1 splits them.
+ * `actor.inbox` stays a keyed capability, although the mailbox's provider then depends on every
+ * handler it calls: C1 splits each channel into a Worker half that sends and an object half that
+ * handles, two components, so none both provides a handler and uses `actor.mailbox` and there is no
+ * dependency cycle. (`wakeups` registers its handlers with `handle` instead, because there the
+ * component that handles is the one that asks.)
  *
  * Pi first: one Pi process runs a session; which process or object runs which conversation, and how
  * a message gets there, is what pikit adds (P1).
