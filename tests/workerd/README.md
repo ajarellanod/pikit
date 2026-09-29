@@ -23,6 +23,7 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | `test/execution-do.workerd.ts` | Pi's `ExecutionEnv` suite on `execution-do`; Pi's own `write`, `read`, `edit` and `bash` tools on it through the `tool-*` components; the shell, `node` in QuickJS and its budget, the `.git` fence, and `git` clone, commit and push against a fake GitHub |
 | `test/platform-cloudflare.workerd.ts` | `wakeups` on `platform-cloudflare` over a real object's SQL (the alarm simulated on the suite's clock); `actor.mailbox` and `actor.inbox` from the Worker's App by real RPC to deployment-cloudflare's `Conversation` class (`PlatformConversation`); on that class, the real alarm (set, fired, after an eviction), the slice, the backoff, a request waiting for its handler, an object's own mailbox |
 | `test/runtime-pi.workerd.ts` | `runtime-pi` in a `PlatformConversation` object's App (sessions on `sessions-sql` over `storage-do`, `platform-cloudflare`'s `actor.inbox` and `wakeups`, an actor that handles and wakes): a message sent from the Worker's App by RPC is answered by a run driven in the object's alarm |
+| `test/tool-mcp.workerd.ts` | `@pikit/pi-adapter/mcp`'s transport on workerd's real `fetch` (JSON and server-sent event answers), and Pi's gap it closes (pi-mcp's own transport fails with "Illegal invocation"); `tool-mcp` in an App: tools described at start, calls, a reported failure, a forgotten session, a secret token |
 
 Each case of a storage suite runs in a Durable Object of its own (`runInDurableObject` on a new id),
 and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint
@@ -34,7 +35,9 @@ A worker killed mid-run cannot be a killed process here: `runtime-pi`'s suite le
 the object instead, an app never stopped whose tool never returns (`interruptInProcess`, from
 `@pikit/pi-adapter/testing/neutral`, the part of the adapter's test kit that runs in workerd). What
 the next worker finds is what a reset object leaves. `git` reaches a fake GitHub through `fetch`,
-which the test puts in place of the global one: the lane never touches the network.
+which the test puts in place of the global one: the lane never touches the network. The MCP tests
+keep workerd's own `fetch` (the point of them): `vitest.config.ts` makes `test/mcp-outbound.ts`
+workerd's outbound service, where fake MCP servers answer in Node and any other address is refused.
 
 `platform-cloudflare`'s tests run on deployment-cloudflare's real `Conversation` class, a second time
 (`PlatformConversation`, bound as `PLATFORM_CONVERSATION`, platform-cloudflare's `binding` in those
@@ -78,6 +81,10 @@ storage-do, sessions-sql, runtime-pi, execution-do and Pi's four tools. Measured
 execution-do adds about 786 KiB gzip: just-bash, isomorphic-git and QuickJS's WebAssembly (503 KB,
 226 KiB gzip). The budget is 10 MB compressed (SPEC §4). `wrangler.jsonc` carries the rule that
 bundles that WebAssembly as a compiled module (execution-do's README, "On Cloudflare").
+
+`tool-mcp` added to `src/bundle.ts` adds 48 KiB, 11 KiB gzip (measured the same day, then taken out):
+Pi's MCP client and its HTTP transport; its stdio transport and OAuth callback server are tree-shaken
+away, so the bundle gains no Node module.
 
 ## Adding a suite
 
