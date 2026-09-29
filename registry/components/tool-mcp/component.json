@@ -21,7 +21,8 @@
     "agent.tool"
   ],
   "hooks": {
-    "doctor": "doctor.ts"
+    "doctor": "doctor.ts",
+    "beforeDeploy": "deploy.ts"
   },
   "dependencies": {
     "@pikit/contracts": "0.0.0",
