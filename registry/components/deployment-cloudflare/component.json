@@ -17,6 +17,9 @@
   "dependencies": {
     "@pikit/contracts": "0.0.0"
   },
+  "devDependencies": {
+    "wrangler": "4.143.0"
+  },
   "files": [
     {
       "source": "files/src",

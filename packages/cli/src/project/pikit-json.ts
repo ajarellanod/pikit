@@ -3,7 +3,7 @@
  * registry, at which version and commit, and the hash of every file each one wrote.
  *
  * It is the install record, so it keeps what `pikit remove` and `pikit doctor` need later without
- * the registry at hand: the npm dependencies and environment variables the component declared when
+ * the registry at hand: the npm (dev) dependencies and environment variables the component declared when
  * it was installed. Whether a file is modified is not stored: it is computed by comparing its hash,
  * so it can never go stale.
  *
@@ -30,6 +30,8 @@ export interface InstalledComponent {
   files: Record<string, { hash: string }>;
   /** The npm packages its manifest declared (package → version). */
   dependencies: Record<string, string>;
+  /** The npm dev dependencies its manifest declared (package → version); absent when it declared none. */
+  devDependencies?: Record<string, string>;
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
   /**

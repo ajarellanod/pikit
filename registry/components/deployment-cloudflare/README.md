@@ -11,8 +11,10 @@ objects running the project's two Apps, `wrangler.jsonc`, and the commands
 - **Target:** `cloudflare`. Only `entrypoint.ts` imports `cloudflare:workers`; only `commands.ts`,
   which runs on your machine, imports `node:*`.
 - **Installs to:** `src/pikit/deployment-cloudflare/`, plus `wrangler.jsonc` at the project's root.
-- **npm dependencies:** `@pikit/contracts`. The project's `wrangler` (a dev dependency that
-  `pikit new --target cloudflare` adds), which runs on Node ≥ 22.
+- **npm dependencies:** `@pikit/contracts`; and `wrangler` 4.143.0 as a dev dependency
+  (`component.json`'s `devDependencies`): `pikit add` puts it in the project's `package.json`
+  devDependencies and `pikit remove` takes it out, like any dependency. Its commands and tests run
+  that project's own wrangler, which runs on Node ≥ 22.
 - **Environment:** none of its own. `.env` holds the app's secrets: `pikit up` uploads them with each
   version, and `pikit dev` gives them to the local Worker.
 
@@ -204,4 +206,5 @@ alarm reaching their handlers, an evicted object starting again, and a failed st
 `channel-telegram-webhook`'s fake Telegram: its webhook registered only once the new version answers.
 
 `component.json` is generated, not written by hand. With no `setup`, it provides and requires
-nothing. Its `files` maps `files/src` to `src` and names `wrangler.jsonc` (SPEC §10.2).
+nothing. Its `files` maps `files/src` to `src` and names `wrangler.jsonc`; its `devDependencies`,
+written by hand, name `wrangler` (SPEC §10.2).

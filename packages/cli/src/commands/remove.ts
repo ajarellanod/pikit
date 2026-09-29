@@ -82,7 +82,10 @@ export async function remove(projectDir: string, name: string, options: RemoveOp
   removeEmptyParents(projectDir, BASES_DIR);
 
   const pkg = readPackageJson(projectDir);
-  const removed = removeDependencies(pkg, unneededDependencies(projectDir, project, installed.dependencies));
+  const removed = [
+    ...removeDependencies(pkg, unneededDependencies(projectDir, project, installed.dependencies)),
+    ...removeDependencies(pkg, unneededDependencies(projectDir, project, installed.devDependencies ?? {}), "devDependencies"),
+  ];
   if (removed.length > 0) {
     writePackageJson(projectDir, pkg);
     await bunInstall(projectDir);
@@ -174,11 +177,12 @@ function installedName(project: ProjectManifest, component: string): string {
 }
 
 /**
- * The component's npm packages that nothing else needs: no remaining component declares it, no
- * source file of the project imports it, and it is not the kit.
+ * The component's npm packages (dependencies or dev dependencies) that nothing else needs: no
+ * remaining component declares it, as either, no source file of the project imports it, and it is
+ * not the kit.
  */
-function unneededDependencies(projectDir: string, project: ProjectManifest, declared: Record<string, string>): string[] {
-  const needed = new Set(Object.values(project.components).flatMap((c) => Object.keys(c.dependencies)));
+export function unneededDependencies(projectDir: string, project: ProjectManifest, declared: Record<string, string>): string[] {
+  const needed = new Set(Object.values(project.components).flatMap((c) => [...Object.keys(c.dependencies), ...Object.keys(c.devDependencies ?? {})]));
   for (const file of projectSources(projectDir)) {
     for (const specifier of scanImports(readFileSync(join(projectDir, file), "utf8"))) needed.add(packageName(specifier));
   }

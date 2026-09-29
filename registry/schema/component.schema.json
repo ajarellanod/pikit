@@ -226,6 +226,16 @@
       },
       "description": "Exactly the npm packages its files import, pinned (package → version)."
     },
+    "devDependencies": {
+      "type": "object",
+      "patternProperties": {
+        "^.*$": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+\\.\\d+(-[0-9A-Za-z.-]+)?$"
+        }
+      },
+      "description": "The npm packages the project needs to develop and deploy with it, which its files do not import (a tool it runs: deployment-cloudflare's `wrangler`), pinned to an exact version (package → version). `pikit add` puts them in the project's package.json devDependencies; `pikit remove` takes out those no other installed component declares. Never a package of `dependencies`, nor a kit package (`@pikit/*`)."
+    },
     "files": {
       "type": "array",
       "items": {

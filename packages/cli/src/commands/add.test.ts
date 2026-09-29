@@ -83,7 +83,7 @@ function otherKitProject(installed: string[] = [], kit?: string): string {
  * A registry with one component, `tool-fake`: its own `src/pikit/tool-fake/index.ts`, plus `extra`
  * (component-relative source → project target; a source under `files/src/` rides on the src mapping).
  */
-function fakeRegistry(extra: Record<string, string>): string {
+function fakeRegistry(extra: Record<string, string>, fields: Record<string, unknown> = {}): string {
   const root = temp();
   const dir = join(root, "components", "tool-fake");
   const put = (file: string, text: string) => {
@@ -98,7 +98,7 @@ function fakeRegistry(extra: Record<string, string>): string {
   }
   const manifest = {
     name: "tool-fake", version: "0.0.0", description: "tool-fake", targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
-    optional: { capabilities: [] }, provides: [], dependencies: {}, files,
+    optional: { capabilities: [] }, provides: [], dependencies: {}, files, ...fields,
   };
   writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));
   const index = { "tool-fake": { version: "0.0.0", description: "tool-fake", targets: ["server"], path: "components/tool-fake" } };
@@ -172,6 +172,29 @@ test("an add that fails once writing began puts back what it wrote: files, tarba
   expect(snapshot(dir)).toEqual(before);
   expect(existsSync(join(dir, "pikit-bases"))).toBe(false);
 }, 120_000);
+
+test("a component's devDependencies are in its plan, and an add whose install fails puts package.json back", () => {
+  const dir = otherKitProject();
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const registry = fakeRegistry({}, { devDependencies: { "left-pad": "1.3.0" } });
+  const before = snapshot(dir);
+  const run = pikit(["add", "tool-fake", "--registry", registry, "--yes"], dir);
+  expect(run.out).toContain("npm (dev): left-pad@1.3.0");
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("`bun install` failed");
+  expect(run.err).toContain("nothing was added");
+  expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
+test("a devDependencies version that is not exact is refused before anything is written", () => {
+  const dir = otherKitProject();
+  const registry = fakeRegistry({}, { devDependencies: { "left-pad": "^1.3.0" } });
+  const before = snapshot(dir);
+  const run = pikit(["add", "tool-fake", "--registry", registry, "--yes"], dir);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("/devDependencies/left-pad");
+  expect(snapshot(dir)).toEqual(before);
+});
 
 test("a reinstall that fails puts back the bases it replaced, and removes those it wrote", () => {
   const dir = otherKitProject();
