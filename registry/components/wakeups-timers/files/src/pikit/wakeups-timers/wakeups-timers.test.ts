@@ -5,9 +5,9 @@
  */
 
 import { expect, test } from "bun:test";
-import { type AppContext, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
+import { type AppContext, type Clock, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import type { Wakeups } from "@pikit/contracts";
-import { createLifecycleConformance, createManualClock, type ManualClock } from "@pikit/core/testing";
+import { createLifecycleConformance, createManualClock } from "@pikit/core/testing";
 import { createWakeupsConformance } from "@pikit/contracts/testing";
 import wakeupsTimers, { BACKOFF_MS } from "./index.ts";
 
@@ -29,21 +29,22 @@ for (const c of createLifecycleConformance(() => ({ component: wakeupsTimers }))
   test(`wakeups-timers ${c.group}: ${c.name}`, () => c.run());
 }
 
-/**
- * An app of wakeups-timers and one handler, "test.wake", that runs `handle`; its `wakeups` comes from a
- * second component, as a component that both handles and asks would be a dependency cycle.
- */
-async function open(clock: ManualClock, handle: (ctx: AppContext) => Promise<void>, logger: Logger = silentLogger) {
+/** An app of wakeups-timers and one component that registers "test.wake" to run `handler`, and asks. */
+async function open(clock: Clock, handler: (ctx: AppContext) => Promise<void>, logger: Logger = silentLogger, config?: Record<string, unknown>) {
   let wakeups: Wakeups | undefined;
-  const handler = defineComponent({ name: "test-handler", setup: (pikit) => pikit.provideKeyed("wakeup", "test.wake", handle) });
-  const asker = defineComponent({
-    name: "test-asker",
+  const owner = defineComponent({
+    name: "test-owner",
     setup(pikit) {
       const handle = pikit.use("wakeups");
-      return { start: () => void (wakeups = handle.get()) };
+      return {
+        start() {
+          wakeups = handle.get();
+          wakeups.handle("test.wake", handler);
+        },
+      };
     },
   });
-  const app = await defineApp({ components: [handler, wakeupsTimers, asker], logger, clock }).create();
+  const app = await defineApp({ components: [wakeupsTimers, owner], logger, clock, ...(config !== undefined && { config }) }).create();
   await app.start();
   if (wakeups === undefined) throw new Error("wakeups was not resolved");
   return { wakeups, app };
@@ -54,7 +55,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "wakeups-timers")).toMatchObject({
     provides: ["wakeups"],
     requires: [],
-    optional: ["wakeup"],
+    optional: [],
   });
 });
 
@@ -83,12 +84,12 @@ test("a failure is logged with the handler's name, its count and when it runs ag
   }
 });
 
-test("asking for a name nobody handles says which names exist and how to provide one", async () => {
+test("registering a name twice says a name has one owner", async () => {
   const clock = createManualClock();
   const { wakeups, app } = await open(clock, async () => {});
   try {
-    await expect(wakeups.at("test.wak", clock.now(), app.context())).rejects.toThrow(
-      'no "wakeup" handler is named "test.wak" (named: test.wake); provide one with pikit.provideKeyed("wakeup", "test.wak", handler), or check the name',
+    expect(() => wakeups.handle("test.wake", async () => {})).toThrow(
+      '"test.wake" already has a handler; a name has one owner, so give each handler its own (prefixed with your component\'s name)',
     );
   } finally {
     await app.stop();
@@ -112,4 +113,33 @@ test("nothing is persisted: a new app over the same clock forgets the last one's
 
 test("sliceMs is a positive whole number of milliseconds", () => {
   expect(() => defineApp({ components: [wakeupsTimers], config: { "wakeups-timers": { sliceMs: 0 } } })).toThrow("invalid config");
+});
+
+test("no timer outlives a stop by more than a second, even with a long slice: the loop keeps the deadlines", async () => {
+  const manual = createManualClock();
+  const sleeps: number[] = [];
+  const clock: Clock = { now: () => manual.now(), sleep: (ms) => (sleeps.push(ms), manual.sleep(ms)) };
+  let cut = false;
+  const waitForCut = (ctx: AppContext) =>
+    new Promise<void>((resolve) =>
+      ctx.abortSignal?.addEventListener("abort", () => {
+        cut = true;
+        resolve();
+      }),
+    );
+  const { wakeups, app } = await open(
+    clock,
+    waitForCut,
+    silentLogger,
+    { "wakeups-timers": { sliceMs: 60 * 60 * 1_000 } },
+  );
+  try {
+    await wakeups.at("test.wake", manual.now() + 5_000, app.context());
+    await manual.advance(5_000);
+    await manual.advance(60 * 60 * 1_000);
+    expect(cut).toBe(true);
+    expect(Math.max(...sleeps)).toBeLessThanOrEqual(1_000);
+  } finally {
+    await app.stop();
+  }
 });

@@ -11,9 +11,7 @@
     "capabilities": []
   },
   "optional": {
-    "capabilities": [
-      "wakeup"
-    ]
+    "capabilities": []
   },
   "provides": [
     "wakeups"
