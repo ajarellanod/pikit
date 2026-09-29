@@ -1,6 +1,6 @@
 /**
  * Runs a conformance case inside a fresh SQLite-backed Durable Object, with that object in
- * `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint will put it: the Worker's `env`, the
+ * `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint puts it: the Worker's `env`, the
  * object's id and storage, and hooks for its alarm and RPC (recorded, never called here).
  *
  * The suites build their fixtures in a factory the case calls, so a fixture reads the object it runs

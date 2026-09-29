@@ -21,8 +21,8 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | `test/deployment-cloudflare.workerd.ts` | `deployment-cloudflare`'s entrypoint: its `Conversation` class (exported by `src/worker.ts`, over the small Apps of `src/deployment.ts`) and its Worker `fetch`: `/health`, `WORKERS_HOST`, `deliver` and the alarm reaching their handlers, eviction, a failed start resetting the object |
 
 Each case of a storage suite runs in a Durable Object of its own (`runInDurableObject` on a new id),
-and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint will
-put it (`test/host.ts`): the suites start their own apps, so the host is given with `withWorkersHost`
+and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint
+puts it (`test/host.ts`): the suites start their own apps, so the host is given with `withWorkersHost`
 from `@pikit/contracts/testing`. A test in each file also starts an app with the host in
 `app.start`'s context, the entrypoint's own way.
 
