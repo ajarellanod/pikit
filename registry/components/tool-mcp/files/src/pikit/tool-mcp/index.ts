@@ -77,10 +77,16 @@ const Server = Type.Object(
   { additionalProperties: false },
 );
 
-const Config = Type.Object({
-  /** Server name (letters, digits, `_`, `-`) → how to reach it and which of its tools to give. */
-  servers: Type.Record(Type.String(), Server, { default: {} }),
-});
+const Config = Type.Object(
+  {
+    /** Server name (letters, digits, `_`, `-`) → how to reach it and which of its tools to give. */
+    servers: Type.Record(Type.String(), Server, { default: {} }),
+  },
+  {
+    // A full config: `registry generate` describes setup with it, so the manifest lists the tools it provides.
+    examples: [{ servers: { deepwiki: { url: "https://mcp.deepwiki.com/mcp", tools: ["ask_wiki_question", "read_wiki_structure"] } } }],
+  },
+);
 
 export type ServerConfig = Static<typeof Server>;
 

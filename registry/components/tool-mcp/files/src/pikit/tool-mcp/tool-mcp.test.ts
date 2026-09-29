@@ -366,6 +366,14 @@ test("without storage.kv, every start reaches the server", async () => {
   expect(server.requests.filter((r) => r.rpc === "tools/list")).toHaveLength(2);
 });
 
+test("the config's example composes and provides its tools (setup only: nothing is reached)", async () => {
+  const examples = (toolMcp.config as { examples?: Record<string, unknown>[] }).examples ?? [];
+  expect(examples).toHaveLength(1);
+  const app = await defineApp({ components: [toolMcp], config: { "tool-mcp": examples[0] }, logger: silentLogger }).create();
+  const keys = (app.describe() as { capabilities: Record<string, { keys?: Record<string, string> }> }).capabilities["agent.tool"]?.keys;
+  expect(Object.keys(keys ?? {}).sort()).toEqual(["deepwiki_ask_wiki_question", "deepwiki_read_wiki_structure"]);
+});
+
 test("setup refuses a server name that cannot start a tool name, and two tools with one name", async () => {
   const url = "http://127.0.0.1:9/mcp";
   const bad = defineApp({ components: [toolMcp], config: { "tool-mcp": { servers: { "my wiki": { url, tools: ["a"] } } } }, logger: silentLogger });
