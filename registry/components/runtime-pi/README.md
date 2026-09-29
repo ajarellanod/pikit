@@ -212,6 +212,14 @@ defineAgent({ name: "ops", model: "anthropic/claude-sonnet-4-6", tools: ["read",
 A name (`"bash"`) is a tool that a `tool-*` component provides. An object (`lookupTicket`) is a tool
 of your own. Installing `tool-bash` gives no agent a shell until one of them names `bash`.
 
+A tool of your own that more than one agent names is a component: `toolComponent` from
+`@pikit/pi-adapter/tools`, with its `replay` (`"safe"` runs it again when a run resumes after a crash;
+`"never"` tells the model it was interrupted), or a `defineComponent` providing `agent.tool` when it
+needs a capability (a secret, `execution`). Pi's `defineTool` belongs inside a Pi extension: the
+tools an extension registers are always `"never"`, and `pikit doctor` notes them. `toolComponent` is a
+bridge: when the adapter moves to Pi's durable runtime, a tool is Pi's own object, with its `replay`
+inside (`features/completed/tool-component.md`, "Migration").
+
 ## Agents that change with the conversation
 
 An agent can keep a JSON state per conversation and choose its model, system prompt and tools

@@ -11,10 +11,41 @@ const EXAMPLES = join(import.meta.dir, "..", "..", "..", "pi-adapter", "src", "e
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
-test("Pi's examples that pikit runs have nothing to report", () => {
+test("Pi's examples that pikit runs have nothing unsupported; hello registers a tool", () => {
   for (const example of ["permission-gate.ts", "protected-paths.ts", "hello.ts"]) {
-    expect(inspectExtension(readFileSync(join(EXAMPLES, example), "utf8"))).toEqual({ missing: [], subpaths: [], unsupported: [] });
+    expect(inspectExtension(readFileSync(join(EXAMPLES, example), "utf8"))).toEqual({
+      missing: [],
+      subpaths: [],
+      unsupported: [],
+      registersTools: example === "hello.ts",
+    });
   }
+});
+
+test("registering tools is noted, under whatever name the API has, and is not unsupported", () => {
+  const dir = mkdtempSync(join(tmpdir(), "pikit-pi-extensions-"));
+  dirs.push(dir);
+  const files: Record<string, string> = {
+    "src/extensions/weather.ts": [
+      `import { defineTool, type ExtensionAPI } from "${ALIAS}";`,
+      "export default function (api: ExtensionAPI) {",
+      "  api.registerTool(defineTool({} as never));",
+      "}",
+    ].join("\n"),
+    // Mentioned in a comment only: not a registration.
+    "src/extensions/quiet.ts": `import type { ExtensionAPI } from "${ALIAS}";\n// pi.registerTool(x)\nexport default (pi: ExtensionAPI) => void pi;\n`,
+  };
+  for (const [file, text] of Object.entries(files)) {
+    mkdirSync(join(dir, file, ".."), { recursive: true });
+    writeFileSync(join(dir, file), text);
+  }
+  expect(inspectExtension(files["src/extensions/weather.ts"] ?? "")).toMatchObject({ unsupported: [], registersTools: true });
+  const { problems, notes } = checkPiExtensions(dir, Object.keys(files));
+  expect(problems).toEqual([]);
+  expect(notes).toHaveLength(1);
+  expect(notes[0]).toStartWith("src/extensions/weather.ts registers tools with pi.registerTool");
+  expect(notes[0]).toContain('replay "never"');
+  expect(notes[0]).toContain("toolComponent from @pikit/pi-adapter/tools");
 });
 
 test("a name or a subpath the shim does not export is missing, a type included; comments are not imports", () => {

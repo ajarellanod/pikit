@@ -12,7 +12,8 @@
  *
  * `toolComponent` is the short way to a tool of your own: one written as Pi's `defineTool` writes it,
  * provided as `agent.tool` by a component, with the `replay` pikit needs. `agentTool` is the same tool
- * without the component, for a `defineComponent` of your own that needs config or a capability.
+ * without the component, for a `defineComponent` of your own that needs config or a capability. Both
+ * are a bridge until the adapter moves to Pi's durable runtime: see `toolComponent`, "Migration".
  */
 
 import type { AgentHarnessTool, AgentToolResult, AgentToolUpdateCallback, ExecutionEnv } from "@earendil-works/pi-agent-core";
@@ -40,6 +41,9 @@ export interface BindOptions {
  * which only an extension's host has. So a Pi tool's object moves in as it is, written inside
  * `toolComponent`; one typed by Pi's `defineTool` promises that context and does not compile here,
  * and a tool that uses it stays an extension's tool.
+ *
+ * Deleted with `toolComponent` when the adapter moves to Pi's durable runtime, whose `ToolRegistration`
+ * is then the one shape of a tool (see `toolComponent`, "Migration").
  */
 export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown> {
   /** The name the model calls it by, and the one agents name in `tools`. */
@@ -69,6 +73,23 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
  *
  * A tool that needs a capability (an environment, a secret) or config is a `defineComponent` of its
  * own that `use`s it and provides `agentTool(tool, { replay })`; this one declares none.
+ *
+ * **Which to use.** A tool of your own for pikit: `toolComponent`, or a `defineComponent` when it needs
+ * a capability. Pi's `defineTool` (imported from `@earendil-works/pi-coding-agent`, pikit's shim) only
+ * inside a Pi extension: one you bring from Pi unchanged, or one that must also run in Pi's CLI. The
+ * shim exports it so those extensions load; it is not pikit's way to write a tool.
+ *
+ * **Migration: a bridge until Pi's durable runtime.** In `@earendil-works/pi-durable` (Pi's Pico
+ * runtime: `ToolRegistration`, `packages/durable/docs/pico-v5.md` §7 in Pi's repository), a tool is
+ * one object that carries its own `replay` (`"safe" | "unsafe"`, `"unsafe"` by default) and learns its
+ * conversation from its `api` (`api.conversationId`): the two things this function adds today. When
+ * the adapter moves to it:
+ * - a tool is Pi's object, unchanged: an agent takes it in `tools: [tool]`, or a `defineComponent`
+ *   provides it as `agent.tool` when it is shared by name or needs a capability;
+ * - `toolComponent`, `agentTool` and `ToolDefinition` are deleted, and `replay` takes Pi's words (`"unsafe"` for
+ *   `"never"`), in that one change;
+ * - if Pi ships a helper that types such an object, it is used under Pi's own name.
+ * Until then, nothing is added here: no rename, and no second word for `"never"`.
  */
 export function toolComponent<TParams extends TSchema, TDetails = unknown>(tool: ToolDefinition<TParams, TDetails>, options: { replay: "safe" | "never" }): ComponentDefinition {
   const agentToolObject = agentTool(tool, options);

@@ -60,4 +60,4 @@ how it fits pikit, what Pi already does, where the code and its tests are, and w
 | Feature | One line |
 |---|---|
 | [storage-kv](completed/storage-kv.md) | `storage.kv`: small JSON values per component, by key; `storage-kv-sql` provides it, `channel-telegram` keeps its cursor there |
-| [tool-component](completed/tool-component.md) | `toolComponent`: a tool in the shape of Pi's `defineTool` as a component providing `agent.tool`, with its `replay` |
+| [tool-component](completed/tool-component.md) | `toolComponent`: a tool in the shape of Pi's `defineTool` as a component providing `agent.tool`, with its `replay`. A bridge until the adapter moves to `pi-durable` |

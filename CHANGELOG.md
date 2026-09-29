@@ -127,6 +127,14 @@ line names its area (AGENTS.md, "Git and docs").
   more than a second. Nothing is persisted: components register and ask again at start. Targets
   `server`. `wakeups` is a new component kind.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
+- cli: `pikit doctor` notes a project file that registers tools with `pi.registerTool`: pikit runs
+  them, but an extension's tools are never run again when a run resumes after a crash (`replay:
+  "never"`), and a tool of your own chooses with `toolComponent`. A note, never a failure.
+- docs: `toolComponent` is a bridge. When the adapter moves to Pi's durable runtime
+  (`@earendil-works/pi-durable`), a tool is Pi's own object with its `replay` inside (`"safe"` /
+  `"unsafe"`), `toolComponent` is deleted, and `replay` takes Pi's words. Until then: tools of your
+  own with `toolComponent` (or `defineComponent` when they need a capability); Pi's `defineTool`
+  only inside Pi extensions (`features/completed/tool-component.md`, `runtime-pi`'s README).
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an
   agent names it in `tools`. Unlike a Pi extension's tool, it may be `replay: "safe"`, and `pikit
