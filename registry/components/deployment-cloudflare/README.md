@@ -83,7 +83,7 @@ project's `node_modules/.bin/wrangler` in the project's directory, without a she
 
 | Function | Runs |
 |---|---|
-| `up({ url })` | `wrangler deploy --secrets-file <.env's secrets>`, then `GET /health` every 2 s until it answers ok from the version it deployed (3 min at most). Resolves with `{ version, url }` |
+| `up({ url })` | `wrangler deploy --secrets-file <.env's secrets>`, then `GET /health` every 2 s until it answers ok from the version it deployed (3 min at most), then the components' `afterDeploy` hooks. Resolves with `{ version, url }` |
 | `down()` | `wrangler delete`, only at a terminal (see below) |
 | `logs()` | `wrangler tail`: live, until Ctrl-C |
 | `status({ url })` | `wrangler deployments list --json`, plus `GET /health` |
@@ -105,6 +105,34 @@ back is yours. `/health` is asked at the `workers.dev` URL wrangler reports; pas
 domain. `up` notes the version and URL in `.pikit/deployment-cloudflare.json` for `status`.
 
 A deploy cuts the alarms in progress; Cloudflare retries them, and runs resume (C4).
+
+**After the deploy: the components' hooks (C8).** Some components register the Worker with
+something outside it (`channel-telegram-webhook` tells Telegram where to post), and that must reach
+the new version. So, once `/health` answers ok from it, `up` runs each installed component's
+`afterDeploy`. The convention, explicit on both sides:
+
+- The component names the file in its `component.json`, relative to its own directory:
+  `"hooks": { "afterDeploy": "deploy.ts" }`. `pikit add` records it in `pikit.json`, by project path
+  (`"hooks": { "afterDeploy": "src/pikit/channel-telegram-webhook/deploy.ts" }`); `up` reads only that
+  (`deployHooks(cwd)`). No file is found by its name.
+- That file exports `afterDeploy(io)`, and resolves with its problems, one line each (empty when done):
+
+  ```ts
+  export async function afterDeploy(io: {
+    url: string;                               // the deployed Worker's public base URL (`url`, or workers.dev)
+    config: Readonly<Record<string, unknown>>; // its config in pikit.config.ts (the default export's, defaults applied)
+    get(name: string): string | undefined;     // an exported variable, or else .env: the secrets just uploaded
+    say(line: string): void;                   // printed by `pikit up`
+  }): Promise<string[]>;
+  ```
+
+  The shape is structural (`AfterDeployIO` in `commands.ts`): a component imports nothing from this one.
+
+The hooks run in `pikit.json`'s order, every one of them, and a hook that throws counts as a problem.
+Then `up` fails with all their problems, each named by its component. The version stays deployed and
+is not rolled back: it answers, and what failed is outside it. Fix what they say (often `pikit
+configure`), then `pikit up` again: a hook runs at every deploy, so it must be harmless to repeat. A
+version that never answers, or answers that its App does not start, runs no hook.
 
 **`down` deletes.** Cloudflare cannot stop a Worker without deleting it, and deleting it deletes every
 conversation's Durable Object with its data. `down` runs `wrangler delete`, which asks at the
@@ -131,14 +159,18 @@ The tests are copied with the component and run in your project:
   App starts, what `WORKERS_HOST` carries, alarms and deliveries, a failed start and a late one with a
   rollback that hangs (both deadlines hold), the Worker's routes and `/health`.
 - `commands.test.ts`: the exact `wrangler` argv of every command, the secrets file, the wait for the
-  new version, the rollback and `status`, with a fake runner and a fake `fetch`. No wrangler, no account.
+  new version, the components' hooks run after it (with their URL, config and secrets, their problems
+  failing `up`, none for a version that does not answer), the rollback and `status`, with a fake runner
+  and a fake `fetch`. No wrangler, no account.
 - `bundle.test.ts`: `wrangler deploy --dry-run` bundles `worker.ts` with a two-App `pikit.config.ts`
   and exports `Conversation`, and the commands never reach the bundle. Uploads nothing.
 - `files.test.ts`: `wrangler.jsonc` keeps its promises, and only `entrypoint.ts` imports `cloudflare:*`.
 
 In the pikit repository, the workerd lane (`tests/workerd/test/deployment-cloudflare.workerd.ts`) runs
 the entrypoint on real SQLite-backed Durable Objects: `/health`, `WORKERS_HOST`, `deliver` and the
-alarm reaching their handlers, an evicted object starting again, and a failed start resetting it.
+alarm reaching their handlers, an evicted object starting again, and a failed start resetting it. And
+`packages/cli/src/deploy-hooks.test.ts` runs `up` with a fake wrangler against
+`channel-telegram-webhook`'s fake Telegram: its webhook registered only once the new version answers.
 
 `component.json` is generated, not written by hand. With no `setup`, it provides and requires
 nothing. Its `files` maps `files/src` to `src` and names `wrangler.jsonc` (SPEC §10.2).

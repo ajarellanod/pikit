@@ -1,13 +1,14 @@
 /**
  * The commands with a fake wrangler runner and a fake `fetch`: the exact argv, the secrets file, the
- * wait for the deployed version (C8), the rollback, and `status`'s parsing. No wrangler, no account.
+ * wait for the deployed version (C8), the components' after-deploy hooks, the rollback, and `status`'s
+ * parsing. No wrangler, no account.
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type Runner, deploySecrets, down, dev, logs, parseDeployments, status, up, workerName } from "./commands.ts";
+import { type Runner, deployHooks, deploySecrets, down, dev, logs, parseDeployments, status, up, workerName } from "./commands.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -114,6 +115,90 @@ test("up fails when wrangler deploy fails, before any probe", async () => {
   const health = fakeHealth({ ok: true, version: "v2" });
   await expect(up({ cwd: project(), run: wrangler.run, fetch: health.fetcher })).rejects.toThrow(/`wrangler deploy --name my-bot-v2` exited with code 1/);
   expect(health.urls).toEqual([]);
+});
+
+/** What the fake hooks and `/health` did, in order: `globalThis`, since the hooks are files of their own. */
+const events = ((globalThis as { deployEvents?: string[] }).deployEvents ??= []);
+
+/**
+ * A project with two components that have an after-deploy hook, as `pikit add` records them in
+ * pikit.json, one without, and a pikit.config.ts whose default export has their config.
+ */
+function projectWithHooks(env: string): string {
+  const cwd = project(env);
+  const hook = (name: string) => `src/pikit/${name}/deploy.ts`;
+  const components = { "channel-a": { hooks: { afterDeploy: hook("channel-a") } }, "storage-b": {}, "channel-c": { hooks: { afterDeploy: hook("channel-c") } } };
+  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 2, targets: ["cloudflare"], registries: {}, components }));
+  writeFileSync(join(cwd, "pikit.config.ts"), `export default { config: { "channel-a": { greeting: "hello" } } };\n`);
+  for (const name of ["channel-a", "channel-c"]) {
+    mkdirSync(join(cwd, "src", "pikit", name), { recursive: true });
+    writeFileSync(
+      join(cwd, hook(name)),
+      `export async function afterDeploy(io) {
+  globalThis.deployEvents.push(\`${name} \${io.url} \${JSON.stringify(io.config)} \${io.get("HOOK_TEST_TOKEN")}\`);
+  io.say("${name} registered");
+  const problem = io.get("${name.toUpperCase().replace("-", "_")}_PROBLEM");
+  if (problem === "throw") throw new Error("unreachable");
+  return problem === undefined ? [] : [problem];
+}
+`,
+    );
+  }
+  return cwd;
+}
+
+/** A `/health` as `fakeHealth`, noting each answer's version in `events`. */
+function notedHealth(...bodies: { ok: boolean; version: string }[]) {
+  const health = fakeHealth(...bodies);
+  const fetcher = (async (url: URL | string) => {
+    const response = await health.fetcher(url);
+    events.push(`health ${((await response.clone().json()) as { version: string }).version}`);
+    return response;
+  }) as unknown as typeof fetch;
+  return { ...health, fetcher };
+}
+
+test("up runs each component's afterDeploy once /health answers the new version: its URL, config and secrets, and what it says", async () => {
+  events.length = 0;
+  const cwd = projectWithHooks("HOOK_TEST_TOKEN=from-env-file\n");
+  expect(deployHooks(cwd)).toEqual([
+    { component: "channel-a", file: "src/pikit/channel-a/deploy.ts" },
+    { component: "channel-c", file: "src/pikit/channel-c/deploy.ts" },
+  ]);
+  const said: string[] = [];
+  const deployed = await up({ cwd, run: fakeWrangler().run, fetch: notedHealth({ ok: true, version: "v1" }, { ok: true, version: "v2" }).fetcher, intervalMs: 1, say: (line) => said.push(line) });
+
+  expect(deployed).toEqual({ version: "v2", url: "https://my-bot-v2.acme.workers.dev" });
+  // Never against the previous version (C8); each with its own config ({} without one).
+  expect(events).toEqual([
+    "health v1",
+    "health v2",
+    'channel-a https://my-bot-v2.acme.workers.dev {"greeting":"hello"} from-env-file',
+    "channel-c https://my-bot-v2.acme.workers.dev {} from-env-file",
+  ]);
+  expect(said).toEqual(["channel-a registered", "channel-c registered"]);
+});
+
+test("up fails with every hook's problems, a hook that throws among them, and leaves the version deployed", async () => {
+  events.length = 0;
+  const cwd = projectWithHooks("HOOK_TEST_TOKEN=t\nCHANNEL_A_PROBLEM=throw\nCHANNEL_C_PROBLEM=its webhook was refused\n");
+  const wrangler = fakeWrangler();
+  const failure = up({ cwd, run: wrangler.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher, say: () => {} });
+  await expect(failure).rejects.toThrow(
+    "the new version v2 answers at https://my-bot-v2.acme.workers.dev, but what runs after a deploy failed:\n  channel-a: unreachable\n  channel-c: its webhook was refused\n",
+  );
+  // Both ran; nothing was rolled back: the version answers, what failed is outside it.
+  expect(events).toHaveLength(2);
+  expect(wrangler.calls).toHaveLength(1);
+  expect(JSON.parse(readFileSync(join(cwd, ".pikit", "deployment-cloudflare.json"), "utf8"))).toMatchObject({ version: "v2" });
+});
+
+test("a new version that does not answer runs no hook", async () => {
+  events.length = 0;
+  const cwd = projectWithHooks("HOOK_TEST_TOKEN=t\n");
+  await expect(up({ cwd, run: fakeWrangler().run, fetch: fakeHealth({ ok: false, version: "v2" }).fetcher, rollback: false })).rejects.toThrow(/still deployed/);
+  await expect(up({ cwd, run: fakeWrangler().run, fetch: fakeHealth({ ok: true, version: "v1" }).fetcher, waitMs: 10, intervalMs: 5 })).rejects.toThrow(/did not answer/);
+  expect(events).toEqual([]);
 });
 
 test("down deletes the Worker only when a person is there to answer wrangler", async () => {
