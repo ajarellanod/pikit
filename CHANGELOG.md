@@ -5,6 +5,7 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an
   agent names it in `tools`. Unlike a Pi extension's tool, it may be `replay: "safe"`, and `pikit
