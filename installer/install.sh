@@ -3,6 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --yes --install-docker
+#   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --cloudflare
 #
 # What it does, in order, and it says so as it goes:
 #   1. checks git, curl and (Linux) unzip; installs the missing ones with apt-get, after asking;
@@ -11,10 +12,13 @@
 #      after asking;
 #   3. fetches pikit with git into ~/.pikit/pikit, at a ref, and runs `bun install` there;
 #   4. writes ~/.pikit/bin/pikit and prints the PATH line to add (it edits no shell file);
-#   5. checks Docker, which only `pikit up` needs. On Linux it offers Docker's official script and
-#      the docker group, and does either only with your consent (--install-docker, or "y" at the
-#      prompt); on macOS it points to Docker Desktop;
-#   6. on a terminal, runs `pikit new`, which asks everything and starts your first agent
+#   5. checks Docker, which only `pikit up` on a server needs. On Linux it offers Docker's official
+#      script and the docker group, and does either only with your consent (--install-docker, or "y"
+#      at the prompt); on macOS it points to Docker Desktop. With --cloudflare it skips Docker and
+#      checks Node.js >= 22 instead, which wrangler (Cloudflare's CLI, in each project) runs on;
+#   6. on a terminal, runs `pikit new`, which asks everything and starts your first agent; with
+#      --cloudflare, `pikit new --target cloudflare --preset telegram-cloudflare`, a Telegram bot on
+#      Cloudflare, which asks its name, `pikit configure`'s questions, then deploys it with `pikit up`
 #      (PIKIT_NO_WIZARD=1 skips it; Ctrl-C stops it, and `pikit new` continues later).
 # Running it again updates pikit and changes nothing else. It never runs sudo without saying so
 # first and asking, and it never runs as a side effect what it did not print.
@@ -31,6 +35,8 @@
 #   PIKIT_YES=1           answer yes to installing git, curl, unzip, and to replacing a Bun outside the
 #                         supported range with PIKIT_BUN_VERSION (not Docker)
 #   PIKIT_INSTALL_DOCKER=1  consent to Docker's official install script on Linux
+#   PIKIT_CLOUDFLARE=1    the Cloudflare path, as --cloudflare: no Docker, and `pikit new` makes a
+#                         Telegram bot on Cloudflare
 
 set -eu
 
@@ -46,6 +52,7 @@ PIKIT_REPO="${PIKIT_REPO:-https://github.com/ajarellanod/pikit.git}"
 PIKIT_SOURCE="${PIKIT_SOURCE:-}"
 PIKIT_YES="${PIKIT_YES:-}"
 PIKIT_INSTALL_DOCKER="${PIKIT_INSTALL_DOCKER:-}"
+PIKIT_CLOUDFLARE="${PIKIT_CLOUDFLARE:-}"
 if [ -n "$PIKIT_SOURCE" ]; then
   PIKIT_REF="${PIKIT_REF:-HEAD}"
 else
@@ -57,6 +64,7 @@ for arg in "$@"; do
   case "$arg" in
     --yes | -y) PIKIT_YES=1 ;;
     --install-docker) PIKIT_INSTALL_DOCKER=1 ;;
+    --cloudflare) PIKIT_CLOUDFLARE=1 ;;
     *) printf 'pikit install: unknown option %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -190,14 +198,28 @@ chmod 755 "$BIN_DIR/pikit"
 "$BIN_DIR/pikit" --version >/dev/null || fail "$BIN_DIR/pikit does not run"
 say "installed $("$BIN_DIR/pikit" --version) as $BIN_DIR/pikit"
 
-# 5. Docker, for `pikit up` only. Without root, using it needs the docker group, which a running shell
-# only gets after `newgrp docker` or a new login: the closing lines say so.
+# 5. Docker, for `pikit up` on a server only. Without root, using it needs the docker group, which a
+# running shell only gets after `newgrp docker` or a new login: the closing lines say so. On
+# Cloudflare there is no Docker: wrangler deploys, and it runs on Node.js, which is only checked.
 NEWGRP=""
 join_docker_group() {
   as_root usermod -aG docker "$(id -un)"
   NEWGRP=1
 }
-if has docker && docker compose version >/dev/null 2>&1; then
+if [ -n "$PIKIT_CLOUDFLARE" ]; then
+  say "Cloudflare: no Docker needed. Each project deploys with its own wrangler, which runs on Node.js >= 22."
+  NODE_VERSION="$(node --version 2>/dev/null || true)"
+  NODE_MAJOR="${NODE_VERSION#v}"
+  NODE_MAJOR="${NODE_MAJOR%%.*}"
+  case "$NODE_MAJOR" in
+    '' | *[!0-9]*) NODE_MAJOR=0 ;;
+  esac
+  if [ "$NODE_MAJOR" -ge 22 ]; then
+    say "Node.js $NODE_VERSION found: wrangler can run"
+  else
+    warn "wrangler needs Node.js >= 22 (found: ${NODE_VERSION:-none}): pikit up and pikit logs fail without it. Install it (https://nodejs.org/en/download; on macOS: brew install node), then pikit up."
+  fi
+elif has docker && docker compose version >/dev/null 2>&1; then
   say "Docker with Compose found: pikit up can run your project in a container"
   if [ "$OS" = "Linux" ] && [ "$(id -u)" != "0" ] && ! docker info >/dev/null 2>&1; then
     # `id -nG` alone: this shell's groups; with the user: the groups a new login gets.
@@ -216,7 +238,7 @@ elif [ "$OS" = "Darwin" ]; then
   say "  Install Docker Desktop: https://docs.docker.com/desktop/setup/install/mac-install/"
 else
   say "Docker is not installed. pikit up needs it; pikit dev does not."
-  if ask "Install Docker with its official script (https://get.docker.com, runs as root), and add you to the docker group (PIKIT_INSTALL_DOCKER=1 or --install-docker to consent)?" "$PIKIT_INSTALL_DOCKER"; then
+  if ask "Install Docker with its official script (https://get.docker.com, runs as root), and add you to the docker group (PIKIT_INSTALL_DOCKER=1 or --install-docker to consent; on Cloudflare no Docker is needed: answer N)?" "$PIKIT_INSTALL_DOCKER"; then
     curl -fsSL https://get.docker.com -o "$PIKIT_HOME/get-docker.sh"
     as_root sh "$PIKIT_HOME/get-docker.sh"
     rm -f "$PIKIT_HOME/get-docker.sh"
@@ -226,16 +248,22 @@ else
   fi
 fi
 
-# 6. The first agent, step by step: `pikit new` with no arguments asks everything (its name, where to
-# talk to it, the channel's setup, the model's login) and starts it. Only on a terminal; Ctrl-C stops
-# it, and `pikit new` continues later. With a new docker group, `sg` gives it that group now, since
-# this shell only gets it at the next login.
+# 6. The first agent, step by step: `pikit new` with no arguments asks everything (its name, where it
+# runs, where to talk to it, the channel's setup, the model's login) and starts it. With --cloudflare,
+# its flags answer where it runs and the preset: a Telegram bot on Cloudflare. Only on a terminal;
+# Ctrl-C stops it, and `pikit new` continues later. With a new docker group, `sg` gives it that group
+# now, since this shell only gets it at the next login.
+if [ -n "$PIKIT_CLOUDFLARE" ]; then
+  set -- new --target cloudflare --preset telegram-cloudflare
+else
+  set -- new
+fi
 if [ -t 1 ] && (: </dev/tty) 2>/dev/null && [ -z "${PIKIT_NO_WIZARD:-}" ]; then
   say "installed. Now your first agent, step by step:"
   if [ -n "$NEWGRP" ] && has sg; then
     sg docker -c "exec '$BIN_DIR/pikit' new" </dev/tty || true
   else
-    "$BIN_DIR/pikit" new </dev/tty || true
+    "$BIN_DIR/pikit" "$@" </dev/tty || true
   fi
   printf '\n'
 fi
@@ -256,4 +284,8 @@ if [ -n "$LINES" ]; then
   say "to use pikit in this shell, paste:"
   printf '\n%s\n\n' "$LINES"
 fi
-say "pikit new starts a new agent step by step; pikit --help lists the rest."
+if [ -n "$PIKIT_CLOUDFLARE" ]; then
+  say "pikit $* starts another Telegram bot on Cloudflare, step by step; pikit --help lists the rest."
+else
+  say "pikit new starts a new agent step by step; pikit --help lists the rest."
+fi

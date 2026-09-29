@@ -31,8 +31,12 @@ export {
   type WorkerHost,
 } from "./host.ts";
 export {
+  type AccountOptions,
   type AfterDeployIO,
   type DeployHook,
+  LOGIN_HELP,
+  login,
+  deployFailure,
   up,
   down,
   logs,
