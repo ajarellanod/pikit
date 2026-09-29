@@ -12,7 +12,9 @@
  *   `ctx.*` members it lacks or leaves inert, terminal UI calls. One note per file lists them.
  *   Another note says when a file registers tools (`pi.registerTool`): pikit runs them, but an
  *   extension's tools are never run again when a run resumes (`replay: "never"`), and a tool of the
- *   project's own can choose with `toolComponent` instead.
+ *   project's own can choose with `toolComponent` instead; and only tools registered while the
+ *   extension loads reach the model (one registered from a handler is ignored with a warning at run
+ *   time: telling the two apart statically is not worth a parser).
  */
 
 import { readFileSync } from "node:fs";
@@ -131,7 +133,9 @@ export function checkPiExtensions(projectDir: string, files: readonly string[]):
       notes.push(
         `${file} registers tools with pi.registerTool: pikit runs them, but never again when a run resumes after a crash ` +
           '(an extension\'s tools are replay "never"; the model is told the call was interrupted). For a tool of your own, ' +
-          'toolComponent from @pikit/pi-adapter/tools chooses its replay ("safe" for one that only reads)',
+          'toolComponent from @pikit/pi-adapter/tools chooses its replay ("safe" for one that only reads). ' +
+          "Only tools registered while the extension loads (in its factory) reach the model: one registered later, " +
+          "from a handler such as session_start, is ignored with a warning (features/codemode.md)",
       );
     }
   }

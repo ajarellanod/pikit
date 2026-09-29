@@ -6,7 +6,10 @@
  *
  * Two phases, as in Pi:
  * 1. **Load** (`loadExtensions`): each factory runs and registers handlers, tools and providers.
- *    Actions (`sendMessage`, `setActiveTools`…) throw here: there is no conversation yet.
+ *    Actions (`sendMessage`, `setActiveTools`…) throw here: there is no conversation yet. The
+ *    harness is created with the tools registered here, so a tool registered later (Pi allows it,
+ *    for example once `session_start` has connected to a backend) is ignored with a warning, once
+ *    per name (`features/codemode.md`).
  * 2. **Bind** (`bind`): once the harness exists, Pi's extension events are translated onto the
  *    harness hooks and events of `AgentHarness`, the class pikit runs (Pi's coding agent still
  *    runs the legacy `Agent`), and actions reach the conversation's lane.
@@ -116,6 +119,8 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
     },
   };
 
+  // Set once the factories have run: the harness's tools are then fixed.
+  let loaded = false;
   // Set by bind(); until then actions have no conversation to act on.
   let bound: Bound | undefined;
   const conversation = (what: string): Bound => {
@@ -135,6 +140,12 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
       };
     },
     registerTool(tool) {
+      if (loaded) {
+        return unsupported(
+          `pi.registerTool("${tool.name}") after the extensions loaded`,
+          "pikit gives agents only the tools registered while extensions load, in their factories: this one is ignored (features/codemode.md)",
+        );
+      }
       // Registering a name again replaces the tool, as in Pi (which withdraws one this way, as `hidden`).
       const at = definitions.findIndex((existing) => existing.name === tool.name);
       if (at === -1) definitions.push(tool as unknown as ToolDefinition);
@@ -189,6 +200,7 @@ export async function loadExtensions(extensions: readonly PiExtension[], options
   };
 
   for (const extension of extensions) await extension(pi);
+  loaded = true;
 
   const exposed = definitions.filter((definition) => {
     const exposure = exposureOf(definition);

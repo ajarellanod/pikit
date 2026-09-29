@@ -360,6 +360,11 @@ export interface ToolLoadoutChanges {
  */
 export type ToolExecutionMode = "sequential" | "parallel";
 
+/**
+ * What `pi.registerTool()` takes. pikit gives the model only the tools registered while the
+ * extensions load (their factories): one registered later, from a handler such as `session_start`,
+ * is ignored with a warning (`features/codemode.md`).
+ */
 export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = unknown, TState = unknown> {
   name: string;
   label: string;
@@ -486,6 +491,10 @@ export interface ExtensionAPI {
   // biome-ignore lint/suspicious/noExplicitAny: events pikit does not implement
   on(event: string, handler: ExtensionHandler<any, any>): () => void;
 
+  /**
+   * Register a tool, or replace the one with its name. Only while the extension loads (in its
+   * factory): pikit ignores, with a warning, a tool registered later, from a handler.
+   */
   // biome-ignore lint/suspicious/noExplicitAny: Pi's signature
   registerTool<TParams extends TSchema = TSchema, TDetails = unknown, TState = any>(
     tool: ToolDefinition<TParams, TDetails, TState>,

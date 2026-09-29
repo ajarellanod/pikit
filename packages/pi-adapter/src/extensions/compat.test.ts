@@ -541,6 +541,29 @@ describe("Pi 0.99's tool exposure: what reaches the model (SPEC \u00a76.2b)", ()
 
     expect(alongside).toMatchObject({ a: [], b: ["a"], c: ["a", "b"], alone: [] });
   });
+
+  test("a tool registered after the extensions loaded is ignored, with one warning per name", async () => {
+    const warnings: { what: unknown; detail: unknown }[] = [];
+    const logger: Logger = { ...silentLogger, warn: (_message, fields) => void warnings.push({ what: fields?.what, detail: fields?.detail }) };
+    let all: ReturnType<ExtensionAPI["getAllTools"]> = [];
+    const late: PiExtension = (pi) => {
+      pi.on("session_start", () => {
+        pi.registerTool(tool("backend"));
+        pi.registerTool(tool("backend"));
+        all = pi.getAllTools();
+      });
+      pi.on("agent_start", () => pi.registerTool(tool("backend")));
+    };
+    const s = await setup([late], { logger });
+
+    expect((await s.say("call backend")).text).toContain("backend");
+    await s.close();
+
+    expect(declared(s.requests[0])).toEqual(["bash", "write"]);
+    expect(all).toEqual([]);
+    expect(warnings.map((warning) => warning.what)).toEqual(['pi.registerTool("backend") after the extensions loaded']);
+    expect(String(warnings[0]?.detail)).toContain("only the tools registered while extensions load");
+  });
 });
 
 describe("taking a conversation up again, with extensions loaded (SPEC §6.2b)", () => {
