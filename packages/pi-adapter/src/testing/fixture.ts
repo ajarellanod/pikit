@@ -1,7 +1,7 @@
 /**
- * The `agent.runtime` conformance fixture on Pi. Sessions are JSONL files in a temporary
- * directory, so they outlive a worker as a real store does, and `interrupted()` kills a real
- * process mid-run (SIGKILL) for the next worker to resume.
+ * The `agent.runtime` conformance fixture on Pi. Sessions are in a temporary directory (Pi's JSONL
+ * files, or the SQL store on a SQLite file: `sessions`), so they outlive a worker as a real store
+ * does, and `interrupted()` kills a real process mid-run (SIGKILL) for the next worker to resume.
  *
  * The runtime under test is built by the caller, so the same fixture checks the adapter and the
  * `runtime-pi` component. The fixture provides what it uses: `sessions.store`, the scripted
@@ -14,14 +14,14 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createInterface } from "node:readline";
 import { fileURLToPath } from "node:url";
-import { JsonlSessionRepo, MemorySessionRepo } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import { MemorySessionRepo } from "@earendil-works/pi-agent-core";
 import { BACKGROUND_CONTEXT, type ComponentDefinition, defineComponent } from "@pikit/core";
 import { type AgentDefinition, type ConversationRef } from "@pikit/contracts";
 import type { AgentRuntimeFixture } from "@pikit/contracts/testing";
 import type { HarnessHook } from "../conversation.ts";
 import type { SessionStore } from "../types.ts";
 import { holdTool, scriptedAgent, scriptedProvider, type ScriptedProviderOptions } from "./script.ts";
+import { type SessionsKind, sessionsAt } from "./stores.ts";
 
 export interface PiRuntimeUnderTest {
   /** Pass to the runtime: the fixture pauses runs at their end through Pi's `before_run_end` hook. */
@@ -30,9 +30,23 @@ export interface PiRuntimeUnderTest {
 
 const WORKER = fileURLToPath(new URL("./interrupted-worker.ts", import.meta.url));
 
-export function createPiRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) => ComponentDefinition[]): AgentRuntimeFixture {
+export interface PiRuntimeFixtureOptions {
+  /**
+   * Where sessions live: Pi's JSONL files (the default), or `@pikit/pi-adapter/sql`'s store on a
+   * SQLite file held to a Durable Object's limits (what `sessions-sql` provides). Killed workers use
+   * the same.
+   */
+  sessions?: SessionsKind;
+}
+
+export function createPiRuntimeFixture(
+  runtime: (underTest: PiRuntimeUnderTest) => ComponentDefinition[],
+  options: PiRuntimeFixtureOptions = {},
+): AgentRuntimeFixture {
   const root = mkdtempSync(join(tmpdir(), "pikit-pi-"));
-  const sessions = new JsonlSessionRepo({ fileSystem: new NodeExecutionEnv({ cwd: root }), sessionsRoot: root });
+  const kind = options.sessions ?? "jsonl";
+  const store = sessionsAt(root, kind);
+  const sessions = store.store;
 
   let release!: () => void;
   let started!: () => void;
@@ -73,9 +87,21 @@ export function createPiRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) 
 
   const agent = scriptedAgent(hold);
   const support = testComponents({ sessions, agents: [agent], fail });
-  const records = [support.sessions, support.agents, support.provider];
+  // The store is usable once its tables exist: what uses it starts after them.
+  const records = [
+    defineComponent({
+      name: "sessions-fixture",
+      setup(pikit) {
+        pikit.provide("sessions.store", sessions);
+        return { start: () => store.ready };
+      },
+    }),
+    support.agents,
+    support.provider,
+  ];
 
   const conversation = async (): Promise<ConversationRef> => {
+    await store.ready;
     const session = await sessions.create({ cwd: root }, BACKGROUND_CONTEXT);
     // The runtime opens it again from the store: one open Session per process at a time.
     await session.close(BACKGROUND_CONTEXT);
@@ -103,10 +129,11 @@ export function createPiRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) 
     async interrupted() {
       const ref = await conversation();
       const requestId = "r-crashed";
-      await killMidRun(root, ref.sessionId, requestId, "never");
+      await killMidRun(root, ref.sessionId, requestId, "never", kind);
       return { conversation: ref, requestId };
     },
     async dispose() {
+      await store.close();
       rmSync(root, { recursive: true, force: true });
     },
   };
@@ -145,11 +172,12 @@ export function testComponents(
 }
 
 /**
- * Run `hold` in a separate process over the sessions in `root`, and SIGKILL it once the tool runs.
- * The session is left with an open run whose tool call has no result.
+ * Run `hold` in a separate process over the sessions in `root` (JSONL files by default, or the SQL
+ * store's database there), and SIGKILL it once the tool runs. The session is left with an open run
+ * whose tool call has no result.
  */
-export async function killMidRun(root: string, sessionId: string, requestId: string, replay: "safe" | "never"): Promise<void> {
-  const worker = spawn(process.execPath, [WORKER, root, sessionId, requestId, replay], { stdio: ["ignore", "pipe", "inherit"] });
+export async function killMidRun(root: string, sessionId: string, requestId: string, replay: "safe" | "never", sessions: SessionsKind = "jsonl"): Promise<void> {
+  const worker = spawn(process.execPath, [WORKER, root, sessionId, requestId, replay, sessions], { stdio: ["ignore", "pipe", "inherit"] });
   const exited = new Promise((resolve) => worker.once("exit", resolve));
   let held = false;
   for await (const line of createInterface({ input: worker.stdout })) {

@@ -5,6 +5,14 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- adapter: `createSqlSessionStore(db, { cwd })` in `@pikit/pi-adapter/sql` (neutral: server and
+  Cloudflare): Pi sessions on `storage.sql`, a `sessions.store` with `find(id)` and `migrate()`. It
+  passes Pi's session suites (repository, forks, storage) on SQLite held to a Durable Object's limits;
+  a record over 256 Ki characters is stored in parts. In `@pikit/pi-adapter/testing`:
+  `createPiRuntimeFixture(runtime, { sessions: "sql" })` and `killMidRun(…, "sql")` run the runtime
+  and its killed workers on it, `openSqliteDatabase(path, { durableObjectLimits })` is a `storage.sql`
+  for tests, and `createSessionRepoStreamingForkConformance` is Pi's fork cases the repository suite
+  does not include yet.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an
