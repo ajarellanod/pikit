@@ -32,6 +32,8 @@ export type { HttpRoute } from "./http.ts";
 export type { SecretStore } from "./secrets.ts";
 export type { JsonValue, KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
 export type { Feed, FeedItem, FeedPage } from "./feed.ts";
+export type { ActorInboxHandler, ActorMailbox } from "./actor.ts";
+export type { WakeupHandler, Wakeups } from "./wakeups.ts";
 export type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "./submissions.ts";
 export type {
   ChannelTransport,

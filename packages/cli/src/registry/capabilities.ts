@@ -108,6 +108,18 @@ export const CAPABILITIES: Catalogue = {
     summary: "Small JSON values a component keeps across restarts, by key, in a namespace of its own (a cursor, a token).",
     offer: true,
   },
+  "actor.mailbox": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Delivers a JSON message to the actor owning a key, wherever it runs; resolves once the actor holds it durably.",
+  },
+  wakeups: {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Timers: a component registers a named handler and asks for it to run at or after a time, at least once, retried with backoff.",
+  },
   "sessions.store": {
     mode: "single",
     definedIn: "@pikit/pi-adapter",
@@ -157,6 +169,12 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/contracts",
     stability: "experimental",
     summary: 'One HTTP endpoint per "METHOD /path", as a fetch handler; one server component serves them all.',
+  },
+  "actor.inbox": {
+    mode: "keyed",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "One handler per message type an actor receives through actor.mailbox; it resolves once the message is durable.",
   },
   "model.provider": {
     mode: "keyed",

@@ -59,6 +59,26 @@ line names its area (AGENTS.md, "Git and docs").
   and its killed workers on it, `openSqliteDatabase(path, { durableObjectLimits })` is a `storage.sql`
   for tests, and `createSessionRepoStreamingForkConformance` is Pi's fork cases the repository suite
   does not include yet.
+- contracts: `actor.mailbox` and the keyed `actor.inbox` (experimental, SPEC C2): `send(key, type,
+  message, ctx)` resolves once the actor owning `key` holds the JSON message durably (its `actor.inbox`
+  handler for `type` resolved), and rejects otherwise, with an error naming the type when nothing
+  handles it. The handler gets a copy and a context of its own. Its conformance suite and a memory
+  mailbox for tests are in `@pikit/contracts/testing`.
+- contracts: `wakeups` (experimental, SPEC C3, C4): the component that owns the work registers a
+  handler with `handle(name, handler)` in its `start` (one owner per name, dropped at stop) and asks
+  with `at(name, time, ctx)`, replacing its earlier request; `cancel(name, ctx)` drops it. A request
+  may come before its handler and waits for it. At least once, never early, one run per name at a
+  time; a handler that rejects runs again with the provider's backoff, and its context may be
+  cancelled at a slice deadline, after which it asks again. Its conformance suite (on a manual clock)
+  and a memory wakeups for tests, forgetful or durable, are in `@pikit/contracts/testing`.
+- component/mailbox-local: new. `actor.mailbox` on a server: `send` calls the same app's
+  `actor.inbox` handler for the type with a JSON copy and resolves when it does; `stop` cancels the
+  handlers still running. Targets `server`. `mailbox` is a new component kind.
+- component/wakeups-timers: new. `wakeups` on a server as in-process timers on the app's clock: a
+  failed handler runs again after 1 s, 5 s, 30 s, then every 60 s, logged each time; optional
+  `sliceMs` cancels a running handler's context as Cloudflare would, and no timer outlives a stop by
+  more than a second. Nothing is persisted: components register and ask again at start. Targets
+  `server`. `wakeups` is a new component kind.
 - spec: the Cloudflare target's decisions (SPEC §4.1, C1–C8): a thin Worker and an App per conversation's Durable Object, `actor.mailbox`, `wakeups`, work in slices inside events (with the limits measured on the Free plan), neutral state providers and one platform context key (`WORKERS_HOST`), `channel-telegram-webhook`, `execution-do`, and a deploy that waits for its version to answer.
 - adapter: `toolComponent(tool, { replay })` in `@pikit/pi-adapter/tools`: a tool of your own in the
   shape of Pi's `defineTool` becomes a component (`tool-<name>`) that provides `agent.tool`, so an

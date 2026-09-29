@@ -1,0 +1,30 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "mailbox-local",
+  "version": "0.0.0",
+  "description": "Hands a channel's message to the actor that owns its conversation, in the same app: actor.mailbox on a server.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": [
+      "actor.inbox"
+    ]
+  },
+  "provides": [
+    "actor.mailbox"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
