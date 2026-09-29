@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- repository: the workerd lane also runs Pi's session conformance on `sessions-sql` over `storage-do`
+  (the Durable Object session backend passes it, SPEC §4) and `agent.runtime` on `runtime-pi` over
+  those sessions, and `execution-do` with Pi's own tools on it; `bun run --cwd tests/workerd bundle`
+  measures a conversation object's bundle (1,002 KiB gzip with `execution-do`, 216 KiB without).
 - component/execution-do: new. `execution` and `execution.shell` in the conversation's Durable
   Object: files in its SQL (`execution_do_*` tables, 1 MB chunks), a shell without processes
   (just-bash) with `git` (isomorphic-git: clone, status, diff, commit, log, push, pr), `node` (QuickJS
