@@ -66,14 +66,15 @@ bun run --cwd tests/workerd bundle    # wrangler deploy --dry-run of src/bundle.
 ```
 
 `src/bundle.ts` is what a conversation's object bundles when its agent works in `execution-do`:
-storage-do, sessions-sql, runtime-pi, execution-do and Pi's four tools. Measured on September 29,
-2026 (wrangler 4.143.0):
+storage-do, sessions-sql, runtime-pi, execution-do and Pi's four tools. It has its own config,
+`wrangler.bundle.jsonc`, which binds only its `TestObject`: `wrangler.jsonc` binds the suites'
+classes, which it does not export. Measured on September 29, 2026 (wrangler 4.143.0, Pi 0.99.0):
 
 | Worker | Uncompressed | gzip |
 |---|---|---|
-| The lane's own Worker (`src/worker.ts`, no component) | 0.5 KiB | 0.3 KiB |
-| The conversation's stack without execution-do | 1,183 KiB | 216 KiB |
-| The same with execution-do (`src/bundle.ts`) | 4,176 KiB | 1,002 KiB |
+| The lane's own Worker (`src/worker.ts`: deployment-cloudflare's `Conversation` over the suites' Apps) | 501 KiB | 78 KiB |
+| The conversation's stack without execution-do | 1,195 KiB | 219 KiB |
+| The same with execution-do (`src/bundle.ts`) | 4,188 KiB | 1,005 KiB |
 
 execution-do adds about 786 KiB gzip: just-bash, isomorphic-git and QuickJS's WebAssembly (503 KB,
 226 KiB gzip). The budget is 10 MB compressed (SPEC §4). `wrangler.jsonc` carries the rule that
