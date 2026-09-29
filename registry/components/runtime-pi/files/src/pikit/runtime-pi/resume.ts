@@ -6,7 +6,8 @@
  * Each conversation is opened as a new message would open it: a run the dead process left open is
  * resumed, a message waiting in Pi's inbox gets a run, and a run that ended without its end recorded is
  * settled from the session (`recover`, in the adapter). A few at a time, in the background: start does
- * not wait for them, and stop aborts what has not started.
+ * not wait for them, and stop aborts what has not started. With `wakeups`, the handler that drives the
+ * runs calls this at each run instead, skipping what its App drives already (`index.ts`).
  *
  * A message nothing can answer is abandoned (`runtime.abandon`): its channel tells the user to send it
  * again, and it stops being retried at every start. At once when its agent or session is gone
@@ -16,7 +17,7 @@
  */
 
 import type { AppContext } from "@pikit/core";
-import type { AgentSubmissions } from "@pikit/contracts";
+import type { AgentSubmissions, ConversationRef } from "@pikit/contracts";
 import type { PiRuntime } from "@pikit/pi-adapter";
 
 /** Conversations resumed at once: each may run the model, and a restart should not flood the provider. */
@@ -25,6 +26,8 @@ export const RESUME_AT_ONCE = 4;
 export interface ResumeOptions {
   /** How old a conversation's oldest pending message may be before what resuming leaves is abandoned. */
   abandonAfterMs: number;
+  /** Conversations left alone this time: ones this worker drives already, or whose run waits for a retry. */
+  skip?(conversation: ConversationRef): boolean;
 }
 
 /** Resumes every pending conversation; `ctx`'s cancellation stops taking new ones. Never rejects. */
@@ -38,6 +41,7 @@ export async function resumePending(runtime: PiRuntime, submissions: AgentSubmis
     logger.error("runtime-pi: could not read the conversations with unanswered messages; they resume when they get a new one", { error: String(error) });
     return;
   }
+  if (pending !== undefined && options.skip !== undefined) pending = pending.filter((p) => !options.skip?.(p.conversation));
   if (pending === undefined || pending.length === 0) return;
   const messages = pending.reduce((sum, p) => sum + p.requestIds.length, 0);
   logger.info("runtime-pi: resuming conversations with unanswered messages", { conversations: pending.length, messages });
