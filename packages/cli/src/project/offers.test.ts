@@ -41,13 +41,10 @@ test("the runtime brings the record of submissions, and the storage it requires"
 });
 
 test("only providers that run on the project's targets are offered: on Cloudflare, the storage is storage-do", () => {
-  // What channel-telegram's offers become there (`pikit add` refuses channel-telegram itself, a
-  // server component): storage-sqlite does not run on Cloudflare, so storage-do is the one provider of
-  // storage.sql, and submissions-sql, server-only, is not offered.
-  expect(offeredProviders(registry, ["channel-telegram"], [], ["cloudflare"])).toEqual([
-    { component: "storage-do", capability: "storage.sql", for: "outbound-durable", why: "required" },
-    { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram", why: "recommended" },
-    { component: "storage-kv-sql", capability: "storage.kv", for: "channel-telegram", why: "recommended" },
+  // storage-sqlite does not run on Cloudflare, so storage-do is the one provider of storage.sql there.
+  expect(offeredProviders(registry, ["channel-http"], [], ["cloudflare"])).toEqual([
+    { component: "storage-do", capability: "storage.sql", for: "submissions-sql", why: "required" },
+    { component: "submissions-sql", capability: "agent.submissions", for: "channel-http", why: "recommended" },
   ]);
 });
 

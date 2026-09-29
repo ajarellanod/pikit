@@ -5,6 +5,9 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/submissions-sql: targets `cloudflare` too: unmodified, over `storage-do`, it passes its
+  `agent.submissions` suite (with the feed, pruning and restarts) in workerd. On Cloudflare its
+  records are the conversation object's.
 - repository: the workerd lane (`bun run test:workerd`, `tests/workerd/`, a CI job): Vitest with
   `@cloudflare/vitest-plugin` runs, offline in workerd on a real SQLite-backed Durable Object, the
   `storage.sql` suite on `storage-do`, `storage.kv` on `storage-kv-sql` and `agent.submissions` (with

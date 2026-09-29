@@ -163,7 +163,8 @@
       "version": "0.0.0",
       "description": "No admitted message ends without its answer: unanswered conversations resume at start, and channels deliver every answer from a feed, even one that ended while they were stopped.",
       "targets": [
-        "server"
+        "server",
+        "cloudflare"
       ],
       "path": "components/submissions-sql"
     },
