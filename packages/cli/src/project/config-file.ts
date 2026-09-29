@@ -139,17 +139,20 @@ export function removeComponent(text: string, name: string): string {
   return next;
 }
 
-/** Sets `config["<name>"]` to `value` (TypeScript source), adding the key at the end of `config`. */
-export function setConfigEntry(text: string, name: string, value: string): string {
-  const object = configObject(text);
-  if (object === undefined) throw new ShapeError("it has no `const config = { … }`");
-  if (findConfigKey(text, object, name) !== undefined) throw new ShapeError(`config already has "${name}"`);
+/**
+ * Sets `config["<name>"]` to `value` (TypeScript source), adding the key at the end of `config`;
+ * `objectName` names another config object (`workerConfig`).
+ */
+export function setConfigEntry(text: string, name: string, value: string, objectName = "config"): string {
+  const object = configObject(text, objectName);
+  if (object === undefined) throw new ShapeError(`it has no \`const ${objectName} = { … }\``);
+  if (findConfigKey(text, object, name) !== undefined) throw new ShapeError(`${objectName} already has "${name}"`);
   const line = `"${name}": ${value},`;
   if (text.slice(object.open + 1, object.close).trim() === "") {
     return `${text.slice(0, object.open + 1)}\n  ${line}\n${text.slice(object.close)}`;
   }
   const closeLineStart = text.lastIndexOf("\n", object.close - 1) + 1;
-  if (text.slice(closeLineStart, object.close).trim() !== "") throw new ShapeError("the closing `}` of config is not on its own line");
+  if (text.slice(closeLineStart, object.close).trim() !== "") throw new ShapeError(`the closing \`}\` of ${objectName} is not on its own line`);
   return `${text.slice(0, closeLineStart)}  ${line}\n${text.slice(closeLineStart)}`;
 }
 

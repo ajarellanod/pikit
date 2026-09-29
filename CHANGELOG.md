@@ -5,6 +5,10 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- preset/telegram-cloudflare: new. `pikit new my-bot --target cloudflare --preset telegram-cloudflare`: a Telegram bot on Cloudflare, `pikit configure`, `pikit up`. secrets-cloudflare and platform-cloudflare in both Apps, channel-telegram-webhook's Worker half in the Worker's, and in each chat's Durable Object storage-do, storage-kv-sql, submissions-sql, sessions-sql, conversations-kv, provider-openrouter, runtime-pi, router-basic, the channel (with outbound-durable, offered), execution-do and tool-read, -write, -edit, -bash, -fetch and -websearch-brave; deployment-cloudflare runs it. The starter agent names every installed tool. deployment-cloudflare's README has "Your Telegram bot on Cloudflare": new, configure, up, and what `up` does.
+- cli: `pikit new --target cloudflare` starts the agent on `openrouter/z-ai/glm-5.3-flash` (provider-anthropic is server-only); on a server it stays `anthropic/claude-sonnet-4-6`.
+- cli: `pikit new --preset <p>` without `--target`, for a preset that runs on another target, is still refused, and now says the command that makes it (`pikit new <dir> --target cloudflare --preset <p>`).
+- cli: `pikit configure` offers a model login only where a `model.credentials` component can keep it: on Cloudflare it asks for the API key instead of offering a login that fails.
 - component/tool-websearch-brave: `BRAVE_API_KEY` is optional, as the app already started without it (`pikit doctor` no longer fails without it), and a `pikit configure` step asks for it in a terminal, where Enter skips.
 - component/provider-openrouter: `apiBase` in config (OpenRouter's API by default) moves every model under a proxy or a test double; `fake-openrouter.test-support.ts` is a local OpenRouter for tests.
 - component/deployment-cloudflare: `wrangler.jsonc` bundles execution-do's QuickJS (`@jitl/quickjs-wasmfile-release-sync/wasm`, a package export without `.wasm`), so a project with execution-do builds under `wrangler dev` and `deploy`.

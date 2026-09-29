@@ -12,7 +12,8 @@
  * permission gate loaded, and `router-basic` sends every message to `assistant`.
  *
  * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
- * two Apps (SPEC C1), `package.json` has `wrangler`, and `.gitignore` and the README say so.
+ * two Apps (SPEC C1), `package.json` has `wrangler`, the agent's model is one whose provider runs
+ * there (`STARTER_MODEL`), and `.gitignore` and the README say so.
  */
 
 import { readFileSync } from "node:fs";
@@ -165,7 +166,18 @@ export function configFile(target = "server"): string {
   return target === "cloudflare" ? CLOUDFLARE_CONFIG : CONFIG;
 }
 
-export function agent(tools: string[]): string {
+/**
+ * The starter agent's model, by the project's target: one whose provider runs there. On a server,
+ * Anthropic's (`provider-anthropic`, which the server presets install). On Cloudflare, OpenRouter's
+ * (`provider-openrouter`, with an API key): `provider-anthropic` is server-only.
+ */
+export const STARTER_MODEL: Record<string, string> = {
+  server: "anthropic/claude-sonnet-4-6",
+  cloudflare: "openrouter/z-ai/glm-5.3-flash",
+};
+
+export function agent(tools: string[], target = "server"): string {
+  const model = STARTER_MODEL[target] ?? (STARTER_MODEL.server as string);
   const workspace =
     tools.length > 0
       ? `\n    "You work in a workspace directory: use your tools to read, write and edit files there, and to run commands in it.",`
@@ -180,7 +192,7 @@ export function agent(tools: string[]): string {
  */
 export default defineAgent({
   name: "${STARTER_AGENT}",
-  model: "anthropic/claude-sonnet-4-6",
+  model: "${model}",
   systemPrompt: [
     "You are a helpful assistant reached over an HTTP API. Answer briefly and plainly.",${workspace}
   ].join(" "),

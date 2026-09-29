@@ -1,0 +1,34 @@
+# yaml-language-server: $schema=../schema/preset.schema.json
+# An agent in Telegram, on Cloudflare (SPEC §4.1):
+#   pikit new my-bot --target cloudflare --preset telegram-cloudflare
+#   pikit configure   # the bot's token, who may talk to it, the webhook's secret, the model's key
+#   pikit up          # deploy, wait until /health answers the new version, then set the webhook
+# deployment-cloudflare's README, "Your Telegram bot on Cloudflare", walks through it.
+#
+# A base, not an alias of cloudflare-minimal: an alias only answers its base's questions (`choose`),
+# and cloudflare-minimal asks none. `pikit add` puts each half in its App (C1): secrets-cloudflare and
+# platform-cloudflare in both, channel-telegram-webhook's Worker half in the Worker's, everything else
+# in each conversation's Durable Object. Offered along the way (SPEC §10.5): outbound-durable, for the
+# channel's answers. The starter agent's model is OpenRouter's (provider-anthropic is server-only),
+# and it names every tool below.
+title: "Telegram on Cloudflare: a Worker, and a Durable Object per chat"
+components:
+  - secrets-cloudflare
+  - platform-cloudflare
+  - storage-do
+  - storage-kv-sql
+  - submissions-sql
+  - sessions-sql
+  - conversations-kv
+  - provider-openrouter
+  - runtime-pi
+  - router-basic
+  - channel-telegram-webhook
+  - execution-do
+  - tool-read
+  - tool-write
+  - tool-edit
+  - tool-bash
+  - tool-fetch
+  - tool-websearch-brave
+  - deployment-cloudflare

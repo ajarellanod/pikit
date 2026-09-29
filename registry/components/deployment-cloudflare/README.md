@@ -16,6 +16,35 @@ objects running the project's two Apps, `wrangler.jsonc`, and the commands
 - **Environment:** none of its own. `.env` holds the app's secrets: `pikit up` uploads them with each
   version, and `pikit dev` gives them to the local Worker.
 
+## Your Telegram bot on Cloudflare
+
+```sh
+pikit new my-bot --target cloudflare --preset telegram-cloudflare
+cd my-bot
+pikit configure
+pikit up
+```
+
+- **`new`** writes the bot: a Worker that receives Telegram's updates, and one Durable Object per chat
+  running the agent (`channel-telegram-webhook`, `runtime-pi`, OpenRouter's models, a workspace and a
+  shell in the object with `execution-do`, web fetch and search), each half in its App of
+  `pikit.config.ts`. The agent, `src/agents/assistant/agent.ts`, uses `openrouter/z-ai/glm-5.3-flash`
+  and names every installed tool.
+- **`configure`** asks, in order: the bot's token (from @BotFather, checked with Telegram), who may
+  talk to it (send the bot a message; it reads it and asks you to allow the sender), the webhook's
+  secret (generated), the Brave Search key (optional: Enter skips, and only web search needs it) and
+  the OpenRouter key. Everything goes to `.env` (mode 0600). Without a terminal, export them instead:
+  `TELEGRAM_BOT_TOKEN`, `TELEGRAM_ALLOWED_USERS`, `OPENROUTER_API_KEY`, `BRAVE_API_KEY`.
+- **`up`** deploys the Worker with `.env`'s variables as its secrets (`wrangler deploy`, on your
+  Cloudflare account: `bunx wrangler login` once, or `CLOUDFLARE_API_TOKEN`), waits until `/health` answers from the
+  version it deployed, then tells Telegram where to post (`setWebhook` at `<workers.dev URL>/telegram`,
+  with the secret). Write to the bot: it answers.
+
+`pikit dev` runs the same Worker and objects on your machine (`wrangler dev`); Telegram cannot reach it
+there, so a webhook needs a deploy. `pikit logs` streams the deployed bot's logs, `pikit status` shows
+what serves. pikit's own end-to-end test (`packages/cli/src/e2e-telegram-cloudflare.test.ts`) runs this
+whole path in workerd against a fake Telegram and a fake OpenRouter.
+
 ## What it does
 
 ### Two Apps (`worker.ts`, `entrypoint.ts`, `host.ts`)
