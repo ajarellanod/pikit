@@ -5,6 +5,12 @@ line names its area (AGENTS.md, "Git and docs").
 
 ## Unreleased
 
+- component/sessions-sql: new. `sessions.store` on `storage.sql` (the adapter's SQL store), so
+  sessions live in the app's database on a server and in a Durable Object alike; tables
+  `sessions_sql_*`, versioned and migrated at start; targets `server` and `cloudflare`. Optional
+  `cwd` config.
+- component/runtime-pi: its tests also run the `agent.runtime` conformance on sessions in
+  `storage.sql`, including a worker killed mid-run.
 - adapter: `createSqlSessionStore(db, { cwd })` in `@pikit/pi-adapter/sql` (neutral: server and
   Cloudflare): Pi sessions on `storage.sql`, a `sessions.store` with `find(id)` and `migrate()`. It
   passes Pi's session suites (repository, forks, storage) on SQLite held to a Durable Object's limits;

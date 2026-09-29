@@ -126,6 +126,15 @@
       ],
       "path": "components/sessions-jsonl"
     },
+    "sessions-sql": {
+      "version": "0.0.0",
+      "description": "Each conversation's Pi session in the app's SQL database: on a server's SQLite or in a Cloudflare Durable Object alike.",
+      "targets": [
+        "server",
+        "cloudflare"
+      ],
+      "path": "components/sessions-sql"
+    },
     "storage-kv-sql": {
       "version": "0.0.0",
       "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",
