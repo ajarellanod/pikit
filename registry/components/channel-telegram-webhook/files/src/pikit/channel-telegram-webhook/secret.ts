@@ -23,12 +23,12 @@ export function secretProblem(value: string): string | undefined {
   return undefined;
 }
 
-/** Shorter claim codes (`claim.ts`) are refused: they could be guessed. */
-export const CLAIM_CODE_MIN_LENGTH = 8;
+/** Shorter passwords (`login.ts`) are refused: they could be guessed. */
+export const PASSWORD_MIN_LENGTH = 8;
 
-/** What is wrong with `value` as a claim code, or `undefined` when it is a good one. */
-export function claimCodeProblem(value: string): string | undefined {
-  if (value.trim().length < CLAIM_CODE_MIN_LENGTH) return `it is shorter than ${CLAIM_CODE_MIN_LENGTH} characters, so it could be guessed`;
+/** What is wrong with `value` as the bot's password, or `undefined` when it is a good one. */
+export function passwordProblem(value: string): string | undefined {
+  if (value.trim().length < PASSWORD_MIN_LENGTH) return `it is shorter than ${PASSWORD_MIN_LENGTH} characters, so it could be guessed`;
   return undefined;
 }
 

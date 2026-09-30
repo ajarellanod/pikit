@@ -14,9 +14,9 @@
  *    else (a group, a bot, an edit) is acknowledged with `200` and dropped, as channel-telegram does.
  * 3. **Who may talk**: the ids in `TELEGRAM_[<NAME>_]ALLOWED_USERS`. A stranger is told their id, so
  *    the owner can add it, and nothing reaches the agent. A message with no text gets a hint.
- *    When the bot can be claimed (`TELEGRAM_[<NAME>_]CLAIM_CODE` is set, or nobody is listed), the
+ *    When the bot takes logins (`TELEGRAM_[<NAME>_]PASSWORD` is set, or nobody is listed), the
  *    Worker decides nothing about strangers: it hands their updates to their chat's actor as
- *    `telegram.stranger`, which keeps the claims and answers them (`claim.ts`).
+ *    `telegram.stranger`, which keeps the logins and answers them (`login.ts`).
  * 4. **The actor**: `actor.mailbox.send("<instance>:<chat>", "telegram.update", update)`. It resolves
  *    once the conversation holds the message durably, and the Worker answers `200`; if it rejects, `500`,
  *    and Telegram delivers the update again (the object recognises it: answered once).
@@ -41,9 +41,9 @@ import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, conversationKeyOf } from "./account.ts";
 import { createTelegramApi, parseAllowedUsers, type TelegramApi } from "./api.ts";
 import { TELEGRAM_TIMEOUT_MS, within } from "./bot.ts";
-import { strangerText } from "./claim.ts";
 import { NO_TEXT } from "./inbox.ts";
-import { claimCodeProblem, type Digest, digest, matches, SECRET_HEADER, secretProblem } from "./secret.ts";
+import { readPassword, strangerText } from "./login.ts";
+import { type Digest, digest, matches, passwordProblem, SECRET_HEADER, secretProblem } from "./secret.ts";
 import { isPrivateMessage, readUpdate, STRANGER_TYPE, textOf, UPDATE_TYPE } from "./update.ts";
 import { type Registration, registerWebhook } from "./webhook.ts";
 
@@ -68,10 +68,12 @@ interface Endpoint {
   /** The secret itself, which `setWebhook` gives Telegram. */
   secretToken: string;
   allowed: ReadonlySet<number>;
-  /** Whether `TELEGRAM_[<NAME>_]CLAIM_CODE` is set (the object's half compares it). */
-  claimCode: boolean;
-  /** A claim code is set, or nobody is listed: strangers go to their chat's actor, which keeps the claims. */
-  claimable: boolean;
+  /** Whether `TELEGRAM_[<NAME>_]PASSWORD` is set (the object's half compares it). */
+  hasPassword: boolean;
+  /** Where the password was read from, when it is the deprecated `TELEGRAM_[<NAME>_]CLAIM_CODE`. */
+  deprecatedPassword: string | undefined;
+  /** A password is set, or nobody is listed: strangers go to their chat's actor, which keeps the logins. */
+  takesLogins: boolean;
   api: TelegramApi;
   told: Set<number>;
 }
@@ -135,7 +137,7 @@ export const worker = defineComponent({
       const chatId = message.chat.id;
       const allowed = endpoint.allowed.has(message.from.id);
 
-      if (!allowed && !endpoint.claimable) {
+      if (!allowed && !endpoint.takesLogins) {
         ctx.logger.warn("channel-telegram-webhook: a message from a user who is not allowed", { instance: account.instance, user: message.from.id });
         if (!endpoint.told.has(message.from.id)) {
           if (endpoint.told.size >= STRANGERS_REMEMBERED) endpoint.told.clear();
@@ -150,7 +152,7 @@ export const worker = defineComponent({
       }
 
       try {
-        // Someone not listed, of a bot that can be claimed: their chat's actor decides (claim.ts).
+        // Someone not listed, of a bot that takes logins: their chat's actor decides (login.ts).
         await mailbox.get().send(conversationKeyOf(account.instance, chatId), allowed ? UPDATE_TYPE : STRANGER_TYPE, update as unknown as JsonValue, ctx);
       } catch (error) {
         // Not acknowledged: Telegram delivers it again, and the conversation recognises it.
@@ -172,10 +174,16 @@ export const worker = defineComponent({
         const ready = new Map<string, Endpoint>();
         for (const account of accounts) {
           const endpoint = await endpointOf(account);
-          if (endpoint.allowed.size === 0 && !endpoint.claimCode) {
-            ctx.logger.warn(`channel-telegram-webhook: nobody is in ${account.allowedSecret} and ${account.claimSecret} is not set: only chats that claimed the bot before can talk to it`, {
+          if (endpoint.allowed.size === 0 && !endpoint.hasPassword) {
+            ctx.logger.warn(`channel-telegram-webhook: nobody is in ${account.allowedSecret} and ${account.passwordSecret} is not set: only chats that logged in before can talk to it`, {
               instance: account.instance,
             });
+          }
+          if (endpoint.deprecatedPassword !== undefined) {
+            ctx.logger.warn(
+              `channel-telegram-webhook: ${endpoint.deprecatedPassword} is deprecated: rename it ${account.passwordSecret} (the same value keeps the chats that logged in)`,
+              { instance: account.instance },
+            );
           }
           ready.set(account.instance, endpoint);
         }
@@ -204,9 +212,10 @@ export const worker = defineComponent({
       if (token === undefined) throw new Error(`channel-telegram-webhook: ${account.tokenSecret} is not set. Create a bot with @BotFather, then run \`pikit configure\``);
       const allowed = parseAllowedUsers(await store.get(account.allowedSecret));
       if (allowed instanceof Error) throw new Error(`channel-telegram-webhook: ${allowed.message.replace("TELEGRAM_ALLOWED_USERS", account.allowedSecret)}`);
-      const claimCode = (await store.get(account.claimSecret))?.trim() ?? "";
-      const claimProblem = claimCode === "" ? undefined : claimCodeProblem(claimCode);
-      if (claimProblem !== undefined) throw new Error(`channel-telegram-webhook: ${account.claimSecret} is not usable: ${claimProblem}. Choose a longer passphrase, or remove it`);
+      // Also read under its former name, TELEGRAM_[<NAME>_]CLAIM_CODE (login.ts), with a warning at start.
+      const password = await readPassword(account, (name) => store.get(name));
+      const weak = password === undefined ? undefined : passwordProblem(password.value);
+      if (password !== undefined && weak !== undefined) throw new Error(`channel-telegram-webhook: ${password.name} is not usable: ${weak}. Choose a longer password, or remove it`);
       const secret = await store.get(account.webhookSecret);
       if (secret === undefined) throw new Error(`channel-telegram-webhook: ${account.webhookSecret} is not set. Run \`pikit configure\`: it generates one`);
       const problem = secretProblem(secret);
@@ -216,9 +225,10 @@ export const worker = defineComponent({
         secret: await digest(secret),
         secretToken: secret,
         allowed,
-        claimCode: claimCode !== "",
-        // Nobody listed: a claim made before the claim code was removed keeps working (claim.ts).
-        claimable: claimCode !== "" || allowed.size === 0,
+        hasPassword: password !== undefined,
+        deprecatedPassword: password?.name === account.legacyPasswordSecret ? password.name : undefined,
+        // Nobody listed: a login made before the password was removed keeps working (login.ts).
+        takesLogins: password !== undefined || allowed.size === 0,
         api: createTelegramApi(token, config.apiBase),
         told: new Set(),
       };

@@ -244,12 +244,12 @@ test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each ha
   expect(agent).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
   expect(agent).toContain('tools: ["read","write","edit","bash","fetch","websearch"],');
   // The Telegram variables are the channel's; the Brave key is optional, and so are the model's key
-  // and the Telegram claim code (the Deploy to Cloudflare button's way to let the owner in).
+  // and the Telegram bot's password (the Deploy to Cloudflare button's way to let the owner in).
   const optional = Object.values(manifest.components as Record<string, { environment: { name: string; required: boolean }[] }>)
     .flatMap((c) => c.environment)
     .filter((v) => !v.required)
     .map((v) => v.name);
-  expect(optional.sort()).toEqual(["BRAVE_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_CLAIM_CODE"]);
+  expect(optional.sort()).toEqual(["BRAVE_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_PASSWORD"]);
 }, 60_000);
 
 test("add without a terminal needs --yes, and writes nothing without it", () => {

@@ -13,12 +13,13 @@
  *    you to send the bot any message and reads it with `getUpdates`, which works only while the bot
  *    has no webhook. On a bot that has one already (a deploy registered it), it offers to remove it:
  *    with nobody allowed, the Worker lets no message through to the agent (except from a chat that
- *    claimed the bot), and the next `pikit up` sets it again (as does the Worker, when a new isolate of
+ *    logged in), and the next `pikit up` sets it again (as does the Worker, when a new isolate of
  *    it starts: then read the message again). You can also set `TELEGRAM_ALLOWED_USERS` yourself.
- * 4. A claim code (`TELEGRAM_[<NAME>_]CLAIM_CODE`), only if you set one: checked (8 characters at
- *    least) and saved to `.env`, so `pikit up` uploads it. With it, a private chat that sends
- *    `/claim <code>` may talk to the bot too (`claim.ts`). It is never asked for: the way the CLI
- *    allows you is step 3; the claim code is the "Deploy to Cloudflare" button's way.
+ * 4. Before step 3, the bot's password (`TELEGRAM_[<NAME>_]PASSWORD`), optional: one you set is
+ *    checked (8 characters at least) and saved to `.env`, so `pikit up` uploads it; at a terminal, on
+ *    a first setup (no password, nobody allowed yet), you may choose one, and Enter skips. With it, a
+ *    private chat that sends `/login <password>` may talk to the bot too (`login.ts`). The CLI's way to
+ *    allow you is step 3; the password is the "Deploy to Cloudflare" button's way, and yours to share.
  *
  * Without a terminal it asks nothing: the variables come from the environment (or `.env`), the token
  * is still checked, and a missing secret is still generated. It never prints the token or the secret.
@@ -26,7 +27,8 @@
 
 import { type Account, accountsOf } from "./account.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, type TelegramApi, TelegramError, type TelegramUser } from "./api.ts";
-import { claimCodeProblem, generateSecret, secretProblem } from "./secret.ts";
+import { readPassword } from "./login.ts";
+import { generateSecret, PASSWORD_MIN_LENGTH, passwordProblem, secretProblem } from "./secret.ts";
 
 /** What `pikit configure` gives a component's step. Structural, so this file imports nothing from the CLI. */
 export interface ConfigureIO {
@@ -67,27 +69,52 @@ export async function configure(io: ConfigureIO): Promise<string[]> {
   return missing;
 }
 
-/** One bot: its token, its webhook's secret, its claim code if it has one, then who may talk to it. */
+/** One bot: its token, its webhook's secret, its password, then who may talk to it. */
 async function configureBot(io: ConfigureIO, apiBase: string, account: Account): Promise<string[]> {
   const { tokenSecret } = account;
   const bot = await token(io, apiBase, tokenSecret);
   if (bot === undefined) return [`${tokenSecret}: create a bot with @BotFather and give its token to \`pikit configure\` (or set ${tokenSecret})`];
   webhookSecret(io, account);
-  return [...claimCode(io, account), ...(await allowUsers(io, bot, account))];
+  return [...(await password(io, account)), ...(await allowUsers(io, bot, account))];
 }
 
-/** The claim code, when one is given: checked, and saved to `.env`. Never asked for. */
-function claimCode(io: ConfigureIO, account: Account): string[] {
-  const name = account.claimSecret;
-  const given = io.get(name)?.trim();
-  if (given === undefined || given === "") return [];
-  const problem = claimCodeProblem(given);
-  if (problem !== undefined) {
-    io.say(`\u2717 ${name} is not usable: ${problem}`);
-    return [`${name}: choose a passphrase of at least 8 characters, or remove it`];
+/**
+ * The bot's password: one given is checked and saved to `.env`. At a terminal, on a first setup (no
+ * password, nobody allowed yet), it offers to choose one; Enter skips. Never shown.
+ */
+async function password(io: ConfigureIO, account: Account): Promise<string[]> {
+  const name = account.passwordSecret;
+  const given = await readPassword(account, (variable) => io.get(variable));
+  if (given !== undefined) {
+    const problem = passwordProblem(given.value);
+    if (problem !== undefined) {
+      io.say(`\u2717 ${given.name} is not usable: ${problem}`);
+      return [`${given.name}: choose a password of at least ${PASSWORD_MIN_LENGTH} characters, or remove it`];
+    }
+    // Its former name (login.ts) still works: said, not moved, since .env keeps what its owner wrote.
+    if (given.name !== name) {
+      io.say(`  ${given.name} is deprecated: rename it ${name} in .env (the same value keeps the chats that logged in)`);
+      return [];
+    }
+    io.set(name, given.value);
+    io.say(`  ${name}: set; once deployed, send /login <password> to your bot`);
+    return [];
   }
-  io.set(name, given);
-  io.say(`  ${name}: set; a private chat that sends /claim followed by it may talk to the bot`);
+  const allowed = parseAllowedUsers(io.get(account.allowedSecret));
+  if (!io.interactive || (!(allowed instanceof Error) && allowed.size > 0)) return [];
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const chosen = (
+      await io.askSecret(`Choose a password for your bot (${PASSWORD_MIN_LENGTH}+ characters, or Enter for none): you'll send /login <password> to it once deployed`)
+    ).trim();
+    if (chosen === "") return [];
+    const problem = passwordProblem(chosen);
+    if (problem === undefined) {
+      io.set(name, chosen);
+      io.say(`\u2713 ${name} saved to .env: once deployed, send /login <password> to your bot. Whoever knows it can log in too; change it to log everyone out`);
+      return [];
+    }
+    io.say(`\u2717 That password is not usable: ${problem}. Choose another:`);
+  }
   return [];
 }
 
@@ -132,7 +159,7 @@ function webhookSecret(io: ConfigureIO, account: Account): void {
 /**
  * Whether the bot has no webhook, so `getUpdates` can read the first message; if it has one, a person
  * may remove it. With nobody allowed yet, the Worker lets no message through to the agent (only a chat
- * that claimed the bot), so the webhook serves no one.
+ * that logged in), so the webhook serves no one.
  */
 async function withoutWebhook(io: ConfigureIO, api: TelegramApi): Promise<boolean> {
   const { url } = await api.getWebhookInfo();

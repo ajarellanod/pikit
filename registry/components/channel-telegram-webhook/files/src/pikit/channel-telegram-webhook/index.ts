@@ -9,8 +9,8 @@
  *   (on Cloudflare, the Durable Object `idFromName("telegram:<chat>")`):
  *   - the `actor.inbox` handler of `telegram.update` (`inbox.ts`): the commands, then `admitInbound`;
  *     it resolves once the message is durable, and asks for the delivery wakeup;
- *   - the `actor.inbox` handler of `telegram.stranger` (`claim.ts`), for a bot that can be claimed:
- *     a chat that claimed it is handled as above, `/claim <code>` claims it, anyone else is told;
+ *   - the `actor.inbox` handler of `telegram.stranger` (`login.ts`), for a bot that takes logins:
+ *     a chat that logged in is handled as above, `/login <password>` logs it in, anyone else is told;
  *   - the wakeup `channel-telegram-webhook.deliver` (`delivery.ts`), registered with `wakeups.handle`
  *     at start: the answers from `agent.submissions`' feed, from a cursor in `storage.kv`, "typing…"
  *     while a message waits for its run, and a new request while work remains. With `outbound.queue`
@@ -36,9 +36,9 @@ import { ACCOUNT_NAME, accountsOf } from "./account.ts";
 import { registerInbox } from "./actor-inbox.ts";
 import { createTelegramApi } from "./api.ts";
 import { type Bot, createBot, findBot } from "./bot.ts";
-import { type ClaimCode, claimCodeOf, handleStranger } from "./claim.ts";
 import { createDelivery, DELIVER, type Delivery, openCursors } from "./delivery.ts";
 import { handleMessage, type InboxOutcome } from "./inbox.ts";
+import { handleStranger, type Password, passwordOf, readPassword } from "./login.ts";
 import { isPrivateMessage, type PrivateUpdate, readUpdate, STRANGER_TYPE, UPDATE_TYPE } from "./update.ts";
 
 export { SETUP_ROUTE, worker, WORKER_NAME } from "./worker.ts";
@@ -56,8 +56,8 @@ const Config = Type.Object({
 
 interface Running {
   bots: Bot[];
-  /** Each bot's claim code, by instance; absent when none is set. */
-  codes: Map<string, ClaimCode>;
+  /** Each bot's password, by instance; absent when none is set. */
+  passwords: Map<string, Password>;
   delivery: Delivery;
   queue: OutboundQueue | undefined;
 }
@@ -106,11 +106,11 @@ export default defineComponent({
       UPDATE_TYPE,
       receive((update, bot, _now, ctx) => handleMessage(update.message, depsOf(bot), ctx)),
     );
-    // Someone the Worker does not list, of a bot that can be claimed: the claims are kept here.
+    // Someone the Worker does not list, of a bot that takes logins: the logins are kept here.
     const strangers = registerInbox(
       pikit,
       STRANGER_TYPE,
-      receive((update, bot, now, ctx) => handleStranger(update.message, { ...depsOf(bot), code: now.codes.get(bot.account.instance) }, ctx)),
+      receive((update, bot, now, ctx) => handleStranger(update.message, { ...depsOf(bot), password: now.passwords.get(bot.account.instance) }, ctx)),
     );
 
     const ended = async (result: AgentResult, ctx: AppContext): Promise<void> => {
@@ -129,13 +129,14 @@ export default defineComponent({
     return {
       async start(ctx) {
         const bots: Bot[] = [];
-        const codes = new Map<string, ClaimCode>();
+        const passwords = new Map<string, Password>();
         for (const account of accounts) {
           const token = await secrets.get().get(account.tokenSecret);
           if (token === undefined) throw new Error(`channel-telegram-webhook: ${account.tokenSecret} is not set. Create a bot with @BotFather, then run \`pikit configure\``);
           bots.push(createBot(account, createTelegramApi(token, config.apiBase)));
-          const code = await claimCodeOf(await secrets.get().get(account.claimSecret));
-          if (code !== undefined) codes.set(account.instance, code);
+          // Its former name too, silently: the Worker's half warns once, not every object.
+          const password = await passwordOf((await readPassword(account, (name) => secrets.get().get(name)))?.value);
+          if (password !== undefined) passwords.set(account.instance, password);
         }
         const store = storage.get().namespace(NAME);
         const recorded = submissions.get();
@@ -145,7 +146,7 @@ export default defineComponent({
         for (const bot of bots) queue?.attach(bot.account.instance, bot.transport);
         try {
           wakeups.get().handle(DELIVER, (run) => delivery.run(run));
-          running = { bots, codes, delivery, queue };
+          running = { bots, passwords, delivery, queue };
           inbox.start();
           strangers.start();
           // Whatever ended while nothing ran (a restart, an eviction, a deploy) is delivered now.

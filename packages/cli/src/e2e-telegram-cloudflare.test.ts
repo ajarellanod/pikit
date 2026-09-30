@@ -171,6 +171,9 @@ test.skipIf(!E2E)(
     at = await t.waitFor("TELEGRAM_BOT_TOKEN", at);
     await t.type(`${telegram.token}\r`);
     at = await t.waitFor("TELEGRAM_WEBHOOK_SECRET generated", at);
+    // A first setup offers a password; Enter: none (the CLI allows the owner by their message).
+    at = await t.waitFor("Choose a password for your bot (8+ characters, or Enter for none): you'll send /login <password> to it once deployed", at);
+    await t.type("\r");
     at = await t.waitFor("send it any message now", at);
     telegram.say(OWNER, "hi");
     at = await t.waitFor("Message from Ada (@ada), id 1001. Allow them to talk to your agent?", at);
@@ -344,15 +347,15 @@ test.skipIf(!E2E)(
 );
 
 test.skipIf(!E2E)(
-  "in workerd, as a Deploy to Cloudflare button leaves it: the build's script has the Worker register its webhook, and the owner claims the bot with /claim",
+  "in workerd, as a Deploy to Cloudflare button leaves it: the build's script has the Worker register its webhook, and the owner logs in with /login <password>",
   async () => {
-    // The button's form: a token, a webhook secret and a claim code; nobody listed, since nobody ran configure.
-    const CLAIM_CODE = "e2e correct horse battery staple";
+    // The button's form: a token, a webhook secret and a password; nobody listed, since nobody ran configure.
+    const PASSWORD = "e2e correct horse battery staple";
     const OWNER_OF_BUTTON = { id: 3003, first_name: "Grace" };
     const lines = readFileSync(join(project, ".env"), "utf8")
       .split("\n")
       .filter((line) => line !== "" && !line.startsWith("TELEGRAM_ALLOWED_USERS="));
-    writeFileSync(join(project, ".env"), `${[...lines, `TELEGRAM_CLAIM_CODE=${CLAIM_CODE}`].join("\n")}\n`);
+    writeFileSync(join(project, ".env"), `${[...lines, `TELEGRAM_PASSWORD=${PASSWORD}`].join("\n")}\n`);
     telegram.sent.length = 0;
     const asked = openrouter.requests.length;
     // No `pikit up` will register anything: nothing is set until the Worker does.
@@ -372,28 +375,29 @@ test.skipIf(!E2E)(
       expect(script.out).toBe(`\u2713 Telegram telegram: webhook ${base}/telegram\n`);
       expect([telegram.webhookUrl, telegram.webhookSecret, telegram.allowedUpdates]).toEqual([`${base}/telegram`, env().TELEGRAM_WEBHOOK_SECRET, ["message"]]);
 
-      // The owner, whom no list names, is told their id and /claim; a wrong code is refused; the right one claims.
+      // The owner, whom no list names, is told their id and /login; a wrong password is refused; the right one logs in.
       expect((await telegram.write(OWNER_OF_BUTTON, "hello?")).status).toBe(200);
-      expect((await telegram.write(OWNER_OF_BUTTON, "/claim not the code")).status).toBe(200);
-      expect((await telegram.write(OWNER_OF_BUTTON, `/claim ${CLAIM_CODE}`)).status).toBe(200);
+      expect((await telegram.write(OWNER_OF_BUTTON, "/login not the password")).status).toBe(200);
+      expect((await telegram.write(OWNER_OF_BUTTON, `/login ${PASSWORD}`)).status).toBe(200);
       expect((await telegram.write(OWNER_OF_BUTTON, "hello again")).status).toBe(200);
       const sent = await telegram.sentCount(4, 60_000);
       expect(sent.map((message) => [message.chatId, message.text])).toEqual([
-        [OWNER_OF_BUTTON.id, `This bot is private. Your Telegram user id is ${OWNER_OF_BUTTON.id}: its owner can let you in by adding it to TELEGRAM_ALLOWED_USERS. If you are its owner, send /claim followed by the claim code.`],
-        [OWNER_OF_BUTTON.id, "That is not the claim code."],
-        [OWNER_OF_BUTTON.id, "\u2713 This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."],
+        // Sent as HTML: Telegram shows `<password>`.
+        [OWNER_OF_BUTTON.id, `This bot is private. If you have its password, send /login &lt;password&gt;. Your Telegram user id is ${OWNER_OF_BUTTON.id}: its owner can also let you in by adding it to TELEGRAM_ALLOWED_USERS.`],
+        [OWNER_OF_BUTTON.id, "Wrong password."],
+        [OWNER_OF_BUTTON.id, "\u2713 You're logged in: this chat can talk to the agent now. You may delete your /login message: it contains the password."],
         [OWNER_OF_BUTTON.id, "answer: hello again"],
       ]);
-      // Only the message after the claim reached the model; the code never did.
+      // Only the message after logging in reached the model; the password never did.
       expect(openrouter.requests).toHaveLength(asked + 1);
       expect(JSON.stringify(openrouter.requests.at(-1)?.messages)).toContain("hello again");
-      expect(JSON.stringify(openrouter.requests)).not.toContain(CLAIM_CODE);
+      expect(JSON.stringify(openrouter.requests)).not.toContain(PASSWORD);
     } finally {
       await stop();
     }
     const logs = devLogs();
-    expect(logs).toContain("channel-telegram-webhook: a chat claimed the bot");
-    for (const secret of [telegram.token, CLAIM_CODE, env().TELEGRAM_WEBHOOK_SECRET as string]) expect(logs).not.toContain(secret);
+    expect(logs).toContain("channel-telegram-webhook: a chat logged in");
+    for (const secret of [telegram.token, PASSWORD, env().TELEGRAM_WEBHOOK_SECRET as string]) expect(logs).not.toContain(secret);
   },
   TIMEOUT,
 );
