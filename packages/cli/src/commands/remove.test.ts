@@ -1,6 +1,6 @@
 /**
  * `pikit add` then `pikit remove`, run as a user runs them, on what P3 asks: removing leaves the
- * project as it was. A remove that fails once writing began puts back what it wrote, and what was
+ * project as it was, after a reinstall (`add --force`) too. A remove that fails once writing began puts back what it wrote, and what was
  * installed for a component goes with it even when `pikit doctor` then reports a problem. The
  * projects have this CLI's kit, with `@pikit/core` and `@pikit/contracts` linked as `bun install`
  * would, so both run to the end without the network; the one `bun install` here is made to fail.
@@ -106,6 +106,60 @@ test("a remove whose bun install fails puts back what it wrote: config, files, .
   expect(run.err).toContain("`bun install` failed");
   expect(run.err).toContain("nothing was removed");
   expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
+test("a reinstall deletes a file the new version no longer ships and replaces its .env.example block; remove then leaves no trace", () => {
+  const dir = project();
+  const registry = logEventsRegistry();
+  const extra = join(dir, "src", "pikit", "log-events", "extra.ts");
+  editLogEvents(registry, { environment: [variable("FOO")] }, { "extra.ts": "export const extra = 1;\n" });
+  expect(pikit(["add", "log-events", "--registry", registry, "--yes"], dir).code).toBe(0);
+  expect(existsSync(extra)).toBe(true);
+  expect(readFileSync(join(dir, ".env.example"), "utf8")).toContain("FOO=");
+
+  editLogEvents(registry, { environment: [variable("BAR")] }, { "extra.ts": undefined });
+  const reinstall = pikit(["add", "log-events", "--registry", registry, "--yes", "--force"], dir);
+  expect(reinstall.code).toBe(0);
+  expect(reinstall.out).toContain("deletes, no longer shipped: src/pikit/log-events/extra.ts");
+  expect(existsSync(extra)).toBe(false);
+  const record = readManifest(dir).components["log-events"];
+  expect(Object.keys(record.files)).not.toContain("src/pikit/log-events/extra.ts");
+  expect(record.environment.map((v: { name: string }) => v.name)).toEqual(["BAR"]);
+  const example = readFileSync(join(dir, ".env.example"), "utf8");
+  expect(example).toBe("# log-events\n# BAR, for the test. (optional)\nBAR=\n");
+  // The base of the file it no longer ships went with it.
+  expect(readdirSync(join(dir, "pikit-bases")).length).toBe(Object.keys(record.files).length);
+
+  expect(pikit(["remove", "log-events"], dir).code).toBe(0);
+  expect(readdirSync(join(dir, "src"))).toEqual([]);
+  expect(existsSync(join(dir, ".env.example"))).toBe(false);
+  expect(existsSync(join(dir, "pikit-bases"))).toBe(false);
+}, 120_000);
+
+test("a reinstall keeps a file the user modified that the new version no longer ships; remove asks for --force before deleting it", () => {
+  const dir = project();
+  const registry = logEventsRegistry();
+  const extra = join(dir, "src", "pikit", "log-events", "extra.ts");
+  editLogEvents(registry, {}, { "extra.ts": "export const extra = 1;\n" });
+  expect(pikit(["add", "log-events", "--registry", registry, "--yes"], dir).code).toBe(0);
+  writeFileSync(extra, "export const extra = 2; // mine\n");
+  const installed = readManifest(dir).components["log-events"].files["src/pikit/log-events/extra.ts"];
+
+  editLogEvents(registry, {}, { "extra.ts": undefined });
+  const reinstall = pikit(["add", "log-events", "--registry", registry, "--yes", "--force"], dir);
+  expect(reinstall.code).toBe(0);
+  expect(reinstall.err).toContain("log-events 0.0.0 no longer ships src/pikit/log-events/extra.ts, which you modified: it is kept");
+  expect(reinstall.out).not.toContain("deletes, no longer shipped");
+  expect(readFileSync(extra, "utf8")).toBe("export const extra = 2; // mine\n");
+  // Still recorded as installed, with its base: remove and a future upgrade see it as the user's edit.
+  expect(readManifest(dir).components["log-events"].files["src/pikit/log-events/extra.ts"]).toEqual(installed);
+  expect(existsSync(join(dir, "pikit-bases", installed.hash.slice("sha256:".length)))).toBe(true);
+
+  const refused = pikit(["remove", "log-events"], dir);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("you modified these files of log-events; pass --force to delete them anyway:\n  src/pikit/log-events/extra.ts");
+  expect(pikit(["remove", "log-events", "--force"], dir).code).toBe(0);
+  expect(existsSync(extra)).toBe(false);
 }, 120_000);
 
 test("what was installed for a component goes with it, and then doctor reports what it finds", () => {

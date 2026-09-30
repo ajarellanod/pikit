@@ -2,8 +2,8 @@
  * `.env` (the project's secrets, mode 0600, never committed) and `.env.example` (the variables the
  * installed components read, committed, no values).
  *
- * `.env.example` has one block per component, which `pikit add` appends and `pikit remove`
- * deletes: a `# <component>` line, one commented description and one `NAME=` line per variable,
+ * `.env.example` has one block per component, which `pikit add` appends (or replaces, on a
+ * reinstall) and `pikit remove` deletes: a `# <component>` line, one commented description and one `NAME=` line per variable,
  * and a blank line between blocks.
  */
 
@@ -72,6 +72,21 @@ export function appendExampleBlock(text: string, block: string): string {
   if (block === "") return text;
   if (text.trim() === "") return block;
   return `${text.replace(/\n*$/, "\n")}\n${block}`;
+}
+
+/**
+ * The component's block replaced by `block`, where it is; appended when it has none, removed (with
+ * its blank line) when `block` is empty.
+ */
+export function replaceExampleBlock(text: string, component: string, block: string): string {
+  const lines = text.split("\n");
+  const start = lines.indexOf(`# ${component}`);
+  if (start === -1) return appendExampleBlock(text, block);
+  if (block === "") return removeExampleBlock(text, component);
+  let end = start + 1;
+  while (end < lines.length && lines[end] !== "") end++;
+  lines.splice(start, end - start, ...block.replace(/\n$/, "").split("\n"));
+  return lines.join("\n");
 }
 
 /** Removes the component's block and the blank line that separated it; no block, no change. */
