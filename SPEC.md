@@ -41,7 +41,8 @@ changes its own service). When Pi ships something pikit built, pikit deletes its
 
 The kernel is `@pikit/core`: what the app runs itself (composition, capabilities, events,
 pipelines, lifecycle, config validation, context, clock, logger), with no word of the domain.
-Its exports are held by `packages/core/src/exports.test.ts`; its only runtime dependency is
+Its exports, and those of `@pikit/core/testing` that components' tests import, are held by
+`packages/core/src/exports.test.ts`; its only runtime dependency is
 `typebox`. The shared vocabulary lives in `@pikit/contracts` and versions apart (K8).
 
 ### 3.1 Decisions
