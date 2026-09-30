@@ -232,6 +232,13 @@
       },
       "additionalProperties": false
     },
+    "modelProviders": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Generated: the `model.provider` keys setup provides, with the default config (`anthropic`: agents name its models `anthropic/<modelId>`). `pikit new` checks the starter agent's model against them before it writes anything."
+    },
     "dependencies": {
       "type": "object",
       "patternProperties": {

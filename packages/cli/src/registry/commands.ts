@@ -270,6 +270,7 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
     ["requires.capabilities", manifest.requires?.capabilities, expected.requires.capabilities],
     ["optional.capabilities", manifest.optional?.capabilities, expected.optional.capabilities],
     ["replay", manifest.replay, expected.replay],
+    ["modelProviders", manifest.modelProviders, expected.modelProviders],
     ["halves", manifest.halves, expected.halves],
   ];
   for (const [field, actual, derived] of fields) {
