@@ -44,7 +44,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
     channel fills with `answer.conversation.key` (`channel-telegram/index.ts:118`,
     `channel-telegram-webhook/delivery.ts:160,176`);
   - the actor: the Worker half sends each update to `conversationKeyOf(instance, chat)`
-    (`channel-telegram-webhook/worker.ts:154`), and the object half refuses a key that is not one of
+    (`channel-telegram-webhook/worker.ts:156`), and the object half refuses a key that is not one of
     its chats (`channel-telegram-webhook/index.ts:88-97`).
 - **Where a channel rebuilds a key without a message to admit**: `/new` resets
   `conversationKeyOf(...)` (`channel-telegram/inbound.ts:81`, `channel-telegram-webhook/inbox.ts:53,64`);
@@ -115,7 +115,9 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
    (only possible once something maps several platform conversations to one key) keeps the recorded
    address, and the registry logs it. A scheduled prompt into a Telegram conversation
    ([scheduler](scheduler.md): "a job reaches an agent through `admitInbound`") is exactly that case, and
-   its answer then goes to the chat, which is what the scheduler wants. Answering each message where it
+   its answer then goes to the chat, which is what the scheduler wants, as long as a chat's message
+   created the conversation: one a job created first records the job's address, which no chat channel
+   claims. Answering each message where it
    came from is alternative B.
 
 ### Tenant and `conversation.resolve`, on a server
@@ -134,16 +136,21 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
 
 ### Tenant and `conversation.resolve`, on Cloudflare
 - **The owner is chosen before any pipeline runs.** The Worker half sends the update to the actor
-  named by the channel's key (`channel-telegram-webhook/worker.ts:154`), which is the Durable Object
+  named by the channel's key (`channel-telegram-webhook/worker.ts:156`), which is the Durable Object
   `idFromName(key)` (`platform-cloudflare/index.ts:361`, SPEC C2 at `SPEC.md:185`); `admitInbound` runs
   in that object (`channel-telegram-webhook/inbox.ts:85`), and each object keeps its own pointers
   (`features/cloudflare-conversation-index.md:17`).
-- **Renaming is safe; merging is not.** A stage that maps each channel key to one key of its own (a
-  tenant prefix of a chat that belongs to one tenant) keeps one owner: the only object that ever sees
-  the new key is the one the channel key named. A stage that maps two channel keys to one key (two
-  chats, or two channels, into one conversation) would create that conversation in two objects, each
-  with its own pointer and session: two owners, against C1 (`SPEC.md:164,176`).
-- **So merging needs the message at the owner of the resolved key**, one of:
+- **Renaming keeps one owner, but not C2's address; merging keeps neither.** A stage that maps each
+  channel key to one key of its own (a tenant prefix of a chat that belongs to one tenant) keeps one
+  owner: the only object that ever sees the new key is the one the channel key named. But that object
+  is `idFromName` of the channel's key, not of the conversation's, so whatever reaches the
+  conversation by its own key through `actor.mailbox` (a scheduler fanning out to Durable Objects,
+  [scheduler](scheduler.md); an admin action on a key the [conversation index](cloudflare-conversation-index.md)
+  lists) gets `idFromName` of that key (`platform-cloudflare/index.ts:361`): another, empty object,
+  against C2's "the actor owning `key`" (`SPEC.md:185-191`). A stage that maps two channel keys to one
+  key (two chats, or two channels, into one conversation) would create that conversation in two
+  objects, each with its own pointer and session: two owners, against C1 (`SPEC.md:164,176`).
+- **So any key the stage changes needs the message at `idFromName` of the resolved key**, one of:
   - **(F) Forward from the object** (recommended to try first). The object half resolves the key; when
     it is not the key it was delivered under (the handler gets that key,
     `channel-telegram-webhook/index.ts:88`), it forwards the message with `actor.mailbox` to the owner
@@ -157,7 +164,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   - **(W) Resolve in the Worker.** The Worker half computes the resolved key before
     `mailbox.send`. The Worker holds no pointers, so only a stateless mapping works there (or a global
     store, `features/cloudflare-conversation-index.md:19`, a subrequest per message), and every
-    channel's Worker half changes at `worker.ts:154`.
+    channel's Worker half changes at `worker.ts:156`.
 - **A tenant's namespace.** Separate Durable Object namespaces per tenant
   (`multi-tenant-isolation.md:22`) are chosen by the mailbox, which today has one `binding`
   (`platform-cloudflare/index.ts:53`) and whose `send(key, type, message, ctx)` has no tenant. A
@@ -177,7 +184,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   and fall back to `chatIn`; `conversationKey` on the outbox is the channel's own. The fallback stays
   at least as long as a settlement without an address can be read: settlements live for the
   provider's retention (`submissions.ts:28`), and pending rows resume with what they stored.
-  `worker.ts:154` and the inbox's key check (`channel-telegram-webhook/index.ts:91-97`) do not change
+  `worker.ts:156` and the inbox's key check (`channel-telegram-webhook/index.ts:91-97`) do not change
   until (F) or (W) is built.
 - **channel-http**: its answers already match by session and request (`channel-http/index.ts:164`);
   only its `GET` and `reset` routes move to `resolveConversationKey` when `conversation.resolve` lands.
@@ -221,7 +228,8 @@ per-request address) is to check before B is built.
   breaking for both registries and their suite; the contracts are 0.x, K8).
 - `conversation.resolve`'s value: with the route decision (`pipeline-anchors.md:18`) or only the
   message and the key, so the channels' commands can run it too.
-- On Cloudflare, (F) or (W) for merging, or no merging there; and whether a mailbox that picks a
+- On Cloudflare, (F) or (W) for any key the stage changes (renaming too), or no `conversation.resolve`
+  there; and whether a mailbox that picks a
   namespace per tenant still fits C2's wording (`SPEC.md:185-195`) or needs it changed first (SPEC §7).
 - A settlement no channel claims is dropped by every channel with no error. With addresses, an
   answer for an instance no installed channel serves is detectable; who says so (the runtime, `pikit
@@ -229,5 +237,6 @@ per-request address) is to check before B is built.
 - How a component that rewrites keys says it needs channels that read the address, when nothing
   records per-component compatibility.
 - Whether this proposal requires changing SPEC §1–§6: as written it adds contracts only, and keeps C1
-  and C2 (one owner per conversation; the mailbox addressed by key). A tenant namespace chosen by the
+  and C2 (one owner per conversation; the mailbox addressed by key) as long as, on Cloudflare, a
+  changed key reaches its conversation by (F) or (W). A tenant namespace chosen by the
   mailbox is the one point that may touch C2's text.
