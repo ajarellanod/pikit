@@ -9,7 +9,7 @@ import type { TelegramMessage, TelegramUpdate } from "./api.ts";
 export const UPDATE_TYPE = "telegram.update";
 /**
  * The type of an update from someone `TELEGRAM_[<NAME>_]ALLOWED_USERS` does not list, sent only when the
- * bot can be claimed (`claim.ts`): the chat's actor decides, from the claim it keeps.
+ * bot takes logins (`login.ts`): the chat's actor decides, from the login it keeps.
  */
 export const STRANGER_TYPE = "telegram.stranger";
 

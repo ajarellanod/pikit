@@ -31,7 +31,7 @@ import { createLifecycleConformance } from "@pikit/core/testing";
 import { createMemoryFeed, createMemoryKeyValueStorage, createMemoryMailbox, createMemorySubmissions, createMemoryWakeups, withWorkersHost } from "@pikit/contracts/testing";
 import { accountsOf } from "./account.ts";
 import { registerInbox } from "./actor-inbox.ts";
-import { CLAIM_COOL_DOWN_MS } from "./claim.ts";
+import { LOGIN_COOL_DOWN_MS } from "./login.ts";
 import { afterDeploy } from "./deploy.ts";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.test-support.ts";
 import channelTelegramWebhook, { NAME, worker, WORKER_NAME } from "./index.ts";
@@ -378,8 +378,11 @@ test("each half refuses to start without what it needs, and names it", async () 
   const { TELEGRAM_BOT_TOKEN, TELEGRAM_ALLOWED_USERS } = secretsFor(telegram);
 
   expect(await startError(halves, { TELEGRAM_ALLOWED_USERS, TELEGRAM_WEBHOOK_SECRET: SECRET })).toContain("TELEGRAM_BOT_TOKEN is not set");
-  // Nobody listed is no longer a failure: the bot can be claimed (see "Claiming the bot"). A claim
-  // code that could be guessed is.
+  // Nobody listed is no longer a failure: the bot takes logins (see "The password"). A password
+  // that could be guessed is, under its former name too.
+  expect(await startError(halves, { TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TELEGRAM_PASSWORD: "1234567" })).toContain(
+    "TELEGRAM_PASSWORD is not usable: it is shorter than 8 characters, so it could be guessed. Choose a longer password, or remove it",
+  );
   expect(await startError(halves, { TELEGRAM_BOT_TOKEN, TELEGRAM_WEBHOOK_SECRET: SECRET, TELEGRAM_CLAIM_CODE: "1234567" })).toContain(
     "TELEGRAM_CLAIM_CODE is not usable: it is shorter than 8 characters",
   );
@@ -709,7 +712,8 @@ test("accounts: the default bot's path and secrets; a named one gets its own", (
       tokenSecret: "TELEGRAM_BOT_TOKEN",
       allowedSecret: "TELEGRAM_ALLOWED_USERS",
       webhookSecret: "TELEGRAM_WEBHOOK_SECRET",
-      claimSecret: "TELEGRAM_CLAIM_CODE",
+      passwordSecret: "TELEGRAM_PASSWORD",
+      legacyPasswordSecret: "TELEGRAM_CLAIM_CODE",
       path: "/telegram",
     },
     {
@@ -718,7 +722,8 @@ test("accounts: the default bot's path and secrets; a named one gets its own", (
       tokenSecret: "TELEGRAM_OPS_BOT_TOKEN",
       allowedSecret: "TELEGRAM_OPS_ALLOWED_USERS",
       webhookSecret: "TELEGRAM_OPS_WEBHOOK_SECRET",
-      claimSecret: "TELEGRAM_OPS_CLAIM_CODE",
+      passwordSecret: "TELEGRAM_OPS_PASSWORD",
+      legacyPasswordSecret: "TELEGRAM_OPS_CLAIM_CODE",
       path: "/telegram/ops",
     },
   ]);
@@ -892,149 +897,201 @@ test("setup-webhook.mjs fails, saying why, when the deploy printed no URL or the
 });
 
 // ---------------------------------------------------------------------------------------------
-// Claiming the bot from Telegram (claim.ts): /claim <code>, kept by the chat's actor.
+// Logging in from Telegram (login.ts): /login <password>, kept by the chat's actor.
 
-const CODE = "correct horse battery staple";
-const claimSecrets = (telegram: FakeTelegram, extra: Record<string, string> = {}): Record<string, string> => ({
+const PASSWORD = "correct horse battery staple";
+const loginSecrets = (telegram: FakeTelegram, extra: Record<string, string> = {}): Record<string, string> => ({
   TELEGRAM_BOT_TOKEN: telegram.token,
   TELEGRAM_WEBHOOK_SECRET: SECRET,
-  TELEGRAM_CLAIM_CODE: CODE,
+  TELEGRAM_PASSWORD: PASSWORD,
   ...extra,
 });
 const privateBot = (id: number) => `This bot is private. Your Telegram user id is ${id}: its owner can let you in by adding it to TELEGRAM_ALLOWED_USERS.`;
-const claimHint = " If you are its owner, send /claim followed by the claim code.";
+// The object's replies are sent as HTML: Telegram gets `&lt;password&gt;`, and shows `<password>`.
+const privateBotWithPassword = (id: number) =>
+  `This bot is private. If you have its password, send /login &lt;password&gt;. Your Telegram user id is ${id}: its owner can also let you in by adding it to TELEGRAM_ALLOWED_USERS.`;
+const LOGGED_IN = "✓ You're logged in: this chat can talk to the agent now. You may delete your /login message: it contains the password.";
 const texts = (telegram: FakeTelegram) => telegram.sent.map((m) => m.text);
 
-test("with a claim code, a stranger is told their id and /claim, once; nothing reaches the agent", async () => {
+test("with a password, a stranger is told their id and /login, once; nothing reaches the agent", async () => {
   const telegram = fake();
-  const s = await started({ telegram, secrets: claimSecrets(telegram) });
+  const s = await started({ telegram, secrets: loginSecrets(telegram) });
 
   expect((await telegram.write(OWNER, "hello?")).status).toBe(200);
   expect((await telegram.write(OWNER, "anyone?")).status).toBe(200);
   expect((await telegram.write(OWNER, undefined)).status).toBe(200);
   await Bun.sleep(50);
 
-  expect(telegram.sent).toMatchObject([{ chatId: OWNER.id, text: privateBot(OWNER.id) + claimHint }]);
+  expect(telegram.sent).toMatchObject([{ chatId: OWNER.id, text: privateBotWithPassword(OWNER.id) }]);
   expect(s.runtime.dispatched).toEqual([]);
 });
 
-test("/claim with the right code: the chat talks to the agent, the code reaches neither the agent nor a log, and a redelivery is not answered twice", async () => {
+test("/login with the right password: the chat talks to the agent, the password reaches neither the agent nor a log, and a redelivery is not answered twice", async () => {
   const telegram = fake();
   const logger = recordingLogger();
-  const s = await started({ telegram, secrets: claimSecrets(telegram), logger });
+  const s = await started({ telegram, secrets: loginSecrets(telegram), logger });
 
-  const { update } = await telegram.write(OWNER, `/claim   ${CODE}  `);
+  const { update } = await telegram.write(OWNER, `/login   ${PASSWORD}  `);
   await telegram.sentCount(1);
-  expect(texts(telegram)).toEqual(["✓ This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."]);
+  expect(texts(telegram)).toEqual([LOGGED_IN]);
   expect(await telegram.post(update)).toBe(200);
 
   await telegram.write(OWNER, "hello");
   expect((await telegram.sentCount(2))[1]).toEqual({ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true });
   await telegram.write(OWNER, undefined);
   expect((await telegram.sentCount(3))[2]?.text).toBe("I can only read text messages for now.");
-  // /claim again is the channel's to answer.
-  await telegram.write(OWNER, `/claim ${CODE}`);
+  // /login again is the channel's to answer.
+  await telegram.write(OWNER, `/login ${PASSWORD}`);
   expect((await telegram.sentCount(4))[3]?.text).toBe("This chat can talk to me already.");
   // Someone else is still a stranger.
   await telegram.write(STRANGER, "me too?");
-  expect((await telegram.sentCount(5))[4]).toMatchObject({ chatId: STRANGER.id, text: privateBot(STRANGER.id) + claimHint });
+  expect((await telegram.sentCount(5))[4]).toMatchObject({ chatId: STRANGER.id, text: privateBotWithPassword(STRANGER.id) });
   await Bun.sleep(50);
 
   expect(telegram.sent).toHaveLength(5);
   expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello"]);
-  expect(logger.lines.join("\n")).not.toContain(CODE);
+  expect(logger.lines.join("\n")).not.toContain(PASSWORD);
 });
 
-test("an allowed user's /claim is answered by the channel, never by the agent; a stranger may still claim beside the list", async () => {
+test("an allowed user's /login is answered by the channel, never by the agent; a stranger may still log in beside the list", async () => {
   const telegram = fake();
-  const s = await started({ telegram, secrets: { ...secretsFor(telegram), TELEGRAM_CLAIM_CODE: CODE } });
+  const s = await started({ telegram, secrets: { ...secretsFor(telegram), TELEGRAM_PASSWORD: PASSWORD } });
 
-  await telegram.write(OWNER, `/claim ${CODE}`);
-  await telegram.write(STRANGER, `/claim ${CODE}`);
+  await telegram.write(OWNER, `/login ${PASSWORD}`);
+  await telegram.write(STRANGER, `/login ${PASSWORD}`);
   await telegram.write(STRANGER, "hi");
   await telegram.sentCount(3);
 
-  expect(texts(telegram).slice(0, 2)).toEqual(["This chat can talk to me already.", "✓ This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."]);
+  expect(texts(telegram).slice(0, 2)).toEqual(["This chat can talk to me already.", LOGGED_IN]);
   expect(s.runtime.dispatched.map((d) => [d.key, d.prompt])).toEqual([[`telegram:${STRANGER.id}`, "hi"]]);
 });
 
-test("wrong codes: each is told; the fifth starts a cool-down in which even the right code is refused; after it, the right code claims", async () => {
+test("wrong passwords: each is told; the fifth starts a cool-down in which even the right one is refused; after it, the right one logs in", async () => {
   const telegram = fake();
   let offset = 0;
   const clock: Clock = { now: () => Date.now() + offset, sleep: (ms) => Bun.sleep(ms) };
-  const s = await started({ telegram, secrets: claimSecrets(telegram), clock });
+  const s = await started({ telegram, secrets: loginSecrets(telegram), clock });
 
-  const first = await telegram.write(OWNER, "/claim correct horse battery stapler");
-  for (let i = 2; i <= 5; i++) await telegram.write(OWNER, `/claim guess number ${i}`);
-  // Telegram delivering a wrong code again is not another guess.
+  const first = await telegram.write(OWNER, "/login correct horse battery stapler");
+  for (let i = 2; i <= 5; i++) await telegram.write(OWNER, `/login guess number ${i}`);
+  // Telegram delivering a wrong password again is not another guess.
   expect(await telegram.post(first.update)).toBe(200);
-  await telegram.write(OWNER, `/claim ${CODE}`);
-  await telegram.write(OWNER, "/claim");
+  await telegram.write(OWNER, `/login ${PASSWORD}`);
+  await telegram.write(OWNER, "/login");
   await telegram.sentCount(7);
   await Bun.sleep(50);
 
   expect(texts(telegram)).toEqual([
-    ...Array.from({ length: 4 }, () => "That is not the claim code."),
-    "That is not the claim code. Too many wrong codes: try again in 15 minutes.",
-    "Too many wrong claim codes: try again in 15 minute(s).",
-    "Too many wrong claim codes: try again in 15 minute(s).",
+    ...Array.from({ length: 4 }, () => "Wrong password."),
+    "Wrong password. Too many wrong passwords: try again in 15 minutes.",
+    "Too many wrong passwords: try again in 15 minute(s).",
+    "Too many wrong passwords: try again in 15 minute(s).",
   ]);
 
-  offset = CLAIM_COOL_DOWN_MS;
-  await telegram.write(OWNER, "/claim");
-  await telegram.write(OWNER, `/claim ${CODE}`);
+  offset = LOGIN_COOL_DOWN_MS;
+  await telegram.write(OWNER, "/login");
+  await telegram.write(OWNER, `/login ${PASSWORD}`);
   await telegram.write(OWNER, "hello");
   await telegram.sentCount(10);
-  expect(texts(telegram).slice(7, 9)).toEqual(["Send /claim followed by the claim code, in one message.", "✓ This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."]);
+  expect(texts(telegram).slice(7, 9)).toEqual(["Send /login followed by the password, in one message: /login &lt;password&gt;.", LOGGED_IN]);
   expect(s.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello"]);
 });
 
-test("a claimed chat stays allowed after a restart and after the claim code is removed; a new claim code revokes it", async () => {
+test("a logged-in chat stays allowed after a restart and after the password is removed; a new password logs it out, and it is told how to log in again", async () => {
   const telegram = fake();
   const kv = createMemoryKeyValueStorage();
   const submissions = createMemorySubmissions().submissions;
-  const first = await started({ telegram, kv, submissions, secrets: claimSecrets(telegram) });
-  await telegram.write(OWNER, `/claim ${CODE}`);
-  await telegram.sentCount(1);
+  const first = await started({ telegram, kv, submissions, secrets: loginSecrets(telegram) });
+  // Told once, before logging in: a new password tells it again.
+  await telegram.write(OWNER, "hi?");
+  await telegram.write(OWNER, `/login ${PASSWORD}`);
+  await telegram.sentCount(2);
+  expect(texts(telegram)).toEqual([privateBotWithPassword(OWNER.id), LOGGED_IN]);
   await first.app.stop();
 
-  // Restarted (a deploy, an eviction) with the same code: still allowed.
-  const second = await started({ telegram, kv, submissions, secrets: claimSecrets(telegram) });
+  // Restarted (a deploy, an eviction) with the same password: still allowed.
+  const second = await started({ telegram, kv, submissions, secrets: loginSecrets(telegram) });
   await telegram.write(OWNER, "after a restart");
-  expect((await telegram.sentCount(2))[1]?.text).toBe("answer: <b>after a restart</b>");
+  expect((await telegram.sentCount(3))[2]?.text).toBe("answer: <b>after a restart</b>");
   expect(second.runtime.dispatched.map((d) => d.prompt)).toEqual(["after a restart"]);
   // Stopped once the answer is marked delivered: otherwise it would go again, marked "↻".
   await until(async () => (await kv.namespace(NAME).get("answers-cursor")) === "1", "the cursor past the answer");
   await second.app.stop();
 
-  // The claim code removed, nobody listed: no new claim, and the chat that claimed still talks.
+  // The password removed, nobody listed: no new login, and the chat that logged in still talks.
   const logger = recordingLogger();
   const third = await started({ telegram, kv, submissions, secrets: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_WEBHOOK_SECRET: SECRET }, logger });
-  expect(logger.lines).toContain("channel-telegram-webhook: nobody is in TELEGRAM_ALLOWED_USERS and TELEGRAM_CLAIM_CODE is not set: only chats that claimed the bot before can talk to it");
-  await telegram.write(OWNER, "without the code");
-  expect((await telegram.sentCount(3))[2]?.text).toBe("answer: <b>without the code</b>");
-  await telegram.write(STRANGER, `/claim ${CODE}`);
-  expect((await telegram.sentCount(4))[3]).toMatchObject({ chatId: STRANGER.id, text: privateBot(STRANGER.id) });
-  expect(third.runtime.dispatched.map((d) => d.prompt)).toEqual(["without the code"]);
+  expect(logger.lines).toContain("channel-telegram-webhook: nobody is in TELEGRAM_ALLOWED_USERS and TELEGRAM_PASSWORD is not set: only chats that logged in before can talk to it");
+  await telegram.write(OWNER, "without the password");
+  expect((await telegram.sentCount(4))[3]?.text).toBe("answer: <b>without the password</b>");
+  await telegram.write(STRANGER, `/login ${PASSWORD}`);
+  expect((await telegram.sentCount(5))[4]).toMatchObject({ chatId: STRANGER.id, text: privateBot(STRANGER.id) });
+  expect(third.runtime.dispatched.map((d) => d.prompt)).toEqual(["without the password"]);
   await until(async () => (await kv.namespace(NAME).get("answers-cursor")) === "2", "the cursor past the answer");
   await third.app.stop();
 
-  // Another claim code: the claims made with the old one are revoked, and the chat may claim again.
-  const fourth = await started({ telegram, kv, submissions, secrets: claimSecrets(telegram, { TELEGRAM_CLAIM_CODE: "a brand new passphrase" }) });
+  // Another password: every chat that logged in with the old one is logged out, told how to log in
+  // again (once), and logs in with the new one.
+  const fourth = await started({ telegram, kv, submissions, secrets: loginSecrets(telegram, { TELEGRAM_PASSWORD: "a brand new password" }) });
   await telegram.write(OWNER, "and now?");
-  expect((await telegram.sentCount(5))[4]).toMatchObject({ chatId: OWNER.id, text: privateBot(OWNER.id) + claimHint });
-  await telegram.write(OWNER, "/claim a brand new passphrase");
+  await telegram.write(OWNER, "hello?");
+  await telegram.write(OWNER, `/login ${PASSWORD}`);
+  await telegram.write(OWNER, "/login a brand new password");
   await telegram.write(OWNER, "back");
-  expect((await telegram.sentCount(7))[6]?.text).toBe("answer: <b>back</b>");
+  expect((await telegram.sentCount(9)).slice(5).map((m) => m.text)).toEqual([privateBotWithPassword(OWNER.id), "Wrong password.", LOGGED_IN, "answer: <b>back</b>"]);
   expect(fourth.runtime.dispatched.map((d) => d.prompt)).toEqual(["back"]);
 });
 
-test("without a claim code, /claim claims nothing: with users listed, the Worker tells the stranger alone, with no word of /claim", async () => {
+test("without a password, /login logs in nothing: with users listed, the Worker tells the stranger alone, with no word of /login", async () => {
   const s = await started();
 
-  expect((await s.telegram.write(STRANGER, `/claim ${CODE}`)).status).toBe(200);
-  expect((await s.telegram.write(STRANGER, "/claim")).status).toBe(200);
+  expect((await s.telegram.write(STRANGER, `/login ${PASSWORD}`)).status).toBe(200);
+  expect((await s.telegram.write(STRANGER, "/login")).status).toBe(200);
 
   expect(s.telegram.sent).toEqual([{ chatId: STRANGER.id, text: privateBot(STRANGER.id), html: false }]);
   expect(s.runtime.dispatched).toEqual([]);
+});
+
+test("the former names: TELEGRAM_CLAIM_CODE is the password when TELEGRAM_PASSWORD is not set (one warning at start), /claim is /login, and renaming the secret keeps the chats logged in", async () => {
+  const telegram = fake();
+  const kv = createMemoryKeyValueStorage();
+  const submissions = createMemorySubmissions().submissions;
+  const deprecated = (lines: string[]) => lines.filter((line) => line.includes("deprecated"));
+  const legacy = { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_WEBHOOK_SECRET: SECRET, TELEGRAM_CLAIM_CODE: PASSWORD };
+
+  const logger = recordingLogger();
+  const first = await started({ telegram, kv, submissions, secrets: legacy, logger });
+  // Both halves run in this App: only the Worker's warns.
+  expect(deprecated(logger.lines)).toEqual(["channel-telegram-webhook: TELEGRAM_CLAIM_CODE is deprecated: rename it TELEGRAM_PASSWORD (the same value keeps the chats that logged in)"]);
+  expect(logger.lines.join("\n")).not.toContain("is not set: only chats that logged in before");
+  // What users are told names /login only; /claim still logs in, and /login too.
+  await telegram.write(OWNER, "hello?");
+  await telegram.write(OWNER, "/claim a wrong password");
+  await telegram.write(OWNER, `/claim ${PASSWORD}`);
+  await telegram.write(STRANGER, `/login ${PASSWORD}`);
+  await telegram.write(OWNER, "hello");
+  expect((await telegram.sentCount(5)).map((m) => m.text)).toEqual([privateBotWithPassword(OWNER.id), "Wrong password.", LOGGED_IN, LOGGED_IN, "answer: <b>hello</b>"]);
+  // An allowed chat's /claim is the channel's to answer, as /login is.
+  await telegram.write(OWNER, `/claim ${PASSWORD}`);
+  expect((await telegram.sentCount(6))[5]?.text).toBe("This chat can talk to me already.");
+  expect(first.runtime.dispatched.map((d) => d.prompt)).toEqual(["hello"]);
+  await until(async () => (await kv.namespace(NAME).get("answers-cursor")) === "1", "the cursor past the answer");
+  await first.app.stop();
+
+  // Renamed TELEGRAM_PASSWORD, same value: no warning, and the chat is still logged in.
+  const renamed = recordingLogger();
+  const second = await started({ telegram, kv, submissions, secrets: loginSecrets(telegram), logger: renamed });
+  expect(deprecated(renamed.lines)).toEqual([]);
+  await telegram.write(OWNER, "still here");
+  expect((await telegram.sentCount(7))[6]?.text).toBe("answer: <b>still here</b>");
+  expect(second.runtime.dispatched.map((d) => d.prompt)).toEqual(["still here"]);
+  await until(async () => (await kv.namespace(NAME).get("answers-cursor")) === "2", "the cursor past the answer");
+  await second.app.stop();
+
+  // Both set: TELEGRAM_PASSWORD wins, with no warning; the old value logs nobody in.
+  const both = recordingLogger();
+  await started({ telegram, kv, submissions, secrets: { ...legacy, TELEGRAM_PASSWORD: "a brand new password" }, logger: both });
+  expect(deprecated(both.lines)).toEqual([]);
+  await telegram.write(OWNER, `/claim ${PASSWORD}`);
+  expect((await telegram.sentCount(8))[7]?.text).toBe("Wrong password.");
 });

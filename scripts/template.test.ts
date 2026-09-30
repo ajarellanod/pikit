@@ -6,7 +6,7 @@
  * take it, in a clean copy: `npm ci` from scratch (only the npm registry is reached), `wrangler deploy
  * --dry-run`, and `wrangler dev` with the button's secrets in `.dev.vars` against a local fake Telegram
  * and fake OpenRouter: the `deploy` script, run with a fake `wrangler deploy` that answers the local
- * Worker's URL, has the Worker register its webhook, and the owner claims the bot and is answered.
+ * Worker's URL, has the Worker register its webhook, and the owner logs in with the password and is answered.
  * Nothing is deployed, and every key is a dummy. Slow, and needs Node (wrangler runs on it) and npm:
  *
  *   PIKIT_E2E=1 bun test scripts/template.test.ts
@@ -77,7 +77,7 @@ test("the button asks for every secret the components need, and nothing else", (
   const asked = TEMPLATE.secrets.map((secret) => secret.name);
   // Each one a component declares is asked, or said why not; and each asked is one a component reads.
   expect([...asked, ...Object.keys(TEMPLATE.notAsked)].sort()).toEqual(declared.map((variable) => variable.name).sort());
-  expect(asked).toEqual(["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_CLAIM_CODE", "OPENROUTER_API_KEY", "BRAVE_API_KEY"]);
+  expect(asked).toEqual(["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "BRAVE_API_KEY"]);
   for (const variable of declared) if (asked.includes(variable.name)) expect(variable.secret).toBe(true);
 
   // .dev.vars.example (dotenv): every secret, without a value.
@@ -105,7 +105,9 @@ test("package.json: the deploy script, a description per secret and binding, the
   expect(descriptions.TELEGRAM_BOT_TOKEN).toContain("https://t.me/BotFather");
   expect(descriptions.TELEGRAM_WEBHOOK_SECRET).toContain("`openssl rand -hex 32`");
   expect(descriptions.TELEGRAM_WEBHOOK_SECRET).toContain("16 to 256 letters, digits, `_` or `-`");
-  expect(descriptions.TELEGRAM_CLAIM_CODE).toContain("8 characters or more");
+  expect(descriptions.TELEGRAM_PASSWORD).toContain("8 characters or more");
+  expect(descriptions.TELEGRAM_PASSWORD).toContain("`/login <password>`");
+  expect(descriptions.TELEGRAM_PASSWORD).toContain("change it to log everyone out");
   expect(descriptions.OPENROUTER_API_KEY).toContain("https://openrouter.ai/settings/keys");
   expect(descriptions.BRAVE_API_KEY).toContain("https://api-dashboard.search.brave.com");
 });
@@ -129,11 +131,13 @@ test("the README has the button, every secret, the five steps after deploying, c
   for (const secret of TEMPLATE.secrets) expect(readme).toContain(`| \`${secret.name}\` |`);
   const steps = readme.slice(readme.indexOf("## After deploying"), readme.indexOf("## How it works"));
   expect(steps.match(/^\d\. \*\*/gm)).toEqual(["1. **", "2. **", "3. **", "4. **", "5. **"]);
-  expect(steps).toContain("/claim <your claim code>");
+  expect(steps).toContain("/login <your password>");
   for (const command of ["pikit doctor", "pikit add", "pikit upgrade"]) expect(steps).toContain(command);
   for (const section of ["## What it costs", "## Security"]) expect(readme).toContain(section);
   expect(readme).toContain("Workers Free plan is enough");
-  expect(readme).toContain("The claim code");
+  expect(readme).toContain("The password");
+  // The words people read are the password and /login.
+  for (const text of [readme, devVarsExample(TEMPLATE), templatePackageJson("{}", TEMPLATE)]) expect(text.toLowerCase()).not.toContain("claim");
   expect(readme).toContain("Who can talk to the bot");
   for (const text of [readme, devVarsExample(TEMPLATE), templatePackageJson("{}", TEMPLATE)]) for (const pattern of TOKEN_PATTERNS) expect(text).not.toMatch(pattern);
 });
@@ -176,10 +180,10 @@ test("mirror: the output holds exactly the template's files, keeps .git and node
 
 const TIMEOUT = 600_000;
 const OWNER = { id: 3003, first_name: "Grace" };
-const CLAIM_CODE = "template correct horse battery";
+const PASSWORD = "template correct horse battery";
 const MODEL_KEY = "sk-or-template-dummy-not-a-key";
 /** This machine's variables the project reads: none may leak into the Worker. */
-const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_CLAIM_CODE", "OPENROUTER_API_KEY", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN"];
+const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "TELEGRAM_CLAIM_CODE", "OPENROUTER_API_KEY", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN"];
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.includes(name))) as Record<string, string>;
 
 async function run(command: string[], cwd: string, env: Record<string, string> = {}) {
@@ -196,7 +200,7 @@ function freePort(): number {
 }
 
 test.skipIf(!E2E)(
-  "the template, made twice and taken as Workers Builds takes it: npm ci, a bundle, and in workerd the deploy script registers the webhook and the owner claims the bot",
+  "the template, made twice and taken as Workers Builds takes it: npm ci, a bundle, and in workerd the deploy script registers the webhook and the owner logs in",
   async () => {
     const out = join(temp(), "pikit-telegram-cloudflare");
     const first = await makeTemplate(KEY, out);
@@ -238,7 +242,7 @@ test.skipIf(!E2E)(
     const webhookSecret = "template_webhook_secret_0123456789";
     writeFileSync(
       join(clean, ".dev.vars"),
-      `TELEGRAM_BOT_TOKEN=${telegram.token}\nTELEGRAM_WEBHOOK_SECRET=${webhookSecret}\nTELEGRAM_CLAIM_CODE="${CLAIM_CODE}"\nOPENROUTER_API_KEY=${MODEL_KEY}\nBRAVE_API_KEY=none\n`,
+      `TELEGRAM_BOT_TOKEN=${telegram.token}\nTELEGRAM_WEBHOOK_SECRET=${webhookSecret}\nTELEGRAM_PASSWORD="${PASSWORD}"\nOPENROUTER_API_KEY=${MODEL_KEY}\nBRAVE_API_KEY=none\n`,
     );
     let config = readFileSync(join(clean, "pikit.config.ts"), "utf8");
     config = setConfigEntry(config, "channel-telegram-webhook", `{ apiBase: "${telegram.url}" }`);
@@ -292,19 +296,20 @@ test.skipIf(!E2E)(
       expect(deployed.out).toBe(`${printed.join("\n")}\n\u2713 Telegram telegram: webhook ${base}/telegram\n`);
       expect([telegram.webhookUrl, telegram.webhookSecret, telegram.allowedUpdates]).toEqual([`${base}/telegram`, webhookSecret, ["message"]]);
 
-      // Nobody is listed: the owner is told /claim, claims the bot, and is answered.
+      // Nobody is listed: the owner is told /login, logs in, and is answered.
       expect((await telegram.write(OWNER, "hello?")).status).toBe(200);
-      expect((await telegram.write(OWNER, `/claim ${CLAIM_CODE}`)).status).toBe(200);
+      expect((await telegram.write(OWNER, `/login ${PASSWORD}`)).status).toBe(200);
       expect((await telegram.write(OWNER, "hello again")).status).toBe(200);
       const sent = await telegram.sentCount(3, 60_000);
       expect(sent.map((message) => [message.chatId, message.text])).toEqual([
-        [OWNER.id, `This bot is private. Your Telegram user id is ${OWNER.id}: its owner can let you in by adding it to TELEGRAM_ALLOWED_USERS. If you are its owner, send /claim followed by the claim code.`],
-        [OWNER.id, "\u2713 This chat can talk to the agent now. You may delete your /claim message: it holds the claim code."],
+        // Sent as HTML: Telegram shows `<password>`.
+        [OWNER.id, `This bot is private. If you have its password, send /login &lt;password&gt;. Your Telegram user id is ${OWNER.id}: its owner can also let you in by adding it to TELEGRAM_ALLOWED_USERS.`],
+        [OWNER.id, "\u2713 You're logged in: this chat can talk to the agent now. You may delete your /login message: it contains the password."],
         [OWNER.id, "answer: hello again"],
       ]);
       expect(openrouter.requests).toHaveLength(1);
       expect(openrouter.requests[0]).toMatchObject({ model: "z-ai/glm-5.3-flash", apiKey: MODEL_KEY });
-      expect(JSON.stringify(openrouter.requests)).not.toContain(CLAIM_CODE);
+      expect(JSON.stringify(openrouter.requests)).not.toContain(PASSWORD);
     } finally {
       dev.kill("SIGINT");
       const stopped = await Promise.race([dev.exited, Bun.sleep(15_000).then(() => undefined)]);
@@ -315,7 +320,7 @@ test.skipIf(!E2E)(
       await openrouter.stop();
     }
     expect(logs).toContain("pikit: Worker started");
-    for (const secret of [telegram.token, CLAIM_CODE, webhookSecret, MODEL_KEY]) expect(logs).not.toContain(secret);
+    for (const secret of [telegram.token, PASSWORD, webhookSecret, MODEL_KEY]) expect(logs).not.toContain(secret);
   },
   TIMEOUT,
 );

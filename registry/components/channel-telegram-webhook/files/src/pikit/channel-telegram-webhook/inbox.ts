@@ -1,12 +1,12 @@
 /**
  * One update, in the actor that owns its conversation (the object's half, SPEC §4.1, C1). The Worker
  * already checked the secret, kept only private messages with text, and let through only the allowed
- * users (or `claim.ts` found the chat claimed the bot); this is the rest of what channel-telegram's
+ * users (or `login.ts` found the chat logged in); this is the rest of what channel-telegram's
  * `inbound.ts` does:
  *
  * 1. Commands the channel answers itself: `/start` and `/help` explain, `/new` (or `/reset`) starts
- *    the conversation over (a reset: a new session, the old one kept), `/claim` says the chat is in
- *    already (it may hold the claim code: it never reaches the agent). Other commands go to the agent
+ *    the conversation over (a reset: a new session, the old one kept), `/login` says the chat is in
+ *    already (it may hold the password: it never reaches the agent). Other commands go to the agent
  *    as text. A command Telegram delivers again (its 200 was lost) is recognised by its message id and
  *    not run twice.
  * 2. Everything else takes the inbound path every channel takes (`admitInbound`: `inbound.normalize`,
@@ -56,14 +56,14 @@ export async function handleMessage(message: TelegramMessage, deps: InboxDeps, c
   if (text === undefined || message.from === undefined) throw new Error(`channel-telegram-webhook: message ${message.message_id} of ${key} has no text or no sender`);
 
   const command = await commandOf(text, bot);
-  if (command === "start" || command === "help" || command === "new" || command === "claim") {
+  if (command === "start" || command === "help" || command === "new" || command === "login") {
     const seenKey = commandSeenKey(key);
     const last = await deps.store.get<number>(seenKey);
     if (last !== undefined && message.message_id <= last) return "answered";
     if (command === "new") {
       const reset = await deps.conversations.reset(key, ctx);
       await reply(bot, chatId, reset === undefined ? "This is already a new conversation." : "Started a new conversation.", ctx);
-    } else if (command === "claim") {
+    } else if (command === "login") {
       await reply(bot, chatId, "This chat can talk to me already.", ctx);
     } else {
       const name = message.from.first_name;
@@ -115,6 +115,9 @@ export async function reply(bot: Bot, chatId: number, text: string, ctx: AppCont
 /**
  * `/new` or `/new@this_bot` → `new`; `/reset` is `new`. A command for another bot, or no command, →
  * `undefined`. The bot's username is asked (`getMe`) only when a command names one.
+ *
+ * `/claim` is `login`: its former name (`login.ts`), kept for the chats and templates that know it,
+ * and never mentioned to users.
  */
 export async function commandOf(text: string, bot: Bot): Promise<string | undefined> {
   const match = /^\/([A-Za-z0-9_]+)(?:@([A-Za-z0-9_]+))?(?:\s|$)/.exec(text.trim());
@@ -122,5 +125,5 @@ export async function commandOf(text: string, bot: Bot): Promise<string | undefi
   const [, name = "", target] = match;
   if (target !== undefined && target.toLowerCase() !== (await bot.me()).username?.toLowerCase()) return undefined;
   const command = name.toLowerCase();
-  return command === "reset" ? "new" : command;
+  return command === "reset" ? "new" : command === "claim" ? "login" : command;
 }

@@ -55,7 +55,11 @@ const PIECES_PER_RUN = 20;
 const RETRY_MS: readonly number[] = [1_000, 5_000, 30_000, 60_000];
 /** From this failure in a row on, an answer that cannot be delivered is an error. */
 const BLOCKED_AFTER = 3;
-/** How often "typing…" is renewed: Telegram shows it for about 5 seconds. */
+/**
+ * How often "typing…" is renewed: Telegram shows it for about 5 seconds. Not 5: the next renewal is
+ * asked for after the send returns, so its period is this plus the send's latency, and at 5 s every
+ * renewal would come after the last one faded (the object-App test holds the gaps under 5 s).
+ */
 export const TYPING_EVERY_MS = 4_000;
 /** A message whose run has not ended after this long stops showing "typing…". */
 const TYPING_AT_MOST_MS = 10 * 60_000;
