@@ -1,9 +1,10 @@
 /**
  * The `http` preset is this sample's composition: exactly the registry components
  * `pikit.config.ts` lists, plus `deployment-docker`, which runs it and is not in `pikit.config.ts`,
- * less the providers `runtime-pi` brings itself (offered providers), which `pikit new`
- * installs with it. A chat channel chosen instead of `channel-http` brings its durable delivery the
- * same way.
+ * less the provider `runtime-pi` brings itself (offered providers), which `pikit new`
+ * installs with it. The storage is the preset's own: it names it rather than rely on the registry
+ * having one server provider of `storage.sql`. A chat channel chosen instead of `channel-http`
+ * brings its durable delivery the same way.
  */
 
 import { expect, test } from "bun:test";
@@ -18,8 +19,8 @@ function preset(): string[] {
 
 /** Components this sample defines itself, which a project keeps in `src/extensions/`. */
 const PROJECT_LOCAL = new Set(["agents"]);
-/** What `runtime-pi` brings: `agent.submissions` and the storage it requires. */
-const OFFERED = new Set(["storage-sqlite", "submissions-sql"]);
+/** What `runtime-pi` brings: `agent.submissions`, over the preset's storage. */
+const OFFERED = new Set(["submissions-sql"]);
 
 test("the http preset lists exactly the sample's registry components, and deployment-docker", () => {
   const listed = preset();

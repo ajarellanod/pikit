@@ -61,7 +61,9 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions: it needs --preset");
   const chosen = options.preset === undefined ? [] : registry.preset(options.preset, options.with ?? []);
   // What the chosen components bring (offered providers, `offers.ts`): durable delivery for a chat
-  // channel, and the storage it needs. A preset lists only what every project of it uses.
+  // channel, and what it needs. A preset lists only what every project of it uses, and names its
+  // storage: an offer needs the registry's only provider, which a second one would take away
+  // (`registry validate` checks that each preset composes, `checkPresets`).
   const { order: components, installedFor } = withOffers(registry, chosen, targets);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
   try {

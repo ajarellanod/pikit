@@ -62,8 +62,9 @@ export default defineApp({
     toolWrite,
     toolEdit,
     toolBash,
-    // Brought by runtime-pi (offered providers, as `pikit add` brings them): no accepted message
-    // goes unanswered across restarts, and a POST that answered 202 reads its answer with GET.
+    // The storage the http preset names, and the record of submissions runtime-pi brings over it
+    // (offered providers, as `pikit add` brings them): no accepted message goes unanswered across
+    // restarts, and a POST that answered 202 reads its answer with GET.
     storageSqlite,
     submissionsSql,
     createRuntimePi({ extensions: [permissionGate] }),
