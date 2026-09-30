@@ -17,7 +17,8 @@
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not);
  *      on Cloudflare, also in the Worker's App when its `component.json`'s `apps.worker` says so (C1)
  *   9. append its variables to `.env.example` (a reinstall replaces its block)
- *  10. record the registry, version, commit, kit ranges, file hashes and hooks in `pikit.json`, and keep each file
+ *  10. record the registry, version, commit, kit ranges, file hashes, hooks and the npm packages it added
+ *      in `pikit.json`, and keep each file
  *      as installed, its base, in `pikit-bases/` (`bases.ts`)
  *  11. `pikit doctor`
  *
@@ -41,6 +42,7 @@ import {
   type InstalledComponent,
   kitRanges,
   modifiedFiles,
+  ownedDependencies,
   PIKIT_JSON,
   type ProjectManifest,
   readProjectManifest,
@@ -265,6 +267,7 @@ function planInstall(
       }
     }
   }
+  const ownedBefore = previous === undefined ? undefined : ownedDependencies(previous);
   const installedFor = options.installedFor === undefined ? undefined : [...new Set([...(project.components[name]?.installedFor ?? []), options.installedFor])];
   project.components[name] = {
     ...(installedFor !== undefined && { installedFor }),
@@ -276,6 +279,9 @@ function planInstall(
     files: hashes,
     dependencies: manifest.dependencies,
     ...(manifest.devDependencies !== undefined && { devDependencies: manifest.devDependencies }),
+    // What `add` put in package.json for it: a reinstall keeps the installed version's (`applyPlans` adds this one's).
+    addedDependencies: ownedBefore?.dependencies ?? [],
+    ...(ownedBefore !== undefined && ownedBefore.devDependencies.length > 0 && { addedDevDependencies: ownedBefore.devDependencies }),
     environment: manifest.environment ?? [],
     // What `pikit doctor` and the deployment's `up` run for it, by its project path.
     ...(manifest.hooks !== undefined && { hooks: projectHooks(name, manifest.hooks) }),
@@ -398,6 +404,12 @@ function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], un
     const dev = addDependencies(projectDir, pkg, plan.manifest.devDependencies ?? {}, "devDependencies");
     for (const conflict of dev.conflicts) log.warn(`dev dependency kept as the project has it: ${conflict}`);
     dependenciesChanged ||= added.length > 0 || dev.added.length > 0;
+    // Only what it added is its to take out on `remove`: a package the project had is the project's.
+    const record = draft.project.components[plan.name] as InstalledComponent;
+    const others = Object.entries(draft.project.components).flatMap(([name, c]) => (name === plan.name ? [] : [ownedDependencies(c)]));
+    record.addedDependencies = owned(record.addedDependencies ?? [], added, plan.manifest.dependencies, others.flatMap((o) => o.dependencies));
+    const addedDev = owned(record.addedDevDependencies ?? [], dev.added, plan.manifest.devDependencies ?? {}, others.flatMap((o) => o.devDependencies));
+    if (addedDev.length > 0) record.addedDevDependencies = addedDev;
   }
   if (dependenciesChanged) writePackageJson(projectDir, pkg);
 
@@ -417,6 +429,16 @@ function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], un
     rmSync(join(projectDir, base));
   }
   return { dependenciesChanged };
+}
+
+/**
+ * The packages of one field a component owns after an add: what it owned, what the add put in
+ * package.json, and what it declares that another installed component put there (shared: the last of
+ * them to be removed takes it out).
+ */
+function owned(before: readonly string[], added: readonly string[], declared: Record<string, string>, ownedByOthers: readonly string[]): string[] {
+  const shared = Object.keys(declared).filter((pkg) => ownedByOthers.includes(pkg));
+  return [...new Set([...before, ...added, ...shared])].sort();
 }
 
 /** The key of `registries` for this path, added (as `recordedLocation` records it) when the project does not know it yet. */

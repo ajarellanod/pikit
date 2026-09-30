@@ -12,7 +12,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { emptyManifest, hashOf, writeProjectManifest } from "../project/pikit-json.ts";
-import { kitSpecifier } from "../project/vendor.ts";
+import { kitCommit, kitSpecifier } from "../project/vendor.ts";
 
 const MAIN = join(import.meta.dir, "..", "main.ts");
 const PACKAGES = join(import.meta.dir, "..", "..", "..");
@@ -29,10 +29,11 @@ function pikit(args: string[], cwd: string) {
   return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() };
 }
 
-/** A project on this CLI's kit, which already depends on `@pikit/contracts`. */
+/** A project on this CLI's kit (recorded), which already depends on `@pikit/contracts`. */
 function project(): string {
   const dir = temp();
-  writeProjectManifest(dir, emptyManifest());
+  writeProjectManifest(dir, emptyManifest(undefined, kitCommit()));
+  mkdirSync(join(dir, "src"));
   const contracts = kitSpecifier("@pikit/contracts");
   mkdirSync(join(dir, "vendor"));
   writeFileSync(join(dir, contracts.slice("file:".length)), "this CLI's kit");
@@ -92,6 +93,7 @@ test("a remove whose bun install fails puts back what it wrote: config, files, .
   // project's own `is-odd` resolves nowhere).
   const manifest = readManifest(dir);
   manifest.components["log-events"].dependencies["left-pad"] = "1.3.0";
+  manifest.components["log-events"].addedDependencies = ["left-pad"];
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
   writeFileSync(join(dir, "package.json"), JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, "is-odd": "3.0.1", "left-pad": "1.3.0" } }));
@@ -105,6 +107,31 @@ test("a remove whose bun install fails puts back what it wrote: config, files, .
   expect(run.code).toBe(1);
   expect(run.err).toContain("`bun install` failed");
   expect(run.err).toContain("nothing was removed");
+  expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
+test("remove takes out only the packages add put in package.json: one the project had stays, one another component added is shared", () => {
+  const dir = project();
+  const pkg = JSON.parse(readFileSync(join(dir, "package.json"), "utf8"));
+  writeFileSync(join(dir, "package.json"), `${JSON.stringify({ ...pkg, dependencies: { ...pkg.dependencies, "is-odd": "3.0.1", "left-pad": "1.3.0" } }, null, 2)}\n`);
+  const registry = logEventsRegistry();
+  editLogEvents(registry, { dependencies: { "@pikit/contracts": "0.0.0", "is-odd": "3.0.1", "left-pad": "1.3.0" } });
+  // Another component put left-pad there; the project had @pikit/contracts and is-odd.
+  const manifest = readManifest(dir);
+  manifest.components["tool-other"] = {
+    registry: "default", version: "0.0.0", files: {}, dependencies: { "left-pad": "1.3.0" }, addedDependencies: ["left-pad"], environment: [],
+  };
+  // Known already: add records a registry it does not know.
+  manifest.registries.local = registry;
+  writeProjectManifest(dir, manifest);
+  const before = snapshot(dir);
+
+  expect(pikit(["add", "log-events", "--registry", registry, "--yes"], dir).code).toBe(0);
+  expect(readManifest(dir).components["log-events"].addedDependencies).toEqual(["left-pad"]);
+  // Removed, it takes nothing out: tool-other still declares left-pad. The project is as it was.
+  const removed = pikit(["remove", "log-events"], dir);
+  expect(removed.code).toBe(0);
+  expect(removed.out).not.toContain("the npm packages only it used");
   expect(snapshot(dir)).toEqual(before);
 }, 120_000);
 

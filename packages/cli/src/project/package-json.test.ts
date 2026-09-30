@@ -92,21 +92,21 @@ test("remove takes out a dev dependency no remaining component declares, as eith
   const project = emptyManifest(undefined, undefined, ["cloudflare"]);
   // What remains once deployment-cloudflare is gone.
   project.components["storage-do"] = installed({ "@pikit/contracts": "0.0.0" });
-  expect(unneededDependencies(dir, project, { wrangler: "4.143.0" })).toEqual(["wrangler"]);
+  expect(unneededDependencies(dir, project, ["wrangler"])).toEqual(["wrangler"]);
 
   // Another deployment that declares it too keeps it; so does one that has it as a dependency.
   project.components["deployment-other"] = installed({}, { wrangler: "4.143.0" });
-  expect(unneededDependencies(dir, project, { wrangler: "4.143.0" })).toEqual([]);
+  expect(unneededDependencies(dir, project, ["wrangler"])).toEqual([]);
   project.components["deployment-other"] = installed({ wrangler: "4.143.0" });
-  expect(unneededDependencies(dir, project, { wrangler: "4.143.0" })).toEqual([]);
+  expect(unneededDependencies(dir, project, ["wrangler"])).toEqual([]);
   // And a dependency that a remaining component declares as a dev dependency stays too.
   project.components["deployment-other"] = installed({}, { hono: "4.13.9" });
-  expect(unneededDependencies(dir, project, { hono: "4.13.9" })).toEqual([]);
+  expect(unneededDependencies(dir, project, ["hono"])).toEqual([]);
 
   // A project file that imports it keeps it.
   delete project.components["deployment-other"];
   mkdirSync(join(dir, "scripts"));
   // Built in two pieces: this test's own imports are checked (scripts/boundaries.ts), and it has no wrangler.
   writeFileSync(join(dir, "scripts", "deploy.ts"), `import { unstable_dev } from ${JSON.stringify("wrangler")};\n`);
-  expect(unneededDependencies(dir, project, { wrangler: "4.143.0" })).toEqual([]);
+  expect(unneededDependencies(dir, project, ["wrangler"])).toEqual([]);
 });

@@ -33,7 +33,7 @@ import { CONFIG_FILE, removeComponent, removeConfigEntry, WORKER_CONFIG } from "
 import type { AppDescription } from "../project/probe.ts";
 import { ENV_EXAMPLE, removeExampleBlock } from "../project/env-file.ts";
 import { readPackageJson, removeDependencies, writePackageJson } from "../project/package-json.ts";
-import { PIKIT_JSON, type ProjectManifest, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { PIKIT_JSON, type ProjectManifest, modifiedFiles, ownedDependencies, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { brokenReferences } from "../project/references.ts";
 import { probe } from "../project/run.ts";
 import { Undo } from "../project/undo.ts";
@@ -104,10 +104,12 @@ async function removeWithLeftovers(projectDir: string, name: string, options: Re
     writeProjectManifest(projectDir, project);
     for (const base of unreferencedBases(projectDir, project)) undo.delete(base);
 
+    // Only what `add` put in package.json for it: a package the project had before stays.
+    const owned = ownedDependencies(installed);
     const pkg = readPackageJson(projectDir);
     removed = [
-      ...removeDependencies(pkg, unneededDependencies(projectDir, project, installed.dependencies)),
-      ...removeDependencies(pkg, unneededDependencies(projectDir, project, installed.devDependencies ?? {}), "devDependencies"),
+      ...removeDependencies(pkg, unneededDependencies(projectDir, project, owned.dependencies)),
+      ...removeDependencies(pkg, unneededDependencies(projectDir, project, owned.devDependencies), "devDependencies"),
     ];
     if (removed.length > 0) {
       undo.keep(PACKAGE_JSON);
@@ -204,14 +206,14 @@ function installedName(project: ProjectManifest, component: string): string {
 }
 
 /**
- * The component's npm packages (dependencies or dev dependencies) that nothing else needs: no
- * remaining component declares it, as either, no source file of the project imports it, and it is
- * not the kit.
+ * Of the npm packages `add` put in package.json for the component (`candidates`: dependencies or dev
+ * dependencies, `ownedDependencies`), those nothing else needs: no remaining component declares it,
+ * as either, no source file of the project imports it, and it is not the kit.
  */
-export function unneededDependencies(projectDir: string, project: ProjectManifest, declared: Record<string, string>): string[] {
+export function unneededDependencies(projectDir: string, project: ProjectManifest, candidates: readonly string[]): string[] {
   const needed = new Set(Object.values(project.components).flatMap((c) => [...Object.keys(c.dependencies), ...Object.keys(c.devDependencies ?? {})]));
   for (const file of projectSources(projectDir)) {
     for (const specifier of scanImports(readFileSync(join(projectDir, file), "utf8"))) needed.add(packageName(specifier));
   }
-  return Object.keys(declared).filter((pkg) => !needed.has(pkg) && pkg !== "@pikit/core" && pkg !== EXTENSION_ALIAS);
+  return candidates.filter((pkg) => !needed.has(pkg) && pkg !== "@pikit/core" && pkg !== EXTENSION_ALIAS);
 }
