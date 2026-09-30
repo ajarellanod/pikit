@@ -8,7 +8,7 @@
  * The suite reaches the database through the capability, as a component would. It uses only SQL
  * that SQLite and Postgres both accept, the portable subset `storage.ts` names: `BIGINT` for an
  * integer past 32 bits (Postgres' `INTEGER` is 32-bit), `BYTEA` for bytes (Postgres has no `BLOB`;
- * SQLite stores bytes as they are in a column of any declared type).
+ * SQLite keeps bytes as they are in any column of a table that is not `STRICT`).
  */
 
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
