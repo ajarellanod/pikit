@@ -94,7 +94,7 @@ what serves. pikit's own end-to-end test (`packages/cli/src/e2e-telegram-cloudfl
 whole path in workerd against a fake Telegram and a fake OpenRouter.
 
 The same project can also be a "Deploy to Cloudflare" button's template, with no CLI at all: the
-Worker registers its own webhook, and the owner claims the bot with `/claim <code>`
+Worker registers its own webhook, and the owner logs in with `/login <password>`
 (`channel-telegram-webhook`'s README, "With a Deploy to Cloudflare button").
 
 ## What it does

@@ -15,10 +15,10 @@ their own chat, and the sender is in.
 ## How it fits pikit
 - Today `channel-telegram` keeps its allowlist in `.env`, read through `secrets`, tells a stranger
   their id once, and its `configure` step allows whoever writes first.
-- `channel-telegram-webhook` adds a first, narrow form of it for deploys with no CLI: `/claim <code>`
-  with a passphrase from `TELEGRAM_CLAIM_CODE` lets a chat in, kept in the chat's Durable Object
-  (`storage.kv`), with a cool-down after wrong codes. It is the owner claiming the bot, not an owner
-  approving others: pairing would generalize it (and could replace it) across channels.
+- `channel-telegram-webhook` adds a first, narrow form of it for deploys with no CLI: `/login
+  <password>` with the bot's password from `TELEGRAM_PASSWORD` lets a chat in, kept in the chat's
+  Durable Object (`storage.kv`), with a cool-down after wrong passwords. It is a shared password, not
+  an owner approving others: pairing would generalize it (and could replace it) across channels.
 - `router-pairing`: a `route.resolve` stage above the rules that denies an unknown actor, records a
   pairing request with a short code in `storage.sql`, and tells the owner; the approved actors are
   its records, per channel instance.

@@ -1,19 +1,19 @@
 /**
  * The bots this channel runs. Each Telegram bot is an
  * account, and each account a channel instance with its own token, allowed users, webhook secret,
- * claim code, webhook path, conversations and transport:
+ * password, webhook path, conversations and transport:
  *
- * | Account | Instance | Token | Allowed users | Webhook secret | Claim code | Path |
+ * | Account | Instance | Token | Allowed users | Webhook secret | Password | Path |
  * |---|---|---|---|---|---|---|
- * | the default one | `telegram` | `TELEGRAM_BOT_TOKEN` | `TELEGRAM_ALLOWED_USERS` | `TELEGRAM_WEBHOOK_SECRET` | `TELEGRAM_CLAIM_CODE` | `/telegram` |
- * | `ops` (in `accounts`) | `telegram:ops` | `TELEGRAM_OPS_BOT_TOKEN` | `TELEGRAM_OPS_ALLOWED_USERS` | `TELEGRAM_OPS_WEBHOOK_SECRET` | `TELEGRAM_OPS_CLAIM_CODE` | `/telegram/ops` |
+ * | the default one | `telegram` | `TELEGRAM_BOT_TOKEN` | `TELEGRAM_ALLOWED_USERS` | `TELEGRAM_WEBHOOK_SECRET` | `TELEGRAM_PASSWORD` | `/telegram` |
+ * | `ops` (in `accounts`) | `telegram:ops` | `TELEGRAM_OPS_BOT_TOKEN` | `TELEGRAM_OPS_ALLOWED_USERS` | `TELEGRAM_OPS_WEBHOOK_SECRET` | `TELEGRAM_OPS_PASSWORD` | `/telegram/ops` |
  *
  * A conversation key is `<instance>:<chat id>`: `telegram:12345`, `telegram:ops:12345`, the same keys
  * channel-telegram makes, so a project that moves from polling to the webhook keeps its conversations.
  * The key is also the actor's: the Worker sends each update to it (`actor.mailbox`).
  *
  * Copied from channel-telegram's `account.ts` (components never import each other, C6), with the
- * webhook's secret, the claim code and the path added.
+ * webhook's secret, the password and the path added.
  */
 
 export const KIND = "telegram";
@@ -27,8 +27,10 @@ export interface Account {
   allowedSecret: string;
   /** The secret Telegram sends with every update of this bot (`X-Telegram-Bot-Api-Secret-Token`). */
   webhookSecret: string;
-  /** The passphrase a private chat sends with `/claim` to be allowed (`claim.ts`); optional. */
-  claimSecret: string;
+  /** The password a private chat sends with `/login` to be allowed (`login.ts`); optional. */
+  passwordSecret: string;
+  /** The password's former name, `TELEGRAM_[<NAME>_]CLAIM_CODE`: read when `passwordSecret` is not set (`readPassword`). */
+  legacyPasswordSecret: string;
   /** Where Telegram posts this bot's updates: `/telegram` or `/telegram/<name>`. */
   path: string;
 }
@@ -46,7 +48,8 @@ export function accountsOf(names: readonly string[]): Account[] {
       tokenSecret: `TELEGRAM_${infix}BOT_TOKEN`,
       allowedSecret: `TELEGRAM_${infix}ALLOWED_USERS`,
       webhookSecret: `TELEGRAM_${infix}WEBHOOK_SECRET`,
-      claimSecret: `TELEGRAM_${infix}CLAIM_CODE`,
+      passwordSecret: `TELEGRAM_${infix}PASSWORD`,
+      legacyPasswordSecret: `TELEGRAM_${infix}CLAIM_CODE`,
       path: name === undefined ? `/${KIND}` : `/${KIND}/${name}`,
     };
   });

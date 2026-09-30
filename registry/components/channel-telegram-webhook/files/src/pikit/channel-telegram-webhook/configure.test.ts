@@ -53,7 +53,8 @@ function fake(): FakeTelegram {
 
 test("from nothing: it explains BotFather, checks the token, generates the webhook's secret, and allows whoever messages the bot", async () => {
   const telegram = fake();
-  const t = terminal(telegram, { answers: [telegram.token, "y"] });
+  // Enter: no password (the CLI allows you by your message).
+  const t = terminal(telegram, { answers: [telegram.token, "", "y"] });
   setTimeout(() => telegram.say(OWNER, "hi"), 100);
 
   expect(await configure(t.io)).toEqual([]);
@@ -112,7 +113,7 @@ test("findToken takes the bot id and secret out of any text", () => {
 
 test("someone who is not you can be refused, and the next person allowed", async () => {
   const telegram = fake();
-  const t = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token }, answers: ["n", "y"] });
+  const t = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token }, answers: ["", "n", "y"] });
   setTimeout(() => {
     telegram.say(STRANGER, "hello?");
     telegram.say(OWNER, "it's me");
@@ -125,7 +126,7 @@ test("someone who is not you can be refused, and the next person allowed", async
 test("a bot that already has a webhook: removing it (the next pikit up sets it again) reads the message", async () => {
   const telegram = fake();
   telegram.webhookUrl = "https://my-agent.example.workers.dev/telegram";
-  const t = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token } });
+  const t = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token }, answers: [""] });
   const confirmed: string[] = [];
   t.io.confirm = async (message) => {
     confirmed.push(message);
@@ -145,7 +146,7 @@ test("a bot that already has a webhook: removing it (the next pikit up sets it a
 test("a bot that already has a webhook, kept: what is missing is named, and nothing is removed", async () => {
   const telegram = fake();
   telegram.webhookUrl = "https://my-agent.example.workers.dev/telegram";
-  const t = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token }, answers: ["n"] });
+  const t = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token }, answers: ["", "n"] });
 
   const missing = await configure(t.io);
   expect(missing).toHaveLength(1);
@@ -181,19 +182,51 @@ test("accounts: each bot is configured with its own variables, its own secret in
   expect(done.env.get("TELEGRAM_OPS_WEBHOOK_SECRET")).not.toBe(done.env.get("TELEGRAM_WEBHOOK_SECRET"));
 });
 
-test("a claim code, if one is given, is checked and saved to .env, never asked for; one that could be guessed is named", async () => {
+test("a password, if one is given, is checked and saved to .env; one that could be guessed is named", async () => {
   const telegram = fake();
-  const saved = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_CLAIM_CODE: "  correct horse battery staple " } });
+  const saved = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_PASSWORD: "  correct horse battery staple " } });
   expect(await configure(saved.io)).toEqual([]);
-  expect(saved.env.get("TELEGRAM_CLAIM_CODE")).toBe("correct horse battery staple");
-  expect(saved.said.join("\n")).toContain("TELEGRAM_CLAIM_CODE: set; a private chat that sends /claim followed by it may talk to the bot");
+  expect(saved.env.get("TELEGRAM_PASSWORD")).toBe("correct horse battery staple");
+  expect(saved.said.join("\n")).toContain("TELEGRAM_PASSWORD: set; once deployed, send /login <password> to your bot");
   expect(saved.said.join("\n")).not.toContain("correct horse");
 
-  const short = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_CLAIM_CODE: "1234" } });
-  expect(await configure(short.io)).toEqual(["TELEGRAM_CLAIM_CODE: choose a passphrase of at least 8 characters, or remove it"]);
-  expect(short.said.join("\n")).toContain("TELEGRAM_CLAIM_CODE is not usable: it is shorter than 8 characters");
+  const short = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_PASSWORD: "1234" } });
+  expect(await configure(short.io)).toEqual(["TELEGRAM_PASSWORD: choose a password of at least 8 characters, or remove it"]);
+  expect(short.said.join("\n")).toContain("TELEGRAM_PASSWORD is not usable: it is shorter than 8 characters");
 
   const none = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001" } });
   expect(await configure(none.io)).toEqual([]);
-  expect(none.env.has("TELEGRAM_CLAIM_CODE")).toBe(false);
+  expect(none.env.has("TELEGRAM_PASSWORD")).toBe(false);
+});
+
+test("at a terminal, a first setup offers to choose a password: one too short is asked again, never shown; with someone allowed, it is not asked", async () => {
+  const telegram = fake();
+  const t = terminal(telegram, { answers: ["short", "  a good long password ", "y"], env: { TELEGRAM_BOT_TOKEN: telegram.token } });
+  setTimeout(() => telegram.say(OWNER, "hi"), 100);
+
+  expect(await configure(t.io)).toEqual([]);
+  expect(t.asked.slice(0, 2)).toEqual(Array(2).fill("Choose a password for your bot (8+ characters, or Enter for none): you'll send /login <password> to it once deployed"));
+  expect(t.said.join("\n")).toContain("That password is not usable: it is shorter than 8 characters");
+  expect(t.said.join("\n")).toContain("TELEGRAM_PASSWORD saved to .env: once deployed, send /login <password> to your bot. Whoever knows it can log in too; change it to log everyone out");
+  expect(t.env.get("TELEGRAM_PASSWORD")).toBe("a good long password");
+  expect(t.env.get("TELEGRAM_ALLOWED_USERS")).toBe("1001");
+  expect(t.said.join("\n")).not.toContain("a good long password");
+
+  // Someone allowed already: nothing asked (the scripted terminal fails on any question).
+  const allowed = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001" } });
+  expect(await configure(allowed.io)).toEqual([]);
+  expect(allowed.env.has("TELEGRAM_PASSWORD")).toBe(false);
+});
+
+test("the password's former name, TELEGRAM_CLAIM_CODE, is checked and said to be renamed, not moved; asked for no password", async () => {
+  const telegram = fake();
+  const legacy = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_CLAIM_CODE: "correct horse battery staple" }, answers: ["y"] });
+  setTimeout(() => telegram.say(OWNER, "hi"), 100);
+  expect(await configure(legacy.io)).toEqual([]);
+  expect(legacy.said.join("\n")).toContain("TELEGRAM_CLAIM_CODE is deprecated: rename it TELEGRAM_PASSWORD in .env (the same value keeps the chats that logged in)");
+  expect(legacy.env.has("TELEGRAM_PASSWORD")).toBe(false);
+  expect(legacy.asked.filter((question) => question.includes("password"))).toEqual([]);
+
+  const short = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_CLAIM_CODE: "1234" } });
+  expect(await configure(short.io)).toEqual(["TELEGRAM_CLAIM_CODE: choose a password of at least 8 characters, or remove it"]);
 });

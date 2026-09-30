@@ -27,7 +27,8 @@ It needs what `pikit new` needs (Bun >= 1.4, the npm registry) and npm. It:
    - `.dev.vars.example` lists the secrets the button asks for (no values), and `package.json`'s
      `cloudflare.bindings` describes each one, and the `CONVERSATION` Durable Object, for the setup
      page. pikit's `.env.example` is removed, so there is one list: it also names
-     `TELEGRAM_ALLOWED_USERS`, which the button does not ask (the owner claims the bot instead);
+     `TELEGRAM_ALLOWED_USERS`, which the button does not ask (the owner logs in with the password
+     instead);
    - `package.json` gets a `description` and the `deploy` script, which the button pre-fills as the
      deploy command: `wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs`. No
      `build` script: wrangler bundles;
@@ -60,6 +61,13 @@ way, and needs no `SKIP_DEPENDENCY_INSTALL` or custom install command. Bun still
 test`) and pikit's CLI; `bun.lock` is ignored so it never makes Workers Builds switch. After `pikit add`
 in a clone, run `npm install` and commit `package-lock.json`.
 
+**How the owner gets in, without `pikit configure`.** Nobody knows their Telegram user id before
+deploying, so the form asks for a password (`TELEGRAM_PASSWORD`) instead of `TELEGRAM_ALLOWED_USERS`:
+1. you choose the password in the form; 2. you deploy; 3. you send `/login <password>` to your bot;
+4. that chat stays allowed; 5. whoever knows the password can log in too; 6. changing the password
+logs everyone out. The template's README says so for its users ("Your bot's password"), and
+`channel-telegram-webhook`'s README has the details ("The password").
+
 **How the webhook gets registered, without `pikit up`.** The `deploy` script pipes `wrangler deploy`
 into `setup-webhook.mjs`, which reads the workers.dev URL and version from wrangler's output, waits
 until `/health` answers from that version, and calls `GET /telegram/setup`: the Worker sets its webhook
@@ -79,7 +87,8 @@ this machine or looks like a token, then, in a clean copy: `npm ci` with an empt
 deploy --dry-run` (the bundle's gzip size, under the Free plan's 3 MB), and `wrangler dev` with the
 button's secrets in `.dev.vars` against a local fake Telegram and fake OpenRouter. There the `deploy`
 script, run by a shell with a fake `wrangler deploy` that prints the local Worker's URL, has the Worker
-register its webhook, and the owner, whom nobody listed, claims the bot with `/claim` and is answered.
+register its webhook, and the owner, whom nobody listed, logs in with `/login <password>` and is
+answered.
 Nothing is deployed and every key is a dummy. It needs Node >= 22 and npm.
 
 ## Publishing

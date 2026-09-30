@@ -17,11 +17,11 @@ Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each m
   - `TELEGRAM_BOT_TOKEN` (secret, required): the bot's token from @BotFather.
   - `TELEGRAM_ALLOWED_USERS` (required by `pikit doctor`): the Telegram user ids allowed to talk to
     the bot, separated by commas. `pikit configure` fills it. Deployed without the CLI it may be
-    empty: the owner claims the bot instead.
+    empty: the owner logs in with the password instead.
   - `TELEGRAM_WEBHOOK_SECRET` (secret, required): what Telegram sends with every update, so only
     Telegram reaches your agent. `pikit configure` generates it.
-  - `TELEGRAM_CLAIM_CODE` (secret, optional): a passphrase, 8 characters at least. A private chat
-    that sends `/claim <passphrase>` may talk to the bot from then on ("Claiming the bot" below).
+  - `TELEGRAM_PASSWORD` (secret, optional): the bot's password, 8 characters at least. A private
+    chat that sends `/login <password>` may talk to the bot from then on ("The password" below).
 
 ## Two halves, one per App
 
@@ -32,7 +32,7 @@ and routes, and the Durable Object's, which owns one conversation. This componen
 |---|---|---|
 | Export of `index.ts` | `worker` (named in `component.json`'s `apps.worker`) | the default export |
 | Component name, and its config's key | `channel-telegram-webhook-worker` | `channel-telegram-webhook` |
-| Does | the route, the secret, the allowed users, strangers, `actor.mailbox`, registering the webhook | commands, `admitInbound`, delivering answers, claims |
+| Does | the route, the secret, the allowed users, strangers, `actor.mailbox`, registering the webhook | commands, `admitInbound`, delivering answers, logins |
 
 ```ts
 import channelTelegramWebhook, { worker as channelTelegramWebhookWorker } from "./src/pikit/channel-telegram-webhook/index.ts";
@@ -83,8 +83,10 @@ pikit up
    refuses while the bot has a webhook: if a deploy already set one, it offers to remove it (the
    Worker answers nobody while nobody is allowed, and the next `pikit up` sets it again).
 
-It also checks a `TELEGRAM_CLAIM_CODE` you set and saves it to `.env`; it never asks for one (with
-the CLI, step 3 is how you are allowed).
+Before step 3, on a first setup (nobody allowed yet, no password), it offers to choose the bot's
+password: "Choose a password for your bot (8+ characters, or Enter for none): you'll send /login
+<password> to it once deployed". Enter skips it: with the CLI, step 3 is how you are allowed. A
+`TELEGRAM_PASSWORD` you set yourself is checked and saved to `.env`, so `pikit up` uploads it.
 
 `pikit up` deploys, waits until the new version answers, then registers the webhook (`afterDeploy`):
 see "Registering the webhook" below.
@@ -98,12 +100,12 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
 
 1. **The form.** Its `.dev.vars.example` lists the secrets, and `package.json`'s `cloudflare.bindings`
    describes them. `TELEGRAM_ALLOWED_USERS` is not asked: nobody knows their Telegram id. The owner
-   claims the bot instead, with the claim code they type here.
+   logs in instead, with the password they choose here.
 
    ```ini
    TELEGRAM_BOT_TOKEN=
    TELEGRAM_WEBHOOK_SECRET=
-   TELEGRAM_CLAIM_CODE=
+   TELEGRAM_PASSWORD=
    OPENROUTER_API_KEY=
    ```
 
@@ -112,7 +114,7 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
      "bindings": {
        "TELEGRAM_BOT_TOKEN": { "description": "In Telegram, open [@BotFather](https://t.me/BotFather), send `/newbot`, and paste the token it answers." },
        "TELEGRAM_WEBHOOK_SECRET": { "description": "Any random string of 16 to 256 letters, digits, `_` or `-`. Telegram sends it with every message, so only Telegram reaches your bot. You never type it again." },
-       "TELEGRAM_CLAIM_CODE": { "description": "A passphrase of 8 characters or more. Once deployed, send `/claim <passphrase>` to your bot: your chat is the one it answers." },
+       "TELEGRAM_PASSWORD": { "description": "A password you choose for your bot, 8 characters or more. Once deployed, send `/login <password>` to your bot: that chat stays allowed. Change it to log everyone out." },
        "OPENROUTER_API_KEY": { "description": "Your [OpenRouter](https://openrouter.ai/keys) API key: the model your agent runs on." }
      }
    }
@@ -140,9 +142,9 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
    pikit makes this template itself: `bun scripts/template.ts telegram-cloudflare <dir>`
    (`templates/README.md`).
 
-3. **The owner claims the bot.** Once deployed, they open the bot in Telegram. It answers that it is
-   private, with their id, and that its owner sends `/claim` followed by the claim code. They send
-   `/claim <passphrase>`, and the bot talks to them from then on ("Claiming the bot").
+3. **The owner logs in.** Once deployed, they open the bot in Telegram. It answers that it is
+   private, and that whoever has its password sends `/login <password>`. They send it, and the bot
+   talks to them from then on ("The password").
 
 ## What it does
 
@@ -153,9 +155,9 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
   other updates are acknowledged (`200`) and dropped. A message without text gets "I can only read
   text messages for now."
 - **Who may talk** is the list in `TELEGRAM_ALLOWED_USERS`, checked in the Worker, and the chats that
-  claimed the bot, kept in their objects ("Claiming the bot"). A stranger is told their user id, so
-  you can add it, and nothing reaches the agent. When the bot cannot be claimed (no claim code, and
-  users listed: the CLI's way), the Worker tells them itself and reaches no object; it keeps no state,
+  logged in with the password, kept in their objects ("The password"). A stranger is told their user
+  id, so you can add it, and nothing reaches the agent. When the bot takes no logins (no password,
+  and users listed: the CLI's way), the Worker tells them itself and reaches no object; it keeps no state,
   so a stranger who keeps writing may be told again after its isolate is recycled.
 - **The way to the conversation.** The Worker sends the update to the conversation's actor,
   `actor.mailbox.send("telegram:<chat>", "telegram.update", update)`: on Cloudflare, the Durable
@@ -169,8 +171,8 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
 - **Conversations:** each private chat is one conversation, `telegram:<chat id>`, the keys
   `channel-telegram` makes.
 - **Commands:** `/new` (or `/reset`) starts a new conversation; the old one is kept in its session.
-  `/start` and `/help` explain. `/claim` in a chat that may talk already says so, and never reaches
-  the agent (it may hold the claim code). Any other command goes to the agent as text.
+  `/start` and `/help` explain. `/login` in a chat that may talk already says so, and never reaches
+  the agent (it may hold the password). Any other command goes to the agent as text.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`). When the agent
   will not answer, the chat is told: "I can't take that message." when a stage stops it, "Sorry, I
   can't answer that here." when the router denies it, "This bot is not set up to answer yet." when no
@@ -208,39 +210,50 @@ whenever a run of its conversations ends.
   the channel was installed.
 
 It refuses to start: the Worker's half without a token or a usable webhook secret, with an allowed
-users list that is not ids, or with a claim code shorter than 8 characters; the object's half without
-a token. With nobody listed and no claim code the Worker starts and logs that only chats that claimed
-the bot before can talk to it. The object's half never calls Telegram to start: on Cloudflare every
+users list that is not ids, or with a password shorter than 8 characters; the object's half without
+a token. With nobody listed and no password the Worker starts and logs that only chats that logged
+in before can talk to it. The object's half never calls Telegram to start: on Cloudflare every
 object runs the start, and each call is a subrequest. The Worker's half checks its webhook at start
 on Cloudflare, once per isolate ("Registering the webhook").
 
-## Claiming the bot
+## The password
 
 With the button nobody reads the owner's first message, so nobody knows their user id and
-`TELEGRAM_ALLOWED_USERS` stays empty. `TELEGRAM_CLAIM_CODE` is a passphrase the owner chose: a private
-chat that sends `/claim <passphrase>` may talk to the bot from then on (`claim.ts`).
+`TELEGRAM_ALLOWED_USERS` stays empty. The bot's password lets its owner in instead:
 
-- **Where claims live.** The Worker has no storage (C1); each chat's object has `storage.kv`. So when
-  the bot can be claimed (a claim code is set, or nobody is listed) the Worker lets the listed users
+1. you choose the password: in the button's form (`TELEGRAM_PASSWORD`), or with `pikit configure`;
+2. you deploy;
+3. you send `/login <password>` to your bot in Telegram;
+4. that chat stays allowed, across restarts and deploys;
+5. whoever knows the password can log in too, from their own chat;
+6. change the password to log everyone out: every chat that logged in with the old one must send
+   `/login` with the new one.
+
+The details (`login.ts`):
+
+- **Where logins live.** The Worker has no storage (C1); each chat's object has `storage.kv`. So when
+  the bot takes logins (a password is set, or nobody is listed) the Worker lets the listed users
   through as before and hands everyone else's private messages to their chat's object
-  (`actor.mailbox.send("telegram:<chat>", "telegram.stranger", update)`), which decides. A claim is
-  kept in the channel's namespace of `storage.kv` (`claim:<conversation>`): it survives restarts,
-  evictions and deploys.
-- **A claimed chat** is handled as an allowed one: commands, the agent, answers.
-- **`/claim <code>`** is compared in constant time (SHA-256 digests). A wrong code is told "That is
-  not the claim code."; after 5 in a row the chat waits 15 minutes, during which every `/claim` is
-  refused unchecked. Telegram delivering the same message again is not another guess. The code never
-  reaches the agent nor a log line; the bot suggests deleting the message that holds it.
-- **Strangers** are told their id once (remembered per chat), and `/claim` only when a claim code is
-  set. Without one, `/claim` is a stranger's message like any other.
-- **Closing and revoking.** A claim holds while the claim code it was made with is set, or while none
-  is:
-  - remove `TELEGRAM_CLAIM_CODE` (the Worker's secret, in the dashboard or `wrangler secret delete`)
-    to close new claims: the chats that claimed keep talking while `TELEGRAM_ALLOWED_USERS` is empty.
-    With ids listed, the Worker decides alone again, and only those ids talk;
-  - change it to revoke every claim made with the old one: those chats `/claim` again with the new
-    code, which you tell only to whom you choose.
-- **`TELEGRAM_ALLOWED_USERS`** works as before and needs no claim; both can be used together.
+  (`actor.mailbox.send("telegram:<chat>", "telegram.stranger", update)`), which decides. A login is
+  kept in the channel's namespace of `storage.kv` with the user's id and the password's fingerprint
+  (its SHA-256): it survives restarts, evictions and deploys.
+- **A logged-in chat** is handled as an allowed one: commands, the agent, answers.
+- **`/login <password>`** is compared in constant time (SHA-256 digests). A wrong one is told "Wrong
+  password."; after 5 in a row the chat waits 15 minutes, during which every `/login` is refused
+  unchecked. Telegram delivering the same message again is not another guess. The password never
+  reaches the agent nor a log line; the bot suggests deleting the message that contains it.
+- **Strangers** are told their id once (remembered per chat), and `/login` only when a password is
+  set. Without one, `/login` is a stranger's message like any other.
+- **Logging everyone out, and closing logins.** A login holds while the password it was made with is
+  set, or while none is:
+  - change `TELEGRAM_PASSWORD` (the Worker's secret, in the dashboard or `wrangler secret put`) to log
+    out every chat that logged in with the old one: each is told once how to log in, and sends
+    `/login` with the new password, which you tell only to whom you choose. Going back to a former
+    password lets back in the chats that logged in with it: choose a new one;
+  - remove it to stop new logins: the chats that logged in keep talking while
+    `TELEGRAM_ALLOWED_USERS` is empty. With ids listed, the Worker decides alone again, and only
+    those ids talk.
+- **`TELEGRAM_ALLOWED_USERS`** works as before and needs no password; both can be used together.
 
 ## Registering the webhook
 
@@ -324,7 +337,7 @@ As in `channel-telegram`, the default bot is `TELEGRAM_BOT_TOKEN` and its conver
 | token | `TELEGRAM_OPS_BOT_TOKEN` |
 | allowed users | `TELEGRAM_OPS_ALLOWED_USERS` |
 | webhook secret | `TELEGRAM_OPS_WEBHOOK_SECRET` |
-| claim code | `TELEGRAM_OPS_CLAIM_CODE` |
+| password | `TELEGRAM_OPS_PASSWORD` |
 | webhook | `POST /telegram/ops` (registered by the same `GET /telegram/setup`) |
 | conversations | `telegram:ops:<chat>` |
 
@@ -335,7 +348,7 @@ An update for a bot the object's half does not run is refused (`500`, and an err
 
 `api.ts`, `format.ts`, `transport.ts` and `account.ts` are copies of `channel-telegram`'s, since
 components never import each other: `api.ts` adds `setWebhook`, `deleteWebhook` and the rest of
-`getWebhookInfo`; `account.ts` adds each bot's webhook secret and path. `configure.ts` is
+`getWebhookInfo`; `account.ts` adds each bot's webhook secret, password and path. `configure.ts` is
 `channel-telegram`'s step with the webhook's secret and an existing webhook added. The delivery follows
 the Cloudflare spike that ran in production (September 2026).
 
@@ -355,13 +368,14 @@ secret: no bot, token or network needed. Only tests import it.
   for each half, and `registerInbox` reached through the mailbox. The webhook registering itself:
   `GET /telegram/setup` (every bot, again, refused), the start on Cloudflare (once per isolate, not
   again when Telegram has it, back when it was moved, nothing over HTTP or off Cloudflare, a refusal
-  logged), and `setup-webhook.mjs` run as a build runs it. Claims: strangers told `/claim` only with a
-  code, a claim and its redelivery, an allowed chat's `/claim`, wrong codes and the cool-down, a claim
-  kept across restarts and after the code is removed, revoked by a new code.
+  logged), and `setup-webhook.mjs` run as a build runs it. The password: strangers told `/login` only
+  with a password, a login and its redelivery, an allowed chat's `/login`, wrong passwords and the
+  cool-down, a login kept across restarts and after the password is removed, logged out by a new
+  password, and the former names still accepted.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`.
 - `configure.test.ts` covers the setup: a checked token, the generated secret, allowing whoever
-  messages the bot, a bot that already has a webhook, the same without a terminal, and a claim code
-  checked and saved.
+  messages the bot, a bot that already has a webhook, the same without a terminal, and the password:
+  offered on a first setup, checked and saved.
 - `deploy.test.ts` covers `afterDeploy`: every bot's webhook set and checked, and what it reports.
 - `format.test.ts` is `channel-telegram`'s, for the copied `format.ts`.
 

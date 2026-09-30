@@ -66,9 +66,9 @@ export const TEMPLATES: Record<string, Template> = {
           "A random string that Telegram sends with every message, so only Telegram reaches your bot: 16 to 256 letters, digits, `_` or `-`. Run `openssl rand -hex 32`, or type any long random string of those characters. You never need it again.",
       },
       {
-        name: "TELEGRAM_CLAIM_CODE",
+        name: "TELEGRAM_PASSWORD",
         description:
-          "A passphrase you choose, **8 characters or more** (the bot does not start with a shorter one). Once deployed, send `/claim <passphrase>` to your bot: your chat is the one it talks to. Whoever knows it can claim the bot too: keep it secret, and change it to revoke every claim.",
+          "A password you choose for your bot, **8 characters or more** (the bot does not start with a shorter one). Once deployed, send `/login <password>` to your bot: that chat stays allowed. Whoever knows the password can log in too, so keep it secret; change it to log everyone out.",
       },
       {
         name: "OPENROUTER_API_KEY",
@@ -82,7 +82,7 @@ export const TEMPLATES: Record<string, Template> = {
       },
     ],
     notAsked: {
-      TELEGRAM_ALLOWED_USERS: "nobody knows their Telegram user id before deploying: the owner claims the bot with TELEGRAM_CLAIM_CODE",
+      TELEGRAM_ALLOWED_USERS: "nobody knows their Telegram user id before deploying: the owner logs in with TELEGRAM_PASSWORD instead",
     },
     bindings: {
       CONVERSATION: "One Durable Object per Telegram chat, SQLite-backed: its conversation, sessions and the agent's workspace. Nothing to set.",

@@ -82,7 +82,7 @@
       "name": "TELEGRAM_ALLOWED_USERS",
       "secret": false,
       "required": true,
-      "description": "Telegram user ids allowed to talk to the bot, separated by commas; `pikit configure` fills it when you message the bot. Deployed without the CLI, it may stay empty: the owner claims the bot with TELEGRAM_CLAIM_CODE."
+      "description": "Telegram user ids allowed to talk to the bot, separated by commas; `pikit configure` fills it when you message the bot. Deployed without the CLI, it may stay empty: the owner logs in with TELEGRAM_PASSWORD instead."
     },
     {
       "name": "TELEGRAM_WEBHOOK_SECRET",
@@ -91,10 +91,10 @@
       "description": "What Telegram sends with every update, so only Telegram reaches your agent; `pikit configure` generates it, and `pikit up` gives it to Telegram."
     },
     {
-      "name": "TELEGRAM_CLAIM_CODE",
+      "name": "TELEGRAM_PASSWORD",
       "secret": true,
       "required": false,
-      "description": "Optional passphrase of 8 characters or more: a private chat that sends `/claim <passphrase>` may talk to the bot from then on. The Deploy to Cloudflare button's way to let its owner in; changing it revokes the claims made with the old one."
+      "description": "Optional password of 8 characters or more: send `/login <password>` to the bot, and that chat may talk to it from then on. Whoever knows it can log in; change it to log everyone out. The Deploy to Cloudflare button's way to let its owner in."
     }
   ]
 }
