@@ -162,7 +162,6 @@ function record(component: ComponentDefinition, target: Target, config: Record<s
   };
   const pikit: Pikit = {
     target,
-    config,
     logger: silentLogger,
     clock: systemClock,
     on: () => {},

@@ -56,11 +56,12 @@ declare module "./events.ts" {
 
 export type Target = "server" | "cloudflare";
 
-/** What every handler receives (SPEC K5). `emit`/`run` propagate this same context. */
+/**
+ * What every handler receives (SPEC K5). `emit`/`run` propagate this same context.
+ * It carries no app config, like `Pikit`: a component's config is `setup`'s second argument.
+ */
 export interface AppContext extends Context {
   target: Target;
-  /** Resolved, validated global config. Component config lives under `config[name]`. */
-  config: Readonly<Record<string, unknown>>;
   logger: Logger;
   clock: Clock;
   emit<K extends keyof AppEvents & string>(name: K, payload: AppEvents[K]): Promise<void>;
@@ -100,11 +101,15 @@ type KeyedName = keyof AppKeyedCapabilities & string;
  * What a component's `setup` receives: read-only app values plus registration. Not a
  * context: setup only registers, so it cannot emit, run a pipeline or see a cancellation. Work
  * happens in `start`/`stop` and in handlers, which receive a `AppContext`.
+ *
+ * No app config: a component gets its own as `setup`'s second argument and never another's.
+ * Reading another component's config would couple the two outside the capability graph (P4),
+ * where neither `registry validate` nor `pikit doctor` can see it; what a component needs from
+ * another is a capability. The whole config is the host's (`AppDefinition.config`) and the
+ * observers' (`describe()`, SPEC K13).
  */
 export interface Pikit {
   readonly target: Target;
-  /** Resolved, validated global config. The component's own config is `setup`'s second argument. */
-  readonly config: Readonly<Record<string, unknown>>;
   readonly logger: Logger;
   readonly clock: Clock;
   on: EventBus<AppEvents, AppContext>["on"];
@@ -227,6 +232,7 @@ export interface App {
 export interface AppDefinition {
   /** Components as listed. Start order is known only after `create()` (see `describe()`). */
   readonly components: readonly ComponentDefinition[];
+  /** Validated and defaulted, for whoever runs the app (a host recomposing it); never a component's. */
   readonly config: Readonly<Record<string, unknown>>;
   create(): Promise<App>;
 }
@@ -262,7 +268,6 @@ export function defineApp(options: AppOptions): AppDefinition {
           value: (key) => inner.value(key),
           toString: () => inner.toString(),
           target,
-          config,
           logger,
           clock,
           emit: (name, payload) => events.emit(name, payload, ctx),
@@ -315,7 +320,6 @@ export function defineApp(options: AppOptions): AppDefinition {
         };
         const pikit: Pikit = {
           target,
-          config,
           logger,
           clock,
           on: (name, listener) => {
