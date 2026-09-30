@@ -52,6 +52,8 @@ export class Undo {
   }
 
   restore(): void {
+    // The directories first: one a new file created again may hold a file `delete` removed, put back below.
+    for (const dir of this.createdDirs.reverse()) rmSync(dir, { recursive: true, force: true });
     for (const [path, content] of this.saved) {
       if (content === undefined) rmSync(path, { force: true });
       else {
@@ -59,7 +61,6 @@ export class Undo {
         writeFileSync(path, content);
       }
     }
-    for (const dir of this.createdDirs.reverse()) rmSync(dir, { recursive: true, force: true });
     const vendor = join(this.projectDir, VENDOR_DIR);
     if (this.vendorBefore === undefined) rmSync(vendor, { recursive: true, force: true });
     else if (existsSync(vendor)) {

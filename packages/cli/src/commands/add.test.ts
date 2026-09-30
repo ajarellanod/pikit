@@ -216,6 +216,29 @@ test("a reinstall that fails puts back the bases it replaced, and removes those 
   expect(snapshot(dir)).toEqual(before);
 }, 120_000);
 
+test("a reinstall that fails puts back a file it deleted, in a directory a new file then created again", () => {
+  const dir = otherKitProject();
+  // tool-fake, installed by an older registry: index.ts and sub/old.ts, which the new one no longer ships.
+  const own = "src/pikit/tool-fake/";
+  const files = { [`${own}index.ts`]: "export default {};\n", [`${own}sub/old.ts`]: "the older tool-fake\n" };
+  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
+  manifest.components["tool-fake"] = {
+    registry: "default", version: "0.0.0", dependencies: {}, environment: [],
+    files: Object.fromEntries(Object.entries(files).map(([file, text]) => [file, { hash: hashOf(text) }])),
+  };
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
+  mkdirSync(join(dir, own, "sub"), { recursive: true });
+  for (const [file, text] of Object.entries(files)) writeFileSync(join(dir, file), text);
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const registry = fakeRegistry({ "files/src/pikit/tool-fake/sub/new.ts": "" });
+  const before = snapshot(dir);
+  const run = pikit(["add", "tool-fake", "--registry", registry, "--yes", "--force"], dir);
+  expect(run.out).toContain(`deletes, no longer shipped: ${own}sub/old.ts`);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("nothing was added");
+  expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
 test("a component that does not accept this CLI's contracts is refused before anything is written", () => {
   const dir = otherKitProject();
   const registry = fakeRegistry({}, { requires: { pikit: "0.0.0", contracts: "^9.0.0", capabilities: [] } });
