@@ -189,10 +189,8 @@ In `prepareOutbound`, at the one point every path shares: the moment a run's set
 - **C6 holds:** the channels still copy client, format and transport, and never import each other
   (`channel-telegram-webhook/index.ts:23-24`); they copy less.
 - **P6 holds:** each migration ships as a new component version. A user who edited `answers.ts`,
-  `delivery.ts` or `index.ts` gets a three-way merge on upgrade, with conflicts where they edited,
-  once `pikit upgrade` exists: it is not built yet (`packages/cli/src/main.ts:48`), so until then a
-  migration reaches an installed channel only by reinstalling it (`--force`,
-  `packages/cli/src/commands/add.ts:208-209`, which does not merge) or by hand. A user who does not
+  `delivery.ts` or `index.ts` gets a three-way merge with `pikit upgrade`
+  (`packages/cli/src/commands/upgrade.ts`), with conflicts where they edited. A user who does not
   upgrade keeps a working channel without `outbound.prepare`.
 
 ### What the planned channels gain

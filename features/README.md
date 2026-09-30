@@ -47,7 +47,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [inbound-dedup](inbound-dedup.md) | | Transport deduplication for platforms that redeliver | No; the first webhook channel |
 | [interaction](interaction.md) | | Pi extensions' questions answered in the chat | No |
 | [multi-tenant-isolation](multi-tenant-isolation.md) | | Tenants that cannot reach each other | No |
-| [open-registries](open-registries.md) | | Git, HTTP and private registries, and a gallery | Partly: `pikit upgrade` (P6) reads Git registries |
+| [open-registries](open-registries.md) | | Git, HTTP and private registries, and a gallery | No: `pikit upgrade` (P6) merges from the bases in `pikit-bases/`, from the registry as recorded (`builtin`, a path) |
 | [outbound-delivery](outbound-delivery.md) | | One answer-delivery protocol for every channel; where `outbound.prepare` runs | No; before the next chat channel |
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |

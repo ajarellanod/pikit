@@ -156,8 +156,8 @@ uses `fetch`.
     the deploy): its first call fixes it, as a stale kept listing always was. Preferring the newer by
     `listedAt` would need a time in the seed, and the churn that comes with it;
   - `seed.ts` is declared `generated`: `pikit doctor` does not list it as modified and `pikit
-    remove` deletes it without `--force`. How a future `pikit upgrade` treats generated files (keep
-    the project's) is for that command;
+    remove` deletes it without `--force`, and `pikit upgrade` keeps the project's copy (the hook
+    rewrites it);
   - a project-wide `storage.kv` (a Workers KV binding) for listings was not needed.
 - **The kept listing has no time to live.** It is refreshed on each connection, which every object
   makes on its first call; a schema that changed on the server and was never called since stays
