@@ -146,8 +146,11 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     if (report.problems.length > 0) throw new CliError(`the new project has ${report.problems.length} problem(s)`);
   } catch (error) {
     // Kept, not deleted, so what failed can be read in it; it is marked, so nothing takes it for a project.
-    const message = error instanceof Error ? error.message : String(error);
-    throw new CliError(`${message}\n${projectDir} is left unfinished: delete it, then run \`pikit new\` again`, error instanceof CliError ? error.exitCode : 1);
+    const unfinished = `${projectDir} is left unfinished: delete it, then run \`pikit new\` again`;
+    if (error instanceof CliError) throw new CliError(`${error.message}\n${unfinished}`, error.exitCode);
+    // Not the user's to act on (a bug): it stays what it is, so `PIKIT_DEBUG` still prints its stack.
+    if (error instanceof Error) error.message += `\n${unfinished}`;
+    throw error;
   }
   rmSync(join(projectDir, UNFINISHED));
   if (options.quiet !== true) log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
