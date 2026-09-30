@@ -4,11 +4,13 @@
  * projects return (P6).
  */
 
-import { afterEach, expect, spyOn, test } from "bun:test";
+import { afterAll, afterEach, expect, spyOn, test } from "bun:test";
 import { printStatus } from "./deployment.ts";
 
 const printed = spyOn(console, "log").mockImplementation(() => {});
 afterEach(() => printed.mockClear());
+// Test files share one process: the files after this one keep their console.
+afterAll(() => printed.mockRestore());
 const output = () => printed.mock.calls.map((call) => String(call[0])).join("\n");
 
 test("a DeploymentStatus is printed line by line, nothing added", () => {
