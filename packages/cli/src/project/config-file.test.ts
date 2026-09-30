@@ -5,7 +5,7 @@
 
 import { expect, test } from "bun:test";
 import { CLOUDFLARE_CONFIG } from "../commands/starter.ts";
-import { addComponent, boundNames, identifierFor, removeComponent, removeConfigEntry, setConfigEntry } from "./config-file.ts";
+import { addComponent, boundNames, identifierFor, removeComponent, removeConfigEntry, setConfigEntry, setWorkerWiring } from "./config-file.ts";
 
 const BASE = `import { defineApp } from "@pikit/core";
 import agents from "./src/extensions/agents.ts";
@@ -145,4 +145,24 @@ test("import clauses: default, named, renamed, namespace", () => {
   expect(boundNames("{ b, c as d }")).toEqual(["b", "d"]);
   expect(boundNames("e, { f }")).toEqual(["f", "e"]);
   expect(boundNames("* as g")).toEqual(["g"]);
+});
+
+test("an upgrade moves a component's Worker wiring as its new version says, and leaves the default App as it is", () => {
+  const plain = addComponent(CLOUDFLARE_CONFIG, { name: "channel-x" });
+  const half = { importClause: "channelX, { worker as channelXWorker }", worker: "channelXWorker" };
+  // Now with a Worker half: imported, and listed in the Worker's App; the default App unchanged.
+  const withHalf = setWorkerWiring(plain, "channel-x", half);
+  expect(withHalf).toBe(addComponent(CLOUDFLARE_CONFIG, { name: "channel-x", ...half }));
+  expect(setWorkerWiring(withHalf, "channel-x", half)).toBe(withHalf);
+  // Its half under another export: the import changes, the entry stays.
+  const renamed = setWorkerWiring(withHalf, "channel-x", { importClause: "channelX, { ingress as channelXWorker }", worker: "channelXWorker" });
+  expect(renamed).toBe(withHalf.replace("{ worker as", "{ ingress as"));
+  // Whole in both Apps, then only in the default one again.
+  const both = setWorkerWiring(withHalf, "channel-x", { worker: "channelX" });
+  expect(both).toBe(addComponent(CLOUDFLARE_CONFIG, { name: "channel-x", worker: "channelX" }));
+  expect(setWorkerWiring(both, "channel-x", {})).toBe(plain);
+  // Not imported: nothing to move. Imported the user's way: refused, not guessed.
+  expect(setWorkerWiring(CLOUDFLARE_CONFIG, "channel-x", half)).toBe(CLOUDFLARE_CONFIG);
+  const own = addComponent(CLOUDFLARE_CONFIG, { name: "channel-x", importClause: "{ createX }", entry: "createX()" });
+  expect(() => setWorkerWiring(own, "channel-x", half)).toThrow(/"channel-x" is imported as \{ createX \}, which pikit did not write/);
 });
