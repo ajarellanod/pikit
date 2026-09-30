@@ -43,7 +43,16 @@ function schemaFiles(): Map<string, string> {
 
 /** The `@pikit/core` a registry at this commit is built with; `requires.pikit` must accept it. */
 export function coreVersion(): string {
-  return (JSON.parse(readFileSync(join(REPO, "packages", "core", "package.json"), "utf8")) as { version: string }).version;
+  return packageVersion("core");
+}
+
+/** The `@pikit/contracts` a registry at this commit is built with; `requires.contracts` must accept it. */
+export function contractsVersion(): string {
+  return packageVersion("contracts");
+}
+
+function packageVersion(dir: string): string {
+  return (JSON.parse(readFileSync(join(REPO, "packages", dir, "package.json"), "utf8")) as { version: string }).version;
 }
 
 export function componentNames(root: string): string[] {
@@ -154,8 +163,9 @@ export async function generate(root: string): Promise<Outcome> {
 }
 
 /** Every rule, for every component, then the index. Nothing is written. */
-export async function validate(root: string, options: { coreVersion?: string } = {}): Promise<Outcome> {
+export async function validate(root: string, options: { coreVersion?: string; contractsVersion?: string } = {}): Promise<Outcome> {
   const core = options.coreVersion ?? coreVersion();
+  const contracts = options.contractsVersion ?? contractsVersion();
   const problems: string[] = [];
   const manifests: Manifest[] = [];
   const names = componentNames(root);
@@ -179,7 +189,7 @@ export async function validate(root: string, options: { coreVersion?: string } =
       continue;
     }
     manifests.push(manifest);
-    checkManifest(manifest, dir, name, core).forEach(report);
+    checkManifest(manifest, dir, name, core, contracts).forEach(report);
     // Every rule below reads the manifest's fields: a malformed one was reported, and that is all.
     if (schemaProblems(ManifestSchema, manifest).length > 0) continue;
 
@@ -304,7 +314,7 @@ function skeleton(dir: string, name: string): Manifest {
     version: "0.0.0",
     description: readmeSummary(dir),
     targets,
-    requires: { pikit: coreVersion(), capabilities: [] },
+    requires: { pikit: coreVersion(), ...(imported.has("@pikit/contracts") && { contracts: contractsVersion() }), capabilities: [] },
     optional: { capabilities: [] },
     provides: [],
     dependencies: Object.fromEntries([...imported].sort().map((pkg) => [pkg, versions[pkg] ?? ""])),
