@@ -20,10 +20,12 @@
  *
  * Ctrl-C stops it at any question. Running `pikit new` again with the same name continues with the
  * project already written: configuring and starting it again is harmless, because `configure` only
- * asks for what is missing.
+ * asks for what is missing. A `pikit new` that did not finish (`UNFINISHED`: its `bun install` or
+ * doctor failed, or it was stopped while writing) is not a project to continue: it offers to delete it
+ * and make it again.
  */
 
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, readdirSync, rmSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { NEW_PROJECT_TARGETS, readProjectManifest } from "../project/pikit-json.ts";
@@ -32,7 +34,7 @@ import { kindOf, TARGETS } from "../registry/manifest.ts";
 import { ask, beginGuided, Cancelled, CliError, choose, confirm, intro, log, outro, spinner } from "../ui.ts";
 import { configure } from "./configure.ts";
 import { deployment, dev } from "./deployment.ts";
-import { newProject, validProjectName } from "./new.ts";
+import { newProject, UNFINISHED, validProjectName } from "./new.ts";
 
 const DEFAULT_NAME = "my-agent";
 const DEFAULT_TARGET = NEW_PROJECT_TARGETS[0] as string;
@@ -126,6 +128,12 @@ async function chooseProject(parentDir: string): Promise<{ dir: string; name: st
     });
     const dir = resolve(parentDir, name);
     if (!existsSync(dir) || readdirSync(dir).length === 0) return { dir, name, existing: false };
+    // `new` marks only a directory it made: deleting it takes nothing that was there before.
+    if (existsSync(join(dir, UNFINISHED))) {
+      if (!(await confirm(`${name} is a \`pikit new\` that did not finish. Delete it and make it again?`, true))) continue;
+      rmSync(dir, { recursive: true, force: true });
+      return { dir, name, existing: false };
+    }
     if (existsSync(join(dir, "pikit.json"))) {
       if (await confirm(`${name} already exists. Continue setting it up?`, true)) return { dir, name, existing: true };
       continue;

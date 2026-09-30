@@ -11,9 +11,13 @@
  * component installed then and later must run there (`checkCompatible`), and the providers offered are
  * the ones that do. On `cloudflare`, `pikit.config.ts` has two Apps (SPEC C1). The target is never
  * guessed from the preset: a preset for another target is refused, with the command that makes it.
+ *
+ * Everything that can be refused is refused before the first file is written. What can still fail
+ * after it (`bun install`, which needs the network, and the final doctor) leaves the directory as it
+ * is, marked `UNFINISHED`: never a project the wizard continues, and the error says to delete it.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
@@ -42,6 +46,16 @@ export interface NewOptions {
   target?: string;
 }
 
+/**
+ * Written first in a new project's directory, deleted once doctor is green: a directory that has it is
+ * a `pikit new` that stopped (a failed `bun install`, doctor's problems, Ctrl-C), not a project.
+ * Nothing continues one, since what stopped it is not known: it is deleted and made again, which
+ * only its own directory allows (it was empty or absent when `new` began).
+ */
+export const UNFINISHED = ".pikit-new-unfinished";
+
+const UNFINISHED_TEXT = "`pikit new` did not finish this project: delete this directory, then run `pikit new` again.\n";
+
 /** A project's directory name is its package name. */
 export function validProjectName(name: string): boolean {
   return /^[a-z0-9][a-z0-9._-]*$/.test(name);
@@ -49,6 +63,7 @@ export function validProjectName(name: string): boolean {
 
 export async function newProject(dir: string, options: NewOptions = {}): Promise<void> {
   const projectDir = resolve(dir);
+  if (existsSync(join(projectDir, UNFINISHED))) throw new CliError(`${projectDir} is a \`pikit new\` that did not finish: delete it, then run it again`);
   if (existsSync(projectDir) && readdirSync(projectDir).length > 0) throw new CliError(`${projectDir} exists and is not empty`);
   const name = basename(projectDir);
   if (!validProjectName(name)) throw new CliError(`"${name}" is not a valid package name: use lowercase letters, digits, "-", "." or "_"`);
@@ -76,47 +91,58 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
 
   const step = (message: string) => options.quiet !== true && log.step(message);
   step(`creating ${projectDir}${options.preset ? ` from the preset "${options.preset}"` : ""}`);
-  mkdirSync(join(projectDir, "src", "agents", starter.STARTER_AGENT), { recursive: true });
-  mkdirSync(join(projectDir, "src", "extensions"), { recursive: true });
-  const kit = vendorKit(projectDir);
+  mkdirSync(projectDir, { recursive: true });
   const write = (file: string, text: string) => writeFileSync(join(projectDir, file), text);
-  write("package.json", starter.packageJson(name, kit));
-  write("tsconfig.json", starter.tsconfig());
-  write(".gitignore", starter.gitignore(target));
-  write("README.md", starter.readme(name, components, target));
-  write(CONFIG_FILE, starter.configFile(target));
-  write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, target));
-  write("src/extensions/agents.ts", starter.AGENTS);
-  write("src/extensions/permission-gate.ts", starter.permissionGate());
-  // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
-  const location = recordedLocation(projectDir, registry.root);
-  if (!isPortable(location)) log.warn(notPortable(location));
-  writeProjectManifest(projectDir, emptyManifest(location, kitCommit(), targets));
+  write(UNFINISHED, UNFINISHED_TEXT);
+  let installed: string[];
+  let report: Awaited<ReturnType<typeof doctor>>;
+  try {
+    mkdirSync(join(projectDir, "src", "agents", starter.STARTER_AGENT), { recursive: true });
+    mkdirSync(join(projectDir, "src", "extensions"), { recursive: true });
+    const kit = vendorKit(projectDir);
+    write("package.json", starter.packageJson(name, kit));
+    write("tsconfig.json", starter.tsconfig());
+    write(".gitignore", starter.gitignore(target));
+    write("README.md", starter.readme(name, components, target));
+    write(CONFIG_FILE, starter.configFile(target));
+    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, target));
+    write("src/extensions/agents.ts", starter.AGENTS);
+    write("src/extensions/permission-gate.ts", starter.permissionGate());
+    // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
+    const location = recordedLocation(projectDir, registry.root);
+    if (!isPortable(location)) log.warn(notPortable(location));
+    writeProjectManifest(projectDir, emptyManifest(location, kitCommit(), targets));
 
-  for (const component of components) {
-    const wiring = starter.STARTER_WIRING[component];
-    const forComponent = installedFor.get(component);
-    if (forComponent !== undefined) step(`${component}, for ${forComponent}`);
-    await installComponent(projectDir, component, {
-      yes: true,
-      quiet: options.quiet === true,
-      ...(wiring !== undefined && { wiring }),
-      ...(forComponent !== undefined && { installedFor: forComponent }),
-    });
+    for (const component of components) {
+      const wiring = starter.STARTER_WIRING[component];
+      const forComponent = installedFor.get(component);
+      if (forComponent !== undefined) step(`${component}, for ${forComponent}`);
+      await installComponent(projectDir, component, {
+        yes: true,
+        quiet: options.quiet === true,
+        ...(wiring !== undefined && { wiring }),
+        ...(forComponent !== undefined && { installedFor: forComponent }),
+      });
+    }
+    installed = Object.keys(readProjectManifest(projectDir).components);
+    let config = readFileSync(join(projectDir, CONFIG_FILE), "utf8");
+    for (const [component, value] of Object.entries(starter.STARTER_CONFIG)) {
+      if (installed.includes(component)) config = setConfigEntry(config, component, value);
+    }
+    write(CONFIG_FILE, config);
+
+    await bunInstall(projectDir, { quiet: options.quiet === true });
+
+    step("pikit doctor");
+    report = await doctor(projectDir, { quiet: true, componentChecks: false });
+    for (const problem of report.problems) log.problem(problem);
+    if (report.problems.length > 0) throw new CliError(`the new project has ${report.problems.length} problem(s)`);
+  } catch (error) {
+    // Kept, not deleted, so what failed can be read in it; it is marked, so nothing takes it for a project.
+    const message = error instanceof Error ? error.message : String(error);
+    throw new CliError(`${message}\n${projectDir} is left unfinished: delete it, then run \`pikit new\` again`, error instanceof CliError ? error.exitCode : 1);
   }
-  const installed = Object.keys(readProjectManifest(projectDir).components);
-  let config = readFileSync(join(projectDir, CONFIG_FILE), "utf8");
-  for (const [component, value] of Object.entries(starter.STARTER_CONFIG)) {
-    if (installed.includes(component)) config = setConfigEntry(config, component, value);
-  }
-  write(CONFIG_FILE, config);
-
-  await bunInstall(projectDir, { quiet: options.quiet === true });
-
-  step("pikit doctor");
-  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
-  for (const problem of report.problems) log.problem(problem);
-  if (report.problems.length > 0) throw new CliError(`the new project has ${report.problems.length} problem(s)`);
+  rmSync(join(projectDir, UNFINISHED));
   if (options.quiet !== true) log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
   if (options.next === false) return;
   const elsewhere = target === "cloudflare" ? "deploy it to Cloudflare" : "run it in Docker";

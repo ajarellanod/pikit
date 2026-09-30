@@ -8,6 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { UNFINISHED } from "./commands/new.ts";
 import { emptyManifest, hashOf, writeProjectManifest } from "./project/pikit-json.ts";
 import { DEFAULT_REGISTRY, PIKIT_ROOT } from "./paths.ts";
 import { openRegistry } from "./project/registry-source.ts";
@@ -283,6 +284,61 @@ test("new records the builtin registry, not this machine's path to it", () => {
   // The kit it vendored, by the commit it was packed from.
   expect(manifest.kit).toEqual(kitCommit() === undefined ? undefined : { commit: kitCommit() });
 }, 60_000);
+
+test("new that fails after writing leaves the directory marked unfinished, says to delete it, and refuses to go on in it", () => {
+  const parent = temp();
+  // Nothing resolves: `bun install` fails at once, after every file is written.
+  const run = Bun.spawnSync([process.execPath, MAIN, "new", "fresh"], {
+    cwd: parent,
+    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
+    stdin: "ignore",
+    stdout: "pipe",
+    stderr: "pipe",
+  });
+  expect(run.exitCode).toBe(1);
+  const project = join(parent, "fresh");
+  expect(run.stderr.toString()).toContain("`bun install` failed");
+  expect(run.stderr.toString()).toContain(`${project} is left unfinished: delete it, then run \`pikit new\` again`);
+  // Kept as it is, with what failed to read in it, and marked.
+  expect(existsSync(join(project, "pikit.json"))).toBe(true);
+  expect(readFileSync(join(project, UNFINISHED), "utf8")).toContain("delete this directory, then run `pikit new` again");
+
+  const again = pikit(["new", "fresh"], parent);
+  expect(again.code).toBe(1);
+  expect(again.err).toContain(`${project} is a \`pikit new\` that did not finish: delete it, then run it again`);
+}, 60_000);
+
+test("the guided path does not continue an unfinished new: it offers to delete it and make it again", async () => {
+  const parent = temp();
+  const project = join(parent, "half");
+  mkdirSync(project);
+  writeProjectManifest(project, emptyManifest());
+  writeFileSync(join(project, UNFINISHED), "");
+  let output = "";
+  const decoder = new TextDecoder();
+  const proc = Bun.spawn([process.execPath, MAIN, "new"], {
+    cwd: parent,
+    terminal: { cols: 160, rows: 50, data: (_terminal, data) => void (output += decoder.decode(data)) },
+  });
+  const waitFor = async (expected: string) => {
+    const deadline = Date.now() + 20_000;
+    while (!output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, "").includes(expected)) {
+      if (proc.exitCode !== null || Date.now() > deadline) throw new Error(`never printed ${JSON.stringify(expected)}; printed:\n${output}`);
+      await Bun.sleep(20);
+    }
+  };
+  await waitFor("Name of your agent");
+  proc.terminal?.write("half\r");
+  await waitFor("half is a `pikit new` that did not finish. Delete it and make it again?");
+  // Not "continuing with half": the default answer deletes it, and the next question is the new project's.
+  proc.terminal?.write("\r");
+  await waitFor("Where should it run?");
+  expect(output).not.toContain("continuing with half");
+  expect(existsSync(project)).toBe(false);
+  proc.terminal?.write("\u0003");
+  expect(await proc.exited).toBe(130);
+  expect(existsSync(project)).toBe(false);
+}, 30_000);
 
 /**
  * A project made on another machine, cloned here: its `pikit.json` is version 1 and names the
