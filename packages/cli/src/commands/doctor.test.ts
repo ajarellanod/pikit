@@ -9,15 +9,10 @@ import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyManifest, hashOf, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { runCli } from "../testing/cli.ts";
 
-const MAIN = join(import.meta.dir, "..", "main.ts");
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
-
-function pikit(args: string[], cwd: string) {
-  const run = Bun.spawnSync([process.execPath, MAIN, ...args], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-  return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() };
-}
 
 /**
  * A project with `checked` (a component whose `doctor.ts` reports the variable CHECKED_PROBLEM, when
@@ -54,71 +49,71 @@ function project(check: string | undefined, declared = check !== undefined): str
 const REPORTS =
   'export async function doctor(io: { config: Record<string, unknown>; get(name: string): string | undefined }) {\n  return [io.get("CHECKED_PROBLEM"), io.config.fail].filter((p) => p !== undefined);\n}\n';
 
-test("a component's own check: its problems fail doctor, named after it, with its config and the project's environment", () => {
+test("a component's own check: its problems fail doctor, named after it, with its config and the project's environment", async () => {
   const dir = project(REPORTS);
   writeFileSync(join(dir, ".env"), "CHECKED_PROBLEM=the server is down\n");
-  const run = pikit(["doctor"], dir);
+  const run = await runCli(["doctor"], dir);
   expect(run.code).toBe(1);
   expect(run.err).toContain("checked: the server is down");
   expect(run.err).toContain("checked: the config says so");
 });
 
-test("pikit up refuses to deploy when a component's check reports a problem, and deploys once it reports none", () => {
+test("pikit up refuses to deploy when a component's check reports a problem, and deploys once it reports none", async () => {
   const dir = project(REPORTS);
-  const refused = pikit(["up"], dir);
+  const refused = await runCli(["up"], dir);
   expect(refused.code).toBe(1);
   expect(refused.err).toContain("checked: the config says so");
   expect(refused.err).toContain("fix what `pikit doctor` reports first");
   expect(existsSync(join(dir, "deployed"))).toBe(false);
 
   writeFileSync(join(dir, "src/pikit/checked/doctor.ts"), "export async function doctor() {\n  return [];\n}\n");
-  const deployed = pikit(["up"], dir);
+  const deployed = await runCli(["up"], dir);
   expect(deployed.err).toBe("");
   expect(deployed.code).toBe(0);
   expect(existsSync(join(dir, "deployed"))).toBe(true);
 });
 
-test("a check that throws, or exports no doctor, is a problem; a component without one is not checked", () => {
-  expect(pikit(["doctor"], project('export async function doctor() {\n  throw new Error("boom");\n}\n')).err).toContain("checked: its doctor check failed: boom");
-  expect(pikit(["doctor"], project("export const nothing = 1;\n")).err).toContain("checked: src/pikit/checked/doctor.ts does not export doctor");
-  const plain = pikit(["doctor"], project(undefined));
+test("a check that throws, or exports no doctor, is a problem; a component without one is not checked", async () => {
+  expect((await runCli(["doctor"], project('export async function doctor() {\n  throw new Error("boom");\n}\n'))).err).toContain("checked: its doctor check failed: boom");
+  expect((await runCli(["doctor"], project("export const nothing = 1;\n"))).err).toContain("checked: src/pikit/checked/doctor.ts does not export doctor");
+  const plain = await runCli(["doctor"], project(undefined));
   expect(plain.out).toContain("pikit doctor: green");
   expect(plain.code).toBe(0);
 });
 
-test("only a declared check runs: a doctor.ts pikit.json does not name is not called, a declared one that is gone is a problem", () => {
-  const undeclared = pikit(["doctor"], project(REPORTS, false));
+test("only a declared check runs: a doctor.ts pikit.json does not name is not called, a declared one that is gone is a problem", async () => {
+  const undeclared = await runCli(["doctor"], project(REPORTS, false));
   expect(undeclared.out).toContain("pikit doctor: green");
   expect(undeclared.code).toBe(0);
   const gone = project(undefined, true);
-  const run = pikit(["doctor"], gone);
+  const run = await runCli(["doctor"], gone);
   expect(run.code).toBe(1);
   expect(run.err).toContain("checked: its doctor check failed:");
 });
 
-test("a check may also give notes: they are printed and fail nothing", () => {
+test("a check may also give notes: they are printed and fail nothing", async () => {
   const dir = project('export async function doctor() {\n  return { problems: [], notes: ["the seed is out of date"] };\n}\n');
-  const run = pikit(["doctor"], dir);
+  const run = await runCli(["doctor"], dir);
   expect(run.code).toBe(0);
   expect(run.out).toContain("checked: the seed is out of date");
   expect(run.out).toContain("pikit doctor: green");
-  const bad = pikit(["doctor"], project('export async function doctor() {\n  return { notes: [] };\n}\n'));
+  const bad = await runCli(["doctor"], project('export async function doctor() {\n  return { notes: [] };\n}\n'));
   expect(bad.err).toContain("checked: its doctor check failed: doctor did not resolve with a list of problems, nor with { problems, notes }");
 });
 
-test("pikit up leaves a component with a beforeDeploy hook to that hook (one check per deploy); pikit doctor still runs its check", () => {
+test("pikit up leaves a component with a beforeDeploy hook to that hook (one check per deploy); pikit doctor still runs its check", async () => {
   const dir = project(REPORTS);
   const manifest = readProjectManifest(dir);
   (manifest.components.checked as { hooks?: Record<string, string> }).hooks = { doctor: "src/pikit/checked/doctor.ts", beforeDeploy: "src/pikit/checked/deploy.ts" };
   writeProjectManifest(dir, manifest);
-  expect(pikit(["doctor"], dir).err).toContain("checked: the config says so");
-  const deployed = pikit(["up"], dir);
+  expect((await runCli(["doctor"], dir)).err).toContain("checked: the config says so");
+  const deployed = await runCli(["up"], dir);
   expect(deployed.err).toBe("");
   expect(deployed.code).toBe(0);
   expect(existsSync(join(dir, "deployed"))).toBe(true);
 });
 
-test("a generated file (the manifest's `generated`) is never reported modified; any other edited file is", () => {
+test("a generated file (the manifest's `generated`) is never reported modified; any other edited file is", async () => {
   const dir = project(undefined);
   const seed = "src/pikit/checked/seed.ts";
   const edited = "src/pikit/checked/index.ts";
@@ -133,7 +128,7 @@ test("a generated file (the manifest's `generated`) is never reported modified; 
   checked.generated = [seed];
   writeProjectManifest(dir, manifest);
   expect(modifiedFiles(dir, checked)).toEqual([edited]);
-  const run = pikit(["doctor"], dir);
+  const run = await runCli(["doctor"], dir);
   expect(run.out).toContain(`modified: ${edited} (checked)`);
   expect(run.out).not.toContain(`modified: ${seed}`);
 });

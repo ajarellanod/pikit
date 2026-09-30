@@ -15,8 +15,8 @@ import { join } from "node:path";
 import { PACKAGES_DIR } from "../paths.ts";
 import { emptyManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { kitSpecifier } from "../project/vendor.ts";
+import { runCli } from "../testing/cli.ts";
 
-const MAIN = join(import.meta.dir, "..", "main.ts");
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 const temp = () => {
@@ -24,11 +24,6 @@ const temp = () => {
   dirs.push(dir);
   return dir;
 };
-
-function pikit(args: string[], cwd: string) {
-  const run = Bun.spawnSync([process.execPath, MAIN, ...args], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-  return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() };
-}
 
 const ONE_APP = `import { defineApp } from "@pikit/core";
 
@@ -111,13 +106,13 @@ function registry(): string {
   return root;
 }
 
-test("on Cloudflare, add puts each half in its App, checks each App, records the hook; remove undoes both", () => {
+test("on Cloudflare, add puts each half in its App, checks each App, records the hook; remove undoes both", async () => {
   const dir = project("cloudflare");
   const from = registry();
   const configPath = join(dir, "pikit.config.ts");
 
   // Nothing provides secrets yet, in either App: said per App, and doctor finds the object's App incomplete.
-  const alone = pikit(["add", "channel-fake", "--yes", "--registry", from], dir);
+  const alone = await runCli(["add", "channel-fake", "--yes", "--registry", from], dir);
   expect(alone.err).toContain('channel-fake requires "secrets" in the default App, which no installed component provides there yet');
   expect(alone.err).toContain('channel-fake requires "secrets" in the Worker\'s App (export const worker), which no installed component provides there yet');
   expect(alone.code).toBe(1);
@@ -130,7 +125,7 @@ test("on Cloudflare, add puts each half in its App, checks each App, records the
   expect(installed.hooks).toEqual({ afterDeploy: "src/pikit/channel-fake/deploy.ts" });
 
   // A component that works in both Apps goes in both, and both Apps compose.
-  const secrets = pikit(["add", "secrets-fake", "--yes", "--registry", from], dir);
+  const secrets = await runCli(["add", "secrets-fake", "--yes", "--registry", from], dir);
   expect(secrets.err).not.toContain("which no installed component provides");
   expect(secrets.out).toContain("secrets-fake installed; `pikit doctor` is green");
   expect(secrets.code).toBe(0);
@@ -139,13 +134,13 @@ test("on Cloudflare, add puts each half in its App, checks each App, records the
   expect(withBoth).toContain("  components: [\n    channelFakeWorker,\n    secretsFake,\n  ],\n  config: workerConfig,\n");
 
   // doctor shows the Worker's App too.
-  const doctor = pikit(["doctor"], dir);
+  const doctor = await runCli(["doctor"], dir);
   expect(doctor.code).toBe(0);
   expect(doctor.out).toContain("The Worker's App (export const worker):");
   expect(doctor.out).toMatch(/ {4}channel-fake-worker +provides http.route · requires secrets\n/);
 
   // What requires it in the Worker's App is said as such.
-  const refused = pikit(["remove", "secrets-fake"], dir);
+  const refused = await runCli(["remove", "secrets-fake"], dir);
   expect(refused.code).toBe(1);
   expect(refused.err).toContain("channel-fake requires secrets\n");
   expect(refused.err).toContain("channel-fake-worker requires secrets in the Worker's App");
@@ -153,28 +148,28 @@ test("on Cloudflare, add puts each half in its App, checks each App, records the
 
   // Configured by hand under its Worker half's name, in the Worker's config.
   writeFileSync(configPath, withBoth.replace("export const workerConfig = {};", 'export const workerConfig = {\n  "channel-fake-worker": { path: "/other" },\n};'));
-  expect(pikit(["doctor"], dir).code).toBe(0);
+  expect((await runCli(["doctor"], dir)).code).toBe(0);
 
   // Removing the channel takes both halves out of both lists, its config with them, and leaves the rest.
-  const removed = pikit(["remove", "channel-fake"], dir);
+  const removed = await runCli(["remove", "channel-fake"], dir);
   expect(removed.code).toBe(0);
   expect(readFileSync(configPath, "utf8")).toBe(TWO_APPS.replace("import { defineApp } from \"@pikit/core\";\n", 'import { defineApp } from "@pikit/core";\nimport secretsFake from "./src/pikit/secrets-fake/index.ts";\n').replaceAll("  components: [\n  ],", "  components: [\n    secretsFake,\n  ],"));
-  expect(pikit(["remove", "secrets-fake"], dir).code).toBe(0);
+  expect((await runCli(["remove", "secrets-fake"], dir)).code).toBe(0);
   expect(readFileSync(configPath, "utf8")).toBe(TWO_APPS);
 }, 60_000);
 
-test("on a server, a component with a Worker half is listed once, by its default export: nothing changes", () => {
+test("on a server, a component with a Worker half is listed once, by its default export: nothing changes", async () => {
   const dir = project("server");
   const from = registry();
-  expect(pikit(["add", "secrets-fake", "--yes", "--registry", from], dir).code).toBe(0);
-  const added = pikit(["add", "channel-fake", "--yes", "--registry", from], dir);
+  expect((await runCli(["add", "secrets-fake", "--yes", "--registry", from], dir)).code).toBe(0);
+  const added = await runCli(["add", "channel-fake", "--yes", "--registry", from], dir);
   expect(added.err).not.toContain("App");
   expect(added.code).toBe(0);
   const config = readFileSync(join(dir, "pikit.config.ts"), "utf8");
   expect(config).toContain('import channelFake from "./src/pikit/channel-fake/index.ts";\n');
   expect(config).toContain("  components: [\n    secretsFake,\n    channelFake,\n  ],");
   expect(config).not.toContain("channelFakeWorker");
-  expect(pikit(["remove", "channel-fake"], dir).code).toBe(0);
-  expect(pikit(["remove", "secrets-fake"], dir).code).toBe(0);
+  expect((await runCli(["remove", "channel-fake"], dir)).code).toBe(0);
+  expect((await runCli(["remove", "secrets-fake"], dir)).code).toBe(0);
   expect(readFileSync(join(dir, "pikit.config.ts"), "utf8")).toBe(ONE_APP);
 }, 60_000);

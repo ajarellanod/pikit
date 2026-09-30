@@ -11,10 +11,10 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { openRegistry } from "../project/registry-source.ts";
+import { runCli } from "../testing/cli.ts";
 import { checkStarterModel } from "./new.ts";
 import { starterModel } from "./starter.ts";
 
-const MAIN = join(import.meta.dir, "..", "main.ts");
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 const temp = () => {
@@ -98,26 +98,19 @@ test("every builtin preset installs its starter model's provider on the target i
   }
 });
 
-test("new refuses a preset whose starter model's provider it does not install, before writing; a preset's model is the agent's", () => {
+test("new refuses a preset whose starter model's provider it does not install, before writing; a preset's model is the agent's", async () => {
   const root = registry({
     mismatched: "components: [provider-alpha, runtime-fake]\n",
     own: "components: [provider-alpha, runtime-fake]\nmodel: alpha/model-1\n",
   });
   const parent = temp();
-  const run = (preset: string) =>
-    Bun.spawnSync([process.execPath, MAIN, "new", preset, "--preset", preset, "--registry", root], {
-      cwd: parent,
-      env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
-      stdin: "ignore",
-      stdout: "pipe",
-      stderr: "pipe",
-    });
-  const refused = run("mismatched");
-  expect(refused.exitCode).toBe(1);
-  expect(refused.stderr.toString()).toContain('needs the model provider "anthropic", which no component of the preset "mismatched" provides; provider-anthropic provides it');
+  const run = (preset: string) => runCli(["new", preset, "--preset", preset, "--registry", root], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  const refused = await run("mismatched");
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain('needs the model provider "anthropic", which no component of the preset "mismatched" provides; provider-anthropic provides it');
   expect(existsSync(join(parent, "mismatched"))).toBe(false);
 
   // Accepted: every file is written, then `bun install` fails at once.
-  expect(run("own").stderr.toString()).toContain("`bun install` failed");
+  expect((await run("own")).err).toContain("`bun install` failed");
   expect(readFileSync(join(parent, "own", "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "alpha/model-1",');
 }, 60_000);

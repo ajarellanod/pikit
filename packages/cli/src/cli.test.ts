@@ -13,6 +13,7 @@ import { emptyManifest, hashOf, writeProjectManifest } from "./project/pikit-jso
 import { DEFAULT_REGISTRY, PIKIT_ROOT } from "./paths.ts";
 import { openRegistry } from "./project/registry-source.ts";
 import { kitCommit, kitSpecifier } from "./project/vendor.ts";
+import { runCli } from "./testing/cli.ts";
 
 const MAIN = join(import.meta.dir, "main.ts");
 const dirs: string[] = [];
@@ -23,11 +24,6 @@ const temp = () => {
   return dir;
 };
 
-function pikit(args: string[], cwd: string) {
-  const run = Bun.spawnSync([process.execPath, MAIN, ...args], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-  return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() };
-}
-
 /** The smallest project `add` accepts: a manifest, a composition root, a package.json. */
 function tinyProject(): string {
   const dir = temp();
@@ -37,45 +33,45 @@ function tinyProject(): string {
   return dir;
 }
 
-test("--version, help, unknown commands and commands not built yet", () => {
+test("--version, help, unknown commands and commands not built yet", async () => {
   const cwd = temp();
-  expect(pikit(["--version"], cwd).out).toMatch(/^pikit \d+\.\d+\.\d+/);
-  expect(pikit(["--help"], cwd).code).toBe(0);
-  expect(pikit(["frobnicate"], cwd).code).toBe(2);
-  expect(pikit(["add", "--bogus"], cwd).code).toBe(2);
-  const later = pikit(["diff"], cwd);
+  expect((await runCli(["--version"], cwd)).out).toMatch(/^pikit \d+\.\d+\.\d+/);
+  expect((await runCli(["--help"], cwd)).code).toBe(0);
+  expect((await runCli(["frobnicate"], cwd)).code).toBe(2);
+  expect((await runCli(["add", "--bogus"], cwd)).code).toBe(2);
+  const later = await runCli(["diff"], cwd);
   expect(later.code).toBe(1);
   expect(later.out).toContain("pikit diff: not built yet (see SPEC P6)");
-  expect(pikit(["upgrade"], cwd).err).toContain("is not a pikit project");
+  expect((await runCli(["upgrade"], cwd)).err).toContain("is not a pikit project");
 });
 
-test("pikit registry validate runs the repository's registry checks", () => {
-  const run = pikit(["registry", "validate"], temp());
+test("pikit registry validate runs the repository's registry checks", async () => {
+  const run = await runCli(["registry", "validate"], temp());
   expect(run.out).toContain("registry validate: ok");
   expect(run.code).toBe(0);
 });
 
-test("pikit registry capabilities prints what each capability is and who provides and uses it", () => {
-  const run = pikit(["registry", "capabilities"], temp());
+test("pikit registry capabilities prints what each capability is and who provides and uses it", async () => {
+  const run = await runCli(["registry", "capabilities"], temp());
   expect(run.code).toBe(0);
   expect(run.out).toContain("sessions.store  (single, @pikit/pi-adapter, experimental)");
   expect(run.out).toContain("provided by: sessions-jsonl");
-  expect(pikit(["registry", "bogus"], temp()).code).toBe(2);
+  expect((await runCli(["registry", "bogus"], temp())).code).toBe(2);
 });
 
-test("project commands outside a project, and up with no deployment component, say what to do", () => {
-  const outside = pikit(["doctor"], temp());
+test("project commands outside a project, and up with no deployment component, say what to do", async () => {
+  const outside = await runCli(["doctor"], temp());
   expect(outside.code).toBe(1);
   expect(outside.err).toContain("is not a pikit project");
 
-  const up = pikit(["up"], tinyProject());
+  const up = await runCli(["up"], tinyProject());
   expect(up.code).toBe(1);
   expect(up.err).toContain("no deployment-* component is installed");
 });
 
-test("new with no directory asks only on a terminal; the presets it offers have titles", () => {
+test("new with no directory asks only on a terminal; the presets it offers have titles", async () => {
   const parent = temp();
-  const run = pikit(["new"], parent);
+  const run = await runCli(["new"], parent);
   expect(run.code).toBe(2);
   expect(run.err).toContain("without <dir>, run it in a terminal: it asks");
   expect(readdirSync(parent)).toEqual([]);
@@ -85,27 +81,27 @@ test("new with no directory asks only on a terminal; the presets it offers have 
   for (const preset of presets) expect(preset.title).not.toBe(preset.name);
 });
 
-test("new refuses a non-empty directory and an unknown preset before writing anything", () => {
+test("new refuses a non-empty directory and an unknown preset before writing anything", async () => {
   const parent = temp();
   mkdirSync(join(parent, "busy"));
   writeFileSync(join(parent, "busy", "file"), "");
-  expect(pikit(["new", "busy"], parent).err).toContain("is not empty");
+  expect((await runCli(["new", "busy"], parent)).err).toContain("is not empty");
 
-  const unknown = pikit(["new", "fresh", "--preset", "nope"], parent);
+  const unknown = await runCli(["new", "fresh", "--preset", "nope"], parent);
   expect(unknown.code).toBe(1);
   expect(unknown.err).toContain('no preset "nope"');
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 
-  const notAsked = pikit(["new", "fresh", "--preset", "http", "--with", "tool-bash"], parent);
+  const notAsked = await runCli(["new", "fresh", "--preset", "http", "--with", "tool-bash"], parent);
   expect(notAsked.code).toBe(1);
   expect(notAsked.err).toContain("has no choice of tool-* components; add tool-bash after");
-  const noPreset = pikit(["new", "fresh", "--with", "channel-telegram"], parent);
+  const noPreset = await runCli(["new", "fresh", "--with", "channel-telegram"], parent);
   expect(noPreset.code).toBe(1);
   expect(noPreset.err).toContain("--with answers a preset's questions: it needs --preset");
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 
-test("new refuses a preset component that does not run on a new project's target, before writing anything", () => {
+test("new refuses a preset component that does not run on a new project's target, before writing anything", async () => {
   const registry = temp();
   const manifest = (name: string, targets: string[]) => ({
     name, version: "0.0.0", description: name, targets, requires: { pikit: "0.0.0", capabilities: [] },
@@ -122,27 +118,27 @@ test("new refuses a preset component that does not run on a new project's target
   writeFileSync(join(registry, "presets", "edge.yaml"), "components: [secrets-env, channel-edge]\n");
 
   const parent = temp();
-  const run = pikit(["new", "fresh", "--preset", "edge", "--registry", registry], parent);
+  const run = await runCli(["new", "fresh", "--preset", "edge", "--registry", registry], parent);
   expect(run.code).toBe(1);
   expect(run.err).toContain("channel-edge runs on cloudflare, not on this project's server target");
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 
-test("new --target: an unknown target, and a preset that does not run on the chosen one, are refused before writing anything", () => {
+test("new --target: an unknown target, and a preset that does not run on the chosen one, are refused before writing anything", async () => {
   const parent = temp();
-  const mars = pikit(["new", "fresh", "--target", "mars"], parent);
+  const mars = await runCli(["new", "fresh", "--target", "mars"], parent);
   expect(mars.code).toBe(2);
   expect(mars.err).toContain('--target is one of server, cloudflare, not "mars"');
 
-  const server = pikit(["new", "fresh", "--target", "cloudflare", "--preset", "http"], parent);
+  const server = await runCli(["new", "fresh", "--target", "cloudflare", "--preset", "http"], parent);
   expect(server.code).toBe(1);
   expect(server.err).toContain("runs on server, not on this project's cloudflare target");
-  const edge = pikit(["new", "fresh", "--preset", "cloudflare-minimal"], parent);
+  const edge = await runCli(["new", "fresh", "--preset", "cloudflare-minimal"], parent);
   expect(edge.code).toBe(1);
   expect(edge.err).toContain("storage-do runs on cloudflare, not on this project's server target");
   // The target is never guessed from the preset, but the refusal says which one it runs on.
   expect(edge.err).toContain('the preset "cloudflare-minimal" runs on cloudflare: pikit new fresh --target cloudflare --preset cloudflare-minimal');
-  const bot = pikit(["new", "fresh", "--preset", "telegram-cloudflare"], parent);
+  const bot = await runCli(["new", "fresh", "--preset", "telegram-cloudflare"], parent);
   expect(bot.code).toBe(1);
   expect(bot.err).toContain("pikit new fresh --target cloudflare --preset telegram-cloudflare");
   // A target that was chosen gets no hint: it was not forgotten.
@@ -150,17 +146,11 @@ test("new --target: an unknown target, and a preset that does not run on the cho
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 
-test("new --target cloudflare records the target, and writes two Apps, wrangler and the Cloudflare components", () => {
+test("new --target cloudflare records the target, and writes two Apps, wrangler and the Cloudflare components", async () => {
   const parent = temp();
   // Nothing resolves: `bun install` fails at once, after every file is written.
-  const run = Bun.spawnSync([process.execPath, MAIN, "new", "edge", "--target", "cloudflare", "--preset", "cloudflare-minimal"], {
-    cwd: parent,
-    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  expect(run.stderr.toString()).toContain("`bun install` failed");
+  const run = await runCli(["new", "edge", "--target", "cloudflare", "--preset", "cloudflare-minimal"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  expect(run.err).toContain("`bun install` failed");
   const project = join(parent, "edge");
   const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
   expect(manifest.targets).toEqual(["cloudflare"]);
@@ -188,20 +178,14 @@ test("new --target cloudflare records the target, and writes two Apps, wrangler 
   expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
 }, 60_000);
 
-test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each half in its App, its agent naming the installed tools", () => {
+test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each half in its App, its agent naming the installed tools", async () => {
   const parent = temp();
   // Nothing resolves: `bun install` fails at once, after every file is written.
-  const run = Bun.spawnSync([process.execPath, MAIN, "new", "bot", "--target", "cloudflare", "--preset", "telegram-cloudflare"], {
-    cwd: parent,
-    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  expect(run.stderr.toString()).toContain("`bun install` failed");
+  const run = await runCli(["new", "bot", "--target", "cloudflare", "--preset", "telegram-cloudflare"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  expect(run.err).toContain("`bun install` failed");
   // Every add was accepted: nothing refused, nothing missing in either App along the way.
-  expect(run.stderr.toString()).not.toContain("is not provided");
-  expect(run.stdout.toString()).toContain("outbound-durable, for channel-telegram-webhook");
+  expect(run.err).not.toContain("is not provided");
+  expect(run.out).toContain("outbound-durable, for channel-telegram-webhook");
   const project = join(parent, "bot");
   const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
   expect(manifest.targets).toEqual(["cloudflare"]);
@@ -254,27 +238,21 @@ test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each ha
   expect(optional.sort()).toEqual(["BRAVE_API_KEY", "OPENROUTER_API_KEY", "TELEGRAM_PASSWORD"]);
 }, 60_000);
 
-test("add without a terminal needs --yes, and writes nothing without it", () => {
+test("add without a terminal needs --yes, and writes nothing without it", async () => {
   const dir = tinyProject();
   const before = readdirSync(dir).sort();
-  const run = pikit(["add", "log-events"], dir);
+  const run = await runCli(["add", "log-events"], dir);
   expect(run.code).toBe(1);
   expect(run.err).toContain("pass --yes");
   expect(readdirSync(dir).sort()).toEqual(before);
-  expect(pikit(["add", "no-such-thing", "--yes"], dir).err).toContain('no component "no-such-thing"');
+  expect((await runCli(["add", "no-such-thing", "--yes"], dir)).err).toContain('no component "no-such-thing"');
 });
 
-test("new records the builtin registry, not this machine's path to it", () => {
+test("new records the builtin registry, not this machine's path to it", async () => {
   const parent = temp();
   // Nothing resolves: `bun install` fails at once, after pikit.json is written.
-  const run = Bun.spawnSync([process.execPath, MAIN, "new", "fresh", "--registry", DEFAULT_REGISTRY], {
-    cwd: parent,
-    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  expect(run.stderr.toString()).toContain("`bun install` failed");
+  const run = await runCli(["new", "fresh", "--registry", DEFAULT_REGISTRY], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  expect(run.err).toContain("`bun install` failed");
   // On a server, the starter's model stays Anthropic's.
   expect(readFileSync(join(parent, "fresh", "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "anthropic/claude-sonnet-4-6",');
   const manifest = JSON.parse(readFileSync(join(parent, "fresh", "pikit.json"), "utf8"));
@@ -286,25 +264,19 @@ test("new records the builtin registry, not this machine's path to it", () => {
   expect(manifest.kit).toEqual(kitCommit() === undefined ? undefined : { commit: kitCommit() });
 }, 60_000);
 
-test("new that fails after writing leaves the directory marked unfinished, says to delete it, and refuses to go on in it", () => {
+test("new that fails after writing leaves the directory marked unfinished, says to delete it, and refuses to go on in it", async () => {
   const parent = temp();
   // Nothing resolves: `bun install` fails at once, after every file is written.
-  const run = Bun.spawnSync([process.execPath, MAIN, "new", "fresh"], {
-    cwd: parent,
-    env: { ...process.env, NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" },
-    stdin: "ignore",
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  expect(run.exitCode).toBe(1);
+  const run = await runCli(["new", "fresh"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  expect(run.code).toBe(1);
   const project = join(parent, "fresh");
-  expect(run.stderr.toString()).toContain("`bun install` failed");
-  expect(run.stderr.toString()).toContain(`${project} is left unfinished: delete it, then run \`pikit new\` again`);
+  expect(run.err).toContain("`bun install` failed");
+  expect(run.err).toContain(`${project} is left unfinished: delete it, then run \`pikit new\` again`);
   // Kept as it is, with what failed to read in it, and marked.
   expect(existsSync(join(project, "pikit.json"))).toBe(true);
   expect(readFileSync(join(project, UNFINISHED), "utf8")).toContain("delete this directory, then run `pikit new` again");
 
-  const again = pikit(["new", "fresh"], parent);
+  const again = await runCli(["new", "fresh"], parent);
   expect(again.code).toBe(1);
   expect(again.err).toContain(`${project} is a \`pikit new\` that did not finish: delete it, then run it again`);
 }, 60_000);
@@ -367,9 +339,9 @@ function clonedProject(): string {
   return clone;
 }
 
-test("a project cloned on another machine resolves its registry: a v1 checkout path is builtin, and add works", () => {
+test("a project cloned on another machine resolves its registry: a v1 checkout path is builtin, and add works", async () => {
   const dir = clonedProject();
-  const run = pikit(["add", "log-events", "--yes"], dir);
+  const run = await runCli(["add", "log-events", "--yes"], dir);
   expect(run.err).not.toContain("is not a registry");
   expect(run.out).toContain("log-events installed; `pikit doctor` is green");
   expect(run.code).toBe(0);
@@ -383,9 +355,9 @@ test("a project cloned on another machine resolves its registry: a v1 checkout p
   expect(manifest.kit).toEqual(kitCommit() === undefined ? undefined : { commit: kitCommit() });
 }, 60_000);
 
-test("add keeps each installed file's base, named by its hash; remove deletes the bases no component names", () => {
+test("add keeps each installed file's base, named by its hash; remove deletes the bases no component names", async () => {
   const dir = clonedProject();
-  expect(pikit(["add", "log-events", "--yes"], dir).code).toBe(0);
+  expect((await runCli(["add", "log-events", "--yes"], dir)).code).toBe(0);
   const files: Record<string, { hash: string }> = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8")).components["log-events"].files;
   expect(Object.keys(files).length).toBeGreaterThan(0);
   const base = (hash: string) => join(dir, "pikit-bases", hash.slice("sha256:".length));
@@ -402,22 +374,22 @@ test("add keeps each installed file's base, named by its hash; remove deletes th
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   writeFileSync(join(dir, "src", "copy.ts"), readFileSync(join(dir, shared)));
 
-  expect(pikit(["remove", "log-events"], dir).code).toBe(0);
+  expect((await runCli(["remove", "log-events"], dir)).code).toBe(0);
   expect(readdirSync(join(dir, "pikit-bases"))).toEqual([sharedHash.slice("sha256:".length)]);
-  expect(pikit(["remove", "log-copy"], dir).code).toBe(0);
+  expect((await runCli(["remove", "log-copy"], dir)).code).toBe(0);
   expect(existsSync(join(dir, "pikit-bases"))).toBe(false);
 }, 60_000);
 
-test("add from a registry outside the project says the project is not portable; the builtin one and one inside it do not", () => {
+test("add from a registry outside the project says the project is not portable; the builtin one and one inside it do not", async () => {
   const dir = tinyProject();
-  expect(pikit(["add", "log-events", "--registry", DEFAULT_REGISTRY], dir).err).not.toContain("is a path on this machine");
+  expect((await runCli(["add", "log-events", "--registry", DEFAULT_REGISTRY], dir)).err).not.toContain("is a path on this machine");
   // A copy of the builtin registry, elsewhere: a path of this machine.
   const copy = join(temp(), "registry");
   cpSync(DEFAULT_REGISTRY, copy, { recursive: true });
-  expect(pikit(["add", "log-events", "--registry", copy], dir).err).toContain(`the registry ${copy} is a path on this machine`);
+  expect((await runCli(["add", "log-events", "--registry", copy], dir)).err).toContain(`the registry ${copy} is a path on this machine`);
   const inside = join(dir, "vendor-registry");
   cpSync(copy, inside, { recursive: true });
-  const run = pikit(["add", "log-events", "--registry", inside], dir);
+  const run = await runCli(["add", "log-events", "--registry", inside], dir);
   expect(run.err).not.toContain("is a path on this machine");
   expect(run.err).toContain("pass --yes");
 }, 60_000);
@@ -452,51 +424,51 @@ function agentProject(tools: string[]): string {
   return dir;
 }
 
-test("doctor fails when an agent names a tool no installed component provides", () => {
-  const green = pikit(["doctor"], agentProject(["bash"]));
+test("doctor fails when an agent names a tool no installed component provides", async () => {
+  const green = await runCli(["doctor"], agentProject(["bash"]));
   expect(green.out).toContain("pikit doctor: green");
   expect(green.code).toBe(0);
 
-  const broken = pikit(["doctor"], agentProject(["bash", "shell"]));
+  const broken = await runCli(["doctor"], agentProject(["bash", "shell"]));
   expect(broken.code).toBe(1);
   expect(broken.err).toContain('agent "soporte" names the tool "shell", which no installed component provides (agent.tool)');
 });
 
-test("doctor fails on a Pi extension importing what the shim lacks, and notes what pikit does not provide", () => {
+test("doctor fails on a Pi extension importing what the shim lacks, and notes what pikit does not provide", async () => {
   const dir = agentProject(["bash"]);
   const alias = '"@earendil-works/pi-coding-agent"';
   writeFileSync(
     join(dir, "src/extensions/tui.ts"),
     `import type { ExtensionAPI } from ${alias};\n\nexport default function (pi: ExtensionAPI) {\n  pi.on("input", (_event, ctx) => ctx.ui.custom(() => undefined));\n}\n`,
   );
-  const noted = pikit(["doctor"], dir);
+  const noted = await runCli(["doctor"], dir);
   expect(noted.out).toContain('src/extensions/tui.ts uses what pikit does not provide to Pi extensions; it does nothing or fails when called (runtime-pi\'s README, "Pi extensions"): pi.on("input"), ctx.ui.custom');
   expect(noted.out).toContain("pikit doctor: green");
   expect(noted.code).toBe(0);
 
   writeFileSync(join(dir, "src/extensions/header.ts"), `import { VERSION, type ExtensionAPI } from ${alias};\n\nexport default (pi: ExtensionAPI) => void VERSION;\n`);
-  const broken = pikit(["doctor"], dir);
+  const broken = await runCli(["doctor"], dir);
   expect(broken.code).toBe(1);
   expect(broken.err).toContain("src/extensions/header.ts imports `VERSION` from @earendil-works/pi-coding-agent, which pikit does not provide (runtime-pi's README, \"Pi extensions\")");
 });
 
-test("remove refuses to take a tool an agent names; with --force it removes it, and doctor reports the name", () => {
+test("remove refuses to take a tool an agent names; with --force it removes it, and doctor reports the name", async () => {
   const dir = agentProject(["bash"]);
   const config = readFileSync(join(dir, "pikit.config.ts"), "utf8");
-  const refused = pikit(["remove", "tool-bash"], dir);
+  const refused = await runCli(["remove", "tool-bash"], dir);
   expect(refused.code).toBe(1);
   expect(refused.err).toContain('agent "soporte" names the tool "bash", which only tool-bash provides');
   expect(refused.err).toContain("pass --force");
   expect(existsSync(join(dir, "src/pikit/tool-bash/index.ts"))).toBe(true);
   expect(readFileSync(join(dir, "pikit.config.ts"), "utf8")).toBe(config);
 
-  const forced = pikit(["remove", "tool-bash", "--force"], dir);
+  const forced = await runCli(["remove", "tool-bash", "--force"], dir);
   expect(forced.out).toContain("tool-bash removed");
   expect(existsSync(join(dir, "src/pikit/tool-bash"))).toBe(false);
   expect(forced.code).toBe(1);
   expect(forced.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool)');
 
-  const doctor = pikit(["doctor"], dir);
+  const doctor = await runCli(["doctor"], dir);
   expect(doctor.code).toBe(1);
   expect(doctor.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool)');
 });
