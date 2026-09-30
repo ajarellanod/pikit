@@ -3,8 +3,8 @@
  * `pikit.config.ts` lists, plus `deployment-docker`, which runs it and is not in `pikit.config.ts`,
  * less the provider `runtime-pi` brings itself (offered providers), which `pikit new`
  * installs with it. The storage is the preset's own: it names it rather than rely on the registry
- * having one server provider of `storage.sql`. A chat channel chosen instead of `channel-http` brings its durable delivery the
- * same way.
+ * having one server provider of `storage.sql`. A chat channel chosen instead of `channel-http`
+ * brings its durable delivery the same way.
  */
 
 import { expect, test } from "bun:test";
