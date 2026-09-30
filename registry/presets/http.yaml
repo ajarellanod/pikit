@@ -7,6 +7,11 @@
 title: "An agent, run in Docker"
 components:
   - secrets-env
+  # Named, not left to `pikit add` to offer: an offer needs the registry's only server provider of
+  # `storage.sql`, and a second one (storage-postgres) would leave every project of this preset with
+  # none. The runtime's record of submissions (and a chat channel's outbox and key-value store) keep
+  # their tables here; they stay offered, as each has one provider, on top of whichever storage.
+  - storage-sqlite
   - sessions-jsonl
   - conversations-file
   - credentials-file

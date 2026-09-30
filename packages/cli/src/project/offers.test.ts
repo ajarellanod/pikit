@@ -121,21 +121,22 @@ test("a provider is offered in the App that misses it: one that goes only in the
 });
 
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {
+  // The preset names its storage (`presets/http.yaml`): the runtime brings only its record of submissions.
   const http = registry.preset("http", []);
+  expect(http).toContain("storage-sqlite");
   const withHttp = withOffers(registry, http);
   const runtime = withHttp.order.indexOf("runtime-pi");
-  expect(withHttp.order.slice(runtime - 2, runtime + 1)).toEqual(["storage-sqlite", "submissions-sql", "runtime-pi"]);
-  expect(withHttp.order.filter((c) => !http.includes(c))).toEqual(["storage-sqlite", "submissions-sql"]);
-  expect(Object.fromEntries(withHttp.installedFor)).toEqual({ "storage-sqlite": "submissions-sql", "submissions-sql": "runtime-pi" });
+  expect(withHttp.order.slice(runtime - 1, runtime + 1)).toEqual(["submissions-sql", "runtime-pi"]);
+  expect(withHttp.order.filter((c) => !http.includes(c))).toEqual(["submissions-sql"]);
+  expect(Object.fromEntries(withHttp.installedFor)).toEqual({ "submissions-sql": "runtime-pi" });
 
-  // The runtime's storage serves the outbox and the key-value store too: the chat channel brings only those two.
+  // The preset's storage serves the outbox and the key-value store too: the chat channel brings only those two.
   const telegram = registry.preset("http", ["channel-telegram"]);
   const { order, installedFor } = withOffers(registry, telegram);
   const at = order.indexOf("channel-telegram");
   expect(order.slice(at - 2, at + 1)).toEqual(["outbound-durable", "storage-kv-sql", "channel-telegram"]);
-  expect(order.filter((c) => !telegram.includes(c))).toEqual(["storage-sqlite", "submissions-sql", "outbound-durable", "storage-kv-sql"]);
+  expect(order.filter((c) => !telegram.includes(c))).toEqual(["submissions-sql", "outbound-durable", "storage-kv-sql"]);
   expect(Object.fromEntries(installedFor)).toEqual({
-    "storage-sqlite": "submissions-sql",
     "submissions-sql": "runtime-pi",
     "outbound-durable": "channel-telegram",
     "storage-kv-sql": "channel-telegram",
