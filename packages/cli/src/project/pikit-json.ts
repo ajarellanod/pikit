@@ -62,6 +62,11 @@ export interface InstalledComponent {
    */
   generated?: string[];
   /**
+   * Its manifest's `apps`: where it went in a project on Cloudflare (SPEC C1). `pikit upgrade` changes
+   * the Worker's App only when a new version says otherwise. Absent when it declared none.
+   */
+  apps?: { worker: string };
+  /**
    * The components it was installed for, when it was offered rather than asked for (`offers.ts`):
    * it leaves with the last of them, when nothing else uses it.
    */
