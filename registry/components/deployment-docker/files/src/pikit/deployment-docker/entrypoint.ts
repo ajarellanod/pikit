@@ -126,8 +126,9 @@ export async function runEntrypoint(definition: AppDefinition, options: Entrypoi
   try {
     await running.start(withAbortSignal(deadline.signal, BACKGROUND_CONTEXT));
   } catch (error) {
-    // A start cancelled by a signal: the shutdown above reports and exits.
-    if (stopping) return;
+    // A start cancelled by a signal: the shutdown above reports and exits. A start the deadline had
+    // already rolled back failed on its own, even if a signal came during its rollback.
+    if (stopping && rollingBack === undefined) return;
     logger.error("pikit: the app failed to start", { error });
     return await rollBack();
   } finally {
