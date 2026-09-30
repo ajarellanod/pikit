@@ -6,7 +6,9 @@
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
  * The suite reaches the database through the capability, as a component would. It uses only SQL
- * that SQLite and Postgres both accept.
+ * that SQLite and Postgres both accept, the portable subset `storage.ts` names: `BIGINT` for an
+ * integer past 32 bits (Postgres' `INTEGER` is 32-bit), `BYTEA` for bytes (Postgres has no `BLOB`;
+ * SQLite stores bytes as they are in a column of any declared type).
  */
 
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
@@ -50,7 +52,7 @@ export function createSqlDatabaseConformance(factory: () => SqlDatabaseFixture |
   return [
     sqlCase("values read back as they were written: text, integers, reals, null and bytes", async (s) => {
       const db = await s.open();
-      await db.run("CREATE TABLE conformance_values (id INTEGER PRIMARY KEY, t TEXT, i INTEGER, r REAL, n TEXT, b BLOB)");
+      await db.run("CREATE TABLE conformance_values (id INTEGER PRIMARY KEY, t TEXT, i BIGINT, r REAL, n TEXT, b BYTEA)");
       const text = "ñandú ✓ \"quoted\" 'single' \\ \n tab\t";
       const bytes = new Uint8Array([0, 1, 2, 250, 255]);
       await db.run("INSERT INTO conformance_values (id, t, i, r, n, b) VALUES (?, ?, ?, ?, ?, ?)", [1, text, 9_007_199_254_740_991, 1.5, null, bytes]);
