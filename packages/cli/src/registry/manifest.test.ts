@@ -21,7 +21,7 @@ test("every component.json of the repository conforms to the schema and names it
 test("an unknown field is one problem that names it; a malformed manifest stops at its shape", () => {
   expect(schemaProblems(ManifestSchema, { ...toolBash(), dependancies: {} })).toEqual(["/dependancies: is not a known field"]);
   // The directory does not match either, but on a malformed manifest only the shape is reported.
-  const problems = checkManifest({ ...toolBash(), targets: [] }, "/nowhere", "other-name", "0.0.0");
+  const problems = checkManifest({ ...toolBash(), targets: [] }, "/nowhere", "other-name", "0.0.0", "0.0.0");
   expect(problems).toEqual(["component.json /targets: must not have fewer than 1 items"]);
 });
 
@@ -37,10 +37,24 @@ test("validate knows when the registry's JSON Schemas are missing or stale", () 
   expect(checkSchemaFiles(root)).toHaveLength(2);
 });
 
+test("requires.contracts must accept this repository's @pikit/contracts, and a component that depends on them says which", () => {
+  const manifest = toolBash() as { requires: Record<string, unknown>; dependencies: Record<string, string> };
+  const dir = join(DEFAULT_REGISTRY, "components", "tool-bash");
+  expect(manifest.dependencies["@pikit/contracts"]).toBeDefined();
+  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.0.0")).toEqual([]);
+  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.1.0")).toEqual([
+    `requires.contracts "${String(manifest.requires.contracts)}" does not accept this repository's @pikit/contracts 0.1.0`,
+  ]);
+  const { contracts: _, ...requires } = manifest.requires;
+  expect(checkManifest({ ...manifest, requires }, dir, "tool-bash", "0.0.0", "0.0.0")).toEqual([
+    "dependencies lists @pikit/contracts, but requires.contracts does not say which versions it works with (a semver range, as requires.pikit)",
+  ]);
+});
+
 test("a files target that leaves the project, or is one of its own records, is a problem", () => {
   const manifest = toolBash();
   const files = [...(manifest.files as unknown[]), { source: "README.md", target: "package.json" }, { source: "README.md", target: "../outside" }];
-  const problems = checkManifest({ ...manifest, files }, join(DEFAULT_REGISTRY, "components", "tool-bash"), "tool-bash", "0.0.0");
+  const problems = checkManifest({ ...manifest, files }, join(DEFAULT_REGISTRY, "components", "tool-bash"), "tool-bash", "0.0.0", "0.0.0");
   expect(problems).toEqual([
     'files target "package.json" is one of the project\'s own files; no component writes it',
     'files target "../outside" leaves the project',

@@ -376,6 +376,8 @@ test("a project cloned on another machine resolves its registry: a v1 checkout p
   expect(manifest.version).toBe(2);
   expect(manifest.registries).toEqual({ default: "builtin" });
   expect(Object.keys(manifest.components)).toEqual(["log-events"]);
+  // The kit it accepts, which a later add checks before it changes the project's kit.
+  expect(manifest.components["log-events"].requires).toEqual({ pikit: "0.0.0", contracts: "0.0.0" });
   // Its tarballs are this CLI's: the kit it did not record is this CLI's now.
   expect(manifest.kit).toEqual(kitCommit() === undefined ? undefined : { commit: kitCommit() });
 }, 60_000);

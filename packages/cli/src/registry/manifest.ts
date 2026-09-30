@@ -89,6 +89,13 @@ export const ManifestSchema = Type.Object(
     requires: Type.Object(
       {
         pikit: Type.String({ minLength: 1, description: "The @pikit/core versions it works with (a semver range)." }),
+        contracts: Type.Optional(
+          Type.String({
+            minLength: 1,
+            description:
+              "The @pikit/contracts versions it works with (a semver range); declared when `dependencies` lists @pikit/contracts. The contracts version apart from the core (SPEC K8): `pikit add` checks it for the component it adds, and records it, so a later add refuses to replace the project's kit with contracts an installed component does not accept.",
+          }),
+        ),
         capabilities: Type.Array(Type.String(), { description: "Generated from setup's use() calls." }),
       },
       { additionalProperties: false, description: "A component depends on capabilities, never on components." },
@@ -286,15 +293,15 @@ export function withGenerated(manifest: Manifest, generated: Generated): Manifes
   return next;
 }
 
-/** Stable text: fields in the schema's order, `requires.pikit` before `requires.capabilities`. */
+/** Stable text: fields in the schema's order, `requires.pikit` and `requires.contracts` before `requires.capabilities`. */
 export function formatManifest(manifest: Manifest): string {
   const fields = manifest as Record<string, unknown>;
   const ordered: Record<string, unknown> = {};
   for (const key of KEY_ORDER) if (key in fields) ordered[key] = fields[key];
   // Unknown fields keep their place after these, so `validate` can name them instead of losing them.
   for (const [key, value] of Object.entries(fields)) if (!(key in ordered)) ordered[key] = value;
-  const { pikit, capabilities, ...otherRequires } = manifest.requires;
-  ordered.requires = { pikit, capabilities, ...otherRequires };
+  const { pikit, contracts, capabilities, ...otherRequires } = manifest.requires;
+  ordered.requires = { pikit, ...(contracts !== undefined && { contracts }), capabilities, ...otherRequires };
   return `${JSON.stringify(ordered, null, 2)}\n`;
 }
 

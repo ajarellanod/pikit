@@ -9,6 +9,7 @@
   ],
   "requires": {
     "pikit": "0.0.0",
+    "contracts": "0.0.0",
     "capabilities": [
       "secrets",
       "conversations.registry",

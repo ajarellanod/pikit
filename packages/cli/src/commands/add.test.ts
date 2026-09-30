@@ -216,6 +216,75 @@ test("a reinstall that fails puts back the bases it replaced, and removes those 
   expect(snapshot(dir)).toEqual(before);
 }, 120_000);
 
+test("a reinstall that fails puts back a file it deleted, in a directory a new file then created again", () => {
+  const dir = otherKitProject();
+  // tool-fake, installed by an older registry: index.ts and sub/old.ts, which the new one no longer ships.
+  const own = "src/pikit/tool-fake/";
+  const files = { [`${own}index.ts`]: "export default {};\n", [`${own}sub/old.ts`]: "the older tool-fake\n" };
+  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
+  manifest.components["tool-fake"] = {
+    registry: "default", version: "0.0.0", dependencies: {}, environment: [],
+    files: Object.fromEntries(Object.entries(files).map(([file, text]) => [file, { hash: hashOf(text) }])),
+  };
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
+  mkdirSync(join(dir, own, "sub"), { recursive: true });
+  for (const [file, text] of Object.entries(files)) writeFileSync(join(dir, file), text);
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const registry = fakeRegistry({ "files/src/pikit/tool-fake/sub/new.ts": "" });
+  const before = snapshot(dir);
+  const run = pikit(["add", "tool-fake", "--registry", registry, "--yes", "--force"], dir);
+  expect(run.out).toContain(`deletes, no longer shipped: ${own}sub/old.ts`);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("nothing was added");
+  expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
+test("a component that does not accept this CLI's contracts is refused before anything is written", () => {
+  const dir = otherKitProject();
+  const registry = fakeRegistry({}, { requires: { pikit: "0.0.0", contracts: "^9.0.0", capabilities: [] } });
+  const before = snapshot(dir);
+  const run = pikit(["add", "tool-fake", "--registry", registry, "--yes"], dir);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.0");
+  expect(snapshot(dir)).toEqual(before);
+});
+
+test("a kit an installed component does not accept is refused before any write, each one named; --force replaces it", () => {
+  const dir = otherKitProject();
+  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
+  const record = { registry: "default", version: "0.0.0", files: {}, environment: [] };
+  manifest.components = {
+    "tool-core": { ...record, requires: { pikit: ">=1.0.0" }, dependencies: {} },
+    "tool-fine": { ...record, requires: { pikit: "0.0.0", contracts: "0.0.0" }, dependencies: { "@pikit/contracts": "0.0.0" } },
+    "tool-newer": { ...record, requires: { pikit: "0.0.0", contracts: "^0.1.0" }, dependencies: { "@pikit/contracts": "0.1.0" } },
+    // Recorded before pikit.json kept `requires`: held to the contracts it pinned.
+    "tool-pinned": { ...record, dependencies: { "@pikit/contracts": "0.2.0" } },
+    "tool-unknown": { ...record, dependencies: {} },
+  };
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const before = snapshot(dir);
+
+  const refused = pikit(["add", "log-events", "--yes"], dir);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain(
+    "which these installed components do not accept:\n  tool-core requires @pikit/core >=1.0.0\n  tool-newer requires @pikit/contracts ^0.1.0\n  tool-pinned requires @pikit/contracts 0.2.0\n",
+  );
+  expect(refused.err).toContain("pass --force to replace the kit anyway");
+  expect(refused.err).not.toContain("tool-fine");
+  expect(refused.err).not.toContain("tool-unknown");
+  expect(refused.out).not.toContain("log-events 0.0.0 from");
+  expect(snapshot(dir)).toEqual(before);
+
+  // Forced, it goes on to the kit refresh (the install then fails here, and everything is put back).
+  const forced = pikit(["add", "log-events", "--yes", "--force"], dir);
+  expect(forced.err).toContain("tool-newer requires @pikit/contracts ^0.1.0");
+  expect(forced.err).toContain("--force: replacing it anyway");
+  expect(forced.out).toContain("refreshed to this CLI's");
+  expect(forced.err).toContain("nothing was added");
+  expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
 test("the plan says when the registry has uncommitted changes", () => {
   const dir = otherKitProject();
   const registry = fakeRegistry({});

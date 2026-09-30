@@ -4,7 +4,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { appendExampleBlock, exampleBlock, parseEnv, readEnv, removeExampleBlock, writeEnv } from "./env-file.ts";
+import { appendExampleBlock, exampleBlock, parseEnv, readEnv, removeExampleBlock, replaceExampleBlock, writeEnv } from "./env-file.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -46,4 +46,18 @@ test(".env.example: appending then removing blocks restores the text exactly", (
   expect(removeExampleBlock(two, "provider-anthropic")).toBe(blockB);
   expect(removeExampleBlock(one, "provider-anthropic")).toBe("");
   expect(removeExampleBlock(two, "nothing")).toBe(two);
+});
+
+test(".env.example: a reinstall replaces the component's block where it is, adds it, or removes it", () => {
+  const blockA = exampleBlock("provider-anthropic", [KEY]);
+  const blockB = exampleBlock("channel-http", [TOKEN]);
+  const blockC = "# the project's own\nMINE=\n";
+  const text = `${blockA}\n${blockB}\n${blockC}`;
+  const newer = exampleBlock("channel-http", [TOKEN, KEY]);
+  expect(replaceExampleBlock(text, "channel-http", newer)).toBe(`${blockA}\n${newer}\n${blockC}`);
+  expect(replaceExampleBlock(text, "channel-http", blockB)).toBe(text);
+  expect(replaceExampleBlock(text, "channel-http", "")).toBe(`${blockA}\n${blockC}`);
+  expect(replaceExampleBlock(`${blockA}\n${blockC}`, "channel-http", blockB)).toBe(`${blockA}\n${blockC}\n${blockB}`);
+  expect(replaceExampleBlock("", "channel-http", blockB)).toBe(blockB);
+  expect(replaceExampleBlock("", "log-events", "")).toBe("");
 });

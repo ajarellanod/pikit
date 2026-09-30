@@ -4,7 +4,9 @@
  *
  * It is the install record, so it keeps what `pikit remove` and `pikit doctor` need later without
  * the registry at hand: the npm (dev) dependencies and environment variables the component declared when
- * it was installed. Whether a file is modified is not stored: it is computed by comparing its hash,
+ * it was installed, the ones `add` put in package.json for it (the only ones `remove` may take out),
+ * and the kit versions it accepts (`requires`), which `add` checks before it changes the project's
+ * kit. Whether a file is modified is not stored: it is computed by comparing its hash,
  * so it can never go stale.
  *
  * Version 2 records registries by what resolves on any machine (`registry-location.ts`). Version 1
@@ -32,6 +34,20 @@ export interface InstalledComponent {
   dependencies: Record<string, string>;
   /** The npm dev dependencies its manifest declared (package → version); absent when it declared none. */
   devDependencies?: Record<string, string>;
+  /**
+   * The packages of `dependencies` that `add` put in package.json for it: those the project did not
+   * have, and those another installed component had put there (the last of them to go takes them
+   * out). `remove` takes out only these, when nothing else needs them. Absent in a record made before
+   * it was kept (`ownedDependencies`).
+   */
+  addedDependencies?: string[];
+  /** The same for `devDependencies`; absent when it added none. */
+  addedDevDependencies?: string[];
+  /**
+   * Its manifest's `requires.pikit` and `requires.contracts`: the @pikit/core and @pikit/contracts
+   * versions it works with. Absent in a record made before they were recorded (`kitRanges`).
+   */
+  requires?: { pikit: string; contracts?: string };
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
   /**
@@ -132,6 +148,28 @@ export function modifiedFiles(projectDir: string, component: InstalledComponent)
   return Object.entries(component.files)
     .filter(([file, { hash }]) => !generated.has(file) && existsSync(join(projectDir, file)) && hashFile(join(projectDir, file)) !== hash)
     .map(([file]) => file);
+}
+
+/**
+ * The @pikit/core and @pikit/contracts ranges an installed component accepts, as recorded. A record
+ * made before `requires` was gives the @pikit/contracts version its manifest pinned in `dependencies`
+ * (written against that one), and no core range: that one was not recorded.
+ */
+export function kitRanges(component: InstalledComponent): { pikit?: string; contracts?: string } {
+  if (component.requires !== undefined) return component.requires;
+  const contracts = component.dependencies["@pikit/contracts"];
+  return contracts === undefined ? {} : { contracts };
+}
+
+/**
+ * The packages `remove` may take out of package.json for an installed component: those `add` put
+ * there for it. A record made before `addedDependencies` was kept gives every package it declared.
+ */
+export function ownedDependencies(component: InstalledComponent): { dependencies: string[]; devDependencies: string[] } {
+  if (component.addedDependencies === undefined) {
+    return { dependencies: Object.keys(component.dependencies), devDependencies: Object.keys(component.devDependencies ?? {}) };
+  }
+  return { dependencies: component.addedDependencies, devDependencies: component.addedDevDependencies ?? [] };
 }
 
 /** Installed files that are gone. */
