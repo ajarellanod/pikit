@@ -12,6 +12,10 @@
  * the ones that do. On `cloudflare`, `pikit.config.ts` has two Apps (SPEC C1). The target is never
  * guessed from the preset: a preset for another target is refused, with the command that makes it.
  *
+ * The starter agent's model is the preset's `model`, or the starter's for the target (`STARTER_MODEL`).
+ * Its provider must be a component being installed, as their `component.json`'s `modelProviders` say
+ * (`checkStarterModel`): otherwise doctor would fail on a project already written.
+ *
  * Everything that can be refused is refused before the first file is written. What can still fail
  * after it (`bun install`, which needs the network, and the final doctor) leaves the directory as it
  * is, marked `UNFINISHED`: never a project the wizard continues, and the error says to delete it.
@@ -23,7 +27,8 @@ import { DEFAULT_REGISTRY } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { withOffers } from "../project/offers.ts";
-import { openRegistry } from "../project/registry-source.ts";
+import { modelProvider } from "../project/references.ts";
+import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
 import { TARGETS } from "../registry/manifest.ts";
@@ -88,6 +93,8 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     throw new CliError(`${error.message}; the preset "${options.preset}" runs on ${runsOn}: pikit new ${dir} --target ${runsOn} --preset ${options.preset}${(options.with ?? []).map((w) => ` --with ${w}`).join("")}`);
   }
   const tools = components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {}));
+  const model = (options.preset === undefined ? undefined : registry.presetModel(options.preset)) ?? starter.starterModel(target);
+  checkStarterModel(registry, components, target, model, options.preset);
 
   const step = (message: string) => options.quiet !== true && log.step(message);
   step(`creating ${projectDir}${options.preset ? ` from the preset "${options.preset}"` : ""}`);
@@ -105,7 +112,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write(".gitignore", starter.gitignore(target));
     write("README.md", starter.readme(name, components, target));
     write(CONFIG_FILE, starter.configFile(target));
-    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, target));
+    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model));
     write("src/extensions/agents.ts", starter.AGENTS);
     write("src/extensions/permission-gate.ts", starter.permissionGate());
     // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
@@ -147,4 +154,30 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   if (options.next === false) return;
   const elsewhere = target === "cloudflare" ? "deploy it to Cloudflare" : "run it in Docker";
   log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev         # or \`pikit up\` to ${elsewhere}`);
+}
+
+/**
+ * The starter agent's model names its provider by key (`anthropic/…`, `references.ts`). When a component
+ * being installed reads it (uses `model.provider`, as the runtime does), one being installed must provide
+ * that key: refused before anything is written, naming the registry's components that provide it. Only
+ * a preset installs components here, so there is always one to name.
+ */
+export function checkStarterModel(registry: Registry, components: readonly string[], target: string, model: string, preset: string | undefined): void {
+  const key = modelProvider(model);
+  const uses = components.some((c) => {
+    const { requires, optional } = registry.manifest(c);
+    return [...requires.capabilities, ...optional.capabilities].includes("model.provider");
+  });
+  if (key === undefined || !uses) return;
+  const provides = (c: string) => registry.manifest(c).modelProviders?.includes(key) === true;
+  // A provider with no keys recorded (a manifest from before `modelProviders`, or keys only its config
+  // gives) may provide it: that is doctor's to say, once it composes.
+  const unknown = (c: string) => registry.manifest(c).provides.includes("model.provider") && registry.manifest(c).modelProviders === undefined;
+  if (components.some((c) => provides(c) || unknown(c))) return;
+  const providers = registry.names().filter((c) => provides(c) && registry.manifest(c).targets.includes(target));
+  const fix =
+    providers.length > 0
+      ? `${providers.join(" or ")} provides it: list it in the preset's components, or give the preset a \`model\` whose provider it installs`
+      : `no component of the registry ${registry.root} provides it on ${target}: give the preset a \`model\` whose provider it installs`;
+  throw new CliError(`the starter agent's model "${model}" needs the model provider "${key}", which no component of the preset "${preset}" provides; ${fix}`);
 }
