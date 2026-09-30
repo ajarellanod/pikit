@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "nod
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
-import { emptyManifest, type InstalledComponent, ownedDependencies, PIKIT_JSON, readProjectManifest, writeProjectManifest } from "./pikit-json.ts";
+import { emptyManifest, type InstalledComponent, kitRanges, ownedDependencies, PIKIT_JSON, readProjectManifest, writeProjectManifest } from "./pikit-json.ts";
 import { BUILTIN_REGISTRY, isCheckoutRegistry, isPortable, recordedLocation, registryPath } from "./registry-location.ts";
 
 const dirs: string[] = [];
@@ -95,4 +95,15 @@ test("the packages remove may take out are those add put in package.json; an old
   expect(ownedDependencies(record)).toEqual({ dependencies: ["hono", "left-pad"], devDependencies: ["wrangler"] });
   expect(ownedDependencies({ ...record, addedDependencies: ["hono"] })).toEqual({ dependencies: ["hono"], devDependencies: [] });
   expect(ownedDependencies({ ...record, addedDependencies: [], addedDevDependencies: ["wrangler"] })).toEqual({ dependencies: [], devDependencies: ["wrangler"] });
+});
+
+test("the kit ranges a component accepts: its recorded ones; with no contracts range, the contracts version it pinned", () => {
+  const record: InstalledComponent = {
+    registry: "default", version: "0.0.0", files: {}, dependencies: { "@pikit/contracts": "0.0.0" }, environment: [],
+  };
+  expect(kitRanges({ ...record, requires: { pikit: "^0.1.0", contracts: "^0.2.0" } })).toEqual({ pikit: "^0.1.0", contracts: "^0.2.0" });
+  // A manifest that declares no contracts range is held to its pin, as a record from before `requires`.
+  expect(kitRanges({ ...record, requires: { pikit: "^0.1.0" } })).toEqual({ pikit: "^0.1.0", contracts: "0.0.0" });
+  expect(kitRanges(record)).toEqual({ contracts: "0.0.0" });
+  expect(kitRanges({ ...record, dependencies: {} })).toEqual({});
 });

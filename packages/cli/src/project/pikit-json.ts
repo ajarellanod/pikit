@@ -151,14 +151,15 @@ export function modifiedFiles(projectDir: string, component: InstalledComponent)
 }
 
 /**
- * The @pikit/core and @pikit/contracts ranges an installed component accepts, as recorded. A record
- * made before `requires` was gives the @pikit/contracts version its manifest pinned in `dependencies`
- * (written against that one), and no core range: that one was not recorded.
+ * The @pikit/core and @pikit/contracts ranges an installed component accepts, as recorded. When no
+ * contracts range is recorded (a record made before `requires` was, or a manifest that declares none),
+ * the @pikit/contracts version its manifest pinned in `dependencies` stands for it: the component was
+ * written against that one. No core range is guessed.
  */
 export function kitRanges(component: InstalledComponent): { pikit?: string; contracts?: string } {
-  if (component.requires !== undefined) return component.requires;
-  const contracts = component.dependencies["@pikit/contracts"];
-  return contracts === undefined ? {} : { contracts };
+  const pikit = component.requires?.pikit;
+  const contracts = component.requires?.contracts ?? component.dependencies["@pikit/contracts"];
+  return { ...(pikit === undefined ? {} : { pikit }), ...(contracts === undefined ? {} : { contracts }) };
 }
 
 /**
