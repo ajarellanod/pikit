@@ -43,9 +43,10 @@ test("--version, help, unknown commands and commands not built yet", () => {
   expect(pikit(["--help"], cwd).code).toBe(0);
   expect(pikit(["frobnicate"], cwd).code).toBe(2);
   expect(pikit(["add", "--bogus"], cwd).code).toBe(2);
-  const later = pikit(["upgrade"], cwd);
+  const later = pikit(["diff"], cwd);
   expect(later.code).toBe(1);
-  expect(later.out).toContain("pikit upgrade: not built yet (see SPEC P6)");
+  expect(later.out).toContain("pikit diff: not built yet (see SPEC P6)");
+  expect(pikit(["upgrade"], cwd).err).toContain("is not a pikit project");
 });
 
 test("pikit registry validate runs the repository's registry checks", () => {

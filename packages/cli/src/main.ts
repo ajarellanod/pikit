@@ -16,6 +16,7 @@ import { doctor } from "./commands/doctor.ts";
 import { newProject } from "./commands/new.ts";
 import { registryCommand } from "./commands/registry.ts";
 import { remove } from "./commands/remove.ts";
+import { upgrade } from "./commands/upgrade.ts";
 import { PIKIT_ROOT } from "./paths.ts";
 import { Cancelled, CliError, isInteractive, log } from "./ui.ts";
 
@@ -26,6 +27,7 @@ Usage:
   pikit new <dir> [--target server|cloudflare] [--preset <name> [--with <component>]...] [--registry <path>]   a new project
   pikit add <component> [--registry <path>] [--force] [--yes]
   pikit remove <component> [--force]
+  pikit upgrade [<component>...] [--dry-run] [--force] [--yes]   take the registry's version, merging your edits
   pikit doctor                        the component graph, and what is missing
   pikit configure [--yes] [--generate <NAME>]... [--login <provider> [--local]]
   pikit dev                           run the project here, reloading on change (on Cloudflare: wrangler dev)
@@ -45,7 +47,6 @@ const LATER: Record<string, string> = {
   create: "",
   outdated: "SPEC P6",
   diff: "SPEC P6",
-  upgrade: "SPEC P6",
   config: "features/config-files.md",
   expose: "",
   deploy: "",
@@ -68,6 +69,7 @@ async function main(argv: string[]): Promise<number> {
       with: { type: "string", multiple: true },
       registry: { type: "string" },
       force: { type: "boolean" },
+      "dry-run": { type: "boolean" },
       yes: { type: "boolean", short: "y" },
       generate: { type: "string", multiple: true },
       login: { type: "string" },
@@ -122,6 +124,9 @@ async function main(argv: string[]): Promise<number> {
       return 0;
     case "remove":
       await remove(cwd, one("component"), { force: values.force === true });
+      return 0;
+    case "upgrade":
+      await upgrade(cwd, rest, { force: values.force === true, yes: values.yes === true, dryRun: values["dry-run"] === true });
       return 0;
     case "doctor": {
       const report = await doctor(cwd);
