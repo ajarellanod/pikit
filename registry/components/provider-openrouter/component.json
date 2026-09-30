@@ -17,6 +17,9 @@
   "provides": [
     "model.provider"
   ],
+  "modelProviders": [
+    "openrouter"
+  ],
   "dependencies": {
     "@pikit/pi-adapter": "0.0.0",
     "typebox": "1.3.27"

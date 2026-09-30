@@ -62,12 +62,14 @@ export function mergeGenerated(halves: readonly Generated[]): Generated {
     halves.reduce<Record<string, string> | undefined>((all, half) => (pick(half) === undefined ? all : { ...all, ...pick(half) }), undefined);
   const tools = merge((h) => h.tools);
   const exampleTools = merge((h) => h.exampleTools);
+  const modelProviders = union(halves.map((h) => h.modelProviders ?? []));
   return {
     provides: union(halves.map((h) => h.provides)),
     requires: union(halves.map((h) => h.requires)),
     optional: union(halves.map((h) => h.optional)).filter((name) => !halves.some((h) => h.requires.includes(name))),
     ...(tools !== undefined && { tools }),
     ...(exampleTools !== undefined && { exampleTools }),
+    ...(modelProviders.length > 0 && { modelProviders }),
   };
 }
 
@@ -90,7 +92,8 @@ export function configExamples(component: ComponentDefinition): unknown[] {
 
 /**
  * What `setup` declares with the default config and with each example config: every list in that
- * order, without repeats; `tools` only the default config's, the examples' others in `exampleTools`.
+ * order, without repeats; `tools` and `modelProviders` only the default config's, the examples' other
+ * tools in `exampleTools`.
  */
 export async function describeComponent(component: ComponentDefinition, target: Target): Promise<Generated> {
   const own = await describeSetup(component, target);
@@ -114,6 +117,7 @@ export async function describeComponent(component: ComponentDefinition, target: 
     optional,
     ...(own.tools !== undefined && { tools: own.tools }),
     ...(Object.keys(exampleTools).length > 0 && { exampleTools }),
+    ...(own.modelProviders !== undefined && { modelProviders: own.modelProviders }),
   };
 }
 
@@ -133,14 +137,20 @@ export async function describeSetup(component: ComponentDefinition, target: Targ
       }),
     );
   const app = await defineApp({ components: [component, ...stubs], config, target, logger: silentLogger }).create();
-  const described = app.describe().components.find((c) => c.name === component.name);
+  const description = app.describe();
+  const described = description.components.find((c) => c.name === component.name);
   if (described === undefined) throw new Error(`describe() does not list "${component.name}"`);
+  // The keys agents name models by (`anthropic/…`), which `pikit new` checks its starter agent against.
+  const modelProviders = Object.entries(description.capabilities["model.provider"]?.keys ?? {})
+    .filter(([, owner]) => owner === component.name)
+    .map(([key]) => key);
 
   return {
     provides: described.provides,
     requires: described.requires,
     optional: described.optional,
     ...(recorded.tools !== undefined && { tools: recorded.tools }),
+    ...(modelProviders.length > 0 && { modelProviders }),
   };
 }
 

@@ -91,3 +91,20 @@ test("an example tool's replay is checked but not written", async () => {
   const manifest = { provides: ["agent.tool"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
   expect(checkDrift(manifest, generated)).toEqual(['the agent.tool "poke" has replay "undefined"; every tool declares "safe" or "never"']);
 });
+
+test("the model.provider keys setup provides are generated, so pikit new can check a model before writing", async () => {
+  const provider = defineComponent({
+    name: "provider-pair",
+    setup(pikit) {
+      pikit.provideKeyed("model.provider" as never, "alpha", {} as never);
+      pikit.provideKeyed("model.provider" as never, "beta", {} as never);
+    },
+  });
+  const generated = await describeComponent(provider, "server");
+  expect(generated).toEqual({ provides: ["model.provider"], requires: [], optional: [], modelProviders: ["alpha", "beta"] });
+  const manifest = { provides: ["model.provider"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
+  expect(checkDrift(manifest, generated)).toEqual([
+    'modelProviders drifted from setup: component.json has nothing, setup declares ["alpha","beta"]; run `bun run registry generate`',
+  ]);
+  expect(checkDrift({ ...manifest, modelProviders: ["alpha", "beta"] }, generated)).toEqual([]);
+});

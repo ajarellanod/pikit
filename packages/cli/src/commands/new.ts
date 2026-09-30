@@ -11,15 +11,24 @@
  * component installed then and later must run there (`checkCompatible`), and the providers offered are
  * the ones that do. On `cloudflare`, `pikit.config.ts` has two Apps (SPEC C1). The target is never
  * guessed from the preset: a preset for another target is refused, with the command that makes it.
+ *
+ * The starter agent's model is the preset's `model`, or the starter's for the target (`STARTER_MODEL`).
+ * Its provider must be a component being installed, as their `component.json`'s `modelProviders` say
+ * (`checkStarterModel`): otherwise doctor would fail on a project already written.
+ *
+ * Everything that can be refused is refused before the first file is written. What can still fail
+ * after it (`bun install`, which needs the network, and the final doctor) leaves the directory as it
+ * is, marked `UNFINISHED`: never a project the wizard continues, and the error says to delete it.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { withOffers } from "../project/offers.ts";
-import { openRegistry } from "../project/registry-source.ts";
+import { modelProvider } from "../project/references.ts";
+import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
 import { TARGETS } from "../registry/manifest.ts";
@@ -42,6 +51,16 @@ export interface NewOptions {
   target?: string;
 }
 
+/**
+ * Written first in a new project's directory, deleted once doctor is green: a directory that has it is
+ * a `pikit new` that stopped (a failed `bun install`, doctor's problems, Ctrl-C), not a project.
+ * Nothing continues one, since what stopped it is not known: it is deleted and made again, which
+ * only its own directory allows (it was empty or absent when `new` began).
+ */
+export const UNFINISHED = ".pikit-new-unfinished";
+
+const UNFINISHED_TEXT = "`pikit new` did not finish this project: delete this directory, then run `pikit new` again.\n";
+
 /** A project's directory name is its package name. */
 export function validProjectName(name: string): boolean {
   return /^[a-z0-9][a-z0-9._-]*$/.test(name);
@@ -49,6 +68,7 @@ export function validProjectName(name: string): boolean {
 
 export async function newProject(dir: string, options: NewOptions = {}): Promise<void> {
   const projectDir = resolve(dir);
+  if (existsSync(join(projectDir, UNFINISHED))) throw new CliError(`${projectDir} is a \`pikit new\` that did not finish: delete it, then run it again`);
   if (existsSync(projectDir) && readdirSync(projectDir).length > 0) throw new CliError(`${projectDir} exists and is not empty`);
   const name = basename(projectDir);
   if (!validProjectName(name)) throw new CliError(`"${name}" is not a valid package name: use lowercase letters, digits, "-", "." or "_"`);
@@ -75,52 +95,94 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     throw new CliError(`${error.message}; the preset "${options.preset}" runs on ${runsOn}: pikit new ${dir} --target ${runsOn} --preset ${options.preset}${(options.with ?? []).map((w) => ` --with ${w}`).join("")}`);
   }
   const tools = components.flatMap((c) => Object.keys(registry.manifest(c).replay?.tools ?? {}));
+  const model = (options.preset === undefined ? undefined : registry.presetModel(options.preset)) ?? starter.starterModel(target);
+  checkStarterModel(registry, components, target, model, options.preset);
 
   const step = (message: string) => options.quiet !== true && log.step(message);
   step(`creating ${projectDir}${options.preset ? ` from the preset "${options.preset}"` : ""}`);
-  mkdirSync(join(projectDir, "src", "agents", starter.STARTER_AGENT), { recursive: true });
-  mkdirSync(join(projectDir, "src", "extensions"), { recursive: true });
-  const kit = vendorKit(projectDir);
+  mkdirSync(projectDir, { recursive: true });
   const write = (file: string, text: string) => writeFileSync(join(projectDir, file), text);
-  write("package.json", starter.packageJson(name, kit));
-  write("tsconfig.json", starter.tsconfig());
-  write(".gitignore", starter.gitignore(target));
-  write("README.md", starter.readme(name, components, target));
-  write(CONFIG_FILE, starter.configFile(target));
-  write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, target));
-  write("src/extensions/agents.ts", starter.AGENTS);
-  write("src/extensions/permission-gate.ts", starter.permissionGate());
-  // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
-  const location = recordedLocation(projectDir, registry.root);
-  if (!isPortable(location)) log.warn(notPortable(location));
-  writeProjectManifest(projectDir, emptyManifest(location, kitCommit(), targets));
+  write(UNFINISHED, UNFINISHED_TEXT);
+  let installed: string[];
+  let report: Awaited<ReturnType<typeof doctor>>;
+  try {
+    mkdirSync(join(projectDir, "src", "agents", starter.STARTER_AGENT), { recursive: true });
+    mkdirSync(join(projectDir, "src", "extensions"), { recursive: true });
+    const kit = vendorKit(projectDir);
+    write("package.json", starter.packageJson(name, kit));
+    write("tsconfig.json", starter.tsconfig());
+    write(".gitignore", starter.gitignore(target));
+    write("README.md", starter.readme(name, components, target));
+    write(CONFIG_FILE, starter.configFile(target));
+    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model));
+    write("src/extensions/agents.ts", starter.AGENTS);
+    write("src/extensions/permission-gate.ts", starter.permissionGate());
+    // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
+    const location = recordedLocation(projectDir, registry.root);
+    if (!isPortable(location)) log.warn(notPortable(location));
+    writeProjectManifest(projectDir, emptyManifest(location, kitCommit(), targets));
 
-  for (const component of components) {
-    const wiring = starter.STARTER_WIRING[component];
-    const forComponent = installedFor.get(component);
-    if (forComponent !== undefined) step(`${component}, for ${forComponent}`);
-    await installComponent(projectDir, component, {
-      yes: true,
-      quiet: options.quiet === true,
-      ...(wiring !== undefined && { wiring }),
-      ...(forComponent !== undefined && { installedFor: forComponent }),
-    });
+    for (const component of components) {
+      const wiring = starter.STARTER_WIRING[component];
+      const forComponent = installedFor.get(component);
+      if (forComponent !== undefined) step(`${component}, for ${forComponent}`);
+      await installComponent(projectDir, component, {
+        yes: true,
+        quiet: options.quiet === true,
+        ...(wiring !== undefined && { wiring }),
+        ...(forComponent !== undefined && { installedFor: forComponent }),
+      });
+    }
+    installed = Object.keys(readProjectManifest(projectDir).components);
+    let config = readFileSync(join(projectDir, CONFIG_FILE), "utf8");
+    for (const [component, value] of Object.entries(starter.STARTER_CONFIG)) {
+      if (installed.includes(component)) config = setConfigEntry(config, component, value);
+    }
+    write(CONFIG_FILE, config);
+
+    await bunInstall(projectDir, { quiet: options.quiet === true });
+
+    step("pikit doctor");
+    report = await doctor(projectDir, { quiet: true, componentChecks: false });
+    for (const problem of report.problems) log.problem(problem);
+    if (report.problems.length > 0) throw new CliError(`the new project has ${report.problems.length} problem(s)`);
+  } catch (error) {
+    // Kept, not deleted, so what failed can be read in it; it is marked, so nothing takes it for a project.
+    const unfinished = `${projectDir} is left unfinished: delete it, then run \`pikit new\` again`;
+    if (error instanceof CliError) throw new CliError(`${error.message}\n${unfinished}`, error.exitCode);
+    // Not the user's to act on (a bug): it stays what it is, so `PIKIT_DEBUG` still prints its stack.
+    if (error instanceof Error) error.message += `\n${unfinished}`;
+    throw error;
   }
-  const installed = Object.keys(readProjectManifest(projectDir).components);
-  let config = readFileSync(join(projectDir, CONFIG_FILE), "utf8");
-  for (const [component, value] of Object.entries(starter.STARTER_CONFIG)) {
-    if (installed.includes(component)) config = setConfigEntry(config, component, value);
-  }
-  write(CONFIG_FILE, config);
-
-  await bunInstall(projectDir, { quiet: options.quiet === true });
-
-  step("pikit doctor");
-  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
-  for (const problem of report.problems) log.problem(problem);
-  if (report.problems.length > 0) throw new CliError(`the new project has ${report.problems.length} problem(s)`);
+  rmSync(join(projectDir, UNFINISHED));
   if (options.quiet !== true) log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
   if (options.next === false) return;
   const elsewhere = target === "cloudflare" ? "deploy it to Cloudflare" : "run it in Docker";
   log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev         # or \`pikit up\` to ${elsewhere}`);
+}
+
+/**
+ * The starter agent's model names its provider by key (`anthropic/…`, `references.ts`). When a component
+ * being installed reads it (uses `model.provider`, as the runtime does), one being installed must provide
+ * that key: refused before anything is written, naming the registry's components that provide it. Only
+ * a preset installs components here, so there is always one to name.
+ */
+export function checkStarterModel(registry: Registry, components: readonly string[], target: string, model: string, preset: string | undefined): void {
+  const key = modelProvider(model);
+  const uses = components.some((c) => {
+    const { requires, optional } = registry.manifest(c);
+    return [...requires.capabilities, ...optional.capabilities].includes("model.provider");
+  });
+  if (key === undefined || !uses) return;
+  const provides = (c: string) => registry.manifest(c).modelProviders?.includes(key) === true;
+  // A provider with no keys recorded (a manifest from before `modelProviders`, or keys only its config
+  // gives) may provide it: that is doctor's to say, once it composes.
+  const unknown = (c: string) => registry.manifest(c).provides.includes("model.provider") && registry.manifest(c).modelProviders === undefined;
+  if (components.some((c) => provides(c) || unknown(c))) return;
+  const providers = registry.names().filter((c) => provides(c) && registry.manifest(c).targets.includes(target));
+  const fix =
+    providers.length > 0
+      ? `${providers.join(" or ")} provides it: list it in the preset's components, or give the preset a \`model\` whose provider it installs`
+      : `no component of the registry ${registry.root} provides it on ${target}: give the preset a \`model\` whose provider it installs`;
+  throw new CliError(`the starter agent's model "${model}" needs the model provider "${key}", which no component of the preset "${preset}" provides; ${fix}`);
 }

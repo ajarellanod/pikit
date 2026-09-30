@@ -44,6 +44,11 @@
           },
           "minItems": 1,
           "description": "One question of `pikit new` per entry; `--with <component>` answers it in a script."
+        },
+        "model": {
+          "type": "string",
+          "pattern": "^[^/\\s]+/\\S+$",
+          "description": "The starter agent's model, `<provider>/<modelId>`: a component of the preset provides its provider (`pikit new` checks it before writing). Default: the CLI's for the target (`anthropic/…` on a server, `openrouter/…` on Cloudflare)."
         }
       },
       "additionalProperties": false

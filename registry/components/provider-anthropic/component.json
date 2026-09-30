@@ -16,6 +16,9 @@
   "provides": [
     "model.provider"
   ],
+  "modelProviders": [
+    "anthropic"
+  ],
   "dependencies": {
     "@pikit/pi-adapter": "0.0.0"
   },
