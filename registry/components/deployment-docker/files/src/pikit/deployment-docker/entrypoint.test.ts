@@ -83,6 +83,27 @@ test("a start past its deadline is abandoned and exits 1", async () => {
   expect(messages(child)).toContain("pikit: the app failed to start");
 });
 
+// The K2 conformance case: a rollback that hangs on purpose, while its timer keeps the process
+// alive, must not keep the process alive. It exits 1 within both deadlines (500 ms each here).
+for (const [mode, start] of [
+  ["rollback-hangs", "a start that fails"],
+  ["rollback-hangs-late", "a start that never returns"],
+] as const) {
+  test(`${start}, with a rollback that hangs, still exits 1 within both deadlines (K2)`, async () => {
+    const started = Date.now();
+    const child = launch([FIXTURE, mode]);
+    // Without the bound, the fixture's timer keeps the child alive forever: kill it, not leak it.
+    const killer = setTimeout(() => child.kill("SIGKILL"), 4_000);
+
+    expect(await child.exited).toBe(1);
+    clearTimeout(killer);
+    expect(Date.now() - started).toBeLessThan(4_000);
+    expect(messages(child)).toContain("pikit: the app failed to start");
+    expect(messages(child)).toContain("pikit: the failed start did not roll back cleanly");
+    expect(messages(child)).not.toContain("pikit: started");
+  });
+}
+
 test("SIGTERM stops the app and exits 0", async () => {
   const child = launch([FIXTURE, "ok"]);
   await child.line("pikit: started");
