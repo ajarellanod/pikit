@@ -5,6 +5,7 @@ line names its area.
 
 ## Unreleased
 
+- component/platform-cloudflare: an alarm's slice runs its due wakeup handlers at the same time (one run per name) and keeps starting those that come due while any runs, until its deadline; before, they ran one at a time, so a Telegram chat showed "typing…" once and not again while `runtime-pi.drive` waited for the model. The README says what a slice costs in subrequests.
 - cli: a component's `doctor` hook may resolve with `{ problems, notes }`; notes are printed and fail nothing. `pikit up` skips the `doctor` hook of a component that has a `beforeDeploy`, which it runs right before the build and which checks the same, so an MCP server is reached once per deploy, not twice (`pikit doctor` and `pikit dev` still run it).
 - registry: `component.json`'s `generated` names files of the component's own directory that a hook rewrites; `pikit add` records them in `pikit.json`, `pikit doctor` never lists them as modified, `pikit remove` deletes them without `--force`, and `registry validate` checks each is a non-test file of the component.
 - component/tool-mcp: `seed.ts` is declared `generated` (a deployed project no longer shows it modified, and `pikit remove tool-mcp` no longer needs `--force`). `pikit doctor` gives a note when `seed.ts` does not hold what a server lists now (run `pikit up`, or commit its seed, before a deploy without the CLI), and a start whose seed lacks a server's listing logs a warning.

@@ -8,8 +8,9 @@
  *   real `Conversation` class (`PlatformConversation`, `src/platform.ts`): each key is a real object,
  *   whose actor also sends to another and wakes itself by the object's real alarm.
  * - Then, on that class, the real alarm: `at` and `cancel` set it, `runDurableObjectAlarm` fires it
- *   through the class's `alarm()`, and it survives an eviction; the slice, the backoff, a request
- *   waiting for its handler; and an object's own mailbox.
+ *   through the class's `alarm()`, and it survives an eviction; the slice (a handler that waits it out
+ *   holds up none of the others), the backoff, a request waiting for its handler; and an object's own
+ *   mailbox.
  *
  * When a test says so, `Date` (the apps' system clock: the tests and the objects share one isolate)
  * runs a day ahead: a request asked for a day later sets a real alarm the runtime does not fire by
@@ -212,6 +213,37 @@ it("the slice deadline cancels the running handler's context in a real alarm; it
   });
   expect(runs[0]?.cutAfterMs).toBeGreaterThanOrEqual(sliceMs - 5);
   expect(runs[0]?.reason).toContain(`slice deadline (${sliceMs} ms)`);
+});
+
+it("in a real alarm, a handler that waits the whole slice does not hold up one that asks again every 100 ms: it runs throughout", async () => {
+  // runtime-pi.drive waits in its wakeup while the model thinks; a channel renews "typing…" meanwhile.
+  const sliceMs = 1_000;
+  const ticks: number[] = [];
+  let cutAt: number | undefined;
+  let wakeups: Wakeups | undefined;
+  const { component, seen } = owner({
+    long: async (ctx) => {
+      if (cutAt !== undefined) return;
+      await new Promise<void>((resolve) => ctx.abortSignal?.addEventListener("abort", () => resolve(), { once: true }));
+      cutAt = Date.now();
+    },
+    tick: async (ctx) => {
+      ticks.push(Date.now());
+      if (cutAt === undefined) await wakeups?.at("tick", ctx.clock.now() + 100, ctx);
+    },
+  });
+  composeObjects([platformCloudflare, component], { "platform-cloudflare": { sliceMs } });
+  const stub = newObject();
+  await inside(stub, seen, async (ctx) => {
+    wakeups = seen.wakeups;
+    await wakeups?.at("long", ctx.clock.now() - 1, ctx);
+    await wakeups?.at("tick", ctx.clock.now() - 1, ctx);
+  });
+  // Due at once: the runtime may fire it first; one alarm runs at a time either way.
+  await runDurableObjectAlarm(stub);
+  await vi.waitFor(() => expect(cutAt).toBeDefined(), { timeout: 5_000 });
+  const during = ticks.filter((at) => at < (cutAt as number));
+  expect(during.length).toBeGreaterThanOrEqual(5);
 });
 
 it("in an object, actor.mailbox delivers to its own key locally and to any other key by RPC to that key's object", async () => {

@@ -172,7 +172,7 @@ test("a request nobody handles waits in the table, never spins the alarm, and ru
   }
 });
 
-test("an alarm is one slice: the running handler is cut at the deadline, asks again, and the rest runs in the next alarm", async () => {
+test("an alarm is one slice: the others run meanwhile; the running handler is cut at the deadline, asks again, and the rest runs in the next alarm", async () => {
   const clock = createManualClock();
   const t0 = clock.now();
   const object = simulatedObject(fakeSql());
@@ -193,15 +193,78 @@ test("an alarm is one slice: the running handler is cut at the deadline, asks ag
     await wakeups.at("long", t0, opened.ctx);
     await wakeups.at("short", t0 + 1, opened.ctx);
     await clock.advance(0);
-    await clock.advance(9_999);
-    expect(runs).toEqual(["long@0"]);
+    await clock.advance(1);
+    expect(runs).toEqual(["long@0", "short@1"]);
+    await clock.advance(9_998);
+    expect(reason).toBeUndefined();
+    expect(object.fired()).toBe(1);
     await clock.advance(1);
     expect(String(reason)).toContain("slice deadline (10000 ms)");
-    expect(runs).toEqual(["long@0", "short@10000", "long@10000"]);
+    expect(runs).toEqual(["long@0", "short@1", "long@10000"]);
     expect(object.fired()).toBe(2);
     expect(object.alarm()).toBeNull();
   } finally {
     await opened.app.stop();
+  }
+});
+
+test("within a slice, a handler that waits does not hold up the others: one that asks again every second runs on time throughout", async () => {
+  // runtime-pi.drive waits in its wakeup while the model thinks; a channel renews "typing…" every few seconds.
+  const clock = createManualClock();
+  const t0 = clock.now();
+  const object = simulatedObject(fakeSql());
+  const ticks: number[] = [];
+  let cutAt: number | undefined;
+  let wakeups: Wakeups | undefined;
+  const long: WakeupHandler = async (ctx) => {
+    if (cutAt !== undefined) return;
+    await new Promise<void>((resolve) => ctx.abortSignal?.addEventListener("abort", () => resolve(), { once: true }));
+    cutAt = ctx.clock.now() - t0;
+    await wakeups?.at("long", ctx.clock.now(), ctx);
+  };
+  const tick: WakeupHandler = async (ctx) => {
+    ticks.push(ctx.clock.now() - t0);
+    await wakeups?.at("tick", ctx.clock.now() + 1_000, ctx);
+  };
+  const opened = await openObject(object, clock, { long, tick }, { sliceMs: 10_000 });
+  wakeups = opened.wakeups;
+  try {
+    await wakeups.at("long", t0, opened.ctx);
+    await wakeups.at("tick", t0, opened.ctx);
+    await clock.advance(0);
+    for (let i = 0; i < 9; i++) await clock.advance(1_000);
+    expect(cutAt).toBeUndefined();
+    expect(ticks).toEqual([0, 1_000, 2_000, 3_000, 4_000, 5_000, 6_000, 7_000, 8_000, 9_000]);
+    expect(object.fired()).toBe(1);
+    await clock.advance(1_000);
+    expect(cutAt).toBe(10_000);
+    // The deadline ends the slice: what is due then runs in the next alarm, which continues at once.
+    expect(object.fired()).toBe(2);
+    expect(ticks.at(-1)).toBe(10_000);
+  } finally {
+    await opened.app.stop();
+  }
+});
+
+test("a request made during a slice while a handler waits, for a name not running, runs at once", async () => {
+  const clock = createManualClock();
+  const t0 = clock.now();
+  const object = simulatedObject(fakeSql());
+  const runs: string[] = [];
+  const long: WakeupHandler = (ctx) => new Promise<void>((resolve) => ctx.abortSignal?.addEventListener("abort", () => resolve(), { once: true }));
+  const kick: WakeupHandler = async (ctx) => void runs.push(`kick@${ctx.clock.now() - t0}`);
+  const { app, wakeups, ctx } = await openObject(object, clock, { long, kick }, { sliceMs: 10_000 });
+  try {
+    await wakeups.at("long", t0, ctx);
+    await clock.advance(0);
+    await clock.advance(2_500);
+    // As a message arriving by RPC during the alarm asks for its delivery.
+    await wakeups.at("kick", clock.now(), ctx);
+    await clock.advance(0);
+    expect(runs).toEqual(["kick@2500"]);
+    expect(object.fired()).toBe(1);
+  } finally {
+    await app.stop();
   }
 });
 
