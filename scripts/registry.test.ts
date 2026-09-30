@@ -177,6 +177,21 @@ test("imports: node:* only when targets are exactly [\"server\"]; tests are exem
   expect(found).not.toContain("node:fs");
 });
 
+test("imports: a server-only kit export (@pikit/pi-adapter/node) needs targets [\"server\"], as node:* does; tests are exempt (SPEC §4)", async () => {
+  const f = await fixture();
+  f.append("index.ts", `import type { LocalExecutionOptions } from "@pikit/pi-adapter/node";`);
+  f.append("sample.test.ts", `import "@pikit/pi-adapter/testing";`);
+  f.writeManifest({ ...f.manifest(), dependencies: { "@pikit/pi-adapter": "0.0.0" } });
+  await generate(f.root);
+  expect((await validate(f.root)).problems).toEqual([]);
+
+  f.writeManifest({ ...f.manifest(), targets: ["server", "cloudflare"] });
+  await generate(f.root);
+  const found = await problems(f);
+  expect(found).toContain(`index.ts imports "@pikit/pi-adapter/node", but targets are ["server","cloudflare"]: a server-only kit export needs targets ["server"]`);
+  expect(found).not.toContain("@pikit/pi-adapter/testing");
+});
+
 test("imports: a deployment component's commands.ts runs on the deploying machine, so it may import node:* on any target (SPEC §4)", async () => {
   const index = `export async function up(): Promise<void> {}\n`;
   const f = await fixture({ name: "deployment-sample", index });

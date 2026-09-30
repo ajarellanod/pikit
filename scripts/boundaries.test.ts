@@ -84,7 +84,7 @@ test("the adapter's main entry reaching Node is caught; the same import behind .
   ]);
 });
 
-test("a new export is neutral until SERVER_ONLY says otherwise", () => {
+test("a new export is neutral until SERVER_ONLY_EXPORTS says otherwise", () => {
   const json = { ...adapter().json, exports: { ...adapter().json.exports, "./files": "./src/files.ts" } };
   const root = packages({ "pi-adapter": { json, files: { ...adapter().files, "src/files.ts": `import { readFile } from "node:fs/promises";\n` } } });
   expect(checkBoundaries(root)).toEqual([
