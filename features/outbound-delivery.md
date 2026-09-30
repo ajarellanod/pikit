@@ -131,7 +131,7 @@ answer** and **per cursor**, not the schedule. So two layers:
    `deliverAnswer` and treating its outcome. Step 2 moves them into `@pikit/contracts` too, with every
    constant (window, page, retries) an option with today's value as default, when the first new
    channel of each model is built: a contract's shape is "decided with two real parties"
-   (`pipeline-anchors.md:22-23`), and today each driver has one. Until then a new channel copies the
+   (`pipeline-anchors.md:23-24`), and today each driver has one. Until then a new channel copies the
    driver of its model, and only the driver, not the per-answer logic.
 
 ### Where `outbound.prepare` runs
@@ -146,8 +146,11 @@ In `prepareOutbound`, at the one point every path shares: the moment a run's set
 - **Direct path:** `deliverAnswer` prepares, then splits and sends.
 - **HTTP path:** `channel-http` calls `prepareOutbound` in `outcome()` (`channel-http/index.ts:96`)
   for a completed run, with `channel: "http"`, the conversation's key and
-  `answerKey(run.conversation, run.requestId)`, and returns the prepared text. It keeps its `[decision]`
-  (no queue, no transport) and reuses only the prepare step.
+  `answerKey(run.conversation, run.requestId)`, and returns the prepared text. `outcome()` then
+  becomes async and takes the context and the run's conversation: today it is synchronous and its
+  `run` is a `Pick` of `kind`, `text` and `error` only, though each caller holds a whole
+  `RunSettlement` or `AgentResult` (`:182`, `:191`, `:209`). It keeps its `[decision]` (no queue,
+  no transport) and reuses only the prepare step.
 - **Other producers** (a [scheduler](scheduler.md)'s routine answers travel "as any answer does",
   `scheduler.md:26-27`; an [approvals](approvals.md) card) enqueue through `deliverAnswer` or call
   `prepareOutbound` before `enqueue`.
@@ -177,12 +180,20 @@ In `prepareOutbound`, at the one point every path shares: the moment a run's set
     `index.ts:84`): a crash mid-answer resends only the unsent pieces, the one in flight marked `↻`,
     instead of the whole answer unmarked (`replies.ts:36-43`);
   - the address's transport keeps direct sends in the chat's line (`replies.ts:85`), so an answer's
-    pieces and the channel's own short replies (commands) do not interleave.
+    pieces and the channel's own short replies (commands) do not interleave;
+  - a piece's retries: today `sendPiece` tries it 4 times in the process and waits Telegram's
+    `retry_after` (`replies.ts:66-77`); `deliverAnswer` tries once and returns `failed` with
+    `retryAfterMs`, which the reader's fixed backoff (`answers.ts:155-173`) does not read. Either the
+    address's transport keeps retrying, or the reader learns `retryAfterMs`, as the object's does
+    (`delivery.ts:141-149`).
 - **C6 holds:** the channels still copy client, format and transport, and never import each other
   (`channel-telegram-webhook/index.ts:23-24`); they copy less.
 - **P6 holds:** each migration ships as a new component version. A user who edited `answers.ts`,
-  `delivery.ts` or `index.ts` gets a three-way merge on upgrade, with conflicts where they edited.
-  A user who does not upgrade keeps a working channel without `outbound.prepare`.
+  `delivery.ts` or `index.ts` gets a three-way merge on upgrade, with conflicts where they edited,
+  once `pikit upgrade` exists: it is not built yet (`packages/cli/src/main.ts:48`), so until then a
+  migration reaches an installed channel only by reinstalling it (`--force`,
+  `packages/cli/src/commands/add.ts:208-209`, which does not merge) or by hand. A user who does not
+  upgrade keeps a working channel without `outbound.prepare`.
 
 ### What the planned channels gain
 Each writes `address`, its words and its transport, then picks a driver:
