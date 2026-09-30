@@ -12,9 +12,11 @@
  * - **In an object's App** (`object` present):
  *   - `wakeups`, as rows in the object's SQL (`platform_cloudflare_wakeups`, one per name)
  *     multiplexed over its one alarm. The alarm is set to the earliest row whose name has a handler,
- *     and set again whenever `at`, `cancel` or `handle` changes that. When it fires, the due handlers
- *     run one at a time, within one slice (`sliceMs`): at the slice's deadline the running handler's
- *     context is cancelled, it asks again (`at(name, now)`) and resolves, and the alarm is set for
+ *     and set again whenever `at`, `cancel` or `handle` changes that. When it fires, it runs one slice
+ *     (`sliceMs`), a small event loop: the due handlers run at the same time (one run per name), and
+ *     while any still runs, requests that come due are run on time (a channel renewing "typing" while
+ *     the runtime's handler waits for the model). At the slice's deadline the running handlers'
+ *     contexts are cancelled, they ask again (`at(name, now)`) and resolve, and the alarm is set for
  *     what remains, so a long piece of work is a sequence of short alarms (C4).
  *   - `actor.inbox`, the RPC's other end: the actors' components register a handler per message
  *     type (`handle(type, handler)`, in their start), and `deliver(type, key, message)` calls the one
@@ -41,7 +43,7 @@ import Type from "typebox";
 const SECOND = 1_000;
 /** The waits after a handler's 1st, 2nd, 3rd and 4th consecutive failure; the last repeats. */
 export const BACKOFF_MS = [SECOND, 5 * SECOND, 30 * SECOND, 60 * SECOND] as const;
-/** The slice deadline's watcher never sleeps longer: no alarm leaves a longer timer behind. */
+/** A slice never sleeps longer between two looks at its rows: no alarm leaves a longer timer behind. */
 const LONGEST_SLEEP_MS = SECOND;
 /** The rows of `wakeups`, one per name. */
 export const WAKEUPS_TABLE = "platform_cloudflare_wakeups";
@@ -100,8 +102,10 @@ export default defineComponent({
     /** The handler of each message type, registered by the actors' components in their start. */
     const inboxHandlers = new Map<string, ActorInboxHandler>();
     const handlers = new Map<string, WakeupHandler>();
-    /** The run in progress: `at` or `cancel` for its name during it decides what its outcome does. */
-    let current: { name: string; touched: boolean } | undefined;
+    /** The runs in progress, by name: `at` or `cancel` for a name during its run decides what its outcome does. */
+    const inProgress = new Map<string, { touched: boolean }>();
+    /** Wakes the slice in progress: a request, a handler or a run's end may change what it runs. */
+    let nudge = () => {};
     /** The alarm time this App last set (`null`: deleted); `undefined` when it does not know. */
     let armed: number | null | undefined;
     /** Alarm changes, one after the other, so the last one set is the one `armed` says. */
@@ -187,52 +191,68 @@ export default defineComponent({
     };
 
     /**
-     * One slice: runs the due requests whose handler is registered, one at a time, until none is
-     * due, the slice's deadline passed, or the app stops. The deadline cancels the running handler's
-     * context; the handler asks again and resolves.
+     * One slice, a small event loop: it starts every due request whose handler is registered and
+     * whose name is not running, then, while any runs, sleeps until the next request comes due, a run
+     * ends or `at`, `cancel` or `handle` is called, and starts what is due again. It ends when nothing
+     * runs, or at the slice's deadline, which cancels the running handlers' contexts (they ask again
+     * and resolve) and starts nothing more; it resolves once every run it started settled. It rejects
+     * when the storage failed, after cancelling and waiting for the runs.
      */
     const slice = async (r: Running): Promise<void> => {
       const { storage } = objectOf(r);
       const cut = new AbortController();
       const deadline = clock.now() + config.sliceMs;
-      let ended = false;
-      // The deadline's watcher sleeps a second at most: a clock's sleep cannot be cancelled, and a
-      // pending timer keeps the object from being evicted, so a slice leaves none longer behind.
-      void (async () => {
-        for (let left = config.sliceMs; !ended; left = deadline - clock.now()) {
-          if (left <= 0) {
-            cut.abort(new Error(`platform-cloudflare: the slice deadline (${config.sliceMs} ms) passed; ask again for what remains`));
-            return;
-          }
-          await clock.sleep(Math.min(left, LONGEST_SLEEP_MS));
-        }
-      })();
       const ctx = r.wakeup.derive((inner) => withAbortSignal(cut.signal, inner));
-      try {
-        await runDue(r, storage, ctx, cut.signal);
-      } finally {
-        ended = true;
-      }
-    };
+      const settling = new Set<Promise<void>>();
+      let failure: { error: unknown } | undefined;
 
-    /** Runs the due requests whose handler is registered, one at a time, until none is due or `signal` aborts. */
-    const runDue = async (r: Running, storage: ObjectStorage, ctx: AppContext, signal: AbortSignal): Promise<void> => {
-      while (running === r && !signal.aborted) {
-        const now = clock.now();
-        const row = rows(storage).find((candidate) => candidate.time <= now && handlers.has(candidate.name));
-        if (row === undefined) return;
-        const run = { name: row.name, touched: false };
-        current = run;
-        let error: unknown;
-        try {
-          await (handlers.get(row.name) as WakeupHandler)(ctx);
-        } catch (thrown) {
-          error = thrown ?? new Error("rejected with nothing");
-        } finally {
-          current = undefined;
+      const begin = (row: Row, handler: WakeupHandler) => {
+        const run = { touched: false };
+        inProgress.set(row.name, run);
+        const done = Promise.resolve()
+          .then(() => handler(ctx))
+          .then(
+            () => undefined,
+            (thrown: unknown) => thrown ?? new Error("rejected with nothing"),
+          )
+          .then((error) => settle(r, row, run, error))
+          .catch((error: unknown) => void (failure ??= { error }))
+          .finally(() => {
+            inProgress.delete(row.name);
+            settling.delete(done);
+            nudge();
+          });
+        settling.add(done);
+      };
+
+      try {
+        while (running === r && failure === undefined) {
+          const woken = new Promise<void>((resolve) => (nudge = resolve));
+          const now = clock.now();
+          if (now >= deadline) {
+            cut.abort(new Error(`platform-cloudflare: the slice deadline (${config.sliceMs} ms) passed; ask again for what remains`));
+            break;
+          }
+          let next = deadline;
+          for (const row of rows(storage)) {
+            const handler = handlers.get(row.name);
+            if (handler === undefined || inProgress.has(row.name)) continue;
+            if (row.time <= now) begin(row, handler);
+            else next = Math.min(next, row.time);
+          }
+          if (inProgress.size === 0) break;
+          // A second at most: a clock's sleep cannot be cancelled, and a pending timer keeps the
+          // object from being evicted, so a slice leaves none longer behind.
+          await Promise.race([woken, clock.sleep(Math.min(next - now, LONGEST_SLEEP_MS))]);
         }
-        settle(r, row, run, error);
+      } catch (error) {
+        failure ??= { error };
+      } finally {
+        nudge = () => {};
       }
+      if (failure !== undefined) cut.abort(failure.error);
+      while (settling.size > 0) await Promise.all(settling);
+      if (failure !== undefined) throw failure.error;
     };
 
     /** What the object's alarm calls. A stopped App's does nothing: the next App's start sets the alarm again. */
@@ -263,7 +283,8 @@ export default defineComponent({
         const r = opened();
         objectOf(r);
         handlers.set(name, handler);
-        // A request that waited for this handler sets the alarm now.
+        nudge();
+        // A request that waited for this handler sets the alarm now (or the slice in progress runs it).
         arm(r).catch((error: unknown) => logger.error("platform-cloudflare: could not set the object's alarm", { error: String(error) }));
       },
       async at(name, time) {
@@ -275,13 +296,17 @@ export default defineComponent({
           name,
           time,
         );
-        if (current?.name === name) current.touched = true;
+        const run = inProgress.get(name);
+        if (run !== undefined) run.touched = true;
+        nudge();
         await arm(r);
       },
       async cancel(name) {
         const r = opened();
         objectOf(r).storage.sql.exec(`DELETE FROM ${WAKEUPS_TABLE} WHERE name = ?`, name);
-        if (current?.name === name) current.touched = true;
+        const run = inProgress.get(name);
+        if (run !== undefined) run.touched = true;
+        nudge();
         await arm(r);
       },
     };
