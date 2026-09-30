@@ -38,7 +38,12 @@ export type Usage = Payload<"usage">;
 
 /** Which conversation (actor) a message belongs to. */
 export interface ConversationRef {
-  /** `tenant:channel:conversationId[:threadId]`. */
+  /**
+   * The conversation's address, opaque to all but the channel that made it. The channel builds it
+   * (`AdmitOptions.key`: `telegram:12345`, `telegram:ops:12345`, `http:<id>`) and is the only one that
+   * parses it back, to find where an answer goes; everyone else only stores, compares and logs it. It
+   * has no grammar of its own: no tenant or thread part (features/conversation-routing.md).
+   */
   key: string;
   /** Name of the `AgentDefinition` that runs this conversation (`agent.definition` key). */
   agent: string;
