@@ -179,6 +179,18 @@ test("a second server provider of storage.sql leaves the repository's presets co
   expect(checkPresets(root)).toContain('presets/leaning.yaml: on server, submissions-sql requires "storage.sql", which nothing provides');
 });
 
+test("registry validate reports a preset whose starter model's provider it does not install, unless the preset names its model", () => {
+  const root = repositoryWith([]);
+  const http = readFileSync(join(root, "presets", "http.yaml"), "utf8");
+  const openrouter = http.replace(/^\s+- provider-anthropic\n/m, "  - provider-openrouter\n");
+  writeFileSync(join(root, "presets", "other-provider.yaml"), openrouter);
+  expect(checkPresets(root)).toContain(
+    `presets/other-provider.yaml: on server, the starter agent's model "anthropic/claude-sonnet-4-6" needs the model provider "anthropic", which no component of the preset "other-provider" provides; provider-anthropic provides it: list it in the preset's components, or give the preset a \`model\` whose provider it installs`,
+  );
+  writeFileSync(join(root, "presets", "other-provider.yaml"), `model: openrouter/z-ai/glm-5.3-flash\n${openrouter}`);
+  expect(checkPresets(root)).toEqual([]);
+});
+
 test("the repository's presets resolve: telegram is http with channel-telegram", () => {
   expect(checkPresets(DEFAULT_REGISTRY)).toEqual([]);
   const r = openRegistry(DEFAULT_REGISTRY);

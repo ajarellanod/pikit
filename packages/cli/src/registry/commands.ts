@@ -13,6 +13,7 @@ import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp } from "../project
 import { DEPLOYMENT_EXPORTS } from "../project/deployment-module.ts";
 import { withOffers } from "../project/offers.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, type Registry, readPreset } from "../project/registry-source.ts";
+import { starterModel, starterModelProblem } from "../project/starter-model.ts";
 import { capabilityEntry } from "./capabilities.ts";
 import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
@@ -301,7 +302,13 @@ export function checkPresets(root: string): string[] {
         const not = (target: string) => components.filter((c) => !registry.manifest(c).targets.includes(target));
         report(`no target runs all its components (${TARGETS.map((t) => `not on ${t}: ${not(t).join(", ")}`).join("; ")})`);
       }
-      for (const target of targets) compositionProblems(registry, components, target).forEach((p) => report(`on ${target}, ${p}`));
+      for (const target of targets) {
+        compositionProblems(registry, components, target).forEach((p) => report(`on ${target}, ${p}`));
+        // The starter agent `pikit new` writes must name a model provider the preset installs.
+        const model = registry.presetModel(name) ?? starterModel(target);
+        const problem = starterModelProblem(registry, components, target, model, name);
+        if (problem !== undefined) report(`on ${target}, ${problem}`);
+      }
       // An alias asks its base's questions: they are checked once, with the base.
       for (const slot of isAlias ? [] : registry.slots(name)) {
         for (const option of slot.options) {

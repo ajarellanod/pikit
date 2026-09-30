@@ -22,7 +22,11 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PACKAGES_DIR, PIKIT_ROOT } from "../paths.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
+import { starterModel } from "../project/starter-model.ts";
 import { EXTENSION_ALIAS } from "../project/vendor.ts";
+
+// The starter model lives with the check `registry validate` shares.
+export { STARTER_MODEL, starterModel } from "../project/starter-model.ts";
 
 export const STARTER_AGENT = "assistant";
 
@@ -164,21 +168,6 @@ export const worker = defineApp({
 /** `pikit.config.ts` for a project on `target`. */
 export function configFile(target = "server"): string {
   return target === "cloudflare" ? CLOUDFLARE_CONFIG : CONFIG;
-}
-
-/**
- * The starter agent's model, by the project's target, when the preset declares none: one whose provider
- * runs there. On a server, Anthropic's (`provider-anthropic`, which the server presets install). On
- * Cloudflare, OpenRouter's (`provider-openrouter`, with an API key): `provider-anthropic` is
- * server-only. `pikit new` refuses, before writing, a project that would not install its provider.
- */
-export const STARTER_MODEL: Record<string, string> = {
-  server: "anthropic/claude-sonnet-4-6",
-  cloudflare: "openrouter/z-ai/glm-5.3-flash",
-};
-
-export function starterModel(target = "server"): string {
-  return STARTER_MODEL[target] ?? (STARTER_MODEL.server as string);
 }
 
 export function agent(tools: string[], model = starterModel()): string {
