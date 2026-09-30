@@ -20,9 +20,16 @@ const temp = () => {
   return dir;
 };
 
-function pikit(args: string[], cwd: string) {
-  const run = Bun.spawnSync([process.execPath, MAIN, ...args], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
-  return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() };
+/**
+ * The CLI as a child, awaited: not `Bun.spawnSync`, whose private event loop can lose a child's exit on
+ * Bun 1.4.2 and spin at 100% CPU forever with the child a zombie (oven-sh/bun#34069, fixed by #40078).
+ * Each spawnSync is a window for the drift that causes it, and this file's many long ones hung a later
+ * file's spawnSync (`doctor.test.ts`, `two-apps.test.ts`) in about half of the full runs.
+ */
+async function pikit(args: string[], cwd: string) {
+  const child = Bun.spawn([process.execPath, MAIN, ...args], { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  return { code, out, err };
 }
 
 /** A project `add` and `upgrade` run to the end in: no kit dependency to install, `@pikit/core` linked. */
@@ -68,11 +75,11 @@ function publish(root: string, name: string, version: string, files: Record<stri
 }
 
 /** A project with `tool-fake` installed from a registry at 0.1.0 with `files`; its registry's root. */
-function installed(files: Record<string, string>, fields: Record<string, unknown> = {}): { dir: string; registry: string } {
+async function installed(files: Record<string, string>, fields: Record<string, unknown> = {}): Promise<{ dir: string; registry: string }> {
   const dir = project();
   const registry = temp();
   publish(registry, "tool-fake", "0.1.0", files, fields);
-  const add = pikit(["add", "tool-fake", "--registry", registry, "--yes"], dir);
+  const add = await pikit(["add", "tool-fake", "--registry", registry, "--yes"], dir);
   expect(add.out).toContain("tool-fake installed");
   expect(add.code).toBe(0);
   return { dir, registry };
@@ -98,13 +105,13 @@ function snapshot(dir: string, prefix = ""): Record<string, string> {
   return files;
 }
 
-test("an unmodified file is replaced, an edit merges with a change elsewhere, and then everything is up to date", () => {
-  const { dir, registry } = installed({ "lines.ts": lines(), "same.ts": "export {};\n" });
+test("an unmodified file is replaced, an edit merges with a change elsewhere, and then everything is up to date", async () => {
+  const { dir, registry } = await installed({ "lines.ts": lines(), "same.ts": "export {};\n" });
   writeFileSync(join(dir, own("lines.ts")), lines({ 2: "export const line2 = 'mine';" }));
   const next = { "index.ts": INDEX("tool-fake", "// 0.2.0"), "lines.ts": lines({ 9: "export const line9 = 'theirs';" }), "same.ts": "export {};\n" };
   publish(registry, "tool-fake", "0.2.0", next);
 
-  const run = pikit(["upgrade", "--yes"], dir);
+  const run = await pikit(["upgrade", "--yes"], dir);
   expect(run.out).toContain("tool-fake 0.1.0 → 0.2.0");
   expect(run.out).toContain(`updated: ${own("index.ts")}\n`);
   expect(run.out).toContain(`merged with your edits: ${own("lines.ts")}\n`);
@@ -119,19 +126,19 @@ test("an unmodified file is replaced, an edit merges with a change elsewhere, an
   for (const [file, text] of Object.entries(next)) expect(after.files[own(file)].hash).toBe(hashOf(text));
   expect(bases(dir)).toEqual(Object.values(next).map(baseOf).sort());
   // The merged file is yours on top of 0.2.0: modified.
-  expect(pikit(["doctor"], dir).out).toContain(`modified: ${own("lines.ts")} (tool-fake)`);
+  expect((await pikit(["doctor"], dir)).out).toContain(`modified: ${own("lines.ts")} (tool-fake)`);
 
-  const again = pikit(["upgrade", "--yes"], dir);
+  const again = await pikit(["upgrade", "--yes"], dir);
   expect(again.out).toContain("every component is up to date with its registry");
   expect(again.code).toBe(0);
 }, 60_000);
 
-test("a conflict is written with markers, ends with code 1, and is yours: a second upgrade keeps the resolution, a third merges it", () => {
-  const { dir, registry } = installed({ "lines.ts": lines() });
+test("a conflict is written with markers, ends with code 1, and is yours: a second upgrade keeps the resolution, a third merges it", async () => {
+  const { dir, registry } = await installed({ "lines.ts": lines() });
   writeFileSync(join(dir, own("lines.ts")), lines({ 5: "export const line5 = 'mine';" }));
   publish(registry, "tool-fake", "0.2.0", { "lines.ts": lines({ 5: "export const line5 = 'theirs';" }) });
 
-  const run = pikit(["upgrade", "tool-fake", "--yes"], dir);
+  const run = await pikit(["upgrade", "tool-fake", "--yes"], dir);
   expect(run.out).toContain(`conflicts with your edits: ${own("lines.ts")}`);
   expect(run.err).toContain(`these files have conflicts between your edits and the new version:\n  ${own("lines.ts")} (tool-fake@0.2.0)`);
   expect(run.code).toBe(1);
@@ -141,29 +148,29 @@ test("a conflict is written with markers, ends with code 1, and is yours: a seco
   expect(record(dir).version).toBe("0.2.0");
   expect(record(dir).files[own("lines.ts")].hash).toBe(hashOf(lines({ 5: "export const line5 = 'theirs';" })));
   expect(bases(dir)).toContain(baseOf(lines({ 5: "export const line5 = 'theirs';" })));
-  expect(pikit(["doctor"], dir).out).toContain(`modified: ${own("lines.ts")} (tool-fake)`);
+  expect((await pikit(["doctor"], dir)).out).toContain(`modified: ${own("lines.ts")} (tool-fake)`);
 
   // Resolved; the registry has not moved: nothing to do, the resolution stays.
   const resolved = lines({ 5: "export const line5 = 'both';" });
   writeFileSync(join(dir, own("lines.ts")), resolved);
-  const again = pikit(["upgrade", "--yes"], dir);
+  const again = await pikit(["upgrade", "--yes"], dir);
   expect(again.out).toContain("every component is up to date");
   expect(read(dir, own("lines.ts"))).toBe(resolved);
 
   // The next version changes another line: merged into the resolution.
   publish(registry, "tool-fake", "0.3.0", { "lines.ts": lines({ 5: "export const line5 = 'theirs';", 10: "export const line10 = 'later';" }) });
-  const third = pikit(["upgrade", "--yes"], dir);
+  const third = await pikit(["upgrade", "--yes"], dir);
   expect(third.out).toContain(`merged with your edits: ${own("lines.ts")}`);
   expect(third.code).toBe(0);
   expect(read(dir, own("lines.ts"))).toBe(lines({ 5: "export const line5 = 'both';", 10: "export const line10 = 'later';" }));
 }, 60_000);
 
-test("files the new version adds are added; those it drops go when unmodified and stay when modified", () => {
-  const { dir, registry } = installed({ "old.ts": "export const old = 1;\n", "edited.ts": "export const edited = 1;\n" });
+test("files the new version adds are added; those it drops go when unmodified and stay when modified", async () => {
+  const { dir, registry } = await installed({ "old.ts": "export const old = 1;\n", "edited.ts": "export const edited = 1;\n" });
   writeFileSync(join(dir, own("edited.ts")), "export const edited = 'mine';\n");
   publish(registry, "tool-fake", "0.2.0", { "sub/new.ts": "export const fresh = 1;\n" });
 
-  const run = pikit(["upgrade", "--yes"], dir);
+  const run = await pikit(["upgrade", "--yes"], dir);
   expect(run.out).toContain(`added: ${own("sub/new.ts")}\n`);
   expect(run.out).toContain(`deleted, no longer shipped: ${own("old.ts")}\n`);
   expect(run.out).toContain(`kept, no longer shipped but modified by you: ${own("edited.ts")}\n`);
@@ -177,39 +184,39 @@ test("files the new version adds are added; those it drops go when unmodified an
   expect(files[own("edited.ts")].hash).toBe(hashOf("export const edited = 1;\n"));
 }, 60_000);
 
-test("a new file where the project has one of its own is refused before anything is written", () => {
-  const { dir, registry } = installed({});
+test("a new file where the project has one of its own is refused before anything is written", async () => {
+  const { dir, registry } = await installed({});
   writeFileSync(join(dir, own("new.ts")), "// the user's own\n");
   publish(registry, "tool-fake", "0.2.0", { "new.ts": "export const fresh = 1;\n" });
   const before = snapshot(dir);
-  const run = pikit(["upgrade", "--yes"], dir);
+  const run = await pikit(["upgrade", "--yes"], dir);
   expect(run.code).toBe(1);
   expect(run.err).toContain(`these files exist and differ from tool-fake's (pass --force to overwrite them):\n  ${own("new.ts")}`);
   expect(snapshot(dir)).toEqual(before);
 }, 60_000);
 
-test("a file the user deleted is not restored: it is named, and recorded as the new version ships it", () => {
-  const { dir, registry } = installed({ "lines.ts": lines() });
+test("a file the user deleted is not restored: it is named, and recorded as the new version ships it", async () => {
+  const { dir, registry } = await installed({ "lines.ts": lines() });
   unlinkSync(join(dir, own("lines.ts")));
   publish(registry, "tool-fake", "0.2.0", { "lines.ts": lines({ 1: "export const line1 = 'theirs';" }) });
-  const run = pikit(["upgrade", "--yes"], dir);
+  const run = await pikit(["upgrade", "--yes"], dir);
   expect(run.out).toContain(`not restored, deleted by you (\`pikit add --force\` restores it): ${own("lines.ts")}`);
   expect(run.code).toBe(0);
   expect(existsSync(join(dir, own("lines.ts")))).toBe(false);
   expect(record(dir).files[own("lines.ts")].hash).toBe(hashOf(lines({ 1: "export const line1 = 'theirs';" })));
-  expect(pikit(["doctor"], dir).out).toContain(`deleted: ${own("lines.ts")} (tool-fake)`);
+  expect((await pikit(["doctor"], dir)).out).toContain(`deleted: ${own("lines.ts")} (tool-fake)`);
 }, 60_000);
 
-test("the environment block follows the new version; a dependency it adds is added, one it drops is taken out", () => {
+test("the environment block follows the new version; a dependency it adds is added, one it drops is taken out", async () => {
   const pkg = temp();
   writeFileSync(join(pkg, "package.json"), '{ "name": "left-pad", "version": "1.0.0", "main": "index.js" }\n');
   writeFileSync(join(pkg, "index.js"), "module.exports = 1;\n");
   const variable = (name: string) => ({ name, description: `${name}.`, required: false, secret: false });
-  const { dir, registry } = installed({}, { environment: [variable("FAKE_OLD")] });
+  const { dir, registry } = await installed({}, { environment: [variable("FAKE_OLD")] });
   expect(read(dir, ".env.example")).toContain("# tool-fake\n# FAKE_OLD. (optional)\nFAKE_OLD=\n");
 
   publish(registry, "tool-fake", "0.2.0", {}, { environment: [variable("FAKE_NEW")], dependencies: { "left-pad": `file:${pkg}` } });
-  const run = pikit(["upgrade", "--yes"], dir);
+  const run = await pikit(["upgrade", "--yes"], dir);
   expect(run.out).toContain("new environment variables: FAKE_NEW");
   expect(run.out).toContain("environment variables it no longer reads: FAKE_OLD");
   expect(run.out).toContain(`npm, new: left-pad@file:${pkg}`);
@@ -221,49 +228,49 @@ test("the environment block follows the new version; a dependency it adds is add
   expect(existsSync(join(dir, "node_modules", "left-pad"))).toBe(true);
 
   publish(registry, "tool-fake", "0.3.0", {}, { environment: [variable("FAKE_NEW")] });
-  const dropped = pikit(["upgrade", "--yes"], dir);
+  const dropped = await pikit(["upgrade", "--yes"], dir);
   expect(dropped.out).toContain("npm, taken out unless something else needs it: left-pad");
   expect(dropped.code).toBe(0);
   expect(JSON.parse(read(dir, "package.json")).dependencies).toEqual({});
   expect(record(dir).addedDependencies).toEqual([]);
 }, 60_000);
 
-test("a version this CLI's contracts do not satisfy is refused before any write; --force upgrades to it", () => {
-  const { dir, registry } = installed({});
+test("a version this CLI's contracts do not satisfy is refused before any write; --force upgrades to it", async () => {
+  const { dir, registry } = await installed({});
   publish(registry, "tool-fake", "0.2.0", { "index.ts": INDEX("tool-fake", "// 0.2.0") }, { requires: { pikit: "0.0.0", contracts: "^9.0.0", capabilities: [] } });
   const before = snapshot(dir);
-  const refused = pikit(["upgrade", "--yes"], dir);
+  const refused = await pikit(["upgrade", "--yes"], dir);
   expect(refused.code).toBe(1);
   expect(refused.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.0");
   expect(snapshot(dir)).toEqual(before);
 
-  const forced = pikit(["upgrade", "--yes", "--force"], dir);
+  const forced = await pikit(["upgrade", "--yes", "--force"], dir);
   expect(forced.err).toContain("tool-fake requires @pikit/contracts ^9.0.0; this CLI vendors 0.0.0; --force: going ahead");
   expect(forced.code).toBe(0);
   expect(record(dir).requires).toEqual({ pikit: "0.0.0", contracts: "^9.0.0" });
   expect(read(dir, own("index.ts"))).toBe(INDEX("tool-fake", "// 0.2.0"));
 }, 60_000);
 
-test("an upgrade whose install fails puts everything back: files, merges, bases, pikit.json, package.json", () => {
-  const { dir, registry } = installed({ "lines.ts": lines(), "old.ts": "export const old = 1;\n" });
+test("an upgrade whose install fails puts everything back: files, merges, bases, pikit.json, package.json", async () => {
+  const { dir, registry } = await installed({ "lines.ts": lines(), "old.ts": "export const old = 1;\n" });
   writeFileSync(join(dir, own("lines.ts")), lines({ 2: "export const line2 = 'mine';" }));
   // Nothing resolves: `bun install` fails at once, after every file is written.
   writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
   publish(registry, "tool-fake", "0.2.0", { "index.ts": INDEX("tool-fake", "// 0.2.0"), "lines.ts": lines({ 9: "x" }), "new.ts": "" }, { dependencies: { "left-pad": "1.3.0" } });
   const before = snapshot(dir);
-  const run = pikit(["upgrade", "--yes"], dir);
+  const run = await pikit(["upgrade", "--yes"], dir);
   expect(run.err).toContain("`bun install` failed");
   expect(run.err).toContain("nothing was upgraded");
   expect(run.code).toBe(1);
   expect(snapshot(dir)).toEqual(before);
 }, 120_000);
 
-test("--dry-run says what it would do and writes nothing", () => {
-  const { dir, registry } = installed({ "lines.ts": lines() });
+test("--dry-run says what it would do and writes nothing", async () => {
+  const { dir, registry } = await installed({ "lines.ts": lines() });
   writeFileSync(join(dir, own("lines.ts")), lines({ 5: "export const line5 = 'mine';" }));
   publish(registry, "tool-fake", "0.2.0", { "index.ts": INDEX("tool-fake", "// 0.2.0"), "lines.ts": lines({ 5: "export const line5 = 'theirs';" }) });
   const before = snapshot(dir);
-  const run = pikit(["upgrade", "--dry-run"], dir);
+  const run = await pikit(["upgrade", "--dry-run"], dir);
   expect(run.out).toContain("tool-fake 0.1.0 → 0.2.0");
   expect(run.out).toContain(`updated: ${own("index.ts")}`);
   expect(run.out).toContain(`conflicts with your edits: ${own("lines.ts")}`);
@@ -271,24 +278,24 @@ test("--dry-run says what it would do and writes nothing", () => {
   expect(run.code).toBe(0);
   expect(snapshot(dir)).toEqual(before);
   // Without --yes nor a terminal, the real one asks, and writes nothing.
-  const asked = pikit(["upgrade"], dir);
+  const asked = await pikit(["upgrade"], dir);
   expect(asked.code).toBe(1);
   expect(asked.err).toContain("pass --yes");
   expect(snapshot(dir)).toEqual(before);
 }, 60_000);
 
-test("named components are the only ones upgraded; an unknown name is refused", () => {
-  const { dir, registry } = installed({});
+test("named components are the only ones upgraded; an unknown name is refused", async () => {
+  const { dir, registry } = await installed({});
   publish(registry, "tool-other", "0.1.0", {});
-  expect(pikit(["add", "tool-other", "--registry", registry, "--yes"], dir).code).toBe(0);
+  expect((await pikit(["add", "tool-other", "--registry", registry, "--yes"], dir)).code).toBe(0);
   publish(registry, "tool-fake", "0.2.0", { "index.ts": INDEX("tool-fake", "// 0.2.0") });
   publish(registry, "tool-other", "0.2.0", { "index.ts": INDEX("tool-other", "// 0.2.0") });
 
-  const unknown = pikit(["upgrade", "tool-nope", "--yes"], dir);
+  const unknown = await pikit(["upgrade", "tool-nope", "--yes"], dir);
   expect(unknown.code).toBe(1);
   expect(unknown.err).toContain("not installed: tool-nope");
 
-  const run = pikit(["upgrade", "tool-other", "--yes"], dir);
+  const run = await pikit(["upgrade", "tool-other", "--yes"], dir);
   expect(run.out).toContain("tool-other 0.1.0 → 0.2.0");
   expect(run.out).not.toContain("tool-fake 0.1.0");
   expect(run.code).toBe(0);
