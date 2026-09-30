@@ -14,9 +14,11 @@ reach each other: the agency case of IDEA.md.
 ## How it fits pikit
 - Routing is not isolation. Today every conversation of an app shares one process, one
   `storage.sql` database and one `execution`.
-- `tenant` enters `InboundMessage` and `RouteDecision` with the component that produces it, and the
-  conversation key (`tenant:channel:conversationId`, `ConversationRef.key` in
-  `packages/contracts/src/agent.ts`).
+- `tenant` enters `InboundMessage` and `RouteDecision` with the component that produces it. The
+  conversation key has no tenant part today: `ConversationRef.key`
+  (`packages/contracts/src/agent.ts`) is an opaque address its channel makes and alone reads back
+  (`<instance>:<chat id>`). How a tenant reaches the key while answers still reach their chat, on a
+  server and on Cloudflare, is [conversation routing](conversation-routing.md).
 - A `tenant-isolation` component maps tenants to separate Durable Object namespaces or database
   files; execution per tenant is [sandboxed execution](sandboxed-execution.md); secrets per tenant
   are a `secrets` provider's.
