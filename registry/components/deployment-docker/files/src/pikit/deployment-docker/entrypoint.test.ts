@@ -92,8 +92,11 @@ for (const [mode, start] of [
   test(`${start}, with a rollback that hangs, still exits 1 within both deadlines (K2)`, async () => {
     const started = Date.now();
     const child = launch([FIXTURE, mode]);
+    // Without the bound, the fixture's timer keeps the child alive forever: kill it, not leak it.
+    const killer = setTimeout(() => child.kill("SIGKILL"), 4_000);
 
     expect(await child.exited).toBe(1);
+    clearTimeout(killer);
     expect(Date.now() - started).toBeLessThan(4_000);
     expect(messages(child)).toContain("pikit: the app failed to start");
     expect(messages(child)).toContain("pikit: the failed start did not roll back cleanly");
