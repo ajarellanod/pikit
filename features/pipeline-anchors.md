@@ -18,7 +18,8 @@ which conversation a message goes to, what a run is configured with, what an ans
 - `conversation.resolve` (`{ decision, conversation? }`) lands in `admitInbound` when a component
   needs to change which conversation a message goes to (the former SPEC §5, M1 decision).
 - `agent.prepare` runs after the agent's `prepare` in Pi's `before_run` and patches its `TurnConfig`.
-- `outbound.prepare` transforms an `OutboundMessage` before it is enqueued.
+- `outbound.prepare` transforms an `OutboundMessage` as it leaves its channel: enqueued, sent
+  directly, or returned in an HTTP response. Where it runs: [answer delivery](outbound-delivery.md).
 - Each is a contract in `@pikit/contracts` (SPEC §3): its value type is decided with two real
   parties, never as a `[planned]` line alone.
 - `agent.state` for components outside a run (an admin route, a scheduler): a capability, added with
