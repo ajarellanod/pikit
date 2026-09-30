@@ -102,6 +102,20 @@ function skipRegex(source: string, start: number): number {
   return i;
 }
 
+/**
+ * The kit's exports that may use Node, as specifiers (SPEC §4). Every other export of a kit package
+ * runs on every target: `scripts/boundaries.ts` holds the packages to that, and `registry validate`
+ * (`checks.ts`) holds a component importing one of these to targets ["server"], as it does `node:*`.
+ */
+export const SERVER_ONLY_EXPORTS: readonly string[] = [
+  // The JSONL store and the local execution environment; the test fixtures that spawn Pi workers.
+  "@pikit/pi-adapter/node",
+  "@pikit/pi-adapter/testing",
+];
+
+/** Pi's own Node subpath: fine behind a server-only export, never in a neutral one. */
+export const PI_NODE = "@earendil-works/pi-agent-core/node";
+
 /** `@scope/pkg/sub` → `@scope/pkg`; `pkg/sub` → `pkg`. */
 export function packageName(specifier: string): string {
   const parts = specifier.split("/");

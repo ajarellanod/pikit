@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { capabilityEntry } from "./capabilities.ts";
-import { isRelative, packageName, runtimeScheme, scanImports } from "./imports.ts";
+import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports } from "./imports.ts";
 import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 
@@ -154,6 +154,10 @@ export function checkImports(componentDir: string, name: string, targets: readon
       }
       if (specifier.startsWith("@earendil-works/")) {
         problems.push(`${at} imports "${specifier}": only @pikit/pi-adapter imports Pi`);
+      }
+      // A kit export that reaches Node (`@pikit/pi-adapter/node`) is Node by another name.
+      if (SERVER_ONLY_EXPORTS.includes(specifier) && !serverOnly && !forTests(file) && !forMachine(file, name)) {
+        problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: a server-only kit export needs targets ["server"] (SPEC §4)`);
       }
       const pkg = packageName(specifier);
       if (!KIT_PACKAGES.has(pkg)) packages.add(pkg);

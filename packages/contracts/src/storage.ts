@@ -13,8 +13,13 @@
  *   statements. A store that is sync underneath (SQLite, Durable Object SQL) may then run it as one
  *   step, and a stalled transaction never holds the database. Inside `work`, use `tx`: calling the
  *   database itself waits for the transaction to end, which never happens.
- * - The SQL dialect is the common subset of SQLite and Postgres a component chooses to use; this
- *   contract does not translate it.
+ * - **The dialect is not translated.** Every provider accepts the subset SQLite and Postgres share,
+ *   which the conformance suite (`@pikit/contracts/testing`) is written in: `?` placeholders,
+ *   `INTEGER` for 32-bit integers and `BIGINT` past them (epoch milliseconds: Postgres' `INTEGER` is
+ *   32-bit), `REAL`, `TEXT`, `BYTEA` for bytes (Postgres has no `BLOB`; SQLite keeps bytes as they
+ *   are in any column of a table that is not `STRICT`), and no `AUTOINCREMENT`. A consumer that
+ *   keeps to it runs on any provider; one that uses a dialect's own SQL (SQLite's
+ *   `AUTOINCREMENT` or rowid order) says so in its header, and porting it changes that file.
  */
 
 import type { JsonValue } from "./json.ts";
