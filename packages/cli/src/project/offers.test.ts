@@ -120,6 +120,14 @@ test("a provider is offered in the App that misses it: one that goes only in the
   ]);
 });
 
+test("with a second provider, nothing is offered for it (the user's choice); the presets named their storage, and bring the rest over it", () => {
+  const sqlite = registry.manifest("storage-sqlite");
+  const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
+  expect(offeredProviders(two, ["channel-http"]).map((o) => o.component)).toEqual(["submissions-sql"]);
+  const telegram = registry.preset("telegram");
+  expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["submissions-sql", "outbound-durable", "storage-kv-sql"]);
+});
+
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {
   // The preset names its storage (`presets/http.yaml`): the runtime brings only its record of submissions.
   const http = registry.preset("http", []);

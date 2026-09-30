@@ -9,7 +9,10 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
-import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, readPreset } from "../project/registry-source.ts";
+import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp } from "../project/apps.ts";
+import { withOffers } from "../project/offers.ts";
+import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, type Registry, readPreset } from "../project/registry-source.ts";
+import { capabilityEntry } from "./capabilities.ts";
 import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
@@ -226,6 +229,11 @@ export function checkSchemaFiles(root: string): string[] {
 /**
  * Every preset resolves: its components exist, once each; an alias extends a base and chooses what
  * that base lets it choose; and every answer to a question resolves too and has a `title` to show.
+ *
+ * And composes, as `pikit new` would make it: on each target all its components run on (one at
+ * least), with what they bring (`withOffers`), and each answer on each of those targets it runs on
+ * (the answers `pikit new` offers there). An offer needs the registry's only provider, so a preset
+ * that leaned on one breaks when a second provider lands: this says so before a project is written.
  */
 export function checkPresets(root: string): string[] {
   const dir = join(root, "presets");
@@ -239,6 +247,12 @@ export function checkPresets(root: string): string[] {
       const components = registry.preset(name);
       for (const component of components) registry.manifest(component);
       if (new Set(components).size !== components.length) report("lists a component twice");
+      const targets = TARGETS.filter((target) => components.every((c) => registry.manifest(c).targets.includes(target)));
+      if (targets.length === 0) {
+        const not = (target: string) => components.filter((c) => !registry.manifest(c).targets.includes(target));
+        report(`no target runs all its components (${TARGETS.map((t) => `not on ${t}: ${not(t).join(", ")}`).join("; ")})`);
+      }
+      for (const target of targets) compositionProblems(registry, components, target).forEach((p) => report(`on ${target}, ${p}`));
       // An alias asks its base's questions: they are checked once, with the base.
       for (const slot of isAlias ? [] : registry.slots(name)) {
         for (const option of slot.options) {
@@ -248,11 +262,47 @@ export function checkPresets(root: string): string[] {
           }
         }
       }
+      for (const target of isAlias ? [] : targets) {
+        for (const slot of registry.slots(name, [target])) {
+          for (const option of slot.options.filter((o) => o.name !== slot.default)) {
+            const chosen = registry.preset(name, [option.name]);
+            compositionProblems(registry, chosen, target).forEach((p) => report(`with ${option.name}, on ${target}, ${p}`));
+          }
+        }
+      }
     } catch (error) {
       report(error instanceof Error ? error.message : String(error));
     }
   }
   return [...problems];
+}
+
+/**
+ * Why `components`, with what they bring, would not compose on `target`, per App (SPEC C1): a
+ * capability one requires that nothing in its App provides (the project's own, `agent.definition`,
+ * aside), and a single capability two components provide there. `pikit doctor` judges the real app;
+ * this reads the manifests, before any project exists.
+ */
+function compositionProblems(registry: Registry, components: readonly string[], target: string): string[] {
+  const targets = [target];
+  const providers: Record<AppName, Map<string, string[]>> = { default: new Map(), worker: new Map() };
+  const required: [AppName, string, string][] = [];
+  for (const name of withOffers(registry, components, targets).order) {
+    for (const [app, half] of declaredByApp(registry.manifest(name), targets)) {
+      for (const capability of half.provides) providers[app].set(capability, [...(providers[app].get(capability) ?? []), name]);
+      for (const capability of half.requires) required.push([app, capability, name]);
+    }
+  }
+  const where = (app: AppName) => (hasWorkerApp(targets) ? ` in ${APP_LABEL[app]}` : "");
+  const problems = required
+    .filter(([app, capability]) => !providers[app].has(capability) && capabilityEntry(capability)?.providedBy !== "project")
+    .map(([app, capability, name]) => `${name} requires "${capability}"${where(app)}, which nothing provides`);
+  for (const app of ["default", "worker"] as const) {
+    for (const [capability, names] of providers[app]) {
+      if (names.length > 1 && capabilityEntry(capability)?.mode === "single") problems.push(`"${capability}" takes one provider${where(app)}, and ${names.join(" and ")} each provide it`);
+    }
+  }
+  return problems;
 }
 
 /** Every component's manifest, by listing `components/`. A missing one is skipped; invalid JSON throws. */
