@@ -63,8 +63,9 @@ export function validateConfig(
     const problems = Value.Errors(schema, defaulted).map((e) => `${e.instancePath || "/"}: ${e.message}`);
     throw new Error(`invalid config:\n  ${problems.join("\n  ")}`);
   }
-  // `ctx.config` is shared by every component: a mutation would be a hidden coupling between
-  // them (and leak into the next `create()`). Frozen, it throws at the line that tries.
+  // Shared: each component's part goes to its setup on every `create()`, and the whole object to
+  // the host and `describe()`. A mutation would be a hidden coupling (and leak into the next
+  // `create()`). Frozen, it throws at the line that tries.
   return deepFreeze(defaulted);
 }
 

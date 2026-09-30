@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import Type from "typebox";
 import { BACKGROUND_CONTEXT, createContextKey, withAbortSignal, withContextValue } from "./context.ts";
 import { silentLogger } from "./logger.ts";
-import { defineComponent, defineApp, type AppOptions, type Pikit } from "./app.ts";
+import { defineComponent, defineApp, type AppContext, type AppOptions, type Pikit } from "./app.ts";
 import { Halt } from "./pipeline.ts";
 
 declare module "@pikit/core" {
@@ -753,7 +753,7 @@ test("setup only registers: pikit has no emit, run, derive or invocation context
   });
   await defineApp(quiet({ components: [probe] })).create();
   expect(keys.sort()).toEqual(
-    ["target", "config", "logger", "clock", "on", "pipeline", "provide", "provideKeyed", "use", "useOptional", "useKeyed", "halt"].sort(),
+    ["target", "logger", "clock", "on", "pipeline", "provide", "provideKeyed", "use", "useOptional", "useKeyed", "halt"].sort(),
   );
 
   // Type level too: doing work in setup does not compile.
@@ -788,7 +788,7 @@ test("config is validated and defaulted per component; typos and bad values are 
   await def.create();
   expect(received).toEqual({ port: 8080, path: "/hook" });
 
-  // Shared by every component, so frozen: a mutation throws where it happens.
+  // Shared with the host and every create(), so frozen: a mutation throws where it happens.
   expect(() => {
     (received as { port: number }).port = 1;
   }).toThrow(TypeError);
@@ -800,6 +800,36 @@ test("config is validated and defaulted per component; typos and bad values are 
     "/channel-http/path");
   expect(() => defineApp(quiet({ components: [http], config: { "chanel-http": {} } }))).toThrow("invalid config");
   expect(() => defineApp(quiet({ components: [http] }))).toThrow("/channel-http"); // path is required
+});
+
+test("a component sees only its own config: neither pikit nor ctx carries the app's", async () => {
+  const seen: { pikit?: boolean; ctx?: boolean } = {};
+  const probe = defineComponent({
+    name: "probe",
+    config: Type.Object({ mine: Type.String() }),
+    setup(pikit) {
+      seen.pikit = "config" in pikit;
+      return {
+        start(ctx) {
+          seen.ctx = "config" in ctx;
+        },
+      };
+    },
+  });
+  const app = await defineApp(quiet({ components: [probe], config: { probe: { mine: "x" } } })).create();
+  await app.start();
+  expect(seen).toEqual({ pikit: false, ctx: false });
+  expect("config" in app.context()).toBe(false);
+  await app.stop();
+
+  // Type level too: another component's config would couple the two outside the graph (P4).
+  const read = (pikit: Pikit, ctx: AppContext) => {
+    // @ts-expect-error: a component's config is setup's second argument
+    void pikit.config;
+    // @ts-expect-error: handlers get no app config either
+    void ctx.config;
+  };
+  void read;
 });
 
 test("describe reflects selection and resolved pipeline chains; halt is emitted as pipeline.halted", async () => {
