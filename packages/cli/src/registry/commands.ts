@@ -9,6 +9,7 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
+import { DEPLOYMENT_EXPORTS } from "../project/deployment-module.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, readPreset } from "../project/registry-source.ts";
 import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
@@ -102,6 +103,43 @@ async function checkHooks(componentDir: string, name: string, manifest: Manifest
     }
   }
   return problems;
+}
+
+/**
+ * A `deployment-*` component's `index.ts` exports the functions the CLI calls (`DEPLOYMENT_EXPORTS`):
+ * each required one, and each one it exports, as a function; and nothing one letter or a case away
+ * from one of them (`Status`, `restar`), which the CLI would never call.
+ */
+async function checkDeploymentExports(componentDir: string, name: string): Promise<string[]> {
+  if (!name.startsWith("deployment-")) return [];
+  let module: Record<string, unknown>;
+  try {
+    module = (await import(pathToFileURL(entryOf(componentDir, name)).href)) as Record<string, unknown>;
+  } catch (error) {
+    return [`index.ts could not be loaded: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  const problems: string[] = [];
+  const commands = Object.keys(DEPLOYMENT_EXPORTS);
+  for (const [command, need] of Object.entries(DEPLOYMENT_EXPORTS)) {
+    if (module[command] === undefined) {
+      if (need === "required") problems.push(`index.ts does not export ${command}(), which the CLI calls on every deployment component`);
+    } else if (typeof module[command] !== "function") problems.push(`index.ts exports ${command}, but not as a function`);
+  }
+  for (const exported of Object.keys(module)) {
+    const meant = commands.find((command) => command !== exported && oneEditApart(exported.toLowerCase(), command));
+    if (meant !== undefined) problems.push(`index.ts exports ${exported}: the CLI calls ${meant}, never ${exported}`);
+  }
+  return problems;
+}
+
+/** At most one letter inserted, deleted or replaced turns `a` into `b`. */
+function oneEditApart(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let start = 0;
+  while (start < a.length && a[start] === b[start]) start++;
+  let end = 0;
+  while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
+  return a.length - start - end <= 1 && b.length - start - end <= 1;
 }
 
 /** Each of `generated` is a file of the component's own directory, not a test file. */
@@ -200,6 +238,7 @@ export async function validate(root: string, options: { coreVersion?: string } =
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
     }
     (await checkHooks(dir, name, manifest)).forEach(report);
+    (await checkDeploymentExports(dir, name)).forEach(report);
     checkGeneratedFiles(dir, name, manifest).forEach(report);
   }
 

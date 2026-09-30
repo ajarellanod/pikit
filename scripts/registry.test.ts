@@ -177,9 +177,12 @@ test("imports: node:* only when targets are exactly [\"server\"]; tests are exem
   expect(found).not.toContain("node:fs");
 });
 
+/** A deployment component's `index.ts` exporting these functions (the CLI calls them, SPEC §4). */
+const deploymentIndex = (...names: string[]) => names.map((name) => `export async function ${name}(): Promise<void> {}\n`).join("");
+const DEPLOYMENT_INDEX = deploymentIndex("up", "down", "logs", "status");
+
 test("imports: a deployment component's commands.ts runs on the deploying machine, so it may import node:* on any target (SPEC §4)", async () => {
-  const index = `export async function up(): Promise<void> {}\n`;
-  const f = await fixture({ name: "deployment-sample", index });
+  const f = await fixture({ name: "deployment-sample", index: DEPLOYMENT_INDEX });
   f.writeManifest({ ...f.manifest(), targets: ["cloudflare"] });
   writeFileSync(join(f.own, "commands.ts"), `import "node:child_process";\n`);
   await generate(f.root);
@@ -263,7 +266,7 @@ test("files: only files/src maps as a directory; a file outside src is listed on
 
 test("a component with no default export is not an app component: it provides and uses nothing", async () => {
   // Module imports are cached per path, so the file is written before the first generate.
-  const f = await fixture({ name: "deployment-sample", index: 'export const run = () => "runs the app instead of running inside it";\n' });
+  const f = await fixture({ name: "deployment-sample", index: DEPLOYMENT_INDEX });
 
   expect(f.manifest()).toMatchObject({ provides: [], requires: { capabilities: [] }, optional: { capabilities: [] } });
   expect(await problems(f)).toBe("");
@@ -360,6 +363,28 @@ test("hooks: doctor and beforeDeploy, each a file exporting a function of the ho
   expect(found).toContain('hooks.beforeDeploy "doctor.ts" does not export a function beforeDeploy');
   f.writeManifest({ ...f.manifest(), hooks: { onStart: "doctor.ts" } as never });
   expect(await problems(f)).toContain("component.json /hooks/onStart:");
+});
+
+test("deployment: index.ts exports up, down, logs and status as functions, restart, dev and exec when it has them, and no near miss", async () => {
+  const plain = await fixture({ name: "deployment-sample", index: DEPLOYMENT_INDEX });
+  expect(await problems(plain)).toBe("");
+  const full = await fixture({ name: "deployment-sample", index: deploymentIndex("up", "down", "restart", "logs", "status", "dev", "exec", "login") });
+  expect(await problems(full)).toBe("");
+
+  const missing = await fixture({ name: "deployment-sample", index: deploymentIndex("up", "down", "logs") });
+  expect(await problems(missing)).toContain("index.ts does not export status(), which the CLI calls on every deployment component");
+  const misspelled = await fixture({
+    name: "deployment-sample",
+    index: `${deploymentIndex("up", "down", "logs", "status", "restar", "Dev")}export const exec = 1;\n`,
+  });
+  const found = await problems(misspelled);
+  expect(found).toContain("index.ts exports restar: the CLI calls restart, never restar");
+  expect(found).toContain("index.ts exports Dev: the CLI calls dev, never Dev");
+  expect(found).toContain("index.ts exports exec, but not as a function");
+  expect(found).not.toContain("does not export");
+
+  // Only a deployment component: any other kind exports what it likes.
+  expect(await problems(await fixture({ name: "tool-sample", index: deploymentIndex("up") }))).toBe("");
 });
 
 test("generated: files of the component's own directory that a hook rewrites; not a missing file nor a test file", async () => {
