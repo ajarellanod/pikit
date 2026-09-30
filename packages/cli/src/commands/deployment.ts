@@ -3,8 +3,9 @@
  *
  * The CLI only delegates `[decision]`: `up`, `down`, `restart`, `logs` and `status` are the functions
  * of the same names that the installed `deployment-*` component exports from
- * `src/pikit/<name>/index.ts`. The CLI holds no Docker or systemd knowledge; changing how a project
- * is deployed is editing or swapping that component.
+ * `src/pikit/<name>/index.ts` (the protocol: `DeploymentModule`, in `project/deployment-module.ts`).
+ * The CLI holds no Docker or systemd knowledge; changing how a project is deployed is editing or
+ * swapping that component.
  * That component's `up` also runs the installed components' deploy hooks (`hooks.beforeDeploy` before
  * it builds, `hooks.afterDeploy` once the new version answers, as `pikit.json` records them); the CLI
  * runs only their `hooks.doctor`, through `pikit doctor`, first.
@@ -16,16 +17,20 @@
 
 import { existsSync } from "node:fs";
 import { join } from "node:path";
-import { deploymentComponent, deploymentExec, loadDeployment } from "../project/deployment-module.ts";
+import {
+  DEPLOYMENT_COMMANDS,
+  type DeploymentCommand,
+  type DeploymentStatus,
+  deploymentComponent,
+  deploymentExec,
+  loadDeployment,
+} from "../project/deployment-module.ts";
 import { checkModelCredentials } from "../project/model-credentials.ts";
 import { projectEnv } from "../project/run.ts";
 import { CliError, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
 
-export { deploymentComponent };
-
-export const DEPLOYMENT_COMMANDS = ["up", "down", "restart", "logs", "status"] as const;
-export type DeploymentCommand = (typeof DEPLOYMENT_COMMANDS)[number];
+export { DEPLOYMENT_COMMANDS, type DeploymentCommand, deploymentComponent };
 
 /**
  * `up` and `dev` start the app: refuse before that when doctor would. `up` leaves the check of a
@@ -86,9 +91,18 @@ function deployedAt(result: unknown): string {
   return typeof deployed.version === "string" && typeof deployed.url === "string" ? `: version ${deployed.version} answers at ${deployed.url}` : "";
 }
 
-/** A deployment's status: containers (Docker) or deployments (Cloudflare), then its probes. */
-function printStatus(result: unknown): void {
-  const status = result as {
+/**
+ * A deployment's status: its `lines` as they are (`DeploymentStatus`). The two shapes from before it,
+ * containers (Docker) or deployments (Cloudflare) then their probes, are still printed for the copies
+ * in projects (P6); any other result is printed as JSON, not guessed at.
+ */
+export function printStatus(result: unknown): void {
+  const lines = (result as Partial<DeploymentStatus> | undefined)?.lines;
+  if (Array.isArray(lines)) {
+    for (const line of lines) log.info(String(line));
+    return;
+  }
+  const status = (result ?? {}) as {
     containers?: { name: string; state: string; health: string; status: string }[];
     deployments?: { id: string; created: string; message?: string; versions: { id: string; percentage: number }[] }[];
     url?: string;
@@ -106,8 +120,12 @@ function printStatus(result: unknown): void {
     log.info(`GET /health${at}: ${String(status.health)}${typeof status.version === "string" ? ` from version ${status.version}` : ""}`);
     return;
   }
-  for (const c of status.containers ?? []) log.info(`${c.name}: ${c.state}${c.health ? ` (${c.health})` : ""} · ${c.status}`);
-  if ((status.containers ?? []).length === 0) log.info("no containers");
+  if (!Array.isArray(status.containers)) {
+    log.info(JSON.stringify(result, null, 2) ?? String(result));
+    return;
+  }
+  for (const c of status.containers) log.info(`${c.name}: ${c.state}${c.health ? ` (${c.health})` : ""} · ${c.status}`);
+  if (status.containers.length === 0) log.info("no containers");
   log.info(`GET /health: ${String(status.health)}\nGET /ready:  ${String(status.ready)}`);
 }
 
