@@ -4,7 +4,8 @@
  *
  * It is the install record, so it keeps what `pikit remove` and `pikit doctor` need later without
  * the registry at hand: the npm (dev) dependencies and environment variables the component declared when
- * it was installed. Whether a file is modified is not stored: it is computed by comparing its hash,
+ * it was installed, and the kit versions it accepts (`requires`), which `add` checks before it changes
+ * the project's kit. Whether a file is modified is not stored: it is computed by comparing its hash,
  * so it can never go stale.
  *
  * Version 2 records registries by what resolves on any machine (`registry-location.ts`). Version 1
@@ -32,6 +33,11 @@ export interface InstalledComponent {
   dependencies: Record<string, string>;
   /** The npm dev dependencies its manifest declared (package → version); absent when it declared none. */
   devDependencies?: Record<string, string>;
+  /**
+   * Its manifest's `requires.pikit` and `requires.contracts`: the @pikit/core and @pikit/contracts
+   * versions it works with. Absent in a record made before they were recorded (`kitRanges`).
+   */
+  requires?: { pikit: string; contracts?: string };
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
   /**
@@ -132,6 +138,17 @@ export function modifiedFiles(projectDir: string, component: InstalledComponent)
   return Object.entries(component.files)
     .filter(([file, { hash }]) => !generated.has(file) && existsSync(join(projectDir, file)) && hashFile(join(projectDir, file)) !== hash)
     .map(([file]) => file);
+}
+
+/**
+ * The @pikit/core and @pikit/contracts ranges an installed component accepts, as recorded. A record
+ * made before `requires` was gives the @pikit/contracts version its manifest pinned in `dependencies`
+ * (written against that one), and no core range: that one was not recorded.
+ */
+export function kitRanges(component: InstalledComponent): { pikit?: string; contracts?: string } {
+  if (component.requires !== undefined) return component.requires;
+  const contracts = component.dependencies["@pikit/contracts"];
+  return contracts === undefined ? {} : { contracts };
 }
 
 /** Installed files that are gone. */

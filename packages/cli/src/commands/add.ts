@@ -3,8 +3,9 @@
  *
  *   1. resolve the registry (`builtin`, or a local path) and the component's version and commit
  *   2. read the component's package
- *   3. check its targets and `requires.pikit`, and that this CLI's kit is not older than the
- *      project's (`checkKit`); warn for each required capability nothing provides
+ *   3. check its targets, `requires.pikit` and `requires.contracts`, and that this CLI's kit is not
+ *      older than the project's nor outside what an installed component accepts (`checkKit`); warn for
+ *      each required capability nothing provides
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies
  *      and dev dependencies, environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
@@ -13,7 +14,7 @@
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not);
  *      on Cloudflare, also in the Worker's App when its `component.json`'s `apps.worker` says so (C1)
  *   9. append its variables to `.env.example`
- *  10. record the registry, version, commit, file hashes and hooks in `pikit.json`, and keep each file
+ *  10. record the registry, version, commit, kit ranges, file hashes and hooks in `pikit.json`, and keep each file
  *      as installed, its base, in `pikit-bases/` (`bases.ts`)
  *  11. `pikit doctor`
  *
@@ -25,14 +26,22 @@
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { stripComments } from "../registry/imports.ts";
-import { coreVersion } from "../registry/commands.ts";
+import { contractsVersion, coreVersion } from "../registry/commands.ts";
 import { BOTH_APPS, HOOKS, type Manifest } from "../registry/manifest.ts";
 import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { basePath, unreferencedBases } from "../project/bases.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
 import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-file.ts";
 import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
-import { hashFile, type InstalledComponent, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import {
+  hashFile,
+  type InstalledComponent,
+  kitRanges,
+  PIKIT_JSON,
+  type ProjectManifest,
+  readProjectManifest,
+  writeProjectManifest,
+} from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import { type Offer, offeredProviders } from "../project/offers.ts";
@@ -237,6 +246,8 @@ function planInstall(
     registry: registryName,
     version: manifest.version,
     ...(registry.commit !== undefined && { commit: registry.commit }),
+    // The kit it accepts: a later add checks it before it changes the project's kit (`checkKit`).
+    requires: { pikit: manifest.requires.pikit, ...(manifest.requires.contracts !== undefined && { contracts: manifest.requires.contracts }) },
     files: hashes,
     dependencies: manifest.dependencies,
     ...(manifest.devDependencies !== undefined && { devDependencies: manifest.devDependencies }),
@@ -268,7 +279,10 @@ function workerWiring(name: string, manifest: Manifest, targets: readonly string
  * The kit `add` will point the project at is this CLI's (`refreshKit`, in the apply phase). Refused,
  * before any write, when that replaces a newer kit: the components installed with it may need what
  * it has. `--force` replaces it anyway. When the order cannot be told, it is said, and it goes ahead.
- * The draft records the kit the project will have.
+ * Refused too, unless `--force`, when an installed component does not accept this CLI's core or
+ * contracts (`requires` in pikit.json, `kitRanges`): the contracts stay 0.x on their own schedule (SPEC
+ * K8), and nothing else would check the components already vendored against them. The draft records
+ * the kit the project will have.
  */
 function checkKit(projectDir: string, project: ProjectManifest, force: boolean): void {
   const { vendored, stale } = staleKit(projectDir);
@@ -291,6 +305,16 @@ function checkKit(projectDir: string, project: ProjectManifest, force: boolean):
     log.warn(`${what}; --force: replacing it with this older kit`);
   } else if (order.verdict === "unknown") {
     log.warn(`the project's kit is replaced with this CLI's (${cli ?? "not in Git"}), which may be older: ${order.why}`);
+  }
+  const refused = incompatibleInstalled(project);
+  if (refused.length > 0) {
+    const what = `adding a component replaces the project's kit with this CLI's (@pikit/core ${coreVersion()}, @pikit/contracts ${contractsVersion()}), which these installed components do not accept:\n  ${refused.join("\n  ")}`;
+    if (!force) {
+      throw new CliError(
+        `${what}\nUse a pikit whose kit they accept, or pass --force to replace the kit anyway (then check them with \`pikit doctor\` and a type-check).`,
+      );
+    }
+    log.warn(`${what}\n--force: replacing it anyway`);
   }
   if (cli === undefined) delete project.kit;
   else project.kit = { commit: cli };
@@ -436,7 +460,23 @@ export function notPortable(location: string): string {
   return `the registry ${location} is a path on this machine: where this project is cloned, \`pikit add\` from it fails (put the registry inside the project to keep it portable)`;
 }
 
-/** Refuses a component that does not run on `targets` or does not accept this CLI's core. */
+/** Each installed component that does not accept this CLI's core or contracts, with what it accepts. */
+function incompatibleInstalled(project: ProjectManifest): string[] {
+  const kit = { "@pikit/core": coreVersion(), "@pikit/contracts": contractsVersion() };
+  return Object.entries(project.components).flatMap(([name, installed]) => {
+    const { pikit, contracts } = kitRanges(installed);
+    return (
+      [
+        ["@pikit/core", pikit],
+        ["@pikit/contracts", contracts],
+      ] as const
+    )
+      .filter(([pkg, range]) => range !== undefined && !Bun.semver.satisfies(kit[pkg], range))
+      .map(([pkg, range]) => `${name} requires ${pkg} ${range}`);
+  });
+}
+
+/** Refuses a component that does not run on `targets` or does not accept this CLI's core and contracts. */
 export function checkCompatible(targets: readonly string[], manifest: Manifest): void {
   const unsupported = targets.filter((t) => !manifest.targets.includes(t));
   if (unsupported.length > 0) {
@@ -445,6 +485,10 @@ export function checkCompatible(targets: readonly string[], manifest: Manifest):
   const core = coreVersion();
   if (!Bun.semver.satisfies(core, manifest.requires.pikit)) {
     throw new CliError(`${manifest.name} requires @pikit/core ${manifest.requires.pikit}; this CLI vendors ${core}`);
+  }
+  const contracts = contractsVersion();
+  if (manifest.requires.contracts !== undefined && !Bun.semver.satisfies(contracts, manifest.requires.contracts)) {
+    throw new CliError(`${manifest.name} requires @pikit/contracts ${manifest.requires.contracts}; this CLI vendors ${contracts}`);
   }
 }
 
