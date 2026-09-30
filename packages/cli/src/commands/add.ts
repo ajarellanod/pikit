@@ -23,8 +23,8 @@
  * `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files, the bases and the new tarballs.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { stripComments } from "../registry/imports.ts";
 import { contractsVersion, coreVersion } from "../registry/commands.ts";
 import { BOTH_APPS, HOOKS, type Manifest } from "../registry/manifest.ts";
@@ -45,7 +45,8 @@ import {
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import { type Offer, offeredProviders } from "../project/offers.ts";
-import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit, VENDOR_DIR } from "../project/vendor.ts";
+import { Undo } from "../project/undo.ts";
+import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit } from "../project/vendor.ts";
 import { capabilityEntry } from "../registry/capabilities.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
@@ -391,52 +392,6 @@ function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], un
     rmSync(join(projectDir, base));
   }
   return { dependenciesChanged };
-}
-
-/**
- * What an install changed, to put back when a later step fails: each file's content before its first
- * change (or its absence), the directories it created, and the tarballs it added to `vendor/`.
- */
-class Undo {
-  private readonly saved = new Map<string, Buffer | undefined>();
-  private readonly createdDirs: string[] = [];
-  private readonly vendorBefore: string[] | undefined;
-  /** `bun install` ran: `node_modules` is not put back. */
-  installed = false;
-
-  constructor(private readonly projectDir: string) {
-    const vendor = join(projectDir, VENDOR_DIR);
-    this.vendorBefore = existsSync(vendor) ? readdirSync(vendor) : undefined;
-  }
-
-  /** Remembers a project-relative file as it is now, the first time it is about to change. */
-  keep(file: string): void {
-    const path = join(this.projectDir, file);
-    if (!this.saved.has(path)) this.saved.set(path, existsSync(path) ? readFileSync(path) : undefined);
-  }
-
-  /** Creates the directory of a project-relative file, remembering the outermost one it created; returns the file's path. */
-  mkdirFor(file: string): string {
-    const path = join(this.projectDir, file);
-    let outermost: string | undefined;
-    for (let dir = dirname(path); !existsSync(dir); dir = dirname(dir)) outermost = dir;
-    mkdirSync(dirname(path), { recursive: true });
-    if (outermost !== undefined) this.createdDirs.push(outermost);
-    return path;
-  }
-
-  restore(): void {
-    for (const [path, content] of this.saved) {
-      if (content === undefined) rmSync(path, { force: true });
-      else writeFileSync(path, content);
-    }
-    for (const dir of this.createdDirs.reverse()) rmSync(dir, { recursive: true, force: true });
-    const vendor = join(this.projectDir, VENDOR_DIR);
-    if (this.vendorBefore === undefined) rmSync(vendor, { recursive: true, force: true });
-    else if (existsSync(vendor)) {
-      for (const file of readdirSync(vendor)) if (!this.vendorBefore.includes(file)) rmSync(join(vendor, file), { force: true });
-    }
-  }
 }
 
 /** The key of `registries` for this path, added (as `recordedLocation` records it) when the project does not know it yet. */

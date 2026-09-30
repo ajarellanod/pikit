@@ -14,23 +14,29 @@
  * it, so `add` then `remove` leaves no trace even when `add` brought a provider along. When another
  * component uses it now, it stays, installed for that one.
  *
+ * Every refusal comes before the first write. A step that fails after it (a `bun install`) puts back
+ * what was written (`undo.ts`): the config, the files, `.env.example`, `pikit.json`, the bases,
+ * `package.json` and `bun.lock`. `pikit doctor` runs once, at the end, after what was installed for it
+ * went too: it reports, and never keeps that cleanup from running.
+ *
  * On Cloudflare it undoes both Apps (SPEC C1): its entries leave every `components` list, its config
  * keys leave `config` and `workerConfig` (its Worker half's is `<name>-worker`), and what depends on
  * it is looked for in each App.
  */
 
-import { existsSync, readdirSync, readFileSync, rmdirSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { packageName, scanImports } from "../registry/imports.ts";
-import { BASES_DIR, unreferencedBases } from "../project/bases.ts";
+import { unreferencedBases } from "../project/bases.ts";
 import { workerHalfName } from "../project/apps.ts";
 import { CONFIG_FILE, removeComponent, removeConfigEntry, WORKER_CONFIG } from "../project/config-file.ts";
 import type { AppDescription } from "../project/probe.ts";
 import { ENV_EXAMPLE, removeExampleBlock } from "../project/env-file.ts";
 import { readPackageJson, removeDependencies, writePackageJson } from "../project/package-json.ts";
-import { type ProjectManifest, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { PIKIT_JSON, type ProjectManifest, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { brokenReferences } from "../project/references.ts";
 import { probe } from "../project/run.ts";
+import { Undo } from "../project/undo.ts";
 import { EXTENSION_ALIAS } from "../project/vendor.ts";
 import { CliError, log } from "../ui.ts";
 import { doctor, projectSources } from "./doctor.ts";
@@ -41,7 +47,18 @@ export interface RemoveOptions {
   force?: boolean;
 }
 
+const PACKAGE_JSON = "package.json";
+const BUN_LOCK = "bun.lock";
+
 export async function remove(projectDir: string, name: string, options: RemoveOptions = {}): Promise<void> {
+  await removeWithLeftovers(projectDir, name, options);
+  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
+  for (const problem of report.problems) log.problem(problem);
+  if (report.problems.length > 0) throw new CliError(`\`pikit doctor\` found ${report.problems.length} problem(s) after removing ${name}`);
+}
+
+/** The component, then what was installed only for it (each with what was installed only for that one). */
+async function removeWithLeftovers(projectDir: string, name: string, options: RemoveOptions): Promise<void> {
   const project = readProjectManifest(projectDir);
   const installed = project.components[name];
   if (installed === undefined) throw new CliError(`${name} is not installed (pikit.json has ${Object.keys(project.components).join(", ") || "nothing"})`);
@@ -61,44 +78,54 @@ export async function remove(projectDir: string, name: string, options: RemoveOp
   for (const key of [name, workerHalfName(name)].filter((key) => key === name || !(key in project.components))) {
     nextConfig = removeConfigEntry(nextConfig, key, WORKER_CONFIG);
   }
-  if (nextConfig !== config) writeFileSync(configPath, nextConfig);
+  const undo = new Undo(projectDir);
+  let removed: string[] = [];
+  try {
+    if (nextConfig !== config) {
+      undo.keep(CONFIG_FILE);
+      writeFileSync(configPath, nextConfig);
+    }
 
-  for (const file of Object.keys(installed.files)) {
-    rmSync(join(projectDir, file), { force: true });
-    removeEmptyParents(projectDir, dirname(file));
-  }
+    for (const file of Object.keys(installed.files)) undo.delete(file);
 
-  const examplePath = join(projectDir, ENV_EXAMPLE);
-  if (existsSync(examplePath)) {
-    const example = readFileSync(examplePath, "utf8");
-    const next = removeExampleBlock(example, name);
-    if (next === "") rmSync(examplePath);
-    else if (next !== example) writeFileSync(examplePath, next);
-  }
+    const examplePath = join(projectDir, ENV_EXAMPLE);
+    if (existsSync(examplePath)) {
+      const example = readFileSync(examplePath, "utf8");
+      const next = removeExampleBlock(example, name);
+      if (next === "") undo.delete(ENV_EXAMPLE);
+      else if (next !== example) {
+        undo.keep(ENV_EXAMPLE);
+        writeFileSync(examplePath, next);
+      }
+    }
 
-  delete project.components[name];
-  writeProjectManifest(projectDir, project);
-  for (const base of unreferencedBases(projectDir, project)) rmSync(join(projectDir, base));
-  removeEmptyParents(projectDir, BASES_DIR);
+    delete project.components[name];
+    undo.keep(PIKIT_JSON);
+    writeProjectManifest(projectDir, project);
+    for (const base of unreferencedBases(projectDir, project)) undo.delete(base);
 
-  const pkg = readPackageJson(projectDir);
-  const removed = [
-    ...removeDependencies(pkg, unneededDependencies(projectDir, project, installed.dependencies)),
-    ...removeDependencies(pkg, unneededDependencies(projectDir, project, installed.devDependencies ?? {}), "devDependencies"),
-  ];
-  if (removed.length > 0) {
-    writePackageJson(projectDir, pkg);
-    await bunInstall(projectDir);
+    const pkg = readPackageJson(projectDir);
+    removed = [
+      ...removeDependencies(pkg, unneededDependencies(projectDir, project, installed.dependencies)),
+      ...removeDependencies(pkg, unneededDependencies(projectDir, project, installed.devDependencies ?? {}), "devDependencies"),
+    ];
+    if (removed.length > 0) {
+      undo.keep(PACKAGE_JSON);
+      writePackageJson(projectDir, pkg);
+      undo.keep(BUN_LOCK);
+      undo.installed = true;
+      await bunInstall(projectDir);
+    }
+  } catch (error) {
+    undo.restore();
+    log.warn(`nothing was removed: the project's files are back as they were${undo.installed ? " (node_modules may not be: run `bun install`)" : ""}`);
+    throw error;
   }
 
   log.ok(`${name} removed${removed.length > 0 ? ` (and the npm packages only it used: ${removed.join(", ")})` : ""}`);
-  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
-  for (const problem of report.problems) log.problem(problem);
-  if (report.problems.length > 0) throw new CliError(`\`pikit doctor\` found ${report.problems.length} problem(s) after removing ${name}`);
-
   for (const leftover of await installedOnlyFor(projectDir, name)) {
     log.step(`${leftover} was installed for ${name}, and nothing uses it now`);
-    await remove(projectDir, leftover, options);
+    await removeWithLeftovers(projectDir, leftover, options);
   }
 }
 
@@ -187,14 +214,4 @@ export function unneededDependencies(projectDir: string, project: ProjectManifes
     for (const specifier of scanImports(readFileSync(join(projectDir, file), "utf8"))) needed.add(packageName(specifier));
   }
   return Object.keys(declared).filter((pkg) => !needed.has(pkg) && pkg !== "@pikit/core" && pkg !== EXTENSION_ALIAS);
-}
-
-function removeEmptyParents(projectDir: string, dir: string): void {
-  let current = dir;
-  while (current !== "." && current !== "" && current !== "src") {
-    const path = join(projectDir, current);
-    if (!existsSync(path) || readdirSync(path).length > 0) return;
-    rmdirSync(path);
-    current = dirname(current);
-  }
 }
