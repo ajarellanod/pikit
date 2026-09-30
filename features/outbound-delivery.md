@@ -223,7 +223,10 @@ transport does not `draw` into their fallback before the split (`rich-content.md
     same trade `admitInbound` made;
   - `@pikit/contracts` gains its second protocol function, and the root header
     (`index.ts:1-5`) must say so; the drivers of step 2 carry policy constants, which the header
-    now excludes;
+    now excludes. SPEC calls the package "the shared vocabulary" (`SPEC.md:45`) and delivery "a
+    capability in `@pikit/contracts` and a component" (`SPEC.md:123`): step 1 stays within that as
+    `admitInbound` does, while drivers in the package stretch it. A driver can instead be a
+    component providing a capability, which keeps SPEC's wording as it is;
   - a channel copy that predates the helper silently skips `outbound.prepare`: a redaction stage
     would not apply to it;
   - a migrated copy needs a contracts version that has the helper, and nothing checks kit-package
@@ -242,8 +245,9 @@ Nothing in Pi: channels and delivery are pikit's (SPEC P1). When the adapter mov
 - **The value type of `outbound.prepare`:** `OutboundMessage` alone, or with the run
   (`{ message, answer: RunSettlement }`) for a stage that treats a failure differently. To decide with
   its first stage, per [pipeline anchors](pipeline-anchors.md).
-- **Step 2:** whether the drivers move into `@pikit/contracts` (proposed), or stay copied per channel
-  and the root header keeps "no policy".
+- **Step 2:** whether the drivers move into `@pikit/contracts` (proposed), become components that
+  provide a capability (SPEC §3.2's shape for delivery), or stay copied per channel and the root
+  header keeps "no policy".
 - **Words:** whether a default `text` (today's `replyText`) belongs in `@pikit/contracts`, which has no
   user-facing words today, or stays in each channel.
 - **A copy that skips the pipeline:** whether `pikit doctor` should note a channel that reads
