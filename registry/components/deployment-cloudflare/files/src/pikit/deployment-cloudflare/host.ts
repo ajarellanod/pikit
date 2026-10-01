@@ -225,7 +225,9 @@ export function createWorkerHost(definition: AppDefinition | undefined, options:
 /**
  * Starts `app` with `parent`'s values and a deadline. At the deadline, and after a failed start, the
  * app is stopped with a deadline of its own, which bounds the rollback of whatever had started (K2).
- * Rejects as the start did.
+ * Rejects as the start did, or with the deadline's error once the rollback settles if the deadline
+ * stopped the app although its start resolved (a `runtime.ready` listener past the deadline is
+ * abandoned, not failed): a stopped App is never handed to the caller.
  */
 async function startWithin(app: App, parent: Context, options: HostOptions, logger: Logger): Promise<void> {
   const startDeadlineMs = options.startDeadlineMs ?? START_DEADLINE_MS;
@@ -248,6 +250,10 @@ async function startWithin(app: App, parent: Context, options: HostOptions, logg
     throw error;
   } finally {
     clearTimeout(timer);
+  }
+  if (stopping !== undefined) {
+    await stopping;
+    throw deadline.signal.reason;
   }
 }
 

@@ -5,8 +5,7 @@
       "version": "0.0.0",
       "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
       "targets": [
-        "server",
-        "cloudflare"
+        "server"
       ],
       "path": "components/channel-http"
     },

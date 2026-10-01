@@ -17,13 +17,52 @@
  *
  * Per App (`apps.ts`): on Cloudflare, what a component's Worker half needs must be provided in the
  * Worker's App, by a component that goes there, and what its object's half needs in the default App.
+ *
+ * What a project provides is what its `pikit.config.ts` composes (`providedByApp`: its own components
+ * and their config included), never what a registry's manifests say of the installed names: a
+ * component of that name in the registry may not be the one installed. Manifests count only for what
+ * is about to be installed (`providedByManifests`). A new project has nothing installed: manifests
+ * alone (`withOffers`). A project whose composition is unknown gets no offer.
  */
 
 import { capabilityEntry } from "../registry/capabilities.ts";
 import type { Manifest } from "../registry/manifest.ts";
-import { type AppName, declaredByApp } from "./apps.ts";
+import { type AppName, declaredByApp, workerHalfName } from "./apps.ts";
 import { NEW_PROJECT_TARGETS } from "./pikit-json.ts";
+import type { AppDescription, ProbeResult } from "./probe.ts";
 import type { Registry } from "./registry-source.ts";
+
+/** The capabilities each App provides. */
+export type ProvidedCapabilities = Record<AppName, ReadonlySet<string>>;
+
+/**
+ * What each App of a composed project provides (`probe`), but for `excluding` (components about to
+ * be replaced: their Worker halves too); undefined when it does not compose.
+ */
+export function providedByApp(result: ProbeResult, excluding: readonly string[] = []): ProvidedCapabilities | undefined {
+  if (!result.ok) return undefined;
+  const skipped = new Set(excluding.flatMap((name) => [name, workerHalfName(name)]));
+  const of = (description: AppDescription | undefined) =>
+    new Set((description?.components ?? []).filter((c) => !skipped.has(c.name)).flatMap((c) => c.provides));
+  return { default: of(result.description), worker: of(result.worker) };
+}
+
+/** What `manifests` declare they provide in each App, on `targets`: components not installed yet. */
+export function providedByManifests(manifests: readonly Manifest[], targets: readonly string[]): ProvidedCapabilities {
+  const provided = { default: new Set<string>(), worker: new Set<string>() };
+  for (const manifest of manifests) {
+    for (const [app, half] of declaredByApp(manifest, targets)) for (const capability of half.provides) provided[app].add(capability);
+  }
+  return provided;
+}
+
+/** Every capability any of `all` provides, per App. */
+export function mergeProvided(...all: ProvidedCapabilities[]): ProvidedCapabilities {
+  return {
+    default: new Set(all.flatMap((p) => [...p.default])),
+    worker: new Set(all.flatMap((p) => [...p.worker])),
+  };
+}
 
 export interface Offer {
   /** The provider to install. */
@@ -39,17 +78,19 @@ export interface Offer {
 }
 
 /**
- * The providers `names` bring, given what `installed` already provides, among those that run on
- * `targets` (the project's); dependencies first (the order to install them in). `names` themselves
- * are never offered.
+ * The providers `names` bring, given what the project `provided` (`providedByApp`), among those that
+ * run on `targets` (the project's); dependencies first (the order to install them in). `names`
+ * themselves, and the `installed` ones, are never offered. Without `provided`, only a project with
+ * nothing installed gets offers: what an installed component provides is never guessed.
  */
 export function offeredProviders(
   registry: Registry,
   names: readonly string[],
   installed: readonly string[] = [],
   targets: readonly string[] = NEW_PROJECT_TARGETS,
+  provided?: ProvidedCapabilities,
 ): Offer[] {
-  return resolveOffers(registry, names, installed, targets).offers;
+  return resolveOffers(registry, names, installed, targets, provided).offers;
 }
 
 /** An optional capability marked `offer` that nothing provides, left out because several components could. */
@@ -68,8 +109,9 @@ export function unchosenProviders(
   names: readonly string[],
   installed: readonly string[] = [],
   targets: readonly string[] = NEW_PROJECT_TARGETS,
+  provided?: ProvidedCapabilities,
 ): UnchosenOffer[] {
-  return resolveOffers(registry, names, installed, targets).unchosen;
+  return resolveOffers(registry, names, installed, targets, provided).unchosen;
 }
 
 function resolveOffers(
@@ -77,27 +119,34 @@ function resolveOffers(
   names: readonly string[],
   installed: readonly string[],
   targets: readonly string[],
+  composed: ProvidedCapabilities | undefined,
 ): { offers: Offer[]; unchosen: UnchosenOffer[] } {
-  const provided: Record<AppName, Set<string>> = { default: new Set(), worker: new Set() };
+  // Installed components whose composition is unknown: nothing is offered rather than guessed.
+  if (composed === undefined && installed.length > 0) return { offers: [], unchosen: [] };
+  const provided: Record<AppName, Set<string>> = { default: new Set(composed?.default), worker: new Set(composed?.worker) };
   const known = (name: string) => {
     try {
       return registry.manifest(name);
     } catch {
-      return undefined; // Installed from another registry: `pikit doctor` checks the real app.
+      return undefined;
     }
   };
   const provide = (manifest: Manifest) => {
     for (const [app, half] of declaredByApp(manifest, targets)) for (const capability of half.provides) provided[app].add(capability);
   };
-  for (const name of [...installed, ...names]) {
+  for (const name of names) {
     const manifest = known(name);
     if (manifest !== undefined) provide(manifest);
   }
 
   const runsHere = (name: string) => targets.every((target) => known(name)?.targets.includes(target) === true);
-  /** The components that provide `capability` in `app`: a provider of the other App does not help. */
+  /**
+   * The components that provide `capability` in `app`: a provider of the other App does not help. An
+   * installed name is not one: it is not reinstalled, and the registry's may not be the installed one.
+   */
   const providersOf = (capability: string, app: AppName) =>
     registry.names().filter((name) => {
+      if (installed.includes(name)) return false;
       const manifest = known(name);
       if (manifest === undefined || !runsHere(name)) return false;
       return declaredByApp(manifest, targets).some(([where, half]) => where === app && half.provides.includes(capability));

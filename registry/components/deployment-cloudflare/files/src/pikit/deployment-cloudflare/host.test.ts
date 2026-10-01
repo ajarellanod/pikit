@@ -136,6 +136,66 @@ test("a start past its deadline, with a rollback that hangs, still ends within b
   expect(Date.now() - started).toBeLessThan(1_000);
 });
 
+/**
+ * A component that is up from its start to its stop, and whose first App's `runtime.ready` listener
+ * never returns: the start deadline passes after every start ran, and the core abandons the listener
+ * and resolves `start()` while the host's deadline is stopping the App. Each App records `up` from
+ * its alarm handler and its `GET /up` route.
+ */
+function readyHangsOnce() {
+  let apps = 0;
+  const alarms: boolean[] = [];
+  const component = defineComponent({
+    name: "ready-hangs-once",
+    setup(pikit) {
+      const first = ++apps === 1;
+      let up = false;
+      pikit.on("runtime.ready", () => (first ? new Promise<void>(() => {}) : undefined));
+      pikit.provideKeyed("http.route", "GET /up", () => Response.json({ up }));
+      return {
+        start(ctx) {
+          up = true;
+          ctx.value(WORKERS_HOST)?.object?.onAlarm(async () => void alarms.push(up));
+        },
+        stop() {
+          up = false;
+        },
+      };
+    },
+  });
+  return { component, alarms, apps: () => apps };
+}
+
+test("an object's App stopped by its start deadline is never used, even when its start resolved; the next event starts a new App", async () => {
+  const { component, alarms, apps } = readyHangsOnce();
+  const state = fakeState();
+  const host = createObjectHost(defineApp({ components: [component] }), state, {}, { logger: silentLogger, startDeadlineMs: 50, rollbackDeadlineMs: 50 });
+
+  await expect(host.alarm()).rejects.toThrow(/did not start within 50 ms/);
+  expect(alarms).toEqual([]);
+
+  await host.alarm();
+  expect(alarms).toEqual([true]);
+  expect(apps()).toBe(2);
+  expect(state.blocked).toBe(2);
+});
+
+test("a Worker's App stopped by its start deadline never serves, even when its start resolved; the next request starts a new App", async () => {
+  const { component, apps } = readyHangsOnce();
+  const worker = createWorkerHost(defineApp({ components: [component] }), { logger: silentLogger, startDeadlineMs: 50, rollbackDeadlineMs: 50 });
+
+  const env = { CONVERSATION: fakeNamespace(async () => ({ ok: true })) };
+
+  // Not 200 from a stopped App, which every later request of the isolate would reach ({ up: false }).
+  const health = await worker.fetch(new Request("https://w.example/health"), env);
+  expect(health.status).toBe(503);
+  expect(await health.json()).toEqual({ ok: false, version: null, error: "the Worker's App did not start" });
+  const next = await worker.fetch(new Request("https://w.example/up"), env);
+  expect(next.status).toBe(200);
+  expect(await next.json()).toEqual({ up: true });
+  expect(apps()).toBe(2);
+});
+
 test("the Worker's App starts once per isolate with WORKERS_HOST { env, origin }, and serves its routes with contexts of their own", async () => {
   let starts = 0;
   let startSignal: AbortSignal | undefined;

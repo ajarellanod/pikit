@@ -4,6 +4,9 @@
  * It creates the app `pikit.config.ts` composes, in a child process, and prints the component
  * graph, the capability providers, the pipelines and the config; on Cloudflare, of each App (C1).
  * Then it checks:
+ * - no `pikit add`, `remove` or `upgrade` was left unfinished (`operation.ts`): its marker is a problem
+ *   until the person has checked the project and deleted it; doctor never deletes it;
+ * - `bun.lock` matches `package.json`'s dependencies (`lockfile.ts`), read offline: no `bun install`;
  * - the app composes: every required capability has a provider, selections are valid, the config
  *   matches the merged schema (the core's own `create()` decides);
  * - every tool, extension and model provider an agent names statically is an installed key, when a
@@ -32,10 +35,13 @@ import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from ".
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
 import { brokenReferences } from "../project/references.ts";
+import { checkLockfile } from "../project/lockfile.ts";
+import { incompleteOperation, incompleteOperationMessage } from "../project/operation.ts";
 import { checkPiExtensions } from "../project/pi-extensions.ts";
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
 import { EXTENSION_ALIAS } from "../project/vendor.ts";
 import { log } from "../ui.ts";
+import { confinedPath } from "../project/paths.ts";
 
 export interface DoctorReport {
   problems: string[];
@@ -63,7 +69,12 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
   const unconfigured: string[] = [];
   const notes: string[] = [];
 
+  const operation = incompleteOperation(projectDir);
+  if (operation !== undefined) problems.push(incompleteOperationMessage(operation));
   if (!existsSync(join(projectDir, "node_modules"))) problems.push("dependencies are not installed: run `bun install`");
+  const lockfile = checkLockfile(projectDir);
+  problems.push(...lockfile.problems);
+  notes.push(...lockfile.notes);
 
   const result = await probe(projectDir);
   if (!result.ok) problems.push(`pikit.config.ts does not compose: ${result.error}`);
@@ -95,14 +106,23 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
         unconfigured.push(`${variable.name} is not set (${name} requires it): run \`pikit configure\``);
       }
     }
-    for (const file of modifiedFiles(projectDir, component)) notes.push(`modified: ${file} (${name})`);
-    for (const file of missingFiles(projectDir, component)) notes.push(`deleted: ${file} (${name})`);
+    try {
+      for (const file of modifiedFiles(projectDir, component)) notes.push(`modified: ${file} (${name})`);
+      for (const file of missingFiles(projectDir, component)) notes.push(`deleted: ${file} (${name})`);
+    } catch (error) {
+      problems.push(`${name}'s installed files cannot be checked: ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
 
-  problems.push(...checkPiImports(projectDir));
-  const extensions = checkPiExtensions(projectDir, projectSources(projectDir));
-  problems.push(...extensions.problems);
-  notes.push(...extensions.notes);
+  try {
+    const sources = projectSources(projectDir);
+    problems.push(...checkPiImports(projectDir, sources));
+    const extensions = checkPiExtensions(projectDir, sources);
+    problems.push(...extensions.problems);
+    notes.push(...extensions.notes);
+  } catch (error) {
+    problems.push(`the project's source files cannot be checked: ${error instanceof Error ? error.message : String(error)}`);
+  }
 
   if (options.quiet !== true) {
     for (const note of notes) log.info(`  ${note}`);
@@ -155,9 +175,9 @@ function printGraph(description: AppDescription, indent = ""): void {
 }
 
 /** S1 in the project: `@earendil-works/*` is imported only by the adapter, and by Pi extensions under their alias. */
-export function checkPiImports(projectDir: string): string[] {
+export function checkPiImports(projectDir: string, sources: readonly string[] = projectSources(projectDir)): string[] {
   const problems: string[] = [];
-  for (const file of projectSources(projectDir)) {
+  for (const file of sources) {
     const inComponent = file.startsWith("src/pikit/");
     for (const specifier of scanImports(readFileSync(join(projectDir, file), "utf8"))) {
       if (!specifier.startsWith("@earendil-works/")) continue;
@@ -173,12 +193,12 @@ const SKIPPED = new Set(["node_modules", "vendor", ".pikit", ".git", "dist"]);
 /** The project's own source files, relative, without dependencies or state. */
 export function projectSources(projectDir: string, dir = ""): string[] {
   const files: string[] = [];
-  for (const entry of readdirSync(join(projectDir, dir))) {
+  for (const entry of readdirSync(dir === "" ? projectDir : confinedPath(projectDir, dir))) {
     if (SKIPPED.has(entry)) continue;
     const relative = dir === "" ? entry : `${dir}/${entry}`;
-    const stats = statSync(join(projectDir, relative));
+    const stats = statSync(confinedPath(projectDir, relative));
     if (stats.isDirectory()) files.push(...projectSources(projectDir, relative));
-    else if (/\.[cm]?[jt]sx?$/.test(entry)) files.push(relative);
+    else if (stats.isFile() && /\.[cm]?[jt]sx?$/.test(entry)) files.push(relative);
   }
   return files;
 }

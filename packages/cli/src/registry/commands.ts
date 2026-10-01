@@ -56,6 +56,11 @@ export function contractsVersion(): string {
   return packageVersion("contracts");
 }
 
+/** The `@pikit/pi-adapter` a registry at this commit is built with; `requires.adapter` must accept it. */
+export function adapterVersion(): string {
+  return packageVersion("pi-adapter");
+}
+
 function packageVersion(dir: string): string {
   return (JSON.parse(readFileSync(join(REPO, "packages", dir, "package.json"), "utf8")) as { version: string }).version;
 }
@@ -205,9 +210,10 @@ export async function generate(root: string): Promise<Outcome> {
 }
 
 /** Every rule, for every component, then the index. Nothing is written. */
-export async function validate(root: string, options: { coreVersion?: string; contractsVersion?: string } = {}): Promise<Outcome> {
+export async function validate(root: string, options: { coreVersion?: string; contractsVersion?: string; adapterVersion?: string } = {}): Promise<Outcome> {
   const core = options.coreVersion ?? coreVersion();
   const contracts = options.contractsVersion ?? contractsVersion();
+  const adapter = options.adapterVersion ?? adapterVersion();
   const problems: string[] = [];
   const manifests: Manifest[] = [];
   const names = componentNames(root);
@@ -231,7 +237,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
       continue;
     }
     manifests.push(manifest);
-    checkManifest(manifest, dir, name, core, contracts).forEach(report);
+    checkManifest(manifest, dir, name, core, contracts, adapter).forEach(report);
     // Every rule below reads the manifest's fields: a malformed one was reported, and that is all.
     if (schemaProblems(ManifestSchema, manifest).length > 0) continue;
 
@@ -411,7 +417,12 @@ function skeleton(dir: string, name: string): Manifest {
     version: "0.0.0",
     description: readmeSummary(dir),
     targets,
-    requires: { pikit: coreVersion(), ...(imported.has("@pikit/contracts") && { contracts: contractsVersion() }), capabilities: [] },
+    requires: {
+      pikit: coreVersion(),
+      ...(imported.has("@pikit/contracts") && { contracts: contractsVersion() }),
+      ...(imported.has("@pikit/pi-adapter") && { adapter: adapterVersion() }),
+      capabilities: [],
+    },
     optional: { capabilities: [] },
     provides: [],
     dependencies: Object.fromEntries([...imported].sort().map((pkg) => [pkg, versions[pkg] ?? ""])),

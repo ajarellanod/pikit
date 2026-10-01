@@ -106,7 +106,10 @@ test("a preset's shape is its schema: an unknown key is an error, not silence", 
 });
 
 test("a component whose component.json breaks the schema is refused before anything is installed", () => {
-  const r = openRegistry(registry({ ...COMPONENTS, "channel-bad": { targets: ["mars"] } }, { base: BASE }));
+  const root = registry({ ...COMPONENTS, "channel-bad": undefined }, { base: BASE });
+  const file = join(root, "components", "channel-bad", "component.json");
+  writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, "utf8")), targets: ["mars"] }));
+  const r = openRegistry(root);
   expect(() => r.manifest("channel-bad")).toThrow('the registry\'s component "channel-bad" has an invalid component.json: /targets/0:');
 });
 
@@ -202,9 +205,9 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   const r = openRegistry(DEFAULT_REGISTRY);
   expect(r.preset("telegram")).toEqual(r.preset("http", ["channel-telegram"]));
   expect(r.slots("http")[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram", "channel-telegram-webhook"]);
-  // A server project is not offered the webhook (it runs on cloudflare only), a Cloudflare one not the poller.
+  // A server project is not offered the webhook; Cloudflare has neither the poller nor an HTTP Worker half.
   expect(r.slots("http", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram"]);
-  expect(r.slots("http", ["cloudflare"])[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram-webhook"]);
+  expect(r.slots("http", ["cloudflare"])[0]?.options.map((o) => o.name)).toEqual(["channel-telegram-webhook"]);
 });
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {

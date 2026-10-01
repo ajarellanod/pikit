@@ -29,7 +29,9 @@
  * added at the version it declared moved to the new one), its hooks and generated files, the kit
  * ranges it accepts (a version this CLI's kit does not satisfy is refused, unless `--force`, as is a
  * downgrade), the Worker's App on Cloudflare when its `apps` changed, and the providers it now needs
- * (offered, as `add` offers them; warned about when nothing provides them).
+ * (offered, as `add` offers them; warned about when nothing provides them). What the project provides
+ * is what `pikit.config.ts` composes before the upgrade, without what the upgraded components provide
+ * now and with what their new versions declare (`composedProvides`, `offers.ts`).
  *
  * `add --force` stays what it was: a reinstall that overwrites the user's edits.
  *
@@ -39,17 +41,18 @@
  */
 
 import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
 import { hasWorkerApp } from "../project/apps.ts";
 import { basePath } from "../project/bases.ts";
 import { setWorkerWiring } from "../project/config-file.ts";
 import { exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
 import { mergeFile } from "../project/merge.ts";
-import { offeredProviders } from "../project/offers.ts";
+import { mergeProvided, offeredProviders, providedByManifests } from "../project/offers.ts";
 import { hashFile, type InstalledComponent, type ProjectManifest } from "../project/pikit-json.ts";
 import { registryPath } from "../project/registry-location.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { Undo } from "../project/undo.ts";
+import { confinedPath } from "../project/paths.ts";
+import { assertNoIncompleteOperation, beginOperation, finishOperation, OPERATION_MARKER } from "../project/operation.ts";
 import { pruneVendor, refreshKit } from "../project/vendor.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import {
@@ -60,6 +63,7 @@ import {
   checkCompatible,
   checkConflicts,
   checkKit,
+  composedProvides,
   describePlan,
   type Draft,
   ownDir,
@@ -114,6 +118,7 @@ interface UpgradePlan extends Plan {
 }
 
 export async function upgrade(projectDir: string, names: readonly string[], options: UpgradeOptions = {}): Promise<void> {
+  assertNoIncompleteOperation(projectDir);
   const force = options.force === true;
   const draft = readDraft(projectDir);
   const installed = Object.keys(draft.project.components);
@@ -147,11 +152,17 @@ export async function upgrade(projectDir: string, names: readonly string[], opti
     return;
   }
   checkKit(projectDir, draft.project, force);
+  // What the project will provide: what it composes now, without what the upgraded components' installed
+  // versions provide (and only theirs: those up to date stay as they compose), with what every new version declares.
+  const composed = await composedProvides(projectDir, plans.map((plan) => plan.name));
+  if (composed !== undefined) draft.provided = mergeProvided(composed, providedByManifests(plans.map((plan) => plan.manifest), draft.project.targets));
+  for (const plan of plans) warnUnprovided(draft.project, plan.manifest, draft.provided);
   for (const plan of plans) describeUpgrade(plan);
 
   if (options.dryRun === true) {
     for (const plan of plans) {
-      for (const offer of offeredProviders(plan.registry, [plan.name], installed, draft.project.targets)) {
+      if (draft.provided === undefined) break;
+      for (const offer of offeredProviders(plan.registry, [plan.name], installed, draft.project.targets, draft.provided)) {
         log.info(`  would offer ${offer.component}, for ${offer.for} (${offer.capability})`);
       }
     }
@@ -161,7 +172,9 @@ export async function upgrade(projectDir: string, names: readonly string[], opti
   await confirmUpgrade(plans, options);
   const all: Plan[] = [...plans];
   for (const plan of plans) {
-    for (const offer of await acceptedOffers(plan.registry, plan.name, installed, draft.project.targets, options)) {
+    // Each planned provider joins `draft.provided` (`planInstall`): one two components need comes once.
+    if (draft.provided === undefined) break;
+    for (const offer of await acceptedOffers(plan.registry, plan.name, installed, draft.project.targets, draft.provided, options)) {
       // Two upgraded components may need the same provider: it comes once.
       if (offer.component in draft.project.components) continue;
       const offered = planInstall(projectDir, draft, plan.registry, plan.registryName, offer.component, { force, yes: options.yes === true, installedFor: offer.for });
@@ -171,6 +184,7 @@ export async function upgrade(projectDir: string, names: readonly string[], opti
   }
 
   const undo = new Undo(projectDir);
+  beginOperation(projectDir, `pikit upgrade${names.length > 0 ? ` ${names.join(" ")}` : ""}${force ? " --force" : ""}`);
   let refreshed: string[] = [];
   try {
     undo.keep(PACKAGE_JSON);
@@ -179,15 +193,18 @@ export async function upgrade(projectDir: string, names: readonly string[], opti
     const { dependenciesChanged } = applyPlans(projectDir, draft, all, undo);
     if (dependenciesChanged || refreshed.length > 0) {
       undo.keep(BUN_LOCK);
+      undo.keep("bun.lockb");
       undo.installed = true;
       await bunInstall(projectDir);
     }
   } catch (error) {
     undo.restore();
-    log.warn(`nothing was upgraded: the project's files are back as they were${undo.installed ? " (node_modules may not be: run `bun install`)" : ""}`);
+    if (!undo.installed) finishOperation(projectDir);
+    log.warn(`nothing was upgraded: the project's files are back as they were${undo.installed ? ` (node_modules may not be: run \`bun install\`, then delete ${OPERATION_MARKER})` : ""}`);
     throw error;
   }
   if (refreshed.length > 0) pruneVendor(projectDir);
+  finishOperation(projectDir);
   for (const plan of plans) log.ok(`${plan.name} upgraded: ${plan.previous.version} → ${plan.manifest.version}`);
 
   const conflicted = plans.flatMap((plan) => plan.changes.conflicted.map((file) => `${file} (${plan.name}@${plan.manifest.version})`));
@@ -233,14 +250,13 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
   }
   // The files it ships that it did not install: refused where they are another component's, or differ.
   checkConflicts(projectDir, project, name, new Map([...files].filter(([target]) => !(target in previous.files))), force);
-  warnUnprovided(project, registry, manifest);
 
   const changes: FileChanges = { updated: [], merged: [], conflicted: [], added: [], removed: obsolete, kept, notRestored: [] };
   const writes: Plan["writes"] = new Map();
   const notes: string[] = [];
   const generated = new Set([...(previous.generated ?? []), ...(record.generated ?? [])]);
   for (const [target, source] of files) {
-    const path = join(projectDir, target);
+    const path = confinedPath(projectDir, target);
     const theirs = hashFile(source);
     const installed = previous.files[target]?.hash;
     if (installed === undefined) {
@@ -254,7 +270,7 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
         writes.set(target, { source });
         changes.updated.push(target);
       } else if (ours !== theirs) {
-        const base = join(projectDir, basePath(installed));
+        const base = confinedPath(projectDir, basePath(installed));
         if (hasConflictMarkers(path)) notes.push(`${target} still has the conflict markers of an earlier upgrade: they are merged as your lines`);
         const merged = await mergeFile(path, existsSync(base) ? base : undefined, source, `${name}@${manifest.version}`);
         if ("error" in merged) {

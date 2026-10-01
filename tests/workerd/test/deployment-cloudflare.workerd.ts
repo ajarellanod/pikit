@@ -8,8 +8,9 @@
 
 import { env, evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import type { JsonValue } from "@pikit/contracts";
+import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { expect, it } from "vitest";
-import { HEALTH_OBJECT } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
+import { createWorkerHost, HEALTH_OBJECT } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
 import { entrypoint } from "../src/deployment.ts";
 
 /** The object's RPC, as the Worker (and `actor.mailbox`) calls it. */
@@ -26,6 +27,27 @@ function newObject(id = env.CONVERSATION.newUniqueId()) {
 
 /** What the object's storage holds under `key`. */
 const stored = (stub: DurableObjectStub, key: string) => runInDurableObject(stub, (_instance, state) => state.storage.get(key));
+
+it("a readiness deadline never publishes a stopped Worker App, and the next request retries cleanly", async () => {
+  let apps = 0;
+  const component = defineComponent({
+    name: "ready-deadline",
+    setup(pikit) {
+      const first = ++apps === 1;
+      let up = false;
+      pikit.on("runtime.ready", () => first ? new Promise<void>(() => {}) : undefined);
+      pikit.provideKeyed("http.route", "GET /up", () => Response.json({ up }));
+      return { start: () => { up = true; }, stop: () => { up = false; } };
+    },
+  });
+  const host = createWorkerHost(defineApp({ components: [component] }), { logger: silentLogger, startDeadlineMs: 200, rollbackDeadlineMs: 200 });
+  const first = await host.fetch(new Request("https://lane.example/up"), { ...env });
+  expect(first.status).toBe(503);
+  const retry = await host.fetch(new Request("https://lane.example/up"), { ...env });
+  expect(retry.status).toBe(200);
+  expect(await retry.json()).toEqual({ up: true });
+  expect(apps).toBe(2);
+});
 
 it("GET /health starts the health object's App, with the object in WORKERS_HOST, and answers { ok, version }", async () => {
   const response = await entrypoint.handler.fetch(new Request("https://lane.example/health"), env);

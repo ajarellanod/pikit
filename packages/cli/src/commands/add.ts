@@ -3,9 +3,10 @@
  *
  *   1. resolve the registry (`builtin`, or a local path) and the component's version and commit
  *   2. read the component's package
- *   3. check its targets, `requires.pikit` and `requires.contracts`, and that this CLI's kit is not
- *      older than the project's nor outside what an installed component accepts (`checkKit`); warn for
- *      each required capability nothing provides
+ *   3. check its targets, `requires.pikit`, `requires.contracts` and `requires.adapter` (a range it
+ *      must state is refused when missing, even with `--force`), and that this CLI's kit is not older
+ *      than the project's nor outside what an installed component accepts (`checkKit`); warn for each
+ *      required capability nothing provides, by what `pikit.config.ts` composes now (`offers.ts`)
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies
  *      and dev dependencies, environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
@@ -33,10 +34,11 @@
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { stripComments } from "../registry/imports.ts";
-import { contractsVersion, coreVersion } from "../registry/commands.ts";
+import { kitRangeProblems } from "../registry/checks.ts";
+import { adapterVersion, contractsVersion, coreVersion } from "../registry/commands.ts";
 import { BOTH_APPS, HOOKS, type Manifest } from "../registry/manifest.ts";
-import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
-import { basePath, unreferencedBases } from "../project/bases.ts";
+import { APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
+import { BASES_DIR, basePath, unreferencedBases } from "../project/bases.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
 import { ENV_EXAMPLE, exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
 import { addDependencies, type DependencyField, readPackageJson, removeDependencies, updateDependencies, writePackageJson } from "../project/package-json.ts";
@@ -53,9 +55,20 @@ import {
 } from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
-import { type Offer, offeredProviders, unchosenProviders } from "../project/offers.ts";
+import {
+  mergeProvided,
+  type Offer,
+  offeredProviders,
+  type ProvidedCapabilities,
+  providedByApp,
+  providedByManifests,
+  unchosenProviders,
+} from "../project/offers.ts";
+import { probe } from "../project/run.ts";
 import { Undo } from "../project/undo.ts";
-import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit } from "../project/vendor.ts";
+import { confinedPath } from "../project/paths.ts";
+import { assertNoIncompleteOperation, beginOperation, finishOperation, OPERATION_MARKER } from "../project/operation.ts";
+import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit, VENDOR_DIR } from "../project/vendor.ts";
 import { capabilityEntry } from "../registry/capabilities.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
@@ -89,6 +102,7 @@ export interface AddOptions {
 }
 
 export async function add(projectDir: string, name: string, options: AddOptions = {}): Promise<void> {
+  assertNoIncompleteOperation(projectDir);
   // Steps 1–5 for the component and the providers it brings, before anything is written: a refusal
   // (installed, incompatible, a conflict, a config shape, a "no") leaves the project as it was.
   const draft = readDraft(projectDir);
@@ -98,10 +112,13 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   const registry = openRegistry(registryPath(projectDir, location));
   if (!isPortable(location)) log.warn(notPortable(location));
   const installed = Object.keys(draft.project.components);
+  // What the project provides now, but for the component a reinstall replaces.
+  draft.provided = await composedProvides(projectDir, name in draft.project.components ? [name] : []);
   const plans = [planInstall(projectDir, draft, registry, registryName, name, options)];
   if (options.quiet !== true) describePlan(plans[0] as Plan);
   await confirmPlan(plans[0] as Plan, options);
-  for (const offer of await acceptedOffers(registry, name, installed, draft.project.targets, options)) {
+  const offers = draft.provided === undefined ? [] : await acceptedOffers(registry, name, installed, draft.project.targets, draft.provided, options);
+  for (const offer of offers) {
     const offered = planInstall(projectDir, draft, registry, registryName, offer.component, { ...options, installedFor: offer.for });
     if (options.quiet !== true) describePlan(offered);
     plans.push(offered);
@@ -110,6 +127,7 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   // Steps 6–10 and `bun install`. What they write is put back if one fails, so the project is never
   // left half-added: a package.json that bun.lock does not match fails the next frozen install.
   const undo = new Undo(projectDir);
+  beginOperation(projectDir, `pikit add ${name}${options.force === true ? " --force" : ""}`);
   let refreshed: string[] = [];
   try {
     // The component comes from this CLI's registry: the core it needs is this CLI's kit (vendor.ts).
@@ -119,16 +137,19 @@ export async function add(projectDir: string, name: string, options: AddOptions 
     const { dependenciesChanged } = applyPlans(projectDir, draft, plans, undo);
     if (dependenciesChanged || refreshed.length > 0) {
       undo.keep(BUN_LOCK);
+      undo.keep("bun.lockb");
       undo.installed = true;
       await bunInstall(projectDir);
     }
   } catch (error) {
     undo.restore();
-    log.warn(`nothing was added: the project's files are back as they were${undo.installed ? " (node_modules may not be: run `bun install`)" : ""}`);
+    if (!undo.installed) finishOperation(projectDir);
+    log.warn(`nothing was added: the project's files are back as they were${undo.installed ? ` (node_modules may not be: run \`bun install\`, then delete ${OPERATION_MARKER})` : ""}`);
     throw error;
   }
   // Only now: until the install rewrote bun.lock, it named the old tarballs.
   if (refreshed.length > 0) pruneVendor(projectDir);
+  finishOperation(projectDir);
   const report = await doctor(projectDir, { quiet: true, componentChecks: false });
   if (report.problems.length > 0) {
     for (const problem of report.problems) log.problem(problem);
@@ -139,14 +160,44 @@ export async function add(projectDir: string, name: string, options: AddOptions 
 }
 
 /**
- * The providers `name` brings (`offers.ts`), each asked about (Enter is yes), or all of them with
- * `--yes`. A declined provider takes what only it needed with it.
+ * What the project's Apps provide now, as `pikit.config.ts` composes them (`providedByApp`): its own
+ * components and their config included, `excluding` those about to be replaced. Undefined, and said,
+ * when it does not compose: then nothing is offered, and the providers are the user's to add.
  */
-export async function acceptedOffers(registry: Registry, name: string, installed: readonly string[], targets: readonly string[], options: AddOptions): Promise<Offer[]> {
-  warnUnchosen(registry, [name], installed, targets);
+export async function composedProvides(projectDir: string, excluding: readonly string[]): Promise<ProvidedCapabilities | undefined> {
+  let error: string;
+  try {
+    const result = await probe(projectDir);
+    const provided = providedByApp(result, excluding);
+    if (provided !== undefined) return provided;
+    error = result.ok ? "" : result.error;
+  } catch (thrown) {
+    error = thrown instanceof Error ? thrown.message : String(thrown);
+  }
+  log.warn(
+    `pikit.config.ts does not compose (${error}), so what the project provides is unknown: no provider is offered. ` +
+      "Fix the composition, or add the providers it needs with `pikit add <name>`",
+  );
+  return undefined;
+}
+
+/**
+ * The providers `name` brings (`offers.ts`), given what the project provides (`composedProvides`),
+ * each asked about (Enter is yes), or all of them with `--yes`. A declined provider takes what only
+ * it needed with it.
+ */
+export async function acceptedOffers(
+  registry: Registry,
+  name: string,
+  installed: readonly string[],
+  targets: readonly string[],
+  provided: ProvidedCapabilities,
+  options: AddOptions,
+): Promise<Offer[]> {
+  warnUnchosen(registry, [name], installed, targets, provided);
   const accepted: Offer[] = [];
   const declined = new Set<string>();
-  for (const offer of offeredProviders(registry, [name], installed, targets).reverse()) {
+  for (const offer of offeredProviders(registry, [name], installed, targets, provided).reverse()) {
     if (declined.has(offer.for)) {
       declined.add(offer.component);
       continue;
@@ -170,8 +221,14 @@ export async function acceptedOffers(registry: Registry, name: string, installed
  * Says which optional capabilities `names` could use but get no provider for, because the registry has
  * several (`unchosenProviders`): the project composes without them, so nothing else would say so.
  */
-export function warnUnchosen(registry: Registry, names: readonly string[], installed: readonly string[], targets: readonly string[]): void {
-  for (const { capability, for: name, providers, app } of unchosenProviders(registry, names, installed, targets)) {
+export function warnUnchosen(
+  registry: Registry,
+  names: readonly string[],
+  installed: readonly string[],
+  targets: readonly string[],
+  provided?: ProvidedCapabilities,
+): void {
+  for (const { capability, for: name, providers, app } of unchosenProviders(registry, names, installed, targets, provided)) {
     const what = (capabilityEntry(capability)?.summary ?? capability).replace(/\.$/, "");
     const who = app === "worker" ? `${name}'s Worker half` : name;
     log.warn(`${who} can use ${capability} (${what}), but ${providers.join(" and ")} each provide it, so none is installed: choose one with \`pikit add <name>\``);
@@ -226,12 +283,20 @@ export interface Draft {
   config: { before: string; after: string } | undefined;
   /** `.env.example`, as read ("" when absent) and as it will be. */
   example: { before: string; after: string };
+  /**
+   * What the project will provide, per App: what it composes now (`composedProvides`), with what each
+   * planned component declares. Undefined when unknown (it does not compose; `pikit new`, whose final
+   * doctor checks it): nothing is warned about, nor offered.
+   */
+  provided?: ProvidedCapabilities | undefined;
 }
 
 export function readDraft(projectDir: string): Draft {
-  const configPath = join(projectDir, CONFIG_FILE);
+  // Fixed records/directories are guarded before any component can write or an install can run.
+  for (const file of [PACKAGE_JSON, BUN_LOCK, "bun.lockb", BASES_DIR, VENDOR_DIR]) confinedPath(projectDir, file);
+  const configPath = confinedPath(projectDir, CONFIG_FILE);
   const config = existsSync(configPath) ? readFileSync(configPath, "utf8") : undefined;
-  const examplePath = join(projectDir, ENV_EXAMPLE);
+  const examplePath = confinedPath(projectDir, ENV_EXAMPLE);
   const example = existsSync(examplePath) ? readFileSync(examplePath, "utf8") : "";
   return {
     project: readProjectManifest(projectDir),
@@ -257,7 +322,8 @@ export function planInstall(
     );
   }
   checkCompatible(project.targets, manifest);
-  warnUnprovided(project, registry, manifest);
+  warnUnprovided(project, manifest, draft.provided);
+  if (draft.provided !== undefined) draft.provided = mergeProvided(draft.provided, providedByManifests([manifest], project.targets));
 
   const files = registry.files(name);
   checkConflicts(projectDir, project, name, files, options.force === true);
@@ -305,13 +371,17 @@ export function recordInstall(
 ): { record: InstalledComponent; obsolete: string[]; kept: string[]; dropped: Record<DependencyField, string[]> } {
   const { name } = manifest;
   const hashes: Record<string, { hash: string }> = {};
-  for (const [target, source] of files) hashes[target] = { hash: hashFile(source) };
+  for (const [target, source] of files) {
+    const hash = hashFile(source);
+    confinedPath(projectDir, basePath(hash));
+    hashes[target] = { hash };
+  }
   const obsolete: string[] = [];
   const kept: string[] = [];
   if (previous !== undefined) {
     const modified = new Set(modifiedFiles(projectDir, previous));
     for (const [file, recorded] of Object.entries(previous.files)) {
-      if (files.has(file) || !existsSync(join(projectDir, file))) continue;
+      if (files.has(file) || !existsSync(confinedPath(projectDir, file))) continue;
       if (!modified.has(file)) obsolete.push(file);
       else {
         hashes[file] = recorded;
@@ -329,7 +399,11 @@ export function recordInstall(
     version: manifest.version,
     ...(registry.commit !== undefined && { commit: registry.commit }),
     // The kit it accepts: a later add checks it before it changes the project's kit (`checkKit`).
-    requires: { pikit: manifest.requires.pikit, ...(manifest.requires.contracts !== undefined && { contracts: manifest.requires.contracts }) },
+    requires: {
+      pikit: manifest.requires.pikit,
+      ...(manifest.requires.contracts !== undefined && { contracts: manifest.requires.contracts }),
+      ...(manifest.requires.adapter !== undefined && { adapter: manifest.requires.adapter }),
+    },
     files: hashes,
     dependencies: manifest.dependencies,
     ...(manifest.devDependencies !== undefined && { devDependencies: manifest.devDependencies }),
@@ -366,8 +440,8 @@ export function workerWiring(name: string, manifest: Manifest, targets: readonly
  * The kit `add` will point the project at is this CLI's (`refreshKit`, in the apply phase). Refused,
  * before any write, when that replaces a newer kit: the components installed with it may need what
  * it has. `--force` replaces it anyway. When the order cannot be told, it is said, and it goes ahead.
- * Refused too, unless `--force`, when an installed component does not accept this CLI's core or
- * contracts (`requires` in pikit.json, `kitRanges`): the contracts stay 0.x on their own schedule (SPEC
+ * Refused too, unless `--force`, when an installed component does not accept this CLI's core,
+ * contracts or adapter (`requires` in pikit.json, `kitRanges`): the contracts stay 0.x on their own schedule (SPEC
  * K8), and nothing else would check the components already vendored against them. The draft records
  * the kit the project will have.
  */
@@ -395,7 +469,7 @@ export function checkKit(projectDir: string, project: ProjectManifest, force: bo
   }
   const refused = incompatibleInstalled(project);
   if (refused.length > 0) {
-    const what = `adding a component replaces the project's kit with this CLI's (@pikit/core ${coreVersion()}, @pikit/contracts ${contractsVersion()}), which these installed components do not accept:\n  ${refused.join("\n  ")}`;
+    const what = `adding a component replaces the project's kit with this CLI's (@pikit/core ${coreVersion()}, @pikit/contracts ${contractsVersion()}, @pikit/pi-adapter ${adapterVersion()}), which these installed components do not accept:\n  ${refused.join("\n  ")}`;
     if (!force) {
       throw new CliError(
         `${what}\nUse a pikit whose kit they accept, or pass --force to replace the kit anyway (then check them with \`pikit doctor\` and a type-check).`,
@@ -448,7 +522,7 @@ export function applyPlans(projectDir: string, draft: Draft, plans: readonly Pla
     for (const [target, source] of plan.files) {
       // The base is named by the hash pikit.json records: the source's.
       const base = basePath(recorded[target]?.hash ?? hashFile(source));
-      if (existsSync(join(projectDir, base))) continue;
+      if (existsSync(confinedPath(projectDir, base))) continue;
       undo.keep(base);
       copyFileSync(source, undo.mkdirFor(base));
     }
@@ -530,15 +604,21 @@ export function notPortable(location: string): string {
   return `the registry ${location} is a path on this machine: where this project is cloned, \`pikit add\` from it fails (put the registry inside the project to keep it portable)`;
 }
 
-/** Each installed component that does not accept this CLI's core or contracts, with what it accepts. */
+/** This CLI's kit: the versions it vendors. */
+function kitVersions(): { "@pikit/core": string; "@pikit/contracts": string; "@pikit/pi-adapter": string } {
+  return { "@pikit/core": coreVersion(), "@pikit/contracts": contractsVersion(), "@pikit/pi-adapter": adapterVersion() };
+}
+
+/** Each installed component that does not accept this CLI's core, contracts or adapter, with what it accepts. */
 function incompatibleInstalled(project: ProjectManifest): string[] {
-  const kit = { "@pikit/core": coreVersion(), "@pikit/contracts": contractsVersion() };
+  const kit = kitVersions();
   return Object.entries(project.components).flatMap(([name, installed]) => {
-    const { pikit, contracts } = kitRanges(installed);
+    const { pikit, contracts, adapter } = kitRanges(installed);
     return (
       [
         ["@pikit/core", pikit],
         ["@pikit/contracts", contracts],
+        ["@pikit/pi-adapter", adapter],
       ] as const
     )
       .filter(([pkg, range]) => range !== undefined && !Bun.semver.satisfies(kit[pkg], range))
@@ -547,8 +627,10 @@ function incompatibleInstalled(project: ProjectManifest): string[] {
 }
 
 /**
- * Refuses a component that does not run on `targets` or does not accept this CLI's core and
- * contracts. `force` (`pikit upgrade --force`) turns the second into a warning.
+ * Refuses a component that does not run on `targets`, that does not say which contracts or adapter it
+ * accepts while it depends on them (`kitRangeProblems`), or that does not accept this CLI's core,
+ * contracts or adapter. `force` (`pikit upgrade --force`) turns only the last into a warning: a range
+ * that is not stated could not be checked later either.
  */
 export function checkCompatible(targets: readonly string[], manifest: Manifest, force = false): void {
   const unsupported = targets.filter((t) => !manifest.targets.includes(t));
@@ -559,37 +641,25 @@ export function checkCompatible(targets: readonly string[], manifest: Manifest, 
     if (!force) throw new CliError(what);
     log.warn(`${what}; --force: going ahead`);
   };
-  const core = coreVersion();
-  if (!Bun.semver.satisfies(core, manifest.requires.pikit)) {
-    refuse(`${manifest.name} requires @pikit/core ${manifest.requires.pikit}; this CLI vendors ${core}`);
+  const { missing, refused } = kitRangeProblems(manifest, kitVersions());
+  if (missing.length > 0) {
+    throw new CliError(`${manifest.name}'s component.json: ${missing.join("; ")}. Its registry must say so; --force does not skip it`);
   }
-  const contracts = contractsVersion();
-  if (manifest.requires.contracts !== undefined && !Bun.semver.satisfies(contracts, manifest.requires.contracts)) {
-    refuse(`${manifest.name} requires @pikit/contracts ${manifest.requires.contracts}; this CLI vendors ${contracts}`);
-  }
+  for (const { pkg, range, version } of refused) refuse(`${manifest.name} requires ${pkg} ${range}; this CLI vendors ${version}`);
 }
 
 /**
- * Information, not failure: the provider may come next, or from the project's own components. Per App
- * on Cloudflare: what the Worker's half requires must be provided in the Worker's App.
+ * Information, not failure: the provider may come next. Per App on Cloudflare: what the Worker's half
+ * requires must be provided in the Worker's App. `provided` is what the project will provide
+ * (`Draft.provided`); unknown, nothing is said (`pikit doctor` checks the real app).
  */
-export function warnUnprovided(project: ProjectManifest, registry: Registry, manifest: Manifest): void {
-  const provided: Record<AppName, Set<string>> = { default: new Set(), worker: new Set() };
-  const provide = (m: Manifest) => {
-    for (const [app, half] of declaredByApp(m, project.targets)) for (const capability of half.provides) provided[app].add(capability);
-  };
-  provide(manifest);
-  for (const installed of Object.keys(project.components)) {
-    try {
-      provide(registry.manifest(installed));
-    } catch {
-      // Installed from another registry: `pikit doctor` checks the real app anyway.
-    }
-  }
+export function warnUnprovided(project: ProjectManifest, manifest: Manifest, provided: ProvidedCapabilities | undefined): void {
+  if (provided === undefined) return;
+  const own = providedByManifests([manifest], project.targets);
   const apps = declaredByApp(manifest, project.targets);
   for (const [app, half] of apps) {
     for (const capability of half.requires) {
-      if (provided[app].has(capability)) continue;
+      if (provided[app].has(capability) || own[app].has(capability)) continue;
       log.warn(
         apps.length === 1
           ? `${manifest.name} requires "${capability}", which no installed component provides yet`
@@ -604,7 +674,7 @@ export function checkConflicts(projectDir: string, project: ProjectManifest, nam
   for (const [target, source] of files) {
     const owner = Object.entries(project.components).find(([other, c]) => other !== name && target in c.files)?.[0];
     if (owner !== undefined) throw new CliError(`${name} would write ${target}, which ${owner} installed`);
-    const path = join(projectDir, target);
+    const path = confinedPath(projectDir, target);
     if (!existsSync(path) || hashFile(path) === hashFile(source)) continue;
     // A reinstall may overwrite what it installed itself, when nobody changed it since.
     const recorded = project.components[name]?.files[target]?.hash;

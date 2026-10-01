@@ -5,8 +5,7 @@
   "title": "HTTP API: call your agent from your own code (POST /v1/messages)",
   "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
   "targets": [
-    "server",
-    "cloudflare"
+    "server"
   ],
   "requires": {
     "pikit": "0.0.0",

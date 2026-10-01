@@ -1,9 +1,9 @@
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
-import { checkManifest } from "./checks.ts";
+import { checkManifest, kitRangeProblems } from "./checks.ts";
 import { checkSchemaFiles } from "./commands.ts";
 import { COMPONENT_SCHEMA_FILE, ManifestSchema, readManifest, schemaProblems } from "./manifest.ts";
 
@@ -21,7 +21,7 @@ test("every component.json of the repository conforms to the schema and names it
 test("an unknown field is one problem that names it; a malformed manifest stops at its shape", () => {
   expect(schemaProblems(ManifestSchema, { ...toolBash(), dependancies: {} })).toEqual(["/dependancies: is not a known field"]);
   // The directory does not match either, but on a malformed manifest only the shape is reported.
-  const problems = checkManifest({ ...toolBash(), targets: [] }, "/nowhere", "other-name", "0.0.0", "0.0.0");
+  const problems = checkManifest({ ...toolBash(), targets: [] }, "/nowhere", "other-name", "0.0.0", "0.0.0", "0.0.0");
   expect(problems).toEqual(["component.json /targets: must not have fewer than 1 items"]);
 });
 
@@ -41,20 +41,45 @@ test("requires.contracts must accept this repository's @pikit/contracts, and a c
   const manifest = toolBash() as { requires: Record<string, unknown>; dependencies: Record<string, string> };
   const dir = join(DEFAULT_REGISTRY, "components", "tool-bash");
   expect(manifest.dependencies["@pikit/contracts"]).toBeDefined();
-  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.0.0")).toEqual([]);
-  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.1.0")).toEqual([
+  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([]);
+  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.1.0", "0.0.0")).toEqual([
     `requires.contracts "${String(manifest.requires.contracts)}" does not accept this repository's @pikit/contracts 0.1.0`,
   ]);
   const { contracts: _, ...requires } = manifest.requires;
-  expect(checkManifest({ ...manifest, requires }, dir, "tool-bash", "0.0.0", "0.0.0")).toEqual([
+  expect(checkManifest({ ...manifest, requires }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
     "dependencies lists @pikit/contracts, but requires.contracts does not say which versions it works with (a semver range, as requires.pikit)",
   ]);
+});
+
+test("requires.adapter must accept this repository's @pikit/pi-adapter, and a component that depends on it states a meaningful range", () => {
+  const manifest = toolBash() as { requires: Record<string, unknown>; dependencies: Record<string, string> };
+  const dir = join(DEFAULT_REGISTRY, "components", "tool-bash");
+  expect(manifest.dependencies["@pikit/pi-adapter"]).toBeDefined();
+  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.0.0", "0.1.0")).toEqual([
+    `requires.adapter "${String(manifest.requires.adapter)}" does not accept this repository's @pikit/pi-adapter 0.1.0`,
+  ]);
+  const { adapter: _, ...requires } = manifest.requires;
+  expect(checkManifest({ ...manifest, requires }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
+    "dependencies lists @pikit/pi-adapter, but requires.adapter does not say which versions it works with (a semver range, as requires.pikit)",
+  ]);
+  // A wildcard says nothing either.
+  expect(checkManifest({ ...manifest, requires: { ...requires, adapter: "*" } }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
+    'dependencies lists @pikit/pi-adapter, but requires.adapter ("*") does not say which versions it works with (a semver range, as requires.pikit)',
+  ]);
+});
+
+test("every component of the repository that depends on the contracts or the adapter states their range", () => {
+  for (const name of readdirSync(join(DEFAULT_REGISTRY, "components"))) {
+    const manifest = readManifest(join(DEFAULT_REGISTRY, "components", name));
+    if (manifest === undefined) continue;
+    expect([name, kitRangeProblems(manifest, { "@pikit/core": "0.0.0", "@pikit/contracts": "0.0.0", "@pikit/pi-adapter": "0.0.0" }).missing]).toEqual([name, []]);
+  }
 });
 
 test("a files target that leaves the project, or is one of its own records, is a problem", () => {
   const manifest = toolBash();
   const files = [...(manifest.files as unknown[]), { source: "README.md", target: "package.json" }, { source: "README.md", target: "../outside" }];
-  const problems = checkManifest({ ...manifest, files }, join(DEFAULT_REGISTRY, "components", "tool-bash"), "tool-bash", "0.0.0", "0.0.0");
+  const problems = checkManifest({ ...manifest, files }, join(DEFAULT_REGISTRY, "components", "tool-bash"), "tool-bash", "0.0.0", "0.0.0", "0.0.0");
   expect(problems).toEqual([
     'files target "package.json" is one of the project\'s own files; no component writes it',
     'files target "../outside" leaves the project',

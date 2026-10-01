@@ -72,6 +72,22 @@ export async function runEntrypoint(definition: AppDefinition, options: Entrypoi
     return process.exit(1);
   }
 
+  // A stop within the stop deadline. Its timer, like the start's, is a `setTimeout`, not
+  // `AbortSignal.timeout`: Bun's does not keep the process alive, and a deadline must fire even when
+  // a hanging stop has released everything else (the process would drain and skip the other stops).
+  const stopWithin = async (what: string): Promise<void> => {
+    const deadline = new AbortController();
+    const timer = setTimeout(
+      () => deadline.abort(new Error(`deployment-docker: ${what} did not finish within ${stopDeadlineMs} ms`)),
+      stopDeadlineMs,
+    );
+    try {
+      await running.stop(withAbortSignal(deadline.signal, BACKGROUND_CONTEXT));
+    } finally {
+      clearTimeout(timer);
+    }
+  };
+
   let stopping = false;
   const shutdown = (signal: string): void => {
     if (stopping) {
@@ -80,7 +96,7 @@ export async function runEntrypoint(definition: AppDefinition, options: Entrypoi
     }
     stopping = true;
     logger.info("pikit: stopping", { signal, deadlineMs: stopDeadlineMs });
-    running.stop(withAbortSignal(AbortSignal.timeout(stopDeadlineMs), BACKGROUND_CONTEXT)).then(
+    stopWithin("the stop").then(
       () => {
         logger.info("pikit: stopped");
         process.exit(0);
@@ -96,22 +112,13 @@ export async function runEntrypoint(definition: AppDefinition, options: Entrypoi
   process.on("SIGINT", () => shutdown("SIGINT"));
 
   // The rollback of a failed or overdue start (K2): the kernel bounds it only by a stop's deadline.
-  // Its timer, like the start's, is a `setTimeout`, not `AbortSignal.timeout`: Bun's does not keep
-  // the process alive, and a deadline must fire even when nothing else is pending.
   let rollingBack: Promise<never> | undefined;
   const rollBack = (): Promise<never> =>
     (rollingBack ??= (async () => {
-      const deadline = new AbortController();
-      const timer = setTimeout(
-        () => deadline.abort(new Error(`deployment-docker: the rollback did not finish within ${stopDeadlineMs} ms`)),
-        stopDeadlineMs,
-      );
       try {
-        await running.stop(withAbortSignal(deadline.signal, BACKGROUND_CONTEXT));
+        await stopWithin("the rollback");
       } catch (error) {
         logger.error("pikit: the failed start did not roll back cleanly", { error });
-      } finally {
-        clearTimeout(timer);
       }
       return process.exit(1);
     })());

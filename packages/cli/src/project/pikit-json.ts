@@ -16,7 +16,7 @@
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { confinedPath } from "./paths.ts";
 import type { EnvironmentVariable, Hook } from "../registry/manifest.ts";
 import { BUILTIN_REGISTRY, isCheckoutRegistry, recordedLocation } from "./registry-location.ts";
 
@@ -44,10 +44,11 @@ export interface InstalledComponent {
   /** The same for `devDependencies`; absent when it added none. */
   addedDevDependencies?: string[];
   /**
-   * Its manifest's `requires.pikit` and `requires.contracts`: the @pikit/core and @pikit/contracts
-   * versions it works with. Absent in a record made before they were recorded (`kitRanges`).
+   * Its manifest's `requires.pikit`, `requires.contracts` and `requires.adapter`: the @pikit/core,
+   * @pikit/contracts and @pikit/pi-adapter versions it works with. Absent in a record made before
+   * they were recorded (`kitRanges`).
    */
-  requires?: { pikit: string; contracts?: string };
+  requires?: { pikit: string; contracts?: string; adapter?: string };
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
   /**
@@ -100,7 +101,7 @@ export function emptyManifest(registry: string = BUILTIN_REGISTRY, kit?: string,
 }
 
 export function readProjectManifest(projectDir: string): ProjectManifest {
-  const path = join(projectDir, PIKIT_JSON);
+  const path = confinedPath(projectDir, PIKIT_JSON);
   if (!existsSync(path)) {
     throw new Error(`${projectDir} is not a pikit project: there is no ${PIKIT_JSON} (create one with \`pikit new\`)`);
   }
@@ -133,7 +134,7 @@ export function writeProjectManifest(projectDir: string, manifest: ProjectManife
   }
   // Keys in one order, whatever order the object was built in.
   const { version, kit, targets, registries } = manifest;
-  writeFileSync(join(projectDir, PIKIT_JSON), `${JSON.stringify({ version, ...(kit !== undefined && { kit }), targets, registries, components }, null, 2)}\n`);
+  writeFileSync(confinedPath(projectDir, PIKIT_JSON), `${JSON.stringify({ version, ...(kit !== undefined && { kit }), targets, registries, components }, null, 2)}\n`);
 }
 
 export function hashOf(content: string | Uint8Array): string {
@@ -151,20 +152,24 @@ export function hashFile(path: string): string {
 export function modifiedFiles(projectDir: string, component: InstalledComponent): string[] {
   const generated = new Set(component.generated ?? []);
   return Object.entries(component.files)
-    .filter(([file, { hash }]) => !generated.has(file) && existsSync(join(projectDir, file)) && hashFile(join(projectDir, file)) !== hash)
+    .filter(([file, { hash }]) => {
+      const path = confinedPath(projectDir, file);
+      return !generated.has(file) && existsSync(path) && hashFile(path) !== hash;
+    })
     .map(([file]) => file);
 }
 
 /**
- * The @pikit/core and @pikit/contracts ranges an installed component accepts, as recorded. When no
- * contracts range is recorded (a record made before `requires` was, or a manifest that declares none),
- * the @pikit/contracts version its manifest pinned in `dependencies` stands for it: the component was
- * written against that one. No core range is guessed.
+ * The @pikit/core, @pikit/contracts and @pikit/pi-adapter ranges an installed component accepts, as
+ * recorded. When no contracts (or adapter) range is recorded (a record made before `requires` was, or
+ * a manifest that declares none), the version its manifest pinned in `dependencies` stands for it: the
+ * component was written against that one. No core range is guessed.
  */
-export function kitRanges(component: InstalledComponent): { pikit?: string; contracts?: string } {
+export function kitRanges(component: InstalledComponent): { pikit?: string; contracts?: string; adapter?: string } {
   const pikit = component.requires?.pikit;
   const contracts = component.requires?.contracts ?? component.dependencies["@pikit/contracts"];
-  return { ...(pikit === undefined ? {} : { pikit }), ...(contracts === undefined ? {} : { contracts }) };
+  const adapter = component.requires?.adapter ?? component.dependencies["@pikit/pi-adapter"];
+  return { ...(pikit === undefined ? {} : { pikit }), ...(contracts === undefined ? {} : { contracts }), ...(adapter === undefined ? {} : { adapter }) };
 }
 
 /**
@@ -180,5 +185,5 @@ export function ownedDependencies(component: InstalledComponent): { dependencies
 
 /** Installed files that are gone. */
 export function missingFiles(projectDir: string, component: InstalledComponent): string[] {
-  return Object.keys(component.files).filter((file) => !existsSync(join(projectDir, file)));
+  return Object.keys(component.files).filter((file) => !existsSync(confinedPath(projectDir, file)));
 }

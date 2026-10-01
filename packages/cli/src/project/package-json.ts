@@ -5,7 +5,7 @@
  */
 
 import { readFileSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { confinedPath } from "./paths.ts";
 import { isKitPackage, vendorKitPackage } from "./vendor.ts";
 
 export interface PackageJson {
@@ -20,11 +20,11 @@ export interface PackageJson {
 export type DependencyField = "dependencies" | "devDependencies";
 
 export function readPackageJson(projectDir: string): PackageJson {
-  return JSON.parse(readFileSync(join(projectDir, "package.json"), "utf8")) as PackageJson;
+  return JSON.parse(readFileSync(confinedPath(projectDir, "package.json"), "utf8")) as PackageJson;
 }
 
 export function writePackageJson(projectDir: string, pkg: PackageJson): void {
-  writeFileSync(join(projectDir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
+  writeFileSync(confinedPath(projectDir, "package.json"), `${JSON.stringify(pkg, null, 2)}\n`);
 }
 
 /**

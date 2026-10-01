@@ -70,6 +70,11 @@
           "minLength": 1,
           "description": "The @pikit/contracts versions it works with (a semver range); declared when `dependencies` lists @pikit/contracts. The contracts version apart from the core (SPEC K8): `pikit add` checks it for the component it adds, and records it, so a later add refuses to replace the project's kit with contracts an installed component does not accept."
         },
+        "adapter": {
+          "type": "string",
+          "minLength": 1,
+          "description": "The @pikit/pi-adapter versions it works with (a semver range); declared when `dependencies` lists @pikit/pi-adapter. Checked and recorded by `pikit add` as `contracts` is."
+        },
         "capabilities": {
           "type": "array",
           "items": {

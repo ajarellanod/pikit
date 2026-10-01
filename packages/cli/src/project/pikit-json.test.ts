@@ -106,4 +106,8 @@ test("the kit ranges a component accepts: its recorded ones; with no contracts r
   expect(kitRanges({ ...record, requires: { pikit: "^0.1.0" } })).toEqual({ pikit: "^0.1.0", contracts: "0.0.0" });
   expect(kitRanges(record)).toEqual({ contracts: "0.0.0" });
   expect(kitRanges({ ...record, dependencies: {} })).toEqual({});
+  // The adapter the same way: its recorded range, else its pin.
+  const adapter = { ...record, dependencies: { "@pikit/pi-adapter": "0.3.0" } };
+  expect(kitRanges(adapter)).toEqual({ adapter: "0.3.0" });
+  expect(kitRanges({ ...adapter, requires: { pikit: "^0.1.0", adapter: "^0.3.0" } })).toEqual({ pikit: "^0.1.0", adapter: "^0.3.0" });
 });

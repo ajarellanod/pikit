@@ -8,6 +8,9 @@
  * - `start-waits`: its start waits until cancelled, with a long deadline, so a signal cancels it;
  * - `stop-fails`: its stop throws;
  * - `stop-hangs`: its stop never returns, with a long stop deadline, so only a second signal ends it;
+ * - `stop-hangs-idle`: a second component, `releasing`, holds the process's only timer, and its stop
+ *   clears it and never returns: nothing keeps the process alive but the stop deadline (500 ms),
+ *   which must still abandon it and let `fixture` stop;
  * - `rollback-hangs`: a second component, `failing`, whose start throws after `fixture` started, and
  *   `fixture`'s stop never returns while its timer runs, so the rollback hangs (K2);
  * - `rollback-hangs-late`: the same, but `failing`'s start never returns and ignores its cancellation.
@@ -19,6 +22,7 @@ import { runEntrypoint } from "./entrypoint.ts";
 
 const mode = process.argv[2] ?? "ok";
 const rollback = mode.startsWith("rollback-");
+const idle = mode === "stop-hangs-idle";
 
 /** Resolves when `signal` aborts, never otherwise. */
 const aborted = (signal: AbortSignal | undefined): Promise<void> =>
@@ -36,7 +40,8 @@ const fixture = defineComponent({
           await aborted(ctx.abortSignal);
           throw new Error("fixture: the start was cancelled");
         }
-        timer = setInterval(() => {}, 60_000);
+        // In `stop-hangs-idle`, `releasing` holds the only timer.
+        if (!idle) timer = setInterval(() => {}, 60_000);
         ctx.logger.info("fixture: started");
       },
       async stop(ctx) {
@@ -59,7 +64,23 @@ const failing = defineComponent({
   }),
 });
 
-await runEntrypoint(defineApp({ components: rollback ? [fixture, failing] : [fixture] }), {
+const releasing = defineComponent({
+  name: "releasing",
+  setup() {
+    let timer: ReturnType<typeof setInterval> | undefined;
+    return {
+      start() {
+        timer = setInterval(() => {}, 60_000);
+      },
+      async stop() {
+        clearInterval(timer);
+        await new Promise(() => {});
+      },
+    };
+  },
+});
+
+await runEntrypoint(defineApp({ components: rollback ? [fixture, failing] : idle ? [fixture, releasing] : [fixture] }), {
   startDeadlineMs: mode === "start-hangs" || rollback ? 500 : 60_000,
-  stopDeadlineMs: mode === "stop-hangs" ? 60_000 : rollback ? 500 : 2_000,
+  stopDeadlineMs: mode === "stop-hangs" ? 60_000 : rollback || idle ? 500 : 2_000,
 });

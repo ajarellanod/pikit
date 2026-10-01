@@ -9,7 +9,9 @@ Talk to an agent over HTTP: send a message, get the answer in the response.
   `server-bun`) serves the routes, and a router (such as `router-basic`) picks the agent.
 - **Uses, if installed:** `agent.submissions` (`submissions-sql`, which `pikit add runtime-pi`
   offers): a message's outcome can be read later, and sending it again returns it.
-- **Targets:** `server` and `cloudflare` (fetch handlers and Web Crypto only).
+- **Targets:** `server`. Although the handlers use Fetch and Web Crypto, the Cloudflare host serves
+  HTTP routes in the Worker's App; this channel has no Worker half yet. Do not install it on
+  Cloudflare until that request path is integrated and tested.
 - **Installs to:** `src/pikit/channel-http/`.
 - **npm dependencies:** `typebox`.
 - **Environment:** `PIKIT_HTTP_TOKEN` (secret, required, at least 16 characters; for example
@@ -124,5 +126,5 @@ unknown messages; without it, `GET`'s `501`.
 channel does with a message (routed, deduplicated, stopped, denied, no router), over these routes.
 The `samples/http` tests run the same channel with Pi, over real HTTP.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+The CLI generates capability declarations in `component.json` from `setup`; targets are declared
+by the component. The test "what setup declares" pins the capabilities.

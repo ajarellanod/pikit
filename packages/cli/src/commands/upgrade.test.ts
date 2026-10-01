@@ -11,6 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { emptyManifest, hashOf, writeProjectManifest } from "../project/pikit-json.ts";
 import { runCli } from "../testing/cli.ts";
+import { OPERATION_MARKER } from "../project/operation.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -239,6 +240,51 @@ test("a version this CLI's contracts do not satisfy is refused before any write;
   expect(read(dir, own("index.ts"))).toBe(INDEX("tool-fake", "// 0.2.0"));
 }, 60_000);
 
+test("an adapter range this CLI's does not satisfy needs --force; a missing range is refused even with it", async () => {
+  const { dir, registry } = await installed({});
+  publish(registry, "tool-fake", "0.2.0", {}, { dependencies: { "@pikit/pi-adapter": "0.0.0" } });
+  const before = snapshot(dir);
+  const missing = await runCli(["upgrade", "--yes", "--force"], dir);
+  expect(missing.code).toBe(1);
+  expect(missing.err).toContain("tool-fake's component.json: dependencies lists @pikit/pi-adapter, but requires.adapter does not say which versions it works with");
+  expect(snapshot(dir)).toEqual(before);
+
+  publish(registry, "tool-fake", "0.2.0", {}, { requires: { pikit: "0.0.0", adapter: "^9.0.0", capabilities: [] } });
+  const refused = await runCli(["upgrade", "--yes"], dir);
+  expect(refused.code).toBe(1);
+  expect(refused.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.0");
+  expect(snapshot(dir)).toEqual(before);
+  const forced = await runCli(["upgrade", "--yes", "--force"], dir);
+  expect(forced.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.0; --force: going ahead");
+  expect(forced.code).toBe(0);
+  expect(record(dir).requires).toEqual({ pikit: "0.0.0", adapter: "^9.0.0" });
+}, 60_000);
+
+test("providers are offered by what the project will compose: an up-to-date provider counts, one whose new version drops the capability does not", async () => {
+  /** A component whose setup runs `body` (with `pikit`). */
+  const code = (name: string, body = "") => ({
+    "index.ts": `import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({\n  name: "${name}",\n  setup(pikit) {\n    ${body}\n  },\n});\n`,
+  });
+  const { dir, registry } = await installed({});
+  publish(registry, "outbound-fake", "0.1.0", code("outbound-fake", 'pikit.provide("outbound.queue", {});'), { provides: ["outbound.queue"] });
+  publish(registry, "outbound-other", "0.1.0", code("outbound-other", 'pikit.provide("outbound.queue", {});'), { provides: ["outbound.queue"] });
+  expect((await runCli(["add", "outbound-fake", "--registry", registry, "--yes"], dir)).code).toBe(0);
+
+  // tool-fake can now use the queue, which the installed outbound-fake provides: nothing to offer.
+  publish(registry, "tool-fake", "0.2.0", code("tool-fake", 'pikit.useOptional("outbound.queue");'), { optional: { capabilities: ["outbound.queue"] } });
+  const kept = await runCli(["upgrade", "--dry-run"], dir);
+  expect(kept.out).toContain("tool-fake 0.1.0 \u2192 0.2.0");
+  expect(kept.out).not.toContain("outbound-fake 0.1.0 \u2192");
+  expect(kept.out).not.toContain("would offer");
+  expect(kept.code).toBe(0);
+
+  // Its next version no longer provides it: what it provides installed does not count, the other provider is offered.
+  publish(registry, "outbound-fake", "0.2.0", code("outbound-fake"));
+  const dropped = await runCli(["upgrade", "--dry-run"], dir);
+  expect(dropped.out).toContain("would offer outbound-other, for tool-fake (outbound.queue)");
+  expect(dropped.code).toBe(0);
+}, 60_000);
+
 test("an upgrade whose install fails puts everything back: files, merges, bases, pikit.json, package.json", async () => {
   const { dir, registry } = await installed({ "lines.ts": lines(), "old.ts": "export const old = 1;\n" });
   writeFileSync(join(dir, own("lines.ts")), lines({ 2: "export const line2 = 'mine';" }));
@@ -250,7 +296,10 @@ test("an upgrade whose install fails puts everything back: files, merges, bases,
   expect(run.err).toContain("`bun install` failed");
   expect(run.err).toContain("nothing was upgraded");
   expect(run.code).toBe(1);
-  expect(snapshot(dir)).toEqual(before);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
 }, 120_000);
 
 test("--dry-run says what it would do and writes nothing", async () => {

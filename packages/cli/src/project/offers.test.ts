@@ -7,10 +7,15 @@ import { expect, test } from "bun:test";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import type { Manifest } from "../registry/manifest.ts";
 import { declaredByApp } from "./apps.ts";
-import { offeredProviders, unchosenProviders, withOffers } from "./offers.ts";
+import { offeredProviders, type ProvidedCapabilities, providedByApp, providedByManifests, unchosenProviders, withOffers } from "./offers.ts";
+import type { ProbeResult } from "./probe.ts";
 import { openRegistry, type Registry } from "./registry-source.ts";
 
 const registry = openRegistry(DEFAULT_REGISTRY);
+
+/** What `installed` provide when they compose as their manifests in `from` say: a project's `providedByApp`, for these tests. */
+const composing = (installed: readonly string[], targets: readonly string[] = ["server"], from: Registry = registry): ProvidedCapabilities =>
+  providedByManifests(installed.map((name) => from.manifest(name)), targets);
 
 test("a chat channel brings durable delivery, the record of submissions, a place for its cursor, and the storage they require; providers first", () => {
   expect(offeredProviders(registry, ["channel-telegram"])).toEqual([
@@ -22,9 +27,11 @@ test("a chat channel brings durable delivery, the record of submissions, a place
 });
 
 test("what is already installed is not offered again", () => {
-  expect(offeredProviders(registry, ["channel-telegram"], ["outbound-durable", "storage-sqlite", "submissions-sql", "storage-kv-sql"])).toEqual([]);
+  const all = ["outbound-durable", "storage-sqlite", "submissions-sql", "storage-kv-sql"];
+  expect(offeredProviders(registry, ["channel-telegram"], all, ["server"], composing(all))).toEqual([]);
   // The queue, the record and the key-value store are there but not their storage: the storage is the user's to add (doctor says so).
-  expect(offeredProviders(registry, ["channel-telegram"], ["outbound-durable", "submissions-sql", "storage-kv-sql"])).toEqual([]);
+  const some = ["outbound-durable", "submissions-sql", "storage-kv-sql"];
+  expect(offeredProviders(registry, ["channel-telegram"], some, ["server"], composing(some))).toEqual([]);
 });
 
 test("HTTP brings only the record of submissions (its GET); tools do not bring a per-agent workspace, which is a choice, not an offer", () => {
@@ -41,10 +48,10 @@ test("a component that requires a capability marked offer brings its provider, a
     { component: "storage-kv-sql", capability: "storage.kv", for: "conversations-kv", why: "required" },
   ]);
   // The storage is there: only the key-value store comes. Both there: nothing.
-  expect(offeredProviders(registry, ["conversations-kv"], ["storage-sqlite"])).toEqual([
+  expect(offeredProviders(registry, ["conversations-kv"], ["storage-sqlite"], ["server"], composing(["storage-sqlite"]))).toEqual([
     { component: "storage-kv-sql", capability: "storage.kv", for: "conversations-kv", why: "required" },
   ]);
-  expect(offeredProviders(registry, ["conversations-kv"], ["storage-sqlite", "storage-kv-sql"])).toEqual([]);
+  expect(offeredProviders(registry, ["conversations-kv"], ["storage-sqlite", "storage-kv-sql"], ["server"], composing(["storage-sqlite", "storage-kv-sql"]))).toEqual([]);
   // What it requires and the catalogue does not mark offer (its sessions) stays the user's choice.
   expect(offeredProviders(registry, ["conversations-kv"]).map((o) => o.capability)).not.toContain("sessions.store");
 });
@@ -66,7 +73,7 @@ test("only providers that run on the project's targets are offered: on Cloudflar
 
 test("on Cloudflare the Telegram webhook's object half brings the record of submissions and durable delivery; its Worker half nothing of the object's", () => {
   const preset = ["storage-do", "sessions-sql", "conversations-kv", "storage-kv-sql", "deployment-cloudflare"];
-  expect(offeredProviders(registry, ["channel-telegram-webhook"], preset, ["cloudflare"])).toEqual([
+  expect(offeredProviders(registry, ["channel-telegram-webhook"], preset, ["cloudflare"], composing(preset, ["cloudflare"]))).toEqual([
     { component: "submissions-sql", capability: "agent.submissions", for: "channel-telegram-webhook", why: "required" },
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram-webhook", why: "recommended" },
   ]);
@@ -105,7 +112,7 @@ test("a provider is offered in the App that misses it: one that goes only in the
   const objectOnly = fakeRegistry([channel, { name: "storage-kv-object", provides: ["storage.kv"] }]);
   expect(offeredProviders(objectOnly, ["channel-x"], [], ["cloudflare"])).toEqual([{ component: "storage-kv-object", capability: "storage.kv", for: "channel-x", why: "required" }]);
   // Installed already, it still does not serve the Worker's App: nothing there to offer, `pikit add` warns.
-  expect(offeredProviders(objectOnly, ["channel-x"], ["storage-kv-object"], ["cloudflare"])).toEqual([]);
+  expect(offeredProviders(objectOnly, ["channel-x"], ["storage-kv-object"], ["cloudflare"], composing(["storage-kv-object"], ["cloudflare"], objectOnly))).toEqual([]);
 
   // A provider in both Apps serves each; offered once. One only in the Worker's is offered for the Worker's half.
   const both = fakeRegistry([channel, { name: "storage-kv-both", provides: ["storage.kv"], apps: { worker: "default" } }]);
@@ -115,7 +122,7 @@ test("a provider is offered in the App that misses it: one that goes only in the
     { name: "storage-kv-object", provides: ["storage.kv"] },
     { name: "storage-kv-edge", provides: ["storage.kv"], apps: { worker: "worker" }, halves: { default: half([]), worker: { provides: ["storage.kv"], requires: [], optional: [] } } },
   ]);
-  expect(offeredProviders(workerOnly, ["channel-x"], ["storage-kv-object"], ["cloudflare"])).toEqual([
+  expect(offeredProviders(workerOnly, ["channel-x"], ["storage-kv-object"], ["cloudflare"], composing(["storage-kv-object"], ["cloudflare"], workerOnly))).toEqual([
     { component: "storage-kv-edge", capability: "storage.kv", for: "channel-x", why: "required", app: "worker" },
   ]);
 });
@@ -135,7 +142,53 @@ test("an optional capability with two providers is not offered, and is named as 
   expect(unchosenProviders(two, ["channel-telegram"], [], ["server"])).toEqual([{ capability: "outbound.queue", for: "channel-telegram", providers: ["outbound-durable", "outbound-other"] }]);
   // One provider: offered, nothing to choose. Installed already: nothing either way.
   expect(unchosenProviders(registry, ["channel-telegram"], [], ["server"])).toEqual([]);
-  expect(unchosenProviders(two, ["channel-telegram"], ["outbound-other"], ["server"])).toEqual([]);
+  expect(unchosenProviders(two, ["channel-telegram"], ["outbound-other"], ["server"], composing(["outbound-other"], ["server"], two))).toEqual([]);
+});
+
+test("what an installed component provides is what the project composes, not what a registry's component of that name declares", () => {
+  // `outbound-a` is installed from another registry, and its code provides nothing; this registry's
+  // `outbound-a` says it provides the queue. The queue is offered all the same, by the one provider
+  // that is not an installed name: an installed one is never reinstalled.
+  const channel = { name: "channel-x", targets: ["server"], optional: { capabilities: ["outbound.queue"] } };
+  const provider = (name: string) => ({ name, targets: ["server"], provides: ["outbound.queue"] });
+  const other = fakeRegistry([channel, provider("outbound-a"), provider("outbound-b")]);
+  const nothing: ProvidedCapabilities = { default: new Set(), worker: new Set() };
+  expect(offeredProviders(other, ["channel-x"], ["outbound-a"], ["server"], nothing)).toEqual([
+    { component: "outbound-b", capability: "outbound.queue", for: "channel-x", why: "recommended" },
+  ]);
+  expect(unchosenProviders(other, ["channel-x"], ["outbound-a"], ["server"], nothing)).toEqual([]);
+  // Composed with the queue (the project's own component, or its config), nothing is offered.
+  const queued: ProvidedCapabilities = { default: new Set(["outbound.queue"]), worker: new Set() };
+  expect(offeredProviders(other, ["channel-x"], ["outbound-a"], ["server"], queued)).toEqual([]);
+});
+
+test("with something installed and the composition unknown, nothing is offered nor named: never guessed from manifests", () => {
+  expect(offeredProviders(registry, ["channel-telegram"], ["tool-bash"], ["server"])).toEqual([]);
+  expect(unchosenProviders(registry, ["channel-telegram"], ["tool-bash"], ["server"])).toEqual([]);
+  // Nothing installed (a new project): the manifests are all there is.
+  expect(offeredProviders(registry, ["channel-http"], [], ["server"]).map((o) => o.component)).toEqual(["storage-sqlite", "submissions-sql"]);
+});
+
+test("what a composed project provides, per App, without the components about to be replaced and their Worker halves", () => {
+  const app = (components: [string, string[]][]) => ({
+    components: components.map(([name, provides]) => ({ name, provides, requires: [], optional: [] })),
+    capabilities: {},
+    pipelines: {},
+    config: {},
+  });
+  const result: ProbeResult = {
+    ok: true,
+    listed: [],
+    agents: [],
+    description: app([["agents", ["agent.definition"]], ["channel-x", ["outbound.queue"]], ["storage-x", ["storage.sql"]]]),
+    worker: app([["channel-x-worker", ["http.route"]], ["secrets-x", ["secrets"]]]),
+  };
+  expect(providedByApp(result)).toEqual({
+    default: new Set(["agent.definition", "outbound.queue", "storage.sql"]),
+    worker: new Set(["http.route", "secrets"]),
+  });
+  expect(providedByApp(result, ["channel-x"])).toEqual({ default: new Set(["agent.definition", "storage.sql"]), worker: new Set(["secrets"]) });
+  expect(providedByApp({ ok: false, error: "no" })).toBeUndefined();
 });
 
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {

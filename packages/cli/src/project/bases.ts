@@ -12,7 +12,7 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { confinedPath } from "./paths.ts";
 import type { ProjectManifest } from "./pikit-json.ts";
 
 export const BASES_DIR = "pikit-bases";
@@ -26,12 +26,16 @@ export function basePath(hash: string): string {
 
 /** The bases in the project that no installed component names: project-relative paths. */
 export function unreferencedBases(projectDir: string, project: ProjectManifest): string[] {
-  const dir = join(projectDir, BASES_DIR);
+  const dir = confinedPath(projectDir, BASES_DIR);
   if (!existsSync(dir)) return [];
   const hashes = Object.values(project.components).flatMap((c) => Object.values(c.files).map(({ hash }) => hash));
   const named = new Set(hashes.map((hash) => `${BASES_DIR}/${hash.slice("sha256:".length)}`));
   return readdirSync(dir)
-    .map((file) => `${BASES_DIR}/${file}`)
+    .map((file) => {
+      const base = `${BASES_DIR}/${file}`;
+      confinedPath(projectDir, base);
+      return base;
+    })
     .filter((base) => !named.has(base))
     .sort();
 }

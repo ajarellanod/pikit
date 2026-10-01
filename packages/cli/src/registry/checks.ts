@@ -10,6 +10,7 @@ import { capabilityEntry } from "./capabilities.ts";
 import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports } from "./imports.ts";
 import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
+import { confinedPath } from "../project/paths.ts";
 
 /**
  * Component kinds: the prefix of every component's name. A new kind is a naming decision, so it is
@@ -51,12 +52,59 @@ export function checkNaming(name: string): string[] {
   return [];
 }
 
+/** The kit packages a component states a range for, by their `requires` field: the core, and those that version apart from it (SPEC K8). */
+export const KIT_RANGES = [
+  ["pikit", "@pikit/core"],
+  ["contracts", "@pikit/contracts"],
+  ["adapter", "@pikit/pi-adapter"],
+] as const;
+export type KitPackage = (typeof KIT_RANGES)[number][1];
+
+/** A range that says something: not blank, not a wildcard that accepts any version. */
+function meaningful(range: string | undefined): range is string {
+  return range !== undefined && !/^\s*[*xX]?\s*$/.test(range);
+}
+
+/**
+ * The kit ranges of `manifest` against `versions`, the same for `registry validate` and `pikit add`:
+ * `missing`, a range it must state and does not (it depends on @pikit/contracts or @pikit/pi-adapter,
+ * in `dependencies` or `devDependencies`, without a meaningful `requires.contracts` or
+ * `requires.adapter`), which nothing may skip; `refused`, a stated range the version is outside of.
+ */
+export function kitRangeProblems(
+  manifest: Manifest,
+  versions: Record<KitPackage, string>,
+): { missing: string[]; refused: { field: string; pkg: KitPackage; range: string; version: string }[] } {
+  const missing: string[] = [];
+  const refused: { field: string; pkg: KitPackage; range: string; version: string }[] = [];
+  const requires = manifest.requires as Record<string, unknown>;
+  for (const [field, pkg] of KIT_RANGES) {
+    const range = typeof requires[field] === "string" ? (requires[field] as string) : undefined;
+    const listedIn = (["dependencies", "devDependencies"] as const).find((deps) => pkg in (manifest[deps] ?? {}));
+    if (field !== "pikit" && listedIn !== undefined && !meaningful(range)) {
+      const what = range === undefined ? "does not say" : `("${range}") does not say`;
+      missing.push(`${listedIn} lists ${pkg}, but requires.${field} ${what} which versions it works with (a semver range, as requires.pikit)`);
+    } else if (range !== undefined && !Bun.semver.satisfies(versions[pkg], range)) {
+      refused.push({ field, pkg, range, version: versions[pkg] });
+    }
+  }
+  return { missing, refused };
+}
+
 /**
  * The manifest's shape (`ManifestSchema`), then what a schema cannot say: that it matches its
- * directory, accepts this repository's core and contracts (a component that depends on the contracts
- * says which versions it accepts: they version apart from the core, SPEC K8), and names files that exist.
+ * directory, accepts this repository's core, contracts and adapter (a component that depends on the
+ * contracts or the adapter says which versions it accepts: they version apart from the core, SPEC K8,
+ * `kitRangeProblems`), and names files that exist.
  */
-export function checkManifest(manifest: unknown, componentDir: string, dirName: string, coreVersion: string, contractsVersion: string): string[] {
+export function checkManifest(
+  manifest: unknown,
+  componentDir: string,
+  dirName: string,
+  coreVersion: string,
+  contractsVersion: string,
+  adapterVersion: string,
+): string[] {
   const shape = schemaProblems(ManifestSchema, manifest).map((problem) =>
     // The one extra field worth explaining: a dependency on another component.
     problem.startsWith("/requires/") && problem.endsWith("is not a known field")
@@ -68,30 +116,32 @@ export function checkManifest(manifest: unknown, componentDir: string, dirName: 
   const m = manifest as Manifest;
   const problems: string[] = [];
   if (m.name !== dirName) problems.push(`component.json name "${m.name}" does not match its directory "${dirName}"`);
-  if (!Bun.semver.satisfies(coreVersion, m.requires.pikit)) {
-    problems.push(`requires.pikit "${m.requires.pikit}" does not accept this repository's @pikit/core ${coreVersion}`);
-  }
-  if (m.requires.contracts === undefined) {
-    if ("@pikit/contracts" in m.dependencies) {
-      problems.push(`dependencies lists @pikit/contracts, but requires.contracts does not say which versions it works with (a semver range, as requires.pikit)`);
-    }
-  } else if (!Bun.semver.satisfies(contractsVersion, m.requires.contracts)) {
-    problems.push(`requires.contracts "${m.requires.contracts}" does not accept this repository's @pikit/contracts ${contractsVersion}`);
-  }
+  const kit = kitRangeProblems(m, { "@pikit/core": coreVersion, "@pikit/contracts": contractsVersion, "@pikit/pi-adapter": adapterVersion });
+  problems.push(...kit.missing);
+  for (const { field, pkg, range, version } of kit.refused) problems.push(`requires.${field} "${range}" does not accept this repository's ${pkg} ${version}`);
   for (const f of m.files) {
     // What `pikit add` refuses to install (registry-source.ts), refused here first.
     if (!isInside(f.target)) problems.push(`files target "${f.target}" leaves the project`);
     else if (isProtected(f.target)) problems.push(`files target "${f.target}" is one of the project's own files; no component writes it`);
-    if (!existsSync(join(componentDir, f.source))) problems.push(`files source "${f.source}" does not exist`);
-    // Only `src` is mapped as a directory; every file outside it is listed on its own,
-    // so a component owns exactly the files it lists and removing it cannot touch another one.
-    else if (isDirectory(join(componentDir, f.source)) && !(f.source === "files/src" && f.target === "src")) {
-      problems.push(`files maps the directory "${f.source}" onto "${f.target}"; only files/src → src is a directory, list other files one by one`);
+    try {
+      const source = confinedPath(componentDir, f.source);
+      if (!existsSync(source)) problems.push(`files source "${f.source}" does not exist`);
+      // Only src may map a directory; other files must be explicitly owned.
+      else if (isDirectory(source) && !(f.source === "files/src" && f.target === "src")) {
+        problems.push(`files maps the directory "${f.source}" onto "${f.target}"; only files/src → src is a directory, list other files one by one`);
+      }
+    } catch (error) {
+      problems.push(`files source "${f.source}": ${error instanceof Error ? error.message : String(error)}`);
     }
   }
   for (const key of ["config", "migrations"] as const) {
     const path = m[key];
-    if (path !== undefined && !existsSync(join(componentDir, path))) problems.push(`${key} "${path}" does not exist`);
+    if (path === undefined) continue;
+    try {
+      if (!existsSync(confinedPath(componentDir, path))) problems.push(`${key} "${path}" does not exist`);
+    } catch (error) {
+      problems.push(`${key} "${path}": ${error instanceof Error ? error.message : String(error)}`);
+    }
   }
   return problems;
 }

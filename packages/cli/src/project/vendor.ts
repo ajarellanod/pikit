@@ -29,6 +29,7 @@ import { join } from "node:path";
 import { PACKAGES_DIR, PIKIT_ROOT } from "../paths.ts";
 import { gitCommit, isAncestor } from "./git.ts";
 import { type PackageJson, readPackageJson, writePackageJson } from "./package-json.ts";
+import { confinedPath } from "./paths.ts";
 
 export const VENDOR_DIR = "vendor";
 
@@ -92,9 +93,9 @@ export function kitSpecifier(name: string): string {
  */
 export function vendorKitPackage(projectDir: string, name: string): string {
   const specifier = kitSpecifier(name);
-  const tarball = join(projectDir, specifier.slice("file:".length));
+  const tarball = confinedPath(projectDir, specifier.slice("file:".length));
   if (existsSync(tarball)) return specifier;
-  mkdirSync(join(projectDir, VENDOR_DIR), { recursive: true });
+  mkdirSync(confinedPath(projectDir, VENDOR_DIR), { recursive: true });
   // Packed elsewhere: `bun pm pack` names the tarball without the hash, which may be an older kit's
   // tarball still in vendor/ (and still named in bun.lock until the next install).
   const staging = mkdtempSync(join(tmpdir(), "pikit-pack-"));
@@ -208,10 +209,10 @@ export function kitOrder(current: string | undefined): KitOrder {
 export function pruneVendor(projectDir: string): string[] {
   const pkg = readPackageJson(projectDir);
   const named = new Set([...Object.values(pkg.dependencies ?? {}), ...Object.values(pkg.overrides ?? {})].map((s) => s.slice("file:".length)));
-  const dir = join(projectDir, VENDOR_DIR);
+  const dir = confinedPath(projectDir, VENDOR_DIR);
   if (!existsSync(dir)) return [];
   const pruned = readdirSync(dir).filter((file) => file.endsWith(".tgz") && !named.has(`${VENDOR_DIR}/${file}`));
-  for (const file of pruned) rmSync(join(dir, file));
+  for (const file of pruned) rmSync(confinedPath(projectDir, `${VENDOR_DIR}/${file}`));
   return pruned;
 }
 

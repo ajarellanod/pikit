@@ -5,7 +5,7 @@
  */
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
-import { isAbsolute, join, normalize, resolve } from "node:path";
+import { join, posix, resolve } from "node:path";
 import { parse } from "yaml";
 import Type, { type Static } from "typebox";
 import { kindOf, type Manifest, ManifestSchema, readManifest, type RegistryIndex, SCHEMA_DIR, schemaProblems } from "../registry/manifest.ts";
@@ -15,6 +15,8 @@ import { ENV_EXAMPLE, ENV_FILE } from "./env-file.ts";
 import { gitCommit } from "./git.ts";
 import { PIKIT_JSON } from "./pikit-json.ts";
 import { VENDOR_DIR } from "./vendor.ts";
+import { confinedPath, isInside } from "./paths.ts";
+export { isInside } from "./paths.ts";
 
 /** One question of `pikit new`: which component of `kind` the project gets. */
 export interface PresetSlot {
@@ -56,17 +58,23 @@ export interface Registry {
 
 export function openRegistry(path: string): Registry {
   const root = resolve(path);
-  const indexPath = join(root, "registry.json");
+  const indexPath = confinedPath(root, "registry.json");
   if (!existsSync(indexPath)) throw new Error(`${root} is not a registry: it has no registry.json`);
-  const index = JSON.parse(readFileSync(indexPath, "utf8")) as RegistryIndex;
+  const raw: unknown = JSON.parse(readFileSync(indexPath, "utf8"));
+  const problems = schemaProblems(RegistryIndexSchema, raw);
+  if (problems.length > 0) throw new Error(`${root} has an invalid registry.json: ${problems.join("; ")}`);
+  const index = raw as RegistryIndex;
+  for (const [name, entry] of Object.entries(index.components)) {
+    if (!isInside(entry.path)) throw new Error(`${name}: the registry path "${entry.path}" leaves ${root}`);
+  }
   const commit = gitCommit(root);
 
   const dir = (name: string): string => {
-    const entry = index.components[name];
+    const entry = Object.hasOwn(index.components, name) ? index.components[name] : undefined;
     if (entry === undefined) {
       throw new Error(`the registry ${root} has no component "${name}" (it has: ${Object.keys(index.components).join(", ")})`);
     }
-    return join(root, entry.path);
+    return confinedPath(root, entry.path);
   };
 
   return {
@@ -75,11 +83,17 @@ export function openRegistry(path: string): Registry {
     names: () => Object.keys(index.components),
     dir,
     manifest(name) {
-      const manifest = readManifest(dir(name));
+      const componentDir = dir(name);
+      confinedPath(componentDir, "component.json");
+      const manifest = readManifest(componentDir);
       if (manifest === undefined) throw new Error(`the registry's component "${name}" has no component.json`);
       // Checked before anything is installed from it: a registry may not be this repository's.
       const problems = schemaProblems(ManifestSchema, manifest);
       if (problems.length > 0) throw new Error(`the registry's component "${name}" has an invalid component.json: ${problems.join("; ")}`);
+      if (manifest.name !== name) throw new Error(`the registry's component "${name}" has component.json name "${manifest.name}"`);
+      for (const field of ["config", "migrations"] as const) {
+        if (manifest[field] !== undefined) confinedPath(componentDir, manifest[field]);
+      }
       return manifest;
     },
     preset(name, choices = []) {
@@ -102,7 +116,7 @@ export function openRegistry(path: string): Registry {
       return components;
     },
     presets() {
-      const dir = join(root, "presets");
+      const dir = confinedPath(root, "presets");
       if (!existsSync(dir)) return [];
       return readdirSync(dir)
         .filter((file) => file.endsWith(".yaml"))
@@ -133,16 +147,18 @@ export function openRegistry(path: string): Registry {
       const componentDir = dir(name);
       const files = new Map<string, string>();
       for (const { source, target } of this.manifest(name).files) {
-        const from = join(componentDir, source);
+        const from = confinedPath(componentDir, source);
         if (!isInside(target)) throw new Error(`${name}: the file target "${target}" leaves the project`);
         // Refused with --force too: the registry may be anyone's, and these are not a component's to write.
         if (isProtected(target)) throw new Error(`${name}: the file target "${target}" is the project's own (${PROTECTED}); no component writes it`);
-        if (statSync(from).isDirectory()) {
+        const stat = statSync(from);
+        if (stat.isDirectory()) {
           // `files/src` → `src` is the only directory mapping.
           if (source !== "files/src" || target !== "src") throw new Error(`${name}: only files/src → src may map a directory`);
           for (const file of listFiles(from)) files.set(`src/${file}`, join(from, file));
         } else {
-          files.set(normalize(target).split("\\").join("/"), from);
+          if (!stat.isFile()) throw new Error(`${name}: the source "${source}" is not a regular file`);
+          files.set(posix.normalize(target.replaceAll("\\", "/")), from);
         }
       }
       return files;
@@ -150,18 +166,12 @@ export function openRegistry(path: string): Registry {
   };
 }
 
-/** A relative path that stays inside the project: no `..`, not absolute. */
-export function isInside(target: string): boolean {
-  if (target === "" || isAbsolute(target)) return false;
-  return !normalize(target).split(/[\\/]/).includes("..");
-}
-
 /**
  * The project's own records, which no component may write, whatever `--force` says: what the CLI and
  * Bun keep (`pikit.json`, `package.json`, the lockfile, `pikit.config.ts`, `.env.example`, `vendor/`,
  * `pikit-bases/`, `node_modules/`), the app's secrets and state (`.env`, `.pikit/`) and Git's (`.git`).
  */
-const PROTECTED_FILES = [PIKIT_JSON, "package.json", "bun.lock", "bun.lockb", CONFIG_FILE, ENV_FILE, ENV_EXAMPLE];
+const PROTECTED_FILES = [PIKIT_JSON, "package.json", "bun.lock", "bun.lockb", CONFIG_FILE, ENV_FILE, ENV_EXAMPLE, ".pikit-operation-unfinished", ".pikit-new-unfinished"];
 const PROTECTED_DIRS = [".git", VENDOR_DIR, BASES_DIR, "node_modules", ".pikit"];
 const PROTECTED = [...PROTECTED_FILES, ...PROTECTED_DIRS.map((dir) => `${dir}/`)].join(", ");
 
@@ -170,18 +180,32 @@ const PROTECTED = [...PROTECTED_FILES, ...PROTECTED_DIRS.map((dir) => `${dir}/`)
  * directories (`PROTECTED_DIRS`). Without case: macOS and Windows would write `Package.json` over `package.json`.
  */
 export function isProtected(target: string): boolean {
-  const path = normalize(target).split("\\").join("/").replace(/\/+$/, "").toLowerCase();
+  const path = posix.normalize(target.replaceAll("\\", "/")).replace(/\/+$/, "").toLowerCase();
   return PROTECTED_FILES.includes(path) || PROTECTED_DIRS.includes(path.split("/")[0] as string);
 }
 
 function listFiles(dir: string): string[] {
-  return (readdirSync(dir, { recursive: true }) as string[])
-    .map((f) => f.split("\\").join("/"))
-    .filter((f) => !f.split("/").includes("node_modules") && statSync(join(dir, f)).isFile())
-    .sort();
+  const files: string[] = [];
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules") continue;
+    const path = confinedPath(dir, entry.name);
+    if (entry.isDirectory()) files.push(...listFiles(path).map((file) => `${entry.name}/${file}`));
+    else if (entry.isFile()) files.push(entry.name);
+    else throw new Error(`the source ${path} is not a regular file or directory`);
+  }
+  return files.sort();
 }
 
 const KEBAB = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
+const RegistryIndexSchema = Type.Object({
+  version: Type.Literal(1),
+  components: Type.Record(Type.String({ pattern: KEBAB }), Type.Object({
+    version: Type.String({ minLength: 1 }),
+    description: Type.String(),
+    targets: Type.Array(Type.String({ enum: ["server", "cloudflare"] }), { minItems: 1, uniqueItems: true }),
+    path: Type.String({ minLength: 1 }),
+  }, { additionalProperties: false }), { additionalProperties: false }),
+}, { additionalProperties: false });
 const TEXT = "\\S";
 const Title = Type.Optional(Type.String({ pattern: TEXT, description: "What `pikit new` shows if it asks which preset to start from." }));
 
@@ -240,7 +264,8 @@ type Preset = Static<typeof BasePresetSchema> & Partial<Static<typeof AliasPrese
 
 /** One preset, as written: its shape checked against `PresetSchema`, its `choose` against its `components`. */
 export function readPreset(root: string, name: string): Preset {
-  const file = join(root, "presets", `${name}.yaml`);
+  if (!new RegExp(KEBAB).test(name)) throw new Error(`invalid preset name "${name}"`);
+  const file = confinedPath(root, `presets/${name}.yaml`);
   if (!existsSync(file)) throw new Error(`the registry ${root} has no preset "${name}" (presets/${name}.yaml)`);
   const raw = (parse(readFileSync(file, "utf8")) ?? {}) as Record<string, unknown>;
   const at = `presets/${name}.yaml`;

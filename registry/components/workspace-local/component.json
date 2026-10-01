@@ -9,6 +9,7 @@
   "requires": {
     "pikit": "0.0.0",
     "contracts": "0.0.0",
+    "adapter": "0.0.0",
     "capabilities": []
   },
   "optional": {

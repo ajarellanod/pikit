@@ -8,6 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { OPERATION_MARKER } from "../project/operation.ts";
 import { emptyManifest, hashOf, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { runCli } from "../testing/cli.ts";
 
@@ -111,6 +112,46 @@ test("pikit up leaves a component with a beforeDeploy hook to that hook (one che
   expect(deployed.err).toBe("");
   expect(deployed.code).toBe(0);
   expect(existsSync(join(dir, "deployed"))).toBe(true);
+});
+
+test("an unfinished add, remove or upgrade is a problem, with what to do; doctor leaves its marker for the person to delete", async () => {
+  const dir = project(undefined);
+  writeFileSync(join(dir, OPERATION_MARKER), JSON.stringify({ command: "pikit remove tool-bash", startedAt: "2026-01-01T00:00:00.000Z" }));
+  const run = await runCli(["doctor"], dir);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("`pikit remove tool-bash`, started 2026-01-01T00:00:00.000Z, did not finish");
+  expect(run.err).toContain(`delete ${OPERATION_MARKER} and run \`pikit doctor\``);
+  expect(existsSync(join(dir, OPERATION_MARKER))).toBe(true);
+  // Every mutating command refuses before planning, even a dry-run upgrade.
+  for (const args of [["remove", "checked"], ["add", "log-events", "--yes"], ["upgrade", "--yes"], ["upgrade", "--dry-run"]]) {
+    const refused = await runCli(args, dir);
+    expect(refused.code).toBe(1);
+    expect(refused.err).toContain("`pikit remove tool-bash`, started 2026-01-01T00:00:00.000Z, did not finish");
+  }
+  expect(readProjectManifest(dir).components.checked).toBeDefined();
+});
+
+test("a bun.lock that does not match package.json fails doctor even with node_modules there; one that matches (JSONC, overrides) does not", async () => {
+  const dir = project(undefined);
+  writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "checked", dependencies: {}, overrides: { "left-pad": "1.3.0" } }));
+  const lock = (dependencies: string) =>
+    `{\n  // bun\n  "lockfileVersion": 2,\n  "configVersion": 1,\n  "workspaces": {\n    "": {\n      "name": "checked",${dependencies}\n    },\n  },\n  "overrides": {\n    "left-pad": "1.3.0",\n  },\n  "packages": {},\n}\n`;
+  writeFileSync(join(dir, "bun.lock"), lock('\n      "dependencies": {\n        "left-pad": "^1.0.0",\n      },'));
+  const stale = await runCli(["doctor"], dir);
+  expect(stale.code).toBe(1);
+  expect(stale.err).toContain("bun.lock does not match package.json");
+  expect(stale.err).toContain('left-pad: bun.lock has it (dependencies "^1.0.0"), package.json does not');
+  expect(stale.out).not.toContain("pikit doctor: green");
+
+  writeFileSync(join(dir, "bun.lock"), lock(""));
+  const matching = await runCli(["doctor"], dir);
+  expect(matching.code).toBe(0);
+  expect(matching.out).toContain("pikit doctor: green");
+
+  rmSync(join(dir, "bun.lock"));
+  const unchecked = await runCli(["doctor"], dir);
+  expect(unchecked.code).toBe(0);
+  expect(unchecked.out).toContain("there is no bun.lock: whether node_modules matches package.json is not checked");
 });
 
 test("a generated file (the manifest's `generated`) is never reported modified; any other edited file is", async () => {

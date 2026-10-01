@@ -136,6 +136,24 @@ test("a stop that fails exits 1 and says why", async () => {
   expect(JSON.stringify(failure.error)).toContain("the stop failed on purpose");
 });
 
+// The stop deadline must fire even when the hanging stop released the process's last handle:
+// otherwise the process drains, exits 0 and skips the earlier components' stops.
+test("a stop that releases every handle and hangs is abandoned at its deadline, and the earlier stops still run", async () => {
+  const child = launch([FIXTURE, "stop-hangs-idle"]);
+  await child.line("pikit: started");
+  const killer = setTimeout(() => child.kill("SIGKILL"), 4_000);
+
+  const stopping = Date.now();
+  child.kill("SIGTERM");
+
+  expect(await child.exited).toBe(1);
+  clearTimeout(killer);
+  expect(Date.now() - stopping).toBeLessThan(4_000);
+  expect(messages(child)).toContain("fixture: stopped");
+  expect(messages(child)).toContain("pikit: the app did not stop cleanly");
+  expect(messages(child)).not.toContain("pikit: stopped");
+});
+
 test("a second signal during the stop exits at once", async () => {
   const child = launch([FIXTURE, "stop-hangs"]);
   await child.line("pikit: started");

@@ -10,13 +10,14 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PIKIT_ROOT } from "../paths.ts";
 import { emptyManifest, hashOf, writeProjectManifest } from "../project/pikit-json.ts";
 import { EXTENSION_ALIAS, KIT_PACKAGES } from "../project/vendor.ts";
 import { runCli } from "../testing/cli.ts";
+import { OPERATION_MARKER } from "../project/operation.ts";
 
 const MAIN = join(import.meta.dir, "..", "main.ts");
 const dirs: string[] = [];
@@ -159,7 +160,10 @@ test("an add that fails once writing began puts back what it wrote: files, tarba
   expect(run.err).toContain("`bun install` failed");
   expect(run.err).toContain("nothing was added");
   expect(run.out).toContain("refreshed to this CLI's");
-  expect(snapshot(dir)).toEqual(before);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
   expect(existsSync(join(dir, "pikit-bases"))).toBe(false);
 }, 120_000);
 
@@ -173,7 +177,10 @@ test("a component's devDependencies are in its plan, and an add whose install fa
   expect(run.code).toBe(1);
   expect(run.err).toContain("`bun install` failed");
   expect(run.err).toContain("nothing was added");
-  expect(snapshot(dir)).toEqual(before);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
 }, 120_000);
 
 test("a devDependencies version that is not exact is refused before anything is written", async () => {
@@ -203,7 +210,10 @@ test("a reinstall that fails puts back the bases it replaced, and removes those 
   const run = await runCli(["add", "log-events", "--yes", "--force"], dir);
   expect(run.code).toBe(1);
   expect(run.err).toContain("nothing was added");
-  expect(snapshot(dir)).toEqual(before);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
 }, 120_000);
 
 test("a reinstall that fails puts back a file it deleted, in a directory a new file then created again", async () => {
@@ -226,7 +236,10 @@ test("a reinstall that fails puts back a file it deleted, in a directory a new f
   expect(run.out).toContain(`deletes, no longer shipped: ${own}sub/old.ts`);
   expect(run.code).toBe(1);
   expect(run.err).toContain("nothing was added");
-  expect(snapshot(dir)).toEqual(before);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
 }, 120_000);
 
 test("a component that does not accept this CLI's contracts is refused before anything is written", async () => {
@@ -239,6 +252,104 @@ test("a component that does not accept this CLI's contracts is refused before an
   expect(snapshot(dir)).toEqual(before);
 });
 
+test("a component that does not accept this CLI's adapter is refused before anything is written", async () => {
+  const dir = otherKitProject();
+  const registry = fakeRegistry({}, { requires: { pikit: "0.0.0", adapter: "^9.0.0", capabilities: [] } });
+  const before = snapshot(dir);
+  const run = await runCli(["add", "tool-fake", "--registry", registry, "--yes"], dir);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("tool-fake requires @pikit/pi-adapter ^9.0.0; this CLI vendors 0.0.0");
+  expect(snapshot(dir)).toEqual(before);
+});
+
+test("a component that depends on the contracts or the adapter without saying which versions it accepts is refused before any write, --force or not", async () => {
+  const dir = otherKitProject();
+  const before = snapshot(dir);
+  for (const [pkg, field] of [["@pikit/contracts", "contracts"], ["@pikit/pi-adapter", "adapter"]]) {
+    const registry = fakeRegistry({}, { dependencies: { [pkg as string]: "0.0.0" } });
+    for (const force of [[], ["--force"]]) {
+      const run = await runCli(["add", "tool-fake", "--registry", registry, "--yes", ...force], dir);
+      expect(run.code).toBe(1);
+      expect(run.err).toContain(`tool-fake's component.json: dependencies lists ${pkg}, but requires.${field} does not say which versions it works with`);
+      expect(run.err).toContain("--force does not skip it");
+      expect(snapshot(dir)).toEqual(before);
+    }
+  }
+}, 60_000);
+
+/** A project `add` runs to the end in: no kit to install, `@pikit/core` linked, so `pikit.config.ts` composes. */
+function composingProject(): string {
+  const dir = temp();
+  writeProjectManifest(dir, emptyManifest());
+  writeFileSync(join(dir, "package.json"), '{ "name": "composing", "dependencies": {} }\n');
+  writeFileSync(
+    join(dir, "pikit.config.ts"),
+    'import { defineApp } from "@pikit/core";\n\nexport const config = {};\n\nexport default defineApp({\n  components: [\n  ],\n  config,\n});\n',
+  );
+  mkdirSync(join(dir, "node_modules", "@pikit"), { recursive: true });
+  symlinkSync(join(PIKIT_ROOT, "packages", "core"), join(dir, "node_modules", "@pikit", "core"));
+  return dir;
+}
+
+/** A component whose setup runs `setup` (with `pikit`). */
+const component = (name: string, setup = "") =>
+  `import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({\n  name: "${name}",\n  setup(pikit) {\n    ${setup}\n  },\n});\n`;
+
+/** A registry of these components: name → its index.ts and its manifest's fields. */
+function registryOf(components: Record<string, [string, Record<string, unknown>]>): string {
+  const root = temp();
+  const index: Record<string, unknown> = {};
+  for (const [name, [code, fields]] of Object.entries(components)) {
+    const dir = join(root, "components", name);
+    mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
+    writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), code);
+    const manifest = {
+      name, version: "0.0.0", description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
+      optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...fields,
+    };
+    writeFileSync(join(dir, "component.json"), JSON.stringify(manifest));
+    index[name] = { version: "0.0.0", description: name, targets: ["server"], path: `components/${name}` };
+  }
+  writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
+  return root;
+}
+
+/** A registry whose `outbound-fake` says it provides the queue, as another provider does; and a channel that can use it. */
+const queueRegistry = () =>
+  registryOf({
+    "channel-fake": [component("channel-fake", 'pikit.useOptional("outbound.queue");'), { optional: { capabilities: ["outbound.queue"] } }],
+    "outbound-fake": [component("outbound-fake", 'pikit.provide("outbound.queue", {});'), { provides: ["outbound.queue"] }],
+    "outbound-other": [component("outbound-other", 'pikit.provide("outbound.queue", {});'), { provides: ["outbound.queue"] }],
+  });
+
+test("what is installed provides what the project composes: a registry's component of the same name does not stand for it", async () => {
+  const dir = composingProject();
+  // Installed from another registry, `outbound-fake` provides nothing.
+  const other = registryOf({ "outbound-fake": [component("outbound-fake"), {}] });
+  expect((await runCli(["add", "outbound-fake", "--registry", other, "--yes"], dir)).code).toBe(0);
+
+  const run = await runCli(["add", "channel-fake", "--registry", queueRegistry(), "--yes"], dir);
+  expect(run.out).toContain("outbound-other, for channel-fake (outbound.queue)");
+  expect(run.code).toBe(0);
+  const components = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8")).components;
+  expect(components["outbound-other"].installedFor).toEqual(["channel-fake"]);
+  expect(components["outbound-fake"].registry).toBe("local");
+}, 60_000);
+
+test("on a project that does not compose, nothing is offered nor guessed, and it says so", async () => {
+  // No node_modules: pikit.config.ts cannot load. The install itself then fails at once.
+  const dir = otherKitProject();
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const before = snapshot(dir);
+  const run = await runCli(["add", "channel-fake", "--registry", queueRegistry(), "--yes"], dir);
+  expect(run.err).toContain("pikit.config.ts does not compose (");
+  expect(run.err).toContain("no provider is offered");
+  expect(run.err).not.toContain("each provide it");
+  expect(run.out).not.toContain(", for channel-fake");
+  expect(run.err).toContain("nothing was added");
+  expect(snapshot(dir)).toEqual(before);
+}, 120_000);
+
 test("a kit an installed component does not accept is refused before any write, each one named; --force replaces it", async () => {
   const dir = otherKitProject();
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
@@ -249,6 +360,8 @@ test("a kit an installed component does not accept is refused before any write, 
     "tool-newer": { ...record, requires: { pikit: "0.0.0", contracts: "^0.1.0" }, dependencies: { "@pikit/contracts": "0.1.0" } },
     // Recorded before pikit.json kept `requires`: held to the contracts it pinned.
     "tool-pinned": { ...record, dependencies: { "@pikit/contracts": "0.2.0" } },
+    // And to the adapter it pinned.
+    "tool-pinned-adapter": { ...record, dependencies: { "@pikit/pi-adapter": "0.2.0" } },
     "tool-unknown": { ...record, dependencies: {} },
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
@@ -258,7 +371,7 @@ test("a kit an installed component does not accept is refused before any write, 
   const refused = await runCli(["add", "log-events", "--yes"], dir);
   expect(refused.code).toBe(1);
   expect(refused.err).toContain(
-    "which these installed components do not accept:\n  tool-core requires @pikit/core >=1.0.0\n  tool-newer requires @pikit/contracts ^0.1.0\n  tool-pinned requires @pikit/contracts 0.2.0\n",
+    "which these installed components do not accept:\n  tool-core requires @pikit/core >=1.0.0\n  tool-newer requires @pikit/contracts ^0.1.0\n  tool-pinned requires @pikit/contracts 0.2.0\n  tool-pinned-adapter requires @pikit/pi-adapter 0.2.0\n",
   );
   expect(refused.err).toContain("pass --force to replace the kit anyway");
   expect(refused.err).not.toContain("tool-fine");
