@@ -137,7 +137,7 @@ export async function upgrade(projectDir: string, names: readonly string[], opti
       log.warn(`${name} is skipped: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
-    const plan = planUpgrade(projectDir, draft, registry, key, name, force);
+    const plan = await planUpgrade(projectDir, draft, registry, key, name, force);
     if (plan === undefined) upToDate.push(name);
     else plans.push(plan);
   }
@@ -214,9 +214,10 @@ function registryOf(projectDir: string, project: ProjectManifest, key: string): 
 
 /**
  * The component's upgrade on the draft, or undefined when its registry has what is installed: the
- * same version, files and manifest. Every refusal and every merge happens here.
+ * same version, files and manifest. Every refusal and every merge happens here. Async only because
+ * `mergeFile` is, for a Bun bug (see `merge.ts`).
  */
-function planUpgrade(projectDir: string, draft: Draft, registry: Registry, registryName: string, name: string, force: boolean): UpgradePlan | undefined {
+async function planUpgrade(projectDir: string, draft: Draft, registry: Registry, registryName: string, name: string, force: boolean): Promise<UpgradePlan | undefined> {
   const { project } = draft;
   const previous = project.components[name] as InstalledComponent;
   const manifest = registry.manifest(name);
@@ -255,7 +256,7 @@ function planUpgrade(projectDir: string, draft: Draft, registry: Registry, regis
       } else if (ours !== theirs) {
         const base = join(projectDir, basePath(installed));
         if (hasConflictMarkers(path)) notes.push(`${target} still has the conflict markers of an earlier upgrade: they are merged as your lines`);
-        const merged = mergeFile(path, existsSync(base) ? base : undefined, source, `${name}@${manifest.version}`);
+        const merged = await mergeFile(path, existsSync(base) ? base : undefined, source, `${name}@${manifest.version}`);
         if ("error" in merged) {
           changes.conflicted.push(target);
           notes.push(`${target}: ${merged.error}. Yours is kept as it is; ${name} ${manifest.version}'s is ${basePath(theirs)}`);
