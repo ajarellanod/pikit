@@ -9,8 +9,10 @@
  *   too (`outbound-durable` needs `storage.sql`: `storage-sqlite`).
  *
  * Only when the registry has exactly one provider that runs on every one of the project's targets
- * (`storage-sqlite` on a server, `storage-do` on Cloudflare): with several, choosing is the user's,
- * and `pikit doctor` says what is missing. What is installed this way is recorded as installed *for* the
+ * (`storage-sqlite` on a server, `storage-do` on Cloudflare): with several, choosing is the user's.
+ * A required one is then missing, which `pikit add` warns about and `pikit doctor` fails on; an
+ * optional one is not, so `unchosenProviders` names it, or the project would silently lack it
+ * (durable delivery) with doctor green. What is installed this way is recorded as installed *for* the
  * component that brought it, and leaves with it when nothing else uses it (`pikit remove`).
  *
  * Per App (`apps.ts`): on Cloudflare, what a component's Worker half needs must be provided in the
@@ -47,6 +49,35 @@ export function offeredProviders(
   installed: readonly string[] = [],
   targets: readonly string[] = NEW_PROJECT_TARGETS,
 ): Offer[] {
+  return resolveOffers(registry, names, installed, targets).offers;
+}
+
+/** An optional capability marked `offer` that nothing provides, left out because several components could. */
+export interface UnchosenOffer {
+  capability: string;
+  /** The component that can use it. */
+  for: string;
+  /** Those that provide it, on the project's targets: the user picks one with `pikit add`. */
+  providers: string[];
+  app?: "worker";
+}
+
+/** What `offeredProviders` leaves out because the registry has several providers of an optional capability. */
+export function unchosenProviders(
+  registry: Registry,
+  names: readonly string[],
+  installed: readonly string[] = [],
+  targets: readonly string[] = NEW_PROJECT_TARGETS,
+): UnchosenOffer[] {
+  return resolveOffers(registry, names, installed, targets).unchosen;
+}
+
+function resolveOffers(
+  registry: Registry,
+  names: readonly string[],
+  installed: readonly string[],
+  targets: readonly string[],
+): { offers: Offer[]; unchosen: UnchosenOffer[] } {
   const provided: Record<AppName, Set<string>> = { default: new Set(), worker: new Set() };
   const known = (name: string) => {
     try {
@@ -72,6 +103,7 @@ export function offeredProviders(
       return declaredByApp(manifest, targets).some(([where, half]) => where === app && half.provides.includes(capability));
     });
   const offers: Offer[] = [];
+  const unchosen: UnchosenOffer[] = [];
   const visit = (name: string, depth: number): void => {
     const manifest = known(name);
     if (manifest === undefined) return;
@@ -86,6 +118,7 @@ export function offeredProviders(
       for (const [capability, why] of wanted) {
         if (provided[app].has(capability) || capabilityEntry(capability)?.mode !== "single") continue;
         const providers = providersOf(capability, app);
+        if (providers.length > 1 && why === "recommended") unchosen.push({ capability, for: name, providers, ...(app === "worker" && { app }) });
         if (providers.length !== 1) continue;
         const component = providers[0] as string;
         provide(known(component) as Manifest);
@@ -96,7 +129,7 @@ export function offeredProviders(
     }
   };
   for (const name of names) visit(name, 0);
-  return offers;
+  return { offers, unchosen };
 }
 
 /**

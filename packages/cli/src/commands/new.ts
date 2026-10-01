@@ -33,7 +33,7 @@ import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
 import { TARGETS } from "../registry/manifest.ts";
 import { CliError, log } from "../ui.ts";
-import { checkCompatible, installComponent, notPortable } from "./add.ts";
+import { checkCompatible, installComponent, notPortable, warnUnchosen } from "./add.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
 import * as starter from "./starter.ts";
@@ -85,6 +85,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   // storage: an offer needs the registry's only provider, which a second one would take away
   // (`registry validate` checks that each preset composes, `checkPresets`).
   const { order: components, installedFor } = withOffers(registry, chosen, targets);
+  warnUnchosen(registry, chosen, [], targets);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
   try {
     for (const component of components) checkCompatible(targets, registry.manifest(component));

@@ -53,7 +53,7 @@ import {
 } from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
-import { type Offer, offeredProviders } from "../project/offers.ts";
+import { type Offer, offeredProviders, unchosenProviders } from "../project/offers.ts";
 import { Undo } from "../project/undo.ts";
 import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit } from "../project/vendor.ts";
 import { capabilityEntry } from "../registry/capabilities.ts";
@@ -143,6 +143,7 @@ export async function add(projectDir: string, name: string, options: AddOptions 
  * `--yes`. A declined provider takes what only it needed with it.
  */
 export async function acceptedOffers(registry: Registry, name: string, installed: readonly string[], targets: readonly string[], options: AddOptions): Promise<Offer[]> {
+  warnUnchosen(registry, [name], installed, targets);
   const accepted: Offer[] = [];
   const declined = new Set<string>();
   for (const offer of offeredProviders(registry, [name], installed, targets).reverse()) {
@@ -163,6 +164,18 @@ export async function acceptedOffers(registry: Registry, name: string, installed
   }
   // Providers before what uses them.
   return accepted.reverse();
+}
+
+/**
+ * Says which optional capabilities `names` could use but get no provider for, because the registry has
+ * several (`unchosenProviders`): the project composes without them, so nothing else would say so.
+ */
+export function warnUnchosen(registry: Registry, names: readonly string[], installed: readonly string[], targets: readonly string[]): void {
+  for (const { capability, for: name, providers, app } of unchosenProviders(registry, names, installed, targets)) {
+    const what = (capabilityEntry(capability)?.summary ?? capability).replace(/\.$/, "");
+    const who = app === "worker" ? `${name}'s Worker half` : name;
+    log.warn(`${who} can use ${capability} (${what}), but ${providers.join(" and ")} each provide it, so none is installed: choose one with \`pikit add <name>\``);
+  }
 }
 
 /** Steps 1–6 and 8–10: everything but `bun install` and `doctor`, which `pikit new` runs once for all. */

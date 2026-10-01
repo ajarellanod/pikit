@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import type { Manifest } from "../registry/manifest.ts";
 import { declaredByApp } from "./apps.ts";
-import { offeredProviders, withOffers } from "./offers.ts";
+import { offeredProviders, unchosenProviders, withOffers } from "./offers.ts";
 import { openRegistry, type Registry } from "./registry-source.ts";
 
 const registry = openRegistry(DEFAULT_REGISTRY);
@@ -126,6 +126,16 @@ test("with a second provider, nothing is offered for it (the user's choice); the
   expect(offeredProviders(two, ["channel-http"]).map((o) => o.component)).toEqual(["submissions-sql"]);
   const telegram = registry.preset("telegram");
   expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["submissions-sql", "outbound-durable", "storage-kv-sql"]);
+});
+
+test("an optional capability with two providers is not offered, and is named as the user's choice instead of left out in silence", () => {
+  const durable = registry.manifest("outbound-durable");
+  const two = { ...registry, names: () => [...registry.names(), "outbound-other"], manifest: (name: string) => (name === "outbound-other" ? { ...durable, name } : registry.manifest(name)) } as Registry;
+  expect(offeredProviders(two, ["channel-telegram"], [], ["server"]).map((o) => o.component)).not.toContain("outbound-durable");
+  expect(unchosenProviders(two, ["channel-telegram"], [], ["server"])).toEqual([{ capability: "outbound.queue", for: "channel-telegram", providers: ["outbound-durable", "outbound-other"] }]);
+  // One provider: offered, nothing to choose. Installed already: nothing either way.
+  expect(unchosenProviders(registry, ["channel-telegram"], [], ["server"])).toEqual([]);
+  expect(unchosenProviders(two, ["channel-telegram"], ["outbound-other"], ["server"])).toEqual([]);
 });
 
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {
