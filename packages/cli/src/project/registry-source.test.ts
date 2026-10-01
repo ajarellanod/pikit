@@ -179,6 +179,12 @@ test("a second server provider of storage.sql leaves the repository's presets co
   expect(checkPresets(root)).toContain('presets/leaning.yaml: on server, submissions-sql requires "storage.sql", which nothing provides');
 });
 
+test("a second Cloudflare provider of storage.kv leaves cloudflare-minimal composing: it names its storage", () => {
+  const kv = openRegistry(DEFAULT_REGISTRY).manifest("storage-kv-sql");
+  const root = repositoryWith([{ ...kv, name: "storage-kv-other", description: "A second storage.kv." }]);
+  expect(checkPresets(root)).toEqual([]);
+});
+
 test("registry validate reports a preset whose starter model's provider it does not install, unless the preset names its model", () => {
   const root = repositoryWith([]);
   const http = readFileSync(join(root, "presets", "http.yaml"), "utf8");

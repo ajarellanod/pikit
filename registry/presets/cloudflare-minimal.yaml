@@ -3,10 +3,12 @@
 # Each conversation's Durable Object keeps its sessions and its registry in its own SQLite, and
 # deployment-cloudflare deploys it; `pikit up` checks that the object's App starts there (/health).
 # No channel and no runtime yet: those arrive as Cloudflare components, added after.
-# conversations-kv brings storage-kv-sql (`pikit add` offers storage.kv's provider).
 title: "Cloudflare: a Worker and a Durable Object per conversation, storage only for now"
 components:
   - storage-do
   - sessions-sql
+  # Named, not left to `pikit add` to offer: an offer needs the registry's only Cloudflare provider of
+  # `storage.kv`, and a second one would leave every project of this preset with none.
+  - storage-kv-sql
   - conversations-kv
   - deployment-cloudflare

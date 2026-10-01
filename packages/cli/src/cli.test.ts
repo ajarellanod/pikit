@@ -155,8 +155,8 @@ test("new --target cloudflare records the target, and writes two Apps, wrangler 
   const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
   expect(manifest.targets).toEqual(["cloudflare"]);
   expect(Object.keys(manifest.components).sort()).toEqual(["conversations-kv", "deployment-cloudflare", "sessions-sql", "storage-do", "storage-kv-sql"]);
-  // Offered among the providers that run on Cloudflare: storage-kv-sql, never storage-sqlite.
-  expect(manifest.components["storage-kv-sql"].installedFor).toEqual(["conversations-kv"]);
+  // The preset names storage-kv-sql (not an offer that a second storage.kv provider would cancel).
+  expect(manifest.components["storage-kv-sql"].installedFor).toBeUndefined();
   expect(Object.keys(manifest.components["deployment-cloudflare"].files)).toContain("wrangler.jsonc");
 
   const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
