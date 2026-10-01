@@ -8,7 +8,8 @@
  * component.json names in `$schema` so an editor completes and checks it too.
  *
  * Generated from `setup` (S14), rewritten by `generate`, checked by `validate`: `$schema`,
- * `provides`, `requires.capabilities`, `optional.capabilities`, `halves` and `replay.tools`. Everything
+ * `provides`, `requires.capabilities`, `optional.capabilities`, `halves`, `replay.tools` and
+ * `modelProviders`. Everything
  * else is written by hand and `generate` never changes it.
  *
  * `setup` runs with the default config, and with each config in the `examples` of the component's
@@ -88,6 +89,13 @@ export const ManifestSchema = Type.Object(
     requires: Type.Object(
       {
         pikit: Type.String({ minLength: 1, description: "The @pikit/core versions it works with (a semver range)." }),
+        contracts: Type.Optional(
+          Type.String({
+            minLength: 1,
+            description:
+              "The @pikit/contracts versions it works with (a semver range); declared when `dependencies` lists @pikit/contracts. The contracts version apart from the core (SPEC K8): `pikit add` checks it for the component it adds, and records it, so a later add refuses to replace the project's kit with contracts an installed component does not accept.",
+          }),
+        ),
         capabilities: Type.Array(Type.String(), { description: "Generated from setup's use() calls." }),
       },
       { additionalProperties: false, description: "A component depends on capabilities, never on components." },
@@ -175,6 +183,12 @@ export const ManifestSchema = Type.Object(
         { additionalProperties: false },
       ),
     ),
+    modelProviders: Type.Optional(
+      Type.Array(Type.String(), {
+        description:
+          "Generated: the `model.provider` keys setup provides, with the default config (`anthropic`: agents name its models `anthropic/<modelId>`). `pikit new` checks the starter agent's model against them before it writes anything.",
+      }),
+    ),
     dependencies: Type.Record(Type.String(), Type.String({ minLength: 1 }), {
       description: "Exactly the npm packages its files import, pinned (package → version).",
     }),
@@ -233,6 +247,8 @@ export interface Generated {
    * written, since their names are the example's.
    */
   exampleTools?: Record<string, string>;
+  /** The `model.provider` keys it provides; absent when it provides none with its default config. */
+  modelProviders?: string[];
   /** What each App's half declares; absent unless `apps.worker` names a half. */
   halves?: Record<AppName, Half>;
 }
@@ -270,20 +286,22 @@ export function withGenerated(manifest: Manifest, generated: Generated): Manifes
   };
   if (generated.tools === undefined) delete next.replay;
   else next.replay = { ...manifest.replay, tools: generated.tools };
+  if (generated.modelProviders === undefined) delete next.modelProviders;
+  else next.modelProviders = generated.modelProviders;
   if (generated.halves === undefined) delete next.halves;
   else next.halves = generated.halves;
   return next;
 }
 
-/** Stable text: fields in the schema's order, `requires.pikit` before `requires.capabilities`. */
+/** Stable text: fields in the schema's order, `requires.pikit` and `requires.contracts` before `requires.capabilities`. */
 export function formatManifest(manifest: Manifest): string {
   const fields = manifest as Record<string, unknown>;
   const ordered: Record<string, unknown> = {};
   for (const key of KEY_ORDER) if (key in fields) ordered[key] = fields[key];
   // Unknown fields keep their place after these, so `validate` can name them instead of losing them.
   for (const [key, value] of Object.entries(fields)) if (!(key in ordered)) ordered[key] = value;
-  const { pikit, capabilities, ...otherRequires } = manifest.requires;
-  ordered.requires = { pikit, capabilities, ...otherRequires };
+  const { pikit, contracts, capabilities, ...otherRequires } = manifest.requires;
+  ordered.requires = { pikit, ...(contracts !== undefined && { contracts }), capabilities, ...otherRequires };
   return `${JSON.stringify(ordered, null, 2)}\n`;
 }
 

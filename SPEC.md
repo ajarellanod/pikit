@@ -41,7 +41,8 @@ changes its own service). When Pi ships something pikit built, pikit deletes its
 
 The kernel is `@pikit/core`: what the app runs itself (composition, capabilities, events,
 pipelines, lifecycle, config validation, context, clock, logger), with no word of the domain.
-Its exports are held by `packages/core/src/exports.test.ts`; its only runtime dependency is
+Its exports, and those of `@pikit/core/testing` that components' tests import, are held by
+`packages/core/src/exports.test.ts`; its only runtime dependency is
 `typebox`. The shared vocabulary lives in `@pikit/contracts` and versions apart (K8).
 
 ### 3.1 Decisions
@@ -66,7 +67,11 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 - **K4. The kernel takes a plain, validated object as config.** It merges the components' TypeBox
   schemas under their names, validates, and deep-freezes. Where the object comes from (TypeScript
   in `pikit.config.ts` today, YAML or a wizard later) is the project's or the CLI's business, never
-  the kernel's. *Why:* formats change; the kernel's contract does not.
+  the kernel's. A component's `setup` receives only its own part, under its name; neither `pikit`
+  nor `ctx` carries the whole object, which belongs to whoever runs the app (`AppDefinition.config`)
+  and to observers (K13). *Why:* formats change; the kernel's contract does not; and a component
+  that read another's config would depend on it outside the capability graph, where `registry
+  validate`, `pikit doctor` and `pikit remove` cannot see it (P4).
 - **K5. `Context` is pikit's own, and frozen.** Its shape is `abortSignal`, `value(key)`,
   `toString()`, with `createContextKey`, `withAbortSignal`, `withCancel`, `withContextValue` and
   `BACKGROUND_CONTEXT`. It grows only through context keys, never by changing the interface. It

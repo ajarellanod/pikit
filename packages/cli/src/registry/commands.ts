@@ -9,7 +9,12 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
-import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, readPreset } from "../project/registry-source.ts";
+import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp } from "../project/apps.ts";
+import { DEPLOYMENT_EXPORTS } from "../project/deployment-module.ts";
+import { withOffers } from "../project/offers.ts";
+import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, type Registry, readPreset } from "../project/registry-source.ts";
+import { starterModel, starterModelProblem } from "../project/starter-model.ts";
+import { capabilityEntry } from "./capabilities.ts";
 import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
@@ -43,7 +48,16 @@ function schemaFiles(): Map<string, string> {
 
 /** The `@pikit/core` a registry at this commit is built with; `requires.pikit` must accept it. */
 export function coreVersion(): string {
-  return (JSON.parse(readFileSync(join(REPO, "packages", "core", "package.json"), "utf8")) as { version: string }).version;
+  return packageVersion("core");
+}
+
+/** The `@pikit/contracts` a registry at this commit is built with; `requires.contracts` must accept it. */
+export function contractsVersion(): string {
+  return packageVersion("contracts");
+}
+
+function packageVersion(dir: string): string {
+  return (JSON.parse(readFileSync(join(REPO, "packages", dir, "package.json"), "utf8")) as { version: string }).version;
 }
 
 export function componentNames(root: string): string[] {
@@ -104,6 +118,43 @@ async function checkHooks(componentDir: string, name: string, manifest: Manifest
   return problems;
 }
 
+/**
+ * A `deployment-*` component's `index.ts` exports the functions the CLI calls (`DEPLOYMENT_EXPORTS`):
+ * each required one, and each one it exports, as a function; and nothing one letter or a case away
+ * from one of them (`Status`, `restar`), which the CLI would never call.
+ */
+async function checkDeploymentExports(componentDir: string, name: string): Promise<string[]> {
+  if (!name.startsWith("deployment-")) return [];
+  let module: Record<string, unknown>;
+  try {
+    module = (await import(pathToFileURL(entryOf(componentDir, name)).href)) as Record<string, unknown>;
+  } catch (error) {
+    return [`index.ts could not be loaded: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  const problems: string[] = [];
+  const commands = Object.keys(DEPLOYMENT_EXPORTS);
+  for (const [command, need] of Object.entries(DEPLOYMENT_EXPORTS)) {
+    if (module[command] === undefined) {
+      if (need === "required") problems.push(`index.ts does not export ${command}(), which the CLI calls on every deployment component`);
+    } else if (typeof module[command] !== "function") problems.push(`index.ts exports ${command}, but not as a function`);
+  }
+  for (const exported of Object.keys(module)) {
+    const meant = commands.find((command) => command !== exported && oneEditApart(exported.toLowerCase(), command));
+    if (meant !== undefined) problems.push(`index.ts exports ${exported}: the CLI calls ${meant}, never ${exported}`);
+  }
+  return problems;
+}
+
+/** At most one letter inserted, deleted or replaced turns `a` into `b`. */
+function oneEditApart(a: string, b: string): boolean {
+  if (Math.abs(a.length - b.length) > 1) return false;
+  let start = 0;
+  while (start < a.length && a[start] === b[start]) start++;
+  let end = 0;
+  while (end < a.length - start && end < b.length - start && a[a.length - 1 - end] === b[b.length - 1 - end]) end++;
+  return a.length - start - end <= 1 && b.length - start - end <= 1;
+}
+
 /** Each of `generated` is a file of the component's own directory, not a test file. */
 function checkGeneratedFiles(componentDir: string, name: string, manifest: Manifest): string[] {
   return (manifest.generated ?? []).flatMap((file) => {
@@ -154,8 +205,9 @@ export async function generate(root: string): Promise<Outcome> {
 }
 
 /** Every rule, for every component, then the index. Nothing is written. */
-export async function validate(root: string, options: { coreVersion?: string } = {}): Promise<Outcome> {
+export async function validate(root: string, options: { coreVersion?: string; contractsVersion?: string } = {}): Promise<Outcome> {
   const core = options.coreVersion ?? coreVersion();
+  const contracts = options.contractsVersion ?? contractsVersion();
   const problems: string[] = [];
   const manifests: Manifest[] = [];
   const names = componentNames(root);
@@ -179,7 +231,7 @@ export async function validate(root: string, options: { coreVersion?: string } =
       continue;
     }
     manifests.push(manifest);
-    checkManifest(manifest, dir, name, core).forEach(report);
+    checkManifest(manifest, dir, name, core, contracts).forEach(report);
     // Every rule below reads the manifest's fields: a malformed one was reported, and that is all.
     if (schemaProblems(ManifestSchema, manifest).length > 0) continue;
 
@@ -200,6 +252,7 @@ export async function validate(root: string, options: { coreVersion?: string } =
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
     }
     (await checkHooks(dir, name, manifest)).forEach(report);
+    (await checkDeploymentExports(dir, name)).forEach(report);
     checkGeneratedFiles(dir, name, manifest).forEach(report);
   }
 
@@ -226,6 +279,11 @@ export function checkSchemaFiles(root: string): string[] {
 /**
  * Every preset resolves: its components exist, once each; an alias extends a base and chooses what
  * that base lets it choose; and every answer to a question resolves too and has a `title` to show.
+ *
+ * And composes, as `pikit new` would make it: on each target all its components run on (one at
+ * least), with what they bring (`withOffers`), and each answer on each of those targets it runs on
+ * (the answers `pikit new` offers there). An offer needs the registry's only provider, so a preset
+ * that leaned on one breaks when a second provider lands: this says so before a project is written.
  */
 export function checkPresets(root: string): string[] {
   const dir = join(root, "presets");
@@ -239,6 +297,18 @@ export function checkPresets(root: string): string[] {
       const components = registry.preset(name);
       for (const component of components) registry.manifest(component);
       if (new Set(components).size !== components.length) report("lists a component twice");
+      const targets = TARGETS.filter((target) => components.every((c) => registry.manifest(c).targets.includes(target)));
+      if (targets.length === 0) {
+        const not = (target: string) => components.filter((c) => !registry.manifest(c).targets.includes(target));
+        report(`no target runs all its components (${TARGETS.map((t) => `not on ${t}: ${not(t).join(", ")}`).join("; ")})`);
+      }
+      for (const target of targets) {
+        compositionProblems(registry, components, target).forEach((p) => report(`on ${target}, ${p}`));
+        // The starter agent `pikit new` writes must name a model provider the preset installs.
+        const model = registry.presetModel(name) ?? starterModel(target);
+        const problem = starterModelProblem(registry, components, target, model, name);
+        if (problem !== undefined) report(`on ${target}, ${problem}`);
+      }
       // An alias asks its base's questions: they are checked once, with the base.
       for (const slot of isAlias ? [] : registry.slots(name)) {
         for (const option of slot.options) {
@@ -248,11 +318,47 @@ export function checkPresets(root: string): string[] {
           }
         }
       }
+      for (const target of isAlias ? [] : targets) {
+        for (const slot of registry.slots(name, [target])) {
+          for (const option of slot.options.filter((o) => o.name !== slot.default)) {
+            const chosen = registry.preset(name, [option.name]);
+            compositionProblems(registry, chosen, target).forEach((p) => report(`with ${option.name}, on ${target}, ${p}`));
+          }
+        }
+      }
     } catch (error) {
       report(error instanceof Error ? error.message : String(error));
     }
   }
   return [...problems];
+}
+
+/**
+ * Why `components`, with what they bring, would not compose on `target`, per App (SPEC C1): a
+ * capability one requires that nothing in its App provides (the project's own, `agent.definition`,
+ * aside), and a single capability two components provide there. `pikit doctor` judges the real app;
+ * this reads the manifests, before any project exists.
+ */
+function compositionProblems(registry: Registry, components: readonly string[], target: string): string[] {
+  const targets = [target];
+  const providers: Record<AppName, Map<string, string[]>> = { default: new Map(), worker: new Map() };
+  const required: [AppName, string, string][] = [];
+  for (const name of withOffers(registry, components, targets).order) {
+    for (const [app, half] of declaredByApp(registry.manifest(name), targets)) {
+      for (const capability of half.provides) providers[app].set(capability, [...(providers[app].get(capability) ?? []), name]);
+      for (const capability of half.requires) required.push([app, capability, name]);
+    }
+  }
+  const where = (app: AppName) => (hasWorkerApp(targets) ? ` in ${APP_LABEL[app]}` : "");
+  const problems = required
+    .filter(([app, capability]) => !providers[app].has(capability) && capabilityEntry(capability)?.providedBy !== "project")
+    .map(([app, capability, name]) => `${name} requires "${capability}"${where(app)}, which nothing provides`);
+  for (const app of ["default", "worker"] as const) {
+    for (const [capability, names] of providers[app]) {
+      if (names.length > 1 && capabilityEntry(capability)?.mode === "single") problems.push(`"${capability}" takes one provider${where(app)}, and ${names.join(" and ")} each provide it`);
+    }
+  }
+  return problems;
 }
 
 /** Every component's manifest, by listing `components/`. A missing one is skipped; invalid JSON throws. */
@@ -270,6 +376,7 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
     ["requires.capabilities", manifest.requires?.capabilities, expected.requires.capabilities],
     ["optional.capabilities", manifest.optional?.capabilities, expected.optional.capabilities],
     ["replay", manifest.replay, expected.replay],
+    ["modelProviders", manifest.modelProviders, expected.modelProviders],
     ["halves", manifest.halves, expected.halves],
   ];
   for (const [field, actual, derived] of fields) {
@@ -304,7 +411,7 @@ function skeleton(dir: string, name: string): Manifest {
     version: "0.0.0",
     description: readmeSummary(dir),
     targets,
-    requires: { pikit: coreVersion(), capabilities: [] },
+    requires: { pikit: coreVersion(), ...(imported.has("@pikit/contracts") && { contracts: contractsVersion() }), capabilities: [] },
     optional: { capabilities: [] },
     provides: [],
     dependencies: Object.fromEntries([...imported].sort().map((pkg) => [pkg, versions[pkg] ?? ""])),

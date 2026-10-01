@@ -4,6 +4,10 @@
  *
  * - `start(ctx)` with a deadline. If it rejects, exit 1: the container restarts (compose's
  *   `restart` policy), and a half-started app never serves.
+ * - At the start deadline, and after a failed start, `stop(ctx)` with the stop deadline bounds the
+ *   rollback of whatever had started, and the process exits 1 once it settles. A rollback that hangs
+ *   (a socket that never drains) would otherwise keep a container alive that never serves and that
+ *   Docker never restarts.
  * - On SIGTERM (`docker stop`, `docker compose down`) or SIGINT (Ctrl-C), `stop(ctx)` with a
  *   deadline shorter than compose's `stop_grace_period`, so the process exits by itself before
  *   Docker sends SIGKILL. Exit 0 if every component stopped, 1 if one failed or was abandoned.
@@ -91,14 +95,44 @@ export async function runEntrypoint(definition: AppDefinition, options: Entrypoi
   process.on("SIGTERM", () => shutdown("SIGTERM"));
   process.on("SIGINT", () => shutdown("SIGINT"));
 
+  // The rollback of a failed or overdue start (K2): the kernel bounds it only by a stop's deadline.
+  // Its timer, like the start's, is a `setTimeout`, not `AbortSignal.timeout`: Bun's does not keep
+  // the process alive, and a deadline must fire even when nothing else is pending.
+  let rollingBack: Promise<never> | undefined;
+  const rollBack = (): Promise<never> =>
+    (rollingBack ??= (async () => {
+      const deadline = new AbortController();
+      const timer = setTimeout(
+        () => deadline.abort(new Error(`deployment-docker: the rollback did not finish within ${stopDeadlineMs} ms`)),
+        stopDeadlineMs,
+      );
+      try {
+        await running.stop(withAbortSignal(deadline.signal, BACKGROUND_CONTEXT));
+      } catch (error) {
+        logger.error("pikit: the failed start did not roll back cleanly", { error });
+      } finally {
+        clearTimeout(timer);
+      }
+      return process.exit(1);
+    })());
+
   logger.info("pikit: starting", { deadlineMs: startDeadlineMs });
+  const deadline = new AbortController();
+  const timer = setTimeout(() => {
+    deadline.abort(new Error(`deployment-docker: the app did not start within ${startDeadlineMs} ms`));
+    // A signal's stop already bounds the rollback.
+    if (!stopping) void rollBack();
+  }, startDeadlineMs);
   try {
-    await running.start(withAbortSignal(AbortSignal.timeout(startDeadlineMs), BACKGROUND_CONTEXT));
+    await running.start(withAbortSignal(deadline.signal, BACKGROUND_CONTEXT));
   } catch (error) {
-    // A start cancelled by a signal: the shutdown above reports and exits.
-    if (stopping) return;
+    // A start cancelled by a signal: the shutdown above reports and exits. A start the deadline had
+    // already rolled back failed on its own, even if a signal came during its rollback.
+    if (stopping && rollingBack === undefined) return;
     logger.error("pikit: the app failed to start", { error });
-    return process.exit(1);
+    return await rollBack();
+  } finally {
+    clearTimeout(timer);
   }
   logger.info("pikit: started", { components: running.describe().components.length });
 }

@@ -5,7 +5,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
@@ -119,6 +119,76 @@ test("registry validate reports unknown components, duplicates and answers with 
   expect(problems).toContain('presets/base.yaml: channel-c answers "Where?" but its component.json has no title to show');
   expect(problems).toContain("presets/twice.yaml: lists a component twice");
   expect(problems.some((p) => p.startsWith('presets/ghost.yaml: the registry') && p.includes('no component "nope-x"'))).toBe(true);
+});
+
+test("registry validate reports a preset that does not compose on its target, and each answer that does not", () => {
+  const requires = (capabilities: string[]) => ({ requires: { pikit: "0.0.0", capabilities } });
+  const root = registry(
+    {
+      "secrets-env": { provides: ["secrets"] },
+      "secrets-file": { provides: ["secrets"] },
+      "channel-a": { title: "A", ...requires(["secrets"]) },
+      // Nothing provides storage.sql: an answer that cannot compose.
+      "channel-b": { title: "B", ...requires(["storage.sql"]) },
+      // Runs only on Cloudflare: not an answer on a server, so not checked there.
+      "channel-edge": { title: "Edge", targets: ["cloudflare"], ...requires(["storage.sql"]) },
+      "server-bun": undefined,
+    },
+    {
+      base: "components: [secrets-env, channel-a, server-bun]\nchoose:\n  - kind: channel\n",
+      twice: "components: [secrets-env, secrets-file, server-bun]\n",
+      lonely: "components: [channel-a]\n",
+      nowhere: "components: [secrets-env, channel-edge]\n",
+    },
+  );
+  expect(checkPresets(root).sort()).toEqual([
+    'presets/base.yaml: with channel-b, on server, channel-b requires "storage.sql", which nothing provides',
+    'presets/lonely.yaml: on server, channel-a requires "secrets", which nothing provides',
+    "presets/nowhere.yaml: no target runs all its components (not on server: channel-edge; not on cloudflare: secrets-env)",
+    'presets/twice.yaml: on server, "secrets" takes one provider, and secrets-env and secrets-file each provide it',
+  ]);
+});
+
+/** The repository's registry, component.json files only, plus `extra` components: enough to check presets. */
+function repositoryWith(extra: Manifest[]): string {
+  const root = mkdtempSync(join(tmpdir(), "pikit-registry-test-"));
+  dirs.push(root);
+  const index = JSON.parse(readFileSync(join(DEFAULT_REGISTRY, "registry.json"), "utf8"));
+  for (const name of Object.keys(index.components)) {
+    mkdirSync(join(root, "components", name), { recursive: true });
+    copyFileSync(join(DEFAULT_REGISTRY, "components", name, "component.json"), join(root, "components", name, "component.json"));
+  }
+  for (const manifest of extra) {
+    mkdirSync(join(root, "components", manifest.name), { recursive: true });
+    writeFileSync(join(root, "components", manifest.name, "component.json"), JSON.stringify(manifest));
+    index.components[manifest.name] = { version: manifest.version, description: manifest.description, targets: manifest.targets, path: `components/${manifest.name}` };
+  }
+  writeFileSync(join(root, "registry.json"), JSON.stringify(index));
+  mkdirSync(join(root, "presets"));
+  for (const file of readdirSync(join(DEFAULT_REGISTRY, "presets"))) copyFileSync(join(DEFAULT_REGISTRY, "presets", file), join(root, "presets", file));
+  return root;
+}
+
+test("a second server provider of storage.sql leaves the repository's presets composing: they name their storage", () => {
+  const sqlite = openRegistry(DEFAULT_REGISTRY).manifest("storage-sqlite");
+  const root = repositoryWith([{ ...sqlite, name: "storage-postgres", description: "A second server storage.sql." }]);
+  expect(checkPresets(root)).toEqual([]);
+  // A preset that left its storage to the offer: with two providers nothing is offered, and it says so.
+  const http = readFileSync(join(root, "presets", "http.yaml"), "utf8");
+  writeFileSync(join(root, "presets", "leaning.yaml"), http.replace(/^\s+- storage-sqlite\n/m, ""));
+  expect(checkPresets(root)).toContain('presets/leaning.yaml: on server, submissions-sql requires "storage.sql", which nothing provides');
+});
+
+test("registry validate reports a preset whose starter model's provider it does not install, unless the preset names its model", () => {
+  const root = repositoryWith([]);
+  const http = readFileSync(join(root, "presets", "http.yaml"), "utf8");
+  const openrouter = http.replace(/^\s+- provider-anthropic\n/m, "  - provider-openrouter\n");
+  writeFileSync(join(root, "presets", "other-provider.yaml"), openrouter);
+  expect(checkPresets(root)).toContain(
+    `presets/other-provider.yaml: on server, the starter agent's model "anthropic/claude-sonnet-4-6" needs the model provider "anthropic", which no component of the preset "other-provider" provides; provider-anthropic provides it: list it in the preset's components, or give the preset a \`model\` whose provider it installs`,
+  );
+  writeFileSync(join(root, "presets", "other-provider.yaml"), `model: openrouter/z-ai/glm-5.3-flash\n${openrouter}`);
+  expect(checkPresets(root)).toEqual([]);
 });
 
 test("the repository's presets resolve: telegram is http with channel-telegram", () => {

@@ -31,9 +31,17 @@ const KINDS: Kind[] = [
   {
     capability: "model.provider",
     describe: (agent, key, who) => `the model "${agent.model}", whose provider "${key}" ${who} provides`,
-    keys: (agent) => (agent.model.includes("/") ? [agent.model.slice(0, agent.model.indexOf("/"))] : []),
+    keys: (agent) => {
+      const key = modelProvider(agent.model);
+      return key === undefined ? [] : [key];
+    },
   },
 ];
+
+/** The `model.provider` key a model names: the part of `provider/modelId` before the first slash. */
+export function modelProvider(model: string): string | undefined {
+  return model.includes("/") ? model.slice(0, model.indexOf("/")) : undefined;
+}
 
 /**
  * The references that are broken now, or, with `removing`, that removing that component would

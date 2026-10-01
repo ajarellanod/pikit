@@ -22,6 +22,9 @@ The container runs `bun src/pikit/deployment-docker/main.ts`, which runs your `p
 as SPEC K2 and P5 require:
 - It starts the app with a 30 s deadline. If the start fails, it exits 1, and Docker restarts the
   container. The app is never restarted inside the same process.
+- At the start deadline, or once the start failed, it stops the app with the 10 s stop deadline,
+  which bounds the rollback of the components already started, and exits 1. A component whose stop
+  hangs cannot keep a container alive that never serves: the process exits within both deadlines.
 - On SIGTERM (`docker compose down`, `docker stop`) or SIGINT (Ctrl-C), it stops the app with a
   10 s deadline and exits 0 if every component stopped, 1 otherwise. `compose.yaml`'s
   `stop_grace_period` is 20 s, so the app stops itself before Docker kills it.
@@ -116,7 +119,8 @@ and is yours to run.
 
 The tests are copied with the component and run in your project:
 - `entrypoint.test.ts` runs the entrypoint in a child process with a fixture app
-  (`entrypoint-fixture.ts`): a failed or late start exits 1, SIGTERM and SIGINT stop cleanly with 0,
+  (`entrypoint-fixture.ts`): a failed or late start exits 1, even when its rollback hangs (the K2
+  conformance case: it exits within both deadlines), SIGTERM and SIGINT stop cleanly with 0,
   a failed stop exits 1, a second signal exits at once, a signal during the start cancels it. It
   also runs `main.ts` in a throwaway project to check that it runs the project's `pikit.config.ts`.
 - `logger.test.ts`: the shape of a line, levels, errors, redaction, and odd fields that never throw.

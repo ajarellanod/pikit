@@ -10,7 +10,8 @@
  * - **Pi only through the adapter**: no package but `@pikit/pi-adapter` imports `@earendil-works/*`.
  * - **Neutral exports**: every file an export reaches through relative imports runs on every target:
  *   no `node:*`, `bun:*` or `cloudflare:*`, and not Pi's Node subpath. Every export is neutral unless
- *   `SERVER_ONLY` names it, so a new export is held to the rule until someone decides otherwise.
+ *   `SERVER_ONLY_EXPORTS` names it, so a new export is held to the rule until someone decides
+ *   otherwise. The list lives with the CLI's import scan, which holds components to the same one.
  * - **Inside the package**: source files do not import relative paths outside their package; a
  *   package reaches another only through its exports. Tests may (they read registry fixtures).
  * - **Layers** (SPEC §3): the kit's packages depend only downwards, kernel → contracts →
@@ -23,13 +24,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { isRelative, packageName, runtimeScheme, scanImports } from "../packages/cli/src/registry/imports.ts";
-
-/** Exports that may use Node, by package directory. Every other export is neutral. */
-export const SERVER_ONLY: Readonly<Record<string, readonly string[]>> = {
-  // The JSONL store and the local execution environment; the test fixtures that spawn Pi workers.
-  "pi-adapter": ["./node", "./testing"],
-};
+import { isRelative, PI_NODE, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports } from "../packages/cli/src/registry/imports.ts";
 
 /** The kit's layers, lowest first: a kit package depends only on kit packages below it. */
 export const LAYERS: readonly string[] = ["@pikit/core", "@pikit/contracts", "@pikit/pi-adapter"];
@@ -53,8 +48,6 @@ export const ALLOWED: readonly { dir: string; files: string; specifier: string; 
   },
 ];
 
-/** Pi's own Node subpath: fine behind `./node`, never in a neutral export. */
-const PI_NODE = "@earendil-works/pi-agent-core/node";
 const SOURCE = /\.[cm]?tsx?$/;
 const TEST = /\.test\.[cm]?tsx?$/;
 
@@ -105,10 +98,9 @@ export function checkBoundaries(packagesDir: string): string[] {
       }
     }
 
-    const serverOnly = SERVER_ONLY[dir] ?? [];
     for (const [exported, target] of Object.entries(pkg.exports ?? {})) {
-      if (serverOnly.includes(exported)) continue;
       const entry = `${pkg.name}${exported === "." ? "" : exported.slice(1)}`;
+      if (SERVER_ONLY_EXPORTS.includes(entry)) continue;
       for (const { file, specifier } of platformImports(resolve(root, target))) {
         problems.push(`${at(file)} imports "${specifier}", but ${entry} reaches it and must run on every target (SPEC §4)`);
       }

@@ -3,6 +3,9 @@
  * no word of the domain; it should hardly ever change. A change to this list is a [decision]: record
  * it in SPEC.md, then update the list. A name the components share belongs in @pikit/contracts.
  *
+ * `@pikit/core/testing` is held the same way: the tests components ship into users' projects import
+ * it, so a change there breaks tests the user owns.
+ *
  * Read from `index.ts` as text, so type-only exports count too.
  */
 
@@ -53,6 +56,17 @@ const KERNEL = [
   "systemClock",
 ];
 
+const TESTING = [
+  // The lifecycle suite every component that owns resources passes.
+  "ConformanceCase",
+  "LifecycleConformanceOptions",
+  "LifecycleFixture",
+  "createLifecycleConformance",
+  // A clock tests move by hand.
+  "ManualClock",
+  "createManualClock",
+];
+
 function exported(source: string): string[] {
   const names: string[] = [];
   for (const match of source.matchAll(/export\s+(?:type\s+)?\{([^}]*)\}\s+from/g)) {
@@ -68,4 +82,10 @@ test("the kernel exports exactly its list: a change is a [decision] (SPEC §3.2)
   const source = readFileSync(join(import.meta.dir, "index.ts"), "utf8");
   expect(source).not.toMatch(/export\s+\*/);
   expect(exported(source).sort()).toEqual([...KERNEL].sort());
+});
+
+test("@pikit/core/testing exports exactly its list: component tests in users' projects import it", () => {
+  const source = readFileSync(join(import.meta.dir, "testing", "index.ts"), "utf8");
+  expect(source).not.toMatch(/export\s+\*/);
+  expect(exported(source).sort()).toEqual([...TESTING].sort());
 });

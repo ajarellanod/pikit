@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { capabilityEntry } from "./capabilities.ts";
-import { isRelative, packageName, runtimeScheme, scanImports } from "./imports.ts";
+import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports } from "./imports.ts";
 import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 
@@ -53,9 +53,10 @@ export function checkNaming(name: string): string[] {
 
 /**
  * The manifest's shape (`ManifestSchema`), then what a schema cannot say: that it matches its
- * directory, accepts this repository's core, and names files that exist.
+ * directory, accepts this repository's core and contracts (a component that depends on the contracts
+ * says which versions it accepts: they version apart from the core, SPEC K8), and names files that exist.
  */
-export function checkManifest(manifest: unknown, componentDir: string, dirName: string, coreVersion: string): string[] {
+export function checkManifest(manifest: unknown, componentDir: string, dirName: string, coreVersion: string, contractsVersion: string): string[] {
   const shape = schemaProblems(ManifestSchema, manifest).map((problem) =>
     // The one extra field worth explaining: a dependency on another component.
     problem.startsWith("/requires/") && problem.endsWith("is not a known field")
@@ -69,6 +70,13 @@ export function checkManifest(manifest: unknown, componentDir: string, dirName: 
   if (m.name !== dirName) problems.push(`component.json name "${m.name}" does not match its directory "${dirName}"`);
   if (!Bun.semver.satisfies(coreVersion, m.requires.pikit)) {
     problems.push(`requires.pikit "${m.requires.pikit}" does not accept this repository's @pikit/core ${coreVersion}`);
+  }
+  if (m.requires.contracts === undefined) {
+    if ("@pikit/contracts" in m.dependencies) {
+      problems.push(`dependencies lists @pikit/contracts, but requires.contracts does not say which versions it works with (a semver range, as requires.pikit)`);
+    }
+  } else if (!Bun.semver.satisfies(contractsVersion, m.requires.contracts)) {
+    problems.push(`requires.contracts "${m.requires.contracts}" does not accept this repository's @pikit/contracts ${contractsVersion}`);
   }
   for (const f of m.files) {
     // What `pikit add` refuses to install (registry-source.ts), refused here first.
@@ -154,6 +162,10 @@ export function checkImports(componentDir: string, name: string, targets: readon
       }
       if (specifier.startsWith("@earendil-works/")) {
         problems.push(`${at} imports "${specifier}": only @pikit/pi-adapter imports Pi`);
+      }
+      // A kit export that reaches Node (`@pikit/pi-adapter/node`) is Node by another name.
+      if (SERVER_ONLY_EXPORTS.includes(specifier) && !serverOnly && !forTests(file) && !forMachine(file, name)) {
+        problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: a server-only kit export needs targets ["server"] (SPEC §4)`);
       }
       const pkg = packageName(specifier);
       if (!KIT_PACKAGES.has(pkg)) packages.add(pkg);

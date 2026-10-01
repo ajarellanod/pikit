@@ -43,6 +43,8 @@ export interface Registry {
   preset(name: string, choices?: readonly string[]): string[];
   /** Every preset, with the `title` `pikit new` shows for it, by name. An alias names its base in `extends`. */
   presets(): { name: string; title: string; extends?: string }[];
+  /** The starter agent's model the preset (its base, for an alias) declares; `undefined` leaves it to `pikit new`. */
+  presetModel(name: string): string | undefined;
   /**
    * The preset's questions (its base's, for an alias), each with the preset's own answer as default.
    * With `targets`, only the components that run on all of them are answers.
@@ -110,6 +112,9 @@ export function openRegistry(path: string): Registry {
           const preset = readPreset(root, name);
           return { name, title: preset.title ?? name, ...(preset.extends !== undefined && { extends: preset.extends }) };
         });
+    },
+    presetModel(name) {
+      return presetBase(root, name).base.model;
     },
     slots(name, targets = []) {
       const components = this.preset(name);
@@ -196,6 +201,13 @@ const BasePresetSchema = Type.Object(
         { minItems: 1, description: "One question of `pikit new` per entry; `--with <component>` answers it in a script." },
       ),
     ),
+    model: Type.Optional(
+      Type.String({
+        pattern: "^[^/\\s]+/\\S+$",
+        description:
+          "The starter agent's model, `<provider>/<modelId>`: a component of the preset provides its provider (`pikit new` checks it before writing). Default: the CLI's for the target (`anthropic/…` on a server, `openrouter/…` on Cloudflare).",
+      }),
+    ),
   },
   { additionalProperties: false },
 );
@@ -213,7 +225,7 @@ const AliasPresetSchema = Type.Object(
  * A preset (`presets/<name>.yaml`): the list of `add` calls, and a `title` for `pikit new`'s
  * question. Nothing reads which preset a project came from. YAML 1.2. Either:
  * - a base: `components`, and optionally `choose`, one question per kind whose answers are every
- *   registry component of that kind (the listed one is the default); or
+ *   registry component of that kind (the listed one is the default), and `model`, the starter agent's; or
  * - an alias: `extends` a base and answers some of its questions with `with`, as `--with` does.
  */
 export const PresetSchema = Type.Union([BasePresetSchema, AliasPresetSchema], {

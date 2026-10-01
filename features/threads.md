@@ -3,8 +3,8 @@
 **Public appeal:** —
 
 **Specified:** partly (the key `<instance>:<conversation id>[:<thread id>]` was decided in the former
-SPEC §5, and `ConversationRef.key` documents its thread part; `InboundMessage.threadId` and
-`router-rules`' `thread` are `[planned]`)
+SPEC §5; today `ConversationRef.key` is the channel's own opaque address, which a channel with threads
+extends; `InboundMessage.threadId` and `router-rules`' `thread` are `[planned]`)
 
 **Needed by:** nothing required.
 

@@ -41,12 +41,14 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |
 | [codemode](codemode.md) | | The model writes a script that calls its tools (Pi's `pi-codemode`), server only; what the extension host leaves pending until then | No |
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
+| [conversation-routing](conversation-routing.md) | | Answers routed by an address, not by parsing the conversation key | Open: before tenants or `conversation.resolve` |
 | [deployment-systemd](deployment-systemd.md) | | Run as a systemd service, without Docker | No |
 | [health](health.md) | | Components report failures; essential ones restart the process | Yes: SPEC §5 and §6 |
 | [inbound-dedup](inbound-dedup.md) | | Transport deduplication for platforms that redeliver | No; the first webhook channel |
 | [interaction](interaction.md) | | Pi extensions' questions answered in the chat | No |
 | [multi-tenant-isolation](multi-tenant-isolation.md) | | Tenants that cannot reach each other | No |
-| [open-registries](open-registries.md) | | Git, HTTP and private registries, and a gallery | Partly: `pikit upgrade` (P6) reads Git registries |
+| [open-registries](open-registries.md) | | Git, HTTP and private registries, and a gallery | No: `pikit upgrade` (P6) merges from the bases in `pikit-bases/`, from the registry as recorded (`builtin`, a path) |
+| [outbound-delivery](outbound-delivery.md) | | One answer-delivery protocol for every channel; where `outbound.prepare` runs | No; before the next chat channel |
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |

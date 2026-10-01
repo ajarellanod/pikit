@@ -4,9 +4,10 @@
 
 **Specified:** partly (the former SPEC §10.3, §10.4)
 
-**Needed by:** partly by `pikit upgrade` (P6): it fetches a pinned commit again, which is when Git
-registries are read. HTTP registries, private registries beyond that, and a gallery are
-not required.
+**Needed by:** nothing yet. `pikit upgrade` (P6) does not fetch a pinned commit again: it merges
+from the bases kept in the project (`pikit-bases/`) and reads the new version from the registry as
+`pikit.json` records it (`builtin`, or a path). A Git registry would give it one more place to read
+from. HTTP registries, private registries and a gallery are not required.
 
 ## What it gives
 Official, third-party, private (Git over SSH) and local registries as equals, for any kind of

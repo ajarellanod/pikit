@@ -3,17 +3,25 @@
  *
  *   1. resolve the registry (`builtin`, or a local path) and the component's version and commit
  *   2. read the component's package
- *   3. check its targets and `requires.pikit`, and that this CLI's kit is not older than the
- *      project's (`checkKit`); warn for each required capability nothing provides
+ *   3. check its targets, `requires.pikit` and `requires.contracts`, and that this CLI's kit is not
+ *      older than the project's nor outside what an installed component accepts (`checkKit`); warn for
+ *      each required capability nothing provides
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies
  *      and dev dependencies, environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
- *   6. write its files; refuse to overwrite a file that differs without `--force`
- *   7. add its npm dependencies and dev dependencies (`component.json`'s `devDependencies`); `bun install`
+ *   6. write its files; refuse to overwrite a file that differs without `--force`. A reinstall
+ *      (`--force`) overwrites the user's edits (`pikit upgrade` merges them instead), and deletes the
+ *      files the installed version wrote that this one no longer ships, unless the user modified one:
+ *      that one is kept, named, and stays recorded as the component's, so `pikit remove` asks for
+ *      `--force` before deleting it
+ *   7. add its npm dependencies and dev dependencies (`component.json`'s `devDependencies`), and on a
+ *      reinstall take out those it added that it no longer declares, when nothing else needs them;
+ *      `bun install`
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not);
  *      on Cloudflare, also in the Worker's App when its `component.json`'s `apps.worker` says so (C1)
- *   9. append its variables to `.env.example`
- *  10. record the registry, version, commit, file hashes and hooks in `pikit.json`, and keep each file
+ *   9. append its variables to `.env.example` (a reinstall replaces its block)
+ *  10. record the registry, version, commit, kit ranges, file hashes, hooks and the npm packages it added
+ *      in `pikit.json`, and keep each file
  *      as installed, its base, in `pikit-bases/` (`bases.ts`)
  *  11. `pikit doctor`
  *
@@ -22,33 +30,50 @@
  * `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files, the bases and the new tarballs.
  */
 
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { dirname, join } from "node:path";
+import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import { stripComments } from "../registry/imports.ts";
-import { coreVersion } from "../registry/commands.ts";
+import { contractsVersion, coreVersion } from "../registry/commands.ts";
 import { BOTH_APPS, HOOKS, type Manifest } from "../registry/manifest.ts";
 import { type AppName, APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { basePath, unreferencedBases } from "../project/bases.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
-import { appendExampleBlock, ENV_EXAMPLE, exampleBlock } from "../project/env-file.ts";
-import { addDependencies, readPackageJson, writePackageJson } from "../project/package-json.ts";
-import { hashFile, type InstalledComponent, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import { ENV_EXAMPLE, exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
+import { addDependencies, type DependencyField, readPackageJson, removeDependencies, updateDependencies, writePackageJson } from "../project/package-json.ts";
+import {
+  hashFile,
+  type InstalledComponent,
+  kitRanges,
+  modifiedFiles,
+  ownedDependencies,
+  PIKIT_JSON,
+  type ProjectManifest,
+  readProjectManifest,
+  writeProjectManifest,
+} from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import { type Offer, offeredProviders } from "../project/offers.ts";
-import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit, VENDOR_DIR } from "../project/vendor.ts";
+import { Undo } from "../project/undo.ts";
+import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit } from "../project/vendor.ts";
 import { capabilityEntry } from "../registry/capabilities.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
+import { unneededDependencies } from "./remove.ts";
 
-const PACKAGE_JSON = "package.json";
-const BUN_LOCK = "bun.lock";
+export const PACKAGE_JSON = "package.json";
+export const BUN_LOCK = "bun.lock";
+const FIELDS: readonly DependencyField[] = ["dependencies", "devDependencies"];
 
 export interface AddOptions {
   /** A registry path other than the project's default one. */
   registry?: string;
-  /** Overwrite files that differ, reinstall an installed component, and replace a newer kit with this CLI's. */
+  /**
+   * Overwrite files that differ, reinstall an installed component, and replace a kit that is newer or
+   * that an installed component does not accept with this CLI's. It never deletes a file the user
+   * modified that a reinstalled version no longer ships.
+   */
   force?: boolean;
   /** Skip the confirmation (step 5). */
   yes?: boolean;
@@ -117,7 +142,7 @@ export async function add(projectDir: string, name: string, options: AddOptions 
  * The providers `name` brings (`offers.ts`), each asked about (Enter is yes), or all of them with
  * `--yes`. A declined provider takes what only it needed with it.
  */
-async function acceptedOffers(registry: Registry, name: string, installed: readonly string[], targets: readonly string[], options: AddOptions): Promise<Offer[]> {
+export async function acceptedOffers(registry: Registry, name: string, installed: readonly string[], targets: readonly string[], options: AddOptions): Promise<Offer[]> {
   const accepted: Offer[] = [];
   const declined = new Set<string>();
   for (const offer of offeredProviders(registry, [name], installed, targets).reverse()) {
@@ -161,20 +186,28 @@ export async function installComponent(
   }
 }
 
-/** One component's install, checked: what it writes, from where. */
-interface Plan {
+/** One component's install (or upgrade), checked: what it writes, from where. */
+export interface Plan {
   name: string;
   registry: Registry;
   manifest: Manifest;
-  /** Project-relative target → absolute source. */
+  /** Every file it ships, project-relative target → absolute source: each one's base (`bases.ts`) is kept. */
   files: Map<string, string>;
+  /** What is written, by target: a shipped file (its source), or a merge's text (`pikit upgrade`). */
+  writes: Map<string, { source: string } | { content: Uint8Array }>;
+  /** A reinstall: what the installed version wrote, this one no longer ships, and nobody modified; deleted. */
+  obsolete: string[];
+  /** A reinstall: the record it replaces. */
+  previous: InstalledComponent | undefined;
+  /** A reinstall: the packages `add` put in package.json for it that it no longer declares, by field. */
+  dropped: Record<DependencyField, string[]>;
 }
 
 /**
  * The project files an install edits, as they will be once it is done. Each plan is checked against
  * the draft and edits it in memory; nothing reaches the disk before every plan passed and was confirmed.
  */
-interface Draft {
+export interface Draft {
   project: ProjectManifest;
   /** `pikit.config.ts`, as read and as it will be; undefined when the project has none. */
   config: { before: string; after: string } | undefined;
@@ -182,7 +215,7 @@ interface Draft {
   example: { before: string; after: string };
 }
 
-function readDraft(projectDir: string): Draft {
+export function readDraft(projectDir: string): Draft {
   const configPath = join(projectDir, CONFIG_FILE);
   const config = existsSync(configPath) ? readFileSync(configPath, "utf8") : undefined;
   const examplePath = join(projectDir, ENV_EXAMPLE);
@@ -195,7 +228,7 @@ function readDraft(projectDir: string): Draft {
 }
 
 /** Steps 1–4 and the text of steps 8–10, on the draft: every refusal happens here, before any write. */
-function planInstall(
+export function planInstall(
   projectDir: string,
   draft: Draft,
   registry: Registry,
@@ -206,7 +239,9 @@ function planInstall(
   const { project } = draft;
   const manifest = registry.manifest(name);
   if (name in project.components && options.force !== true) {
-    throw new CliError(`${name} is already installed; \`pikit upgrade\` is not built yet (pass --force to reinstall it)`);
+    throw new CliError(
+      `${name} is already installed: \`pikit upgrade ${name}\` takes its registry's version and keeps your edits (\`--force\` reinstalls it, overwriting them)`,
+    );
   }
   checkCompatible(project.targets, manifest);
   warnUnprovided(project, registry, manifest);
@@ -224,29 +259,79 @@ function planInstall(
     }
   }
 
-  if (!draft.example.after.split("\n").includes(`# ${name}`)) {
-    draft.example.after = appendExampleBlock(draft.example.after, exampleBlock(name, manifest.environment ?? []));
-  }
+  // A reinstall replaces its block: the variables are this version's.
+  draft.example.after = replaceExampleBlock(draft.example.after, name, exampleBlock(name, manifest.environment ?? []));
 
-  // The copy has the source's bytes, so its hash is the source's.
+  const previous = project.components[name];
+  const installedFor = options.installedFor === undefined ? undefined : [...new Set([...(previous?.installedFor ?? []), options.installedFor])];
+  const { record, obsolete, kept, dropped } = recordInstall(projectDir, previous, registry, registryName, manifest, files, installedFor);
+  for (const file of kept) {
+    log.warn(`${name} ${manifest.version} no longer ships ${file}, which you modified: it is kept (delete it yourself if nothing uses it)`);
+  }
+  project.components[name] = record;
+  const writes = new Map([...files].map(([target, source]) => [target, { source }]));
+  return { name, registry, manifest, files, writes, obsolete, previous, dropped };
+}
+
+/**
+ * The `pikit.json` record of `manifest`'s install from `registry`: each file it ships by the hash of
+ * its source (its copy's, and its base's), and what it declares. On a reinstall or an upgrade
+ * (`previous`), the files the installed version wrote that this one no longer ships are `obsolete`
+ * (deleted), unless the user modified one: that one is `kept`, recorded as installed, so `pikit
+ * remove` still asks first. The packages `add` put in package.json for it stay its own while it
+ * declares them; the others are `dropped` (`applyPlans` takes them out when nothing else needs them).
+ */
+export function recordInstall(
+  projectDir: string,
+  previous: InstalledComponent | undefined,
+  registry: Registry,
+  registryName: string,
+  manifest: Manifest,
+  files: Map<string, string>,
+  installedFor: string[] | undefined,
+): { record: InstalledComponent; obsolete: string[]; kept: string[]; dropped: Record<DependencyField, string[]> } {
+  const { name } = manifest;
   const hashes: Record<string, { hash: string }> = {};
   for (const [target, source] of files) hashes[target] = { hash: hashFile(source) };
-  const installedFor = options.installedFor === undefined ? undefined : [...new Set([...(project.components[name]?.installedFor ?? []), options.installedFor])];
-  project.components[name] = {
+  const obsolete: string[] = [];
+  const kept: string[] = [];
+  if (previous !== undefined) {
+    const modified = new Set(modifiedFiles(projectDir, previous));
+    for (const [file, recorded] of Object.entries(previous.files)) {
+      if (files.has(file) || !existsSync(join(projectDir, file))) continue;
+      if (!modified.has(file)) obsolete.push(file);
+      else {
+        hashes[file] = recorded;
+        kept.push(file);
+      }
+    }
+  }
+  const ownedBefore = previous === undefined ? { dependencies: [], devDependencies: [] } : ownedDependencies(previous);
+  const declared = { dependencies: manifest.dependencies, devDependencies: manifest.devDependencies ?? {} };
+  const stays = (field: DependencyField) => ownedBefore[field].filter((pkg) => pkg in declared[field]);
+  const dropped = { dependencies: ownedBefore.dependencies.filter((pkg) => !(pkg in declared.dependencies)), devDependencies: ownedBefore.devDependencies.filter((pkg) => !(pkg in declared.devDependencies)) };
+  const record: InstalledComponent = {
     ...(installedFor !== undefined && { installedFor }),
     registry: registryName,
     version: manifest.version,
     ...(registry.commit !== undefined && { commit: registry.commit }),
+    // The kit it accepts: a later add checks it before it changes the project's kit (`checkKit`).
+    requires: { pikit: manifest.requires.pikit, ...(manifest.requires.contracts !== undefined && { contracts: manifest.requires.contracts }) },
     files: hashes,
     dependencies: manifest.dependencies,
     ...(manifest.devDependencies !== undefined && { devDependencies: manifest.devDependencies }),
+    // What `add` put in package.json for it: a reinstall keeps those it still declares (`applyPlans` adds this version's).
+    addedDependencies: stays("dependencies"),
+    ...(stays("devDependencies").length > 0 && { addedDevDependencies: stays("devDependencies") }),
     environment: manifest.environment ?? [],
     // What `pikit doctor` and the deployment's `up` run for it, by its project path.
     ...(manifest.hooks !== undefined && { hooks: projectHooks(name, manifest.hooks) }),
     // Files a hook rewrites: never reported as the user's edits.
     ...(manifest.generated !== undefined && { generated: manifest.generated.map((file) => `${ownDir(name)}${file}`) }),
+    // Where it goes on Cloudflare: `pikit upgrade` rewires the Worker's App only when this changes.
+    ...(manifest.apps !== undefined && { apps: manifest.apps }),
   };
-  return { name, registry, manifest, files };
+  return { record, obsolete, kept, dropped };
 }
 
 /**
@@ -255,7 +340,7 @@ function planInstall(
  * under its component's name (`channel-telegram-webhook-worker` → `channelTelegramWebhookWorker`),
  * which is its config key in `workerConfig`. On a server, or without `apps`, only the default App.
  */
-function workerWiring(name: string, manifest: Manifest, targets: readonly string[]): Omit<ComponentEntry, "name"> {
+export function workerWiring(name: string, manifest: Manifest, targets: readonly string[]): Omit<ComponentEntry, "name"> {
   const exported = manifest.apps?.worker;
   if (exported === undefined || !hasWorkerApp(targets)) return {};
   const identifier = identifierFor(name);
@@ -268,9 +353,12 @@ function workerWiring(name: string, manifest: Manifest, targets: readonly string
  * The kit `add` will point the project at is this CLI's (`refreshKit`, in the apply phase). Refused,
  * before any write, when that replaces a newer kit: the components installed with it may need what
  * it has. `--force` replaces it anyway. When the order cannot be told, it is said, and it goes ahead.
- * The draft records the kit the project will have.
+ * Refused too, unless `--force`, when an installed component does not accept this CLI's core or
+ * contracts (`requires` in pikit.json, `kitRanges`): the contracts stay 0.x on their own schedule (SPEC
+ * K8), and nothing else would check the components already vendored against them. The draft records
+ * the kit the project will have.
  */
-function checkKit(projectDir: string, project: ProjectManifest, force: boolean): void {
+export function checkKit(projectDir: string, project: ProjectManifest, force: boolean): void {
   const { vendored, stale } = staleKit(projectDir);
   const cli = kitCommit();
   if (stale.length === 0) {
@@ -292,6 +380,16 @@ function checkKit(projectDir: string, project: ProjectManifest, force: boolean):
   } else if (order.verdict === "unknown") {
     log.warn(`the project's kit is replaced with this CLI's (${cli ?? "not in Git"}), which may be older: ${order.why}`);
   }
+  const refused = incompatibleInstalled(project);
+  if (refused.length > 0) {
+    const what = `adding a component replaces the project's kit with this CLI's (@pikit/core ${coreVersion()}, @pikit/contracts ${contractsVersion()}), which these installed components do not accept:\n  ${refused.join("\n  ")}`;
+    if (!force) {
+      throw new CliError(
+        `${what}\nUse a pikit whose kit they accept, or pass --force to replace the kit anyway (then check them with \`pikit doctor\` and a type-check).`,
+      );
+    }
+    log.warn(`${what}\n--force: replacing it anyway`);
+  }
   if (cli === undefined) delete project.kit;
   else project.kit = { commit: cli };
 }
@@ -309,29 +407,33 @@ function projectHooks(name: string, hooks: NonNullable<Manifest["hooks"]>): NonN
   return Object.fromEntries(HOOKS.flatMap((hook) => (hooks[hook] === undefined ? [] : [[hook, `${ownDir(name)}${hooks[hook]}`]])));
 }
 
-function ownDir(name: string): string {
+export function ownDir(name: string): string {
   return `src/pikit/${name}/`;
 }
 
 /** The targets outside the component's own directory, sorted (so grouped by directory). */
-function outside(name: string, files: Map<string, string>): string[] {
+function outside(name: string, files: Map<string, unknown>): string[] {
   return [...files.keys()].filter((target) => !target.startsWith(ownDir(name))).sort();
 }
 
 /** What a confirmation adds when the component writes outside its directory: the files, by name. */
-function alsoWrites(name: string, files: Map<string, string>): string {
+export function alsoWrites(name: string, files: Map<string, unknown>): string {
   const others = outside(name, files);
   return others.length === 0 ? "" : ` It also writes, outside ${ownDir(name)}: ${others.join(", ")}`;
 }
 
 /** Steps 6–10 for the confirmed plans: files and their bases, npm (dev) dependencies, then the draft's three files. */
-function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], undo: Undo): { dependenciesChanged: boolean } {
+export function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], undo: Undo): { dependenciesChanged: boolean } {
   for (const plan of plans) {
+    for (const file of plan.obsolete) undo.delete(file);
+    for (const [target, write] of plan.writes) {
+      undo.keep(target);
+      if ("source" in write) copyFileSync(write.source, undo.mkdirFor(target));
+      else writeFileSync(undo.mkdirFor(target), write.content);
+    }
     const recorded = draft.project.components[plan.name]?.files ?? {};
     for (const [target, source] of plan.files) {
-      undo.keep(target);
-      copyFileSync(source, undo.mkdirFor(target));
-      // The base is named by the hash pikit.json records: the source's, which the copy has.
+      // The base is named by the hash pikit.json records: the source's.
       const base = basePath(recorded[target]?.hash ?? hashFile(source));
       if (existsSync(join(projectDir, base))) continue;
       undo.keep(base);
@@ -343,11 +445,26 @@ function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], un
   const pkg = readPackageJson(projectDir);
   let dependenciesChanged = false;
   for (const plan of plans) {
+    const record = draft.project.components[plan.name] as InstalledComponent;
+    // A reinstall or an upgrade: what it added and no longer declares goes, when nothing else needs
+    // it; what it added moves to the version it declares now, unless the project chose another.
+    for (const field of FIELDS) {
+      const unneeded = plan.dropped[field].length === 0 ? [] : unneededDependencies(projectDir, draft.project, plan.dropped[field]);
+      const removed = removeDependencies(pkg, unneeded, field);
+      const owned = (field === "dependencies" ? record.addedDependencies : record.addedDevDependencies) ?? [];
+      const moved = updateDependencies(pkg, plan.previous?.[field] ?? {}, record[field] ?? {}, owned, field);
+      dependenciesChanged ||= removed.length > 0 || moved.length > 0;
+    }
     const { added, conflicts } = addDependencies(projectDir, pkg, plan.manifest.dependencies);
     for (const conflict of conflicts) log.warn(`dependency kept as the project has it: ${conflict}`);
     const dev = addDependencies(projectDir, pkg, plan.manifest.devDependencies ?? {}, "devDependencies");
     for (const conflict of dev.conflicts) log.warn(`dev dependency kept as the project has it: ${conflict}`);
     dependenciesChanged ||= added.length > 0 || dev.added.length > 0;
+    // Only what it added is its to take out on `remove`: a package the project had is the project's.
+    const others = Object.entries(draft.project.components).flatMap(([name, c]) => (name === plan.name ? [] : [ownedDependencies(c)]));
+    record.addedDependencies = owned(record.addedDependencies ?? [], added, plan.manifest.dependencies, others.flatMap((o) => o.dependencies));
+    const addedDev = owned(record.addedDevDependencies ?? [], dev.added, plan.manifest.devDependencies ?? {}, others.flatMap((o) => o.devDependencies));
+    if (addedDev.length > 0) record.addedDevDependencies = addedDev;
   }
   if (dependenciesChanged) writePackageJson(projectDir, pkg);
 
@@ -370,49 +487,13 @@ function applyPlans(projectDir: string, draft: Draft, plans: readonly Plan[], un
 }
 
 /**
- * What an install changed, to put back when a later step fails: each file's content before its first
- * change (or its absence), the directories it created, and the tarballs it added to `vendor/`.
+ * The packages of one field a component owns after an add: what it owned, what the add put in
+ * package.json, and what it declares that another installed component put there (shared: the last of
+ * them to be removed takes it out).
  */
-class Undo {
-  private readonly saved = new Map<string, Buffer | undefined>();
-  private readonly createdDirs: string[] = [];
-  private readonly vendorBefore: string[] | undefined;
-  /** `bun install` ran: `node_modules` is not put back. */
-  installed = false;
-
-  constructor(private readonly projectDir: string) {
-    const vendor = join(projectDir, VENDOR_DIR);
-    this.vendorBefore = existsSync(vendor) ? readdirSync(vendor) : undefined;
-  }
-
-  /** Remembers a project-relative file as it is now, the first time it is about to change. */
-  keep(file: string): void {
-    const path = join(this.projectDir, file);
-    if (!this.saved.has(path)) this.saved.set(path, existsSync(path) ? readFileSync(path) : undefined);
-  }
-
-  /** Creates the directory of a project-relative file, remembering the outermost one it created; returns the file's path. */
-  mkdirFor(file: string): string {
-    const path = join(this.projectDir, file);
-    let outermost: string | undefined;
-    for (let dir = dirname(path); !existsSync(dir); dir = dirname(dir)) outermost = dir;
-    mkdirSync(dirname(path), { recursive: true });
-    if (outermost !== undefined) this.createdDirs.push(outermost);
-    return path;
-  }
-
-  restore(): void {
-    for (const [path, content] of this.saved) {
-      if (content === undefined) rmSync(path, { force: true });
-      else writeFileSync(path, content);
-    }
-    for (const dir of this.createdDirs.reverse()) rmSync(dir, { recursive: true, force: true });
-    const vendor = join(this.projectDir, VENDOR_DIR);
-    if (this.vendorBefore === undefined) rmSync(vendor, { recursive: true, force: true });
-    else if (existsSync(vendor)) {
-      for (const file of readdirSync(vendor)) if (!this.vendorBefore.includes(file)) rmSync(join(vendor, file), { force: true });
-    }
-  }
+function owned(before: readonly string[], added: readonly string[], declared: Record<string, string>, ownedByOthers: readonly string[]): string[] {
+  const shared = Object.keys(declared).filter((pkg) => ownedByOthers.includes(pkg));
+  return [...new Set([...before, ...added, ...shared])].sort();
 }
 
 /** The key of `registries` for this path, added (as `recordedLocation` records it) when the project does not know it yet. */
@@ -436,15 +517,42 @@ export function notPortable(location: string): string {
   return `the registry ${location} is a path on this machine: where this project is cloned, \`pikit add\` from it fails (put the registry inside the project to keep it portable)`;
 }
 
-/** Refuses a component that does not run on `targets` or does not accept this CLI's core. */
-export function checkCompatible(targets: readonly string[], manifest: Manifest): void {
+/** Each installed component that does not accept this CLI's core or contracts, with what it accepts. */
+function incompatibleInstalled(project: ProjectManifest): string[] {
+  const kit = { "@pikit/core": coreVersion(), "@pikit/contracts": contractsVersion() };
+  return Object.entries(project.components).flatMap(([name, installed]) => {
+    const { pikit, contracts } = kitRanges(installed);
+    return (
+      [
+        ["@pikit/core", pikit],
+        ["@pikit/contracts", contracts],
+      ] as const
+    )
+      .filter(([pkg, range]) => range !== undefined && !Bun.semver.satisfies(kit[pkg], range))
+      .map(([pkg, range]) => `${name} requires ${pkg} ${range}`);
+  });
+}
+
+/**
+ * Refuses a component that does not run on `targets` or does not accept this CLI's core and
+ * contracts. `force` (`pikit upgrade --force`) turns the second into a warning.
+ */
+export function checkCompatible(targets: readonly string[], manifest: Manifest, force = false): void {
   const unsupported = targets.filter((t) => !manifest.targets.includes(t));
   if (unsupported.length > 0) {
     throw new CliError(`${manifest.name} runs on ${manifest.targets.join(", ")}, not on this project's ${unsupported.join(", ")} target`);
   }
+  const refuse = (what: string) => {
+    if (!force) throw new CliError(what);
+    log.warn(`${what}; --force: going ahead`);
+  };
   const core = coreVersion();
   if (!Bun.semver.satisfies(core, manifest.requires.pikit)) {
-    throw new CliError(`${manifest.name} requires @pikit/core ${manifest.requires.pikit}; this CLI vendors ${core}`);
+    refuse(`${manifest.name} requires @pikit/core ${manifest.requires.pikit}; this CLI vendors ${core}`);
+  }
+  const contracts = contractsVersion();
+  if (manifest.requires.contracts !== undefined && !Bun.semver.satisfies(contracts, manifest.requires.contracts)) {
+    refuse(`${manifest.name} requires @pikit/contracts ${manifest.requires.contracts}; this CLI vendors ${contracts}`);
   }
 }
 
@@ -452,7 +560,7 @@ export function checkCompatible(targets: readonly string[], manifest: Manifest):
  * Information, not failure: the provider may come next, or from the project's own components. Per App
  * on Cloudflare: what the Worker's half requires must be provided in the Worker's App.
  */
-function warnUnprovided(project: ProjectManifest, registry: Registry, manifest: Manifest): void {
+export function warnUnprovided(project: ProjectManifest, registry: Registry, manifest: Manifest): void {
   const provided: Record<AppName, Set<string>> = { default: new Set(), worker: new Set() };
   const provide = (m: Manifest) => {
     for (const [app, half] of declaredByApp(m, project.targets)) for (const capability of half.provides) provided[app].add(capability);
@@ -478,7 +586,7 @@ function warnUnprovided(project: ProjectManifest, registry: Registry, manifest: 
   }
 }
 
-function checkConflicts(projectDir: string, project: ProjectManifest, name: string, files: Map<string, string>, force: boolean): void {
+export function checkConflicts(projectDir: string, project: ProjectManifest, name: string, files: Map<string, string>, force: boolean): void {
   const conflicts: string[] = [];
   for (const [target, source] of files) {
     const owner = Object.entries(project.components).find(([other, c]) => other !== name && target in c.files)?.[0];
@@ -495,7 +603,7 @@ function checkConflicts(projectDir: string, project: ProjectManifest, name: stri
   }
 }
 
-function describePlan({ registry, manifest, files }: Plan): void {
+export function describePlan({ registry, manifest, files, obsolete }: Plan): void {
   log.step(`${manifest.name} ${manifest.version} from ${registry.root}${registry.commit ? ` at ${registry.commit}` : ""}`);
   if (registry.commit?.endsWith("-dirty")) {
     log.warn(`the registry has uncommitted changes: its commit does not name these files (pikit-bases/ keeps them as installed, for \`pikit upgrade\`)`);
@@ -507,6 +615,7 @@ function describePlan({ registry, manifest, files }: Plan): void {
     log.info(`  files outside ${ownDir(manifest.name)}: ${others.length}`);
     for (const target of others) log.info(`    ! ${target}`);
   }
+  if (obsolete.length > 0) log.info(`  deletes, no longer shipped: ${obsolete.join(", ")}`);
   const deps = Object.entries(manifest.dependencies);
   if (deps.length > 0) log.info(`  npm: ${deps.map(([p, v]) => `${p}@${v}`).join(", ")}`);
   const devDeps = Object.entries(manifest.devDependencies ?? {});

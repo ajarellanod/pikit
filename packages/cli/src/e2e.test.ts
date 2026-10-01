@@ -66,11 +66,11 @@ test.skipIf(!E2E)(
     expect(config).toContain("createRuntimePi({ extensions: [permissionGate] }),");
     expect(config).not.toContain("deploymentDocker");
     // HTTP answers in the response: nothing offers it durable delivery, so none is installed. The
-    // runtime brings its record of submissions, and the storage it needs (`offers.ts`).
+    // runtime brings its record of submissions (`offers.ts`), over the storage the preset names.
     const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
     expect(Object.keys(manifest.components)).not.toContain("outbound-durable");
     expect(manifest.components["submissions-sql"].installedFor).toEqual(["runtime-pi"]);
-    expect(manifest.components["storage-sqlite"].installedFor).toEqual(["submissions-sql"]);
+    expect(manifest.components["storage-sqlite"].installedFor).toBeUndefined();
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
   },
@@ -173,18 +173,19 @@ test.skipIf(!E2E)(
       sh([process.execPath, "install"]);
     }
 
-    // submissions-sql, which runtime-pi brought: removed, it takes its storage along and the runtime
-    // and the channel work without them; added back with its storage, green; removed again, no trace.
-    expect((await pikit(["remove", "submissions-sql"])).out).toContain("storage-sqlite was installed for submissions-sql, and nothing uses it now");
+    // submissions-sql, which runtime-pi brought: removed, the runtime and the channel work without it,
+    // and the storage stays (the preset named it, nothing brought it); added back, green; removed
+    // again, no trace.
+    const withoutSubmissions = await pikit(["remove", "submissions-sql"]);
+    expect(withoutSubmissions.code).toBe(0);
+    expect(withoutSubmissions.out).not.toContain("storage-sqlite was installed for");
     expect((await pikit(["doctor"])).code).toBe(0);
     git("add", "-A");
     git("commit", "-qm", "without submissions-sql");
-    expect((await pikit(["add", "storage-sqlite", "--yes"])).code).toBe(0);
     const submissions = await pikit(["add", "submissions-sql", "--yes"]);
     expect(submissions.code).toBe(0);
     expect(submissions.out).toContain("`pikit doctor` is green");
     expect((await pikit(["remove", "submissions-sql"])).code).toBe(0);
-    expect((await pikit(["remove", "storage-sqlite"])).code).toBe(0);
     expect(git("status", "--porcelain").out).toBe("");
     git("reset", "-q", "--hard", "HEAD~1");
     sh([process.execPath, "install"]);
@@ -209,8 +210,8 @@ test.skipIf(!E2E)(
     expect(brought.code).toBe(0);
     const components = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components;
     expect(components["outbound-durable"].installedFor).toEqual(["channel-telegram"]);
-    // The storage the runtime's submissions brought serves the outbox too.
-    expect(components["storage-sqlite"].installedFor).toEqual(["submissions-sql"]);
+    // The preset's storage serves the outbox too: nothing brings another.
+    expect(components["storage-sqlite"].installedFor).toBeUndefined();
     const removedWith = await pikit(["remove", "channel-telegram"]);
     expect(removedWith.code).toBe(0);
     expect(removedWith.out).toContain("outbound-durable was installed for channel-telegram, and nothing uses it now");

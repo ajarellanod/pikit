@@ -56,6 +56,28 @@ export function addDependencies(
   return { added, conflicts };
 }
 
+/**
+ * An upgrade's new versions (`pikit upgrade`): each of `owned` (what `add` put in package.json for the
+ * component) that the project still has at the version the component declared (`before`) moves to
+ * the one it declares now (`wanted`). A version the project chose stays; kit packages are the kit's
+ * (`refreshKit`). Returns the packages moved.
+ */
+export function updateDependencies(
+  pkg: PackageJson,
+  before: Record<string, string>,
+  wanted: Record<string, string>,
+  owned: readonly string[],
+  field: DependencyField = "dependencies",
+): string[] {
+  const record = pkg[field];
+  if (record === undefined) return [];
+  const moved = Object.entries(wanted).filter(
+    ([name, version]) => owned.includes(name) && !isKitPackage(name) && before[name] !== undefined && record[name] === before[name] && version !== before[name],
+  );
+  for (const [name, version] of moved) record[name] = version;
+  return moved.map(([name]) => name);
+}
+
 /** Removes the named dependencies (or dev dependencies); returns those that were there. */
 export function removeDependencies(pkg: PackageJson, names: Iterable<string>, field: DependencyField = "dependencies"): string[] {
   const record = { ...pkg[field] };

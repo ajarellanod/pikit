@@ -108,18 +108,23 @@ export function removeComponent(text: string, name: string): string {
   // Every top-level entry that uses what the imports bind goes, whole, even over several lines, from
   // each App's list: the default export's (checked for its shape, as `add` needs it) and any other.
   componentsList(text);
+  const lists = [...text.matchAll(COMPONENTS)].map((list) => list.index + list[0].length - 1);
+  let next = withoutEntries(text, name, names, lists);
+  for (const m of [...next.matchAll(importLine)].reverse()) next = next.slice(0, m.index) + next.slice(m.index + m[0].length);
+
+  const stillUsed = names.filter((n) => new RegExp(`\\b${escape(n)}\\b`).test(stripComments(next)));
+  if (stillUsed.length > 0) {
+    throw new ShapeError(`${stillUsed.join(", ")} (from "${name}") is still used outside the components list`);
+  }
+  return next;
+}
+
+/** The lists (each by the index of its `[`) without their entries that use one of `names` (but `keep`), each a whole line. */
+function withoutEntries(text: string, name: string, names: readonly string[], lists: readonly number[], keep?: string): string {
   const removals: [number, number][] = [];
-  for (const list of text.matchAll(COMPONENTS)) {
-    const open = list.index + list[0].length - 1;
-    const close = matchClose(text, open);
-    for (let i = open + 1; ; ) {
-      const start = skipSpaces(text, i);
-      if (start >= close) break;
-      let end = skipValue(text, start);
-      const entry = text.slice(start, end);
-      if (text[end] === ",") end++;
-      i = end;
-      if (!names.some((n) => new RegExp(`\\b${escape(n)}\\b`).test(stripComments(entry)))) continue;
+  for (const open of lists) {
+    for (const { start, end, entry } of entries(text, open)) {
+      if (entry.trim() === keep || !names.some((n) => new RegExp(`\\b${escape(n)}\\b`).test(stripComments(entry)))) continue;
       const lineStart = text.lastIndexOf("\n", start - 1) + 1;
       const lineEnd = text.indexOf("\n", end);
       if (text.slice(lineStart, start).trim() !== "" || lineEnd === -1 || text.slice(end, lineEnd).trim() !== "") {
@@ -130,13 +135,51 @@ export function removeComponent(text: string, name: string): string {
   }
   let next = text;
   for (const [from, to] of removals.sort(([a], [b]) => b - a)) next = next.slice(0, from) + next.slice(to);
-  for (const m of [...next.matchAll(importLine)].reverse()) next = next.slice(0, m.index) + next.slice(m.index + m[0].length);
-
-  const stillUsed = names.filter((n) => new RegExp(`\\b${escape(n)}\\b`).test(stripComments(next)));
-  if (stillUsed.length > 0) {
-    throw new ShapeError(`${stillUsed.join(", ")} (from "${name}") is still used outside the components list`);
-  }
   return next;
+}
+
+/** The top-level entries of the list whose `[` is at `open`: each one's text, and where it ends (past its `,`). */
+function entries(text: string, open: number): { start: number; end: number; entry: string }[] {
+  const close = matchClose(text, open);
+  const found: { start: number; end: number; entry: string }[] = [];
+  for (let i = open + 1; ; ) {
+    const start = skipSpaces(text, i);
+    if (start >= close) return found;
+    let end = skipValue(text, start);
+    const entry = text.slice(start, end);
+    if (text[end] === ",") end++;
+    found.push({ start, end, entry });
+    i = end;
+  }
+}
+
+/**
+ * A new version's place in the Worker's App (`pikit upgrade`, SPEC C1): the component's import binds
+ * `importClause` (its default export's name when undefined) and the Worker's App lists `worker` (nothing
+ * when undefined), in place of what it listed there. Unchanged when it already is so, and when the
+ * component is not imported (never listed, as a `deployment-*`, or taken out by the user). An import
+ * the CLI did not write (`{ createRuntimePi }`) is the user's: a change to it is refused.
+ */
+export function setWorkerWiring(text: string, name: string, wiring: Pick<ComponentEntry, "importClause" | "worker">): string {
+  const importLine = new RegExp(`^import\\s+([^;"'\`]+?)(\\s+from\\s+["']${escape(entryPath(name))}["'];?[^\\n]*\\n)`, "m");
+  const imported = importLine.exec(text);
+  if (imported === null) return text;
+  const clause = (imported[1] as string).trim();
+  const names = boundNames(clause);
+  const list = componentsList(text, "worker");
+  const listed = entries(text, list.open)
+    .map(({ entry }) => entry.trim())
+    .filter((entry) => names.some((n) => new RegExp(`\\b${escape(n)}\\b`).test(stripComments(entry))));
+  const identifier = identifierFor(name);
+  const wanted = wiring.importClause ?? identifier;
+  if (clause === wanted && listed.join("\n") === (wiring.worker ?? "")) return text;
+  if (clause !== identifier && !clause.startsWith(`${identifier}, {`)) {
+    throw new ShapeError(`"${name}" is imported as ${clause}, which pikit did not write; its Worker's App entry is now ${wiring.worker ?? "none"}, imported as ${wanted}`);
+  }
+  let next = withoutEntries(text, name, names, [list.open], wiring.worker);
+  // Its default export stays in the default App: only the Worker's list and the import change.
+  if (wiring.worker !== undefined && !listed.includes(wiring.worker)) next = appendEntry(next, componentsList(next, "worker"), wiring.worker);
+  return next.replace(importLine, (_line, _clause, rest: string) => `import ${wanted}${rest}`);
 }
 
 /**

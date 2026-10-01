@@ -12,16 +12,21 @@
  * permission gate loaded, and `router-basic` sends every message to `assistant`.
  *
  * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
- * two Apps (SPEC C1), the agent's model is one whose provider runs there (`STARTER_MODEL`), and
- * `.gitignore` and the README say so. What a component needs in `package.json` (deployment-cloudflare's
- * `wrangler`) its `component.json` declares, and `pikit add` installs it: never the starter.
+ * two Apps (SPEC C1), the agent's model is one whose provider runs there (`STARTER_MODEL`, unless the
+ * preset declares its `model`), and `.gitignore` and the README say so. What a component needs in
+ * `package.json` (deployment-cloudflare's `wrangler`) its `component.json` declares, and `pikit add`
+ * installs it: never the starter.
  */
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PACKAGES_DIR, PIKIT_ROOT } from "../paths.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
+import { starterModel } from "../project/starter-model.ts";
 import { EXTENSION_ALIAS } from "../project/vendor.ts";
+
+// The starter model lives with the check `registry validate` shares.
+export { STARTER_MODEL, starterModel } from "../project/starter-model.ts";
 
 export const STARTER_AGENT = "assistant";
 
@@ -165,18 +170,7 @@ export function configFile(target = "server"): string {
   return target === "cloudflare" ? CLOUDFLARE_CONFIG : CONFIG;
 }
 
-/**
- * The starter agent's model, by the project's target: one whose provider runs there. On a server,
- * Anthropic's (`provider-anthropic`, which the server presets install). On Cloudflare, OpenRouter's
- * (`provider-openrouter`, with an API key): `provider-anthropic` is server-only.
- */
-export const STARTER_MODEL: Record<string, string> = {
-  server: "anthropic/claude-sonnet-4-6",
-  cloudflare: "openrouter/z-ai/glm-5.3-flash",
-};
-
-export function agent(tools: string[], target = "server"): string {
-  const model = STARTER_MODEL[target] ?? (STARTER_MODEL.server as string);
+export function agent(tools: string[], model = starterModel()): string {
   const workspace =
     tools.length > 0
       ? `\n    "You work in a workspace directory: use your tools to read, write and edit files there, and to run commands in it.",`

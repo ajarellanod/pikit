@@ -16,7 +16,10 @@ Conversations, sessions and every component's tables in Postgres, for a managed 
 
 ## How it fits pikit
 - `storage-postgres` provides `storage.sql` (`SqlDatabase`, async so that Postgres fits, C5)
-  and passes its suite; every component's tables keep their prefixes.
+  and passes its suite; every component's tables keep their prefixes. The suite uses only SQL both
+  engines accept (`BIGINT`, `BYTEA`, `storage.ts`); the provider rewrites `?` to `$n` and returns
+  `int8` values (`COUNT(*)` too) as numbers. Each SQLite-dialect consumer (`submissions-sql`,
+  `outbound-durable`) ports its own store file, as its header says.
 - `sessions-postgres` provides `sessions.store` and passes Pi's `createSessionRepoConformance` and
   `createStorageConformance`.
 - The swap is selection or removal (`capabilities: { storage.sql: storage-postgres }`), with the
