@@ -14,9 +14,9 @@ import { readProjectManifest } from "./pikit-json.ts";
 import { CliError } from "../ui.ts";
 
 /**
- * What a deployment's `status` may return for `pikit status` to print as it is, one line each. The
- * CLI also prints the results of `deployment-docker` and `deployment-cloudflare` from before this
- * shape, which copies already in projects still return (P6).
+ * What a deployment's `status` returns for `pikit status` to print as it is, one line each. What the
+ * lines say (containers, deployments, probes) is the component's; it may return more fields beside
+ * them, which the CLI does not read.
  */
 export interface DeploymentStatus {
   lines: string[];
@@ -33,7 +33,7 @@ export interface DeploymentModule {
   down(args: { cwd: string }): Promise<unknown>;
   restart?(args: { cwd: string }): Promise<unknown>;
   logs(args: { cwd: string; follow?: boolean; tail?: number }): Promise<unknown>;
-  /** A `DeploymentStatus`, or one of the two older shapes (see `DeploymentStatus`). */
+  /** A `DeploymentStatus`. */
   status(args: { cwd: string }): Promise<unknown>;
   /** `pikit dev`: runs the app here until Ctrl-C; resolves with its exit code. */
   dev?(args: { cwd: string }): Promise<number>;

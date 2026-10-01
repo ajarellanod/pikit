@@ -92,9 +92,9 @@ function deployedAt(result: unknown): string {
 }
 
 /**
- * A deployment's status: its `lines` as they are (`DeploymentStatus`). The two shapes from before it,
- * containers (Docker) or deployments (Cloudflare) then their probes, are still printed for the copies
- * in projects (P6); any other result is printed as JSON, not guessed at.
+ * A deployment's status: its `lines` as they are (`DeploymentStatus`); what they say is the
+ * component's, so the CLI knows nothing of containers or deployments. Any other result is printed as
+ * JSON, not guessed at.
  */
 export function printStatus(result: unknown): void {
   const lines = (result as Partial<DeploymentStatus> | undefined)?.lines;
@@ -102,31 +102,8 @@ export function printStatus(result: unknown): void {
     for (const line of lines) log.info(String(line));
     return;
   }
-  const status = (result ?? {}) as {
-    containers?: { name: string; state: string; health: string; status: string }[];
-    deployments?: { id: string; created: string; message?: string; versions: { id: string; percentage: number }[] }[];
-    url?: string;
-    health?: unknown;
-    ready?: unknown;
-    version?: unknown;
-  };
-  if (status.deployments !== undefined) {
-    for (const d of status.deployments) {
-      const versions = d.versions.map((v) => `${v.id} (${v.percentage}%)`).join(", ");
-      log.info(`${d.created}  ${versions}${d.message ? ` · ${d.message}` : ""}`);
-    }
-    if (status.deployments.length === 0) log.info("no deployments");
-    const at = status.url === undefined ? " (no URL yet: `pikit up` records it)" : ` at ${status.url}`;
-    log.info(`GET /health${at}: ${String(status.health)}${typeof status.version === "string" ? ` from version ${status.version}` : ""}`);
-    return;
-  }
-  if (!Array.isArray(status.containers)) {
-    log.info(JSON.stringify(result, null, 2) ?? String(result));
-    return;
-  }
-  for (const c of status.containers) log.info(`${c.name}: ${c.state}${c.health ? ` (${c.health})` : ""} · ${c.status}`);
-  if (status.containers.length === 0) log.info("no containers");
-  log.info(`GET /health: ${String(status.health)}\nGET /ready:  ${String(status.ready)}`);
+  // Not a `DeploymentStatus`: shown whole, rather than guessed at.
+  log.info(JSON.stringify(result, null, 2) ?? String(result));
 }
 
 /** Runs the app here until Ctrl-C; resolves with its exit code. */

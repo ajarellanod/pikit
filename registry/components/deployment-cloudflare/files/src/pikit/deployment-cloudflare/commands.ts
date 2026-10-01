@@ -443,6 +443,8 @@ export interface Status {
   health: Probe;
   /** The version `/health` answered from, when it did. */
   version?: string | null;
+  /** What `pikit status` prints, one line each: the deployments, then the probe. */
+  lines: string[];
 }
 
 export interface StatusOptions extends AccountOptions {
@@ -460,9 +462,20 @@ export async function status(options: StatusOptions = {}): Promise<Status> {
   const listed = await wrangler(["deployments", "list", "--name", name, "--json"], options, {}, true);
   const deployments = parseDeployments(listed.stdout);
   const url = options.url?.toString() ?? readRecord(cwd)?.url;
-  if (url === undefined) return { deployments, health: "unknown" };
+  if (url === undefined) return withLines({ deployments, health: "unknown" });
   const seen = await probeHealth(url, options.fetch ?? fetch, options.probeTimeoutMs ?? 30_000);
-  return { deployments, url, health: seen.status, ...(seen.version !== undefined && { version: seen.version }) };
+  return withLines({ deployments, url, health: seen.status, ...(seen.version !== undefined && { version: seen.version }) });
+}
+
+function withLines(status: Omit<Status, "lines">): Status {
+  const lines = status.deployments.map((d) => {
+    const versions = d.versions.map((v) => `${v.id} (${v.percentage}%)`).join(", ");
+    return `${d.created}  ${versions}${d.message ? ` · ${d.message}` : ""}`;
+  });
+  if (status.deployments.length === 0) lines.push("no deployments");
+  const at = status.url === undefined ? " (no URL yet: `pikit up` records it)" : ` at ${status.url}`;
+  lines.push(`GET /health${at}: ${status.health}${typeof status.version === "string" ? ` from version ${status.version}` : ""}`);
+  return { ...status, lines };
 }
 
 /** `wrangler deployments list --json`: an array, oldest first. */

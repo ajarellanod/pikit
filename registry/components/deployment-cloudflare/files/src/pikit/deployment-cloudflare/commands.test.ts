@@ -318,12 +318,16 @@ const DEPLOYMENTS = JSON.stringify([
 test("status lists the deployments and probes /health where the last up deployed", async () => {
   const cwd = project();
   const wrangler = fakeWrangler({ stdout: DEPLOYMENTS });
-  expect(await status({ cwd, run: wrangler.run })).toEqual({ deployments: parseDeployments(DEPLOYMENTS), health: "unknown" });
+  const unprobed = await status({ cwd, run: wrangler.run });
+  expect(unprobed).toMatchObject({ deployments: parseDeployments(DEPLOYMENTS), health: "unknown" });
+  expect(unprobed.lines.at(-1)).toBe("GET /health (no URL yet: `pikit up` records it): unknown");
+  expect(unprobed.lines).toHaveLength(parseDeployments(DEPLOYMENTS).length + 1);
   expect(wrangler.calls[0]).toEqual({ command: ["wrangler", "deployments", "list", "--name", "my-bot-v2", "--json"], capture: true });
 
   await up({ cwd, run: wrangler.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher });
   const probed = await status({ cwd, run: wrangler.run, fetch: fakeHealth({ ok: true, version: "v2" }).fetcher });
   expect(probed).toMatchObject({ url: "https://my-bot-v2.acme.workers.dev", health: 200, version: "v2" });
+  expect(probed.lines.at(-1)).toBe("GET /health at https://my-bot-v2.acme.workers.dev: 200 from version v2");
   expect(await status({ cwd, run: wrangler.run, fetch: fakeHealth("down").fetcher })).toMatchObject({ health: "unreachable" });
 });
 

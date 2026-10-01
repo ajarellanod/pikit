@@ -213,6 +213,8 @@ export interface Status {
   health: Probe;
   /** `GET /ready`: 200 only while every component is started. */
   ready: Probe;
+  /** What `pikit status` prints, one line each: the containers, then the probes. */
+  lines: string[];
 }
 
 export interface StatusOptions extends CommandOptions {
@@ -236,7 +238,14 @@ export async function status(options: StatusOptions = {}): Promise<Status> {
       () => "unreachable" as const,
     );
   const [health, ready] = await Promise.all([probe("/health"), probe("/ready")]);
-  return { containers: parseContainers(result.stdout), health, ready };
+  const containers = parseContainers(result.stdout);
+  return { containers, health, ready, lines: statusLines(containers, health, ready) };
+}
+
+function statusLines(containers: ContainerState[], health: Probe, ready: Probe): string[] {
+  const lines = containers.map((c) => `${c.name}: ${c.state}${c.health ? ` (${c.health})` : ""} · ${c.status}`);
+  if (containers.length === 0) lines.push("no containers");
+  return [...lines, `GET /health: ${health}`, `GET /ready:  ${ready}`];
 }
 
 /**

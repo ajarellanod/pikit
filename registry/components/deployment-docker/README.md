@@ -100,7 +100,7 @@ problems; any problem, or a hook that throws, fails `up` before the build (`Befo
 `commands.ts`, the same shape as `deployment-cloudflare`'s). `pikit dev` runs none.
 
 `status()` returns the containers (name, state, health) and each probe's HTTP status, or
-`"unreachable"`. The default URL is `http://127.0.0.1:3000`, the port `compose.yaml` publishes.
+`"unreachable"`, and the `lines` `pikit status` prints. The default URL is `http://127.0.0.1:3000`, the port `compose.yaml` publishes.
 
 `exec()` runs a command where the app runs: the same image (rebuilt first if the source changed),
 `.env` and the `pikit-state` volume, in a separate short-lived container that publishes no ports and

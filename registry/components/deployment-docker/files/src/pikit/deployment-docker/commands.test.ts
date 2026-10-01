@@ -172,6 +172,7 @@ test("status reports the containers and what /health and /ready answer", async (
     containers: [{ name: "my-agent-app-1", service: "app", state: "running", health: "healthy", status: "Up 3 minutes (healthy)" }],
     health: 200,
     ready: 503,
+    lines: ["my-agent-app-1: running (healthy) · Up 3 minutes (healthy)", "GET /health: 200", "GET /ready:  503"],
   });
 });
 
@@ -185,7 +186,7 @@ test("status says unreachable when nothing answers, and probes compose.yaml's po
 
   const result = await status({ run, fetch: refused });
 
-  expect(result).toEqual({ containers: [], health: "unreachable", ready: "unreachable" });
+  expect(result).toEqual({ containers: [], health: "unreachable", ready: "unreachable", lines: ["no containers", "GET /health: unreachable", "GET /ready:  unreachable"] });
   expect(probed.sort()).toEqual(["http://127.0.0.1:3000/health", "http://127.0.0.1:3000/ready"]);
 });
 
