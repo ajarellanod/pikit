@@ -2,16 +2,31 @@
 
 **Public appeal:** —
 
-**Specified:** no. A design proposal, from the architecture audit's finding on conversation keys
-(finding 6). Nothing here is built; the contract below is written in `SPEC.md` when it is (SPEC §7).
+**Specified:** decided (below): a conversation is one chat of one channel, and its key is its
+channel's, never rewritten. The address proposal that follows is kept for reference only, for the
+day that decision changes; it is not to be built. From the architecture audit's finding 6.
 
-**Needed by:** nothing required today, because nothing rewrites a conversation key. It must be
-settled before the first component that does: a tenant in the key
-([multi-tenant isolation](multi-tenant-isolation.md)), `conversation.resolve`
-([pipeline anchors](pipeline-anchors.md)), a thread in the key ([threads](threads.md)). It is
-cheapest before the next channel is written ([Slack](channel-slack.md), [Discord](channel-discord.md),
-[WhatsApp](channel-whatsapp.md), [email](channel-email.md), [Google Chat](channel-google-chat.md)),
-which would otherwise copy Telegram's key parsing.
+**Needed by:** nothing. A new channel builds and reads its own keys, as Telegram's do.
+
+## Decision
+- **A conversation belongs to one chat of one channel, for good.** Two chats, or the same person on
+  two channels (Telegram and WhatsApp), are two conversations with two sessions; they are never
+  merged. What a person shares across channels is the agent's [memory](memory.md) of them, per
+  person, not a conversation.
+- **The key is its channel's own, and nothing rewrites it.** The channel builds it and alone reads it
+  back (`account.ts:11`). Whatever must be in it, the channel puts there itself: a tenant in the
+  channel's instance (`telegram:acme:12345`, [multi-tenant isolation](multi-tenant-isolation.md)), a
+  thread in the channel's own format ([threads](threads.md)).
+- **So answers keep finding their chat by the key**, and the proposal below is not needed: no
+  component changes a key, Cloudflare's owner stays `idFromName` of the channel's key (C1, C2), and
+  `conversation.resolve` is not planned ([pipeline anchors](pipeline-anchors.md)).
+- **An answer no channel claims is logged, never dropped in silence (P5).** Today every channel
+  passes over it (below, "What goes wrong"). How it is detected (each channel declaring the instances
+  whose keys it reads, or the address) is decided with the next channel; the runtime's log is the
+  minimum, `pikit doctor` and the dashboard may say it later.
+
+*The rest of this file is the proposal as written before the decision, kept as the reference for
+changing it.*
 
 ## What it gives
 An answer reaches the chat it answers even when the conversation's key is not the one its channel
@@ -200,8 +215,8 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   parser changing; merging conversations stays impossible, and each new channel writes its own parser.
 - **B. An address per request, not per conversation.** `agent.submissions.admitted` records the
   address with each request, and a settlement answers each of its `requestIds` (`agent.ts:184`) where
-  it came from. It makes one conversation fed by several chats possible (a user's memory across
-  channels). But a run answers several requests at once, possibly from different chats, so a channel
+  it came from. It makes one conversation fed by several chats possible, which the decision above
+  rules out (a person's continuity across channels is [memory](memory.md)'s). But a run answers several requests at once, possibly from different chats, so a channel
   must fan out one answer; the event path (channels without `agent.submissions`) has no record to
   read; and it is a larger change to the submissions contract, which Pi's durable runtime is expected to
   take over (`submissions.ts:13-19`). The proposal's per-conversation address does not prevent it
@@ -223,20 +238,12 @@ Nothing in Pi: a Pi session knows no channels. Pi's durable runtime keeps submis
 per-request address) is to check before B is built.
 
 ## Open questions
-- The registry's signature: a trailing optional `address` after `ctx` (additive, but the only
-  parameter after a context in the contracts), or `resolve(key, { agent, address }, ctx)` (clearer,
-  breaking for both registries and their suite; the contracts are 0.x, K8).
-- `conversation.resolve`'s value: with the route decision (`pipeline-anchors.md:18`) or only the
-  message and the key, so the channels' commands can run it too.
-- On Cloudflare, (F) or (W) for any key the stage changes (renaming too), or no `conversation.resolve`
-  there; and whether a mailbox that picks a
-  namespace per tenant still fits C2's wording (`SPEC.md:185-195`) or needs it changed first (SPEC §7).
-- A settlement no channel claims is dropped by every channel with no error. With addresses, an
-  answer for an instance no installed channel serves is detectable; who says so (the runtime, `pikit
-  doctor`, the dashboard) is open.
-- How a component that rewrites keys says it needs channels that read the address, when nothing
-  records per-component compatibility.
-- Whether this proposal requires changing SPEC §1–§6: as written it adds contracts only, and keeps C1
-  and C2 (one owner per conversation; the mailbox addressed by key) as long as, on Cloudflare, a
-  changed key reaches its conversation by (F) or (W). A tenant namespace chosen by the
-  mailbox is the one point that may touch C2's text.
+Settled by the decision above: the registry's signature, what `conversation.resolve` receives, and
+(F) or (W) on Cloudflare (nothing rewrites a key, so none arises); and how a key-rewriting component
+would require channels that read the address (there is none). If the decision is ever revisited:
+`resolve(key, { agent, address }, ctx)` rather than a trailing parameter (pikit is unreleased, and the
+contracts are 0.x, K8), and `conversation.resolve` taking only the message and the key, so the
+channels' commands (`/new`, HTTP's `GET` and `reset`) resolve the same key.
+
+Still open:
+- How an answer no channel claims is detected and reported (the decision's last point).

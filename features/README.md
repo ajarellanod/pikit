@@ -41,7 +41,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |
 | [codemode](codemode.md) | | The model writes a script that calls its tools (Pi's `pi-codemode`), server only; what the extension host leaves pending until then | No |
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
-| [conversation-routing](conversation-routing.md) | | Answers routed by an address, not by parsing the conversation key | Open: before tenants or `conversation.resolve` |
+| [conversation-routing](conversation-routing.md) | | Decided: a conversation is one chat of one channel; its key is never rewritten | No |
 | [deployment-systemd](deployment-systemd.md) | | Run as a systemd service, without Docker | No |
 | [health](health.md) | | Components report failures; essential ones restart the process | Yes: SPEC §5 and §6 |
 | [inbound-dedup](inbound-dedup.md) | | Transport deduplication for platforms that redeliver | No; the first webhook channel |

@@ -17,8 +17,9 @@ reach each other: the agency case of IDEA.md.
 - `tenant` enters `InboundMessage` and `RouteDecision` with the component that produces it. The
   conversation key has no tenant part today: `ConversationRef.key`
   (`packages/contracts/src/agent.ts`) is an opaque address its channel makes and alone reads back
-  (`<instance>:<chat id>`). How a tenant reaches the key while answers still reach their chat, on a
-  server and on Cloudflare, is [conversation routing](conversation-routing.md).
+  (`<instance>:<chat id>`). Nothing rewrites a key ([conversation routing](conversation-routing.md)):
+  a tenant reaches it through the channel's instance (`telegram:acme:12345`), which the channel
+  builds and reads back itself, so answers still reach their chat on a server and on Cloudflare.
 - A `tenant-isolation` component maps tenants to separate Durable Object namespaces or database
   files; execution per tenant is [sandboxed execution](sandboxed-execution.md); secrets per tenant
   are a `secrets` provider's.

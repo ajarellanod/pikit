@@ -15,8 +15,10 @@ The points on the main path where a component can change what happens without fo
 which conversation a message goes to, what a run is configured with, what an answer looks like.
 
 ## How it fits pikit
-- `conversation.resolve` (`{ decision, conversation? }`) lands in `admitInbound` when a component
-  needs to change which conversation a message goes to (the former SPEC §5, M1 decision).
+- `conversation.resolve` (`{ decision, conversation? }`), planned by the former SPEC §5 (M1) to change
+  which conversation a message goes to, is not planned any more: a conversation is one chat of one
+  channel and its key is the channel's, never rewritten ([conversation routing](conversation-routing.md)).
+  Reviving it means changing that decision first.
 - `agent.prepare` runs after the agent's `prepare` in Pi's `before_run` and patches its `TurnConfig`.
 - `outbound.prepare` transforms an `OutboundMessage` as it leaves its channel: enqueued, sent
   directly, or returned in an HTTP response. Where it runs: [answer delivery](outbound-delivery.md).

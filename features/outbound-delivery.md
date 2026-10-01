@@ -236,20 +236,25 @@ Nothing in Pi: channels and delivery are pikit's (SPEC P1). When the adapter mov
 `agent.submissions` may be bridged or deleted (`submissions.ts:21-22`); the helper reads only its
 `answers` feed and `RunSettlement`, which is where that change would land.
 
+## Decisions
+- **A withheld answer is said, never silent.** When an `outbound.prepare` stage halts an answer, the
+  user is told so in a fixed line, in the channel's words (silence reads as a bot that is down), and
+  `channel-http` answers with a status of its own, distinct from a success and from a failed run. The
+  cursor passes it; it is logged, never pretended delivered (P5).
+- **`outbound.prepare`'s value type** is decided with its first real stage (a stage that rewrites a
+  failure's words needs the run; a redaction stage needs only the message), per
+  [pipeline anchors](pipeline-anchors.md).
+- **Drivers (step 2) are copied per channel until a model has its second channel**, then become a
+  component that provides a capability (SPEC §3.2's shape for delivery), not code in
+  `@pikit/contracts`, whose root header keeps "no policy". Step 1's primitives are vocabulary plus
+  one protocol function, as `admitInbound` is.
+- **The words stay in each channel** (today's `replyText`): what a user is told is the project's to
+  edit (P3), so `@pikit/contracts` gets no user-facing text.
+- **`pikit doctor` notes a channel that skips the pipeline**: one that reads `agent.submissions`
+  without the helper while an `outbound.prepare` stage is installed. A redaction stage that a copy
+  silently skips is a leak, which a README line would not prevent.
+
 ## Open questions
-- **A withheld answer:** what the user is told (nothing, a fixed line, the channel's words), and
-  which status `channel-http` returns for it. The cursor passes it either way; it is logged, never
-  pretended delivered (P5).
-- **The value type of `outbound.prepare`:** `OutboundMessage` alone, or with the run
-  (`{ message, answer: RunSettlement }`) for a stage that treats a failure differently. To decide with
-  its first stage, per [pipeline anchors](pipeline-anchors.md).
-- **Step 2:** whether the drivers move into `@pikit/contracts` (proposed), become components that
-  provide a capability (SPEC §3.2's shape for delivery), or stay copied per channel and the root
-  header keeps "no policy".
-- **Words:** whether a default `text` (today's `replyText`) belongs in `@pikit/contracts`, which has no
-  user-facing words today, or stays in each channel.
-- **A copy that skips the pipeline:** whether `pikit doctor` should note a channel that reads
-  `agent.submissions` without the helper once an `outbound.prepare` stage is installed, or whether
-  the stage's README saying which channels run it is enough.
 - **Rich content with the queue:** the queue stores text split by the transport (`queue.ts:68`); once
-  `parts` exist, the fold happens before `enqueue` or the queue stores parts too.
+  `parts` exist, the fold happens before `enqueue` or the queue stores parts too. Decided with
+  [rich content](rich-content.md).

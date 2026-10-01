@@ -20,7 +20,26 @@ profile per person (name, preferences, what they work on); search over past conv
 - Recall into the prompt: through the `agent.prepare` pipeline ([pipeline anchors](pipeline-anchors.md))
   or a Pi extension's `before_agent_start` (tier A: `packages/pi-adapter/src/extensions/surface.ts`).
 - Memory is neither `agent.state` (one conversation, reset by `/reset`) nor the registry's metadata.
-- A person seen on two channels is two actor ids; linking them is its own decision (below).
+- **Memory is per person and agent, shared across channels; a conversation never is.** Ana on
+  Telegram and on WhatsApp has two conversations, two sessions
+  ([conversation routing](conversation-routing.md)), and one memory the agent keeps of her, which
+  both read and write.
+- **One person, many actor ids, linked on purpose.** A person seen on two channels is two actor ids,
+  and no platform proves they are one (Telegram does not give the phone number). A link is explicit
+  and confirmed from both sides: `/link` on one channel gives a one-time code, sent from the other.
+  Until linked, each actor id is its own person. A wrong link shows one person's memory to another,
+  so linking belongs with [pairing](pairing.md)'s approvals, never guessed from a name or a number.
+- **Where it lives.** On a server, `memory-sql` on the app's `storage.sql`, keyed by person and
+  agent. On Cloudflare a conversation's Durable Object cannot hold it (another channel's conversation
+  is another object), so:
+  - **one Durable Object per person** (`idFromName(personId)`), which each conversation calls
+    through `actor.mailbox` (recommended): one owner of a person's memory, as C1 gives a conversation
+    one, so writes from two channels at once are ordered, and each person's data is apart; it costs
+    one call between objects per recall (one per message, through `agent.prepare`) and per write,
+    within C4's subrequest budget;
+  - or **a shared D1 database**, as the [conversation index](cloudflare-conversation-index.md) uses:
+    search and the dashboard over everyone's memory are easier, but every person's memory is one
+    global table whose concurrent writes the component orders itself.
 - Absent: no tools, no table, nothing injected.
 
 ## Pi first
@@ -33,8 +52,8 @@ crosses sessions, which one Pi process cannot do, so the store is pikit's. The t
 ## Open questions
 - Memory is where a prompt injection persists: who may write it, and does a stranger's
   conversation ever write shared memory?
-- Linking identities across channels (Hermes' cross-platform continuity) versus
-  [pairing](pairing.md).
-- On Cloudflare, `storage.sql` is per Durable Object: shared memory needs a shared store (D1),
-  as the [conversation index](cloudflare-conversation-index.md) does.
+- The link's flow in detail (who may start it, how it is undone, whether the owner approves it) is
+  decided with [pairing](pairing.md).
+- On Cloudflare, a person's Durable Object (recommended above) or D1: settled when `memory` is built,
+  with search in mind (a person's object searches only that person's memory).
 - Session search: an index fed from `agent.submissions`' `answers`, or reading sessions.
