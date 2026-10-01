@@ -15,7 +15,7 @@
  * gets this CLI's when a component is added (`refreshKit`): the component and the core it needs come
  * from the same checkout. That is not assumed safe for the components already installed: P7 promises
  * only the core's 1.x, and the contracts stay 0.x on their own schedule (SPEC K8). So each installed
- * component records the core and contracts ranges it accepts (`requires` in `pikit.json`), and `add`
+ * component records the core, contracts and adapter ranges it accepts (`requires` in `pikit.json`), and `add`
  * refuses, before any write and unless `--force`, a kit outside them (`checkKit` in `add.ts`).
  *
  * A hash says two kits differ, not which is newer. Meanwhile the kit's identity is the commit of the

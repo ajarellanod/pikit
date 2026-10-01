@@ -111,17 +111,6 @@ function snapshot(dir: string, prefix = ""): Record<string, string> {
   return files;
 }
 
-/**
- * A rollback that ran after `bun install` left the operation's marker (operation.ts): everything but
- * node_modules is back as it was, and the marker names the command and what to do about it.
- */
-function expectRolledBack(dir: string, command: string, before: Record<string, string>): void {
-  const after = snapshot(dir);
-  expect(after[OPERATION_MARKER]).toContain(`"command": "${command}"`);
-  delete after[OPERATION_MARKER];
-  expect(after).toEqual(before);
-}
-
 test("adding an installed component on another kit's project changes nothing: package.json, vendor/, bun.lock", async () => {
   const dir = otherKitProject(["tool-bash"]);
   const before = snapshot(dir);
@@ -347,6 +336,28 @@ test("what is installed provides what the project composes: a registry's compone
   expect(components["outbound-fake"].registry).toBe("local");
 }, 60_000);
 
+test("a completed add clears its marker before reporting a failed doctor", async () => {
+  const dir = composingProject();
+  const registry = registryOf({
+    "tool-fake": [component("tool-fake", 'pikit.use("storage.kv");'), { requires: { pikit: "0.0.0", capabilities: ["storage.kv"] } }],
+  });
+  const run = await runCli(["add", "tool-fake", "--registry", registry, "--yes"], dir);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("tool-fake is installed, but `pikit doctor` found");
+  expect(existsSync(join(dir, "src/pikit/tool-fake/index.ts"))).toBe(true);
+  expect(existsSync(join(dir, OPERATION_MARKER))).toBe(false);
+});
+
+test("channel-http is refused on Cloudflare before writing or creating an operation marker", async () => {
+  const dir = composingProject();
+  writeProjectManifest(dir, emptyManifest(undefined, undefined, ["cloudflare"]));
+  const before = snapshot(dir);
+  const run = await runCli(["add", "channel-http", "--yes"], dir);
+  expect(run.code).toBe(1);
+  expect(run.err).toContain("channel-http runs on server, not on this project's cloudflare target");
+  expect(snapshot(dir)).toEqual(before);
+});
+
 test("on a project that does not compose, nothing is offered nor guessed, and it says so", async () => {
   // No node_modules: pikit.config.ts cannot load. The install itself then fails at once.
   const dir = otherKitProject();
@@ -358,7 +369,10 @@ test("on a project that does not compose, nothing is offered nor guessed, and it
   expect(run.err).not.toContain("each provide it");
   expect(run.out).not.toContain(", for channel-fake");
   expect(run.err).toContain("nothing was added");
-  expectRolledBack(dir, "pikit add channel-fake", before);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
 }, 120_000);
 
 test("a kit an installed component does not accept is refused before any write, each one named; --force replaces it", async () => {
@@ -390,13 +404,16 @@ test("a kit an installed component does not accept is refused before any write, 
   expect(refused.out).not.toContain("log-events 0.0.0 from");
   expect(snapshot(dir)).toEqual(before);
 
-  // Forced, it goes on to the kit refresh (the install then fails here; everything but node_modules is put back, and the marker stays).
+  // Forced, it goes on to the kit refresh (the install then fails here, and everything is put back).
   const forced = await runCli(["add", "log-events", "--yes", "--force"], dir);
   expect(forced.err).toContain("tool-newer requires @pikit/contracts ^0.1.0");
   expect(forced.err).toContain("--force: replacing it anyway");
   expect(forced.out).toContain("refreshed to this CLI's");
   expect(forced.err).toContain("nothing was added");
-  expectRolledBack(dir, "pikit add log-events --force", before);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
 }, 120_000);
 
 test("the plan says when the registry has uncommitted changes", async () => {
@@ -475,12 +492,15 @@ test.skipIf(!CLI_IN_GIT)("a project whose kit is newer than this CLI's is refuse
   expect(refused.out).not.toContain("log-events 0.0.0 from");
   expect(snapshot(dir)).toEqual(before);
 
-  // Forced, it goes on to the kit refresh (the install then fails here; everything but node_modules is put back, and the marker stays).
+  // Forced, it goes on to the kit refresh (the install then fails here, and everything is put back).
   const forced = await runCli(["add", "log-events", "--yes", "--force"], dir, { env: seesNewer });
   expect(forced.err).toContain("--force: replacing it with this older kit");
   expect(forced.out).toContain("refreshed to this CLI's");
   expect(forced.err).toContain("nothing was added");
-  expectRolledBack(dir, "pikit add log-events --force", before);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
 }, 120_000);
 
 test.skipIf(!CLI_IN_GIT)("an older kit is replaced without a word; an unrecorded one with a warning", async () => {

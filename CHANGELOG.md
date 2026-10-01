@@ -5,6 +5,14 @@ line names its area.
 
 ## Unreleased
 
+- cli/registry: declarative file operations validate the registry index and portable paths and reject symlinks below project/component roots, including sources, copied files, rollback, bases and vendor tarballs. A symlinked root itself is supported; this is not a sandbox for trusted setup code.
+- cli: `add` and `upgrade` resolve offers from the project's actual composition, separately per App, not another registry's manifests for installed names. An unknown composition gets a warning and no automatic offers.
+- cli/registry: installation and validation share contracts/adapter compatibility checks. A component depending on either must declare a meaningful range (`requires.contracts` / `requires.adapter`); installed adapter ranges are recorded and checked before a kit refresh.
+- cli: interrupted `add`, `remove` and `upgrade` leave `.pikit-operation-unfinished`, blocking later changes until manual recovery. A failed install retains it even after file rollback because `node_modules` is not restored. Doctor checks root dependency and override snapshots in JSONC `bun.lock`; binary or missing lockfiles remain explicitly unchecked.
+- cli: automatic removal never inherits the requested component's `--force`; modified or uncertain leftover providers stay with a warning and lose obsolete `installedFor` ownership.
+- component/channel-http: targets are server-only until its HTTP request path is integrated into the Cloudflare Worker's App. A real server integration test checks `POST /v1/messages`, not merely health.
+- components/deployment-docker, deployment-cloudflare: Docker's stop deadline keeps the process alive even after its last other handle closes; Cloudflare never publishes an App stopped by its startup deadline, and retries on the next request/event.
+
 - presets: `cloudflare-minimal` lists `storage-kv-sql` itself instead of getting it as an offer, so a second Cloudflare provider of `storage.kv` does not leave its projects without one.
 - cli: `pikit add`, `pikit upgrade` and `pikit new` say when a component could use an optional capability (durable delivery, `outbound.queue`) that several components of the registry provide, so none is installed for it, and how to choose one; before, the project went without it in silence.
 - cli: `pikit upgrade` runs `git merge-file` with async `Bun.spawn`: Bun 1.4's `spawnSync` can lose a child's exit and spin forever (oven-sh/bun#34069), and an upgrade runs one merge per file you edited.
