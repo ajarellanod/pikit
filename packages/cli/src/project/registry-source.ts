@@ -169,19 +169,22 @@ export function openRegistry(path: string): Registry {
 /**
  * The project's own records, which no component may write, whatever `--force` says: what the CLI and
  * Bun keep (`pikit.json`, `package.json`, the lockfile, `pikit.config.ts`, `.env.example`, `vendor/`,
- * `pikit-bases/`, `node_modules/`), the app's secrets and state (`.env`, `.pikit/`) and Git's (`.git`).
+ * `pikit-bases/`, `node_modules/`), the app's secrets and state (`.env`, `.pikit/`) and Git's (`.git`);
+ * and the project's own part, which no registry has (starter.ts): its `tsconfig.json`, its README,
+ * its agents (`src/agents/`) and its extensions (`src/extensions/`, the permission gate included).
  */
-const PROTECTED_FILES = [PIKIT_JSON, "package.json", "bun.lock", "bun.lockb", CONFIG_FILE, ENV_FILE, ENV_EXAMPLE, ".pikit-operation-unfinished", ".pikit-new-unfinished"];
-const PROTECTED_DIRS = [".git", VENDOR_DIR, BASES_DIR, "node_modules", ".pikit"];
+const PROTECTED_FILES = [PIKIT_JSON, "package.json", "bun.lock", "bun.lockb", CONFIG_FILE, ENV_FILE, ENV_EXAMPLE, "tsconfig.json", "README.md", ".pikit-operation-unfinished", ".pikit-new-unfinished"];
+const PROTECTED_DIRS = [".git", VENDOR_DIR, BASES_DIR, "node_modules", ".pikit", "src/agents", "src/extensions"];
 const PROTECTED = [...PROTECTED_FILES, ...PROTECTED_DIRS.map((dir) => `${dir}/`)].join(", ");
 
 /**
  * A target that is one of the project's own records (`PROTECTED_FILES`) or lies under one of its own
- * directories (`PROTECTED_DIRS`). Without case: macOS and Windows would write `Package.json` over `package.json`.
+ * directories (`PROTECTED_DIRS`, matched as path prefixes: `src/agents/`, never `src/agents-old/`).
+ * Without case: macOS and Windows would write `Package.json` over `package.json`.
  */
 export function isProtected(target: string): boolean {
   const path = posix.normalize(target.replaceAll("\\", "/")).replace(/\/+$/, "").toLowerCase();
-  return PROTECTED_FILES.includes(path) || PROTECTED_DIRS.includes(path.split("/")[0] as string);
+  return PROTECTED_FILES.some((file) => file.toLowerCase() === path) || PROTECTED_DIRS.some((dir) => path === dir || path.startsWith(`${dir}/`));
 }
 
 function listFiles(dir: string): string[] {

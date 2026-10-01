@@ -139,10 +139,22 @@ test("an optional capability with two providers is not offered, and is named as 
   const durable = registry.manifest("outbound-durable");
   const two = { ...registry, names: () => [...registry.names(), "outbound-other"], manifest: (name: string) => (name === "outbound-other" ? { ...durable, name } : registry.manifest(name)) } as Registry;
   expect(offeredProviders(two, ["channel-telegram"], [], ["server"]).map((o) => o.component)).not.toContain("outbound-durable");
-  expect(unchosenProviders(two, ["channel-telegram"], [], ["server"])).toEqual([{ capability: "outbound.queue", for: "channel-telegram", providers: ["outbound-durable", "outbound-other"] }]);
+  expect(unchosenProviders(two, ["channel-telegram"], [], ["server"])).toEqual([{ capability: "outbound.queue", why: "recommended", for: "channel-telegram", providers: ["outbound-durable", "outbound-other"] }]);
   // One provider: offered, nothing to choose. Installed already: nothing either way.
   expect(unchosenProviders(registry, ["channel-telegram"], [], ["server"])).toEqual([]);
   expect(unchosenProviders(two, ["channel-telegram"], ["outbound-other"], ["server"], composing(["outbound-other"], ["server"], two))).toEqual([]);
+});
+
+test("a required capability with two providers is named with its candidates too: until one is installed the project does not compose", () => {
+  const sqlite = registry.manifest("storage-sqlite");
+  const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
+  // The channel's chain needs storage.sql through each provider it brings; with two providers none comes.
+  expect(offeredProviders(two, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["outbound-durable", "submissions-sql", "storage-kv-sql"]);
+  expect(unchosenProviders(two, ["channel-telegram"], [], ["server"])).toEqual([
+    { capability: "storage.sql", why: "required", for: "outbound-durable", providers: ["storage-sqlite", "storage-postgres"] },
+    { capability: "storage.sql", why: "required", for: "submissions-sql", providers: ["storage-sqlite", "storage-postgres"] },
+    { capability: "storage.sql", why: "required", for: "storage-kv-sql", providers: ["storage-sqlite", "storage-postgres"] },
+  ]);
 });
 
 test("what an installed component provides is what the project composes, not what a registry's component of that name declares", () => {

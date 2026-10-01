@@ -228,10 +228,14 @@ export function warnUnchosen(
   targets: readonly string[],
   provided?: ProvidedCapabilities,
 ): void {
-  for (const { capability, for: name, providers, app } of unchosenProviders(registry, names, installed, targets, provided)) {
+  for (const { capability, for: name, providers, app, why } of unchosenProviders(registry, names, installed, targets, provided)) {
     const what = (capabilityEntry(capability)?.summary ?? capability).replace(/\.$/, "");
     const who = app === "worker" ? `${name}'s Worker half` : name;
-    log.warn(`${who} can use ${capability} (${what}), but ${providers.join(" and ")} each provide it, so none is installed: choose one with \`pikit add <name>\``);
+    log.warn(
+      why === "recommended"
+        ? `${who} can use ${capability} (${what}), but ${providers.join(" and ")} each provide it, so none is installed: choose one with \`pikit add <name>\``
+        : `${who} requires ${capability}, which ${providers.join(" and ")} each provide, so none is installed: install one with \`pikit add <name>\` before the app composes`,
+    );
   }
 }
 

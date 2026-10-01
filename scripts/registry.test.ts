@@ -181,7 +181,8 @@ test("imports: a server-only kit export (@pikit/pi-adapter/node) needs targets [
   const f = await fixture();
   f.append("index.ts", `import type { LocalExecutionOptions } from "@pikit/pi-adapter/node";`);
   f.append("sample.test.ts", `import "@pikit/pi-adapter/testing";`);
-  f.writeManifest({ ...f.manifest(), dependencies: { "@pikit/pi-adapter": "0.0.0" } });
+  // A component that depends on the adapter says which versions it works with (requires.adapter).
+  f.writeManifest({ ...f.manifest(), requires: { ...f.manifest().requires, adapter: "0.0.0" }, dependencies: { "@pikit/pi-adapter": "0.0.0" } });
   await generate(f.root);
   expect((await validate(f.root)).problems).toEqual([]);
 

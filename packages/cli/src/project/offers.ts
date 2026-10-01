@@ -12,7 +12,9 @@
  * (`storage-sqlite` on a server, `storage-do` on Cloudflare): with several, choosing is the user's.
  * A required one is then missing, which `pikit add` warns about and `pikit doctor` fails on; an
  * optional one is not, so `unchosenProviders` names it, or the project would silently lack it
- * (durable delivery) with doctor green. What is installed this way is recorded as installed *for* the
+ * (durable delivery) with doctor green. Both are named by `unchosenProviders`, with their
+ * candidates: an optional one may be left out, a required one leaves the project not composing
+ * until one of them is installed. What is installed this way is recorded as installed *for* the
  * component that brought it, and leaves with it when nothing else uses it (`pikit remove`).
  *
  * Per App (`apps.ts`): on Cloudflare, what a component's Worker half needs must be provided in the
@@ -93,9 +95,11 @@ export function offeredProviders(
   return resolveOffers(registry, names, installed, targets, provided).offers;
 }
 
-/** An optional capability marked `offer` that nothing provides, left out because several components could. */
+/** A capability nothing provides, left out because several components could (`Offer["why"]` says which kind). */
 export interface UnchosenOffer {
   capability: string;
+  /** `recommended`: an optional capability marked `offer`; `required`: a hard requirement left unmet. */
+  why: Offer["why"];
   /** The component that can use it. */
   for: string;
   /** Those that provide it, on the project's targets: the user picks one with `pikit add`. */
@@ -167,7 +171,9 @@ function resolveOffers(
       for (const [capability, why] of wanted) {
         if (provided[app].has(capability) || capabilityEntry(capability)?.mode !== "single") continue;
         const providers = providersOf(capability, app);
-        if (providers.length > 1 && why === "recommended") unchosen.push({ capability, for: name, providers, ...(app === "worker" && { app }) });
+        // Several providers, none installed: choosing is the user's. Named either way: an optional
+        // one may be left out silently, a required one leaves the project not composing until one is.
+        if (providers.length > 1) unchosen.push({ capability, why, for: name, providers, ...(app === "worker" && { app }) });
         if (providers.length !== 1) continue;
         const component = providers[0] as string;
         provide(known(component) as Manifest);
