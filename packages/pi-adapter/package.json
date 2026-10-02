@@ -15,7 +15,9 @@
     "./sql": "./src/sql/index.ts",
     "./providers/anthropic": "./src/providers/anthropic.ts",
     "./providers/openrouter": "./src/providers/openrouter.ts",
-    "./tools": "./src/tools/index.ts"
+    "./tools": "./src/tools/index.ts",
+    "./durable": "./src/durable/index.ts",
+    "./durable/testing": "./src/durable/testing.ts"
   },
   "files": [
     "src"
@@ -24,10 +26,13 @@
     "bun": ">=1.4.0"
   },
   "dependencies": {
+    "@earendil-works/chord": "1.0.0",
     "@earendil-works/pi-agent-core": "0.99.0",
     "@earendil-works/pi-ai": "0.99.0",
+    "@earendil-works/pi-durable": "1.0.0",
     "@earendil-works/pi-mcp": "0.99.0",
     "@pikit/contracts": "workspace:*",
-    "@pikit/core": "workspace:*"
+    "@pikit/core": "workspace:*",
+    "pi-ai-v1": "npm:@earendil-works/pi-ai@1.0.0"
   }
 }
