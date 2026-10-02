@@ -109,6 +109,61 @@
       },
       "description": "Generated from setup's provide() and provideKeyed() calls, with the default config and with each config in the `examples` of the component's config schema (for what it provides only when configured)."
     },
+    "declares": {
+      "type": "object",
+      "properties": {
+        "kinds": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*$"
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "New name prefixes for the registry's components (`memory` for `memory-sql`); never one the kit has."
+        },
+        "capabilities": {
+          "type": "object",
+          "patternProperties": {
+            "^.*$": {
+              "type": "object",
+              "required": [
+                "mode",
+                "stability",
+                "summary"
+              ],
+              "properties": {
+                "mode": {
+                  "type": "string",
+                  "enum": [
+                    "single",
+                    "keyed"
+                  ],
+                  "description": "`single`: one provider (`provide`); `keyed`: one per key (`provideKeyed`)."
+                },
+                "stability": {
+                  "type": "string",
+                  "enum": [
+                    "experimental",
+                    "stable"
+                  ],
+                  "description": "How settled the contract is (SPEC K8): `experimental` until two providers pass its suite."
+                },
+                "summary": {
+                  "type": "string",
+                  "pattern": "\\S",
+                  "description": "One line: what a consumer gets from it."
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "description": "New capabilities whose contract this component defines (its TypeScript type, by declaration merging on AppCapabilities or AppKeyedCapabilities, is in its files): name → what `pikit registry capabilities` shows. Never one the kit has; another component that declares the same name declares it identically."
+        }
+      },
+      "additionalProperties": false,
+      "description": "Written by hand: the vocabulary this component adds to its registry, which extends the kit's catalogue for every component of the registry (`registry validate`, `pikit registry capabilities`). A feature the kit does not have needs no change to the CLI."
+    },
     "apps": {
       "type": "object",
       "required": [

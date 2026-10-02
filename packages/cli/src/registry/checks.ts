@@ -6,25 +6,11 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
-import { capabilityEntry } from "./capabilities.ts";
+import { capabilityEntry, KIT_CATALOGUE, type RegistryCatalogue } from "./capabilities.ts";
 import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports } from "./imports.ts";
 import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 import { confinedPath } from "../project/paths.ts";
-
-/**
- * Component kinds: the prefix of every component's name. A new kind is a naming decision, so it is
- * added here on purpose, not accepted silently.
- */
-export const KINDS = [
-  "channel", "router", "sessions", "storage", "workspace", "execution", "scheduler", "deployment",
-  "tool", "policy", "admin", "inbound", "outbound", "log",
-  "conversations", "credentials", "provider", "runtime", "secrets", "server", "submissions",
-  // SPEC C2 and C3: `mailbox-local`, `wakeups-timers`.
-  "mailbox", "wakeups",
-  // SPEC C2 to C5: a target's platform providers (`platform-cloudflare`).
-  "platform",
-];
 
 const KEBAB = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const SOURCE = /\.[cm]?[jt]sx?$/;
@@ -43,11 +29,15 @@ const forMachine = (file: string, name: string): boolean => name.startsWith("dep
 /** Packages that are the kit itself: `requires.pikit` covers them, so `dependencies` does not. */
 const KIT_PACKAGES = new Set(["@pikit/core"]);
 
-export function checkNaming(name: string): string[] {
+/** The name is kebab-case and starts with a kind of `catalogue`: the kit's, or one a component of the registry declares. */
+export function checkNaming(name: string, catalogue: RegistryCatalogue = KIT_CATALOGUE): string[] {
   if (!KEBAB.test(name)) return [`name "${name}" is not kebab-case`];
   const kind = name.split("-")[0] ?? "";
-  if (!name.includes("-") || !KINDS.includes(kind)) {
-    return [`name "${name}" has no known kind prefix (${KINDS.map((k) => `${k}-`).join(", ")}); a new kind goes in KINDS in packages/cli/src/registry/checks.ts`];
+  if (!name.includes("-") || !catalogue.kinds.includes(kind)) {
+    return [
+      `name "${name}" has no known kind prefix (${catalogue.kinds.map((k) => `${k}-`).join(", ")}); ` +
+        `a new kind is declared by a component of the registry: "declares": { "kinds": ["${kind}"] } in its component.json`,
+    ];
   }
   return [];
 }
@@ -225,12 +215,19 @@ export function checkImports(componentDir: string, name: string, targets: readon
   return { problems, packages };
 }
 
-/** Every capability the component provides or uses has an entry in the catalogue (`capabilities.ts`). */
-export function checkCapabilities(manifest: Manifest): string[] {
+/**
+ * Every capability the component provides or uses is in `catalogue`: the kit's (`capabilities.ts`), or
+ * one a component of the registry declares.
+ */
+export function checkCapabilities(manifest: Manifest, catalogue: RegistryCatalogue = KIT_CATALOGUE): string[] {
   const named = [...(manifest.provides ?? []), ...(manifest.requires?.capabilities ?? []), ...(manifest.optional?.capabilities ?? [])];
   return [...new Set(named)]
-    .filter((name) => capabilityEntry(name) === undefined)
-    .map((name) => `capability "${name}" is not in the catalogue: describe it in packages/cli/src/registry/capabilities.ts`);
+    .filter((name) => capabilityEntry(name, catalogue) === undefined)
+    .map(
+      (name) =>
+        `capability "${name}" is not in the catalogue: the component that defines its contract declares it in its component.json ` +
+        `("declares": { "capabilities": { "${name}": { "mode", "stability", "summary" } } }); \`pikit registry capabilities\` lists the known ones`,
+    );
 }
 
 /** `dependencies` lists exactly the npm packages the files import. */

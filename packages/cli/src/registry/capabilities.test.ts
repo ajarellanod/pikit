@@ -8,12 +8,13 @@ import {
   capabilityUsage,
   checkStability,
   formatCapabilities,
+  registryCatalogue,
 } from "./capabilities.ts";
-import { checkCapabilities } from "./checks.ts";
+import { checkCapabilities, checkNaming } from "./checks.ts";
 import { readManifests } from "./commands.ts";
 import type { Manifest } from "./manifest.ts";
 
-const manifest = (name: string, fields: { provides?: string[]; requires?: string[]; optional?: string[] }): Manifest => ({
+const manifest = (name: string, fields: { provides?: string[]; requires?: string[]; optional?: string[]; declares?: Manifest["declares"] }): Manifest => ({
   name,
   version: "0.0.0",
   description: name,
@@ -23,6 +24,7 @@ const manifest = (name: string, fields: { provides?: string[]; requires?: string
   provides: fields.provides ?? [],
   dependencies: {},
   files: [{ source: "files/src", target: "src" }],
+  ...(fields.declares !== undefined && { declares: fields.declares }),
 });
 
 // Checked by tsc, not at run time: `agent.runtime` is a single capability, so a keyed entry is a type error.
@@ -33,9 +35,48 @@ void wrongMode;
 test("validate rejects a capability the catalogue does not describe, once per name", () => {
   const m = manifest("channel-x", { provides: ["agent.conversations"], requires: ["made.up", "secrets"], optional: ["made.up"] });
   expect(checkCapabilities(m)).toEqual([
-    'capability "made.up" is not in the catalogue: describe it in packages/cli/src/registry/capabilities.ts',
+    'capability "made.up" is not in the catalogue: the component that defines its contract declares it in its component.json ("declares": { "capabilities": { "made.up": { "mode", "stability", "summary" } } }); `pikit registry capabilities` lists the known ones',
   ]);
   expect(checkCapabilities(manifest("tool-x", { provides: ["agent.tool"], requires: ["execution"] }))).toEqual([]);
+});
+
+const memory = { mode: "single", stability: "experimental", summary: "What the agent remembers of a person." };
+
+test("a registry's components declare new kinds and capabilities, which every component of the registry may use", () => {
+  const sql = manifest("memory-sql", { provides: ["memory"], requires: ["storage.sql"], declares: { kinds: ["memory"], capabilities: { memory } } });
+  const tool = manifest("tool-memory", { requires: ["memory"] });
+  const { catalogue, problems } = registryCatalogue([sql, tool]);
+
+  expect(problems).toEqual([]);
+  expect(checkNaming("memory-sql")).toEqual([
+    'name "memory-sql" has no known kind prefix (' + catalogue.kinds.filter((k) => k !== "memory").map((k) => `${k}-`).join(", ") +
+      '); a new kind is declared by a component of the registry: "declares": { "kinds": ["memory"] } in its component.json',
+  ]);
+  expect(checkNaming("memory-sql", catalogue)).toEqual([]);
+  expect(checkCapabilities(tool, catalogue)).toEqual([]);
+  expect(capabilityEntry("memory", catalogue)).toEqual({ ...memory, mode: "single", stability: "experimental", definedIn: "memory-sql" });
+  expect(capabilityEntry("memory")).toBeUndefined();
+
+  const text = formatCapabilities(capabilityUsage([sql, tool]));
+  expect(text).toContain("memory  (single, declared by memory-sql, experimental)\n  What the agent remembers of a person.\n  provided by: memory-sql\n  used by:     tool-memory");
+});
+
+test("a declaration may not redeclare the kit's vocabulary, and one capability has one declaration", () => {
+  const { problems } = registryCatalogue([
+    manifest("memory-sql", { declares: { kinds: ["memory", "tool"], capabilities: { memory, "storage.sql": memory } } }),
+    manifest("memory-postgres", { declares: { kinds: ["memory"], capabilities: { memory } } }),
+    manifest("memory-odd", { declares: { kinds: ["Memory"], capabilities: { memory: { ...memory, mode: "keyed" }, "Not Valid": memory } } }),
+  ]);
+
+  expect(problems).toEqual([
+    'memory-odd: declares the kind "Memory", which is not one lowercase word (a kind is a name\'s prefix: "Memory-…")',
+    'memory-odd: declares the capability "Not Valid", which is not a capability name (lowercase words joined by "." or "-")',
+    // Components are read by name: the first declaration stands, the others must match it.
+    'memory-postgres: declares the capability "memory" differently from memory-odd: one contract has one declaration (copy memory-odd\'s)',
+    'memory-sql: declares the kind "tool", which the kit has already: declare only new kinds',
+    'memory-sql: declares the capability "memory" differently from memory-odd: one contract has one declaration (copy memory-odd\'s)',
+    'memory-sql: declares the capability "storage.sql", which the kit defines (@pikit/contracts): use it, or declare a capability of another name',
+  ]);
 });
 
 test("usage lists every catalogued capability, its providers and its consumers, optional ones marked", () => {

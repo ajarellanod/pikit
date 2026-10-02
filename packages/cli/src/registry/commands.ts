@@ -14,7 +14,7 @@ import { DEPLOYMENT_EXPORTS } from "../project/deployment-module.ts";
 import { withOffers } from "../project/offers.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, type Registry, readPreset } from "../project/registry-source.ts";
 import { starterModel, starterModelProblem } from "../project/starter-model.ts";
-import { capabilityEntry } from "./capabilities.ts";
+import { capabilityEntry, type RegistryCatalogue, registryCatalogue } from "./capabilities.ts";
 import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
@@ -218,11 +218,15 @@ export async function validate(root: string, options: { coreVersion?: string; co
   const manifests: Manifest[] = [];
   const names = componentNames(root);
   if (names.length === 0) problems.push(`registry: no components under ${join(root, "components")}`);
+  // The kit's vocabulary, extended by what the registry's well-formed manifests declare.
+  const declared = registryCatalogue(wellFormedManifests(root, names));
+  problems.push(...declared.problems);
+  const catalogue = declared.catalogue;
 
   for (const name of names) {
     const dir = join(root, "components", name);
     const report = (message: string) => problems.push(`${name}: ${message}`);
-    checkNaming(name).forEach(report);
+    checkNaming(name, catalogue).forEach(report);
     checkLayout(dir, name).forEach(report);
 
     let manifest: Manifest | undefined;
@@ -252,7 +256,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
       if (drift.length === 0) {
         checkFormat(dir, manifest).forEach(report);
         // Only on an up-to-date manifest: a drifted one would report names setup no longer uses.
-        checkCapabilities(manifest).forEach(report);
+        checkCapabilities(manifest, catalogue).forEach(report);
       }
     } catch (error) {
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
@@ -269,7 +273,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     problems.push("registry.json does not match the components' manifests: run `bun run registry generate`");
   } else {
     // Presets resolve through registry.json, so only once it is right.
-    problems.push(...checkPresets(root));
+    problems.push(...checkPresets(root, catalogue));
   }
   problems.push(...checkSchemaFiles(root));
   return { written: [], problems };
@@ -291,7 +295,7 @@ export function checkSchemaFiles(root: string): string[] {
  * (the answers `pikit new` offers there). An offer needs the registry's only provider, so a preset
  * that leaned on one breaks when a second provider lands: this says so before a project is written.
  */
-export function checkPresets(root: string): string[] {
+export function checkPresets(root: string, catalogue: RegistryCatalogue = registryCatalogue(readManifests(root)).catalogue): string[] {
   const dir = join(root, "presets");
   if (!existsSync(dir)) return [];
   const registry = openRegistry(root);
@@ -309,7 +313,7 @@ export function checkPresets(root: string): string[] {
         report(`no target runs all its components (${TARGETS.map((t) => `not on ${t}: ${not(t).join(", ")}`).join("; ")})`);
       }
       for (const target of targets) {
-        compositionProblems(registry, components, target).forEach((p) => report(`on ${target}, ${p}`));
+        compositionProblems(registry, components, target, catalogue).forEach((p) => report(`on ${target}, ${p}`));
         // The starter agent `pikit new` writes must name a model provider the preset installs.
         const model = registry.presetModel(name) ?? starterModel(target);
         const problem = starterModelProblem(registry, components, target, model, name);
@@ -328,7 +332,7 @@ export function checkPresets(root: string): string[] {
         for (const slot of registry.slots(name, [target])) {
           for (const option of slot.options.filter((o) => o.name !== slot.default)) {
             const chosen = registry.preset(name, [option.name]);
-            compositionProblems(registry, chosen, target).forEach((p) => report(`with ${option.name}, on ${target}, ${p}`));
+            compositionProblems(registry, chosen, target, catalogue).forEach((p) => report(`with ${option.name}, on ${target}, ${p}`));
           }
         }
       }
@@ -345,7 +349,7 @@ export function checkPresets(root: string): string[] {
  * aside), and a single capability two components provide there. `pikit doctor` judges the real app;
  * this reads the manifests, before any project exists.
  */
-function compositionProblems(registry: Registry, components: readonly string[], target: string): string[] {
+function compositionProblems(registry: Registry, components: readonly string[], target: string, catalogue: RegistryCatalogue): string[] {
   const targets = [target];
   const providers: Record<AppName, Map<string, string[]>> = { default: new Map(), worker: new Map() };
   const required: [AppName, string, string][] = [];
@@ -357,14 +361,26 @@ function compositionProblems(registry: Registry, components: readonly string[], 
   }
   const where = (app: AppName) => (hasWorkerApp(targets) ? ` in ${APP_LABEL[app]}` : "");
   const problems = required
-    .filter(([app, capability]) => !providers[app].has(capability) && capabilityEntry(capability)?.providedBy !== "project")
+    .filter(([app, capability]) => !providers[app].has(capability) && capabilityEntry(capability, catalogue)?.providedBy !== "project")
     .map(([app, capability, name]) => `${name} requires "${capability}"${where(app)}, which nothing provides`);
   for (const app of ["default", "worker"] as const) {
     for (const [capability, names] of providers[app]) {
-      if (names.length > 1 && capabilityEntry(capability)?.mode === "single") problems.push(`"${capability}" takes one provider${where(app)}, and ${names.join(" and ")} each provide it`);
+      if (names.length > 1 && capabilityEntry(capability, catalogue)?.mode === "single") problems.push(`"${capability}" takes one provider${where(app)}, and ${names.join(" and ")} each provide it`);
     }
   }
   return problems;
+}
+
+/** The manifests of `names` that parse and match the schema: what a registry's catalogue is read from. */
+function wellFormedManifests(root: string, names: readonly string[]): Manifest[] {
+  return names.flatMap((name) => {
+    try {
+      const manifest = readManifest(join(root, "components", name));
+      return manifest !== undefined && schemaProblems(ManifestSchema, manifest).length === 0 ? [manifest] : [];
+    } catch {
+      return [];
+    }
+  });
 }
 
 /** Every component's manifest, by listing `components/`. A missing one is skipped; invalid JSON throws. */
