@@ -140,8 +140,10 @@ export on its first event, never in its constructor:
 otherwise) and the same deadlines. A failed start answers 503 and
 the next request tries again. It serves the App's `http.route`s as `server-bun` does on a server: a
 context of their own per request (never the start's, and without `WORKERS_HOST`), a literal path
-before one with parameters, 404 for no match, and a 500 that does not reveal the error. The routes
-are resolved by a component of the entrypoint's own, named `deployment-cloudflare` in `describe()`.
+before one with parameters, which comes before a prefix (`"GET /admin/*"`, the longest first),
+404 for no match, and a 500 that does not reveal the error. The routes are resolved by a component
+of the entrypoint's own, named `deployment-cloudflare` in `describe()` (`createWorkerServer`, which
+passes the `http.route` suite under Bun and in workerd).
 Without `export const worker`, the Worker serves only `/health`.
 
 **`GET /health`** is the Worker's own and public. It starts the Worker's App and the App of one

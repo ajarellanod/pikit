@@ -13,7 +13,9 @@ The HTTP server of the server target: Hono on `Bun.serve`.
 Channels and admin components provide routes as standard fetch handlers,
 `(request: Request, ctx: AppContext) => Response`. They never see Hono, and the same handlers run
 on Cloudflare. Hono only does the routing: `"POST /v1/conversations/:id/reset"` matches one
-segment for `:id`, and the handler reads it from `request.url`.
+segment for `:id`, and the handler reads it from `request.url`; `"GET /admin/*"` matches `/admin`
+and everything under it (a dashboard's assets and API). The most specific key serves a request: a
+literal path, then one with parameters, then the longest prefix. `/health` and `/ready` come first.
 
 Two routes are the server's own:
 - `GET /health` answers `200` as long as the process can answer at all. A supervisor restarts the

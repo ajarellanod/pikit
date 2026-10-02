@@ -5,7 +5,9 @@ it into the app.
 
 - **Provides:** `agent.runtime`, `agent.conversations` (where `conversations.registry` creates the
   conversation of a new key, or of a reset), and `agent.submissions` (what became of each message,
-  and the `answers` feed channels deliver from: "Nothing admitted goes unanswered" below).
+  and the `answers` feed channels deliver from: "Nothing admitted goes unanswered" below), and
+  `agent.observe` (what an operator sees, read-only from pi-durable's records: conversations, a
+  transcript, live events, usage; `createObserver` in the adapter's `observe.ts`).
 - **Requires:** `storage.sql`: pi-durable keeps every conversation there (its transcript, its state,
   its runs and the messages it holds). On a server that is `storage-sqlite`, in a Cloudflare object
   `storage-do`. Its tables are pi-durable's (`conversations`, `entries`, `tasks`, `submissions`,
