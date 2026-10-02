@@ -39,12 +39,12 @@ const adapter = (files: Record<string, string> = {}) => ({
   json: {
     name: "@pikit/pi-adapter",
     exports: { ".": "./src/index.ts", "./node": "./src/node/index.ts" },
-    dependencies: { "@earendil-works/pi-agent-core": "0.87.1", "@pikit/core": "workspace:*" },
+    dependencies: { "@earendil-works/pi-durable": "1.0.0", "@pikit/core": "workspace:*" },
   },
   files: {
     "src/index.ts": `export * from "./runtime.ts";\n`,
-    "src/runtime.ts": `import { AgentHarness } from "@earendil-works/pi-agent-core";\n`,
-    "src/node/index.ts": `import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";\nimport { readFile } from "node:fs/promises";\n`,
+    "src/runtime.ts": `import { Harness } from "@earendil-works/pi-durable";\n`,
+    "src/node/index.ts": `import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";\nimport { readFile } from "node:fs/promises";\n`,
     ...files,
   },
 });
@@ -71,15 +71,15 @@ test("core importing a Pi type is caught, even type-only (case B)", () => {
 
 test("the adapter's main entry reaching Node is caught; the same import behind ./node is not (case C)", () => {
   const direct = packages({
-    "pi-adapter": adapter({ "src/runtime.ts": `import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";\n` }),
+    "pi-adapter": adapter({ "src/runtime.ts": `import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";\n` }),
   });
   expect(checkBoundaries(direct)).toEqual([
-    `packages/pi-adapter/src/runtime.ts imports "@earendil-works/pi-agent-core/node", but @pikit/pi-adapter reaches it and must run on every target (SPEC §4)`,
+    `packages/pi-adapter/src/runtime.ts imports "@earendil-works/pi-durable/env/node", but @pikit/pi-adapter reaches it and must run on every target (SPEC §4)`,
   ]);
   // Through a relative import into node/: the file reached is reported, with the entry that reached it.
   const relative = packages({ "pi-adapter": adapter({ "src/runtime.ts": `import { x } from "./node/index.ts";\n` }) });
   expect(checkBoundaries(relative)).toEqual([
-    `packages/pi-adapter/src/node/index.ts imports "@earendil-works/pi-agent-core/node", but @pikit/pi-adapter reaches it and must run on every target (SPEC §4)`,
+    `packages/pi-adapter/src/node/index.ts imports "@earendil-works/pi-durable/env/node", but @pikit/pi-adapter reaches it and must run on every target (SPEC §4)`,
     `packages/pi-adapter/src/node/index.ts imports "node:fs/promises", but @pikit/pi-adapter reaches it and must run on every target (SPEC §4)`,
   ]);
 });

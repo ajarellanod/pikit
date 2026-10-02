@@ -85,7 +85,7 @@ export const TEMPLATES: Record<string, Template> = {
       TELEGRAM_ALLOWED_USERS: "nobody knows their Telegram user id before deploying: the owner logs in with TELEGRAM_PASSWORD instead",
     },
     bindings: {
-      CONVERSATION: "One Durable Object per Telegram chat, SQLite-backed: its conversation, sessions and the agent's workspace. Nothing to set.",
+      CONVERSATION: "One Durable Object per Telegram chat, SQLite-backed: its conversations (pi-durable) and the agent's workspace. Nothing to set.",
     },
     deploy: "wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs",
   },

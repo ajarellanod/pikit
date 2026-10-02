@@ -21,7 +21,7 @@ function keyed(examples?: unknown[]): ComponentDefinition {
       pikit.useOptional("secrets");
       if (config.store) pikit.use("storage.kv");
       for (const [server, { tools }] of Object.entries(config.servers)) {
-        for (const tool of tools) pikit.provideKeyed("agent.tool", `${server}_${tool}`, { replay: "never" } as never);
+        for (const tool of tools) pikit.provideKeyed("agent.tool", `${server}_${tool}`, { replay: "unsafe" } as never);
       }
       if (Object.keys(config.servers).length > 0) pikit.provide("mcp.servers" as never, {} as never);
     },
@@ -44,7 +44,7 @@ test("examples add what setup declares with them, in order, without repeats; the
     provides: ["agent.tool", "mcp.servers"],
     requires: ["storage.kv"],
     optional: ["secrets"],
-    exampleTools: { wiki_ask: "never", docs_read: "never", docs_search: "never" },
+    exampleTools: { wiki_ask: "unsafe", docs_read: "unsafe", docs_search: "unsafe" },
   });
   // Deterministic: the same examples give the same text.
   expect(JSON.stringify(await describeComponent(component, "server"))).toBe(JSON.stringify(described));
@@ -89,7 +89,7 @@ test("an example tool's replay is checked but not written", async () => {
   });
   const generated = await describeComponent(component, "server");
   const manifest = { provides: ["agent.tool"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, $schema: "../../schema/component.schema.json" } as unknown as Manifest;
-  expect(checkDrift(manifest, generated)).toEqual(['the agent.tool "poke" has replay "undefined"; every tool declares "safe" or "never"']);
+  expect(checkDrift(manifest, generated)).toEqual(['the agent.tool "poke" has replay "undefined"; every tool declares "safe" or "unsafe"']);
 });
 
 test("the model.provider keys setup provides are generated, so pikit new can check a model before writing", async () => {

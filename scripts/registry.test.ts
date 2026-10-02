@@ -27,7 +27,7 @@ interface Fixture {
 }
 
 const SETUP = `
-    pikit.use("sessions.store");
+    pikit.use("agent.conversations");
     pikit.useOptional("model.credentials");
     pikit.useKeyed("agent.tool");
     pikit.provide("conversations.registry", {});`;
@@ -81,7 +81,7 @@ test("a fixture made like a real component validates", async () => {
 test("generate writes what setup declares and keeps every hand-written field, even one validate refuses", async () => {
   const f = await fixture();
   expect(f.manifest()).toMatchObject({
-    requires: { capabilities: ["sessions.store"] },
+    requires: { capabilities: ["agent.conversations"] },
     optional: { capabilities: ["model.credentials", "agent.tool"] },
     provides: ["conversations.registry"],
   });
@@ -475,7 +475,7 @@ test("scanImports: type-only, re-exports, side effects and dynamic imports; comm
     `const re = /"from "regex"/;`,
     `const lazy = await import("dynamic");`,
     `const legacy = require("common-js");`,
-    `const store = capabilities.require("sessions.store");`,
+    `const store = capabilities.require("agent.conversations");`,
   ].join("\n");
   // A method named require (the capability registry's) is not an import.
   expect(scanImports(source)).toEqual(["type-only", "mixed", "re-export", "side-effect", "dynamic", "common-js"]);

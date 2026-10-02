@@ -108,15 +108,14 @@ function skipRegex(source: string, start: number): number {
  * (`checks.ts`) holds a component importing one of these to targets ["server"], as it does `node:*`.
  */
 export const SERVER_ONLY_EXPORTS: readonly string[] = [
-  // The JSONL store and the local execution environment; the test fixtures that spawn Pi workers.
+  // The local execution environment (pi-durable's `NodeExecutionEnv`: it spawns processes).
   "@pikit/pi-adapter/node",
+  // The test fixtures on SQLite files.
   "@pikit/pi-adapter/testing",
-  // pi-durable's `NodeExecutionEnv` (`@earendil-works/pi-durable/env/node`: it spawns processes).
-  "@pikit/pi-adapter/durable/node",
 ];
 
 /** Pi's own Node subpath: fine behind a server-only export, never in a neutral one. */
-export const PI_NODE = "@earendil-works/pi-agent-core/node";
+export const PI_NODE = "@earendil-works/pi-durable/env/node";
 
 /** `@scope/pkg/sub` → `@scope/pkg`; `pkg/sub` → `pkg`. */
 export function packageName(specifier: string): string {

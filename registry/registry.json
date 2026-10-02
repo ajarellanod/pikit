@@ -184,23 +184,6 @@
       ],
       "path": "components/server-bun"
     },
-    "sessions-jsonl": {
-      "version": "0.0.0",
-      "description": "Each conversation's Pi session is a JSONL file on the server's disk.",
-      "targets": [
-        "server"
-      ],
-      "path": "components/sessions-jsonl"
-    },
-    "sessions-sql": {
-      "version": "0.0.0",
-      "description": "Each conversation's Pi session in the app's SQL database: on a server's SQLite or in a Cloudflare Durable Object alike.",
-      "targets": [
-        "server",
-        "cloudflare"
-      ],
-      "path": "components/sessions-sql"
-    },
     "storage-do": {
       "version": "0.0.0",
       "description": "The app's SQL database (storage.sql) in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",

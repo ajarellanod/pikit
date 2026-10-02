@@ -1,14 +1,13 @@
 # yaml-language-server: $schema=../schema/preset.schema.json
 # A project on Cloudflare (SPEC §4, C1): `pikit new my-agent --target cloudflare --preset cloudflare-minimal`.
-# Each conversation's Durable Object keeps its sessions and its registry in its own SQLite, and
+# Each conversation's Durable Object has its own SQLite (storage-do, and storage.kv over it), and
 # deployment-cloudflare deploys it; `pikit up` checks that the object's App starts there (/health).
-# No channel and no runtime yet: those arrive as Cloudflare components, added after.
+# No channel, no runtime and so no conversation registry yet (conversations-kv creates conversations
+# through the runtime's `agent.conversations`): those arrive as Cloudflare components, added after.
 title: "Cloudflare: a Worker and a Durable Object per conversation, storage only for now"
 components:
   - storage-do
-  - sessions-sql
   # Named, not left to `pikit add` to offer: an offer needs the registry's only Cloudflare provider of
   # `storage.kv`, and a second one would leave every project of this preset with none.
   - storage-kv-sql
-  - conversations-kv
   - deployment-cloudflare

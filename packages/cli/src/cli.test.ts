@@ -54,8 +54,8 @@ test("pikit registry validate runs the repository's registry checks", async () =
 test("pikit registry capabilities prints what each capability is and who provides and uses it", async () => {
   const run = await runCli(["registry", "capabilities"], temp());
   expect(run.code).toBe(0);
-  expect(run.out).toContain("sessions.store  (single, @pikit/pi-adapter, experimental)");
-  expect(run.out).toContain("provided by: sessions-jsonl");
+  expect(run.out).toContain("execution  (single, @pikit/pi-adapter, experimental)");
+  expect(run.out).toContain("provided by: execution-do, execution-local");
   expect((await runCli(["registry", "bogus"], temp())).code).toBe(2);
 });
 
@@ -154,13 +154,13 @@ test("new --target cloudflare records the target, and writes two Apps, wrangler 
   const project = join(parent, "edge");
   const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
   expect(manifest.targets).toEqual(["cloudflare"]);
-  expect(Object.keys(manifest.components).sort()).toEqual(["conversations-kv", "deployment-cloudflare", "sessions-sql", "storage-do", "storage-kv-sql"]);
+  expect(Object.keys(manifest.components).sort()).toEqual(["deployment-cloudflare", "storage-do", "storage-kv-sql"]);
   // The preset names storage-kv-sql (not an offer that a second storage.kv provider would cancel).
   expect(manifest.components["storage-kv-sql"].installedFor).toBeUndefined();
   expect(Object.keys(manifest.components["deployment-cloudflare"].files)).toContain("wrangler.jsonc");
 
   const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
-  expect(config).toContain("export default defineApp({\n  components: [\n    agents,\n    storageDo,\n    sessionsSql,\n    storageKvSql,\n    conversationsKv,\n  ],");
+  expect(config).toContain("export default defineApp({\n  components: [\n    agents,\n    storageDo,\n    storageKvSql,\n  ],");
   expect(config).toContain("export const worker = defineApp({\n  components: [\n  ],\n  config: workerConfig,\n});");
   expect(config).not.toContain("deploymentCloudflare");
   // wrangler is deployment-cloudflare's dev dependency, installed by `add` like any other: not the starter's.
@@ -195,7 +195,6 @@ test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each ha
     "storage-do",
     "storage-kv-sql",
     "submissions-sql",
-    "sessions-sql",
     "conversations-kv",
     "provider-openrouter",
     "runtime-pi",
@@ -221,7 +220,7 @@ test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each ha
   );
   // The object owns the conversation: everything else, and the router sends every message to the agent.
   expect(config).toContain(
-    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    submissionsSql,\n    sessionsSql,\n    conversationsKv,\n    providerOpenrouter,\n    runtimePi,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n  ],",
+    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    submissionsSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n  ],",
   );
   expect(config).toContain('"router-basic": { defaultAgent: "assistant" },');
   expect(config).not.toContain("deploymentCloudflare");

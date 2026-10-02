@@ -184,7 +184,8 @@ export const ManifestSchema = Type.Object(
       Type.Object(
         {
           tools: Type.Record(Type.String(), Type.String(), {
-            description: "Generated: each agent.tool's replay (S10), with the default config; not the tools only the config schema's `examples` name.",
+            description:
+              "Generated: each agent.tool's replay (S10), with the default config; not the tools only the config schema's `examples` name. Each is `safe` (an interrupted call runs again on recovery) or `unsafe` (the model gets an interrupted result instead): pi-durable's replay.",
           }),
         },
         { additionalProperties: false },
