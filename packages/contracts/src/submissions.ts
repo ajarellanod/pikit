@@ -11,17 +11,17 @@
  *
  * Shaped like pi-durable's own submissions: `pending` is its `queued` and `placed`; a `completed`
  * settlement is `done` with its answer; `failed`, `aborted` and `abandoned` are `unanswered` with a
- * reason. The runtime runs on pi-durable, which keeps them itself (`Conversation.submit()` deduplicates
- * by request id); this contract bridges them for what one pi-durable storage cannot answer: which
- * conversations hold pending work across storages (`pending`, an index; a Durable Object per chat has
- * a storage each), and the feed channels deliver from.
+ * reason. The runtime provides it (runtime-pi, from pi-durable, which keeps every submission and
+ * deduplicates by request id): `pending` and `get` are the runtime's records, and `answers` is a log
+ * derived from them, which pi-durable has no feed for.
  *
  * The runtime's conversation stays the source of truth. A settlement carries the run's final text, not its
- * transcript (`messages`) or usage: what a channel needs to deliver it after a restart, kept only as
- * long as the provider's retention.
+ * transcript (`messages`) or usage: what a channel needs to deliver it after a restart, kept in
+ * `answers` only as long as the provider's retention.
  *
- * **Transitional**, not only `experimental`: the capability catalogue marks it so, and `pikit registry
- * capabilities` says it, so that a component outside this repository knows before depending on it.
+ * A provider that is not the runtime (the in-memory double of `@pikit/contracts/testing`) records what
+ * the runtime tells it through `admitted`, `settled` and `abandoned`; a runtime that provides it keeps
+ * them from its own records, and those calls are hints it may answer from them.
  */
 
 import type { AppContext } from "@pikit/core";
@@ -55,7 +55,7 @@ export interface AgentSubmissions {
    * The runtime admitted `requestId` in `conversation`: it is pending until a run settles it. Called
    * after the message is durable in the runtime's conversation and before `dispatch` resolves, so a channel
    * acknowledges its platform only once both hold it. A request already known, pending or settled,
-   * is left as it is.
+   * is left as it is. A runtime that provides this contract admitted it already: nothing to do.
    */
   admitted(conversation: ConversationRef, requestId: string, ctx: AppContext): Promise<void>;
   /**
@@ -64,7 +64,8 @@ export interface AgentSubmissions {
    * admission was lost with a crash). Idempotent within the provider's retention: a run already
    * settled (the same conversation and `requestId`) changes nothing, and a request keeps the first run
    * that settled it. Once a settlement is pruned, the provider no longer knows it: settling the same
-   * run again appends it to `answers` a second time.
+   * run again appends it to `answers` a second time. A runtime that provides this contract reads the
+   * run from its own records instead (`run` names its conversation), and never appends one twice.
    */
   settled(run: RunSettlement, ctx: AppContext): Promise<void>;
   /**
@@ -75,7 +76,8 @@ export interface AgentSubmissions {
    * them all. Never pretends they were answered; tells their channel so, which tells the user.
    * A request already settled, or unknown, is left as it is. Resolves with the settlement appended,
    * or `undefined` when none of them was pending (so abandoning again changes nothing), for the
-   * caller to announce it as `agent.failed`.
+   * caller to announce it as `agent.failed`. A runtime that provides this contract settles them in its
+   * own records and announces them itself; one a run took is left to the run.
    */
   abandoned(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<RunSettlement | undefined>;
   /**
@@ -85,8 +87,9 @@ export interface AgentSubmissions {
   pending(ctx: AppContext): Promise<PendingConversation[]>;
   /**
    * Where `requestId` is in the runtime's conversation, or `undefined` if it is unknown there (never
-   * admitted, or settled longer ago than the provider keeps settlements). Requests are per conversation,
-   * as pi-durable deduplicates them.
+   * admitted, or settled longer ago than the provider keeps settlements; a runtime that provides this
+   * contract keeps them as long as the conversation). Requests are per conversation, as pi-durable
+   * deduplicates them.
    */
   get(conversation: Pick<ConversationRef, "conversationId">, requestId: string, ctx: AppContext): Promise<SubmissionStatus | undefined>;
   /**
