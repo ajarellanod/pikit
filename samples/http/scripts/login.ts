@@ -21,7 +21,7 @@ import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
 import { defineApp, defineComponent } from "@pikit/core";
 import { type CredentialStore, modelsFrom, type Provider } from "@pikit/pi-adapter";
-import { type AuthInteraction, type LoginTerminal, loginInteraction } from "@pikit/pi-adapter/durable/credentials";
+import { type AuthInteraction, type LoginTerminal, loginInteraction } from "@pikit/pi-adapter/credentials";
 import credentialsFile from "../../../registry/components/credentials-file/files/src/pikit/credentials-file/index.ts";
 import providerAnthropic from "../../../registry/components/provider-anthropic/files/src/pikit/provider-anthropic/index.ts";
 import { config } from "../pikit.config.ts";

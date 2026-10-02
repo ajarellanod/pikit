@@ -59,7 +59,7 @@ export interface CredentialsModule {
   loginInteraction(terminal: LoginTerminal, signal?: AbortSignal): AuthInteraction;
 }
 /** Where the adapter keeps `loginInteraction`, resolved from the project. */
-export const CREDENTIALS_MODULE = "@pikit/pi-adapter/durable/credentials";
+export const CREDENTIALS_MODULE = "@pikit/pi-adapter/credentials";
 /** `modelsFrom` of `@pikit/pi-adapter`, reduced to the two calls made here. */
 type ModelsFrom = (
   providers: Provider[],

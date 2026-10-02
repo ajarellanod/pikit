@@ -5,7 +5,8 @@
  *   and `.env`). A login made here never reaches it, and one made there never reaches this machine:
  *   there is one copy of each credential, so a refreshed token never leaves another copy stale.
  *
- * Both run `credentials.ts` with the project's own components (`model.credentials`).
+ * Both run `credentials.ts` with the project's own components (`model.credentials`). The login
+ * itself is `pikit configure --login` (`commands/configure.ts`).
  */
 
 import type { AppExec } from "./deployment-module.ts";
@@ -23,15 +24,6 @@ export async function checkModelCredentials(projectDir: string, exec?: AppExec):
       : await runScriptInApp<CredentialsResult>(exec, "credentials.ts", ["check"]);
   if (!result.ok) throw new CliError(`could not read the model credentials${exec === undefined ? "" : " where the app runs"}: ${result.error}\nRun \`pikit doctor\`.`);
   return result;
-}
-
-/** pi-ai's OAuth login for `providerId`, stored by the project's `model.credentials` where it runs. */
-export async function loginModel(projectDir: string, providerId: string, exec?: AppExec): Promise<void> {
-  const result =
-    exec === undefined
-      ? await runScript<CredentialsResult>("credentials.ts", projectDir, ["login", providerId], { interactive: true })
-      : await runScriptInApp<CredentialsResult>(exec, "credentials.ts", ["login", providerId], { interactive: true });
-  if (!result.ok) throw new CliError(`login to ${providerId} failed: ${result.error}`);
 }
 
 /** pi-ai's variable for a provider's API key: `ANTHROPIC_API_KEY` for `anthropic`. */
