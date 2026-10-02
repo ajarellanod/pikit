@@ -7,8 +7,8 @@ Talk to an agent over HTTP: send a message, get the answer in the response.
   `http.authenticate`.
 - **Requires:** `secrets` (the token), `conversations.registry`, `agent.runtime`. A server (such as
   `server-bun`) serves the routes, and a router (such as `router-basic`) picks the agent.
-- **Uses, if installed:** `agent.submissions` (`submissions-sql`, which `pikit add runtime-pi`
-  offers): a message's outcome can be read later, and sending it again returns it.
+- **Uses, if installed:** `agent.submissions` (runtime-pi provides it): a message's outcome can be
+  read later, and sending it again returns it.
 - **Targets:** `server`. Although the handlers use Fetch and Web Crypto, the Cloudflare host serves
   HTTP routes in the Worker's App; this channel has no Worker half yet. Do not install it on
   Cloudflare until that request path is integrated and tested.
@@ -66,7 +66,7 @@ What became of a message, for a client whose POST answered `202` (the agent took
 | `409` | `{ requestId, error: "aborted" }` | The run was stopped before answering. |
 | `502` | `{ requestId, error: <code> }` | The run failed. |
 | `502` | `{ requestId, error: "abandoned" }` | The runtime gave up on the message (its agent or conversation is gone, or it waited too long): it was never answered; send it again. |
-| `404` | `{ requestId, error: "not_found" }` | No such message in the conversation's current runtime conversation: never sent, sent before a reset, or settled longer ago than `submissions-sql` keeps them (7 days). |
+| `404` | `{ requestId, error: "not_found" }` | No such message in the conversation's current runtime conversation: never sent, or sent before a reset. |
 | `501` | `{ error: "not_supported", message }` | `agent.submissions` is not installed: nothing keeps a message's outcome outside the runtime. |
 
 Sending the same POST again (same `conversationId` and `messageId`) answers the same way, and never

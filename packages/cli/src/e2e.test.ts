@@ -66,10 +66,11 @@ test.skipIf(!E2E)(
     expect(config).toContain("    runtimePi,\n");
     expect(config).not.toContain("deploymentDocker");
     // HTTP answers in the response: nothing offers it durable delivery, so none is installed. The
-    // runtime brings its record of submissions (`offers.ts`), over the storage the preset names.
+    // runtime provides its record of submissions itself, over the storage the preset names: nothing
+    // is installed for it.
     const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
     expect(Object.keys(manifest.components)).not.toContain("outbound-durable");
-    expect(manifest.components["submissions-sql"].installedFor).toEqual(["runtime-pi"]);
+    expect(Object.values(manifest.components as Record<string, { installedFor?: string[] }>).filter((c) => c.installedFor !== undefined)).toEqual([]);
     expect(manifest.components["storage-sqlite"].installedFor).toBeUndefined();
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
@@ -172,23 +173,6 @@ test.skipIf(!E2E)(
       git("reset", "-q", "--hard", "HEAD~1");
       sh([process.execPath, "install"]);
     }
-
-    // submissions-sql, which runtime-pi brought: removed, the runtime and the channel work without it,
-    // and the storage stays (the preset named it, nothing brought it); added back, green; removed
-    // again, no trace.
-    const withoutSubmissions = await pikit(["remove", "submissions-sql"]);
-    expect(withoutSubmissions.code).toBe(0);
-    expect(withoutSubmissions.out).not.toContain("storage-sqlite was installed for");
-    expect((await pikit(["doctor"])).code).toBe(0);
-    git("add", "-A");
-    git("commit", "-qm", "without submissions-sql");
-    const submissions = await pikit(["add", "submissions-sql", "--yes"]);
-    expect(submissions.code).toBe(0);
-    expect(submissions.out).toContain("`pikit doctor` is green");
-    expect((await pikit(["remove", "submissions-sql"])).code).toBe(0);
-    expect(git("status", "--porcelain").out).toBe("");
-    git("reset", "-q", "--hard", "HEAD~1");
-    sh([process.execPath, "install"]);
 
     const refused = await pikit(["remove", "storage-sqlite"]);
     expect(refused.code).toBe(1);

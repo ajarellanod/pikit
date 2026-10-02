@@ -16,7 +16,7 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | File | Suites |
 |---|---|
 | `test/storage-do.workerd.ts` | `storage.sql` on `storage-do`; `storage.kv` on `storage-kv-sql` over `storage-do`; the start as `deployment-cloudflare` does it; the SQL limits `storage-do`'s README states |
-| `test/submissions-sql.workerd.ts` | `agent.submissions` with its `answers` feed, pruning and restarts, on `submissions-sql` over `storage-do` |
+| `test/runtime-answers.workerd.ts` | runtime-pi's `agent.submissions` in an object: its `answers` log under the feed suite (pruning, restarts) over `storage-do`; in a `PlatformConversation` object, a run settled in pi-durable whose log a crash refused (a SQLite trigger), the object evicted between two alarms, logged and announced once by the next instance, and a redelivery adding nothing |
 | `test/secrets-cloudflare.workerd.ts` | `secrets` on `secrets-cloudflare`, over the Worker's real `env` |
 | `test/deployment-cloudflare.workerd.ts` | `deployment-cloudflare`'s entrypoint: its `Conversation` class (exported by `src/worker.ts`, over the small Apps of `src/deployment.ts`) and its Worker `fetch`: `/health`, `WORKERS_HOST`, `deliver` and the alarm reaching their handlers, eviction, a failed start resetting the object |
 | `test/execution-do.workerd.ts` | pi-durable's `ExecutionEnv` suite on `execution-do`; pi-durable's own `write`, `read`, `edit` and `bash` tools on it through the `tool-*` components; the shell, `node` in QuickJS and its budget, the `.git` fence, and `git` clone, commit and push against a fake GitHub |

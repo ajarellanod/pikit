@@ -23,13 +23,13 @@
       "agent.tool",
       "execution",
       "workspace",
-      "agent.submissions",
       "wakeups"
     ]
   },
   "provides": [
     "agent.runtime",
-    "agent.conversations"
+    "agent.conversations",
+    "agent.submissions"
   ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",

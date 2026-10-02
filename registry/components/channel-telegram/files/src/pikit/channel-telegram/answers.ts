@@ -1,6 +1,6 @@
 /**
- * Delivering answers from `agent.submissions`' feed (`Feed`, SPEC K3), with `submissions-sql` and
- * `storage.kv` installed.
+ * Delivering answers from `agent.submissions`' feed (`Feed`, SPEC K3), with `agent.submissions` (runtime-pi
+ * provides it) and `storage.kv` installed.
  *
  * An answer used to reach the chat only through `agent.settled`, an event: one that ended while the
  * channel was stopped (a deploy stops the channels before the runtime), or whose delivery failed, or

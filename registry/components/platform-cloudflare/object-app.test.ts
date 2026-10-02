@@ -30,7 +30,6 @@ import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import { fakeDurableObjectStorage } from "../storage-do/files/src/pikit/storage-do/durable-object.test-support.ts";
 import storageDo from "../storage-do/files/src/pikit/storage-do/index.ts";
 import storageKvSql from "../storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
-import submissionsSql from "../submissions-sql/files/src/pikit/submissions-sql/index.ts";
 import platformCloudflare from "./files/src/pikit/platform-cloudflare/index.ts";
 import { simulatedObject } from "./files/src/pikit/platform-cloudflare/object.test-support.ts";
 
@@ -133,7 +132,6 @@ async function telegramObjectApp(fake: FakeTelegram, options: { clock?: Clock; c
       provider,
       secrets,
       conversationsKv,
-      submissionsSql,
       storageKvSql,
       storageDo,
       platformCloudflare,

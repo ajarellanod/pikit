@@ -20,7 +20,6 @@ import runtimePi from "../../registry/components/runtime-pi/files/src/pikit/runt
 import secretsEnv from "../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import serverBun from "../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
 import storageSqlite from "../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
-import submissionsSql from "../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
 import toolBash from "../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
 import toolEdit from "../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
 import toolRead from "../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
@@ -54,11 +53,10 @@ export default defineApp({
     toolWrite,
     toolEdit,
     toolBash,
-    // The storage the http preset names, and the record of submissions runtime-pi brings over it
-    // (offered providers, as `pikit add` brings them): no accepted message goes unanswered across
-    // restarts, and a POST that answered 202 reads its answer with GET.
+    // The storage the http preset names. runtime-pi keeps its conversations and its record of
+    // submissions there: no accepted message goes unanswered across restarts, and a POST that
+    // answered 202 reads its answer with GET.
     storageSqlite,
-    submissionsSql,
     runtimePi,
     routerBasic,
     channelHttp,

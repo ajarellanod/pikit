@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { type App, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type ConversationRef, defineAgent } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createDurableRuntime, modelsFrom, openDurableStorage, type WorkspaceProvider } from "@pikit/pi-adapter";
+import { createDurableRuntime, modelsFrom, type WorkspaceProvider } from "@pikit/pi-adapter";
 import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
 import { createWorkspaceConformance, openSqliteDatabase, scriptedProvider } from "@pikit/pi-adapter/testing";
 import { codingTool } from "@pikit/pi-adapter/tools";
@@ -151,7 +151,7 @@ test("in real runs, a file agent A's write tool writes is in A's directory and n
   const sqlite = openSqliteDatabase(":memory:");
   const write = codingTool("write");
   const runtime = createDurableRuntime({
-    storage: () => openDurableStorage(sqlite.database),
+    db: sqlite.database,
     agent: (name) => agents.find((agent) => agent.name === name),
     tool: (name) => (name === "write" ? write : undefined),
     models: modelsFrom([scriptedProvider()]),

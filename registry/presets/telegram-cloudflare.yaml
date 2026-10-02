@@ -17,7 +17,6 @@ components:
   - platform-cloudflare
   - storage-do
   - storage-kv-sql
-  - submissions-sql
   - provider-openrouter
   - runtime-pi
   # After the runtime: the registry creates conversations through its `agent.conversations`.

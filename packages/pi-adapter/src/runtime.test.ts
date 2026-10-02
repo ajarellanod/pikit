@@ -10,7 +10,6 @@ import { BACKGROUND_CONTEXT, createContextKey, defineApp, defineComponent, silen
 import { CONVERSATION, defineAgent } from "@pikit/contracts";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createDurableRuntime } from "./runtime.ts";
-import { openDurableStorage } from "./sql.ts";
 import { databaseFile, holdTool, openWorker, releasableHold, scriptedAgent, scriptedProvider, type Worker } from "./test-support.ts";
 import { openSqliteDatabase } from "./testing/sqlite.ts";
 
@@ -76,7 +75,7 @@ describe("answers", () => {
 
     await expect(w.dispatch("r1", "hi", { ...conversation, agent: "nobody" })).rejects.toThrow('no agent.definition "nobody"');
     await expect(w.dispatch("r1", "hi", { ...conversation, conversationId: "999" })).rejects.toThrow("no pi-durable conversation 999");
-    await expect(w.dispatch("r1", "hi", { ...conversation, conversationId: "a-pi-0.99-session" })).rejects.toThrow("not a pi-durable conversation id");
+    await expect(w.dispatch("r1", "hi", { ...conversation, conversationId: "not-a-number" })).rejects.toThrow("not a pi-durable conversation id");
   });
 
   test("each agent runs on the provider its model names", async () => {
@@ -114,7 +113,7 @@ describe("answers", () => {
     models.setProvider(scriptedProvider());
     const agent = scriptedAgent();
     const runtime = createDurableRuntime({
-      storage: () => openDurableStorage(sqlite.database),
+      db: sqlite.database,
       agent: (name) => (name === agent.name ? agent : undefined),
       models,
       events: app.context(),

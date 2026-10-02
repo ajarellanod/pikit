@@ -1,6 +1,6 @@
 /**
  * The sample with `channel-telegram` instead of `channel-http`, as `pikit new --preset telegram` makes
- * it: the same runtime and registry, the storage (pi-durable's tables) and submissions `runtime-pi` brings, and
+ * it: the same runtime and registry, the storage (pi-durable's tables and runtime-pi's answers log), and
  * the outbox and the key-value store (for its cursor) the channel brings. Telegram is the channel's own fake Bot API (`fake-telegram.ts`), and
  * the model Pi's faux provider, scripted.
  *
@@ -18,7 +18,6 @@ import { createRuntimePi } from "../../../registry/components/runtime-pi/files/s
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import storageSqlite from "../../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
-import submissionsSql from "../../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
 
 /** The fake Bot API's default bot, and who may talk to it. */
 export const BOT_TOKEN = "123456789:fake-token-for-tests";
@@ -46,7 +45,6 @@ export function telegramApp(options: TelegramAppOptions) {
       provider,
       agents,
       storageSqlite,
-      submissionsSql,
       createRuntimePi(),
       routerBasic,
       ...(options.between ?? []),

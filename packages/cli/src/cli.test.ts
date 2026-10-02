@@ -198,7 +198,6 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
     "platform-cloudflare",
     "storage-do",
     "storage-kv-sql",
-    "submissions-sql",
     "conversations-kv",
     "provider-openrouter",
     "runtime-pi",
@@ -224,7 +223,7 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
   );
   // The object owns the conversation: everything else, and the router sends every message to the agent.
   expect(config).toContain(
-    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    submissionsSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n  ],",
+    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n  ],",
   );
   expect(config).toContain('"router-basic": { defaultAgent: "assistant" },');
   expect(config).not.toContain("deploymentCloudflare");

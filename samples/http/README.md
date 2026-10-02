@@ -17,8 +17,8 @@ copy them to `src/pikit/` instead.
 | `src/extensions/agents.ts` | your agents (`src/agents/assistant/agent.ts`) |
 | `execution-local` | the workspace `.pikit/workspace/`: this machine's files and shell |
 | `tool-read`, `tool-write`, `tool-edit`, `tool-bash` | pi-durable's tools; `assistant` names all four |
-| `storage-sqlite`, `submissions-sql` | `.pikit/pikit.db`: the conversations (pi-durable's tables) and the record of messages |
-| `runtime-pi` | Pi (pi-durable) runs the agents |
+| `storage-sqlite` | `.pikit/pikit.db`: the conversations (pi-durable's tables) and the answers log |
+| `runtime-pi` | Pi (pi-durable) runs the agents, and says what became of each message (`agent.submissions`) |
 | `router-basic` | every message goes to `assistant` |
 | `channel-http` | `POST /v1/messages`, `POST /v1/conversations/:id/reset` |
 | `server-bun` | HTTP on port 3000, `/health`, `/ready` |
@@ -90,7 +90,7 @@ curl -s -X POST localhost:3000/v1/conversations/c1/reset -H "authorization: Bear
 
 Messages sent to `c1` while the agent is still answering wait in the conversation's inbox, and its
 next run answers them together: each of those requests receives that answer. A request that answered `202` (the agent took
-longer than two minutes) reads its answer later, from `.pikit/pikit.db`, which `submissions-sql` keeps:
+longer than two minutes) reads its answer later, from `.pikit/pikit.db`, where runtime-pi keeps it:
 
 ```sh
 curl -s localhost:3000/v1/conversations/c1/messages/<requestId> -H "authorization: Bearer $PIKIT_HTTP_TOKEN"

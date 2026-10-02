@@ -10,8 +10,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppEvents, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withCancel } from "@pikit/core";
 import { AGENT_STATE, type AgentRuntime, type AgentSubmissions, type AgentTool, type ConversationRef, defineAgent, type WakeupHandler } from "@pikit/contracts";
-import { createLifecycleConformance, createManualClock } from "@pikit/core/testing";
-import { createAgentRuntimeConformance, createMemorySubmissions, createMemoryWakeups } from "@pikit/contracts/testing";
+import { createLifecycleConformance } from "@pikit/core/testing";
+import { createAgentRuntimeConformance, createMemoryWakeups } from "@pikit/contracts/testing";
 import type { Credential, CredentialStore } from "@pikit/pi-adapter";
 import {
   createPiRuntimeFixture,
@@ -33,26 +33,13 @@ for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture([runt
   test(`runtime-pi ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
 
-/** `agent.submissions` in memory, outliving the apps of a test as a database would. */
-function memorySubmissions(submissions: AgentSubmissions = createMemorySubmissions().submissions) {
-  return defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", submissions) });
-}
-
-// The same contract with agent.submissions installed: recording changes nothing a channel sees.
-for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture([memorySubmissions(), runtimePi]))) {
-  test(`runtime-pi with agent.submissions ${c.group}: ${c.name}`, () => c.run(), 30_000);
-}
-
-// The same contract with runs driven by wakeups (SPEC §4.1, C4), durable as a Durable Object's are, with
-// and without agent.submissions: what a channel sees does not change.
+// The same contract with runs driven by wakeups (SPEC §4.1, C4), durable as a Durable Object's are:
+// what a channel sees does not change.
 for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture([createMemoryWakeups({ durable: true }), runtimePi]))) {
   test(`runtime-pi with wakeups ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
-for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture([createMemoryWakeups({ durable: true }), memorySubmissions(), runtimePi]))) {
-  test(`runtime-pi with wakeups and agent.submissions ${c.group}: ${c.name}`, () => c.run(), 30_000);
-}
 
-// Start and stop honour their deadline and leave nothing open, with and without agent.submissions and wakeups.
+// Start and stop honour their deadline and leave nothing open, with and without wakeups.
 for (const c of createLifecycleConformance(() => {
   const { storage, agents, provider } = testComponents();
   return { component: runtimePi, providers: [storage, agents, provider] };
@@ -61,13 +48,7 @@ for (const c of createLifecycleConformance(() => {
 }
 for (const c of createLifecycleConformance(() => {
   const { storage, agents, provider } = testComponents();
-  return { component: runtimePi, providers: [storage, agents, provider, memorySubmissions()] };
-})) {
-  test(`runtime-pi with agent.submissions ${c.group}: ${c.name}`, () => c.run());
-}
-for (const c of createLifecycleConformance(() => {
-  const { storage, agents, provider } = testComponents();
-  return { component: runtimePi, providers: [storage, agents, provider, memorySubmissions(), createMemoryWakeups({ durable: true })] };
+  return { component: runtimePi, providers: [storage, agents, provider, createMemoryWakeups({ durable: true })] };
 })) {
   test(`runtime-pi with wakeups ${c.group}: ${c.name}`, () => c.run());
 }
@@ -79,25 +60,23 @@ function databaseFile() {
   return { path, open: async () => openSqliteDatabase(path), dispose: () => rmSync(root, { recursive: true, force: true }) };
 }
 
-test("at start, a conversation agent.submissions holds pending is resumed, with no new message", async () => {
+test("at start, a conversation pi-durable holds a message of is resumed, with no new message, and its answer is in agent.submissions", async () => {
   const file = databaseFile();
   try {
-    const { submissions } = createMemorySubmissions();
-    const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
     // A process admitted the message, told its platform, and died mid-run.
     const conversation = await interruptRun(file.open, { requestId: "r-killed", key: "test:resume" });
-    await submissions.admitted(conversation, "r-killed", ctx);
 
     const { agents, provider } = testComponents();
-    const settled: AppEvents["agent.settled"][] = [];
-    const observer = defineComponent({ name: "observer", setup: (pikit) => pikit.on("agent.settled", (result) => void settled.push(result)) });
-    const app = await defineApp({ components: [sqliteStorage(file.path), agents, provider, memorySubmissions(submissions), runtimePi, observer], logger: silentLogger }).create();
+    const seen = observer();
+    const app = await defineApp({ components: [sqliteStorage(file.path), agents, provider, runtimePi, seen.component], logger: silentLogger }).create();
     await app.start();
     try {
-      await until(() => settled.length > 0, "the interrupted run to be resumed");
-      expect(settled.map((r) => [r.requestId, r.kind])).toEqual([["r-killed", "completed"]]);
+      await until(() => seen.results.length > 0, "the interrupted run to be resumed");
+      expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r-killed", "completed"]]);
+      const submissions = seen.submissions();
       expect((await submissions.get(conversation, "r-killed", app.context()))?.kind).toBe("settled");
       expect(await submissions.pending(app.context())).toEqual([]);
+      expect((await submissions.answers.read(undefined, 10)).items.map((item) => [item.fact.requestIds, item.fact.kind])).toEqual([[["r-killed"], "completed"]]);
     } finally {
       await app.stop();
     }
@@ -106,50 +85,32 @@ test("at start, a conversation agent.submissions holds pending is resumed, with 
   }
 }, 30_000);
 
-test("at start, messages still unanswered after abandonPendingAfterHours are abandoned; younger ones are kept", async () => {
-  const { submissions } = createMemorySubmissions();
-  const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
-  const twoHoursAgo = (await defineApp({ components: [], logger: silentLogger, clock: createManualClock(Date.now() - 2 * 60 * 60 * 1_000) }).create()).context();
-  const { storage, agents, provider } = testComponents();
-  // Two conversations, made by an earlier app over the same storage.
-  const before = observer();
-  const earlier = await defineApp({ components: [storage, agents, provider, runtimePi, before.component], logger: silentLogger }).create();
-  await earlier.start();
-  const old = await before.conversation("test:old");
-  const young = await before.conversation("test:young");
-  await earlier.stop();
-  // Admitted, and then lost: pi-durable never held them (a lost write).
-  await submissions.admitted(old, "r-old", twoHoursAgo);
-  await submissions.admitted(young, "r-young", ctx);
-
-  const failed: AppEvents["agent.failed"][] = [];
-  const failures = defineComponent({ name: "failures", setup: (pikit) => pikit.on("agent.failed", (result) => void failed.push(result)) });
-  const app = await defineApp({
-    components: [storage, agents, provider, memorySubmissions(submissions), runtimePi, failures],
-    config: { "runtime-pi": { abandonPendingAfterHours: 1 } },
-    logger: silentLogger,
-  }).create();
-  await app.start();
+test("an answer that ended while the channels were stopped is in agent.submissions' answers at the next start, and keepSettledDays is configurable", async () => {
+  const file = databaseFile();
   try {
-    await until(() => failed.length > 0, "the old message to be abandoned");
-    expect(failed.map((r) => [r.requestIds, r.error])).toEqual([[["r-old"], { code: "abandoned", message: "unanswered_too_long" }]]);
-    expect((await submissions.pending(app.context())).map((p) => p.requestIds)).toEqual([["r-young"]]);
-  } finally {
+    const { agents, provider } = testComponents();
+    const config = { "runtime-pi": { keepSettledDays: 3 } };
+    const first = observer();
+    const app = await defineApp({ components: [sqliteStorage(file.path), agents, provider, runtimePi, first.component], config, logger: silentLogger }).create();
+    await app.start();
+    const conversation = await first.conversation("test:later");
+    await first.runtime().dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context());
+    await until(() => first.results.length > 0, "the answer");
     await app.stop();
+
+    const next = observer();
+    const again = await defineApp({ components: [sqliteStorage(file.path), agents, provider, runtimePi, next.component], config, logger: silentLogger }).create();
+    await again.start();
+    try {
+      const { items } = await next.submissions().answers.read(undefined, 10);
+      expect(items.map((item) => item.fact)).toEqual([{ conversation, requestId: "r1", requestIds: ["r1"], kind: "completed", text: "answer: hello" }]);
+    } finally {
+      await again.stop();
+    }
+  } finally {
+    file.dispose();
   }
 }, 30_000);
-
-test("stop, with no deadline, does not wait for an agent.submissions whose pending() never answers", async () => {
-  const { submissions } = createMemorySubmissions();
-  const hung: AgentSubmissions = { ...submissions, pending: () => new Promise(() => {}) };
-  const { storage, agents, provider } = testComponents();
-  const app = await defineApp({ components: [storage, agents, provider, memorySubmissions(hung), runtimePi], logger: silentLogger }).create();
-  await app.start();
-
-  const stopped = app.stop().then(() => "stopped");
-
-  expect(await Promise.race([stopped, Bun.sleep(2_000).then(() => "still waiting")])).toBe("stopped");
-});
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const { storage, agents, provider } = testComponents();
@@ -158,30 +119,32 @@ test("what setup declares: component.json's provides / requires / optional come 
   const described = app.describe().components.find((component) => component.name === "runtime-pi");
 
   expect(described).toMatchObject({
-    provides: ["agent.runtime", "agent.conversations"],
+    provides: ["agent.runtime", "agent.conversations", "agent.submissions"],
     requires: ["storage.sql"],
-    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "execution", "workspace", "agent.submissions", "wakeups"],
+    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "execution", "workspace", "wakeups"],
   });
 });
 
 // With `wakeups` (SPEC §4.1, C4): every run is driven inside a run of the handler `runtime-pi.drive`,
 // which waits for it one slice at a time; nothing is left running after the event that started it.
 
-/** Stands for a channel: it reaches `agent.runtime` and `agent.conversations`, and records every result. */
+/** Stands for a channel: it reaches `agent.runtime`, `agent.conversations` and `agent.submissions`, and records every result. */
 function observer() {
   const results: (AppEvents["agent.settled"] | AppEvents["agent.failed"])[] = [];
-  let reached: { runtime: AgentRuntime; conversation(key: string): Promise<ConversationRef> } | undefined;
+  let reached: { runtime: AgentRuntime; submissions: AgentSubmissions; conversation(key: string): Promise<ConversationRef> } | undefined;
   const component = defineComponent({
     name: "observer",
     setup(pikit) {
       const runtimeHandle = pikit.use("agent.runtime");
       const conversations = pikit.use("agent.conversations");
+      const submissionsHandle = pikit.use("agent.submissions");
       pikit.on("agent.settled", (result) => void results.push(result));
       pikit.on("agent.failed", (result) => void results.push(result));
       return {
         start: (ctx) =>
           void (reached = {
             runtime: runtimeHandle.get(),
+            submissions: submissionsHandle.get(),
             conversation: async (key) => ({ key, agent: "scripted", conversationId: await conversations.get().create(ctx) }),
           }),
       };
@@ -191,7 +154,13 @@ function observer() {
     if (reached === undefined) throw new Error("the observer has not started");
     return reached;
   };
-  return { component, results, runtime: () => reach().runtime, conversation: (key: string) => reach().conversation(key) };
+  return {
+    component,
+    results,
+    runtime: () => reach().runtime,
+    submissions: () => reach().submissions,
+    conversation: (key: string) => reach().conversation(key),
+  };
 }
 
 /** Waits until `probe` holds, polling. */
@@ -242,7 +211,6 @@ function handDrivenWakeups() {
 test("with wakeups, a run whose worker died mid-run completes when the next app's wakeup fires, with no new message", async () => {
   const file = databaseFile();
   try {
-    const { submissions } = createMemorySubmissions();
     // The object's storage: its wakeup rows outlive each App, as a Durable Object's SQL does.
     const wakeups = createMemoryWakeups({ durable: true });
     // The dead worker admitted the message, asked for a wakeup to drive its run, and died mid-run.
@@ -255,22 +223,21 @@ test("with wakeups, a run whose worker died mid-run completes when the next app'
       },
     });
     const dead = await defineApp({ components: [wakeups, asks], logger: silentLogger }).create();
-    await submissions.admitted(conversation, "r-killed", dead.context());
     await dead.start();
     await dead.stop();
 
     const { agents, provider } = testComponents();
     const seen = observer();
     const app = await defineApp({
-      components: [sqliteStorage(file.path), agents, provider, memorySubmissions(submissions), wakeups, runtimePi, seen.component],
+      components: [sqliteStorage(file.path), agents, provider, wakeups, runtimePi, seen.component],
       logger: silentLogger,
     }).create();
     await app.start();
     try {
       await until(() => seen.results.length > 0, "the killed run's answer");
       expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r-killed", "completed"]]);
-      expect((await submissions.get(conversation, "r-killed", app.context()))?.kind).toBe("settled");
-      expect(await submissions.pending(app.context())).toEqual([]);
+      expect((await seen.submissions().get(conversation, "r-killed", app.context()))?.kind).toBe("settled");
+      expect(await seen.submissions().pending(app.context())).toEqual([]);
     } finally {
       await app.stop();
     }
@@ -293,11 +260,11 @@ test("with wakeups, a long run is driven over several slices: each cut asks agai
   const wakeups = handDrivenWakeups();
   const seen = observer();
   const app = await defineApp({
-    components: [storage, agents, provider, memorySubmissions(), wakeups.component, runtimePi, seen.component],
+    components: [storage, agents, provider, wakeups.component, runtimePi, seen.component],
     logger: silentLogger,
   }).create();
   await app.start();
-  // At start, with agent.submissions, a wakeup resumes what is pending: nothing here, so it ends at once.
+  // At start, a wakeup resumes what is pending: nothing here, so it ends at once.
   await wakeups.run(app).done;
   expect(wakeups.requests.has(DRIVE)).toBe(false);
   const conversation = await seen.conversation("test:slices");
@@ -340,7 +307,7 @@ test("with wakeups, a model retry's backoff is a wakeup at its time, not a timer
   const wakeups = handDrivenWakeups();
   const seen = observer();
   const app = await defineApp({
-    components: [storage, agents, provider, memorySubmissions(), wakeups.component, createRuntimePi({ settings: { retry: { baseDelayMs: 1_000 } } }), seen.component],
+    components: [storage, agents, provider, wakeups.component, createRuntimePi({ settings: { retry: { baseDelayMs: 1_000 } } }), seen.component],
     logger: silentLogger,
   }).create();
   await app.start();
@@ -365,18 +332,25 @@ test("with wakeups, a model retry's backoff is a wakeup at its time, not a timer
   await app.stop();
 }, 30_000);
 
-test("with wakeups, stop cancels a handler waiting on agent.submissions' pending() and asks again for the next app", async () => {
-  const { submissions } = createMemorySubmissions();
-  const hung: AgentSubmissions = { ...submissions, pending: () => new Promise(() => {}) };
-  const { storage, agents, provider } = testComponents();
+test("with wakeups, stop cancels a handler waiting on a run and asks again for the next app", async () => {
+  const { storage, agents, provider } = testComponents({
+    agents: [
+      scriptedAgent(
+        holdTool(
+          (context) =>
+            new Promise<string>((_, reject) => context.abortSignal?.addEventListener("abort", () => reject(context.abortSignal?.reason), { once: true })),
+        ),
+      ),
+    ],
+  });
   const wakeups = handDrivenWakeups();
-  const app = await defineApp({
-    components: [storage, agents, provider, memorySubmissions(hung), wakeups.component, runtimePi],
-    logger: silentLogger,
-  }).create();
+  const seen = observer();
+  const app = await defineApp({ components: [storage, agents, provider, wakeups.component, runtimePi, seen.component], logger: silentLogger }).create();
   await app.start();
-  // At start, with agent.submissions, resuming is asked for as a wakeup.
+  // At start, resuming is asked for as a wakeup.
   expect(wakeups.requests.has(DRIVE)).toBe(true);
+  await wakeups.run(app).done;
+  await seen.runtime().dispatch({ requestId: "r1", conversation: await seen.conversation("test:stop"), prompt: "hold" }, app.context());
   const run = wakeups.run(app);
   expect(await pending(run.done)).toBe(true);
 

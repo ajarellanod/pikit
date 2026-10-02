@@ -26,15 +26,14 @@
  *   `502 { requestId, error: "abandoned" }`: the runtime gave up on it (its agent or session is gone,
  *   or it waited too long): it was never answered and never will be; send it again.
  * - A `messageId` already in the conversation does not run again. With `agent.submissions` installed
- *   (`submissions-sql`), the POST answers with its outcome, as above (`202` while it is still
+ *   (runtime-pi provides it), the POST answers with its outcome, as above (`202` while it is still
  *   running). Without it, `409 { requestId, error: "duplicate" }`: its answer went to the POST that
  *   sent it first.
  *
  * `GET /v1/conversations/:id/messages/:messageId`, with `agent.submissions` installed: what became of
  * a message, as its POST would have answered (`200` / `202` / `502` / `409 aborted`), or `404` when
- * the conversation's current session has no such message (never sent, sent before a reset, or
- * settled longer ago than `submissions-sql` keeps them). Without it: `501`, since nothing keeps the
- * outcome of a message outside its session.
+ * the conversation's current session has no such message (never sent, or sent before a reset).
+ * Without it: `501`, since nothing keeps the outcome of a message outside its session.
  *
  * Delivery `[decision]`: the answer is returned in the HTTP response, not queued in `outbound.queue`
  * (`outbound-durable`) and sent by a `ChannelTransport`, as a chat channel's is. The channel
@@ -195,7 +194,7 @@ export default defineComponent({
       if ((await authenticated(request, ctx)) === undefined) return UNAUTHORIZED();
       const record = submissions.get();
       if (record === undefined) {
-        return json(501, { error: "not_supported", message: "this app keeps no record of messages' outcomes; install submissions-sql" });
+        return json(501, { error: "not_supported", message: "this app keeps no record of messages' outcomes; install a runtime that provides agent.submissions (runtime-pi)" });
       }
       const [, , , id = "", , message = ""] = new URL(request.url).pathname.split("/");
       const conversationId = segment(id);

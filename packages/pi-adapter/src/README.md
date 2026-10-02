@@ -53,14 +53,14 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 
 ## The runtime (`runtime.ts`)
 
-`createDurableRuntime(options)` is `agent.runtime` (`dispatch`, `abort`, `resume`), plus what a host
-uses: `createConversation`, `recover`, `abandon`, `holds`, `whenIdle`, `suspend`, `state`, `inspect`,
-`close`. The contracts and events are as consumers see them: `Admission` (`started`/`queued`/
+`createDurableRuntime(options)` is `agent.runtime` (`dispatch`, `abort`, `resume`) and
+`agent.submissions` (`submissions`, "Submissions" below), plus what a host uses: `createConversation`,
+`recover`, `abandon`, `holds`, `whenIdle`, `suspend`, `state`, `inspect`, `close`. The contracts and events are as consumers see them: `Admission` (`started`/`queued`/
 `duplicate`), `agent.dispatched`, `agent.started` (`resumed` for a run a previous worker left open),
 `agent.settled`/`agent.failed` with `AgentResult`.
 
-- **One Harness per storage**, opened at first use (`storage` is a `Storage` or an opener) and owned
-  until `close`. Opening reconfigures every conversation with live work, resumes the scheduler (it is
+- **One Harness per storage**, opened at first use over `db` (`storage.sql`, `openDurableStorage`)
+  and owned until `close`. Opening reconfigures every conversation with live work, resumes the scheduler (it is
   global: every conversation's work runs), announces the runs it resumes, and starts runs for inputs a
   failed run left queued. `suspend` closes it and keeps the runtime: the next call reopens it.
 - **Conversation ids.** `ConversationRef.conversationId` is the pi-durable conversation id (a number,
@@ -70,10 +70,10 @@ uses: `createConversation`, `recover`, `abandon`, `holds`, `whenIdle`, `suspend`
   (`conversations.registry` keeps pointing keys at ids); pi-durable's own `reset()` is not used, so
   `agent.state` starts fresh. A key/agent pair is recorded in the conversation's `pikit.conversation`
   document at each admission, so a settlement found later has its `ConversationRef`. An id that is
-  not a pi-durable one (a Pi 0.99 session id) is refused (`conversation_missing`); `recover` settles
-  the requests `agent.submissions` held for one aborted, unannounced.
-- **Admission.** `dispatch` runs in the conversation's line: a read-only commit looks the request id up
-  (`duplicate` if pi-durable has it) and, in the same commit, applies `prepare`; then
+  not a pi-durable one is refused (`conversation_missing`).
+- **Admission.** `dispatch` runs in the conversation's line: a commit looks the request id up
+  (`duplicate` if pi-durable has it) and, in the same commit, applies `prepare` and records the
+  admission's time (`pikit.admissions`, below); then
   `submit({ type: "input", requestId })`. The status the creating commit published (`queued` in the
   inbox, or `placed`) gives `queued` or `started`. Every input is a **follow-up**, and follow-ups are
   placed all at once (`followUpMode: "all"`; `steeringMode: "all"` too, though pikit submits no steer):
@@ -85,14 +85,12 @@ uses: `createConversation`, `recover`, `abandon`, `holds`, `whenIdle`, `suspend`
   `aborted`; any other reason (`model_error`, `no_model`, `faulted`, `orphaned`, `reset`) →
   `agent.failed` with `{ code: reason, message: detail }`. `messages` are the model messages from the
   first input's `pi.user` entry to the answer (system entries excluded); `usage` sums their assistant
-  and tool-result usage, what pi-durable adds to `pi.usage`. A withdrawn input is recorded aborted in
-  `agent.submissions` and not announced. Events wait for the admissions' `agent.dispatched`/
-  `agent.started`, so the order is kept.
-- **`agent.submissions` bridge** (transitional): `admitted` before `dispatch` resolves, `settled`
-  before the event (retried in the background on failure). `recover(conversation, requestIds)`
-  settles what pi-durable finished while nobody recorded it, grouped by run (`storedRunsOf`: answered
-  inputs by their answer; unanswered ones whose `pi.user` entries follow each other), and waits for
-  those still queued or running. `abandon` skips requests pi-durable still holds.
+  and tool-result usage, what pi-durable adds to `pi.usage`. A withdrawn input is logged aborted in
+  `answers` and not announced. Events wait for the admissions' `agent.dispatched`/
+  `agent.started`, so the order is kept. `recover(conversation, requestIds)` reconfigures and resumes
+  a conversation, reconciles it (below), and waits for those of `requestIds` still queued or running.
+  `abandon` settles the queued ones unanswered (reason `abandoned`, detail the why) in one commit, and
+  leaves one a run took to that run.
 - **Agents and state** (`agent.ts`). Tools live in the registry, one extension per agent
   (`pikit.agent.<name>`); each conversation's `pi.agent` selects only that extension, offers the
   turn's tools by name, and holds the model and `instructions` (the system prompt). `agent.state` is
@@ -113,6 +111,40 @@ uses: `createConversation`, `recover`, `abandon`, `holds`, `whenIdle`, `suspend`
 - **Contexts.** `toChord` re-attaches a pikit context's signal for Chord 1.0. Tasks run in the
   Harness's context (the app's values); a dispatching caller's values reach the run's events, not its
   tools.
+
+## Submissions (`submissions.ts`, `answers.ts`)
+
+pi-durable is the only record of what became of each message; `agent.submissions` reads it.
+
+- **`get`** is `submissionByRequest`: `queued`/`placed` is pending; a settled one is its run as
+  logged (`answers`), or, past the log's retention, its own settlement read from pi-durable (`toResult`).
+- **`pending`** is `scanSubmissions` of `queued` and `placed` inputs over the runtime's storage (on a
+  server one storage holds every conversation; in a Durable Object, the object's), by conversation,
+  ordered by submission id. `oldestAdmittedAt` comes from **`pikit.admissions`**, a session document
+  written in the commit before each `submit`: per conversation, the requests admitted and not yet
+  logged, with when (pi-durable records no time on a submission).
+- **`answers`** is the table `runtime_pi_answers` in `storage.sql`: one row per run, under its **run
+  key** (`UNIQUE`, so appending again changes nothing). An answered run is named by its answer entry,
+  which every input it took shares (exact); any other by its first input's submission id. Rows go
+  after `keepSettledDays` (pruned at open and at most hourly); the highest pruned `seq` makes a reader
+  behind it see `gap`. The cursor is `seq` (`AUTOINCREMENT`, never reused).
+- **One path for a run's end** (`settle`), in the conversation's line: keep the runs whose requests
+  are still in `pikit.admissions` (not logged yet), append them in one transaction, remove their
+  requests from `pikit.admissions` in one commit, then announce them. A crash between the append and
+  the commit appends the same keys again: nothing changes. Requests leave `pikit.admissions` once
+  logged, so a run is logged at most once, even after the log pruned it.
+- **Live** settlements come from the commits: the inputs a commit settles are grouped exactly
+  (`runsOf`), in the order the commits are observed. **`reconcile(conversation)`** handles what a
+  crash left: every request of the conversation in `pikit.admissions` that pi-durable holds settled,
+  grouped at once (`storedRunsOf`), so a batch is never split, and ordered by the commit sequence of
+  each run's answer entry (or last input entry; withdrawn inputs last). It runs at every opening (for
+  each conversation in `pikit.admissions`), on a redelivery of a settled request (`duplicate`), in
+  `recover`, and for `settled`.
+- **Unanswered grouping is a heuristic.** pi-durable records which run took an input only while it is
+  live (`pi.live.run.inputs`), not with its end. Reconciled unanswered inputs are one run when their
+  `pi.user` entries follow each other and they ended the same way; two failed runs with nothing
+  between them are taken for one, whose channel then tells the user once instead of twice. Exact
+  grouping needs pi-durable to keep a run's inputs with its end (docs/upstream, proposal 13).
 
 ### Gaps bridged (asserted in `pi-facts.test.ts`)
 
@@ -146,7 +178,9 @@ when only timed work is left (a pending timer keeps a Durable Object from being 
 ## Tests
 
 `*.test.ts` here: `runtime` (answers, busy conversations and batching, duplicates, abort, contexts),
-`recovery` (restarts, `agent.submissions`, retries, `suspend`, ids of Pi 0.99's time), `prepare` (and
+`recovery` (restarts, `agent.submissions`: a batch whose log a crash never wrote, logged once by a
+redelivery or the next start, retention and `gap`, abandoning; retries, `suspend`), `answers` (the
+log's feed suite, idempotent appends), `prepare` (and
 `agent.state`'s conformance), `usage`, `conformance` (the contracts' `agent.runtime` suite, every
 case), `pi-facts` (the pi-durable behaviours relied on: duplicate admission, follow-up batching,
 checkpoint shapes, inbox kick…), `sql`, `wakeups`, `models`, `credentials`, `execution`, `mcp`,

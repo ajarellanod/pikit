@@ -17,28 +17,24 @@ const registry = openRegistry(DEFAULT_REGISTRY);
 const composing = (installed: readonly string[], targets: readonly string[] = ["server"], from: Registry = registry): ProvidedCapabilities =>
   providedByManifests(installed.map((name) => from.manifest(name)), targets);
 
-test("a chat channel brings durable delivery, the record of submissions, a place for its cursor, and the storage they require; providers first", () => {
+test("a chat channel brings durable delivery, a place for its cursor, and the storage they require; providers first", () => {
   expect(offeredProviders(registry, ["channel-telegram"])).toEqual([
     { component: "storage-sqlite", capability: "storage.sql", for: "outbound-durable", why: "required" },
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram", why: "recommended" },
-    { component: "submissions-sql", capability: "agent.submissions", for: "channel-telegram", why: "recommended" },
     { component: "storage-kv-sql", capability: "storage.kv", for: "channel-telegram", why: "recommended" },
   ]);
 });
 
 test("what is already installed is not offered again", () => {
-  const all = ["outbound-durable", "storage-sqlite", "submissions-sql", "storage-kv-sql"];
+  const all = ["outbound-durable", "storage-sqlite", "storage-kv-sql"];
   expect(offeredProviders(registry, ["channel-telegram"], all, ["server"], composing(all))).toEqual([]);
-  // The queue, the record and the key-value store are there but not their storage: the storage is the user's to add (doctor says so).
-  const some = ["outbound-durable", "submissions-sql", "storage-kv-sql"];
+  // The queue and the key-value store are there but not their storage: the storage is the user's to add (doctor says so).
+  const some = ["outbound-durable", "storage-kv-sql"];
   expect(offeredProviders(registry, ["channel-telegram"], some, ["server"], composing(some))).toEqual([]);
 });
 
-test("HTTP brings only the record of submissions (its GET); tools do not bring a per-agent workspace, which is a choice, not an offer", () => {
-  expect(offeredProviders(registry, ["channel-http"])).toEqual([
-    { component: "storage-sqlite", capability: "storage.sql", for: "submissions-sql", why: "required" },
-    { component: "submissions-sql", capability: "agent.submissions", for: "channel-http", why: "recommended" },
-  ]);
+test("HTTP brings nothing (its GET reads the runtime's record of submissions); tools do not bring a per-agent workspace, which is a choice, not an offer", () => {
+  expect(offeredProviders(registry, ["channel-http"])).toEqual([]);
   for (const tool of ["tool-read", "tool-write", "tool-edit", "tool-bash"]) expect(offeredProviders(registry, [tool])).toEqual([]);
 });
 
@@ -56,25 +52,21 @@ test("a component that requires a capability marked offer brings its provider, a
   expect(offeredProviders(registry, ["conversations-kv"]).map((o) => o.capability)).not.toContain("agent.conversations");
 });
 
-test("the runtime brings the record of submissions, and the storage it requires", () => {
-  expect(offeredProviders(registry, ["runtime-pi"])).toEqual([
-    { component: "storage-sqlite", capability: "storage.sql", for: "submissions-sql", why: "required" },
-    { component: "submissions-sql", capability: "agent.submissions", for: "runtime-pi", why: "recommended" },
-  ]);
+test("the runtime brings nothing: it provides the record of submissions itself, and its storage is the user's choice", () => {
+  expect(offeredProviders(registry, ["runtime-pi"])).toEqual([]);
 });
 
 test("only providers that run on the project's targets are offered: on Cloudflare, the storage is storage-do", () => {
   // storage-sqlite does not run on Cloudflare, so storage-do is the one provider of storage.sql there.
-  expect(offeredProviders(registry, ["channel-http"], [], ["durable"])).toEqual([
-    { component: "storage-do", capability: "storage.sql", for: "submissions-sql", why: "required" },
-    { component: "submissions-sql", capability: "agent.submissions", for: "channel-http", why: "recommended" },
+  expect(offeredProviders(registry, ["conversations-kv"], [], ["durable"])).toEqual([
+    { component: "storage-do", capability: "storage.sql", for: "storage-kv-sql", why: "required" },
+    { component: "storage-kv-sql", capability: "storage.kv", for: "conversations-kv", why: "required" },
   ]);
 });
 
-test("on Cloudflare the Telegram webhook's object half brings the record of submissions and durable delivery; its Worker half nothing of the object's", () => {
+test("on Cloudflare the Telegram webhook's object half brings durable delivery (the runtime provides the record of submissions); its Worker half nothing of the object's", () => {
   const preset = ["storage-do", "storage-kv-sql", "deployment-cloudflare", "runtime-pi", "conversations-kv"];
   expect(offeredProviders(registry, ["channel-telegram-webhook"], preset, ["durable"], composing(preset, ["durable"]))).toEqual([
-    { component: "submissions-sql", capability: "agent.submissions", for: "channel-telegram-webhook", why: "required" },
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram-webhook", why: "recommended" },
   ]);
 });
@@ -130,9 +122,9 @@ test("a provider is offered in the App that misses it: one that goes only in the
 test("with a second provider, nothing is offered for it (the user's choice); the presets named their storage, and bring the rest over it", () => {
   const sqlite = registry.manifest("storage-sqlite");
   const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
-  expect(offeredProviders(two, ["channel-http"]).map((o) => o.component)).toEqual(["submissions-sql"]);
+  expect(offeredProviders(two, ["conversations-kv"]).map((o) => o.component)).toEqual(["storage-kv-sql"]);
   const telegram = registry.preset("telegram");
-  expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["submissions-sql", "outbound-durable", "storage-kv-sql"]);
+  expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["outbound-durable", "storage-kv-sql"]);
 });
 
 test("an optional capability with two providers is not offered, and is named as the user's choice instead of left out in silence", () => {
@@ -149,10 +141,9 @@ test("a required capability with two providers is named with its candidates too:
   const sqlite = registry.manifest("storage-sqlite");
   const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
   // The channel's chain needs storage.sql through each provider it brings; with two providers none comes.
-  expect(offeredProviders(two, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["outbound-durable", "submissions-sql", "storage-kv-sql"]);
+  expect(offeredProviders(two, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["outbound-durable", "storage-kv-sql"]);
   expect(unchosenProviders(two, ["channel-telegram"], [], ["server"])).toEqual([
     { capability: "storage.sql", why: "required", for: "outbound-durable", providers: ["storage-sqlite", "storage-postgres"] },
-    { capability: "storage.sql", why: "required", for: "submissions-sql", providers: ["storage-sqlite", "storage-postgres"] },
     { capability: "storage.sql", why: "required", for: "storage-kv-sql", providers: ["storage-sqlite", "storage-postgres"] },
   ]);
 });
@@ -178,7 +169,7 @@ test("with something installed and the composition unknown, nothing is offered n
   expect(offeredProviders(registry, ["channel-telegram"], ["tool-bash"], ["server"])).toEqual([]);
   expect(unchosenProviders(registry, ["channel-telegram"], ["tool-bash"], ["server"])).toEqual([]);
   // Nothing installed (a new project): the manifests are all there is.
-  expect(offeredProviders(registry, ["channel-http"], [], ["server"]).map((o) => o.component)).toEqual(["storage-sqlite", "submissions-sql"]);
+  expect(offeredProviders(registry, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["storage-sqlite", "outbound-durable", "storage-kv-sql"]);
 });
 
 test("what a composed project provides, per App, without the components about to be replaced and their Worker halves", () => {
@@ -204,23 +195,20 @@ test("what a composed project provides, per App, without the components about to
 });
 
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {
-  // The preset names its storage (`presets/http.yaml`): the runtime brings only its record of submissions.
+  // The preset names its storage (`presets/http.yaml`), and the runtime provides the record of submissions: nothing is brought.
   const http = registry.preset("http", []);
   expect(http).toContain("storage-sqlite");
   const withHttp = withOffers(registry, http);
-  const runtime = withHttp.order.indexOf("runtime-pi");
-  expect(withHttp.order.slice(runtime - 1, runtime + 1)).toEqual(["submissions-sql", "runtime-pi"]);
-  expect(withHttp.order.filter((c) => !http.includes(c))).toEqual(["submissions-sql"]);
-  expect(Object.fromEntries(withHttp.installedFor)).toEqual({ "submissions-sql": "runtime-pi" });
+  expect(withHttp.order).toEqual(http);
+  expect(Object.fromEntries(withHttp.installedFor)).toEqual({});
 
   // The preset's storage serves the outbox and the key-value store too: the chat channel brings only those two.
   const telegram = registry.preset("http", ["channel-telegram"]);
   const { order, installedFor } = withOffers(registry, telegram);
   const at = order.indexOf("channel-telegram");
   expect(order.slice(at - 2, at + 1)).toEqual(["outbound-durable", "storage-kv-sql", "channel-telegram"]);
-  expect(order.filter((c) => !telegram.includes(c))).toEqual(["submissions-sql", "outbound-durable", "storage-kv-sql"]);
+  expect(order.filter((c) => !telegram.includes(c))).toEqual(["outbound-durable", "storage-kv-sql"]);
   expect(Object.fromEntries(installedFor)).toEqual({
-    "submissions-sql": "runtime-pi",
     "outbound-durable": "channel-telegram",
     "storage-kv-sql": "channel-telegram",
   });

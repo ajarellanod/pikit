@@ -19,8 +19,9 @@ Conversations, sessions and every component's tables in Postgres, for a managed 
 - `storage-postgres` provides `storage.sql` (`SqlDatabase`, async so that Postgres fits, C5)
   and passes its suite; every component's tables keep their prefixes. The suite uses only SQL both
   engines accept (`BIGINT`, `BYTEA`, `storage.ts`); the provider rewrites `?` to `$n` and returns
-  `int8` values (`COUNT(*)` too) as numbers. Each SQLite-dialect consumer (`submissions-sql`,
-  `outbound-durable`) ports its own store file, as its header says.
+  `int8` values (`COUNT(*)` too) as numbers. Each SQLite-dialect consumer (`outbound-durable`)
+  ports its own store file, as its header says; runtime-pi's answers log stays with pi-durable's
+  storage, which is SQLite's.
 - The runtime's state is pi-durable's storage, which pikit runs over `storage.sql` through its SQLite
   core. A Postgres `storage.sql` cannot host that core as it is: conversations in Postgres need a
   Postgres backend of pi-durable's `Storage`, passing pi-durable's storage conformance (below).

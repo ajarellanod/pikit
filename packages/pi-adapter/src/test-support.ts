@@ -14,14 +14,13 @@ import { join } from "node:path";
 import type { Context as ChordContext } from "@earendil-works/chord";
 import { defineTool } from "@earendil-works/pi-durable";
 import { type AppContext, type AppEvents, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
-import type { AgentDefinition, AgentSubmissions, ConversationRef } from "@pikit/contracts";
+import type { AgentDefinition, ConversationRef, SqlDatabase } from "@pikit/contracts";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { type FauxResponseFactory, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
 import { openSqliteDatabase, type SqliteDatabase } from "./testing/sqlite.ts";
 import type { DurableTool } from "./agent.ts";
 import { createDurableRuntime, type DurableRuntime, type DurableRuntimeOptions } from "./runtime.ts";
-import { openDurableStorage } from "./sql.ts";
 
 /** What the provider was asked: the context of one model request. */
 export type ModelRequest = Parameters<FauxResponseFactory>[0];
@@ -110,7 +109,8 @@ export interface WorkerOptions {
   agents?: AgentDefinition[];
   tools?: Record<string, DurableTool>;
   providers?: Provider[];
-  submissions?: AgentSubmissions;
+  /** Wraps the worker's `storage.sql` (to make a write fail, as a crash would). */
+  db?(db: SqlDatabase): SqlDatabase;
   logger?: Logger;
   runtime?: Partial<DurableRuntimeOptions>;
 }
@@ -145,12 +145,11 @@ export async function openWorker(path: string, options: WorkerOptions = {}) {
   for (const provider of options.providers ?? [scriptedProvider()]) models.setProvider(provider);
   const ctx: AppContext = app.context();
   const runtime: DurableRuntime = createDurableRuntime({
-    storage: () => openDurableStorage(sqlite.database),
+    db: options.db?.(sqlite.database) ?? sqlite.database,
     agent: (name) => agents.find((agent) => agent.name === name),
     tool: (name) => options.tools?.[name],
     models,
     events: ctx,
-    ...(options.submissions !== undefined && { submissions: options.submissions }),
     ...options.runtime,
   });
 
