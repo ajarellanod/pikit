@@ -5,8 +5,9 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { AgentTool } from "@pikit/contracts";
+import { callTool } from "@pikit/pi-adapter/execution/testing";
 import toolWebsearchBrave, { KEY_SECRET, SEARCH_PATH } from "./index.ts";
 
 const KEY = "brave-test-key-0123456789";
@@ -67,7 +68,11 @@ async function installed(secrets: Record<string, string> = { [KEY_SECRET]: KEY }
   return { tool, stop: () => app.stop() };
 }
 
-const search = (tool: AgentTool, params: Record<string, unknown>) => tool.execute("call-1", params, () => {}, undefined, invocation, BACKGROUND_CONTEXT);
+/** One call, as the runtime makes it: its text, and its error (the message pi-durable gives the model) when it failed. */
+async function search(tool: AgentTool, params: Record<string, unknown>): Promise<{ text: string; error?: string }> {
+  const result = await callTool(tool, params);
+  return result.isError ? { text: result.text, error: result.diagnostics.map((d) => d.message).join(" ") } : { text: result.text };
+}
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [secretsOf({}), toolWebsearchBrave], logger: silentLogger }).create();
@@ -83,7 +88,7 @@ test("what setup declares: component.json's provides / requires / optional come 
 test("it provides the tool websearch with replay safe", async () => {
   const s = await installed();
 
-  expect([s.tool.name, (s.tool as unknown as { replay: string }).replay]).toEqual(["websearch", "safe"]);
+  expect([s.tool.name, s.tool.replay]).toEqual(["websearch", "safe"]);
   await s.stop();
 });
 
@@ -98,7 +103,7 @@ test("it asks Brave with the key from secrets and returns the results as plain t
       },
     });
   const s = await installed();
-  const text = textOf(await search(s.tool, { query: "pikit agents", count: 2 }));
+  const text = (await search(s.tool, { query: "pikit agents", count: 2 })).text;
   const request = received.at(-1);
 
   expect(request?.path).toBe(SEARCH_PATH);
@@ -112,7 +117,7 @@ test("it asks Brave with the key from secrets and returns the results as plain t
 test("five results by default, and a search with none says so", async () => {
   answer = () => Response.json({ web: { results: [] } });
   const s = await installed();
-  const text = textOf(await search(s.tool, { query: "zzqx" }));
+  const text = (await search(s.tool, { query: "zzqx" })).text;
 
   expect(received.at(-1)?.query.get("count")).toBe("5");
   expect(text).toBe('No results for "zzqx".');
@@ -123,25 +128,22 @@ test("without BRAVE_API_KEY it fails clearly, and asks Brave nothing", async () 
   const s = await installed({});
   const before = received.length;
 
-  await expect(search(s.tool, { query: "pikit" })).rejects.toThrow("websearch: BRAVE_API_KEY is not set");
+  expect((await search(s.tool, { query: "pikit" })).error).toContain("websearch: BRAVE_API_KEY is not set");
   expect(received.length).toBe(before);
   await s.stop();
 });
 
 test("a refused key or a quota fails with Brave's status, and never shows the key", async () => {
   const refused = await installed({ [KEY_SECRET]: "wrong-key" });
-  const error = await search(refused.tool, { query: "pikit" }).then(
-    () => new Error("it answered"),
-    (reason: unknown) => reason as Error,
-  );
+  const error = (await search(refused.tool, { query: "pikit" })).error;
   await refused.stop();
 
-  expect(error.message).toBe("websearch: Brave Search answered HTTP 401: the key in BRAVE_API_KEY was refused");
-  expect(error.message).not.toContain("wrong-key");
+  expect(error).toBe("websearch: Brave Search answered HTTP 401: the key in BRAVE_API_KEY was refused");
+  expect(error).not.toContain("wrong-key");
 
   answer = () => new Response("slow down", { status: 429 });
   const limited = await installed();
-  await expect(search(limited.tool, { query: "pikit" })).rejects.toThrow("HTTP 429: the key's rate limit or monthly quota is reached");
+  expect((await search(limited.tool, { query: "pikit" })).error).toContain("HTTP 429: the key's rate limit or monthly quota is reached");
   await limited.stop();
 });
 

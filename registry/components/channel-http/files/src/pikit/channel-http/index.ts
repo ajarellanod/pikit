@@ -161,7 +161,7 @@ export default defineComponent({
         runtime: runtime.get(),
         key: conversationKey(conversationId),
         beforeDispatch: (conversation) => {
-          waiter = replies.expect(conversation.sessionId, requestId);
+          waiter = replies.expect(conversation.conversationId, requestId);
         },
       }).catch((error: unknown) => {
         waiter?.cancel();
@@ -217,7 +217,7 @@ export default defineComponent({
       }
       const reset = await conversations.get().reset(conversationKey(conversationId), ctx);
       if (reset === undefined) return json(404, { error: "not_found" });
-      return json(200, { conversationId, previousSessionId: reset.previousSessionId, sessionId: reset.newSessionId });
+      return json(200, { conversationId, previousRuntimeConversationId: reset.previousConversationId, runtimeConversationId: reset.newConversationId });
     });
 
     return {

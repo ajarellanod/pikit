@@ -25,7 +25,7 @@
   ],
   "replay": {
     "tools": {
-      "write": "never"
+      "write": "unsafe"
     }
   },
   "dependencies": {

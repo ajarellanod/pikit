@@ -39,7 +39,7 @@ import channelTelegramWebhook, { worker as channelTelegramWebhookWorker } from "
 
 // The Worker's App: secrets, actor.mailbox (an RPC to the object), http.route's server…
 export const worker = defineApp({ components: [/* … */ channelTelegramWebhookWorker], config: workerConfig });
-// The Durable Object's App: the router, the runtime, sessions, storage, submissions, wakeups…
+// The Durable Object's App: the router, the runtime, the registry, storage, submissions, wakeups…
 export default defineApp({ components: [/* … */ channelTelegramWebhook], config });
 ```
 
@@ -170,7 +170,7 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
   again is recognised by its message id and not run twice.
 - **Conversations:** each private chat is one conversation, `telegram:<chat id>`, the keys
   `channel-telegram` makes.
-- **Commands:** `/new` (or `/reset`) starts a new conversation; the old one is kept in its session.
+- **Commands:** `/new` (or `/reset`) starts a new conversation; the old one is kept.
   `/start` and `/help` explain. `/login` in a chat that may talk already says so, and never reaches
   the agent (it may hold the password). Any other command goes to the agent as text.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`). When the agent

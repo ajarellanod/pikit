@@ -6,11 +6,13 @@
 
 import { afterAll, expect, test } from "bun:test";
 import { type App, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
-import { type AgentTool, defineAgent, type KeyValueStorage } from "@pikit/contracts";
+import { type AgentTool, defineAgent, type KeyValueStorage, type SqlDatabase } from "@pikit/contracts";
 import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
-import { createPiRuntime, modelsFrom, type SessionStore } from "@pikit/pi-adapter";
+import { createDurableRuntime, modelsFrom, openDurableStorage } from "@pikit/pi-adapter";
+import { BACKGROUND_CONTEXT, withAbortSignal } from "@pikit/pi-adapter/execution";
+import { callTool } from "@pikit/pi-adapter/execution/testing";
 import { createFakeMcpServer, type FakeMcpServer, type FakeMcpTool } from "@pikit/pi-adapter/mcp/testing";
-import { type ModelRequest, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing/neutral";
+import { type ModelRequest, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
 import toolMcp, { type SeedListing } from "./index.ts";
 import { seed } from "./seed.ts";
 
@@ -101,17 +103,22 @@ function errorsLogger(): Logger & { errors: string[] } {
   return { ...silentLogger, errors, error: (message) => void errors.push(message) };
 }
 
-const invocation = { invocationId: "invocation-1", operationId: "operation-1", turnId: "turn-1", getMemo: async () => undefined, setMemo: async () => {} };
-
-/** Calls `tool` as Pi's harness does, outside a run. */
-function call(tool: AgentTool | undefined, params: Record<string, unknown>, signal?: AbortSignal) {
+/**
+ * Calls `tool` as the runtime does, outside a run: its text, and whether it failed. A throw is a failed
+ * call whose text is the error's message, as pi-durable gives it to the model.
+ */
+async function call(tool: AgentTool | undefined, args: Record<string, unknown>, signal?: AbortSignal): Promise<{ text: string; isError: boolean }> {
   if (tool === undefined) throw new Error("no such tool");
-  const context = { abortSignal: signal, value: () => undefined, toString: () => "test" };
-  return tool.execute("call-1", params, () => {}, undefined, invocation, context as never);
+  const outcome = await callTool(tool, args, signal === undefined ? {} : { context: withAbortSignal(signal, BACKGROUND_CONTEXT) });
+  const thrown = outcome.diagnostics.filter((d) => d.code === "tool_error").map((d) => d.message);
+  return { text: [outcome.text, ...thrown].filter((part) => part !== "").join("\n"), isError: outcome.isError };
 }
 
-function textOf(result: { content: { type: string; text?: string }[] }): string {
-  return result.content.flatMap((part) => (part.type === "text" && part.text !== undefined ? [part.text] : [])).join("");
+/** The text of a call that succeeded. */
+async function textOf(result: Promise<{ text: string; isError: boolean }> | { text: string; isError: boolean }): Promise<string> {
+  const settled = await result;
+  if (settled.isError) throw new Error(settled.text);
+  return settled.text;
 }
 
 async function startError(config: Record<string, unknown>, extra: ComponentDefinition[] = []): Promise<string> {
@@ -144,11 +151,10 @@ test("at start each tool takes its description and parameters from the server, a
   const url = serve(createFakeMcpServer({ tools: WIKI_TOOLS }));
   const s = await installed({ servers: { wiki: { url, tools: ["ask_question", "open_issue", "no_arguments"] } } });
   const ask = s.tools.get("wiki_ask_question");
-  expect(ask?.label).toBe("Ask a question");
   expect(ask?.description).toBe("Asks a question about a repository.");
   expect(ask?.parameters).toMatchObject({ type: "object", properties: { repoName: { type: "string" } }, required: ["repoName", "question"] });
   expect(ask?.replay).toBe("safe");
-  expect(s.tools.get("wiki_open_issue")?.replay).toBe("never");
+  expect(s.tools.get("wiki_open_issue")?.replay).toBe("unsafe");
   // A server that gives no description or properties: the name, and an empty object.
   expect(s.tools.get("wiki_no_arguments")?.description).toBe("no_arguments");
   expect(s.tools.get("wiki_no_arguments")?.parameters).toMatchObject({ type: "object", properties: {} });
@@ -157,8 +163,8 @@ test("at start each tool takes its description and parameters from the server, a
 test("a call reaches the server's tool with its arguments and returns its content", async () => {
   const server = createFakeMcpServer({ tools: WIKI_TOOLS });
   const s = await installed({ servers: { wiki: { url: serve(server), tools: ["ask_question", "no_arguments"] } } });
-  expect(textOf(await call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "what?" }))).toBe("pikit: it is a kit");
-  expect(textOf(await call(s.tools.get("wiki_no_arguments"), {}))).toBe("{}");
+  expect(await textOf(call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "what?" }))).toBe("pikit: it is a kit");
+  expect(await textOf(call(s.tools.get("wiki_no_arguments"), {}))).toBe("{}");
   // One session, opened at start; never the server-to-client GET stream.
   expect(server.sessionsOpened).toBe(1);
   expect(server.requests.some((r) => r.method === "GET")).toBe(false);
@@ -166,8 +172,8 @@ test("a call reaches the server's tool with its arguments and returns its conten
 
 test("a failure the server reports (isError) fails the call with its text", async () => {
   const s = await installed({ servers: { wiki: { url: serve(createFakeMcpServer({ tools: WIKI_TOOLS })), tools: ["open_issue"] } } });
-  await expect(call(s.tools.get("wiki_open_issue"), { title: "" })).rejects.toThrow("a title is required");
-  expect(textOf(await call(s.tools.get("wiki_open_issue"), { title: "bug" }))).toBe("opened #7");
+  await expect(textOf(call(s.tools.get("wiki_open_issue"), { title: "" }))).rejects.toThrow("a title is required");
+  expect(await textOf(call(s.tools.get("wiki_open_issue"), { title: "bug" }))).toBe("opened #7");
 });
 
 test("a tool the server does not have stops the start, naming the ones it has", async () => {
@@ -186,7 +192,7 @@ test("when the server forgets the session, the call connects again and is sent o
   const s = await installed({ servers: { wiki: { url: serve(server), tools: ["ask_question"] } } });
   server.expireSessions();
   const before = server.requests.filter((r) => r.rpc === "tools/call").length;
-  expect(textOf(await call(s.tools.get("wiki_ask_question"), { repoName: "pi", question: "?" }))).toBe("pi: it is a kit");
+  expect(await textOf(call(s.tools.get("wiki_ask_question"), { repoName: "pi", question: "?" }))).toBe("pi: it is a kit");
   expect(server.sessionsOpened).toBe(2);
   // The first try was refused (404) before running; the second ran it.
   expect(server.requests.filter((r) => r.rpc === "tools/call").length - before).toBe(2);
@@ -220,7 +226,7 @@ test("a call ends when its run is cancelled, and the server is told", async () =
   const pending = call(s.tools.get("wiki_slow"), {}, controller.signal);
   while (!server.requests.some((r) => r.rpc === "tools/call")) await Bun.sleep(2);
   controller.abort(new Error("run cancelled"));
-  await expect(pending).rejects.toThrow();
+  expect((await pending).isError).toBe(true);
   while (!server.requests.some((r) => r.rpc === "notifications/cancelled")) await Bun.sleep(2);
 });
 
@@ -261,13 +267,12 @@ test("with a kept listing, a start makes no request and describes the tools from
   const s = await installed(config, [kvOf(storage)]);
   expect(server.requests.length).toBe(before);
   const ask = s.tools.get("wiki_ask_question");
-  expect(ask?.label).toBe("Ask a question");
   expect(ask?.description).toBe("Asks a question about a repository.");
   expect(ask?.parameters).toMatchObject({ type: "object", properties: { repoName: { type: "string" } }, required: ["repoName", "question"] });
   expect(ask?.replay).toBe("safe");
-  expect(s.tools.get("wiki_open_issue")?.replay).toBe("never");
+  expect(s.tools.get("wiki_open_issue")?.replay).toBe("unsafe");
 
-  expect(textOf(await call(ask, { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+  expect(await textOf(call(ask, { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
   expect(server.requests.slice(before).flatMap((r) => (r.rpc === undefined ? [] : [r.rpc]))).toEqual(["initialize", "notifications/initialized", "tools/list", "tools/call"]);
 });
 
@@ -302,8 +307,8 @@ test("a server that is down does not stop a start that has its listing: its call
 
   const s = await installed(config, [kvOf(storage)]);
   expect(s.tools.get("wiki_ask_question")?.description).toBe("Asks a question about a repository.");
-  await expect(call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" })).rejects.toThrow('tool-mcp: the MCP server "wiki" could not be reached');
-  expect(textOf(await call(s.tools.get("other_ask_question"), { repoName: "pi", question: "?" }))).toBe("pi: it is a kit");
+  await expect(textOf(call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" }))).rejects.toThrow('tool-mcp: the MCP server "wiki" could not be reached');
+  expect(await textOf(call(s.tools.get("other_ask_question"), { repoName: "pi", question: "?" }))).toBe("pi: it is a kit");
 });
 
 test("with storage.kv but no kept listing, a server that cannot be reached still stops the start", async () => {
@@ -331,7 +336,7 @@ test("each connection lists the tools again: the tools and the kept listing foll
   server.expireSessions();
   await call(ask, { repoName: "pikit", question: "?" });
   expect(ask?.description).toBe("Asks, version 3.");
-  expect(ask?.replay).toBe("never");
+  expect(ask?.replay).toBe("unsafe");
   expect(await storage.namespace("tool-mcp").get("server/wiki")).toMatchObject({ tools: { ask_question: { description: "Asks, version 3." } } });
 });
 
@@ -345,13 +350,13 @@ test("a named tool the server no longer lists fails its calls and is logged; the
 
   const logger = errorsLogger();
   const s = await installed(config, [kvOf(storage)], logger);
-  await expect(call(s.tools.get("wiki_open_issue"), { title: "bug" })).rejects.toThrow(
+  await expect(textOf(call(s.tools.get("wiki_open_issue"), { title: "bug" }))).rejects.toThrow(
     'tool-mcp: the MCP server "wiki" no longer lists the tool "open_issue" (it has: ask_question, no_arguments, slow)',
   );
   expect(logger.errors).toEqual(['tool-mcp: the MCP server "wiki" no longer lists the tool "open_issue": its calls fail']);
   expect(server.requests.some((r) => r.rpc === "tools/call")).toBe(false);
   // The other tools still answer.
-  expect(textOf(await call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+  expect(await textOf(call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
 
   // The kept listing keeps the tool's last description: a start does not stop the app over it.
   const before = server.requests.length;
@@ -397,11 +402,10 @@ test("with a seed for the server's URL and nothing kept, a start makes no reques
       const s = await installed({ servers: { wiki: { url, tools: ["ask_question", "open_issue"] } } }, extra);
       expect(server.requests).toHaveLength(0);
       const ask = s.tools.get("wiki_ask_question");
-      expect(ask?.label).toBe("Ask a question");
       expect(ask?.description).toBe("Asks, from the seed.");
       expect(ask?.parameters).toMatchObject({ properties: { repoName: { type: "string" } }, required: ["repoName", "question"] });
       expect(ask?.replay).toBe("safe");
-      expect(s.tools.get("wiki_open_issue")?.replay).toBe("never");
+      expect(s.tools.get("wiki_open_issue")?.replay).toBe("unsafe");
     }
   });
   expect(await storage.namespace("tool-mcp").get("server/wiki")).toBeUndefined();
@@ -409,7 +413,7 @@ test("with a seed for the server's URL and nothing kept, a start makes no reques
   // The first call connects and lists: the tools follow the server, and the listing is kept.
   await withSeed({ wiki: seededWiki(url) }, async () => {
     const s = await installed({ servers: { wiki: { url, tools: ["ask_question"] } } }, [kvOf(storage)]);
-    expect(textOf(await call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
+    expect(await textOf(call(s.tools.get("wiki_ask_question"), { repoName: "pikit", question: "?" }))).toBe("pikit: it is a kit");
     expect(s.tools.get("wiki_ask_question")?.description).toBe("Asks a question about a repository.");
   });
   expect(await storage.namespace("tool-mcp").get("server/wiki")).toMatchObject({ url, tools: { ask_question: { description: "Asks a question about a repository." } } });
@@ -494,30 +498,31 @@ test("setup refuses a server name that cannot start a tool name, and two tools w
 });
 
 test("in a real run, the model sees what the server described at start, its call reaches the server, and a reported failure is a failed call", async () => {
-  // When Pi reads a tool: runtime-pi resolves agents' tool names when a conversation opens (after every
-  // start), and Pi reads description, parameters and replay from that same object at each model call.
+  // When pi-durable reads a tool: the runtime installs agents' tools by name when a conversation is
+  // configured (after every start), and pi-durable reads description, parameters and replay from that
+  // same object at each model request.
   const server = createFakeMcpServer({ tools: WIKI_TOOLS });
   const agents = [defineAgent({ name: "researcher", model: "faux/scripted", tools: ["wiki_ask_question", "wiki_open_issue"] })];
   const fixtures = testComponents({ agents });
   const settled: string[] = [];
-  let sessions!: SessionStore;
+  let sql!: SqlDatabase;
   let tools!: { get(name: string): AgentTool | undefined };
   const reader = defineComponent({
     name: "runtime-reader",
     setup(pikit) {
-      const store = pikit.use("sessions.store");
+      const storage = pikit.use("storage.sql");
       const provided = pikit.useKeyed("agent.tool");
       pikit.on("agent.settled", (payload) => void settled.push(payload.requestId));
       return {
         start() {
-          sessions = store.get();
+          sql = storage.get();
           tools = provided;
         },
       };
     },
   });
   const app = await defineApp({
-    components: [fixtures.sessions, toolMcp, reader],
+    components: [fixtures.storage, toolMcp, reader],
     config: { "tool-mcp": { servers: { wiki: { url: serve(server), tools: ["ask_question", "open_issue"] } } } },
     logger: silentLogger,
   }).create();
@@ -525,21 +530,19 @@ test("in a real run, the model sees what the server described at start, its call
   stops.push(() => app.stop());
 
   const requests: ModelRequest[] = [];
-  const runtime = createPiRuntime({
-    sessions,
+  const runtime = createDurableRuntime({
+    storage: () => openDurableStorage(sql),
     agent: (name) => agents.find((agent) => agent.name === name),
     tool: (name) => tools.get(name),
-    models: modelsFrom([scriptedProvider({ onRequest: (request) => void requests.push(request) })]),
+    models: modelsFrom([scriptedProvider({ onRequest: (request) => void requests.push(structuredClone(request)) })]),
     events: app.context(),
   });
   stops.push(() => runtime.close(app.context()));
-  const session = await sessions.create({}, app.context());
-  await session.close(app.context());
-  const conversation = { key: "test:researcher", agent: "researcher", sessionId: session.metadata.id };
+  const conversation = { key: "test:researcher", agent: "researcher", conversationId: await runtime.createConversation(app.context()) };
   await runtime.dispatch({ requestId: "r-1", conversation, prompt: 'call: wiki_ask_question {"repoName":"pikit","question":"what?"}' }, app.context());
   while (!settled.includes("r-1")) await Bun.sleep(5);
 
-  // Pi 0.99 gives the model its tools in the transcript: a system message's `toolsAdded`.
+  // pi-durable gives the model its tools in the transcript: a system message's `toolsAdded`.
   const offered = requests[0]?.messages
     .flatMap((message) => (message.role === "system" ? (message.toolsAdded ?? []) : []))
     .find((tool) => tool.name === "wiki_ask_question");
@@ -550,7 +553,7 @@ test("in a real run, the model sees what the server described at start, its call
   expect(JSON.stringify(result)).toContain("pikit: it is a kit");
   expect(server.requests.filter((r) => r.rpc === "tools/call")).toHaveLength(1);
 
-  // Pi's harness takes a failure only from a throw: an MCP isError must not be recorded as a success.
+  // An MCP isError is recorded as a failed call, with the server's text.
   await runtime.dispatch({ requestId: "r-2", conversation, prompt: 'call: wiki_open_issue {"title":""}' }, app.context());
   while (!settled.includes("r-2")) await Bun.sleep(5);
   const failed = [...(requests.at(-1)?.messages ?? [])].reverse().find((message) => message.role === "toolResult");

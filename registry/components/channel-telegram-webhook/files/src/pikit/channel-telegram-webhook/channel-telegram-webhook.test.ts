@@ -63,7 +63,7 @@ function memoryRegistry(resets: string[]) {
   let sessions = 0;
   const registry: ConversationRegistry = {
     async resolve(key, agent) {
-      const found = pointers.get(key) ?? { key, agent, sessionId: `s${++sessions}` };
+      const found = pointers.get(key) ?? { key, agent, conversationId: `s${++sessions}` };
       pointers.set(key, found);
       return found;
     },
@@ -71,10 +71,10 @@ function memoryRegistry(resets: string[]) {
     async reset(key) {
       const previous = pointers.get(key);
       if (previous === undefined) return undefined;
-      const conversation = { ...previous, sessionId: `s${++sessions}` };
+      const conversation = { ...previous, conversationId: `s${++sessions}` };
       pointers.set(key, conversation);
       resets.push(key);
-      return { conversation, previousSessionId: previous.sessionId, newSessionId: conversation.sessionId };
+      return { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
     },
   };
   return defineComponent({ name: "registry-test", setup: (pikit) => pikit.provide("conversations.registry", registry) });
@@ -534,7 +534,7 @@ test("an answer that ended while no wakeup ran is delivered at the next one, and
   // The App stops (a deploy, an eviction) and the run ends while nothing runs the channel.
   await first.app.stop();
   first.runtime.release();
-  const conversation = { key: `telegram:${OWNER.id}`, agent: "assistant", sessionId: "s1" };
+  const conversation = { key: `telegram:${OWNER.id}`, agent: "assistant", conversationId: "s1" };
   await until(async () => (await submissions.get(conversation, `telegram:${OWNER.id}:1`, first.app.context()))?.kind === "settled", "the run's end");
   expect(telegram.sent).toEqual([]);
 

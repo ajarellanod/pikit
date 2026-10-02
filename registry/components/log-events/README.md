@@ -16,11 +16,11 @@ The event's name is the line's message. The fields:
 
 | Event | Level | Fields |
 |---|---|---|
-| `agent.dispatched` | info | `conversation`, `agent`, `session`, `requestId`, `admission` (`started`, `queued`, `duplicate`) |
-| `agent.started` | info | `conversation`, `agent`, `session`, `requestId`, `resumed` |
-| `agent.settled` | info (`warn` when aborted) | `conversation`, `agent`, `session`, `requestId`, `requestIds`, `run` (`completed`, `aborted`), `messages`, `durationMs`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `totalTokens`, `cost` |
+| `agent.dispatched` | info | `conversation`, `agent`, `conversationId`, `requestId`, `admission` (`started`, `queued`, `duplicate`) |
+| `agent.started` | info | `conversation`, `agent`, `conversationId`, `requestId`, `resumed` |
+| `agent.settled` | info (`warn` when aborted) | `conversation`, `agent`, `conversationId`, `requestId`, `requestIds`, `run` (`completed`, `aborted`), `messages`, `durationMs`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `totalTokens`, `cost` |
 | `agent.failed` | error | the same, with `run: "failed"` and `errorCode` |
-| `conversation.reset` | info | `conversation`, `agent`, `session` (the new one), `previousSession` |
+| `conversation.reset` | info | `conversation`, `agent`, `conversationId` (the new one), `previousConversationId` |
 | `pipeline.halted` | info | `pipeline`, `stage`, `reason` |
 | `runtime.starting` / `ready` / `stopping` / `stopped` | info | none |
 
@@ -28,7 +28,7 @@ With a JSON-lines logger (as in a container) a run's end looks like this; the na
 and message keys are the logger's:
 
 ```json
-{"level":"info","msg":"agent.settled","conversation":"http:c1","agent":"assistant","session":"0199…","requestId":"m-42","requestIds":["m-42"],"run":"completed","messages":2,"durationMs":1840,"inputTokens":1200,"outputTokens":85,"cacheReadTokens":3400,"cacheWriteTokens":0,"totalTokens":4685,"cost":0.0071}
+{"level":"info","msg":"agent.settled","conversation":"http:c1","agent":"assistant","conversationId":"0199…","requestId":"m-42","requestIds":["m-42"],"run":"completed","messages":2,"durationMs":1840,"inputTokens":1200,"outputTokens":85,"cacheReadTokens":3400,"cacheWriteTokens":0,"totalTokens":4685,"cost":0.0071}
 ```
 
 The format is the logger's: this component passes a message and fields, and the logger that the
@@ -41,7 +41,7 @@ deployment gives the app (the console, or `deployment-docker`'s JSON lines) prin
   start times are kept in memory only, so a run that ends after a restart, in another worker, or
   after a Durable Object hibernated has no `durationMs`.
 - **`requestIds`** lists every message the run answered: the one that started it, then the ones
-  steered into it.
+  queued with it while the run before went.
 
 ## What it never logs
 

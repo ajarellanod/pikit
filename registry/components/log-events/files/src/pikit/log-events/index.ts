@@ -3,11 +3,11 @@
  * it is what turns these lines on; removing it turns them off. Where the lines go and in which
  * format (console, JSON lines in a container) is the logger's job, not this one.
  *
- *   agent.dispatched     conversation, agent, session, requestId, admission
- *   agent.started        conversation, agent, session, requestId, resumed
- *   agent.settled        conversation, agent, session, requestId, requestIds, run, messages,
+ *   agent.dispatched     conversation, agent, conversationId, requestId, admission
+ *   agent.started        conversation, agent, conversationId, requestId, resumed
+ *   agent.settled        conversation, agent, conversationId, requestId, requestIds, run, messages,
  *   agent.failed           durationMs?, tokens, cost, errorCode?
- *   conversation.reset   conversation, agent, session, previousSession
+ *   conversation.reset   conversation, agent, conversationId, previousConversationId
  *   pipeline.halted      pipeline, stage, reason
  *   runtime.*            no fields
  *
@@ -38,9 +38,9 @@ type Level = "debug" | "info" | "warn" | "error";
 export default defineComponent({
   name: "log-events",
   setup(pikit) {
-    /** Start time of each run in progress, by `session/requestId` (a run's id is its starter's). */
+    /** Start time of each run in progress, by `conversationId/requestId` (a run's id is its starter's). */
     const started = new Map<string, number>();
-    const runKey = (sessionId: string, requestId: string) => `${sessionId}/${requestId}`;
+    const runKey = (conversationId: string, requestId: string) => `${conversationId}/${requestId}`;
 
     /** Register a listener that logs one line and can never throw. */
     const log = <K extends keyof AppEvents & string>(
@@ -67,13 +67,13 @@ export default defineComponent({
     log("agent.dispatched", ({ conversation, admission }) => ({ level: "info", fields: admissionFields(conversation, admission) }));
 
     log("agent.started", ({ conversation, requestId, resumed }, ctx) => {
-      started.set(runKey(conversation.sessionId, requestId), ctx.clock.now());
+      started.set(runKey(conversation.conversationId, requestId), ctx.clock.now());
       if (started.size > MAX_RUNNING) started.delete(started.keys().next().value as string);
       return { level: "info", fields: { ...conversationFields(conversation), requestId, resumed } };
     });
 
     const ended = (result: AppEvents["agent.settled"] | AppEvents["agent.failed"], ctx: AppContext) => {
-      const key = runKey(result.conversation.sessionId, result.requestId);
+      const key = runKey(result.conversation.conversationId, result.requestId);
       const since = started.get(key);
       started.delete(key);
       const durationMs = since === undefined ? undefined : Math.max(0, ctx.clock.now() - since);

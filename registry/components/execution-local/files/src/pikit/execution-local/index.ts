@@ -1,5 +1,5 @@
 /**
- * execution-local: the agent's tools work on this server's filesystem and shell (Pi's `ExecutionEnv`,
+ * execution-local: the agent's tools work on this server's filesystem and shell (pi-durable's `ExecutionEnv`,
  * held by `createExecutionConformance`).
  *
  * It provides both `execution` (files) and `execution.shell` (commands) with Pi's own

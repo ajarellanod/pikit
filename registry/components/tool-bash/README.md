@@ -1,6 +1,6 @@
 # tool-bash
 
-Pi's own `bash` tool, for the agents that name it: it runs a shell command in the working directory and returns its output (the last lines when it is long), with an optional timeout.
+pi-durable's own `bash` tool, for the agents that name it: it runs a shell command in the working directory and returns its output (the last lines when it is long), with an optional timeout.
 
 - **Provides:** `agent.tool`, under the key `bash`.
 - **Requires:** `execution.shell` (for example `execution-local`).
@@ -23,7 +23,7 @@ pikit does not reimplement the tool; it is Pi's. The component adds only two thi
   A `workspace` without a shell makes every `bash` call fail (`workspace-local` has one);
 - It needs a real shell, so it requires `execution.shell`. An environment without one
   (`execution` only) cannot install it, and `pikit doctor` says so.
-- its replay: `"never"`: a command can do anything, so after a crash Pi reports the call as interrupted and the model decides whether to run it again.
+- its replay: `"unsafe"`: a command can do anything, so after a crash pi-durable reports the call as interrupted (with its output so far) and the model decides whether to run it again.
 
 ## Before you give it to an agent
 

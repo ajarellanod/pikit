@@ -24,9 +24,15 @@ pi-ai looks for them in this order:
    This is either OAuth tokens from a Claude Pro/Max login, or an API key. pi-ai refreshes OAuth
    tokens before they expire and writes the new ones back.
 2. Only when nothing is stored, the environment: `ANTHROPIC_API_KEY` (also `ANTHROPIC_OAUTH_TOKEN`
-   or `ANTHROPIC_AUTH_TOKEN`).
+   or `ANTHROPIC_AUTH_TOKEN`), then (pi-ai 1.0) workload identity federation, when
+   `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and `ANTHROPIC_IDENTITY_TOKEN_FILE` are
+   all set.
 
-The agent runtime refuses to start when neither exists.
+The agent runtime refuses to start when none of them exists.
+
+The OAuth login (pi-ai 1.0) first asks how to log in: `browser` (a callback on localhost) or
+`copy_code` (Anthropic's page shows a code to paste: for a login where the app runs, in Docker).
+`loginInteraction` in `@pikit/pi-adapter/credentials` answers every prompt, that one included.
 
 To log in with a Claude subscription, run pi-ai's OAuth flow and store the result in
 `model.credentials`. The `http` sample has a script for it (`samples/http/scripts/login.ts`).

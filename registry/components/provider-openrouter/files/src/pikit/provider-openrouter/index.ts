@@ -22,12 +22,11 @@
  */
 
 import { defineComponent } from "@pikit/core";
-import type { Provider } from "@pikit/pi-adapter";
-import { openrouterProvider } from "@pikit/pi-adapter/providers/openrouter";
+import { OPENROUTER_API_BASE, openrouterProvider } from "@pikit/pi-adapter/providers/openrouter";
 import Type from "typebox";
 
 /** Where pi-ai's catalogue puts every OpenRouter model: `<API_BASE>/v1`, or `<API_BASE>` itself. */
-export const API_BASE = "https://openrouter.ai/api";
+export const API_BASE = OPENROUTER_API_BASE;
 
 const Config = Type.Object({
   /** OpenRouter's API. A value, for a proxy or a test double. */
@@ -39,18 +38,9 @@ export default defineComponent({
   config: Config,
   setup(pikit, config) {
     // Building the provider opens nothing: no connection, no credential read until a request.
-    const provider = at(openrouterProvider(), config.apiBase.replace(/\/+$/, ""));
+    // The image and classifier models move with the chat ones (`openrouterProvider`'s `apiBase`).
+    const provider = openrouterProvider({ apiBase: config.apiBase });
     pikit.provideKeyed("model.provider", provider.id, provider);
   },
 });
 
-/** The provider with every model's address moved from under `API_BASE` to under `apiBase`. */
-function at(provider: Provider, apiBase: string): Provider {
-  if (apiBase === API_BASE) return provider;
-  const moved = (baseUrl: string) => (baseUrl.startsWith(API_BASE) ? `${apiBase}${baseUrl.slice(API_BASE.length)}` : baseUrl);
-  return {
-    ...provider,
-    ...(provider.baseUrl !== undefined && { baseUrl: moved(provider.baseUrl) }),
-    getModels: () => provider.getModels().map((model) => ({ ...model, baseUrl: moved(model.baseUrl) })),
-  };
-}

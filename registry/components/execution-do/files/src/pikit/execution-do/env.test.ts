@@ -1,15 +1,15 @@
 /**
- * execution-do's pi-durable environment (`durable-env.ts`), under `bun test` over the double of a
- * Durable Object's storage: pi-durable's `ExecutionEnv` contract (`@pikit/pi-adapter/durable/execution/testing`),
+ * execution-do's pi-durable environment (`env.ts`), under `bun test` over the double of a
+ * Durable Object's storage: pi-durable's `ExecutionEnv` contract (`@pikit/pi-adapter/execution/testing`),
  * pi-durable's own `read`, `write`, `edit` and `bash` working on it in a Harness turn, the `.git` fence,
  * and the object as the files' namespace. pikit runs the same on a real object in workerd (`tests/workerd`).
  */
 
 import { expect, test } from "bun:test";
-import { atCwd, BACKGROUND_CONTEXT, getOrThrow, harnessEnv } from "@pikit/pi-adapter/durable/execution";
-import { createDurableExecutionConformance, runToolCalls } from "@pikit/pi-adapter/durable/execution/testing";
-import { codingTool } from "@pikit/pi-adapter/durable/tools";
-import { objectExecution } from "./durable-env.test-support.ts";
+import { atCwd, BACKGROUND_CONTEXT, getOrThrow, harnessEnv } from "@pikit/pi-adapter/execution";
+import { createDurableExecutionConformance, runToolCalls } from "@pikit/pi-adapter/execution/testing";
+import { codingTool } from "@pikit/pi-adapter/tools";
+import { objectExecution } from "./env.test-support.ts";
 import { fakeDurableObjectStorage } from "./durable-object.test-support.ts";
 
 const ctx = BACKGROUND_CONTEXT;

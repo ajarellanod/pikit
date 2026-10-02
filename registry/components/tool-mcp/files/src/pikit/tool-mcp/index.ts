@@ -25,7 +25,7 @@
  *   - with neither, start reaches each server (`initialize`,
  *     `tools/list`), and one that cannot be reached, or lacks a named tool, stops the app (P5): the
  *     model would get a tool with no description or parameters.
- * - **Replay**: `"never"`, unless the server marks the tool read-only
+ * - **Replay**: `"unsafe"`, unless the server marks the tool read-only
  *   (`annotations.readOnlyHint`), then `"safe"`: a run resumed after a crash calls it again.
  * - **Credentials never in config.** `secret` names a secret, read through `secrets` at each request,
  *   holding a bearer token for the server. The model never sees it, nor any error that mentions it.
@@ -33,9 +33,9 @@
  *   (it restarted, or it expires idle ones) the call connects again and is sent once more: the server
  *   ran nothing. On Cloudflare a Durable Object may lose its memory at any time; its next call
  *   connects again (SPEC K6).
- * - **A failure the server reports** (an MCP result with `isError`) fails the call with its text.
+ * - **A failure the server reports** (an MCP result with `isError`) is an error result with its text.
  *
- * Transport: Streamable HTTP over `fetch`, through Pi's MCP client (`@pikit/pi-adapter/mcp`), with no
+ * Transport: Streamable HTTP over `fetch`, through Pi's MCP client (pi-mcp) (`@pikit/pi-adapter/mcp`), with no
  * long-lived server-to-client stream (SPEC §4.1, C4). Targets: `server` and `cloudflare`. A server run
  * as a local process (stdio) is not this component's.
  */
@@ -45,9 +45,9 @@ import { type AppContext, defineComponent, type Logger } from "@pikit/core";
 import {
   type CallToolResult,
   McpClient,
-  type McpAgentTool,
   McpSessionExpiredError,
-  mcpAgentTool,
+  type McpTool,
+  mcpTool,
   mcpHttpTransport,
   mcpToolName,
   type Tool,
@@ -136,7 +136,7 @@ export default defineComponent({
         const other = names.get(agentName);
         if (other !== undefined) throw new Error(`tool-mcp: "${other}" and "${name}/${remote}" would both be the tool "${agentName}"`);
         names.set(agentName, `${name}/${remote}`);
-        const mcp = mcpAgentTool({ name: agentName, label: `${name}: ${remote}`, call: (params, signal) => server.connection.call(remote, params, signal) });
+        const mcp = mcpTool({ name: agentName, label: `${name}: ${remote}`, call: (args, signal) => server.connection.call(remote, args, signal) });
         // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
         pikit.provideKeyed("agent.tool", agentName, mcp.tool);
         server.tools.push({ remote, mcp });
@@ -166,7 +166,7 @@ interface ServerEntry {
   url: string;
   secret: string | undefined;
   connection: Connection;
-  tools: { remote: string; mcp: McpAgentTool }[];
+  tools: { remote: string; mcp: McpTool }[];
   /** Whether start is over: from then on a listing that lacks a named tool is logged (start throws instead). */
   started: boolean;
 }
@@ -288,8 +288,8 @@ async function read(cache: KeyValueStore | undefined, server: ServerEntry, logge
   }
 }
 
-function describeTool(mcp: McpAgentTool, tool: KeptTool): void {
-  mcp.describe(tool, tool.annotations?.readOnlyHint === true ? "safe" : "never");
+function describeTool(mcp: McpTool, tool: KeptTool): void {
+  mcp.describe(tool, tool.annotations?.readOnlyHint === true ? "safe" : "unsafe");
 }
 
 /** What is kept of `tool` (in `storage.kv` and the seed): JSON, without the fields the server left out. */

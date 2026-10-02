@@ -1,12 +1,12 @@
 /**
- * For the tests only: execution-do's pi-durable environment (`durable-env.ts`) over a Durable Object's
+ * For the tests only: execution-do's pi-durable environment (`env.ts`) over a Durable Object's
  * `storage`, built from the same parts and defaults `index.ts` builds its environment from (files,
  * fenced git, just-bash with `node` in QuickJS), with no app around it. Used under `bun test` with the
  * double of `durable-object.test-support.ts` and in workerd on a real object (`tests/workerd`).
  */
 
-import type { ExecutionEnv } from "@pikit/pi-adapter/durable/execution";
-import { createDurableExecutionEnv } from "./durable-env.ts";
+import type { ExecutionEnv } from "@pikit/pi-adapter/execution";
+import { createDurableExecutionEnv } from "./env.ts";
 import { createFiles, type DurableObjectFilesStorage, type Files } from "./files.ts";
 import { createGit } from "./git.ts";
 import { createShell } from "./shell.ts";

@@ -8,11 +8,12 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSy
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { CONVERSATION, type ConversationRef, defineAgent } from "@pikit/contracts";
+import { type ConversationRef, defineAgent } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createPiRuntime, modelsFrom, type SessionStore, type WorkspaceProvider } from "@pikit/pi-adapter";
-import { createExecutionConformance, createWorkspaceConformance, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
-import { bindTool, createWriteTool } from "@pikit/pi-adapter/tools";
+import { createDurableRuntime, modelsFrom, openDurableStorage, type WorkspaceProvider } from "@pikit/pi-adapter";
+import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
+import { createWorkspaceConformance, openSqliteDatabase, scriptedProvider } from "@pikit/pi-adapter/testing";
+import { codingTool } from "@pikit/pi-adapter/tools";
 import workspaceLocal from "./index.ts";
 
 const directories: string[] = [];
@@ -27,7 +28,7 @@ function temporaryRoot(): string {
 }
 
 function conversation(agent: string, id = "1"): ConversationRef {
-  return { key: `test:${agent}:${id}`, agent, sessionId: `session-${agent}-${id}` };
+  return { key: `test:${agent}:${id}`, agent, conversationId: `${agent}-${id}` };
 }
 
 /** A started app with this component, and the `workspace` it provides. */
@@ -54,8 +55,8 @@ for (const c of createWorkspaceConformance(async () => {
   test(`workspace-local ${c.group}: ${c.name}`, () => c.run());
 }
 
-// An agent's directory is Pi's ExecutionEnv, with a shell.
-for (const c of createExecutionConformance(async () => {
+// An agent's directory is pi-durable's ExecutionEnv, with a shell.
+for (const c of createDurableExecutionConformance(async () => {
   const { app, workspace } = await started({ root: temporaryRoot() });
   const { env } = await workspace.resolve(conversation("support"), app.context());
   return { env, shell: true, dispose: () => app.stop() };
@@ -133,53 +134,35 @@ test("a command does not see the server's variables, only the allowed ones", asy
 
 test("in real runs, a file agent A's write tool writes is in A's directory and not in B's", async () => {
   const root = temporaryRoot();
-  // tool-write's own wiring (components never import each other): the agent's workspace, from the run.
+  // The runtime gives each tool call its conversation's workspace (runtime-pi's wiring: `harnessEnv`).
   let workspace!: WorkspaceProvider;
-  const write = bindTool(createWriteTool(), {
-    env: async (context) => {
-      const ref = context.value(CONVERSATION);
-      if (ref === undefined) throw new Error("a call outside a run");
-      return (await workspace.resolve(ref, context)).env;
-    },
-    replay: "never",
-  });
   const agents = ["alpha", "beta"].map((name) => defineAgent({ name, model: "faux/scripted", tools: ["write"] }));
-  const fixtures = testComponents({ agents });
-  let sessions!: SessionStore;
   const settled: string[] = [];
   const reader = defineComponent({
     name: "workspace-reader",
     setup(pikit) {
       const provided = pikit.use("workspace");
-      const store = pikit.use("sessions.store");
       pikit.on("agent.settled", (payload) => void settled.push(payload.requestId));
-      return {
-        start() {
-          workspace = provided.get();
-          sessions = store.get();
-        },
-      };
+      return { start: () => void (workspace = provided.get()) };
     },
   });
-  const app = await defineApp({
-    components: [workspaceLocal, fixtures.sessions, reader],
-    config: { "workspace-local": { root } },
-    logger: silentLogger,
-  }).create();
+  const app = await defineApp({ components: [workspaceLocal, reader], config: { "workspace-local": { root } }, logger: silentLogger }).create();
   await app.start();
-  const runtime = createPiRuntime({
-    sessions,
+  const sqlite = openSqliteDatabase(":memory:");
+  const write = codingTool("write");
+  const runtime = createDurableRuntime({
+    storage: () => openDurableStorage(sqlite.database),
     agent: (name) => agents.find((agent) => agent.name === name),
     tool: (name) => (name === "write" ? write : undefined),
     models: modelsFrom([scriptedProvider()]),
     events: app.context(),
+    workspace: () => workspace,
   });
   /** A new conversation with `agent`, sent one message; resolves when its run has ended. */
   const ask = async (agent: string, prompt: string) => {
-    const session = await sessions.create({}, app.context());
-    await session.close(app.context());
+    const conversationId = await runtime.createConversation(app.context());
     const requestId = `r-${agent}`;
-    await runtime.dispatch({ requestId, conversation: { key: `test:${agent}`, agent, sessionId: session.metadata.id }, prompt }, app.context());
+    await runtime.dispatch({ requestId, conversation: { key: `test:${agent}`, agent, conversationId }, prompt }, app.context());
     while (!settled.includes(requestId)) await Bun.sleep(5);
   };
 
@@ -191,6 +174,7 @@ test("in real runs, a file agent A's write tool writes is in A's directory and n
   expect(readFileSync(join(root, "beta", "other.md"), "utf8")).toBe("from beta");
   expect(existsSync(join(root, "alpha", "other.md"))).toBe(false);
   await runtime.close(app.context());
+  await sqlite.close();
   await app.stop();
 });
 

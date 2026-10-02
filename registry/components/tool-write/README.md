@@ -1,6 +1,6 @@
 # tool-write
 
-Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.
+pi-durable's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.
 
 - **Provides:** `agent.tool`, under the key `write`.
 - **Requires:** `execution` (for example `execution-local`).
@@ -20,7 +20,7 @@ defineAgent({ name: "ops", model: "anthropic/claude-sonnet-4-6", tools: ["write"
 pikit does not reimplement the tool; it is Pi's. The component adds only two things:
 - the environment it works on, read when the tool runs: in a run, the agent's own `workspace` when
   one is installed (`workspace-local` gives each agent a directory); otherwise `execution`;
-- its replay: `"never"`: it changes files, so after a crash Pi reports the call as interrupted and the model decides whether to write again.
+- its replay: `"unsafe"`: it changes files, so after a crash pi-durable reports the call as interrupted and the model decides whether to write again.
 
 ## Tests
 

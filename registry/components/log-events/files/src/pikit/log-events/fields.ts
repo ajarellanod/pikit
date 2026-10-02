@@ -11,9 +11,9 @@ import type { Admission, AgentResult, ConversationRef, ConversationReset } from 
 
 export type Fields = Record<string, string | number | boolean | string[]>;
 
-/** Who a line is about: the conversation key, its agent and its Pi session. */
+/** Who a line is about: the conversation key, its agent and its runtime conversation id. */
 export function conversationFields(conversation: ConversationRef): Fields {
-  return { conversation: conversation.key, agent: conversation.agent, session: conversation.sessionId };
+  return { conversation: conversation.key, agent: conversation.agent, conversationId: conversation.conversationId };
 }
 
 export function admissionFields(conversation: ConversationRef, admission: Admission): Fields {
@@ -40,8 +40,8 @@ export function resultFields(result: AgentResult, durationMs: number | undefined
 export function resetFields(reset: ConversationReset): Fields {
   return {
     ...conversationFields(reset.conversation),
-    previousSession: reset.previousSessionId,
-    session: reset.newSessionId,
+    previousConversationId: reset.previousConversationId,
+    conversationId: reset.newConversationId,
   };
 }
 

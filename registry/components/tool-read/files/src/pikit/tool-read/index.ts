@@ -1,37 +1,27 @@
 /**
- * tool-read: Pi's own `read` tool, for the agents that name it (`tools: ["read"]`). It reads a text
- * file (from a line, up to a number of lines) or an image, and truncates long files for the model.
+ * tool-read: pi-durable's own `read` tool, for the agents that name it (`tools: ["read"]`). It reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.
  *
  * pikit does not reimplement it (SPEC P1). This component adds only what the kit owns:
- * - the environment it works on, read when the tool runs: the agent's own `workspace` when one is
- *   installed (`workspace-local`: a directory per agent), otherwise `execution`. Any
- *   `execution` will do, with or without a shell;
- * - its replay, `"safe"`: it only reads, so a run resumed after a crash reads again (`agentTool`'s replay).
+ * - its replay, `"safe"`: it only reads, so a run resumed after a crash reads again (`codingTool` in @pikit/pi-adapter/tools);
+ * - what it needs installed: an `execution`, with or without a shell, and `workspace` if one is.
+ *
+ * The environment a call works on is not the tool's business: the runtime (runtime-pi) builds it for
+ * each call, the conversation's own `workspace` when one is installed (`workspace-local`: a directory
+ * per agent), otherwise `execution`.
  *
  * Targets: `server` and `cloudflare`, wherever an `execution` provider is installed.
  */
 
 import { defineComponent } from "@pikit/core";
-import { CONVERSATION } from "@pikit/contracts";
-import { bindTool, createReadTool } from "@pikit/pi-adapter/tools";
+import { codingTool } from "@pikit/pi-adapter/tools";
 
 export default defineComponent({
   name: "tool-read",
   setup(pikit) {
-    const environment = pikit.use("execution");
-    const workspace = pikit.useOptional("workspace");
-    const tool = bindTool(createReadTool(), {
-      // In a run, the agent's own workspace when one is installed; otherwise, and outside a run,
-      // `execution` as before.
-      async env(context) {
-        const conversation = context.value(CONVERSATION);
-        const workspaces = workspace.get();
-        if (workspaces === undefined || conversation === undefined) return environment.get();
-        return (await workspaces.resolve(conversation, context)).env;
-      },
-      replay: "safe",
-    });
+    // Required to install, not read: the runtime gives each call its environment.
+    pikit.use("execution");
+    pikit.useOptional("workspace");
     // Under the name the model calls it by: agents name it, and runtime-pi checks the two match.
-    pikit.provideKeyed("agent.tool", "read", tool);
+    pikit.provideKeyed("agent.tool", "read", codingTool("read"));
   },
 });
