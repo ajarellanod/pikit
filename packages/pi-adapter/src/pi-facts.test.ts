@@ -14,6 +14,7 @@ import {
   defineDoc,
   defineExtension,
   defineTool,
+  type EntryId,
   Harness,
   InboxDoc,
   LiveDoc,
@@ -46,15 +47,22 @@ function gated(text: string) {
 
 async function open(
   responses: FauxResponseStep[],
-  options: { registry?: ReturnType<typeof createRegistry>; now?: () => number; retry?: object; followUpMode?: "all" | "one-at-a-time" } = {},
+  options: {
+    registry?: ReturnType<typeof createRegistry>;
+    now?: () => number;
+    retry?: object;
+    followUpMode?: "all" | "one-at-a-time";
+    model?: { provider: string; modelId: string };
+  } = {},
 ) {
   const faux = fauxProvider();
   faux.setResponses(responses);
   const models = createModels();
   models.setProvider(faux.provider);
   const changes: CommitChange[][] = [];
+  const storage = new MemoryStorage();
   const harness = await Harness.open(
-    new MemoryStorage(),
+    storage,
     {
       models,
       registry: options.registry ?? createRegistry(),
@@ -65,10 +73,12 @@ async function open(
     ctx,
   );
   harness.subscribeCommits((publication) => void changes.push([...publication.changes]));
-  const conversation = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: MODEL } }, ctx);
+  const conversation = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: options.model ?? MODEL } }, ctx);
   const submissions = (filter: (record: SubmissionRecord) => boolean = () => true) =>
     changes.flat().flatMap((change) => (change.type === "submission" && filter(change.value) ? [change.value] : []));
-  return { harness, conversation, faux, changes, submissions };
+  /** The sequence of the commit that appended entry `id`. */
+  const commitOf = async (id: EntryId | undefined) => (id === undefined ? undefined : (await storage.entry(id, ctx))?.commitSeq);
+  return { harness, conversation, faux, changes, submissions, commitOf };
 }
 
 describe("pi-durable facts (1.0.0)", () => {
@@ -107,7 +117,7 @@ describe("pi-durable facts (1.0.0)", () => {
 
   test("followUpMode all: the follow-ups queued during a run start the next run together, in one commit, and settle with one answer (batching)", async () => {
     const gate = gated("one");
-    const { harness, conversation, changes } = await open([gate.step, fauxAssistantMessage("two and three")]);
+    const { harness, conversation, changes, commitOf } = await open([gate.step, fauxAssistantMessage("two and three")]);
     const first = await conversation.submit({ type: "input", content: "one", requestId: "r1" }, ctx);
     await gate.reached;
     const second = await conversation.submit({ type: "input", content: "two", requestId: "r2" }, ctx);
@@ -128,10 +138,30 @@ describe("pi-durable facts (1.0.0)", () => {
     // ...and the commit that ended it settled both (`runsOf`).
     const ending = changes.find((commit) => commit.some((change) => change.type === "submission" && change.value.id === second.id && change.value.status === "done"));
     expect(ending?.flatMap((change) => (change.type === "submission" && change.value.status === "done" ? [change.value.id] : []))).toEqual([second.id, third.id]);
-    // Their `pi.user` entries follow each other with nothing between (`storedRunsOf`).
-    if (two?.status !== "done" || three?.status !== "done") throw new Error("expected answers");
-    const between = await conversation.entries({ minEntryId: two.entry, maxEntryId: three.entry }, 100, undefined, ctx);
+    // Their `pi.user` entries were appended by that commit: they share its sequence, the first run's
+    // input has another (`storedRunsOf`).
+    const [seqOne, seqTwo, seqThree] = await Promise.all([one, two, three].map((record) => commitOf(record?.entry)));
+    expect(seqTwo).toBeNumber();
+    expect(seqThree).toBe(seqTwo);
+    expect(seqOne).not.toBe(seqTwo);
+    await harness.close(ctx);
+  });
+
+  test("two runs that failed in a row, with nothing between their inputs, placed them in different commits (storedRunsOf)", async () => {
+    // A model no provider has fails a run before anything follows its input (`no_model`).
+    const { harness, conversation, commitOf } = await open([], { model: { provider: "faux", modelId: "missing" } });
+    const one = await (await conversation.submit({ type: "input", content: "one", requestId: "r1" }, ctx)).wait(ctx);
+    const two = await (await conversation.submit({ type: "input", content: "two", requestId: "r2" }, ctx)).wait(ctx);
+
+    expect([one, two].map((record) => [record.status, record.reason])).toEqual([
+      ["unanswered", "no_model"],
+      ["unanswered", "no_model"],
+    ]);
+    if (one.entry === undefined || two.entry === undefined) throw new Error("expected placed inputs");
+    // Adjacent, and ended the same way: only their commits tell the two runs apart.
+    const between = await conversation.entries({ minEntryId: one.entry, maxEntryId: two.entry }, 100, undefined, ctx);
     expect(between.items.map((entry) => entry.kind)).toEqual(["pi.user", "pi.user"]);
+    expect(await commitOf(one.entry)).toBeLessThan((await commitOf(two.entry)) as number);
     await harness.close(ctx);
   });
 

@@ -47,6 +47,44 @@ function crashingLog(crashing: (params: readonly SqlValue[]) => boolean) {
   });
 }
 
+/**
+ * `storage.sql` that dies once an answers-log append of a run `dies(params)` holds commits: every later
+ * transaction fails, as when the process dies after a run's log is written and before its requests
+ * leave `pikit.admissions` (the Harness is poisoned by its failed commit). Appends `crashing(params)`
+ * holds fail, as in `crashingLog`. `died` resolves at the death.
+ */
+function dyingAfterLog(dies: (params: readonly SqlValue[]) => boolean, crashing: (params: readonly SqlValue[]) => boolean) {
+  let dead = false;
+  let death!: () => void;
+  const dying = new Promise<void>((resolve) => (death = resolve));
+  const died = () => Promise.reject(new Error("the process died"));
+  const wrap = (db: SqlDatabase): SqlDatabase => ({
+    query: (sql, params) => db.query(sql, params),
+    run: (sql, params) => (dead ? died() : db.run(sql, params)),
+    transaction: async (work) => {
+      if (dead) return died();
+      let appended = false;
+      const result = await db.transaction((tx) =>
+        work({
+          query: (sql, params) => tx.query(sql, params),
+          run: (sql, params) => {
+            if (!sql.includes("INSERT INTO runtime_pi_answers")) return tx.run(sql, params);
+            if (crashing(params ?? [])) return Promise.reject(new Error("the process died"));
+            appended ||= dies(params ?? []);
+            return tx.run(sql, params);
+          },
+        }),
+      );
+      if (appended) {
+        dead = true;
+        death();
+      }
+      return result;
+    },
+  });
+  return { wrap, died: dying };
+}
+
 /** Whether an append's parameters are a run that took `requestId`. */
 const takes = (requestId: string) => (params: readonly SqlValue[]) => typeof params[5] === "string" && (JSON.parse(params[5]) as string[]).includes(requestId);
 
@@ -274,6 +312,87 @@ test("runs settled while their log could not be written are logged once at the n
   expect(await third.dispatch("r1", "one", conversation)).toEqual({ kind: "duplicate", requestId: "r1" });
   await third.runtime.whenIdle(third.ctx);
   expect(await answers(third)).toHaveLength(3);
+  expect(third.results()).toEqual([]);
+});
+
+/** Every model request fails with "scripted failure" (not retried). */
+const failing = () => scriptedProvider({ fail: () => Promise.resolve("scripted failure") });
+
+/** Runs as logged: kind, requestIds, error code. */
+const logged = async (w: Worker) => (await answers(w)).map((run) => [run.kind, run.requestIds, run.error?.code]);
+
+test("two runs that failed in a row, whose logs a crash never wrote, are logged and announced as two at the next start; a redelivery adds nothing", async () => {
+  const db = records();
+  const first = await db.worker({ providers: [failing()], db: crashingLog((params) => takes("r1")(params) || takes("r2")(params)) });
+  const conversation = await first.conversation();
+  await first.dispatch("r1", "one", conversation);
+  await settledInDurable(first, conversation, "r1");
+  await first.dispatch("r2", "two", conversation);
+  await settledInDurable(first, conversation, "r2");
+  await first.runtime.whenIdle(first.ctx);
+  expect(await answers(first)).toEqual([]);
+  expect(first.results()).toEqual([]);
+  await first.close();
+
+  const next = await db.worker({ providers: [failing()] });
+  await next.runtime.inspect(next.ctx);
+  await next.result("r2");
+  await next.runtime.whenIdle(next.ctx);
+
+  expect(await logged(next)).toEqual([
+    ["failed", ["r1"], "model_error"],
+    ["failed", ["r2"], "model_error"],
+  ]);
+  expect(next.results().map((r) => [r.kind, r.requestId, r.requestIds])).toEqual([
+    ["failed", "r1", ["r1"]],
+    ["failed", "r2", ["r2"]],
+  ]);
+
+  expect(await next.dispatch("r1", "one", conversation)).toEqual({ kind: "duplicate", requestId: "r1" });
+  expect(await next.dispatch("r2", "two", conversation)).toEqual({ kind: "duplicate", requestId: "r2" });
+  await next.runtime.whenIdle(next.ctx);
+  expect(await answers(next)).toHaveLength(2);
+  expect(next.results()).toHaveLength(2);
+});
+
+test("a run logged before a crash kept its requests in pikit.admissions: the next start neither logs it again nor loses the run beside it", async () => {
+  const db = records();
+  // r1's log is never written; r2's is, and the process dies before its requests leave pikit.admissions.
+  const dying = dyingAfterLog(takes("r2"), takes("r1"));
+  const first = await db.worker({ providers: [failing()], db: dying.wrap });
+  const conversation = await first.conversation();
+  await first.dispatch("r1", "one", conversation);
+  await settledInDurable(first, conversation, "r1");
+  await first.dispatch("r2", "two", conversation);
+  await dying.died;
+  expect(first.results()).toEqual([]);
+  await first.close().catch(() => {});
+
+  const next = await db.worker({ providers: [failing()] });
+  // Read before the worker opens its Harness (and reconciles).
+  expect(await logged(next)).toEqual([["failed", ["r2"], "model_error"]]);
+  await next.runtime.inspect(next.ctx);
+  await next.result("r1");
+  await next.result("r2");
+  await next.runtime.whenIdle(next.ctx);
+
+  // r2 under the key it was logged with live: not appended again; r1 logged.
+  expect(await logged(next)).toEqual([
+    ["failed", ["r2"], "model_error"],
+    ["failed", ["r1"], "model_error"],
+  ]);
+  // Neither was announced before the crash: each is, once.
+  expect(next.results().map((r) => [r.kind, r.requestIds])).toEqual([
+    ["failed", ["r1"]],
+    ["failed", ["r2"]],
+  ]);
+  expect(await next.runtime.submissions.pending(next.ctx)).toEqual([]);
+
+  await next.close();
+  const third = await db.worker({ providers: [failing()] });
+  expect(await third.dispatch("r2", "two", conversation)).toEqual({ kind: "duplicate", requestId: "r2" });
+  await third.runtime.whenIdle(third.ctx);
+  expect(await answers(third)).toHaveLength(2);
   expect(third.results()).toEqual([]);
 });
 

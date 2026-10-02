@@ -11,9 +11,10 @@ line names its area.
   log runtime-pi derives from pi-durable, `runtime_pi_answers` in `storage.sql`, one row per run under
   its run key (the answer entry of an answered run), appended once, kept `keepSettledDays` (runtime-pi
   config, default 7). A run whose log a crash never wrote is logged by the next reconciliation of its
-  conversation (at start, on a redelivery, in `recover`), as one run: a batch answered together is
-  no longer announced in pieces (a redelivered message of it used to be answered alone, then the
-  rest: the same answer twice). `abandon` settles queued messages unanswered in pi-durable (reason
+  conversation (at start, on a redelivery, in `recover`), grouped exactly as it ran: an answered run
+  by its answer, another by the commit that placed its inputs. A batch is announced once, whole; two
+  runs that failed in a row are two `agent.failed`; a run logged just before a crash is not logged
+  again, and the runs beside it are. `abandon` settles queued messages unanswered in pi-durable (reason
   `abandoned`) and runtime-pi announces them; a message a run took is left to it.
   `createDurableRuntime` takes `db` (the `storage.sql`) instead of `storage`, and no `submissions`;
   `DurableRuntime.submissions` is the contract. The capability `agent.submissions` is no longer

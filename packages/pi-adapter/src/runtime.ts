@@ -343,7 +343,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         models: options.models,
         registry,
         // Every input is a follow-up; those queued while a run goes start the next run together. No
-        // input is a steer; were one, it would be taken the same way, all at once.
+        // input is a steer: a steer joins the run going in a later commit, which `storedRunsOf`'s
+        // grouping by placing commit assumes away (submissions.ts says how steers will be grouped).
         settings: { ...options.settings, steeringMode: "all", followUpMode: "all" },
         ...(env !== undefined && { env }),
         now,
@@ -557,8 +558,9 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
   /**
    * Log and announce, at once, every run of the conversation that pi-durable settled and that is not
-   * logged yet: the requests in `AdmissionsDoc` it holds settled, grouped by run (`storedRunsOf`), so a
-   * run is never split. The same path as a live settlement (`settle`); after a crash, on a redelivery,
+   * logged yet: the requests in `AdmissionsDoc` it holds settled, grouped exactly by run
+   * (`storedRunsOf`), so a run is never split nor merged with another, and has the key it would have
+   * had live: one appended before a crash is not appended again. The same path as a live settlement (`settle`); after a crash, on a redelivery,
    * at start and in `recover`. In the conversation's line.
    */
   const reconcile = async (harness: Harness, id: ConversationId): Promise<void> => {
@@ -574,9 +576,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       if (record === undefined) gone.push(requestId);
       else if (isSettledInput(record)) settled.push(record);
     }
-    const conversation = await harness.conversation(id, chord);
-    if (conversation === undefined) return;
-    await settle(harness, id, await storedRunsOf(conversation, stored, settled, chord), gone);
+    await settle(harness, id, await storedRunsOf(stored, settled, chord), gone);
   };
 
   /** Announce a run's result in `ctx`, once the announcements before it (admissions, `agent.started`) are out. */
