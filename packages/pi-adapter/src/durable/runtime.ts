@@ -1,0 +1,811 @@
+/**
+ * `agent.runtime` on pi-durable (@pikit/contracts' agent.ts), built beside the Pi 0.99 runtime
+ * (`../runtime.ts`) until the switch-over. README.md, "The runtime", has the mapping; in short:
+ *
+ * - **One `Harness` per storage**, opened at first use and owned by the runtime from then on; pi-durable
+ *   allows one per storage and one process per storage. Opening it reconfigures the conversations that
+ *   have live work and resumes the scheduler, so a run a dead worker left open continues (pi-durable's
+ *   scheduler is global: it runs every conversation's work, not one conversation's).
+ * - **`ConversationRef.sessionId` carries the pi-durable conversation id** (a number, as a string).
+ *   `createConversation` makes one (`conversations: "ownerless"`, a server's many conversations in one
+ *   storage; `"root"`, the root conversation first, as in a per-chat Durable Object).
+ * - **`dispatch`** submits the prompt as an `input` with the request id: a request id pi-durable already
+ *   holds is `duplicate`; an input it queued in the inbox (a run is going) is `queued`; an input it placed
+ *   at once is `started`. Every input is a follow-up: a queued message gets a run of its own once the run
+ *   in progress ends, so a run takes one request (`requestIds` is `[requestId]`).
+ * - **Settlements** are read from pi-durable's commits: an input settled `done` is `agent.settled`
+ *   (completed), `unanswered` with `aborted` is `agent.settled` (aborted), any other reason is
+ *   `agent.failed` with that reason as its code. One withdrawn while queued (an abort) is recorded in
+ *   `agent.submissions`, unannounced, as before.
+ *
+ * Steps that touch one conversation (admissions, aborts, recoveries, settlements) run in that
+ * conversation's line, one at a time, so a duplicate check and the submit after it never interleave.
+ */
+
+import type { JsonValue } from "@earendil-works/chord";
+import { copyJson } from "@earendil-works/chord";
+import {
+  type CommitChange,
+  type Conversation,
+  type ConversationId,
+  Harness,
+  type HarnessInspection,
+  type HarnessOptions,
+  type HarnessSettings,
+  InboxDoc,
+  LiveDoc,
+  ROOT_CONVERSATION_ID,
+  type Storage,
+  type SubmissionRecord,
+  type TaskInspection,
+  createRegistry,
+} from "@earendil-works/pi-durable";
+import { type AppContext, type AppEvents, withContextValue } from "@pikit/core";
+import {
+  type Admission,
+  AGENT_STATE,
+  type AgentDefinition,
+  type AgentRequest,
+  type AgentResult,
+  type AgentRuntime,
+  type AgentState,
+  type AgentSubmissions,
+  CONVERSATION,
+  type ConversationRef,
+  isJsonObject,
+  type RunSettlement,
+} from "@pikit/contracts";
+import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
+import { runContext, toChord } from "./context.ts";
+import { isSettledInput, type SettledInput, settlementOf, toResult } from "./result.ts";
+
+export interface DurableRuntimeOptions {
+  /**
+   * The pi-durable storage (`openDurableStorage(db)` over `storage.sql`), or how to open it. Opened
+   * once, at first use; the runtime's Harness owns it from then on and closes it in `close`.
+   */
+  storage: Storage | (() => Promise<Storage>);
+  /** The definition of an agent by name (`agent.definition`), or `undefined` if none has it. */
+  agent(name: string): AgentDefinition | undefined;
+  /** An installed tool by name (`agent.tool`), for the tools agents name. Without it, only tool objects work. */
+  tool?(name: string): DurableTool | undefined;
+  /** pi-ai 1.0's models: every model the agents may name (`provider/modelId`). */
+  models: DurableModels;
+  /**
+   * Where runs report when no caller context is known. Derive it once from `start`'s context:
+   * `ctx.derive(() => BACKGROUND_CONTEXT)`, never `start`'s context itself (its deadline). Its values
+   * are the Harness's: every task, tool calls included, runs in it.
+   */
+  events: AppContext;
+  /**
+   * Where admissions and run ends are recorded (`agent.submissions`), when it is installed: a message
+   * once pi-durable holds it and before `dispatch` resolves, every run's end before its event, a request
+   * an abort withdrew as aborted. Transitional (submissions.ts): pi-durable keeps submissions itself, and
+   * this bridge feeds the channels' `answers` and `pending` until they read pi-durable directly.
+   */
+  submissions?: AgentSubmissions;
+  /**
+   * What `createConversation` makes: `ownerless` (default) a new ownerless conversation each time, for a
+   * storage that holds many (a server); `root` the storage's root conversation the first time, then
+   * ownerless ones (after a reset), for a storage per conversation (a per-chat Durable Object).
+   */
+  conversations?: "ownerless" | "root";
+  /**
+   * pi-durable's run policy (stream, retry, compaction, tool execution). The queue modes are the
+   * runtime's (one message per run) and extensions are selected per agent.
+   */
+  settings?: Omit<HarnessSettings, "extensions" | "steeringMode" | "followUpMode">;
+  /** Builds a conversation's execution environment for its tools (pi-durable's `HarnessOptions.env`). */
+  env?: HarnessOptions["env"];
+  /** The clock pi-durable uses (epoch ms); workerd freezes `Date.now()` between I/O. */
+  now?: () => number;
+  /**
+   * For a host that keeps running only while an event is in progress (a Durable Object): called by
+   * `whenIdle` when nothing is driven but live work waits for a time (a model retry's backoff, a
+   * deferred response's poll, a compaction's retry). Those waits are in-process sleeps that die with the
+   * host, so the host asks to be woken when the earliest is due (computed from `inspection`, see
+   * `wakeups.ts`); a reopened Harness continues them. A rejection is logged.
+   */
+  onIdleWithPendingWork?(inspection: HarnessInspection, ctx: AppContext): Promise<void>;
+}
+
+export interface DurableRuntime extends AgentRuntime {
+  /**
+   * A new conversation, for `conversations.registry` (a first message, a reset): its id, which is the
+   * `ConversationRef.sessionId` of every message to it.
+   */
+  createConversation(ctx: AppContext): Promise<string>;
+  /**
+   * Bring back a conversation with requests admitted and never settled (`agent.submissions`' pending),
+   * as a host does at start: it is reconfigured and its work resumed, and a request whose run ended but
+   * whose end was never recorded is settled from what pi-durable stored, with its event (one
+   * `agent.submissions` holds settled already is skipped). Resolves once those of `requestIds`
+   * pi-durable still runs or queues have settled, or when `ctx` is cancelled. A conversation that can
+   * never run (its agent is no longer defined: `agent_removed`; it is not in the storage:
+   * `session_missing`) has its requests abandoned.
+   */
+  recover(conversation: ConversationRef, requestIds: readonly string[], ctx: AppContext): Promise<void>;
+  /**
+   * Give up on requests nothing can answer: those of `requestIds` still pending in `agent.submissions`
+   * are settled unanswered with `reason`, announced as `agent.failed` (code `abandoned`). Skipped,
+   * logged, while pi-durable still queues or runs one of them. Without `agent.submissions`, nothing.
+   */
+  abandon(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<void>;
+  /** Whether this worker drives the conversation now: a run going, or a step or an announcement under way. */
+  holds(conversation: Pick<ConversationRef, "sessionId">): boolean;
+  /**
+   * Resolves `true` once nothing is driven: no task running, no step or announcement under way (work
+   * that only waits for a time does not count; `onIdleWithPendingWork` is told about it). `false` as
+   * soon as `ctx` is cancelled or the runtime closed.
+   */
+  whenIdle(ctx: AppContext): Promise<boolean>;
+  /** The conversation's `agent.state`, as its tools reach it through `AGENT_STATE`. */
+  state(conversation: ConversationRef): AgentState;
+  /** pi-durable's live work: tasks and unsettled submissions (opens the Harness). */
+  inspect(ctx: AppContext): Promise<HarnessInspection>;
+  /** Close the Harness: runs in progress stop and stay pending in the storage; the next worker resumes them. */
+  close(ctx: AppContext): Promise<void>;
+}
+
+/** Why a conversation can never run: what `recover` abandons its requests for. */
+class Unopenable extends Error {
+  constructor(
+    readonly reason: "agent_removed" | "session_missing",
+    message: string,
+  ) {
+    super(message);
+  }
+}
+
+/** `pi.live`, whose `run` says a conversation is busy. */
+const LIVE = "pi.live";
+
+/** The kind of the write that starts a run for inputs a failed run left queued (README.md, "Gaps"). */
+export const INBOX_KICK = "pikit.inbox-kick";
+
+/** How long to wait before recording a run's end again, after `agent.submissions` failed to. */
+const SETTLED_RETRY_MS = [1_000, 5_000, 30_000, 120_000] as const;
+
+/** A run's announcement: the context its events go to, and what its end waits for (its `agent.started`). */
+interface RunAnnouncement {
+  ctx: AppContext;
+  announced: Promise<void>;
+}
+
+export function createDurableRuntime(options: DurableRuntimeOptions): DurableRuntime {
+  const events = options.events;
+  const logger = events.logger;
+  const registry = createRegistry();
+  const now = options.now ?? Date.now;
+  let closed = false;
+  let opening: Promise<Harness> | undefined;
+  let unsubscribe: (() => void) | undefined;
+
+  /** Every promise in flight (steps, settlements, announcements): what `whenIdle` and `close` wait for. */
+  const inflight = new Set<Promise<unknown>>();
+  /** Per conversation, its line of steps. */
+  const lines = new Map<ConversationId, { tail: Promise<unknown>; queued: number }>();
+  /** Conversations with a run going (`pi.live.run`), from the commits. */
+  const busy = new Set<ConversationId>();
+  /** Per conversation, announcements under way. */
+  const announcing = new Map<ConversationId, number>();
+  /** Input submissions seen queued, whose placing starts their run (`agent.started`). */
+  const queued = new Set<number>();
+  /** Per request key, the status a submission was created with (set while `dispatch` submits it). */
+  const admitting = new Map<string, SubmissionRecord["status"] | undefined>();
+  /** Per request key, its run's announcement. */
+  const runs = new Map<string, RunAnnouncement>();
+  /** Per submission id, who waits for its settlement to be handled (`recover`). */
+  const handled = new Map<number, (() => void)[]>();
+  /** Known `ConversationRef`s by conversation id. */
+  const refs = new Map<ConversationId, ConversationRef>();
+  /** Resolved at each commit. */
+  let commitWaiters: (() => void)[] = [];
+  let resolveClosed!: () => void;
+  const closedSignal = new Promise<void>((resolve) => (resolveClosed = resolve));
+  const retries = new Set<ReturnType<typeof setTimeout>>();
+
+  const track = <T>(work: Promise<T>): Promise<T> => {
+    inflight.add(work);
+    const done = () => void inflight.delete(work);
+    work.then(done, done);
+    return work;
+  };
+
+  const inLine = <T>(id: ConversationId, work: () => Promise<T>): Promise<T> => {
+    let line = lines.get(id);
+    if (line === undefined) {
+      line = { tail: Promise.resolve(), queued: 0 };
+      lines.set(id, line);
+    }
+    const current = line;
+    current.queued++;
+    const next = current.tail.then(work);
+    current.tail = next
+      .catch(() => {})
+      .then(() => {
+        current.queued--;
+        if (current.queued === 0 && lines.get(id) === current) lines.delete(id);
+      });
+    return track(next);
+  };
+
+  const keyOf = (id: ConversationId, requestId: string) => `${id}\u0000${requestId}`;
+
+  const config = new AgentConfigs({
+    models: options.models,
+    registry,
+    tool: options.tool,
+    // Each tool runs with its conversation and that conversation's state in its context.
+    wrap: (tool) => ({
+      ...tool,
+      execute: async (args, api, ctx) => {
+        const ref = await refOf(api.conversationId);
+        if (ref === undefined) return tool.execute(args, api, ctx);
+        return tool.execute(args, api, toChord(withContextValue(CONVERSATION, ref, withContextValue(AGENT_STATE, stateOf(ref), ctx))));
+      },
+    }),
+  });
+
+  const harnessOf = (ctx: AppContext): Promise<Harness> => {
+    if (closed) return Promise.reject(new Error("agent.runtime is closed"));
+    opening ??= openHarness(ctx).catch((error: unknown) => {
+      opening = undefined;
+      throw error;
+    });
+    return opening;
+  };
+
+  /**
+   * Open the Harness, reconfigure the conversations with live work (their agents may have changed with
+   * a deploy, and their tools must be installed before anything runs), resume the scheduler, announce
+   * the runs it resumes, and start runs for messages a failed run left queued.
+   */
+  const openHarness = async (ctx: AppContext): Promise<Harness> => {
+    const storage = typeof options.storage === "function" ? await options.storage() : options.storage;
+    const harness = await Harness.open(
+      storage,
+      {
+        models: options.models,
+        registry,
+        settings: { ...options.settings, steeringMode: "one-at-a-time", followUpMode: "one-at-a-time" },
+        ...(options.env !== undefined && { env: options.env }),
+        now,
+        onReport: (error) => logger.warn("pi-durable reported a failure", { error: error instanceof Error ? error.message : String(error) }),
+      },
+      // Tasks run in the Harness's context: the app's values, never a caller's cancellation.
+      toChord(runContext(events)),
+    );
+    if (closed) {
+      await harness.close(toChord(ctx)).catch(() => {});
+      throw new Error("agent.runtime is closed");
+    }
+    unsubscribe = harness.subscribeCommits((publication) => observe(publication.changes));
+    try {
+      await prepareOpened(harness, ctx);
+    } catch (error) {
+      // Never leave a second Harness over the storage for the next attempt to race.
+      unsubscribe();
+      await harness.close(toChord(ctx)).catch(() => {});
+      throw error;
+    }
+    return harness;
+  };
+
+  /** What opening does once the Harness is open: see `openHarness`. */
+  const prepareOpened = async (harness: Harness, ctx: AppContext): Promise<void> => {
+    const inspection = await harness.inspect(toChord(ctx));
+    const live = new Set<ConversationId>([...inspection.tasks.map((task) => task.record.conversationId)]);
+    const resumed: SubmissionRecord[] = [];
+    const waiting = new Set<ConversationId>();
+    for (const submission of inspection.submissions) {
+      live.add(submission.conversationId);
+      if (submission.type !== "input" || submission.requestId === undefined) continue;
+      if (submission.status === "queued") {
+        queued.add(submission.id);
+        waiting.add(submission.conversationId);
+      } else if (submission.status === "placed") {
+        busy.add(submission.conversationId);
+        resumed.push(submission);
+      }
+    }
+    for (const id of live) {
+      await reconfigure(harness, id, ctx).catch((error: unknown) => {
+        logger.error("a conversation with live work could not be reconfigured; it resumes with its last agent", {
+          conversation: id,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }
+    for (const submission of resumed) {
+      const ref = await refOf(submission.conversationId, harness);
+      if (ref === undefined || submission.requestId === undefined) continue;
+      const requestId = submission.requestId;
+      runs.set(keyOf(submission.conversationId, requestId), {
+        ctx: events,
+        announced: emit(events, "agent.started", { conversation: ref, requestId, resumed: true }),
+      });
+    }
+    harness.resume();
+    for (const id of waiting) {
+      if (!busy.has(id)) void inLine(id, () => reconcileInbox(harness, id)).catch(logFailure("starting a run for queued messages failed"));
+    }
+  };
+
+  /**
+   * Every commit: inputs queued, placed (a queued one's run starts: `agent.started`), settled (handled
+   * in their conversation's line); conversations' runs starting and ending. Must not call the Harness.
+   */
+  const observe = (changes: readonly CommitChange[]) => {
+    for (const change of changes) {
+      if (change.type === "document") {
+        if (change.record.kind !== LIVE || change.conversationId === undefined) continue;
+        const value = change.value as { run?: unknown } | null;
+        if (value?.run !== undefined) busy.add(change.conversationId);
+        else busy.delete(change.conversationId);
+        continue;
+      }
+      if (change.type !== "submission") continue;
+      const record = change.value;
+      if (record.type !== "input" || record.requestId === undefined) continue;
+      const key = keyOf(record.conversationId, record.requestId);
+      if (admitting.has(key) && admitting.get(key) === undefined) admitting.set(key, record.status);
+      if (record.status === "queued") {
+        queued.add(record.id);
+      } else if (record.status === "placed") {
+        if (queued.delete(record.id)) startedFromQueue(record.conversationId, record.requestId);
+      } else if (isSettledInput(record)) {
+        queued.delete(record.id);
+        void inLine(record.conversationId, () => handleSettled(record, false)).catch(logFailure("a run ended but its result could not be read"));
+      }
+    }
+    const waiters = commitWaiters;
+    commitWaiters = [];
+    for (const wake of waiters) wake();
+  };
+
+  /** A queued request's run started: `agent.started`, after the announcements of its admission. */
+  const startedFromQueue = (id: ConversationId, requestId: string): void => {
+    const key = keyOf(id, requestId);
+    const before = runs.get(key);
+    const ctx = before?.ctx ?? events;
+    const announced = Promise.resolve(before?.announced)
+      .then(() => refOf(id))
+      .then((ref) => (ref === undefined ? undefined : emit(ctx, "agent.started", { conversation: ref, requestId, resumed: false })));
+    runs.set(key, { ctx, announced });
+    countAnnouncing(id, announced);
+  };
+
+  const countAnnouncing = (id: ConversationId, work: Promise<unknown>): void => {
+    announcing.set(id, (announcing.get(id) ?? 0) + 1);
+    void track(work).finally(() => {
+      const left = (announcing.get(id) ?? 1) - 1;
+      if (left === 0) announcing.delete(id);
+      else announcing.set(id, left);
+    });
+  };
+
+  /** Emit, logging a listener's failure: an event never fails the run that announces it. */
+  const emit = async <K extends "agent.started" | "agent.settled" | "agent.failed">(ctx: AppContext, name: K, payload: AppEvents[K]): Promise<void> => {
+    try {
+      await ctx.emit(name, payload);
+    } catch (error) {
+      logger.error(`a listener of ${name} failed`, { error: error instanceof Error ? error.message : String(error) });
+    }
+  };
+
+  /**
+   * Record a run's end in `agent.submissions`, and retry a few times in the background when that fails:
+   * until it is recorded, a channel reading the answers does not see it. Given up, it stays pending and
+   * the next start settles it from pi-durable (`recover`). Never rejects.
+   */
+  const recordSettled = async (run: RunSettlement, ctx: AppContext, attempt = 0): Promise<void> => {
+    const submissions = options.submissions;
+    if (submissions === undefined) return;
+    try {
+      await submissions.settled(run, ctx);
+    } catch (error) {
+      const wait = SETTLED_RETRY_MS[attempt];
+      const fields = { conversation: run.conversation.key, run: run.requestId, error: error instanceof Error ? error.message : String(error) };
+      if (closed || wait === undefined) {
+        logger.error("a run's end could not be recorded in agent.submissions; the next start settles it from pi-durable", fields);
+        return;
+      }
+      logger.warn("recording a run's end in agent.submissions failed; trying again", { ...fields, inMs: wait });
+      const timer = setTimeout(() => {
+        retries.delete(timer);
+        void recordSettled(run, ctx, attempt + 1);
+      }, wait);
+      retries.add(timer);
+    }
+  };
+
+  /**
+   * Handle a settled input, in its conversation's line: record it, then announce it (once its
+   * `agent.started` is out) unless it was withdrawn before it ran; then, if its run ended unanswered,
+   * start a run for what it left queued. `unrecorded`: only if `agent.submissions` does not hold it
+   * settled (a settlement found after a restart, or on a redelivery).
+   */
+  const handleSettled = async (record: SettledInput, unrecorded: boolean): Promise<void> => {
+    try {
+      const harness = await harnessOf(events);
+      const ref = await refOf(record.conversationId, harness);
+      if (ref === undefined || record.requestId === undefined) return;
+      const key = keyOf(record.conversationId, record.requestId);
+      if (unrecorded && options.submissions !== undefined) {
+        if ((await options.submissions.get(ref, record.requestId, events))?.kind === "settled") return;
+      }
+      const conversation = await harness.conversation(record.conversationId, toChord(events));
+      if (conversation === undefined) return;
+      const result = await toResult(conversation, ref, record, toChord(events));
+      const announcement = runs.get(key);
+      runs.delete(key);
+      const ctx = announcement?.ctx ?? events;
+      await recordSettled(settlementOf(result), ctx);
+      // Withdrawn while queued: recorded aborted, never announced: no run took it.
+      if (record.entry !== undefined) countAnnouncing(record.conversationId, announce(result, announcement));
+      if (record.status === "unanswered" && record.entry !== undefined) await reconcileInbox(harness, record.conversationId);
+    } finally {
+      const waiters = handled.get(record.id);
+      handled.delete(record.id);
+      for (const wake of waiters ?? []) wake();
+    }
+  };
+
+  const announce = async (result: AgentResult, announcement: RunAnnouncement | undefined): Promise<void> => {
+    await announcement?.announced.catch(() => {});
+    const ctx = announcement?.ctx ?? events;
+    if (result.kind === "failed") await emit(ctx, "agent.failed", { ...result, kind: "failed" });
+    else await emit(ctx, "agent.settled", { ...result, kind: result.kind });
+  };
+
+  /**
+   * pi-durable leaves the inputs queued behind a run that ended unanswered in the inbox, until the next
+   * submission places them (pi-facts.test.ts). With no run going and inputs queued, a write submission
+   * (an entry of kind `pikit.inbox-kick`, never seen by the model) runs the boundary that places the
+   * oldest one and starts its run. In the conversation's line.
+   */
+  const reconcileInbox = async (harness: Harness, id: ConversationId): Promise<void> => {
+    if (closed) return;
+    const ctx = toChord(events);
+    const [live, inbox] = await Promise.all([harness.snapshot(LiveDoc, id, ctx), harness.snapshot(InboxDoc, id, ctx)]);
+    if (live?.run !== undefined || !(inbox?.items ?? []).some((item) => item.mode !== "write")) return;
+    const conversation = await harness.conversation(id, ctx);
+    await conversation?.submit({ type: "write", entry: { kind: INBOX_KICK } }, ctx);
+  };
+
+  /** The conversation's `ConversationRef`, from memory or its `pikit.conversation` document. */
+  const refOf = async (id: ConversationId, open?: Harness): Promise<ConversationRef | undefined> => {
+    const known = refs.get(id);
+    if (known !== undefined) return known;
+    const harness = open ?? (await harnessOf(events));
+    const recorded = await harness.snapshot(ConversationDoc, id, toChord(events));
+    if (recorded === undefined || recorded.key === "") return undefined;
+    const ref = { key: recorded.key, agent: recorded.agent, sessionId: String(id) };
+    refs.set(id, ref);
+    return ref;
+  };
+
+  /** Make the conversation's agent what `prepare` gives for its current state; nothing when its agent is gone. */
+  const reconfigure = async (harness: Harness, id: ConversationId, ctx: AppContext, given?: ConversationRef): Promise<void> => {
+    const ref = given ?? (await refOf(id, harness));
+    const agent = ref === undefined ? undefined : options.agent(ref.agent);
+    if (ref === undefined || agent === undefined) return;
+    await harness.commit(async (tx) => {
+      const stored = copyJson(await tx.doc(AgentStateDoc, id)) as { [key: string]: JsonValue };
+      await config.apply(tx, id, ref, agent, effectiveState(agent, stored), logger);
+    }, toChord(ctx));
+    refs.set(id, ref);
+  };
+
+  const conversationIdOf = (ref: Pick<ConversationRef, "sessionId" | "key">): ConversationId => {
+    const id = Number(ref.sessionId);
+    if (!Number.isSafeInteger(id) || id <= 0 || String(id) !== ref.sessionId) {
+      throw new Unopenable("session_missing", `conversation ${ref.key}: "${ref.sessionId}" is not a pi-durable conversation id`);
+    }
+    return id as ConversationId;
+  };
+
+  const conversationOf = async (harness: Harness, ref: ConversationRef, ctx: AppContext): Promise<Conversation> => {
+    const conversation = await harness.conversation(conversationIdOf(ref), toChord(ctx));
+    if (conversation === undefined) throw new Unopenable("session_missing", `conversation ${ref.key}: no pi-durable conversation ${ref.sessionId}`);
+    return conversation;
+  };
+
+  const definitionOf = (ref: ConversationRef): AgentDefinition => {
+    const agent = options.agent(ref.agent);
+    if (agent === undefined) throw new Unopenable("agent_removed", `no agent.definition "${ref.agent}" for conversation ${ref.key}`);
+    return agent;
+  };
+
+  /** `agent.state` of a conversation: reads its document, updates it with `pi.agent` in one commit. */
+  const stateOf = (ref: ConversationRef): AgentState => ({
+    async get(ctx) {
+      const harness = await harnessOf(events);
+      const stored = await harness.snapshot(AgentStateDoc, conversationIdOf(ref), toChord(ctx));
+      return effectiveState(options.agent(ref.agent) ?? { name: ref.agent, model: "" }, stored);
+    },
+    async update(patch, ctx) {
+      if (!isJsonObject(patch)) throw new TypeError("agent.state: a patch must be a JSON object");
+      const copy = structuredClone(patch) as { [key: string]: JsonValue };
+      const harness = await harnessOf(events);
+      const id = conversationIdOf(ref);
+      const agent = options.agent(ref.agent);
+      // One commit: the update and the agent `prepare` gives for it. Commits are serial, so concurrent
+      // updates never lose each other's keys.
+      return harness.commit(async (tx) => {
+        const draft = await tx.doc(AgentStateDoc, id);
+        for (const [key, value] of Object.entries(copy)) draft[key] = value;
+        const state = effectiveState(agent ?? { name: ref.agent, model: "" }, copyJson(draft) as { [key: string]: JsonValue });
+        if (agent !== undefined) await config.apply(tx, id, ref, agent, state, logger);
+        return state;
+      }, toChord(ctx));
+    },
+  });
+
+  const logFailure =
+    (message: string) =>
+    (error: unknown): void => {
+      if (closed) return;
+      logger.error(message, { error: error instanceof Error ? error.message : String(error) });
+    };
+
+  /** Resolves when the submission `id`'s settlement has been handled (registered in its line). */
+  const whenHandled = (id: number): Promise<void> =>
+    new Promise((resolve) => {
+      const waiters = handled.get(id) ?? [];
+      waiters.push(resolve);
+      handled.set(id, waiters);
+    });
+
+  const runtime: DurableRuntime = {
+    async createConversation(ctx) {
+      const harness = await harnessOf(ctx);
+      const chord = toChord(ctx);
+      if (options.conversations === "root" && (await harness.conversation(ROOT_CONVERSATION_ID, chord)) === undefined) {
+        return String((await harness.root(chord)).id);
+      }
+      return String((await harness.createConversation({ ownership: { kind: "ownerless" } }, chord)).id);
+    },
+
+    async dispatch(request: AgentRequest, ctx: AppContext): Promise<Admission> {
+      const ref = request.conversation;
+      const { requestId } = request;
+      const agent = definitionOf(ref);
+      const harness = await harnessOf(ctx);
+      const id = conversationIdOf(ref);
+      const key = keyOf(id, requestId);
+      let announced!: () => void;
+      const admissionAnnounced = new Promise<void>((resolve) => (announced = resolve));
+      let admission: Admission;
+      try {
+        admission = await inLine(id, async () => {
+          const conversation = await conversationOf(harness, ref, ctx);
+          const existing = await conversation.commit(async (tx) => {
+            const found = await tx.submissionByRequest(id, requestId);
+            if (found !== undefined) return found;
+            const stored = copyJson(await tx.doc(AgentStateDoc, id)) as { [key: string]: JsonValue };
+            await config.apply(tx, id, ref, agent, effectiveState(agent, stored), logger);
+            return undefined;
+          }, toChord(ctx));
+          refs.set(id, ref);
+          if (existing !== undefined) {
+            // A redelivery. Settled: its end may never have been recorded (two crashes); still live: make
+            // sure something drives it.
+            if (isSettledInput(existing)) {
+              if (options.submissions !== undefined) await handleSettled(existing, true);
+            } else {
+              harness.resume();
+              await reconcileInbox(harness, id);
+            }
+            return { kind: "duplicate", requestId } as const;
+          }
+          runs.set(key, { ctx: runContext(ctx), announced: admissionAnnounced });
+          admitting.set(key, undefined);
+          try {
+            const submission = await conversation.submit({ type: "input", content: request.prompt, requestId }, toChord(ctx));
+            const status = admitting.get(key) ?? (await submission.status(toChord(ctx))).status;
+            return { kind: status === "queued" ? "queued" : "started", requestId } as const;
+          } catch (error) {
+            runs.delete(key);
+            throw error;
+          } finally {
+            admitting.delete(key);
+          }
+        });
+      } catch (error) {
+        announced();
+        throw error;
+      }
+      // The run may be going already; its end is announced only after `announced()`, so
+      // `agent.dispatched`, `agent.started` and its result arrive in that order.
+      let unrecorded: unknown;
+      try {
+        // Recorded before `dispatch` resolves, so a channel acknowledges its platform only once
+        // pi-durable and `agent.submissions` both hold the message. A failure fails the dispatch (the
+        // platform delivers it again: a duplicate); the message is in pi-durable, and its run goes on.
+        if (admission.kind !== "duplicate" && options.submissions !== undefined) {
+          await options.submissions.admitted(ref, requestId, ctx).catch((error: unknown) => {
+            unrecorded = error;
+          });
+        }
+        await ctx.emit("agent.dispatched", { conversation: ref, admission });
+        if (admission.kind === "started") await emit(runContext(ctx), "agent.started", { conversation: ref, requestId, resumed: false });
+      } finally {
+        announced();
+      }
+      if (unrecorded !== undefined) throw unrecorded;
+      return admission;
+    },
+
+    async abort(conversation: ConversationRef, ctx: AppContext): Promise<void> {
+      const harness = await harnessOf(ctx);
+      const id = conversationIdOf(conversation);
+      await inLine(id, async () => (await conversationOf(harness, conversation, ctx)).abort(toChord(ctx)));
+    },
+
+    async resume(conversation: ConversationRef, ctx: AppContext): Promise<void> {
+      const harness = await harnessOf(ctx);
+      const id = conversationIdOf(conversation);
+      await inLine(id, async () => {
+        await conversationOf(harness, conversation, ctx);
+        await reconfigure(harness, id, ctx, options.agent(conversation.agent) === undefined ? undefined : conversation);
+        harness.resume();
+        await reconcileInbox(harness, id);
+      });
+    },
+
+    async recover(conversation: ConversationRef, requestIds: readonly string[], ctx: AppContext): Promise<void> {
+      let waits: Promise<void>[];
+      try {
+        definitionOf(conversation);
+        const harness = await harnessOf(ctx);
+        const id = conversationIdOf(conversation);
+        waits = await inLine(id, async () => {
+          const handle = await conversationOf(harness, conversation, ctx);
+          await reconfigure(harness, id, ctx, conversation);
+          harness.resume();
+          await reconcileInbox(harness, id);
+          const pending: Promise<void>[] = [];
+          const stuck: string[] = [];
+          for (const requestId of requestIds) {
+            const record = await handle.commit((tx) => tx.submissionByRequest(id, requestId), toChord(ctx));
+            if (record === undefined) stuck.push(requestId);
+            else if (isSettledInput(record)) await handleSettled(record, true);
+            // Live: its settlement is handled in this line, after this step.
+            else pending.push(whenHandled(record.id));
+          }
+          if (stuck.length > 0) {
+            ctx.logger.warn("pending requests are unknown to pi-durable: lost before it held them; they stay pending", {
+              conversation: conversation.key,
+              requests: stuck,
+            });
+          }
+          return pending;
+        });
+      } catch (error) {
+        // Retrying at every start cannot help: the user is told instead of waiting for good.
+        if (error instanceof Unopenable) return runtime.abandon(conversation, requestIds, error.reason, ctx);
+        throw error;
+      }
+      await untilAborted(Promise.all(waits), ctx.abortSignal, closedSignal);
+    },
+
+    async abandon(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<void> {
+      const submissions = options.submissions;
+      if (submissions === undefined) return;
+      const harness = await harnessOf(ctx);
+      const id = Number(conversation.sessionId) as ConversationId;
+      const step = async () => {
+        const handle = Number.isSafeInteger(id) && id > 0 ? await harness.conversation(id, toChord(ctx)) : undefined;
+        for (const requestId of handle === undefined ? [] : requestIds) {
+          const record = await handle?.commit((tx) => tx.submissionByRequest(id, requestId), toChord(ctx));
+          if (record?.status === "queued" || record?.status === "placed") {
+            ctx.logger.warn("pending requests are not abandoned: pi-durable still holds one of them", { conversation: conversation.key, requests: requestIds, reason });
+            return undefined;
+          }
+        }
+        return submissions.abandoned(conversation, requestIds, reason, ctx);
+      };
+      const run = Number.isSafeInteger(id) && id > 0 ? await inLine(id, step) : await step();
+      if (run === undefined) return;
+      ctx.logger.warn("pending requests were abandoned unanswered; their channel tells the user", { conversation: conversation.key, requests: run.requestIds, reason });
+      await emit(runContext(ctx), "agent.failed", { ...run, kind: "failed", messages: [] });
+    },
+
+    holds(conversation: Pick<ConversationRef, "sessionId">): boolean {
+      const id = Number(conversation.sessionId) as ConversationId;
+      return lines.has(id) || busy.has(id) || announcing.has(id);
+    },
+
+    async whenIdle(ctx: AppContext): Promise<boolean> {
+      for (;;) {
+        if (closed || ctx.abortSignal?.aborted) return false;
+        if (inflight.size > 0) {
+          await untilAborted(Promise.allSettled([...inflight]), ctx.abortSignal, closedSignal);
+          continue;
+        }
+        if (opening === undefined) return true;
+        const harness = await opening.catch(() => undefined);
+        if (harness === undefined) return !closed;
+        const committed = new Promise<void>((resolve) => commitWaiters.push(resolve));
+        const inspection = await harness.inspect(toChord(ctx)).catch(() => undefined);
+        if (inspection === undefined) return false;
+        const at = now();
+        if (inflight.size === 0 && !inspection.tasks.some((task) => driven(task, at))) {
+          if (options.onIdleWithPendingWork !== undefined && inspection.tasks.some((task) => timed(task, at))) {
+            await options.onIdleWithPendingWork(inspection, ctx).catch(logFailure("onIdleWithPendingWork failed"));
+          }
+          return !closed;
+        }
+        await untilAborted(Promise.race([committed, ...inflight]), ctx.abortSignal, closedSignal);
+      }
+    },
+
+    state: (conversation) => stateOf(conversation),
+
+    async inspect(ctx) {
+      return (await harnessOf(ctx)).inspect(toChord(ctx));
+    },
+
+    async close(ctx: AppContext): Promise<void> {
+      if (closed) return;
+      closed = true;
+      resolveClosed();
+      for (const timer of retries) clearTimeout(timer);
+      retries.clear();
+      for (const waiters of handled.values()) for (const wake of waiters) wake();
+      handled.clear();
+      const open = opening;
+      if (open !== undefined) {
+        const harness = await open.catch(() => undefined);
+        unsubscribe?.();
+        // Runs in progress stop here and stay pending in the storage, for the next worker.
+        if (harness !== undefined) await untilAborted(harness.close(toChord(ctx)), ctx.abortSignal);
+      }
+      await untilAborted(Promise.allSettled([...inflight]), ctx.abortSignal);
+      runs.clear();
+    },
+  };
+  return runtime;
+}
+
+type Checkpoint = { phase?: string; until?: number; pollAt?: number } | undefined;
+
+/** Live work that waits for a time, in-process: a model retry's backoff, a deferred poll, a compaction's retry. */
+function timed(task: TaskInspection, at: number): boolean {
+  const checkpoint = (task.record.state as { checkpoint?: Checkpoint }).checkpoint;
+  if (task.record.kind === "pi.generation") {
+    if (checkpoint?.phase === "retry") return (checkpoint.until ?? 0) > at;
+    if (checkpoint?.phase === "poll") return (checkpoint.pollAt ?? 0) > at;
+  }
+  if (task.record.kind === "pi.compaction" && checkpoint?.phase === "retry") return (checkpoint.until ?? 0) > at;
+  return false;
+}
+
+/** Live work this process drives now: a task running or about to, unless it only sleeps (`timed`). */
+function driven(task: TaskInspection, at: number): boolean {
+  return (task.state.kind === "running" || task.state.kind === "ready") && !timed(task, at);
+}
+
+/** Resolves when `work` settles, `signal` aborts, or `stop` resolves, whichever comes first. */
+async function untilAborted(work: Promise<unknown>, signal: AbortSignal | undefined, stop?: Promise<void>): Promise<void> {
+  const settled = work.then(
+    () => {},
+    () => {},
+  );
+  const racers: Promise<void>[] = [settled];
+  if (stop !== undefined) racers.push(stop);
+  let onAbort: (() => void) | undefined;
+  if (signal !== undefined) {
+    racers.push(
+      new Promise<void>((resolve) => {
+        onAbort = resolve;
+        if (signal.aborted) resolve();
+        else signal.addEventListener("abort", onAbort, { once: true });
+      }),
+    );
+  }
+  await Promise.race(racers);
+  if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+}
