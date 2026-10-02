@@ -1,10 +1,15 @@
 /**
- * @pikit/pi-adapter/tools: pikit's tools on pi-durable, for the `tool-*` components. A tool is pi-durable's own `ToolRegistration` (`defineTool`): it carries its `replay`,
- * learns its conversation from `api.conversationId`, and works on `api.env`, the environment the
- * Harness builds for the call (`HarnessOptions.env`, see `harnessEnv` in `./execution`). So a
- * component no longer binds an environment to a tool: it provides the tool, by name, as it is.
+ * @pikit/pi-adapter/tools: what a `tool-*` component writes its tool with, without importing Pi. A tool
+ * is pi-durable's own `ToolRegistration` (`defineTool`): it carries its `replay`, learns its
+ * conversation from `api.conversationId`, and works on `api.env`, the environment the Harness builds
+ * for the call (`HarnessOptions.env`, see `harnessEnv` in `./execution`). So a component never binds
+ * an environment to a tool: it provides the tool, by name, as it is.
  *
- * Neutral: every tool here uses only its environment, `fetch`, streams and `HTMLRewriter`.
+ * The tools pikit writes itself are in their components, as source the user owns: `tool-fetch`'s
+ * `fetch.ts`, `tool-websearch-brave`'s `websearch.ts` (the references for a new tool). What stays
+ * here is Pi's own: its coding tools, which `codingTool(name)` gives with pikit's replay.
+ *
+ * Neutral.
  *
  * **Replay** (pi-durable runs an interrupted call again on recovery only when it is `"safe"`; it is
  * a property of the tool, fixed for every call, recorded with the call's intent):
@@ -44,8 +49,6 @@ export {
   type ReadToolInput,
   type WriteToolInput,
 } from "@earendil-works/pi-durable/tools";
-export { createFetchTool, FETCH_MAX_BYTES, FETCH_MAX_OUTPUT, FETCH_METHODS, FETCH_TIMEOUT_MS, type FetchToolOptions } from "./fetch.ts";
-export { BRAVE_KEY_SECRET, BRAVE_SEARCH_PATH, BRAVE_TIMEOUT_MS, type BraveSearchToolOptions, createBraveSearchTool } from "./websearch-brave.ts";
 
 /** The names of pi-durable's coding tools, as agents name them in `tools`. */
 export type CodingToolName = "read" | "write" | "edit" | "bash";

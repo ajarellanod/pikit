@@ -1,74 +1,67 @@
 # tool-fetch
 
 The `fetch` tool, for the agents that name it: one HTTP(S) request to a web page or an API, with the
-answer as text the model can read.
+answer as text the model can read. It is also **the reference for writing a tool**: copy it.
 
 - **Provides:** `agent.tool`, under the key `fetch`.
 - **Requires:** nothing.
-- **Targets:** `server` and `durable`: it uses only `fetch`, streams and `HTMLRewriter`, which
-  Workers and Bun both have.
-- **Installs to:** `src/pikit/tool-fetch/`.
-- **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi), `typebox`.
-
-## What it does
-
-An agent gets this tool only when it names it:
+- **Targets:** `server` and `durable`: only `fetch`, streams and `HTMLRewriter`, which Workers and Bun
+  both have.
+- **Installs to:** `src/pikit/tool-fetch/` (`index.ts` the component, `fetch.ts` the tool, `tool-fetch.test.ts`).
 
 ```ts
 defineAgent({ name: "research", model: "openrouter/z-ai/glm-5.3-flash", tools: ["fetch"] })
 ```
 
-The model gives a `url` and, when it needs them, a `method`, `headers`, a `body`, and `raw`. It gets
-back the status line (`HTTP 200 OK · text/html · <final URL>`) and the content:
+## How this tool is built
 
-- **HTML** as readable text: the title, the text by blocks (no head, scripts or styles), then its
-  links, absolute, with their text. `raw: true` returns the HTML as it is.
-- **JSON** pretty-printed; **other text** (plain, CSV, XML, JavaScript…) as it is.
-- **Binary content** (images, PDFs, archives) is refused: the body is not downloaded, and the model
-  is told what it was. Without a content type, a body with NUL bytes counts as binary.
-- **HEAD** returns the status and the response headers.
-- An error status (404, 500) is an answer like any other; a URL that is not `http:` or `https:`, a
-  method it does not allow, a body on a GET, a network failure or the timeout are errors.
+1. **`fetch.ts` is the tool**, written with pi-durable's `defineTool`, imported from
+   `@pikit/pi-adapter/tools` (a component never imports Pi itself):
+   ```ts
+   defineTool({
+     name: "fetch",                      // what the model calls, and the agent names
+     description: "Makes one HTTP(S) request…", // what the model reads to decide when to call it
+     parameters: Type.Object({ url: Type.String(), … }), // TypeBox: the Harness validates every call
+     replay: "unsafe",                   // see below
+     async execute(args, api, context) { // context.abortSignal: the call's cancellation
+       return { content: [{ type: "text", text }] }; // a throw is an error result the model reads
+     },
+   });
+   ```
+   `api` has the call's conversation (`api.conversationId`) and its environment (`api.env`, the
+   files and shell of `execution` or `workspace`), for tools that work on files. `fetch` uses neither.
+2. **`index.ts` is the component**: it provides the tool as `agent.tool` under its own name, which
+   runtime-pi checks. An agent gets a tool only when it names it.
+3. **What it needs comes through capabilities**: a key through `secrets`
+   (`tool-websearch-brave`, the reference for a tool with a secret), files through `api.env`. Never
+   from the environment or config directly.
+4. **Its limits are its own**, the same on both targets: one deadline for the whole call (20 s), a
+   bounded read of the body (2 MB, the rest never downloaded), a bounded answer (50,000 characters).
+   A tool's output goes into the transcript and the next model call: keep it small.
+5. **Its replay is a decision.** pikit resumes a run after a crash. A `"safe"` tool is called again;
+   an `"unsafe"` one is reported to the model as interrupted, and the model decides. `fetch` is
+   `"unsafe"` because a POST, PUT, PATCH or DELETE may have had its effect before the crash, and a
+   replay is one value for every call of a tool. `component.json`'s `replay.tools` repeats it.
+6. **Its tests** (`tool-fetch.test.ts`) go from the inside out: `execute` called directly against a
+   local server (`Bun.serve`, never the network), the tool as the component installs it in an app,
+   and a real Harness turn (`runToolCalls` from `@pikit/pi-adapter/execution/testing`), where
+   pi-durable validates the arguments and records the result.
 
-Its limits, the same on both targets:
-- **Methods:** GET by default; HEAD, POST, PUT, PATCH and DELETE allowed. The tool's description asks
-  the model to tell the user what it will send, and wait for their confirmation, before any method
-  other than GET or HEAD. That is an instruction to the model, not an enforcement: an approvals
-  component would be the enforcement.
-- **20 s** for the whole call (the answer and the body); the run's cancellation stops it too.
-- **2 MB** read from the body at most; the rest is never downloaded, and the model is told.
-- **50,000 characters** given back to the model at most, with how many more there were.
-- Redirects are followed.
+## What it does
 
-## What it does not carry
+The model gives a `url` and, when it needs them, a `method`, `headers`, a `body`, `raw`. It gets the
+status line (`HTTP 200 OK · text/html · <final URL>`) and the content: HTML as readable text (title,
+text by blocks, then the links, absolute), or as it is with `raw: true`; JSON pretty-printed; other
+text as it is. Binary content (images, PDFs, archives) is refused before it is downloaded. HEAD
+returns the headers. Redirects are followed. An error status is an answer; a scheme other than
+http(s), a method outside GET, HEAD, POST, PUT, PATCH, DELETE, a body on a GET, a network failure or
+the timeout are errors. The description asks the model to confirm with the user before any method
+other than GET or HEAD: an instruction, not an enforcement (that would be an approvals component).
 
-**No credentials.** It adds no cookie, token or key of its own: it reaches what anyone on the
-network could, plus the headers the model writes itself. A tool for an API that needs your key is a
-component of its own that reads the key through `secrets` (as `tool-websearch-brave` does), so the
-model never sees it.
+**No credentials, no address filter.** It adds no cookie, token or key of its own. On a server it
+reaches whatever the server reaches, private addresses included (`localhost`, your LAN, a cloud's
+metadata endpoint); on Cloudflare, what the internet reaches. If your server can reach something the
+agent must not, do not install it there, or firewall the server.
 
-It does not filter addresses: on a server, it reaches whatever the server reaches, private addresses
-included (`localhost`, your LAN, a cloud's metadata endpoint). On Cloudflare, a Worker runs outside
-your network, so it reaches what the internet reaches. If your server can reach something the agent must not, do not
-install this tool there, or put the server behind a firewall that refuses it.
-
-## Replay: `unsafe`
-
-pikit resumes a run after a crash. A tool that is `"safe"` is called again; one that is
-`"unsafe"` is reported to the model as interrupted, and the model decides what to do.
-
-`fetch` is `"unsafe"` because a POST, PUT, PATCH or DELETE may have reached the server and had its
-effect before the crash: sending it again could order twice, post twice or delete something that was
-recreated since. A replay is decided per tool, not per call, so a GET is reported as interrupted
-too; the model can simply fetch it again, which costs one call.
-
-## Tests
-
-`tool-fetch.test.ts` is copied with the component and runs in your project. The web is a local
-server on a free port (`Bun.serve`): no test reaches the network. It covers what setup declares, the
-replay, HTML (text, entities, links, hidden elements, tables), `raw`, JSON, plain text, error
-statuses, binary content (by type and by bytes), redirects, POST and HEAD, the absence of
-credentials, what it refuses, the 2 MB limit, the output limit, the timeout and cancellation.
-
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` (`bun run registry generate`); the test "what setup
+declares" pins it.

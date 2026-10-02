@@ -1,29 +1,18 @@
 /**
  * tool-websearch-brave's tests. They are copied with the component and keep running in your project.
  * Brave is a local stand-in of its web search API on a free port (`Bun.serve`), reached through
- * `apiBase`: no test reaches the network or needs a real key.
+ * `apiBase`: no test reaches the network or needs a real key. The tool is tested as installed (with
+ * `secrets`), called once as the runtime calls it (`callTool`), and in a real Harness turn
+ * (`runToolCalls`), where the transcript is checked for the key.
  */
 
 import { afterAll, expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { AgentTool } from "@pikit/contracts";
-import { callTool } from "@pikit/pi-adapter/execution/testing";
-import toolWebsearchBrave, { KEY_SECRET, SEARCH_PATH } from "./index.ts";
+import { callTool, runToolCalls } from "@pikit/pi-adapter/execution/testing";
+import toolWebsearchBrave, { createBraveSearchTool, KEY_SECRET, SEARCH_PATH } from "./index.ts";
 
 const KEY = "brave-test-key-0123456789";
-
-/** What Pi passes to a tool call; a direct call has no run to identify. */
-const invocation = {
-  invocationId: "invocation-1",
-  operationId: "operation-1",
-  turnId: "turn-1",
-  getMemo: async () => undefined,
-  setMemo: async () => {},
-};
-
-function textOf(result: { content: { type: string; text?: string }[] }): string {
-  return result.content.flatMap((part) => (part.type === "text" && part.text !== undefined ? [part.text] : [])).join("");
-}
 
 /** The requests the fake Brave received, and what it answers next. */
 const received: { path: string; query: URLSearchParams; token: string | null }[] = [];
@@ -154,4 +143,18 @@ test("the key reaches only Brave: nothing the model sees contains it", async () 
 
   expect(JSON.stringify({ tool: s.tool, result })).not.toContain(KEY);
   await s.stop();
+});
+
+test("in a Harness turn: the key is nowhere in the transcript, even when an answer echoes it", async () => {
+  const tool = createBraveSearchTool({ apiKey: async () => KEY, apiBase });
+  answer = () => Response.json({ web: { results: [{ title: `echo ${KEY}`, url: "https://example.org", description: "d" }] } });
+  const results = await runToolCalls({ tools: [tool], calls: [{ name: "websearch", args: { query: "pikit" } }] });
+  answer = () => new Response("down", { status: 503 });
+  const failed = await runToolCalls({ tools: [tool], calls: [{ name: "websearch", args: { query: "pikit" } }] });
+
+  expect(results.map((r) => [r.name, r.isError])).toEqual([["websearch", false]]);
+  expect(results[0]?.text).toContain("echo [redacted]");
+  expect(failed[0]?.isError).toBe(true);
+  expect(failed[0]?.text).toContain("HTTP 503");
+  expect(JSON.stringify([results, failed])).not.toContain(KEY);
 });
