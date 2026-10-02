@@ -7,7 +7,9 @@ pikit, what Pi already does (rule zero), and what is still open; text moved out 
 kept in it verbatim. A feature may never require changing SPEC §1–§6: if one seems to, the
 change is proposed there first. The contracts a feature needs are written in `SPEC.md` when it is
 built. No file tracks status: a built feature has its file in [`completed/`](completed/), and kit
-work that is not a feature is in [kit follow-ups](kit-follow-ups.md).
+work that is not a feature, with the kit-wide decisions it led to (Chord outside the kernel, no code
+hot reload), is in [kit follow-ups](kit-follow-ups.md). Proposals to Pi are in
+[`docs/upstream/`](../docs/upstream/).
 
 **The former SPEC.** Text moved here from `SPEC.md` or `ROADMAP.md` before ea64523 keeps its section
 numbers ("the former SPEC §16"), standards (S1–S16) and milestones (M1–M5): they are those of
@@ -53,8 +55,8 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |
 | [second-agent-runtime](second-agent-runtime.md) | | Another agent loop behind `AgentRuntime` | No |
 | [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
-| [pi-durable-migration](pi-durable-migration.md) | | The adapter on Pi's durable runtime; `sessions-sql` and part of `submissions-sql` removed | No: it removes pikit code once Pi carries it |
-| [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql` and `sessions.store` | No (it was the former roadmap's swap proof) |
+| [pi-durable-migration](pi-durable-migration.md) | | The kit on Pi's durable runtime (in progress): what moves to Pi, the switch-over's decisions, the gaps proposed upstream | Yes: Pi 1.0 removed the `AgentHarness` the runtime ran on |
+| [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations; replies in their thread | No |
 | [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation | Open: SPEC §6's git workspace |
 

@@ -30,7 +30,8 @@ does not already cover the case.
 
 ## Open questions
 - "Hot-reloadable" (below) against a deep-frozen config (SPEC K4): a reload is a restart, or
-  the rules are data in `storage.sql`.
+  the rules are data in `storage.sql`. Code is never hot-reloaded ([kit follow-ups](kit-follow-ups.md),
+  "No code hot reload"), so live rules can only be data.
 - Where roles come from: the agent, the actor, or both.
 
 ## Moved from the former SPEC

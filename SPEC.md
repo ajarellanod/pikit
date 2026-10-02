@@ -26,9 +26,9 @@ A change that breaks one is not done.
 
 | # | Property |
 |---|---|
-| P1 | **Pi is the agent; pikit is the kit.** pikit builds only what one Pi process cannot give itself (channels, routing between agents, conversation ownership across processes, durable delivery, scheduling, approvals, deployment, the dashboard, the path by which an agent
+| P1 | **Pi is the agent; pikit is the kit.** A kit, not a framework: Pi's durable runtime (`pi-durable`) owns the agent runtime (durability, resume, request-id deduplication, the inbox and steering, compaction, subagents, tasks). pikit builds only what one Pi process cannot give itself (channels, routing between agents, conversation ownership across processes, durable delivery to platforms, scheduling, approvals, deployment, the CLI and installer, the dashboard, the path by which an agent
 changes its own service). When Pi ships something pikit built, pikit deletes its own. |
-| P2 | **Five minutes, then it's yours.** One command sequence from an empty server to a reachable agent, leaving a project the user owns. |
+| P2 | **Five minutes, then it's yours.** One command sequence from an empty server to a reachable agent, leaving a project the user owns. The CLI and installer exist for this: zero friction from installer to a running agent. |
 | P3 | **Components are source you own.** Copied into the project, readable, editable, removable; removing one leaves a clean, working project. |
 | P4 | **A small, stable kernel; contracts are the only coupling; no magic; absence, not flags.** |
 | P5 | **Fail loudly, recover honestly.** A part that cannot start stops the app. Delivery is at-least-once and says so. A restart, crash or eviction never loses a conversation and never pretends a message was answered. |
@@ -75,7 +75,8 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 - **K5. `Context` is pikit's own, and frozen.** Its shape is `abortSignal`, `value(key)`,
   `toString()`, with `createContextKey`, `withAbortSignal`, `withCancel`, `withContextValue` and
   `BACKGROUND_CONTEXT`. It grows only through context keys, never by changing the interface. It
-  matches Chord's shape today; when Chord changes, the adapter bridges it. *Why:* users are isolated
+  matches Chord's shape today; when Chord changes, the adapter bridges it. Chord itself stays out of
+  the kernel, re-checked at Chord 1.0 (`features/kit-follow-ups.md`). *Why:* users are isolated
   from Pi's weekly churn, and new needs (tracing, deadlines) fit as keys.
 - **K6. `stop()` may never run.** A `kill -9`, an out-of-memory kill or a Durable Object eviction
   ends the app with no `stop()`. `stop()` is for tidiness, never for correctness: whatever must
@@ -164,14 +165,15 @@ What it requires:
   in the required set import no `node:*`, `bun:*` or `cloudflare:*` (checked by
   `scripts/boundaries.test.ts` and `registry validate`). A component may be server-only, but the
   required set has a Cloudflare provider for every capability it needs.
-- **The required set.** At least a channel, the runtime, sessions, conversations, delivery,
+- **The required set.** At least a channel, the runtime (with pi-durable's storage), conversations, delivery,
   workspace and execution providers for Cloudflare, the dashboard (§5), and `deployment-cloudflare`.
 - **The actor model holds there.** One conversation is owned by one Durable Object (C1). An
   evicted object loses nothing: the next request or alarm resumes the run (`resume()`), per K6.
 - **The budgets hold.** Bundle ≤ 10 MB compressed, cold start ≤ 1 s, ≤ 128 MB per isolate,
   ≤ 6 concurrent outbound connections, measured, not estimated.
 - **The proof runs.** The required set deploys and answers; a run killed by eviction mid-drive
-  completes after `resume()`; the Durable Object session backend passes Pi's session conformance.
+  completes after `resume()`; pi-durable's storage on the object's SQL passes pi-durable's storage
+  conformance.
 
 ### 4.1 Decisions
 
@@ -180,7 +182,7 @@ written here. Status (built or not) is not tracked here, as for the kernel.
 
 - **C1. A thin Worker, and one Durable Object per conversation running the App.** A project on
   Cloudflare has two Apps (K7), both in `pikit.config.ts`: the default export is the Durable
-  Object's App (the channel's other half, the router, the registry, the runtime, sessions, storage,
+  Object's App (the channel's other half, the router, the registry, the runtime, storage,
   delivery), and `export const worker` is the Worker's App (the ingress half of each channel, the
   mailbox, secrets). A component with a half for each exports the Worker's half by the name its
   `component.json` declares, and `pikit add` puts each half in its App. The Worker checks and routes;
@@ -215,8 +217,8 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   the object is reset, 15 minutes of wall clock for an alarm (a cut alarm is retried), and a deploy
   cuts every alarm in progress (it is retried). Slices keep every one of these far away. *Why:* K6
   already makes a reset lose nothing; slices make a long conversation a sequence of short events.
-- **C5. State through neutral contracts; the platform through one context key.** Sessions
-  (`sessions-sql`, Pi's `Storage` on `storage.sql`) and conversations (`conversations-kv`, on
+- **C5. State through neutral contracts; the platform through one context key.** The runtime's
+  state (pi-durable's storage on `storage.sql`) and conversations (`conversations-kv`, on
   `storage.kv`) have neutral providers that run on both targets; the only Cloudflare-specific storage
   is `storage-do` (`storage.sql` on the object's SQLite, whose transactions pass the `storage.sql`
   suite unchanged). Platform objects reach components through one context key in
@@ -225,12 +227,13 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   and in an object its id, its storage, and the hooks its alarm and RPC call. Its types are structural: no `cloudflare:*` import leaves the entrypoints. *Why:* the
   components that must touch the platform are few and say so by reading one key; everything else is
   the same code on both targets.
-  `sessions-sql` is transitional (P1): when the adapter moves to Pi's durable runtime (`pi-durable`),
-  sessions are that runtime's own storage and `sessions-sql` goes (`features/pi-durable-migration.md`).
-  `pi-durable`'s SQLite core takes a synchronous database facade, which a Durable Object's SQLite
-  and Bun's can implement and an asynchronous API cannot: sessions will then sit on the object's SQL
-  directly, through `WORKERS_HOST`, not on `storage.sql`, which stays asynchronous so that Postgres fits
-  and keeps the records components own.
+  With the move to Pi's durable runtime (P1), sessions are that runtime's own storage:
+  `sessions.store`, `sessions-sql` and `sessions-jsonl` go (`features/pi-durable-migration.md`).
+  pi-durable 1.0's SQLite core runs over a thin facade on `storage.sql`, proven on storage-sqlite and
+  on storage-do with pi-durable's own storage conformance, so one implementation serves a server and
+  a Durable Object, and `storage.sql` stays asynchronous so that Postgres fits. Its tables are not
+  prefixed (an exception to `storage.sql`'s rule, proposed upstream), so one `storage.sql` holds one
+  pi-durable Session.
 - **C6. Telegram by webhook is its own component.** `channel-telegram-webhook` (Worker half: the
   route, the secret Telegram echoes, the allowed users, `actor.mailbox`; object half: the inbox
   handler and delivery from `agent.submissions`' answers) reuses `channel-telegram`'s client, format
@@ -263,7 +266,7 @@ records and diff tables, prompt bars, an agent chat harness).
 **What it shows and does.**
 - The composition: components, capabilities and their providers, pipelines, the config without
   secrets.
-- Conversations: their agent, their session, their runs; a run's messages, tool calls and result.
+- Conversations: their agent, their runs and tasks; a run's messages, tool calls and result.
 - Delivery: what is queued, sent, retried, abandoned or possibly duplicated.
 - Health: what is up, degraded or failing.
 - Actions, each through an existing contract, never around one: abort a run, reset a
@@ -276,7 +279,8 @@ records and diff tables, prompt bars, an agent chat harness).
 - **It reads contracts and feeds, never internals.** Its data comes from an authenticated admin
   HTTP API it registers through `http.route`, backed by the capabilities of the installed
   components. What must not be missed comes from feeds, not from events (K3). A view whose
-  capability is not installed does not appear.
+  capability is not installed does not appear. Live views of conversations and tasks build on
+  pi-durable's `watch()` and `taskGraph()`, reached through the adapter, not on a copy of their state.
 - **It runs on both targets** (§4). The UI is static assets built by the component (React and
   Tailwind v4, the stack of Beautiful UI's primitives; no Next.js server runtime), served by
   `server-bun` on a server and as Workers static assets on Cloudflare. Live updates use a stream
@@ -285,7 +289,7 @@ records and diff tables, prompt bars, an agent chat harness).
 - **Its build is its own.** Building the dashboard's assets does not become a build step every
   pikit app needs (no magic, principle 9).
 - **It is safe by default.** Authenticated; never shows a secret or a credential. Operational logs stay without message text; the transcript views are an explicit,
-  authenticated read of the session.
+  authenticated read of the conversation.
 - **No paid dependencies.** Beautiful UI's `SidebarNav` uses a commercial icon set
   (`@central-icons-react`); the dashboard replaces it with a free set. Every copied primitive is
   attributed in `NOTICE`.
@@ -305,6 +309,11 @@ and `/reload` loads it; Pi's durable runtime turns a code change into a *generat
 (stop admitting, close, open a new harness over the same storage, resume from the checkpoints). pikit
 takes the same idea from one Pi process to the whole service: what Pi cannot do for itself is know
 which pikit it runs in, and change, test, approve, deploy and roll back that service.
+
+pikit has no code hot reload: a reload is a restart, and since pi-durable checkpoints every step, a
+restart loses nothing (K6). What changes live is data: a conversation's agent (`configure()`),
+settings read when used, skills and memory kept as documents or files. Code changes only through
+the path below (`features/kit-follow-ups.md`, "No code hot reload").
 
 **Who.** One agent per project is the steward: the main agent, declared so in its `defineAgent`.
 Only it gets the self-knowledge and the self-change tools. Only senders trusted as its operators may
@@ -330,7 +339,7 @@ It changes the source of its own project, as a person would:
    rebuild and restart. Conversations are actors, so the restart loses nothing (K6).
 6. Health is watched after the deploy; if it fails, the previous version comes back automatically.
 
-**What it may change.** Its own definition (prompt, tools, skills), Pi extensions, the components in
+**What it may change.** Its own definition (prompt, tools, skills), pi-durable extensions, the components in
 `src/pikit/`, the dashboard, and config values. **Never:** secrets and credentials, the deployment and
 approval path, the kernel or the contracts (for those it proposes a change upstream).
 

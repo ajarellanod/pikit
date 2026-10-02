@@ -5,15 +5,25 @@ itself. Features have their own files ([README](README.md)); no file tracks stat
 leaves this list when its change lands (and the CHANGELOG says so). Each item says why, when and
 how big.
 
-## Move the adapter to Pi's durable runtime (spike)
-- **Why:** P1. `pi-durable` carries sessions, submissions and resume; once the adapter runs on it,
-  `sessions-sql`, `@pikit/pi-adapter/sql` and part of `submissions-sql` go
+## Move the adapter to Pi's durable runtime (switch-over)
+- **Why:** P1. Pi 1.0 removed the 0.99 `AgentHarness` pikit ran on; `pi-durable` carries
+  conversations, submissions, resume, the inbox, compaction, tasks and subagents. Once the kit runs on
+  it, `sessions.store`, `sessions-sql`, `sessions-jsonl` and `@pikit/pi-adapter/sql` go
   ([pi-durable migration](pi-durable-migration.md)).
-- **When:** deferred by the owner until Pi ships handoff packages 16–18 (tool turns, the
-  busy-conversation inbox, owned runs). Re-check `pico-v5-handoff.md` and `pi-durable` on each Pi
-  bump; 0.99.0 has 1–15.
-- **Size:** the spike is bounded (a message in, tool calls and an answer out, a busy conversation,
-  owned runs); the migration after it is large and removes code.
+- **When:** now. The spike held and the adapter's pieces are built beside the 0.99 code; the
+  switch-over of the components is in progress.
+- **Size:** large, and it removes code. The decisions it follows are in the migration file.
+
+## Upstream proposals for pi-durable (pending the owner's decision to send)
+The gaps pikit works around, one file each in [`docs/upstream/`](../docs/upstream/):
+[next due time](../docs/upstream/pi-durable-next-wake.md),
+[inbox stuck after a failed run](../docs/upstream/pi-durable-inbox-after-failure.md),
+[session id for prompt caching](../docs/upstream/pi-durable-provider-session-id.md),
+[per-conversation resume](../docs/upstream/pi-durable-scheduling-scope.md),
+[table prefix](../docs/upstream/pi-durable-table-prefix.md). Not yet written up: one process per
+storage, and a caller's context values (tenant, trace) not reaching tools. Each one Pi ships removes
+a workaround in the adapter or a limit of the kit.
+- **Size:** small to write; each is sent when the owner decides.
 
 ## Upstream contributions (pending the owner's decision)
 - **pi-mcp's `StreamableHttpTransport` on Workers.**
@@ -25,21 +35,51 @@ how big.
   - *Size:* a small upstream patch for each; then `mcpHttpTransport`'s wrapper goes.
 - **Chord's context loses a foreign parent's `abortSignal`.**
   - *Why:* Chord's `withContextValue` reads cancellation through a private key, so a pikit context
-    that Pi derives loses its signal; `toPi()` in `packages/pi-adapter/src/context.ts` re-attaches it.
+    that Pi derives loses its signal; `toPi()` in `packages/pi-adapter/src/context.ts` re-attaches it
+    (`toChord` in `durable/context.ts` for Chord 1.0, which still has the gap).
     Proposed fix: `ContextValue.abortSignal` returns its own value when it holds the abort key, and
-    `parent.abortSignal` otherwise. With it, pikit deletes `toPi()`.
+    `parent.abortSignal` otherwise. With it, pikit deletes the bridge.
   - *When:* once the owner decides to send it.
   - *Size:* a few lines upstream, and a test; then a small deletion in the adapter.
 
 ## Chord: through the adapter and components, never in `@pikit/core`
-- **Decided:** Chord does not enter the kernel. The kernel's only runtime dependency is `typebox`
-  (SPEC §3); `Context` is pikit's own and frozen (K5), matching Chord's shape and bridged by the
-  adapter; Chord is 0.x and moves with Pi (0.99.1 here); and it depends on `esbuild`.
+- **Decided (re-checked against Chord 1.0):** `@pikit/core` stays, and Chord does not enter the
+  kernel. The kernel's only runtime dependency is `typebox` (SPEC §3); `Context` is pikit's own and
+  frozen (K5), matching Chord's shape and bridged by the adapter (`toChord`, `toPi()`).
+- **Why, with Chord 1.0:** portability is no longer the objection (it runs in Bun and in bare
+  workerd). What remains:
+  - its 1.0 is 1.0 in name, not stable: it comes from Pi's lockstep versioning, and Chord's
+    `PLANNING.md` says it is not a stable public contract, while the kernel promises 1.x (K8, P7);
+  - `esbuild` is still a hard dependency, though only its `./bundler` subpath uses it;
+  - `withContextValue` still drops a foreign parent's `abortSignal` (below, "Upstream
+    contributions"), which pikit bridges;
+  - its facades pay off only with hot reload or remote services, which pikit does not do (below);
+  - it lacks what pikit's kernel provides: typed events, pipelines with priority and halt, optional
+    dependencies, provider selection, keyed lookup, cancellable start/stop with deadlines and
+    rollback, `describe()`, and per-component config validation.
+- **Keep:** aligning `Context` with Chord's shape.
 - **Candidates**, each through the adapter or a component, when its feature is built:
-  - the dashboard's live state (SPEC §5): Chord's `replicatedState` and `delta`;
+  - the operator UI's live state (SPEC §5): pi-durable's `watch()`/`taskGraph()`, and Chord's
+    `replicatedState` and `delta` for the rest (health);
   - [health](health.md): Chord's availability semantics (stable handles, `unavailable` /
     `replaced`, `ready()`).
+- **Open:** the `abortSignal` fix upstream; `esbuild` as an optional peer of Chord; Chord's semver.
 - **Size:** none now; each candidate is weighed with its feature.
+
+## No code hot reload
+- **Decided:** a reload is a restart. pi-durable checkpoints every step, so a restart loses nothing
+  (K6). Code hot reload could never be cross-target (Workers forbid `eval` and `new Function`), and
+  it contradicts "nothing is loaded dynamically in production" (MANIFESTO) and "the agent never edits
+  what runs" (SPEC §6).
+- **Yes to:**
+  - a fast restart in development: `pikit dev` with watch, and a test that a restart mid-turn loses
+    no message;
+  - behaviour changes as data, applied live: per-conversation `configure()`, settings read through
+    live getters, skills and memory as documents or files (editable later from the operator UI);
+  - deploys that lose nothing.
+- **Revisit** only for a marketplace of third-party plugins installed live, which is not pikit's
+  model.
+- **Size:** the restart test is small; the rest comes with the features that use it.
 
 ## Leftovers of the § reference pass
 - **The properties lost their checks.** SPEC §2's table named, for each property, the standard in

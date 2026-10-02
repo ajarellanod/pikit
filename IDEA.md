@@ -33,8 +33,8 @@ plus a registry of components you copy into your project and own.**
 
 Pi's agent runtime is built around a lifecycle of typed events that extensions can observe,
 intercept, and transform. Almost nothing is hard-wired; almost everything is reachable. Pi has
-also been separating its core from Node — abstract execution environment, pluggable session
-storage, transport-neutral protocol — so the same loop can run in different places.
+also been separating its core from Node — abstract execution environment, pluggable storage
+for its durable runtime, transport-neutral protocol — so the same loop can run in different places.
 
 pikit extends that philosophy from the *agent loop* to the *whole harness around it*. The
 lifecycle of a message entering a channel, being routed, running through an agent, and being
@@ -64,7 +64,7 @@ Five minutes to a running agent on a VPS. This is deliberate and it is a differe
 the onboarding of a product (OpenClaw, Hermes) with the ownership of a kit. Frameworks like
 Flue leave you with a Vite project and a deployment to figure out; pikit leaves you with a
 running service, and *then* lets you reshape it. And every behavior — how messages are
-routed, how sessions are stored, how replies are delivered, what gets approved — lives in
+routed, where conversations are stored, how replies are delivered, what gets approved — lives in
 your repository as code you own.
 
 Then, as needs grow:
@@ -73,15 +73,15 @@ Then, as needs grow:
 pikit add outbound-durable        # reliable delivery with retries
 pikit add scheduler             # cron-style routines
 pikit add approvals             # human-in-the-loop decisions
-pikit add sessions-postgres     # swap SQLite for Postgres
-pikit remove sessions-sqlite    # and nothing else changes
+pikit add storage-postgres      # swap SQLite for Postgres
+pikit remove storage-sqlite     # and nothing else changes
 ```
 
 And when the shape changes entirely:
 
 ```bash
 pikit add deployment-cloudflare
-pikit add sessions-cloudflare-do
+pikit add storage-do
 pikit deploy --profile cloudflare
 ```
 
@@ -94,11 +94,12 @@ Same agents, same routing, same channels. Different infrastructure underneath.
 - **Shared contracts** (`@pikit/contracts`): the words the components agree on (an inbound
   message, an agent runtime, an outbound queue), with their conformance suites. They version apart
   from the core, so the vocabulary can grow while the core stays put.
-- **A Pi adapter**: the bridge between pikit's harness lifecycle and Pi's agent runtime
-  (`AgentHarness`, `ExecutionEnv`, `SessionStorage`).
-- **A registry of components**: channels, routers, session stores, outboxes, schedulers,
+- **A Pi adapter**: the bridge between pikit's harness lifecycle and Pi's durable runtime
+  (`pi-durable`'s `Harness`, its execution environment, its storage over `storage.sql`).
+- **A registry of components**: channels, routers, storage providers, outboxes, schedulers,
   approval engines, executors, workspaces, deployment targets. Each one is source you copy.
-- **A CLI**: `new`, `add`, `remove`, `diff`, `upgrade`, `doctor`, `up`, `deploy`.
+- **A CLI**: `new`, `add`, `remove`, `diff`, `upgrade`, `doctor`, `up`, `deploy`. With the
+  installer, its goal is zero friction from installing pikit to a running agent.
 - **Two first-class runtimes**: a long-running server (Bun, and Node by 1.0; Docker, systemd) and
   serverless Cloudflare Workers + Durable Objects (optionally with Containers for shell
   access).
@@ -110,16 +111,24 @@ Same agents, same routing, same channels. Different infrastructure underneath.
 - Not a complete assistant. It does not try to match OpenClaw's or Hermes' feature lists —
   but it does match their *time to first running agent*.
 - Not a new agent loop. Pi is the runtime.
+- Not a framework around the agent. Pi's durable runtime (`pi-durable`) owns durability, resume,
+  request-id deduplication, the inbox and steering, compaction, subagents and tasks. pikit owns
+  what Pi does not: channels, routing, delivery to platforms, deployment on a server or on
+  Cloudflare, the CLI and installer, and an operator UI built on what Pi exposes. When Pi learns
+  something pikit built, pikit's goes.
 - Not a plugin system. Components are installed at development time and compiled into the
-  deployment; nothing is loaded dynamically in production.
+  deployment; nothing is loaded dynamically in production, and code is not hot-reloaded: a
+  reload is a restart, which loses nothing.
 - Not a hosted service. Registries are Git repositories or static files.
 
 ## Why now
 
-- Pi has reached the point where its core is runtime-neutral: `pi-agent-core` has no Node
-  imports at its root, `ExecutionEnv` abstracts filesystem and shell, `SessionStorage` is a
-  pluggable interface with a published conformance suite, and `pi-protocol` / `pi-client`
-  are transport-neutral. The foundation for "run anywhere" exists.
+- Pi has reached the point where its core is runtime-neutral: Pi 1.0's durable runtime
+  (`pi-durable`, still experimental) commits conversations, tasks and documents before
+  anything is shown, `ExecutionEnv` abstracts filesystem and shell, its storage is a small
+  facade with a published conformance suite (pikit runs it on a server's SQLite and in a
+  Durable Object), and `pi-protocol` / `pi-client` are transport-neutral. The foundation for
+  "run anywhere" exists.
 - Cloudflare Durable Objects provide exactly the primitive an agent session needs: a single-
   threaded, globally addressable object with its own SQLite, alarms, hibernating WebSockets,
   and an optional attached Container.
@@ -146,7 +155,7 @@ durability, routing, and the HTTP server; you own agents, channel wiring, tools,
 adapters — the edges. Flue 2 showed what that means in practice: the programming model was
 replaced (`defineAgent` and `defineWorkflow` removed, CLI build commands removed) in a major
 release, and every project migrated on Flue's schedule. In pikit, the center is a small
-core of events, pipelines, and capabilities; the harness pieces — router, session store,
+core of events, pipelines, and capabilities; the harness pieces — router, conversation registry,
 outbox, scheduler, approvals, channel ingress — are source in your repository. When the
 model of one of them needs to change, you change it.
 
@@ -211,7 +220,8 @@ ideas on the table and see which ones hold. These are pikit's:
    citizens; any kind of component, not a fixed list.
 8. **Operational components from production.** Approvals with delivery-time binding to the
    surface where a human can answer, outbox with real delivery semantics, file-defined
-   routines, session continuity that survives eviction, role-based tool policy.
+   routines, conversations that survive eviction (on Pi's durable runtime), role-based tool
+   policy.
 9. **A stability promise.** The 1.x model does not get rewritten. Boring on purpose.
 
 If some of these turn out to be right, others will adopt them — Flue included — and that is
@@ -230,6 +240,17 @@ takes that seriously: the CLI tracks installed versions and hashes, shows upstre
 and can apply safe upgrades or hand a three-way merge to Pi itself.
 
 And it is a project, not a company. Being wrong is allowed.
+
+## Strategy and kill criteria
+
+The bet is checked in a time-box of four to six weeks: a first preset, Telegram on Cloudflare (a
+"Deploy to Cloudflare" template), with a minimal operator UI, shown to the Pi community.
+
+pikit stops if:
+
+- Earendil ships official channels and deployment on `pi-durable`;
+- nobody uses it;
+- what remains above `pi-durable` fits in a template.
 
 ## Where the ideas come from
 

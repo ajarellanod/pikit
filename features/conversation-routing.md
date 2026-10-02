@@ -94,8 +94,12 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
      /** `InboundMessage.conversationId`: the platform's conversation (a chat id). */
      conversationId: string;
    }
-   export interface ConversationRef { key: string; agent: string; sessionId: string; address?: ConversationAddress }
+   export interface ConversationRef { key: string; agent: string; conversationId: string; address?: ConversationAddress }
    ```
+
+   (`ConversationRef.conversationId` is the pi-durable conversation, renamed from `sessionId` with
+   the [move to pi-durable](pi-durable-migration.md); the address's `conversationId` is the
+   platform's, as on `InboundMessage`.)
 
    `RunSettlement`, `SubmissionStatus` and `PendingConversation` carry a `ConversationRef`
    (`submissions.ts:39,42,47`), so they carry the address with no change of their own. A thread adds

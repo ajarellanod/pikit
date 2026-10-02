@@ -16,7 +16,7 @@ profile per person (name, preferences, what they work on); search over past conv
 - `memory-sql` on `storage.sql` provides a `memory` capability (remember, recall, forget, search;
   scoped by agent and actor), with its suite first. The kind `memory` is new (naming decision).
 - Tools from `tool-memory`: `memory_read` (`replay: "safe"`) and `memory_write` (`replay: "never"`,
-  idempotent by `${sessionId}:${runId}:${toolCallId}`). An agent gets them only by naming them.
+  idempotent by `${conversationId}:${runId}:${toolCallId}`). An agent gets them only by naming them.
 - Recall into the prompt: through the `agent.prepare` pipeline ([pipeline anchors](pipeline-anchors.md)).
   (Running unmodified Pi coding-agent extensions, whose `before_agent_start` could do it, was dropped
   with the move to pi-durable; pi-durable's own extensions will replace it.)

@@ -21,20 +21,23 @@ wrong, and we fix whichever it is.
 
 ### 1. Pi is the agent. pikit is the kit.
 
-Pi is our agent. It owns the loop, the models, compaction, retries, steering, its queues and
-its sessions. We never build agent behavior. Before we build anything for the agent, we check
+Pi is our agent. Through its durable runtime it owns the loop, the models, durability and
+resume, compaction, retries, steering, its inbox, subagents, tasks and its conversations. We
+never build agent behavior. Before we build anything for the agent, we check
 whether Pi already does it:
 
 - If Pi does it, we use it.
 - If Pi almost does it, we improve it upstream.
 - We only build what one Pi process cannot give itself: channels, routing between agents,
-  ownership across machines, reliable delivery, scheduling, approvals and deployment.
+  ownership across machines, reliable delivery, scheduling, approvals, deployment, and the CLI
+  that gets you there.
 
-When Pi learns something we built, we delete ours. The kit is yours, piece by piece.
+When Pi learns something we built, we delete ours. That is what makes pikit a kit and not a
+framework: Pi runs the agent, and the kit is yours, piece by piece.
 
 ### 2. Conversations are actors. Machines are workers.
 
-A conversation has an identity, a durable state (its Pi session) and a mailbox (Pi's inbox).
+A conversation has an identity, a durable state (its Pi conversation) and a mailbox (Pi's inbox).
 A worker is wherever the conversation's steps happen to run: a process, a Durable Object.
 Any worker can pick up any conversation, and only one at a time. Losing a worker loses
 nothing, and an idle conversation costs nothing but storage.
@@ -98,7 +101,8 @@ only one place has hidden dependencies it has not admitted to.
 ### 12. Five minutes, then it's yours.
 
 Ownership is no excuse for a slow start. One command takes you from an empty server to a
-running, reachable agent. Presets are shortcuts, never modes: everything they install can be
+running, reachable agent: the CLI and the installer exist so that nothing stands between
+installing pikit and an agent that answers. Presets are shortcuts, never modes: everything they install can be
 edited or removed like anything else.
 
 ### 13. Boring on purpose.
@@ -117,7 +121,8 @@ in components, which you upgrade when you decide to.
 - **Not a framework that owns your application.** Your project owns pikit, not the other way
   around.
 - **Not a plugin marketplace.** Registries distribute source. Nothing is loaded dynamically
-  in production.
+  in production, and code is never hot-reloaded: a reload is a restart, and a restart loses
+  nothing.
 
 ## Who it is for
 

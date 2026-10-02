@@ -26,7 +26,7 @@ it stalls, and expiry.
   and `answerKey` (`Feed`, SPEC K3; `packages/contracts/src/outbound.ts`). The answer comes back as
   an `InboundMessage` with `replyTo` to a `choice` part ([rich content](rich-content.md)).
 - A tool that waits for a decision is `replay: "never"`, and the decision is keyed by
-  `${sessionId}:${runId}:${toolCallId}`.
+  `${conversationId}:${runId}:${toolCallId}`.
 - Absent, nothing waits for a person. A question that needs an answer now is
   [interaction](interaction.md), not an approval.
 
@@ -34,8 +34,8 @@ it stalls, and expiry.
 Pi's durable runtime has durable tasks with phases, waits (`sleep(until)`), memos and an abort
 protocol (`pico-v5.md` §5): a run can wait days for a decision with no task engine in pikit. pikit
 builds only the surface (where the question goes, how the answer comes back) and the record of
-decisions across conversations. `pi-durable` 0.99.0 ships these tasks, but the adapter does not run
-on it yet (`features/pi-durable-migration.md`); until it does, a wait is `state.phase` plus tools.
+decisions across conversations. `pi-durable` 1.0.0 ships these tasks, and the kit is moving onto it
+(`features/pi-durable-migration.md`); until the switch-over lands, a wait is `state.phase` plus tools.
 
 ## Open questions
 - Is the approval of a self-change (SPEC §6) an `approvals` decision, or the git host's
