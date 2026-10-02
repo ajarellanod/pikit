@@ -17,7 +17,6 @@
     "pikit": "bun packages/cli/src/main.ts"
   },
   "devDependencies": {
-    "@earendil-works/pi-coding-agent": "workspace:@pikit/pi-extension-shim@*",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@pikit/contracts": "workspace:*",
     "@pikit/core": "workspace:*",

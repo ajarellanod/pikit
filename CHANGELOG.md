@@ -5,6 +5,16 @@ line names its area.
 
 ## Unreleased
 
+- pi-adapter, cli, contracts: **breaking.** Unmodified Pi coding-agent extensions no longer run.
+  The compatibility layer is gone: the `@pikit/pi-extension-shim` package and the
+  `@earendil-works/pi-coding-agent` alias to it, `@pikit/pi-adapter/extensions` (the vendored
+  `ExtensionAPI`, its host and Pi's example extensions), the `PiExtension`/`ExtensionAPI` exports,
+  `createPiRuntime`'s and `createRuntimePi`'s `extensions` (and the adapter's `extension`) options,
+  the `agent.extension` capability, `AgentDefinition.extensions`, and `pikit doctor`'s Pi-extension
+  checks. `pikit new` no longer writes `src/extensions/permission-gate.ts`, an
+  `@earendil-works/pi-coding-agent` dependency or a vendored shim tarball, and lists `runtimePi`
+  plainly; project code importing `@earendil-works/*` is now always an S1 problem in `pikit doctor`.
+  Extensions return in pi-durable's own model (`defineExtension`) when the adapter moves to it.
 - contracts: **breaking.** `WORKERS_HOST` and `WorkersHost` move from `@pikit/contracts` to its new
   `@pikit/contracts/cloudflare` export (`src/cloudflare.ts`, formerly `src/workers-host.ts`); the
   neutral root no longer exports them. `deployment-cloudflare`, `platform-cloudflare`, `storage-do`,

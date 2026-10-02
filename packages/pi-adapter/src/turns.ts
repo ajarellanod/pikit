@@ -44,8 +44,6 @@ export interface TurnSource {
   models: Models;
   /** An installed tool by name (`agent.tool`). */
   tool: ((name: string) => AgentTool | undefined) | undefined;
-  /** Tools the extensions registered: always in the harness, next to the agent's. */
-  extensionTools: readonly AgentTool[];
 }
 
 /** What `prepare` returns: the `TurnConfig` fields it changes. */
@@ -58,7 +56,7 @@ type TurnChanges = ReturnType<NonNullable<AgentDefinition["prepare"]>>;
 export function resolveTurn(source: TurnSource, changes: TurnChanges = {}): Turn {
   const { agent } = source;
   const tools = resolveTools(agent.name, changes.tools ?? agent.tools ?? [], source.tool);
-  const names = [...tools, ...source.extensionTools].map(nameOf);
+  const names = tools.map(nameOf);
   const twice = names.find((name, index) => names.indexOf(name) !== index);
   if (twice !== undefined) throw new Error(`agent "${agent.name}": two tools are named "${twice}"`);
   const model = resolveModel(source.models, agent.name, changes.model ?? agent.model);
@@ -88,7 +86,7 @@ export class Turns {
 
   /** The tools the harness is created with. */
   get tools(): AgentTool[] {
-    return [...this.initial.tools, ...this.source.extensionTools];
+    return this.initial.tools;
   }
 
   /**
@@ -99,11 +97,9 @@ export class Turns {
    */
   async prepareRun(harness: AgentHarness<undefined>, lane: AgentLane, ctx: Context): Promise<void> {
     const turn = await this.prepared(ctx);
-    await harness.setTools([...turn.tools, ...this.source.extensionTools], ctx);
-    // Extension tools stay as the extensions left them; the agent's are exactly this run's.
+    await harness.setTools(turn.tools, ctx);
     const active = await lane.getActiveTools(ctx);
-    const extensions = this.source.extensionTools.map(nameOf).filter((name) => active.includes(name));
-    const names = [...turn.tools.map(nameOf), ...extensions];
+    const names = turn.tools.map(nameOf);
     if (!sameList(active, names)) await lane.setActiveTools(names, ctx);
     const model = await lane.getModel(ctx);
     if (model?.provider !== turn.model.provider || model.id !== turn.model.id) {

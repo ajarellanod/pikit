@@ -18,7 +18,7 @@ copy them to `src/pikit/` instead.
 | `src/extensions/agents.ts` | your agents (`src/agents/assistant/agent.ts`) |
 | `execution-local` | the workspace `.pikit/workspace/`: this machine's files and shell |
 | `tool-read`, `tool-write`, `tool-edit`, `tool-bash` | Pi's tools; `assistant` names all four |
-| `runtime-pi` | Pi runs the agents, with Pi's `permission-gate` extension loaded |
+| `runtime-pi` | Pi runs the agents |
 | `router-basic` | every message goes to `assistant` |
 | `channel-http` | `POST /v1/messages`, `POST /v1/conversations/:id/reset` |
 | `server-bun` | HTTP on port 3000, `/health`, `/ready` |
@@ -109,8 +109,6 @@ The agent has `bash` on your machine, as your user. `execution-local` is not a s
   `.pikit/credentials.json`.
 - Commands do not see the server's environment variables (`PIKIT_HTTP_TOKEN`,
   `ANTHROPIC_API_KEY`), only an allowlist.
-- Pi's `permission-gate` blocks `rm -rf`, `sudo` and `chmod 777`. That is a policy, not isolation:
-  other commands run.
 - `server-bun` listens on `0.0.0.0:3000`, so anyone who can reach the port and has the token has
   that shell. On a shared network, set `"server-bun": { hostname: "127.0.0.1" }`, or remove `bash`
   from the agent's `tools`.
@@ -138,9 +136,6 @@ Run from the repository root:
   model (no API key). It covers the answer in the response, a message steered into a busy run with
   both POSTs answered, `401`, `/health` and `/ready` while starting, running and stopping, reset,
   and a conversation surviving a restart.
-- `test/scenario-7.test.ts`: Pi's own `permission-gate` extension, unmodified, stops Pi's real
-  `bash` from running `rm -rf` asked for over HTTP, while other commands run in the workspace. An
-  agent that does not name `bash` cannot run commands at all.
 - `test/config.test.ts`: `pikit.config.ts` composes, as `pikit doctor` will check it.
 - `test/anthropic.test.ts`: a real Claude answers, and uses its tools to write a file in the
   workspace. It calls a paid API, so it is opt-in: it runs only with `PIKIT_LIVE=1` and a

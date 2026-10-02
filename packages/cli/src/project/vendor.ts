@@ -1,7 +1,7 @@
 /**
  * The kit packages in a project, until they are published.
  *
- * `@pikit/core`, `@pikit/contracts`, `@pikit/pi-adapter` and `@pikit/pi-extension-shim` are not on npm yet. The CLI
+ * `@pikit/core`, `@pikit/contracts` and `@pikit/pi-adapter` are not on npm yet. The CLI
  * packs them from its own checkout into the project's `vendor/` (`bun pm pack`), and the project
  * depends on the tarballs with `file:vendor/<tarball>`. Everything then resolves inside the project
  * directory, so `bun install --frozen-lockfile` works in a Docker build too.
@@ -38,14 +38,7 @@ export const KIT_PACKAGES: Record<string, string> = {
   "@pikit/core": "core",
   "@pikit/contracts": "contracts",
   "@pikit/pi-adapter": "pi-adapter",
-  "@pikit/pi-extension-shim": "pi-extension-shim",
 };
-
-/**
- * Pi extensions import `@earendil-works/pi-coding-agent`; a project installs the shim under that
- * name, so the 19 MB coding agent is never a dependency.
- */
-export const EXTENSION_ALIAS = "@earendil-works/pi-coding-agent";
 
 export function isKitPackage(name: string): boolean {
   return name in KIT_PACKAGES;
@@ -146,7 +139,6 @@ function pointAtKit(pkg: PackageJson, specifier: (kit: string) => string): { ven
   const rewrite = (record: Record<string, string> | undefined): void => {
     if (record === undefined) return;
     for (const [dependency, current] of Object.entries(record)) {
-      // The Pi extension alias points at the shim's tarball too.
       const kit = Object.keys(KIT_PACKAGES).find((name) => name === dependency || current.includes(`/${packedName(name)}`));
       if (kit === undefined || !current.startsWith(`file:${VENDOR_DIR}/`)) continue;
       vendored = true;

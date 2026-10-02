@@ -63,7 +63,7 @@ test.skipIf(!E2E)(
       expect(copies).toEqual([`@pikit/${kit}/package.json`]);
     }
     const config = readFileSync(join(project, "pikit.config.ts"), "utf8");
-    expect(config).toContain("createRuntimePi({ extensions: [permissionGate] }),");
+    expect(config).toContain("    runtimePi,\n");
     expect(config).not.toContain("deploymentDocker");
     // HTTP answers in the response: nothing offers it durable delivery, so none is installed. The
     // runtime brings its record of submissions (`offers.ts`), over the storage the preset names.

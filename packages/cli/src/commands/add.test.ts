@@ -15,7 +15,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PIKIT_ROOT } from "../paths.ts";
 import { emptyManifest, hashOf, writeProjectManifest } from "../project/pikit-json.ts";
-import { EXTENSION_ALIAS, KIT_PACKAGES } from "../project/vendor.ts";
+import { KIT_PACKAGES } from "../project/vendor.ts";
 import { runCli } from "../testing/cli.ts";
 import { OPERATION_MARKER } from "../project/operation.ts";
 
@@ -59,7 +59,7 @@ function otherKitProject(installed: string[] = [], kit?: string): string {
     overrides[name] = `file:vendor/pikit-${packageDir}-0.0.0-0000000000.tgz`;
     writeFileSync(join(dir, "vendor", `pikit-${packageDir}-0.0.0-0000000000.tgz`), "another kit");
   }
-  const dependencies = { [EXTENSION_ALIAS]: overrides["@pikit/pi-extension-shim"], "@pikit/core": overrides["@pikit/core"] };
+  const dependencies = { "@pikit/core": overrides["@pikit/core"] };
   writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "other-kit", dependencies, overrides }, null, 2)}\n`);
   writeFileSync(join(dir, "bun.lock"), "the lockfile of the other kit\n");
   writeFileSync(join(dir, ".env.example"), "# the project's own\n");

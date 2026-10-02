@@ -12,7 +12,6 @@ import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
 import { Type } from "@earendil-works/pi-ai";
 import { type Context, defineApp, defineComponent, silentLogger, withCancel } from "@pikit/core";
 import type { AgentTool } from "@pikit/contracts";
-import { defineTool } from "../extensions/index.ts";
 import { agentTool, bindTool, createBashTool, createReadTool, createWriteTool, toolComponent } from "./index.ts";
 
 const invocation: AgentHarnessToolInvocation = {
@@ -126,7 +125,7 @@ test("agentTool: the same tool for a component of your own, which names itself a
   await app.stop();
 });
 
-test("toolComponent takes the object of a Pi tool as it is; one typed by Pi's defineTool is refused where it is written", async () => {
+test("toolComponent takes the object of a Pi tool as it is", async () => {
   // Pi's own `hello` example, its object unchanged, written inside toolComponent instead of defineTool.
   const { app, tools } = await toolsOf(
     toolComponent(
@@ -147,18 +146,4 @@ test("toolComponent takes the object of a Pi tool as it is; one typed by Pi's de
   expect(tool.replay).toBe("never");
   expect(textOf(await tool.execute("c1", { name: "Ada" }, () => {}, undefined, invocation, BACKGROUND_CONTEXT))).toBe("Hello, Ada!");
   await app.stop();
-
-  // Pi's defineTool types its fifth argument as the ExtensionContext, which only an extension's host
-  // has: such a tool stays an extension's tool, and the compiler says so, not a conversation.
-  const typedByPi = defineTool({
-    name: "hello",
-    label: "Hello",
-    description: "A simple greeting tool",
-    parameters: Type.Object({}),
-    async execute() {
-      return { content: [{ type: "text", text: "Hello!" }], details: undefined };
-    },
-  });
-  // @ts-expect-error: its execute takes an ExtensionContext, not the run's context
-  toolComponent(typedByPi, { replay: "never" });
 });

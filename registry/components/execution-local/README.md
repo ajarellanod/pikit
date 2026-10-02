@@ -32,8 +32,6 @@ would be false security.
 What protects you:
 - **Give `bash` only to the agents that need it.** An agent gets a tool only when it names it
   (`tools: ["read"]`).
-- **Policy extensions** such as Pi's `permission-gate` block known-dangerous commands (`rm -rf`,
-  `sudo`). That is policy, not isolation: a command they do not recognise still runs.
 - **Isolation** comes from where commands run. Run the server as a user that owns nothing else, in
   a container or a VM, or install another `execution-*` component that runs commands elsewhere.
   The tools do not change.

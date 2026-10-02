@@ -117,7 +117,6 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write(CONFIG_FILE, starter.configFile(target));
     write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model));
     write("src/extensions/agents.ts", starter.AGENTS);
-    write("src/extensions/permission-gate.ts", starter.permissionGate());
     // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
     const location = recordedLocation(projectDir, registry.root);
     if (!isPortable(location)) log.warn(notPortable(location));

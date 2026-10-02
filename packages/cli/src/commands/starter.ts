@@ -5,11 +5,10 @@
  *
  * - `pikit.config.ts`, the composition root, listing the project's agents;
  * - one agent, `assistant` (`src/agents/assistant/agent.ts`), provided by `src/extensions/agents.ts`;
- * - Pi's own `permission-gate` example, unmodified, for agents that have `bash`;
  * - `package.json`, `tsconfig.json`, `.gitignore`, a README.
  *
- * Two lines depend on what gets installed, and only on that: `runtime-pi` is listed with the
- * permission gate loaded, and `router-basic` sends every message to `assistant`.
+ * One line depends on what gets installed, and only on that: `router-basic` sends every message to
+ * `assistant`.
  *
  * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
  * two Apps (SPEC C1), the agent's model is one whose provider runs there (`STARTER_MODEL`, unless the
@@ -20,10 +19,9 @@
 
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PACKAGES_DIR, PIKIT_ROOT } from "../paths.ts";
+import { PIKIT_ROOT } from "../paths.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
 import { starterModel } from "../project/starter-model.ts";
-import { EXTENSION_ALIAS } from "../project/vendor.ts";
 
 // The starter model lives with the check `registry validate` shares.
 export { STARTER_MODEL, starterModel } from "../project/starter-model.ts";
@@ -31,9 +29,7 @@ export { STARTER_MODEL, starterModel } from "../project/starter-model.ts";
 export const STARTER_AGENT = "assistant";
 
 /** How `pikit.config.ts` lists a component when the starter wires it differently from its default export. */
-export const STARTER_WIRING: Record<string, Omit<ComponentEntry, "name">> = {
-  "runtime-pi": { importClause: "{ createRuntimePi }", entry: "createRuntimePi({ extensions: [permissionGate] })" },
-};
+export const STARTER_WIRING: Record<string, Omit<ComponentEntry, "name">> = {};
 
 /** The starter's config values, written for the components that are installed. */
 export const STARTER_CONFIG: Record<string, string> = {
@@ -52,7 +48,6 @@ export function packageJson(name: string, kit: Record<string, string>): string {
     engines: { bun: ">=1.4.0" },
     scripts: { dev: "pikit dev", doctor: "pikit doctor", test: "bun test", typecheck: "tsc --noEmit" },
     dependencies: {
-      [EXTENSION_ALIAS]: kit["@pikit/pi-extension-shim"],
       "@pikit/contracts": kit["@pikit/contracts"],
       "@pikit/core": kit["@pikit/core"],
     },
@@ -100,9 +95,6 @@ export const CONFIG = `/**
 
 import { defineApp } from "@pikit/core";
 import agents from "./src/extensions/agents.ts";
-// Pi's own permission-gate extension, unmodified: it blocks \`rm -rf\`, \`sudo\` and \`chmod 777\` in
-// \`bash\`. A policy, not a sandbox.
-import permissionGate from "./src/extensions/permission-gate.ts";
 
 /** Values, not behaviour, under each component's name. Paths are relative to the project. */
 export const config = {};
@@ -139,9 +131,6 @@ export const CLOUDFLARE_CONFIG = `/**
 
 import { defineApp } from "@pikit/core";
 import agents from "./src/extensions/agents.ts";
-// Pi's own permission-gate extension, unmodified: it blocks \`rm -rf\`, \`sudo\` and \`chmod 777\` in
-// \`bash\`. A policy, not a sandbox.
-import permissionGate from "./src/extensions/permission-gate.ts";
 
 /** Values, not behaviour, under each component's name: the object's App. */
 export const config = {};
@@ -210,11 +199,6 @@ export default defineComponent({
 });
 `;
 
-/** Pi's example, byte for byte: the adapter keeps the copy its compatibility tests run. */
-export function permissionGate(): string {
-  return readFileSync(join(PACKAGES_DIR, "pi-adapter", "src", "extensions", "pi-examples", "permission-gate.ts"), "utf8");
-}
-
 export function readme(name: string, components: string[], target = "server"): string {
   const run =
     target === "cloudflare"
@@ -239,10 +223,10 @@ read, edit and remove.
 |---|---|
 | \`pikit.config.ts\` | ${composition} |
 | \`src/agents/\` | your agents (\`assistant\`) |
-| \`src/extensions/\` | your own components (\`agents.ts\`) and Pi extensions (\`permission-gate.ts\`) |
+| \`src/extensions/\` | your own components (\`agents.ts\`) |
 | \`src/pikit/<component>/\` | installed components, with their tests and a README |
 | \`pikit.json\` | what \`pikit add\` installed: registry, version, commit, and each file's hash |
-| \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\`, \`@pikit/pi-adapter\` and \`@pikit/pi-extension-shim\`, until they are on npm |
+| \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\` and \`@pikit/pi-adapter\`, until they are on npm |
 | \`.env\` | secrets, written by \`pikit configure\` (mode 0600, never committed) |
 | \`.pikit/\` | state: sessions, conversations, model credentials, the workspace |
 

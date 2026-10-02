@@ -9,7 +9,6 @@ import { addComponent, boundNames, identifierFor, removeComponent, removeConfigE
 
 const BASE = `import { defineApp } from "@pikit/core";
 import agents from "./src/extensions/agents.ts";
-import permissionGate from "./src/extensions/permission-gate.ts";
 
 export const config = {};
 
@@ -23,19 +22,19 @@ export default defineApp({
 
 test("a component is imported under its camelCase name and listed at the end", () => {
   const next = addComponent(BASE, { name: "channel-http" });
-  expect(next).toContain('import permissionGate from "./src/extensions/permission-gate.ts";\nimport channelHttp from "./src/pikit/channel-http/index.ts";\n');
+  expect(next).toContain('import agents from "./src/extensions/agents.ts";\nimport channelHttp from "./src/pikit/channel-http/index.ts";\n');
   expect(next).toContain("    agents,\n    channelHttp,\n  ],");
   expect(identifierFor("tool-read")).toBe("toolRead");
 });
 
 test("add then remove gives the file back byte for byte, config included", () => {
   let text = addComponent(BASE, { name: "channel-http" });
-  text = addComponent(text, { name: "runtime-pi", importClause: "{ createRuntimePi }", entry: "createRuntimePi({ extensions: [permissionGate] })" });
+  text = addComponent(text, { name: "runtime-pi", importClause: "{ createRuntimePi }", entry: "createRuntimePi()" });
   text = addComponent(text, { name: "router-basic" });
   text = setConfigEntry(text, "router-basic", '{ defaultAgent: "assistant" }');
   text = setConfigEntry(text, "server-bun", "{\n    port: 3000,\n    hostname: \"127.0.0.1\",\n  }");
   expect(text).toContain('export const config = {\n  "router-basic": { defaultAgent: "assistant" },\n  "server-bun": {');
-  expect(text).toContain("    createRuntimePi({ extensions: [permissionGate] }),\n");
+  expect(text).toContain("    createRuntimePi(),\n");
 
   let back = removeConfigEntry(removeComponent(text, "router-basic"), "router-basic");
   back = removeConfigEntry(back, "server-bun");
@@ -49,7 +48,7 @@ test("a file without semicolons (prettier's semi: false) gets the import after i
     .replace('import { defineApp } from "@pikit/core"', 'import {\n  defineApp,\n} from "@pikit/core"')
     .replace("export const config = {}\n", 'export const config = {}\nexport const note = "one; two"\n');
   const next = addComponent(noSemi, { name: "channel-http" });
-  expect(next).toContain('import permissionGate from "./src/extensions/permission-gate.ts"\nimport channelHttp from "./src/pikit/channel-http/index.ts"\n\nexport const config');
+  expect(next).toContain('import agents from "./src/extensions/agents.ts"\nimport channelHttp from "./src/pikit/channel-http/index.ts"\n\nexport const config');
   expect(next).toContain('export const note = "one; two"\n\nexport default');
   expect(removeComponent(next, "channel-http")).toBe(noSemi);
 });
@@ -92,7 +91,7 @@ test("a component with a Worker half goes in both lists; remove takes it out of 
     worker: "channelTelegramWebhookWorker",
   });
   expect(text).toContain(
-    'import permissionGate from "./src/extensions/permission-gate.ts";\nimport channelTelegramWebhook, { worker as channelTelegramWebhookWorker } from "./src/pikit/channel-telegram-webhook/index.ts";\n',
+    'import agents from "./src/extensions/agents.ts";\nimport channelTelegramWebhook, { worker as channelTelegramWebhookWorker } from "./src/pikit/channel-telegram-webhook/index.ts";\n',
   );
   expect(text).toContain("export default defineApp({\n  components: [\n    agents,\n    channelTelegramWebhook,\n  ],");
   expect(text).toContain("export const worker = defineApp({\n  components: [\n    channelTelegramWebhookWorker,\n  ],\n  config: workerConfig,\n});");

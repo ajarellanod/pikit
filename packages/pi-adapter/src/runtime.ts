@@ -26,7 +26,6 @@ import type {
 } from "@pikit/contracts";
 import { toPi } from "./context.ts";
 import { type HarnessHook, PiConversation, runContext } from "./conversation.ts";
-import type { PiExtension } from "./extensions/api.ts";
 import type { SessionStore } from "./types.ts";
 
 export interface PiRuntimeOptions {
@@ -45,16 +44,6 @@ export interface PiRuntimeOptions {
   events: AppContext;
   /** Attach Pi hooks to each conversation's harness when it opens (tests). */
   onHarness?: HarnessHook;
-  /**
-   * Pi extensions, unmodified (tier A, `extensions/surface.ts`), for every agent. Each conversation
-   * loads them when it opens, as Pi loads them for each session, and they see every run of it.
-   */
-  extensions?: readonly PiExtension[];
-  /**
-   * An installed extension by name (`agent.extension`), for the extensions agents name. A
-   * conversation loads them after `extensions`. Without it, an agent that names one cannot open.
-   */
-  extension?(name: string): PiExtension | undefined;
   /**
    * Where admissions and run ends are recorded (`agent.submissions`, @pikit/contracts'
    * submissions.ts), when it is installed.
@@ -218,8 +207,6 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
     if (slot.conversation !== undefined) return slot.conversation;
     const agent = options.agent(ref.agent);
     if (agent === undefined) throw new Unopenable("agent_removed", `no agent.definition "${ref.agent}" for conversation ${ref.key}`);
-    // Resolved before the session opens: a name nothing provides fails the open with nothing to undo.
-    const extensions = extensionsOf(agent, options);
     const session = await openSession(options.sessions, ref.sessionId, ctx);
     // `close()` may have run while this opened: what opens after it is closed at once, before
     // anything runs (`close()` waits for this line).
@@ -241,7 +228,6 @@ export function createPiRuntime(options: PiRuntimeOptions): PiRuntime {
           ...(retryAt !== undefined && { retryAt: (notBefore: number, runCtx: AppContext) => retryAt(ref, notBefore, runCtx) }),
         },
         onHarness: options.onHarness,
-        extensions,
       },
       ctx,
     );
@@ -421,20 +407,6 @@ async function untilAborted(work: Promise<unknown>, signal: AbortSignal | undefi
     }),
   ]);
   if (onAbort !== undefined) signal.removeEventListener("abort", onAbort);
-}
-
-/**
- * The extensions a conversation of `agent` loads: the runtime's, then the ones the agent names, in
- * that order. A factory in both lists loads once, where it first appears. The agent of a conversation
- * is fixed while it is open, so this is decided once, when it opens.
- */
-function extensionsOf(agent: AgentDefinition, options: PiRuntimeOptions): PiExtension[] {
-  const named = (agent.extensions ?? []).map((name) => {
-    const extension = options.extension?.(name);
-    if (extension === undefined) throw new Error(`agent "${agent.name}" names the extension "${name}", which no agent.extension provides`);
-    return extension;
-  });
-  return [...new Set([...(options.extensions ?? []), ...named])];
 }
 
 /**

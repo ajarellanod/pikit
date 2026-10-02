@@ -4,7 +4,7 @@
  *
  * It refuses when another component requires (`use`) a capability this one is the only provider
  * of; losing the provider of an optional capability is allowed and `doctor` reports it. Without
- * `--force`, it also refuses to take a key an agent names (a tool, an extension, a model's provider):
+ * `--force`, it also refuses to take a key an agent names (a tool, a model's provider):
  * the app would compose and the runtime refuse to start. The answer
  * comes from the app itself (`describe()`), not from manifests, so project components count too.
  * It never deletes a file the user modified without `--force`. The bases of its files (`bases.ts`) go
@@ -45,7 +45,6 @@ import { assertNoIncompleteOperation, beginOperation, finishOperation, OPERATION
 import { brokenReferences } from "../project/references.ts";
 import { probe } from "../project/run.ts";
 import { Undo } from "../project/undo.ts";
-import { EXTENSION_ALIAS } from "../project/vendor.ts";
 import { CliError, log } from "../ui.ts";
 import { doctor, projectSources } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
@@ -286,5 +285,5 @@ export function unneededDependencies(projectDir: string, project: ProjectManifes
     log.warn(`package usage could not be checked: ${error instanceof Error ? error.message : String(error)}; keeping ${candidates.join(", ")}`);
     return [];
   }
-  return candidates.filter((pkg) => !needed.has(pkg) && pkg !== "@pikit/core" && pkg !== EXTENSION_ALIAS);
+  return candidates.filter((pkg) => !needed.has(pkg) && pkg !== "@pikit/core");
 }

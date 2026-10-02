@@ -30,8 +30,6 @@ pikit does not reimplement the tool; it is Pi's. The component adds only two thi
 A shell can do anything the environment's OS user can, outside the working directory too. With
 `execution-local`, that is the server's user: other projects, `~/.ssh`, this app's credentials.
 - Give `bash` only to the agents that need it. An agent gets a tool only when it names it.
-- Pi extensions such as `permission-gate` block known-dangerous commands (`rm -rf`, `sudo`). That is
-  policy, not isolation.
 - Isolation comes from where commands run: a dedicated OS user, a container, a VM, or another
   `execution-*` component.
 
