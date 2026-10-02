@@ -74,6 +74,8 @@ there.
   `execution-do` (files in the object's SQL, a shell without processes, `git`, `node` in QuickJS).
 - Serving and operating: `server-bun` (`/health`, `/ready`), `admin-auth-token` (operators by a bearer
   token from `secrets`), `log-events`.
+- Agent behaviour: `extension-house-rules` (rules from config as a system prompt section, listed tools
+  refused by a `beforeTool` hook; the reference agent extension), of the kind `extension-`.
 - Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`) and
   `deployment-cloudflare` (the Worker and one Durable Object per conversation running the project's
   two Apps; `up` waits for the new version on `/health`, then runs `afterDeploy` hooks, C8).
@@ -104,8 +106,12 @@ there.
 ### Docs and verification
 - `MANIFESTO.md`, `SPEC.md` (what must hold), `IDEA.md`, one design note per feature in `features/`,
   and the upstream proposals to Pi in `docs/upstream/`.
-- `.agents/skills/pikit-component`: how an AI agent writes a component (contract, reference, durability
-  through contracts, suite, `registry validate`, `pikit add`).
+- `.agents/skills/pikit-component`: how an AI agent writes a component (contract, or one of its own
+  with `declares`; reference; durability through contracts, `startAnswerDelivery`, actor calls; suite;
+  `registry validate`, `pikit add`). `.agents/skills/pikit-extension`: agent behaviour as an
+  `agent.extension` (sections, hooks, documents, tools, testing with the scripted faux model).
+- `features/memory.md` is a build guide: per-person memory as a store with an actor per person
+  (`ActorMailbox.call`) and an extension (a stable section, an idempotent `remember`).
 - `bun test` (every package and component), the workerd lane (`bun run test:workerd`: the Cloudflare
   components in real Durable Objects, eviction mid-run included), and `PIKIT_E2E=1` end-to-end tests:
   a project made by `pikit new` answers a message, on a server and in workerd.

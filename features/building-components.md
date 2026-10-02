@@ -23,18 +23,30 @@ be shared, without learning pikit's internals first.
    suite next to it, and that component declares it in its `component.json`, with a new name prefix
    when the feature is a new kind:
    `"declares": { "kinds": ["memory"], "capabilities": { "memory": { "mode": "single", "stability": "experimental", "summary": "…" } } }`.
-   Nothing in the CLI or `@pikit/contracts` changes; redeclaring one of the kit's is refused.
+   Nothing in the CLI or `@pikit/contracts` changes; redeclaring one of the kit's is refused. A
+   component of another name that uses the capability carries an identical copy of the contract's
+   file (it never imports another component's files; `tsc` refuses two copies that differ).
+   [Memory](memory.md) is the worked example.
 2. **Copy a reference component of the same kind.** `router-basic` (a pipeline stage),
-   `channel-http` (a channel), `storage-sqlite` (a `storage.sql` provider), `tool-fetch` (a tool),
-   `deployment-docker` (a deployment); for agent behaviour, runtime-pi's `extensions.test.ts` (an
-   extension with a section, hooks and a tool, provided as `agent.extension`). A component is a
-   folder in a registry:
+   `channel-telegram` (a channel), `storage-sqlite` (a `storage.sql` provider), `tool-fetch` (a tool),
+   `deployment-docker` (a deployment), `extension-house-rules` (agent behaviour: a section and a
+   `beforeTool` hook, provided as `agent.extension`; runtime-pi's `extensions.test.ts` adds a
+   document and a tool). A component is a folder in a registry:
    `component.json` (name, description, targets, requires, provides, dependencies, files) and
    `files/src/pikit/<name>/index.ts` exporting `defineComponent({ name, config, setup })`.
 3. **Durability comes with the contracts.** Keep state in `storage.sql` / `storage.kv` or a
    pi-durable document, wake with `wakeups`, read what must not be missed from a feed with a cursor
    (SPEC K3), deliver through `outbound.queue`. A component that does this never has to think about
-   crashes, evictions or deploys.
+   crashes, evictions or deploys. Each kind has its ready-made path:
+   - a **channel** calls `admitInbound` for each message and `startAnswerDelivery` in its `start`
+     (`@pikit/contracts`): answers from the `answers` feed with a cursor of its own, one lane per
+     conversation, retries and idempotency keys, on both runtime models;
+   - **agent behaviour** is an `agent.extension` (skill `pikit-extension`, reference
+     `extension-house-rules`): its per-conversation state is a document committed with the
+     transcript, and a tool with an effect is `replay: "unsafe"` or idempotent by its call id;
+   - **state shared across conversations** (a person's memory, a team's settings) has one owner, an
+     actor key of the component's, read and written with `ActorMailbox.call` and answered by its
+     `ActorInbox.answer` handler: the App itself on a server, its own Durable Object on Cloudflare.
 4. **Prove it with the suite.** Every provider runs its contract's conformance suite from
    `@pikit/contracts/testing` (`createChannelConformance`, `createSqlDatabaseConformance`,
    `createConversationRegistryConformance`, `createFeedConformance`, `createHttpRouteConformance`,
@@ -50,14 +62,22 @@ be shared, without learning pikit's internals first.
    candidate for UI pieces.
 
 ## What is missing (to make this the easy path)
-- **Skills for AI agents** (`.agents/skills/`): "write a channel", "write a tool", "write a store",
-  "add a dashboard view", "write a feature from its design note": the steps above, executable by
-  an agent in the user's project. Shipped with the starter so they are in every project.
+- **More skills for AI agents** (`.agents/skills/`). `pikit-component` (the steps above) and
+  `pikit-extension` (agent behaviour) ship with every project; "add a dashboard view" comes with
+  `admin-dashboard`, and a focused "write a channel" when the next channel shows what the general
+  skill leaves out.
+- **A helper to run an extension in a Harness turn** without runtime-pi (as `runToolCalls` does for a
+  tool): today a component's own tests check its extension's parts, and the real App test is the
+  project's own, because it imports `src/pikit/runtime-pi/`.
+- **A dev loop for a project's own registry**: an edit in `registry/` reaches `src/pikit/` by
+  `pikit upgrade`, and the registry's copy is kept out of `tsc` (two copies of a contract file must
+  be identical).
 - **A suite for every contract.** Missing today: `execution`/`ExecutionEnv` is in the adapter
   (`@pikit/pi-adapter/execution/testing`), not in contracts; the agent tool shape has none; future
   contracts (`dashboard.view`, memory) get theirs when written.
 - **Design notes as build guides.** Each ⭐ note in `features/` states: the contract (and suite),
-  the Pi pieces it relies on, what it must guarantee, the tests that prove it.
+  the Pi pieces it relies on, what it must guarantee, the tests that prove it. [Memory](memory.md)
+  is the first one written so.
 - **`pikit new component <kind> <name>`** (maybe): scaffolds a component from its kind's reference.
   Only if copying a reference proves too slow for agents.
 - **Git registries**, so what one user builds another installs.
@@ -98,11 +118,15 @@ MANIFESTO principle 13 promises a conformance suite for every contract. These do
   halt; nothing checks a router (router-basic, router-rules) against a shared list of cases.
 - **`agent.definition`.** Data the project provides (`defineAgent` validates it); runtime-pi refuses
   to start on an agent it cannot run.
+- **`agent.extension`.** pi-durable's `Extension`: runtime-pi refuses a missing, misnamed or reserved
+  (`pikit.`) one, and each extension proves its behaviour with its own tests (`extension-house-rules`'
+  `app.test.ts`, runtime-pi's `extensions.test.ts`).
 
 ## Skills: how they reach a project (decided)
 The skills for AI agents live in the kit repository, `.agents/skills/<skill>/SKILL.md`, and
 `pikit new` copies them into every project's `.agents/skills/` (`skillFiles` in
 `packages/cli/src/commands/starter.ts`). Not a component: a skill provides no capability and runs
 nothing, and every project needs it from the first minute. A project made by an older CLI copies a
-newer skill by hand. The first one is `pikit-component` (the steps above, executable by an agent);
-"add a dashboard view" and "write an extension" come with `admin-dashboard` and `agent.extension`.
+newer skill by hand. There are two: `pikit-component` (the steps above, executable by an agent) and
+`pikit-extension` (agent behaviour as an `agent.extension`); "add a dashboard view" comes with
+`admin-dashboard`.
