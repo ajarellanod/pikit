@@ -9,7 +9,7 @@
  * `GET /__requests` answers how many requests it received.
  */
 
-import { createFakeMcpServer, type FakeMcpServer, type FakeMcpTool } from "../../../packages/pi-adapter/src/mcp/testing.ts";
+import { createFakeMcpServer, type FakeMcpServer, type FakeMcpTool } from "../../../packages/pi-adapter/src/testing/mcp.ts";
 
 export const MCP_HOSTS = {
   /** Answers in JSON bodies. */

@@ -1,6 +1,7 @@
 /**
- * execution-do on a real SQLite-backed Durable Object (SPEC C7): Pi's `ExecutionEnv` suite; Pi's own
- * `bash`, `read`, `write` and `edit` tools, through the unmodified `tool-*` components, working on it;
+ * execution-do on a real SQLite-backed Durable Object (SPEC C7): pi-durable's `ExecutionEnv` suite;
+ * pi-durable's own `bash`, `read`, `write` and `edit` tools, through the unmodified `tool-*` components,
+ * working on it;
  * the shell (pipes, loops, redirections, `grep`, `find`, `awk`, `jq`), `node` in QuickJS with its
  * budget, the `.git` fence, and `git` against a fake GitHub reached through `fetch` (no network).
  */
@@ -10,7 +11,7 @@ import type { AgentTool } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { withWorkersHost } from "@pikit/contracts/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
-import { createExecutionConformance } from "@pikit/pi-adapter/testing/neutral";
+import { callTool, createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
 import { afterEach, expect, it } from "vitest";
 import executionDo from "../../../registry/components/execution-do/files/src/pikit/execution-do/index.ts";
 import { createFiles, type DurableObjectFilesStorage } from "../../../registry/components/execution-do/files/src/pikit/execution-do/files.ts";
@@ -28,8 +29,8 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-// Pi's ExecutionEnv contract, with a shell, each case in an object of its own.
-for (const c of createExecutionConformance(async () => {
+// pi-durable's ExecutionEnv contract, with a shell, each case in an object of its own.
+for (const c of createDurableExecutionConformance(async () => {
   const { app, env } = await started(objectHost());
   return { env, shell: true, dispose: () => app.stop() };
 })) {
@@ -66,31 +67,24 @@ async function started(host: WorkersHost, options: { config?: Record<string, unk
   return { app, env, tools };
 }
 
-/** Runs `command` as Pi's `bash` tool does, and returns its exit code and combined output. */
+/** Runs `command` as pi-durable's `bash` tool does, and returns its exit code and combined output. */
 async function run(env: ExecutionEnv, command: string, cwd?: string) {
   let output = "";
-  const result = await env.exec(
-    command,
-    { ...(cwd !== undefined && { cwd }), capture: { limits: { maxBytes: 1 << 20, maxLines: 10_000 } }, onUpdate: (update) => void (update.kind === "replace" && (output = update.output.text)) },
-    ctx,
-  );
+  const result = await env.exec(command, { ...(cwd !== undefined && { cwd }), onOutput: (text) => void (output += text) }, ctx);
   if (!result.ok) throw new Error(`exec failed: ${result.error.code} ${result.error.message}`);
   return { exitCode: result.value.exitCode, output };
 }
 
-/** What Pi passes to a tool call; a direct call has no run to identify. */
-const invocation = { invocationId: "invocation-1", operationId: "operation-1", turnId: "turn-1", getMemo: async () => undefined, setMemo: async () => {} };
-
-/** Calls `tool` as Pi's harness does, and returns the text of its result. */
-async function call(tool: AgentTool | undefined, params: Record<string, unknown>): Promise<string> {
+/** Calls `tool` on `env`, as the runtime does (it gives each call its environment), and returns its text. */
+async function callOn(tool: AgentTool | undefined, args: Record<string, unknown>, env: ExecutionEnv): Promise<string> {
   if (tool === undefined) throw new Error("the tool is not installed");
-  const result = await tool.execute("call-1", params as never, () => {}, undefined as never, invocation as never, ctx);
-  return result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+  return (await callTool(tool, args, { env })).text;
 }
 
-it("Pi's own write, read, edit and bash tools work on the object's files, through the tool-* components", () =>
+it("pi-durable's own write, read, edit and bash tools work on the object's files, through the tool-* components", () =>
   inObject(async (host) => {
-    const { app, tools } = await started(host, { components: [toolBash, toolRead, toolWrite, toolEdit] });
+    const { app, tools, env } = await started(host, { components: [toolBash, toolRead, toolWrite, toolEdit] });
+    const call = (tool: AgentTool | undefined, args: Record<string, unknown>) => callOn(tool, args, env);
 
     expect(await call(tools.get("write"), { path: "notes/plan.md", content: "# Plan\n\n- clone\n- change\n" })).toContain("Successfully wrote");
     expect(await call(tools.get("edit"), { path: "notes/plan.md", edits: [{ oldText: "- change", newText: "- change\n- push" }] })).toContain("Successfully replaced");

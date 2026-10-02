@@ -19,12 +19,13 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | `test/submissions-sql.workerd.ts` | `agent.submissions` with its `answers` feed, pruning and restarts, on `submissions-sql` over `storage-do` |
 | `test/secrets-cloudflare.workerd.ts` | `secrets` on `secrets-cloudflare`, over the Worker's real `env` |
 | `test/deployment-cloudflare.workerd.ts` | `deployment-cloudflare`'s entrypoint: its `Conversation` class (exported by `src/worker.ts`, over the small Apps of `src/deployment.ts`) and its Worker `fetch`: `/health`, `WORKERS_HOST`, `deliver` and the alarm reaching their handlers, eviction, a failed start resetting the object |
-| `test/sessions-sql.workerd.ts` | Pi's own `SessionRepo` and `Storage` suites on `sessions-sql` over `storage-do` (the Durable Object session backend passes Pi's session conformance, SPEC §4); `agent.runtime` on `runtime-pi` over those sessions, a worker killed mid-run included |
-| `test/execution-do.workerd.ts` | Pi's `ExecutionEnv` suite on `execution-do`; Pi's own `write`, `read`, `edit` and `bash` tools on it through the `tool-*` components; the shell, `node` in QuickJS and its budget, the `.git` fence, and `git` clone, commit and push against a fake GitHub |
+| `test/execution-do.workerd.ts` | pi-durable's `ExecutionEnv` suite on `execution-do`; pi-durable's own `write`, `read`, `edit` and `bash` tools on it through the `tool-*` components; the shell, `node` in QuickJS and its budget, the `.git` fence, and `git` clone, commit and push against a fake GitHub |
+| `test/durable-execution.workerd.ts` | `execution-do`'s environment (`env.ts`) under pi-durable's `ExecutionEnv` suite and pi-durable's tools in a Harness turn, on a real object, after an eviction too |
 | `test/platform-cloudflare.workerd.ts` | `wakeups` on `platform-cloudflare` over a real object's SQL (the alarm simulated on the suite's clock); `actor.mailbox` and `actor.inbox` from the Worker's App by real RPC to deployment-cloudflare's `Conversation` class (`PlatformConversation`); on that class, the real alarm (set, fired, after an eviction), the slice (and a handler asking again every 100 ms, on time, while another waits it out), the backoff, a request waiting for its handler, an object's own mailbox |
-| `test/runtime-pi.workerd.ts` | `runtime-pi` in a `PlatformConversation` object's App (sessions on `sessions-sql` over `storage-do`, `platform-cloudflare`'s `actor.inbox` and `wakeups`, an actor that handles and wakes): a message sent from the Worker's App by RPC is answered by a run driven in the object's alarm |
-| `test/tool-mcp.workerd.ts` | `@pikit/pi-adapter/mcp`'s transport on workerd's real `fetch` (JSON and server-sent event answers), and Pi's gap it closes (pi-mcp's own transport fails with "Illegal invocation"); `tool-mcp` in an App: tools described at start, calls, a reported failure, a forgotten session, a secret token; a start from the kept listing, and from the bundled seed (`seed.ts`) with nothing kept, with no request |
-| `test/durable-storage.workerd.ts` | Spike (`packages/pi-adapter/src/durable/README.md`): pi-durable 1.0's storage conformance on `@pikit/pi-adapter/durable` over `storage-do`; a pi-durable `Harness` over it: answered, reopened, after an eviction, a tool call, an interrupted run resumed, a run continuing across the object's events |
+| `test/runtime-pi.workerd.ts` | `agent.runtime` on `runtime-pi` over `storage-do` in a real object, a worker that died mid-run included (a runtime closed while its tool runs); `runtime-pi` in a `PlatformConversation` object's App (pi-durable on `storage-do`, `platform-cloudflare`'s `actor.inbox` and `wakeups`, an actor that creates its conversation through `agent.conversations`): a message sent from the Worker's App by RPC answered by a run driven in the object's alarm; a run the object is evicted in the middle of, answered by the next instance; a model error's backoff as the object's alarm, the object evicted meanwhile |
+| `test/tool-mcp.workerd.ts` | `@pikit/pi-adapter/mcp`'s transport on workerd's real `fetch` (JSON and server-sent event answers), and pi-mcp 1.0's own transport, which works there too (0.99's failed with "Illegal invocation"); `tool-mcp` in an App: tools described at start, calls, a reported failure as an error result, a forgotten session, a secret token; a start from the kept listing, and from the bundled seed (`seed.ts`) with nothing kept, with no request |
+| `test/durable-storage.workerd.ts` | pi-durable 1.0's storage conformance on `openDurableStorage` (`@pikit/pi-adapter`) over `storage-do`; a pi-durable `Harness` over it: answered, reopened, after an eviction, a tool call, an interrupted run resumed, a run continuing across the object's events |
+| `test/durable-wakeups.workerd.ts` | `nextWakeAt` and `driveSlice` (`@pikit/pi-adapter/wakeups`) on a real object: a run evicted during a model error's backoff is completed by the alarm `nextWakeAt` set |
 
 Each case of a storage suite runs in a Durable Object of its own (`runInDurableObject` on a new id),
 and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint
@@ -32,10 +33,10 @@ puts it (`test/host.ts`): the suites start their own apps, so the host is given 
 from `@pikit/contracts/testing`. A test in each file also starts an app with the host in
 `app.start`'s context, the entrypoint's own way.
 
-A worker killed mid-run cannot be a killed process here: `runtime-pi`'s suite leaves the run open in
-the object instead, an app never stopped whose tool never returns (`interruptInProcess`, from
-`@pikit/pi-adapter/testing/neutral`, the part of the adapter's test kit that runs in workerd). What
-the next worker finds is what a reset object leaves. `git` reaches a fake GitHub through `fetch`,
+A worker killed mid-run cannot be a killed process here: `runtime-pi`'s suite closes a runtime over the
+object while its tool runs instead (`createRuntimeFixture`'s `interrupted`, from
+`@pikit/pi-adapter/testing/neutral`, the part of the adapter's test kit that runs in workerd), which
+leaves the run open, driven by no one: what the next worker finds is what a reset object leaves. `git` reaches a fake GitHub through `fetch`,
 which the test puts in place of the global one: the lane never touches the network. The MCP tests
 keep workerd's own `fetch` (the point of them): `vitest.config.ts` makes `test/mcp-outbound.ts`
 workerd's outbound service, where fake MCP servers answer in Node and any other address is refused.
@@ -70,9 +71,10 @@ bun run --cwd tests/workerd bundle    # wrangler deploy --dry-run of src/bundle.
 ```
 
 `src/bundle.ts` is what a conversation's object bundles when its agent works in `execution-do`:
-storage-do, sessions-sql, runtime-pi, execution-do and Pi's four tools. It has its own config,
+storage-do, runtime-pi (pi-durable), execution-do and pi-durable's four tools. It has its own config,
 `wrangler.bundle.jsonc`, which binds only its `TestObject`: `wrangler.jsonc` binds the suites'
-classes, which it does not export. Measured on September 29, 2026 (wrangler 4.143.0, Pi 0.99.0):
+classes, which it does not export. Measured on September 29, 2026 (wrangler 4.143.0, Pi 0.99.0); the
+last row again with pi-durable 1.0: 4,045 KiB, 980 KiB gzip:
 
 | Worker | Uncompressed | gzip |
 |---|---|---|

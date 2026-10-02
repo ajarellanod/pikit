@@ -19,7 +19,6 @@ import executionLocal from "../../registry/components/execution-local/files/src/
 import runtimePi from "../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import secretsEnv from "../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import serverBun from "../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
-import sessionsJsonl from "../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
 import storageSqlite from "../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
 import submissionsSql from "../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
 import toolBash from "../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
@@ -32,7 +31,6 @@ import agents from "./src/extensions/agents.ts";
 const state = (name: string): string => fileURLToPath(new URL(`./.pikit/${name}`, import.meta.url));
 
 export const config = {
-  "sessions-jsonl": { root: state("sessions") },
   "conversations-file": { path: state("conversations.json") },
   "credentials-file": { path: state("credentials.json") },
   "storage-sqlite": { path: state("pikit.db") },
@@ -47,7 +45,6 @@ export default defineApp({
     // First, so its lines cover the whole start; it only listens and owns nothing.
     logEvents,
     secretsEnv,
-    sessionsJsonl,
     conversationsFile,
     credentialsFile,
     providerAnthropic,

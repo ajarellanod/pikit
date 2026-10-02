@@ -3,14 +3,15 @@
  * outbound service is the fake MCP servers of `mcp-outbound.ts` (`vitest.config.ts`), so nothing here
  * replaces `globalThis.fetch` and nothing reaches the network.
  *
- * The first case pins Pi's gap the adapter closes: pi-mcp 0.99 calls the global `fetch` as a method of
- * its transport, which workerd refuses ("Illegal invocation"). When it fails, Pi fixed it upstream and
- * `mcpHttpTransport` may drop its wrapper.
+ * The first case pins what pi-mcp 1.0 fixed upstream: 0.99 called the global `fetch` as a method of its
+ * transport, which workerd refuses ("Illegal invocation"); 1.0 calls it without a receiver, so its own
+ * transport works here, and `mcpHttpTransport`'s wrapper is only belt and braces.
  */
 
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { AgentTool } from "@pikit/contracts";
 import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
+import { callTool } from "@pikit/pi-adapter/execution/testing";
 import { McpClient, mcpHttpTransport, StreamableHttpTransport } from "@pikit/pi-adapter/mcp";
 import { expect, it } from "vitest";
 import toolMcp from "../../../registry/components/tool-mcp/files/src/pikit/tool-mcp/index.ts";
@@ -18,16 +19,18 @@ import { seed } from "../../../registry/components/tool-mcp/files/src/pikit/tool
 import { MCP_HOSTS, MCP_TOKEN } from "./mcp-outbound.ts";
 
 const urlOf = (host: string) => `http://${host}/mcp`;
-const invocation = { invocationId: "i", operationId: "o", turnId: "t", getMemo: async () => undefined, setMemo: async () => {} };
-const context = { abortSignal: undefined, value: () => undefined, toString: () => "test" };
-
-function textOf(result: { content: { type: string; text?: string }[] }): string {
-  return result.content.flatMap((part) => (part.type === "text" && part.text !== undefined ? [part.text] : [])).join("");
+/** One call, as the runtime makes it: its text, and whether it failed. */
+async function call(tool: AgentTool | undefined, args: Record<string, unknown>): Promise<{ text: string; isError: boolean }> {
+  if (tool === undefined) throw new Error("no such tool");
+  const outcome = await callTool(tool, args);
+  return { text: outcome.text, isError: outcome.isError };
 }
 
-it("Pi's gap: pi-mcp's own transport, on workerd's fetch, fails with Illegal invocation", async () => {
+it("pi-mcp 1.0's own transport works on workerd's fetch (0.99's failed with Illegal invocation)", async () => {
   const client = new McpClient({ name: "pikit-workerd", version: "0.0.0" });
-  await expect(client.connect(new StreamableHttpTransport({ url: urlOf(MCP_HOSTS.json), openGetStream: false }))).rejects.toThrow("Illegal invocation");
+  await client.connect(new StreamableHttpTransport({ url: urlOf(MCP_HOSTS.json), openGetStream: false }));
+  expect((await client.listTools()).map((tool) => tool.name)).toEqual(["ask_question", "open_issue"]);
+  await client.close();
 });
 
 for (const kind of ["json", "sse"] as const) {
@@ -72,20 +75,16 @@ it("tool-mcp in workerd: tools described at start, calls, a reported failure, a 
     const ask = tools.get("wiki_ask_question");
     expect(ask?.description).toBe("Asks a question about a repository.");
     expect(ask?.replay).toBe("safe");
-    expect(tools.get("wiki_open_issue")?.replay).toBe("never");
+    expect(tools.get("wiki_open_issue")?.replay).toBe("unsafe");
 
-    const call = (name: string, params: Record<string, unknown>) => {
-      const tool = tools.get(name);
-      if (tool === undefined) throw new Error(`no tool ${name}`);
-      return tool.execute("call-1", params, () => {}, undefined, invocation, context);
-    };
-    expect(textOf(await call("wiki_ask_question", { repoName: "pikit" }))).toBe("pikit: it is a kit");
-    await expect(call("wiki_open_issue", { title: "" })).rejects.toThrow("a title is required");
-    expect(textOf(await call("private_ask_question", { repoName: "pi" }))).toBe("pi: it is a kit");
+    expect(await call(tools.get("wiki_ask_question"), { repoName: "pikit" })).toEqual({ text: "pikit: it is a kit", isError: false });
+    // A failure the server reports is an error result, with its text.
+    expect(await call(tools.get("wiki_open_issue"), { title: "" })).toEqual({ text: "a title is required", isError: true });
+    expect((await call(tools.get("private_ask_question"), { repoName: "pi" })).text).toBe("pi: it is a kit");
 
     // The server forgets its sessions, as one that restarted: the call connects again.
     await fetch(`http://${MCP_HOSTS.sse}/__expire`, { method: "POST" });
-    expect(textOf(await call("wiki_ask_question", { repoName: "again" }))).toBe("again: it is a kit");
+    expect((await call(tools.get("wiki_ask_question"), { repoName: "again" })).text).toBe("again: it is a kit");
   } finally {
     await app.stop();
   }
@@ -124,8 +123,7 @@ it("tool-mcp in workerd with storage.kv: a start with the kept listing makes no 
     const ask = tools.get("wiki_ask_question");
     expect(ask?.description).toBe("Asks a question about a repository.");
     expect(ask?.replay).toBe("safe");
-    const result = await ask?.execute("call-1", { repoName: "pikit" }, () => {}, undefined, invocation, context);
-    expect(textOf(result ?? { content: [] })).toBe("pikit: it is a kit");
+    expect((await call(ask, { repoName: "pikit" })).text).toBe("pikit: it is a kit");
     // initialize, notifications/initialized, tools/list, tools/call.
     expect((await requests()) - before).toBe(4);
   } finally {
@@ -172,8 +170,7 @@ it("tool-mcp in workerd with a bundled seed and nothing kept (a new conversation
     const ask = tools.get("wiki_ask_question");
     expect(ask?.description).toBe("Asks, from the seed.");
     expect(ask?.replay).toBe("safe");
-    const result = await ask?.execute("call-1", { repoName: "pikit" }, () => {}, undefined, invocation, context);
-    expect(textOf(result ?? { content: [] })).toBe("pikit: it is a kit");
+    expect((await call(ask, { repoName: "pikit" })).text).toBe("pikit: it is a kit");
     // The first call connects and lists: the tool follows the server.
     expect((await requests()) - before).toBe(4);
     expect(ask?.description).toBe("Asks a question about a repository.");

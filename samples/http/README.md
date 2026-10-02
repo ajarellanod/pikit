@@ -11,14 +11,14 @@ copy them to `src/pikit/` instead.
 | Component | Does |
 |---|---|
 | `secrets-env` | `secrets` from the environment (`PIKIT_HTTP_TOKEN`) |
-| `sessions-jsonl` | Pi's sessions as JSONL files in `.pikit/sessions/` |
-| `conversations-file` | conversation → session pointers in `.pikit/conversations.json` |
+| `conversations-file` | conversation key → runtime conversation pointers in `.pikit/conversations.json` |
 | `credentials-file` | model credentials in `.pikit/credentials.json` (mode 0600) |
 | `provider-anthropic` | Claude models (`anthropic/claude-sonnet-4-6`) |
 | `src/extensions/agents.ts` | your agents (`src/agents/assistant/agent.ts`) |
 | `execution-local` | the workspace `.pikit/workspace/`: this machine's files and shell |
-| `tool-read`, `tool-write`, `tool-edit`, `tool-bash` | Pi's tools; `assistant` names all four |
-| `runtime-pi` | Pi runs the agents |
+| `tool-read`, `tool-write`, `tool-edit`, `tool-bash` | pi-durable's tools; `assistant` names all four |
+| `storage-sqlite`, `submissions-sql` | `.pikit/pikit.db`: the conversations (pi-durable's tables) and the record of messages |
+| `runtime-pi` | Pi (pi-durable) runs the agents |
 | `router-basic` | every message goes to `assistant` |
 | `channel-http` | `POST /v1/messages`, `POST /v1/conversations/:id/reset` |
 | `server-bun` | HTTP on port 3000, `/health`, `/ready` |
@@ -88,8 +88,8 @@ curl -s -X POST localhost:3000/v1/messages \
 curl -s -X POST localhost:3000/v1/conversations/c1/reset -H "authorization: Bearer $PIKIT_HTTP_TOKEN"
 ```
 
-A message sent to `c1` while the agent is still answering changes its course: Pi takes it as a
-steer, and both requests receive the same answer. A request that answered `202` (the agent took
+Messages sent to `c1` while the agent is still answering wait in the conversation's inbox, and its
+next run answers them together: each of those requests receives that answer. A request that answered `202` (the agent took
 longer than two minutes) reads its answer later, from `.pikit/pikit.db`, which `submissions-sql` keeps:
 
 ```sh
@@ -133,8 +133,8 @@ secrets in the environment of the process that runs it.
 
 Run from the repository root:
 - `test/scenario-1.test.ts`: the whole path over real HTTP on a free port, with Pi's scripted faux
-  model (no API key). It covers the answer in the response, a message steered into a busy run with
-  both POSTs answered, `401`, `/health` and `/ready` while starting, running and stopping, reset,
+  model (no API key). It covers the answer in the response, messages sent to a busy agent
+  answered together by its next run, `401`, `/health` and `/ready` while starting, running and stopping, reset,
   and a conversation surviving a restart.
 - `test/config.test.ts`: `pikit.config.ts` composes, as `pikit doctor` will check it.
 - `test/anthropic.test.ts`: a real Claude answers, and uses its tools to write a file in the
