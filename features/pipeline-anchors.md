@@ -30,8 +30,9 @@ which conversation a message goes to, what a run is configured with, what an ans
   against (they could be added later, additively).
 
 ## Pi first
-Pi already patches a run: `before_run` and `transform_context`, and a Pi extension's
-`before_agent_start` (tier A) can inject context today without `agent.prepare`. Once `agent.state`
+Pi already patches a run: `before_run` and `transform_context`. (A Pi coding-agent extension's
+`before_agent_start` could inject context without `agent.prepare` until running those extensions
+was dropped with the move to pi-durable.) Once `agent.state`
 is a Pi document ([pi-durable migration](pi-durable-migration.md)), reading it outside a run is Pi's
 document API through the adapter, not a pikit store.
 

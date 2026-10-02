@@ -6,6 +6,10 @@
 
 **Needed by:** nothing required.
 
+**Note:** running unmodified Pi coding-agent extensions was dropped with the move to pi-durable,
+whose own extensions will replace it. What follows is about those extensions and must be redone for
+pi-durable's.
+
 ## What it gives
 A Pi extension that asks its user something (Pi's `permission-gate`: "allow this `rm -rf`?") gets the
 answer from the person in the conversation's chat, unmodified.
@@ -15,8 +19,7 @@ answer from the person in the conversation's chat, unmodified.
   component (the kind `interaction` is new: a naming decision). The contract is below.
 - The question goes out as a message with a `choice` part and the answer comes back with `replyTo`
   ([rich content](rich-content.md)).
-- Absent: extensions keep the no-op UI (`hasUI: false`, `runtime-pi`'s README), and `permission-gate`
-  blocks.
+- Absent: extensions keep a no-op UI (`hasUI: false`), and `permission-gate` blocks.
 - An answer that may take days is not a question: it is [approvals](approvals.md).
 
 ## Pi first

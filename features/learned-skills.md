@@ -20,8 +20,8 @@ it loads instructions instead of rediscovering them; a skill that proves wrong i
 - Levels of autonomy for "its own prompt or skills" are the policy component SPEC §6 already
   allows later, with automatic rollback. They never open the gate for anything else.
 - Only the steward holds the self-change tools; another agent's skill is proposed by the steward.
-- pikit adds the nudge (after a long run, suggest a skill): a Pi extension on `agent_end` (tier A)
-  or a line of `pikit-self`. It needs a `skills` field of `AgentDefinition` (`[planned]` in the former
+- pikit adds the nudge (after a long run, suggest a skill): a pi-durable extension at the run's end
+  (once pikit adopts them; Pi coding-agent extensions no longer run) or a line of `pikit-self`. It needs a `skills` field of `AgentDefinition` (`[planned]` in the former
   SPEC §6.2a; not in `packages/contracts/src/agent.ts` yet), which SPEC §6 needs anyway for
   `pikit-self`.
 - On Cloudflare nothing is loaded at run time: a learned skill reaches the agent at the next deploy.

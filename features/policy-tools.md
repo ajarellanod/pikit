@@ -19,14 +19,14 @@ place for the whole project.
   allow and deny lists.
 - It is policy mediation, not a sandbox; isolation is an `execution` provider's
   ([sandboxed execution](sandboxed-execution.md)).
-- Absent: agents have the tools they name, and the Pi extensions they name.
+- Absent: agents have the tools they name.
 
 ## Pi first
-Pi's `tool_call` hook blocks or patches a call, and Pi's own `permission-gate` and `protected-paths`
-extensions already run unmodified per agent (`samples/http/test/scenario-7.test.ts` and
-`scenario-8.test.ts`). A project may need nothing more. `policy-tools` adds only rules by role
-across agents in one place; before building it, check that a Pi extension named per agent does not
-already cover the case.
+Pi's `tool_call` hook blocks or patches a call. Pi's own `permission-gate` and `protected-paths`
+extensions ran unmodified per agent until running Pi coding-agent extensions was dropped with the
+move to pi-durable; pi-durable's own extensions will replace it. `policy-tools` adds only rules by
+role across agents in one place; before building it, check that such an extension, named per agent,
+does not already cover the case.
 
 ## Open questions
 - "Hot-reloadable" (below) against a deep-frozen config (SPEC K4): a reload is a restart, or

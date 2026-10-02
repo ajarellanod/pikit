@@ -17,8 +17,9 @@ profile per person (name, preferences, what they work on); search over past conv
   scoped by agent and actor), with its suite first. The kind `memory` is new (naming decision).
 - Tools from `tool-memory`: `memory_read` (`replay: "safe"`) and `memory_write` (`replay: "never"`,
   idempotent by `${sessionId}:${runId}:${toolCallId}`). An agent gets them only by naming them.
-- Recall into the prompt: through the `agent.prepare` pipeline ([pipeline anchors](pipeline-anchors.md))
-  or a Pi extension's `before_agent_start` (tier A: `packages/pi-adapter/src/extensions/surface.ts`).
+- Recall into the prompt: through the `agent.prepare` pipeline ([pipeline anchors](pipeline-anchors.md)).
+  (Running unmodified Pi coding-agent extensions, whose `before_agent_start` could do it, was dropped
+  with the move to pi-durable; pi-durable's own extensions will replace it.)
 - Memory is neither `agent.state` (one conversation, reset by `/reset`) nor the registry's metadata.
 - **Memory is per person and agent, shared across channels; a conversation never is.** Ana on
   Telegram and on WhatsApp has two conversations, two sessions

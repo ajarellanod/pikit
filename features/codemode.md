@@ -2,8 +2,8 @@
 
 **Public appeal:** —
 
-**Specified:** idea. The extension host (SPEC §6.2b, `packages/pi-adapter/src/extensions`) loads
-the Pi 0.99 fields codemode relies on and leaves them inert; the list is below.
+**Specified:** idea. pikit's host for unmodified Pi coding-agent extensions, which loaded the Pi 0.99
+fields codemode relies on and left them inert, was dropped with the move to pi-durable.
 
 **Needed by:** nothing required.
 
@@ -36,8 +36,8 @@ Checked against Pi 0.99.0:
   metadata; it activates the `codemode` and `deferred` tools it finds for the next model call.
 - Pi's `mcp` extension activates `codemode` when MCP tools are reachable only from scripts.
 
-None of it reaches a pikit agent today: the shim does not export `createCodemodeExtension` or
-`createToolSearchExtension`, and the fields they rely on are inert (below).
+None of it reaches a pikit agent today: pikit no longer runs Pi coding-agent extensions (dropped
+with the move to pi-durable, whose own extensions will replace them).
 
 ## How it fits pikit
 - **A `tool-codemode` component, server only**, providing `agent.tool` `codemode` over
@@ -55,20 +55,8 @@ None of it reaches a pikit agent today: the shim does not export `createCodemode
   writes the component and the nested-call path only.
 
 ## What pikit leaves pending until then
-Each is loaded without an error, so a Pi 0.99 extension that sets it runs:
-- **`constrainedSampling`** on a tool: not in pikit's `ToolDefinition`, ignored at run time; the
-  drift check leaves it out on purpose (`scripts/pi-extension-surface.test.ts`).
-- **`exposure: "codemode"` and `"deferred"`**: such a tool is inactive, and reaches the model only if
-  an extension activates it (`setActiveTools`); pikit warns once. **`tool_search`** does not exist.
-  **`prepareLoadout`** is ignored with a warning.
-- **`ctx.executeTool()`** in a tool: resolves to an `isError` outcome saying pikit runs no nested
-  calls (it never rejects, as in Pi), and `ctx.tools` is empty.
-- **`outputSchema` / `structuredContent`**: the schema reaches the harness tool, but pi-agent-core's
-  harness (0.99.0) drops a result's `structuredContent` (only its `agent-loop` keeps it).
-- **Tools registered after load**: a `pi.registerTool()` after the factories ran (from
-  `session_start`, once a backend is connected) is ignored with a warning, once per name; the harness
-  has the tools registered while the extensions load. `pikit doctor` says so for every extension
-  that registers tools.
+- **`outputSchema` / `structuredContent`**: pi-agent-core's harness (0.99.0) drops a result's
+  `structuredContent` (only its `agent-loop` keeps it).
 
 ## Open questions
 - **The nested-call path.** pi-agent-core exports `runToolCall` (the `agent-loop` pipeline), but the

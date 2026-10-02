@@ -49,18 +49,15 @@ export default toolComponent(
   Pi's own tools bound to an environment use `bindTool` instead, as `tool-read` does.
 
 ## Pi first
-Pi already has `defineTool` (`@earendil-works/pi-coding-agent`, re-exported by
-`@pikit/pi-adapter/extensions`), and an extension's `pi.registerTool` works in pikit today. So
-`toolComponent` takes Pi's shape (same fields, same `execute` order) instead of a new one, and has
-another name so the two are never confused. It adds only what pikit owns: the component, the
+Pi already has `defineTool` (in Pi's coding agent). So `toolComponent` takes Pi's shape (same
+fields, same `execute` order) instead of a new one, and has another name so the two are never confused. It adds only what pikit owns: the component, the
 `agent.tool` key, and `replay`.
 
 The one difference is deliberate. Pi's fifth argument is its `ExtensionContext`, which only an
 extension's host has. Pi's `defineTool` always types it, so:
 - a Pi tool's **object** moves in as it is, written inside `toolComponent`;
 - an object **typed by Pi's `defineTool`** does not compile with `toolComponent`: the compiler says
-  so, not a conversation;
-- a tool that really uses the `ExtensionContext` stays an extension's tool.
+  so, not a conversation.
 
 ## Which to use
 
@@ -68,13 +65,10 @@ extension's host has. Pi's `defineTool` always types it, so:
 |---|---|
 | A tool of your own for pikit that needs nothing from the app | `toolComponent` |
 | A tool that needs a capability (a secret, `execution`, `workspace`, `storage.kv`) | a `defineComponent` that `use`s it and provides `agent.tool` (as `tool-read` does) |
-| A Pi extension brought unchanged, or one that must also run in Pi's CLI | Pi's `defineTool` + `pi.registerTool`, inside the extension |
 
-Pi's `defineTool` is in a pikit project only because the shim (`@earendil-works/pi-coding-agent`)
-exports Pi's extension API, so extensions written for Pi load unmodified. It is not pikit's way to
-write a tool: an extension's tools are always `replay: "never"`, so after a crash or an eviction the
-model is told the call was interrupted, even for one that only reads. `pikit doctor` notes every
-project file that calls `pi.registerTool`, and points to `toolComponent`.
+Running unmodified Pi coding-agent extensions (and with them Pi's `defineTool` and
+`pi.registerTool` in a pikit project) was dropped with the move to pi-durable; pi-durable's own
+extensions will replace it.
 
 ## Migration: a bridge until Pi's durable runtime
 
@@ -106,8 +100,8 @@ Decided on the way there (September 2026):
   goes away is not worth a change.
 - No second word for `"never"` now: two words for one thing is the confusion this avoids, and Pi's
   vocabulary may still change before the migration.
-- `defineTool` stays exported by `@pikit/pi-adapter/extensions`: that module is the shim's source, and
-  removing it there would mean re-implementing it in the shim for no gain.
+- `defineTool` stayed exported by `@pikit/pi-adapter/extensions`, the shim's source, until that
+  module and the shim were removed with the move to pi-durable.
 - No issue or pull request to Pi: its contribution gate closes new contributors' issues and PRs
   (a PR needs a maintainer's `lgtm` first), and `pi-durable` already gives tools a `replay`. What is
   left is the current `ToolDefinition` of Pi's extension API, which that migration replaces.
@@ -115,8 +109,7 @@ Decided on the way there (September 2026):
 ## Where it is
 - `packages/pi-adapter/src/tools/index.ts` (`ToolDefinition`, `toolComponent`, `agentTool`).
 - `packages/pi-adapter/src/tools/tools.test.ts`: component name, key, `replay`, Pi's argument order,
-  `onUpdate`; Pi's `hello` object unchanged; the one typed by `defineTool` refused
-  (`@ts-expect-error`).
+  `onUpdate`; Pi's `hello` object unchanged.
 - `packages/pi-adapter/src/run-context.test.ts`: an agent names the tool, Pi runs it, and it gets the
   run's conversation.
 
