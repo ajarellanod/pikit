@@ -20,7 +20,12 @@
     "./durable/models": "./src/durable/models.ts",
     "./durable/credentials": "./src/durable/credentials.ts",
     "./durable/providers/anthropic": "./src/durable/providers/anthropic.ts",
-    "./durable/providers/openrouter": "./src/durable/providers/openrouter.ts"
+    "./durable/providers/openrouter": "./src/durable/providers/openrouter.ts",
+    "./durable/execution": "./src/durable/execution.ts",
+    "./durable/execution/testing": "./src/durable/execution-testing.ts",
+    "./durable/mcp": "./src/durable/mcp.ts",
+    "./durable/node": "./src/durable/node.ts",
+    "./durable/tools": "./src/durable/tools/index.ts"
   },
   "files": [
     "src"
