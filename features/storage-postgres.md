@@ -8,8 +8,8 @@
 **Needed by:** nothing required now; the former roadmap's M3 named the SQLite → Postgres swap as
 its proof (scenario 4). A second provider also helps `storage.sql` become
 `stable` (two independent providers, `packages/cli/src/registry/capabilities.ts`), which the
-Cloudflare provider (`storage-do`) may give as well. (`sessions.store` and its providers are
-removed with the [move to pi-durable](pi-durable-migration.md).)
+Cloudflare provider (`storage-do`) may give as well. (Conversations are pi-durable's own storage:
+there is no sessions contract, [pi-durable migration](pi-durable-migration.md).)
 
 ## What it gives
 Conversations, sessions and every component's tables in Postgres, for a managed database or
@@ -46,7 +46,7 @@ backends and a storage conformance suite. A Postgres backend of that contract is
 and upstream, rather than a pikit store.
 
 ## Open questions
-- The former scenario 4 says `remove sessions-sqlite`; with sessions gone, the proof swaps
-  `storage-sqlite`, and needs pi-durable on Postgres first.
+- The former scenario 4 removed a sessions provider; today the proof swaps `storage-sqlite`, and
+  needs pi-durable on Postgres first.
 - pi-durable's Postgres backend on its own connection, or on `storage.sql` (whose tables would then
   need the prefix pi-durable lacks, `docs/upstream/pi-durable-table-prefix.md`).

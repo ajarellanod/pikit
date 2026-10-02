@@ -49,7 +49,7 @@ with the move to pi-durable, whose own extensions will replace them).
   compiled module because a Worker cannot compile WebAssembly, and stopped by an interrupt budget.
   It calls no tools. pi-codemode cannot replace it, and it is not a codemode.
 - **Nested calls go through the harness.** The component's script calls must meet the same
-  `before_tool`/`after_tool` hooks (extensions' `tool_call`, policies) and `replay` as the model's
+  `beforeTool`/`afterTool` hooks (the agent's extensions, `agent.extension`: policies) and `replay` as the model's
   calls; the host's `ctx.executeTool()` would then run through the same path.
 - **Rule zero.** The sandbox, the declarations, the description and the search are Pi's; pikit
   writes the component and the nested-call path only.

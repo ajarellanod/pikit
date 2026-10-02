@@ -91,6 +91,15 @@
       ],
       "path": "components/execution-local"
     },
+    "extension-house-rules": {
+      "version": "0.0.0",
+      "description": "House rules for the agents that name them: the rules in config as a system prompt section, and the tools in config refused before they run.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/extension-house-rules"
+    },
     "log-events": {
       "version": "0.0.0",
       "description": "One structured log line per operational event: what reached which agent, how each run ended, how long it took and what it cost.",

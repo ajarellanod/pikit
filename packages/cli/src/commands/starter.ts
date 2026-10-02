@@ -6,7 +6,8 @@
  * - `pikit.config.ts`, the composition root, listing the project's agents;
  * - one agent, `assistant` (`src/agents/assistant/agent.ts`), provided by `src/extensions/agents.ts`;
  * - `package.json`, `tsconfig.json`, `.gitignore`, a README;
- * - the kit's skills for AI agents, `.agents/skills/` (`skillFiles`): how to write a component.
+ * - the kit's skills for AI agents, `.agents/skills/` (`skillFiles`): how to write a component and an
+ *   agent extension.
  *   They are the kit's, not a component's: no capability, nothing that runs, and every project gets
  *   them; a newer CLI's `pikit new` brings newer ones (an existing project copies them by hand).
  *
@@ -268,7 +269,7 @@ read, edit and remove.
 | \`src/extensions/\` | your own components (\`agents.ts\`) |
 | \`src/pikit/<component>/\` | installed components, with their tests and a README |
 | \`pikit.json\` | what \`pikit add\` installed: registry, version, commit, and each file's hash |
-| \`.agents/skills/\` | skills for your AI agent: how to write a component for this project (\`pikit-component\`) |
+| \`.agents/skills/\` | skills for your AI agent: how to write a component (\`pikit-component\`) and an agent extension (\`pikit-extension\`) for this project |
 | \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\` and \`@pikit/pi-adapter\`, until they are on npm |
 | \`.env\` | secrets, written by \`pikit configure\` (mode 0600, never committed) |
 | \`.pikit/\` | state: the database (conversations, the registry), model credentials, the workspace |

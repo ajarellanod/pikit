@@ -41,6 +41,8 @@ export const KINDS: readonly string[] = [
   "mailbox", "wakeups",
   // SPEC C2 to C5: a target's platform providers (`platform-cloudflare`).
   "platform",
+  // Agent behaviour as a Pi extension (`agent.extension`): `extension-house-rules`.
+  "extension",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */

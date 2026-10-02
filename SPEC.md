@@ -228,7 +228,14 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   platform retries. The actor handles it with the handler it registered for `type` on `actor.inbox`
   (`handle(type, (key, message, ctx) => …)`, in its `start`). A message is JSON. On a server the
   mailbox calls the inbox in the same App (`mailbox-local`); on Cloudflare it is an RPC to the object
-  `idFromName(key)` (`platform-cloudflare`). *Why:* one channel component serves both targets, and no
+  `idFromName(key)` (`platform-cloudflare`). A component may also **ask** an actor:
+  `call(key, type, message, ctx)` resolves with the JSON its `answer(type, handler)` handler (on
+  `actor.inbox`, registered in `start`) resolved with, or rejects with an `ActorCallError` whose
+  `code` says why (`invalid`, `no_handler`, `cancelled`, `unreachable`, `failed`, or the handler's
+  own); a call is neither retried nor deduplicated, so a handler that changes state is idempotent.
+  Messages and calls of one type are apart. Calls are how a component reads or writes what another
+  actor owns (a conversation's state from the Worker, a person's memory from a conversation; an
+  actor key need not be a conversation's). *Why:* one channel component serves both targets, and no
   channel names a Durable Object. Handlers are registered by method, not provided as a keyed
   capability, because a keyed capability makes the mailbox depend on every handler's component: a
   handler admits to the runtime, which on Cloudflare wakes through `platform-cloudflare`, the
@@ -260,8 +267,7 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   and in an object its id, its storage, and the hooks its alarm and RPC call. Its types are structural: no `cloudflare:*` import leaves the entrypoints. *Why:* the
   components that must touch the platform are few and say so by reading one key; everything else is
   the same code on both targets.
-  With the move to Pi's durable runtime (P1), sessions are that runtime's own storage:
-  `sessions.store`, `sessions-sql` and `sessions-jsonl` go (`features/pi-durable-migration.md`).
+  Conversations are Pi's durable runtime's own storage (P1): there is no sessions contract.
   pi-durable 1.0's SQLite core runs over a thin facade on `storage.sql`, proven on storage-sqlite and
   on storage-do with pi-durable's own storage conformance, so one implementation serves a server and
   a Durable Object. That core speaks SQLite's dialect, so it needs a SQLite-backed `storage.sql`;

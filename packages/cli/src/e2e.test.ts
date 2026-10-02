@@ -79,7 +79,9 @@ test.skipIf(!E2E)(
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
     // The skills for the user's AI agent come with every project.
-    expect(readFileSync(join(project, ".agents", "skills", "pikit-component", "SKILL.md"), "utf8")).toContain("name: pikit-component");
+    for (const skill of ["pikit-component", "pikit-extension"]) {
+      expect(readFileSync(join(project, ".agents", "skills", skill, "SKILL.md"), "utf8")).toContain(`name: ${skill}`);
+    }
   },
   TIMEOUT,
 );

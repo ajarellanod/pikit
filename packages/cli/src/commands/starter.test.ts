@@ -22,8 +22,9 @@ test("the starter agent's file carries that prompt, quoted for TypeScript", () =
 test("the kit's skills for AI agents are what pikit new copies, by their path in the project", () => {
   const skills = skillFiles();
 
-  expect(skills.map((skill) => skill.path)).toContain(`${SKILLS_DIR}/pikit-component/SKILL.md`);
-  const component = skills.find((skill) => skill.path.endsWith("pikit-component/SKILL.md"));
-  expect(component?.text).toStartWith("---\nname: pikit-component\n");
+  for (const name of ["pikit-component", "pikit-extension"]) {
+    expect(skills.map((skill) => skill.path)).toContain(`${SKILLS_DIR}/${name}/SKILL.md`);
+    expect(skills.find((skill) => skill.path.endsWith(`${name}/SKILL.md`))?.text).toStartWith(`---\nname: ${name}\n`);
+  }
   expect(skillFiles("/nonexistent")).toEqual([]);
 });
