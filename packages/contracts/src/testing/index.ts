@@ -42,3 +42,9 @@ export { createAgentStateConformance } from "./agent-state.ts";
 
 export type { ChannelConformanceOptions, ChannelFixture, ChannelMessage, ChannelSetup } from "./channel.ts";
 export { CONFORMANCE_AGENT, CONFORMANCE_ANSWER, createChannelConformance } from "./channel.ts";
+
+export type { AgentObserveConformanceOptions, AgentObserveFixture } from "./observe.ts";
+export { createAgentObserveConformance } from "./observe.ts";
+
+export type { AdminAuthFixture } from "./admin.ts";
+export { createAdminAuthConformance } from "./admin.ts";

@@ -172,6 +172,8 @@ export interface DurableRuntime extends AgentRuntime {
   state(conversation: ConversationRef): AgentState;
   /** pi-durable's live work: tasks and unsettled submissions (opens the Harness). */
   inspect(ctx: AppContext): Promise<HarnessInspection>;
+  /** The open Harness and its storage (opens it), for read-only observers (`observe.ts`): commit nothing through them. */
+  opened(ctx: AppContext): Promise<{ harness: Harness; storage: Storage }>;
   /** Close the Harness: runs in progress stop and stay pending in the storage; the next worker resumes them. */
   close(ctx: AppContext): Promise<void>;
 }
@@ -950,6 +952,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     async inspect(ctx) {
       return (await harnessOf(ctx)).inspect(toChord(ctx));
     },
+
+    opened,
 
     async suspend(ctx: AppContext): Promise<void> {
       if (closed || opening === undefined) return;

@@ -29,7 +29,8 @@
   "provides": [
     "agent.runtime",
     "agent.conversations",
-    "agent.submissions"
+    "agent.submissions",
+    "agent.observe"
   ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",

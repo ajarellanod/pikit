@@ -40,7 +40,7 @@
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
 import type { AgentConversations, AgentRuntime, AgentSubmissions, ConversationRef, Wakeups } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createDurableRuntime, type DurableRuntime, type DurableRuntimeOptions, modelsFrom, nextWakeAtOf, parseModelName } from "@pikit/pi-adapter";
+import { createDurableRuntime, createObserver, type DurableRuntime, type DurableRuntimeOptions, modelsFrom, nextWakeAtOf, parseModelName } from "@pikit/pi-adapter";
 import Type from "typebox";
 import { resumePending, type ResumeOptions } from "./resume.ts";
 
@@ -131,6 +131,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         answers: { read: (after, limit) => current().submissions.answers.read(after, limit) },
       };
       pikit.provide("agent.submissions", submissions);
+      // What an operator sees of the runtime (the dashboard), read-only, from pi-durable's records.
+      pikit.provide("agent.observe", createObserver(current));
 
       return {
         async start(ctx) {

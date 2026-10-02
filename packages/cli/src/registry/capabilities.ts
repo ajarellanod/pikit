@@ -88,6 +88,19 @@ export const CAPABILITIES: Catalogue = {
     // Provided by the runtime (runtime-pi reads it from pi-durable), so never offered: the runtime is the user's choice.
     summary: "What became of each admitted message, read from the runtime: what is pending, where one request is, and the feed of every run's outcome channels deliver from.",
   },
+  "agent.observe": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Provided by the runtime (runtime-pi reads it from pi-durable), so never offered.
+    summary: "What an operator sees of the runtime, read-only: its conversations (agent, busy, cost), a transcript, a live event stream, usage.",
+  },
+  "admin.auth": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Whether an HTTP request is an operator's: what every admin route (the dashboard's) asks before answering.",
+  },
   "conversations.registry": {
     mode: "single",
     definedIn: "@pikit/contracts",

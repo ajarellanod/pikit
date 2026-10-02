@@ -119,7 +119,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   const described = app.describe().components.find((component) => component.name === "runtime-pi");
 
   expect(described).toMatchObject({
-    provides: ["agent.runtime", "agent.conversations", "agent.submissions"],
+    provides: ["agent.runtime", "agent.conversations", "agent.submissions", "agent.observe"],
     requires: ["storage.sql"],
     optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "execution", "workspace", "wakeups"],
   });
