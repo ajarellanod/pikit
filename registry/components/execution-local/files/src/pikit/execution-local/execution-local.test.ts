@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { type App, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
-import { createExecutionConformance } from "@pikit/pi-adapter/testing";
+import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
 import executionLocal from "./index.ts";
 
 const directories: string[] = [];
@@ -41,8 +41,8 @@ async function started(config: Record<string, unknown>): Promise<{ app: App; fil
   return { app, ...found };
 }
 
-// Pi's ExecutionEnv contract, with a shell.
-for (const c of createExecutionConformance(async () => {
+// pi-durable's ExecutionEnv contract, with a shell.
+for (const c of createDurableExecutionConformance(async () => {
   const { app, shell } = await started({ root: temporaryRoot() });
   return { env: shell, shell: true, dispose: () => app.stop() };
 })) {

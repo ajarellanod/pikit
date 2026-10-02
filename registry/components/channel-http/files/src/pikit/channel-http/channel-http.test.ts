@@ -36,7 +36,7 @@ function memoryRegistry() {
   let sessions = 0;
   const registry: ConversationRegistry = {
     async resolve(key, agent) {
-      const found = pointers.get(key) ?? { key, agent, sessionId: `s${++sessions}` };
+      const found = pointers.get(key) ?? { key, agent, conversationId: `s${++sessions}` };
       pointers.set(key, found);
       return found;
     },
@@ -44,9 +44,9 @@ function memoryRegistry() {
     async reset(key, ctx) {
       const previous = pointers.get(key);
       if (previous === undefined) return undefined;
-      const conversation = { ...previous, sessionId: `s${++sessions}` };
+      const conversation = { ...previous, conversationId: `s${++sessions}` };
       pointers.set(key, conversation);
-      const reset = { conversation, previousSessionId: previous.sessionId, newSessionId: conversation.sessionId };
+      const reset = { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
       await ctx.emit("conversation.reset", reset);
       return reset;
     },
@@ -81,13 +81,13 @@ function scriptedRuntime(submissions?: AgentSubmissions) {
       const seen = new Map<string, Set<string>>();
       const runs = new Map<string, { requestIds: string[]; prompts: string[] }>();
       const run = async (conversation: ConversationRef, requestId: string) => {
-        const current = runs.get(conversation.sessionId);
+        const current = runs.get(conversation.conversationId);
         if (current === undefined) return;
         if (current.prompts[0] === "hold") {
           holding();
           await released;
         }
-        runs.delete(conversation.sessionId);
+        runs.delete(conversation.conversationId);
         const base = { conversation, requestId, requestIds: current.requestIds, messages: [] };
         if (current.prompts[0] === "fail") {
           const error = { code: "provider_error", message: "the model failed" };
@@ -103,19 +103,19 @@ function scriptedRuntime(submissions?: AgentSubmissions) {
         async dispatch(request) {
           const { requestId, conversation, prompt } = request;
           dispatched.push({ requestId, key: conversation.key, agent: conversation.agent, prompt });
-          const known = seen.get(conversation.sessionId) ?? new Set();
-          seen.set(conversation.sessionId, known);
+          const known = seen.get(conversation.conversationId) ?? new Set();
+          seen.set(conversation.conversationId, known);
           let admission: Admission;
           if (known.has(requestId)) admission = { kind: "duplicate", requestId };
           else {
             known.add(requestId);
-            const active = runs.get(conversation.sessionId);
+            const active = runs.get(conversation.conversationId);
             if (active !== undefined) {
               active.requestIds.push(requestId);
               active.prompts.push(prompt);
               admission = { kind: "queued", requestId };
             } else {
-              runs.set(conversation.sessionId, { requestIds: [requestId], prompts: [prompt] });
+              runs.set(conversation.conversationId, { requestIds: [requestId], prompts: [prompt] });
               void run(conversation, requestId);
               admission = { kind: "started", requestId };
             }
@@ -381,7 +381,7 @@ test("reset points the conversation to a new session; an unknown one is a 404", 
   const reset = await s.call("POST /v1/conversations/:id/reset", "/v1/conversations/c1/reset", { method: "POST", headers: AUTH });
   const unknown = await s.call("POST /v1/conversations/:id/reset", "/v1/conversations/nobody/reset", { method: "POST", headers: AUTH });
 
-  expect(reset).toEqual({ status: 200, body: { conversationId: "c1", previousSessionId: "s1", sessionId: "s2" } });
+  expect(reset).toEqual({ status: 200, body: { conversationId: "c1", previousRuntimeConversationId: "s1", runtimeConversationId: "s2" } });
   expect(unknown).toEqual({ status: 404, body: { error: "not_found" } });
   await s.app.stop();
 });

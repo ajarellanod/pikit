@@ -78,7 +78,7 @@ Cloudflare dashboard (Workers & Pages → your Worker → Logs).
 - **Messages.** Telegram posts each message to `POST /telegram` with the webhook secret. The Worker
   checks the secret and who wrote, and hands the message to that chat's Durable Object, which runs the
   agent and sends the answer back. A message is acknowledged once it is stored, never after the run.
-- **Where things are.** Conversations, sessions and the agent's files live in each chat's Durable
+- **Where things are.** Conversations (transcripts and state), the registry and the agent's files live in each chat's Durable
   Object (SQLite). Nothing is stored anywhere else.
 
 ## What it costs

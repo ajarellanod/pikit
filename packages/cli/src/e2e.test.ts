@@ -190,9 +190,9 @@ test.skipIf(!E2E)(
     git("reset", "-q", "--hard", "HEAD~1");
     sh([process.execPath, "install"]);
 
-    const refused = await pikit(["remove", "sessions-jsonl"]);
+    const refused = await pikit(["remove", "storage-sqlite"]);
     expect(refused.code).toBe(1);
-    expect(refused.err).toContain("conversations-file requires sessions.store");
+    expect(refused.err).toContain("runtime-pi requires storage.sql");
     expect(git("status", "--porcelain").out).toBe("");
 
     // A file the user changed is never deleted without --force.

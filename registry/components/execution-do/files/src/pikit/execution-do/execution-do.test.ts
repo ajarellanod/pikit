@@ -2,7 +2,7 @@
  * execution-do's tests. They are copied with the component and keep running in your project, under
  * `bun test`, over a double of a Durable Object's storage (`durable-object.test-support.ts`) and a fake
  * GitHub (`git-server.test-support.ts`): no network. pikit runs the same component in workerd on a real
- * Durable Object, with Pi's own tools on it (`tests/workerd`).
+ * Durable Object, with pi-durable's own tools on it (`tests/workerd`).
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -11,7 +11,7 @@ import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { withWorkersHost } from "@pikit/contracts/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
-import { createExecutionConformance } from "@pikit/pi-adapter/testing";
+import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
 import { fakeDurableObjectStorage, fakeObjectHost } from "./durable-object.test-support.ts";
 import { createFiles, type DurableObjectFilesStorage } from "./files.ts";
 import { branchAllowed, githubRepository } from "./git.ts";
@@ -51,20 +51,16 @@ async function started(options: { storage?: DurableObjectFilesStorage; config?: 
   return { app, storage, env: found.shell, files: found.files };
 }
 
-/** Runs `command` as Pi's `bash` tool does, and returns its exit code and combined output. */
+/** Runs `command` as pi-durable's `bash` tool does, and returns its exit code and combined output. */
 async function run(env: ExecutionEnv, command: string, cwd?: string) {
   let output = "";
-  const result = await env.exec(
-    command,
-    { ...(cwd !== undefined && { cwd }), capture: { limits: { maxBytes: 1 << 20, maxLines: 10_000 } }, onUpdate: (update) => void (update.kind === "replace" && (output = update.output.text)) },
-    ctx,
-  );
+  const result = await env.exec(command, { ...(cwd !== undefined && { cwd }), onOutput: (text) => void (output += text) }, ctx);
   if (!result.ok) throw new Error(`exec failed: ${result.error.code} ${result.error.message}`);
   return { exitCode: result.value.exitCode, output };
 }
 
-// Pi's ExecutionEnv contract, with a shell.
-for (const c of createExecutionConformance(async () => {
+// pi-durable's ExecutionEnv contract, with a shell.
+for (const c of createDurableExecutionConformance(async () => {
   const { app, env } = await started();
   return { env, shell: true, dispose: () => app.stop() };
 })) {

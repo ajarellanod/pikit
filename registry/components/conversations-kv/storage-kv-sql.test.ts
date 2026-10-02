@@ -4,7 +4,7 @@
  * A repository test, not copied with the component: a component's files never import another
  * component's (SPEC P4), so this one lives beside `files/`. The copied tests use the memory `storage.kv`
  * from `@pikit/contracts/testing`; this one checks the same contract where the values are rows and
- * two processes share a database. Sessions come from Pi's in-memory repository through
+ * two processes share a database. Conversations come from Pi's in-memory repository through
  * `@pikit/pi-adapter/testing`.
  */
 
@@ -15,7 +15,7 @@ import { join } from "node:path";
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { ConversationRegistry } from "@pikit/contracts";
 import { createConversationRegistryConformance } from "@pikit/contracts/testing";
-import { testComponents } from "@pikit/pi-adapter/testing";
+import { fakeConversations } from "@pikit/pi-adapter/testing";
 import storageKvSql from "../storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import { testStorage } from "../storage-kv-sql/files/src/pikit/storage-kv-sql/storage.test-support.ts";
 import conversationsKv from "./files/src/pikit/conversations-kv/index.ts";
@@ -33,37 +33,19 @@ function temporaryDatabase(): string {
   return join(dir, "pikit.db");
 }
 
-/** The ids of the sessions in a store, read through a small app of its own. */
-async function sessionIds(sessions: ComponentDefinition): Promise<string[]> {
-  let ids: string[] = [];
-  const probe = defineComponent({
-    name: "sessions-probe",
-    setup(pikit) {
-      const handle = pikit.use("sessions.store");
-      return {
-        async start(ctx) {
-          ids = (await handle.get().list(undefined, ctx)).map((metadata: { id: string }) => metadata.id);
-        },
-      };
-    },
-  });
-  const app = await defineApp({ components: [sessions, probe], logger: silentLogger }).create();
-  await app.start();
-  await app.stop();
-  return ids;
-}
-
 for (const c of createConversationRegistryConformance(() => {
   const database = temporaryDatabase();
-  const { sessions } = testComponents();
-  return { components: [testStorage(database), storageKvSql, sessions, conversationsKv], sessionIds: () => sessionIds(sessions) };
+  const fake = fakeConversations();
+  const conversations = fake.component;
+  return { components: [testStorage(database), storageKvSql, conversations, conversationsKv], conversationIds: async () => [...fake.ids] };
 })) {
   test(`conversations-kv on storage-kv-sql ${c.group}: ${c.name}`, () => c.run());
 }
 
 test("two processes over one database racing a first resolve get one conversation", async () => {
   const database = temporaryDatabase();
-  const { sessions } = testComponents();
+  const fake = fakeConversations();
+  const conversations = fake.component;
   const open = async (): Promise<{ registry: ConversationRegistry; app: App }> => {
     let registry: ConversationRegistry | undefined;
     const reader = defineComponent({
@@ -73,7 +55,7 @@ test("two processes over one database racing a first resolve get one conversatio
         return { start: () => void (registry = handle.get()) };
       },
     });
-    const app = await defineApp({ components: [testStorage(database), storageKvSql, sessions, conversationsKv, reader], logger: silentLogger }).create();
+    const app = await defineApp({ components: [testStorage(database), storageKvSql, conversations, conversationsKv, reader], logger: silentLogger }).create();
     apps.push(app);
     await app.start();
     if (registry === undefined) throw new Error("conversations.registry was not resolved");
@@ -89,7 +71,7 @@ test("two processes over one database racing a first resolve get one conversatio
     }),
   );
 
-  expect(new Set(refs.map((ref) => ref.sessionId)).size).toBe(1);
-  // One session per process at most: the loser's is left unused, as the README says.
-  expect((await sessionIds(sessions)).length).toBeLessThanOrEqual(2);
+  expect(new Set(refs.map((ref) => ref.conversationId)).size).toBe(1);
+  // One conversation per process at most: the loser's is left unused, as the README says.
+  expect((await [...fake.ids]).length).toBeLessThanOrEqual(2);
 });

@@ -33,7 +33,7 @@ before, from events only.
   channel acknowledges its platform only once both hold it (`submissions_requests`).
 - **Settled.** When a run ends, the requests it took are settled by it, and the run is appended to
   `answers` in the same transaction (`submissions_answers`): what it said (its final text, or its
-  error), not its transcript, which stays in the conversation's Pi session. Settling a run twice
+  error), not its transcript, which stays in the runtime's conversation (pi-durable). Settling a run twice
   changes nothing.
 - **Pending.** At start, `runtime-pi` reads the conversations with pending requests (and when the
   oldest was admitted) and resumes them, a few at a time, in the background.
@@ -80,12 +80,13 @@ sqlite3 .pikit/pikit.db "SELECT seq, conversation_key, request_id, kind, error_c
 }
 ```
 
-## When Pi's durable runtime ships submissions
+## A bridge over pi-durable's submissions
 
-Pi's durable runtime (`pi-durable`) will keep a record per message in the session itself, with its
-answer. The adapter will then use Pi's, and what this component records per session goes. What one
-session cannot know stays: which sessions hold pending work, and the feed channels deliver from
-(`features/pi-durable-migration.md`).
+pi-durable keeps a record per message in the conversation itself, with its answer, and the runtime
+deduplicates and resumes from it. This component is the bridge the channels read until they read
+pi-durable directly: what one pi-durable storage cannot answer stays (which conversations hold pending
+work, across storages: a Cloudflare object has one each), and the feed channels deliver from
+(`features/pi-durable-migration.md`). Its column `session_id` holds the conversation id.
 
 ## Removing it
 
@@ -95,7 +96,7 @@ database; drop them if you want (`submissions_requests`, `submissions_answers`, 
 ## Tests
 
 Copied with the component, they run in your project: the `agent.submissions` conformance suite
-(pending, idempotent settlement, per-session requests, restarts, pruning) with the feed suite over
+(pending, idempotent settlement, per-conversation requests, restarts, pruning) with the feed suite over
 `answers`, the lifecycle suite, the retention, a database from a newer version, two processes
 migrating at once, and the convergence
 suite (the process killed after each of its commits in turn: every message still settled and its

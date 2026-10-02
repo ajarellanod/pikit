@@ -393,8 +393,8 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
     }
   }
   for (const [tool, replay] of Object.entries({ ...generated.tools, ...generated.exampleTools })) {
-    if (replay !== "safe" && replay !== "never") {
-      problems.push(`the agent.tool "${tool}" has replay ${JSON.stringify(replay)}; every tool declares "safe" or "never"`);
+    if (replay !== "safe" && replay !== "unsafe") {
+      problems.push(`the agent.tool "${tool}" has replay ${JSON.stringify(replay)}; every tool declares "safe" or "unsafe"`);
     }
   }
   return problems;

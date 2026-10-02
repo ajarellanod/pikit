@@ -16,7 +16,7 @@ test("server-bun serves channel-http's message endpoint, not just a healthy proc
       pikit.provide("secrets", { get: async (name) => name === "PIKIT_HTTP_TOKEN" ? TOKEN : undefined });
       pikit.provide("conversations.registry", {
         async resolve(key, agent) {
-          const conversation = conversations.get(key) ?? { key, agent, sessionId: "session-1" };
+          const conversation = conversations.get(key) ?? { key, agent, conversationId: "session-1" };
           conversations.set(key, conversation);
           return conversation;
         },

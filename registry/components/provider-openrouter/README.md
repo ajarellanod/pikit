@@ -54,8 +54,9 @@ config: { "provider-openrouter": { apiBase: "https://openrouter.ai/api" } }
 ```
 
 `apiBase` is OpenRouter's API by default: every model's address is under it (`<apiBase>/v1` for
-most). Change it only for a proxy in front of OpenRouter, or a test double. The key goes wherever
-`apiBase` points.
+most), the image and classifier models too (`openrouterProvider({ apiBase })` in
+`@pikit/pi-adapter/providers/openrouter`). Change it only for a proxy in front of OpenRouter, or a test
+double. The key goes wherever `apiBase` points.
 
 ## Tests
 

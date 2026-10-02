@@ -13,7 +13,7 @@
     "adapter": "0.0.0",
     "capabilities": [
       "storage.kv",
-      "sessions.store"
+      "agent.conversations"
     ]
   },
   "optional": {

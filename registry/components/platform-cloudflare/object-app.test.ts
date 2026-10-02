@@ -6,7 +6,7 @@
  *
  * Then the object App of a Telegram project on Cloudflare, whole: channel-telegram-webhook's object half
  * (it registers `telegram.update` with `actor.inbox` and uses `wakeups` for its deliveries), runtime-pi,
- * router-basic, and storage, sessions, the registry and submissions in the object's SQL. An update
+ * router-basic, and storage (pi-durable's tables), the registry and submissions in the object's SQL. An update
  * delivered to the object is answered in Telegram (a local fake of its Bot API).
  *
  * A repository test, not copied with the component: a component's files never import another
@@ -27,14 +27,12 @@ import { type FakeTelegram, startFakeTelegram } from "../channel-telegram-webhoo
 import conversationsKv from "../conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import routerBasic from "../router-basic/files/src/pikit/router-basic/index.ts";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
-import sessionsSql from "../sessions-sql/files/src/pikit/sessions-sql/index.ts";
 import { fakeDurableObjectStorage } from "../storage-do/files/src/pikit/storage-do/durable-object.test-support.ts";
 import storageDo from "../storage-do/files/src/pikit/storage-do/index.ts";
 import storageKvSql from "../storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import submissionsSql from "../submissions-sql/files/src/pikit/submissions-sql/index.ts";
 import platformCloudflare from "./files/src/pikit/platform-cloudflare/index.ts";
 import { simulatedObject } from "./files/src/pikit/platform-cloudflare/object.test-support.ts";
-import { fakeSql } from "./files/src/pikit/platform-cloudflare/sql.test-support.ts";
 
 /**
  * A channel's object half, as real ones will be: it handles its messages through `actor.inbox`, admits
@@ -48,7 +46,7 @@ function channelActor() {
       const inbox = pikit.use("actor.inbox");
       const wakeups = pikit.use("wakeups");
       const runtime = pikit.use("agent.runtime");
-      const sessions = pikit.use("sessions.store");
+      const created = pikit.use("agent.conversations");
       const conversations = new Map<string, ConversationRef>();
       pikit.on("agent.settled", (result) => void answers.push(result.text));
       return {
@@ -57,9 +55,7 @@ function channelActor() {
             const { id, text } = message as { id: string; text: string };
             let conversation = conversations.get(key);
             if (conversation === undefined) {
-              const session = await sessions.get().create({ cwd: "/" }, ctx);
-              await session.close(ctx);
-              conversation = { key, agent: "scripted", sessionId: session.metadata.id };
+              conversation = { key, agent: "scripted", conversationId: await created.get().create(ctx) };
               conversations.set(key, conversation);
             }
             await runtime.get().dispatch({ requestId: id, conversation, prompt: text }, ctx);
@@ -72,19 +68,31 @@ function channelActor() {
   return { component, answers };
 }
 
+/**
+ * One simulated object whose storage is storage-do's double: its SQL (where pi-durable, the registry
+ * and submissions keep their tables) and its transactions, with platform-cloudflare's one alarm.
+ */
+function objectWithStorage(options: { id?: string } = {}) {
+  const storage = fakeDurableObjectStorage();
+  const object = simulatedObject(storage.sql, options);
+  const simulated = object.host.object as NonNullable<WorkersHost["object"]>;
+  const host: WorkersHost = { env: {}, object: { ...simulated, storage: { ...(simulated.storage as object), transaction: storage.transaction } } };
+  return { object, host };
+}
+
 test("an object's App composes platform-cloudflare, runtime-pi on its wakeups, and an actor that handles messages and wakes; a delivered message is answered in an alarm", async () => {
-  const object = simulatedObject(fakeSql());
-  const { sessions, agents, provider } = testComponents();
+  const { object, host } = objectWithStorage();
+  const { agents, provider } = testComponents();
   const actor = channelActor();
   const app = await defineApp({
-    components: [actor.component, runtimePi, sessions, agents, provider, platformCloudflare, object.component],
+    components: [actor.component, runtimePi, storageDo, agents, provider, platformCloudflare, object.component],
     logger: silentLogger,
   }).create();
   const order = app.describe().components.map((component) => component.name);
   expect(order.indexOf("platform-cloudflare")).toBeLessThan(order.indexOf("runtime-pi"));
   expect(order.indexOf("runtime-pi")).toBeLessThan(order.indexOf("test-channel-actor"));
 
-  await app.start(withContextValue(WORKERS_HOST, object.host, BACKGROUND_CONTEXT));
+  await app.start(withContextValue(WORKERS_HOST, host, BACKGROUND_CONTEXT));
   try {
     await object.deliver("test.message", "test:conversation-1", { id: "m1", text: "hello" } satisfies JsonValue);
     for (let waited = 0; actor.answers.length === 0 && waited < 5_000; waited += 10) await new Promise((resolve) => setTimeout(resolve, 10));
@@ -107,10 +115,7 @@ const owner = { id: 1001, first_name: "Ada" };
  */
 async function telegramObjectApp(fake: FakeTelegram, options: { clock?: Clock; components?: ReturnType<typeof testComponents> } = {}) {
   // The object's storage: its SQL (storage-do's double) and its one alarm (platform-cloudflare's).
-  const storage = fakeDurableObjectStorage();
-  const object = simulatedObject(storage.sql, { id: "telegram-conversation" });
-  const simulated = object.host.object as NonNullable<WorkersHost["object"]>;
-  const host: WorkersHost = { env: {}, object: { ...simulated, storage: { ...(simulated.storage as object), transaction: storage.transaction } } };
+  const { object, host } = objectWithStorage({ id: "telegram-conversation" });
   const { agents, provider } = options.components ?? testComponents();
   const secrets = defineComponent({
     name: "secrets-test",
@@ -129,7 +134,6 @@ async function telegramObjectApp(fake: FakeTelegram, options: { clock?: Clock; c
       secrets,
       conversationsKv,
       submissionsSql,
-      sessionsSql,
       storageKvSql,
       storageDo,
       platformCloudflare,

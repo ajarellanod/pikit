@@ -2,7 +2,7 @@
 
 The app's SQL database on Cloudflare: each conversation's Durable Object keeps its records in its own
 SQLite. It provides `storage.sql` (SPEC §4.1, C5), so what uses `storage.sql` on a server
-(`submissions-sql`, `storage-kv-sql`, sessions) runs unchanged in the object.
+(`submissions-sql`, `storage-kv-sql`, runtime-pi's pi-durable tables) runs unchanged in the object.
 
 - **Provides:** `storage.sql`.
 - **Requires:** nothing; it reads the object from `WORKERS_HOST`, which `deployment-cloudflare`'s

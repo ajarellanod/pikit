@@ -50,7 +50,7 @@ function memoryRegistry(resets: string[]) {
   let sessions = 0;
   const registry: ConversationRegistry = {
     async resolve(key, agent) {
-      const found = pointers.get(key) ?? { key, agent, sessionId: `s${++sessions}` };
+      const found = pointers.get(key) ?? { key, agent, conversationId: `s${++sessions}` };
       pointers.set(key, found);
       return found;
     },
@@ -58,10 +58,10 @@ function memoryRegistry(resets: string[]) {
     async reset(key) {
       const previous = pointers.get(key);
       if (previous === undefined) return undefined;
-      const conversation = { ...previous, sessionId: `s${++sessions}` };
+      const conversation = { ...previous, conversationId: `s${++sessions}` };
       pointers.set(key, conversation);
       resets.push(key);
-      return { conversation, previousSessionId: previous.sessionId, newSessionId: conversation.sessionId };
+      return { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
     },
   };
   return defineComponent({ name: "registry-test", setup: (pikit) => pikit.provide("conversations.registry", registry) });
@@ -607,7 +607,7 @@ test("an answer that ended while the channel was stopped is delivered when it st
   // A deploy: the channel stops before the runtime, and the run ends in between.
   await first.app.stop();
   first.runtime.release();
-  const conversation = { key: `telegram:${OWNER.id}`, agent: "assistant", sessionId: "s1" };
+  const conversation = { key: `telegram:${OWNER.id}`, agent: "assistant", conversationId: "s1" };
   while ((await submissions.get(conversation, `telegram:${OWNER.id}:1`, first.app.context()))?.kind !== "settled") await Bun.sleep(5);
   expect(telegram.sent).toEqual([]);
 
@@ -689,7 +689,7 @@ test("answers of another channel or of a bot this channel does not run are skipp
   const first = await started({ submissions, kv, telegram });
   const ctx = first.app.context();
   const settle = async (key: string, requestId: string) => {
-    const run = { conversation: { key, agent: "assistant", sessionId: `s-${key}` }, requestId, requestIds: [requestId], kind: "completed" as const, text: `to ${key}` };
+    const run = { conversation: { key, agent: "assistant", conversationId: `s-${key}` }, requestId, requestIds: [requestId], kind: "completed" as const, text: `to ${key}` };
     await submissions.settled(run, ctx);
     await ctx.emit("agent.settled", { ...run, messages: [] });
   };
@@ -720,7 +720,7 @@ test("with agent.submissions, a run that ends before the channel starts is deliv
       pikit.use("agent.runtime");
       return {
         async start(ctx) {
-          const conversation = { key: `telegram:${OWNER.id}`, agent: "assistant", sessionId: "s1" };
+          const conversation = { key: `telegram:${OWNER.id}`, agent: "assistant", conversationId: "s1" };
           const run = { conversation, requestId: "r1", requestIds: ["r1"], kind: "completed" as const, text: "resumed" };
           await submissions.settled(run, ctx);
           await ctx.emit("agent.settled", { ...run, messages: [] });

@@ -5,29 +5,20 @@
   "type": "module",
   "exports": {
     ".": "./src/index.ts",
-    "./testing": "./src/testing/index.ts",
-    "./testing/neutral": "./src/testing/neutral.ts",
-    "./execution": "./src/execution/index.ts",
-    "./mcp": "./src/mcp/index.ts",
-    "./mcp/testing": "./src/mcp/testing.ts",
-    "./node": "./src/node/index.ts",
-    "./sql": "./src/sql/index.ts",
+    "./tools": "./src/tools/index.ts",
+    "./mcp": "./src/mcp.ts",
+    "./mcp/testing": "./src/testing/mcp.ts",
+    "./execution": "./src/execution.ts",
+    "./execution/testing": "./src/testing/execution.ts",
+    "./node": "./src/node.ts",
     "./providers/anthropic": "./src/providers/anthropic.ts",
     "./providers/openrouter": "./src/providers/openrouter.ts",
-    "./tools": "./src/tools/index.ts",
-    "./durable": "./src/durable/index.ts",
-    "./durable/testing": "./src/durable/testing.ts",
-    "./durable/models": "./src/durable/models.ts",
-    "./durable/credentials": "./src/durable/credentials.ts",
-    "./durable/providers/anthropic": "./src/durable/providers/anthropic.ts",
-    "./durable/providers/openrouter": "./src/durable/providers/openrouter.ts",
-    "./durable/execution": "./src/durable/execution.ts",
-    "./durable/execution/testing": "./src/durable/execution-testing.ts",
-    "./durable/mcp": "./src/durable/mcp.ts",
-    "./durable/node": "./src/durable/node.ts",
-    "./durable/tools": "./src/durable/tools/index.ts",
-    "./durable/wakeups": "./src/durable/wakeups.ts",
-    "./durable/wakeups/testing": "./src/durable/wakeups-testing.ts"
+    "./credentials": "./src/credentials.ts",
+    "./wakeups": "./src/wakeups.ts",
+    "./wakeups/testing": "./src/testing/wakeups.ts",
+    "./testing": "./src/testing/index.ts",
+    "./testing/neutral": "./src/testing/neutral.ts",
+    "./testing/harness": "./src/testing/harness.ts"
   },
   "files": [
     "src"
@@ -37,12 +28,10 @@
   },
   "dependencies": {
     "@earendil-works/chord": "1.0.0",
-    "@earendil-works/pi-agent-core": "0.99.0",
-    "@earendil-works/pi-ai": "0.99.0",
+    "@earendil-works/pi-ai": "1.0.0",
     "@earendil-works/pi-durable": "1.0.0",
-    "@earendil-works/pi-mcp": "0.99.0",
+    "@earendil-works/pi-mcp": "1.0.0",
     "@pikit/contracts": "workspace:*",
-    "@pikit/core": "workspace:*",
-    "pi-ai-v1": "npm:@earendil-works/pi-ai@1.0.0"
+    "@pikit/core": "workspace:*"
   }
 }

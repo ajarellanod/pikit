@@ -6,8 +6,8 @@
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
  * The suite reaches the registry through the capability and `conversation.reset`, as a channel
- * would. When the fixture can list the sessions of its store, the suite also checks that every
- * pointer names a real session and that a reset deletes nothing.
+ * would. When the fixture can list the runtime conversations of its store, the suite also checks that every
+ * pointer names a real runtime conversation and that a reset deletes nothing.
  */
 
 import { type App, type AppContext, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
@@ -16,7 +16,7 @@ import type { ConversationRegistry, ConversationReset } from "../conversations.t
 import { checker, expecter } from "./assert.ts";
 import type { ConformanceCase } from "@pikit/core/testing";
 
-/** Fresh records (pointers and sessions), built for one case. */
+/** Fresh records (pointers and runtime conversations), built for one case. */
 export interface ConversationRegistryFixture {
   /**
    * One worker: the component providing `conversations.registry` and everything it uses. The
@@ -25,8 +25,8 @@ export interface ConversationRegistryFixture {
    */
   components: ComponentDefinition[];
   config?: Record<string, unknown>;
-  /** The ids of every session in the store, when the fixture can list them. */
-  sessionIds?(): Promise<string[]>;
+  /** The ids of every runtime conversation in the store, when the fixture can list them. */
+  conversationIds?(): Promise<string[]>;
   /** Release what the fixture holds (temporary directories). */
   dispose?(): Promise<void>;
 }
@@ -54,18 +54,18 @@ export function createConversationRegistryConformance(
   });
 
   return [
-    registryCase("the first resolve creates a conversation on a session of its own", async (s) => {
+    registryCase("the first resolve creates a conversation on a runtime conversation of its own", async (s) => {
       const w = await s.worker();
-      const before = await s.sessionIds();
+      const before = await s.conversationIds();
 
       const created = await w.registry.resolve("test:c1", "support", w.ctx);
 
       expect([created.key, created.agent], ["test:c1", "support"], "the conversation");
-      check(typeof created.sessionId === "string" && created.sessionId.length > 0, "a session id");
+      check(typeof created.conversationId === "string" && created.conversationId.length > 0, "a runtime conversation id");
       if (before !== undefined) {
-        const after = (await s.sessionIds()) ?? [];
-        check(after.includes(created.sessionId), `session ${created.sessionId} to exist in the store`);
-        expect(after.length - before.length, 1, "sessions created");
+        const after = (await s.conversationIds()) ?? [];
+        check(after.includes(created.conversationId), `runtime conversation ${created.conversationId} to exist in the store`);
+        expect(after.length - before.length, 1, "runtime conversations created");
       }
     }),
 
@@ -77,31 +77,31 @@ export function createConversationRegistryConformance(
       same(await w.registry.get("test:c1", w.ctx), created, "get");
     }),
 
-    registryCase("each key has its own session", async (s) => {
+    registryCase("each key has its own runtime conversation", async (s) => {
       const w = await s.worker();
 
       const one = await w.registry.resolve("test:c1", "support", w.ctx);
       const two = await w.registry.resolve("test:c2", "support", w.ctx);
 
-      check(one.sessionId !== two.sessionId, "two keys to point to two sessions");
+      check(one.conversationId !== two.conversationId, "two keys to point to two runtime conversations");
     }),
 
-    registryCase("concurrent first resolves of one key create one session", async (s) => {
+    registryCase("concurrent first resolves of one key create one runtime conversation", async (s) => {
       const w = await s.worker();
-      const before = await s.sessionIds();
+      const before = await s.conversationIds();
 
       const all = await Promise.all(Array.from({ length: 5 }, () => w.registry.resolve("test:c1", "support", w.ctx)));
 
-      expect(new Set(all.map((ref) => ref.sessionId)).size, 1, "distinct sessions for one key");
-      if (before !== undefined) expect(((await s.sessionIds()) ?? []).length - before.length, 1, "sessions created");
+      expect(new Set(all.map((ref) => ref.conversationId)).size, 1, "distinct runtime conversations for one key");
+      if (before !== undefined) expect(((await s.conversationIds()) ?? []).length - before.length, 1, "runtime conversations created");
     }),
 
     registryCase("get of an unknown key is undefined and creates nothing", async (s) => {
       const w = await s.worker();
-      const before = await s.sessionIds();
+      const before = await s.conversationIds();
 
       expect(await w.registry.get("test:unknown", w.ctx), undefined, "get");
-      if (before !== undefined) expect(await s.sessionIds(), before, "sessions after get");
+      if (before !== undefined) expect(await s.conversationIds(), before, "runtime conversations after get");
       expect(await w.registry.get("test:unknown", w.ctx), undefined, "get after get");
     }),
 
@@ -123,27 +123,27 @@ export function createConversationRegistryConformance(
         keys,
         "the keys as given",
       );
-      expect(new Set(refs.map((ref) => ref.sessionId)).size, keys.length, "distinct sessions");
+      expect(new Set(refs.map((ref) => ref.conversationId)).size, keys.length, "distinct runtime conversations");
       for (const ref of refs) same(await w.registry.get(ref.key, w.ctx), ref, `get("${ref.key}")`);
     }),
 
-    registryCase("reset points the key to a new session, keeps the old one and emits conversation.reset", async (s) => {
+    registryCase("reset points the key to a new runtime conversation, keeps the old one and emits conversation.reset", async (s) => {
       const w = await s.worker();
       const created = await w.registry.resolve("test:c1", "support", w.ctx);
 
       const reset = await w.registry.reset("test:c1", w.ctx);
 
       if (reset === undefined) throw new Error(`${GROUP}: reset of a known key returned undefined`);
-      expect([reset.previousSessionId, reset.newSessionId], [created.sessionId, reset.conversation.sessionId], "the reset");
-      check(reset.newSessionId !== created.sessionId, "a new session");
+      expect([reset.previousConversationId, reset.newConversationId], [created.conversationId, reset.conversation.conversationId], "the reset");
+      check(reset.newConversationId !== created.conversationId, "a new runtime conversation");
       expect([reset.conversation.key, reset.conversation.agent], ["test:c1", "support"], "the conversation after reset");
       same(await w.registry.get("test:c1", w.ctx), reset.conversation, "get after reset");
       same(await w.registry.resolve("test:c1", "support", w.ctx), reset.conversation, "resolve after reset");
       expect(w.resets(), [reset], "conversation.reset events");
-      const ids = await s.sessionIds();
+      const ids = await s.conversationIds();
       if (ids !== undefined) {
-        check(ids.includes(created.sessionId), "the previous session to be kept");
-        check(ids.includes(reset.newSessionId), "the new session to exist in the store");
+        check(ids.includes(created.conversationId), "the previous runtime conversation to be kept");
+        check(ids.includes(reset.newConversationId), "the new runtime conversation to exist in the store");
       }
     }),
 
@@ -181,12 +181,12 @@ interface Worker {
 interface Subject {
   /** A new worker (app) over the fixture's records, started. */
   worker(): Promise<Worker>;
-  sessionIds(): Promise<string[] | undefined>;
+  conversationIds(): Promise<string[] | undefined>;
 }
 
 function createSubject(fixture: ConversationRegistryFixture, workers: App[]): Subject {
   return {
-    sessionIds: async () => (fixture.sessionIds === undefined ? undefined : [...(await fixture.sessionIds())].sort()),
+    conversationIds: async () => (fixture.conversationIds === undefined ? undefined : [...(await fixture.conversationIds())].sort()),
     async worker() {
       const resets: ConversationReset[] = [];
       let registry: ConversationRegistry | undefined;
@@ -217,8 +217,8 @@ function createSubject(fixture: ConversationRegistryFixture, workers: App[]): Su
 
 function same(actual: ConversationRef | undefined, expected: ConversationRef, what: string): void {
   expect(
-    actual === undefined ? undefined : { key: actual.key, agent: actual.agent, sessionId: actual.sessionId },
-    { key: expected.key, agent: expected.agent, sessionId: expected.sessionId },
+    actual === undefined ? undefined : { key: actual.key, agent: actual.agent, conversationId: actual.conversationId },
+    { key: expected.key, agent: expected.agent, conversationId: expected.conversationId },
     what,
   );
 }

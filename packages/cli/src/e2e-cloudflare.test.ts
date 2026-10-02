@@ -4,7 +4,7 @@
  * --dry-run`) and typecheck, then `pikit dev` (wrangler dev, workerd) answering `/health` from the
  * object's App. Then a Telegram agent on Cloudflare: `pikit add` of secrets-cloudflare and
  * platform-cloudflare (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
- * is already OpenRouter's: the Anthropic provider is server-only), runtime-pi and channel-telegram-webhook (with what they offer)
+ * is already OpenRouter's: the Anthropic provider is server-only), runtime-pi, conversations-kv and channel-telegram-webhook (with what they offer)
  * put each half in its App (C1), every add is green, the project installs, typechecks and passes its
  * tests, and `pikit remove` undoes both Apps. wrangler is deployment-cloudflare's dev dependency: removing
  * the component takes it out, and adding it back puts it back, bundling again. Nothing reaches a
@@ -131,6 +131,8 @@ test.skipIf(!E2E)(
     // The runtime, with what it offers: the record of submissions (storage-do has its storage).
     const runtime = await add("runtime-pi");
     expect(runtime.out).toContain("submissions-sql, for runtime-pi (agent.submissions)");
+    // The registry, which creates conversations through the runtime's agent.conversations.
+    await add("conversations-kv");
 
     // The channel: its object half needs actor.inbox and wakeups (platform-cloudflare), the runtime and
     // the rest in the object's App; its Worker half, actor.mailbox (platform-cloudflare) in the Worker's.
@@ -146,6 +148,7 @@ test.skipIf(!E2E)(
         "providerOpenrouter",
         "runtimePi",
         "submissionsSql",
+        "conversationsKv",
         "channelTelegramWebhook",
         "outboundDurable",
       ],
@@ -169,14 +172,14 @@ test.skipIf(!E2E)(
     expect(tests.code).toBe(0);
 
     // remove undoes both Apps, and what came for each; the project is the preset's again, and green.
-    for (const name of ["channel-telegram-webhook", "runtime-pi", "provider-openrouter", "platform-cloudflare", "secrets-cloudflare"]) {
+    for (const name of ["channel-telegram-webhook", "conversations-kv", "runtime-pi", "provider-openrouter", "platform-cloudflare", "secrets-cloudflare"]) {
       const removed = await run([process.execPath, MAIN, "remove", name]);
       expect(removed.err).not.toContain("\u2717");
       expect(removed.code).toBe(0);
     }
     expect(readFileSync(configPath, "utf8")).toBe(before);
     expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components).sort()).toEqual(
-      ["conversations-kv", "deployment-cloudflare", "sessions-sql", "storage-do", "storage-kv-sql"],
+      ["deployment-cloudflare", "storage-do", "storage-kv-sql"],
     );
     expect(readFileSync(agentPath, "utf8")).toBe(agentBefore);
     expect((await run([process.execPath, MAIN, "doctor"])).out).toContain("pikit doctor: green");

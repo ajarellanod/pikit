@@ -19,7 +19,7 @@ import {
   type FakeTelegram,
   startFakeTelegram,
 } from "../../../registry/components/channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/fake-telegram.test-support.ts";
-import { createFakeMcpServer } from "../../pi-adapter/src/mcp/testing.ts";
+import { createFakeMcpServer } from "../../pi-adapter/src/testing/mcp.ts";
 import { PACKAGES_DIR, PIKIT_ROOT } from "./paths.ts";
 
 const CHANNEL = "channel-telegram-webhook";

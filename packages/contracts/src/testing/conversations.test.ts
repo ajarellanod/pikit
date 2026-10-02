@@ -1,6 +1,6 @@
 /**
  * The `conversations.registry` suite run against an in-memory double: proof that the suite
- * asks nothing specific to one store. The double's records (pointers and a set of session ids)
+ * asks nothing specific to one store. The double's records (pointers and a set of conversation ids)
  * live in the fixture, so a second app over them is a restart. A real project uses a component
  * such as `conversations-file`, whose records survive the process.
  */
@@ -13,17 +13,17 @@ import { createConversationRegistryConformance } from "./conversations.ts";
 
 interface Records {
   pointers: Map<string, ConversationRef>;
-  sessions: Set<string>;
+  conversations: Set<string>;
 }
 
 function memoryRegistry(records: Records) {
   return defineComponent({
     name: "conversations-memory",
     setup(pikit) {
-      let next = records.sessions.size;
+      let next = records.conversations.size;
       const newSession = (): string => {
         const id = `s${++next}`;
-        records.sessions.add(id);
+        records.conversations.add(id);
         return id;
       };
       const registry: ConversationRegistry = {
@@ -31,7 +31,7 @@ function memoryRegistry(records: Records) {
           // Synchronous from lookup to record: concurrent first resolves cannot both create.
           let ref = records.pointers.get(key);
           if (ref === undefined) {
-            ref = { key, agent, sessionId: newSession() };
+            ref = { key, agent, conversationId: newSession() };
             records.pointers.set(key, ref);
           }
           return { ...ref };
@@ -43,9 +43,9 @@ function memoryRegistry(records: Records) {
         async reset(key, ctx) {
           const previous = records.pointers.get(key);
           if (previous === undefined) return undefined;
-          const conversation = { ...previous, sessionId: newSession() };
+          const conversation = { ...previous, conversationId: newSession() };
           records.pointers.set(key, conversation);
-          const reset = { conversation: { ...conversation }, previousSessionId: previous.sessionId, newSessionId: conversation.sessionId };
+          const reset = { conversation: { ...conversation }, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
           await ctx.emit("conversation.reset", reset);
           return reset;
         },
@@ -56,8 +56,8 @@ function memoryRegistry(records: Records) {
 }
 
 for (const c of createConversationRegistryConformance(() => {
-  const records: Records = { pointers: new Map(), sessions: new Set() };
-  return { components: [memoryRegistry(records)], sessionIds: async () => [...records.sessions] };
+  const records: Records = { pointers: new Map(), conversations: new Set() };
+  return { components: [memoryRegistry(records)], conversationIds: async () => [...records.conversations] };
 })) {
   test(`${c.group}: ${c.name}`, () => c.run());
 }

@@ -40,7 +40,7 @@ The POST waits for the answer, up to `replyTimeoutMs` (120 s by default):
 | Status | Body | When |
 |---|---|---|
 | `200` | `{ requestId, text }` | The agent answered. |
-| `202` | `{ requestId }` | No answer in time, or the server is stopping. The answer still lands in the conversation's session. |
+| `202` | `{ requestId }` | No answer in time, or the server is stopping. The answer still lands in the conversation. |
 | `400` | `{ error: "invalid_request", message }` | The body is not a message. |
 | `401` | `{ error: "unauthorized" }` | Missing or wrong token. |
 | `403` | `{ requestId, error: "denied" \| "rejected", message? }` | The router denied it. |
@@ -50,9 +50,9 @@ The POST waits for the answer, up to `replyTimeoutMs` (120 s by default):
 | `500` | `{ requestId, error: "no_route" }` | No router decided. Install one. |
 | `502` | `{ requestId, error: <code> }` | The run failed (for example, the model provider). |
 
-**A message sent while the agent is working changes its course.** It goes to Pi's inbox as a
-steer, and the run in progress takes it after its current tool calls. That run answers both
-messages, so both POSTs receive the same answer.
+**Messages sent while the agent is working are answered together by its next run.** Each waits in
+the conversation's inbox; once the run in progress ends (its own POST gets its answer), the next run
+takes them all, and its one answer goes to every one of their POSTs.
 
 ### `GET /v1/conversations/:id/messages/:messageId`
 
@@ -65,20 +65,20 @@ What became of a message, for a client whose POST answered `202` (the agent took
 | `202` | `{ requestId }` | Still running. |
 | `409` | `{ requestId, error: "aborted" }` | The run was stopped before answering. |
 | `502` | `{ requestId, error: <code> }` | The run failed. |
-| `502` | `{ requestId, error: "abandoned" }` | The runtime gave up on the message (its agent or session is gone, or it waited too long): it was never answered; send it again. |
-| `404` | `{ requestId, error: "not_found" }` | No such message in the conversation's current session: never sent, sent before a reset, or settled longer ago than `submissions-sql` keeps them (7 days). |
-| `501` | `{ error: "not_supported", message }` | `agent.submissions` is not installed: nothing keeps a message's outcome outside its session. |
+| `502` | `{ requestId, error: "abandoned" }` | The runtime gave up on the message (its agent or conversation is gone, or it waited too long): it was never answered; send it again. |
+| `404` | `{ requestId, error: "not_found" }` | No such message in the conversation's current runtime conversation: never sent, sent before a reset, or settled longer ago than `submissions-sql` keeps them (7 days). |
+| `501` | `{ error: "not_supported", message }` | `agent.submissions` is not installed: nothing keeps a message's outcome outside the runtime. |
 
 Sending the same POST again (same `conversationId` and `messageId`) answers the same way, and never
 runs it again.
 
 ### `POST /v1/conversations/:id/reset`
 
-This starts the conversation over on a new session. The old session is kept.
-- `200 { conversationId, previousSessionId, sessionId }` when the reset happened.
+This starts the conversation over on a new runtime conversation. The old one is kept.
+- `200 { conversationId, previousRuntimeConversationId, runtimeConversationId }` when the reset happened.
 - `404` for a conversation that never had a message.
 
-A run still going on the old session finishes there, and a POST waiting for it still gets its
+A run still going on the old conversation finishes there, and a POST waiting for it still gets its
 answer.
 
 ## How it works
@@ -90,19 +90,19 @@ answer.
    rewrite the text or refuse the message, but must keep its id, channel and conversation.
 3. `route.resolve`: a router picks the agent.
 4. `conversations.registry.resolve("http:<conversationId>", agent)`: the conversation and its
-   session.
+   runtime conversation.
 5. `agent.runtime.dispatch`: Pi takes the message.
 
 The answer comes from the runtime's `agent.settled` / `agent.failed` events. The channel answers
 every POST waiting for one of the run's `requestIds`. That list includes the message that started
-the run and each message queued into it. The waiting POSTs are an in-memory cache only: the answer
-is in the session whether or not anyone waits.
+the run and the messages queued with it. The waiting POSTs are an in-memory cache only: the answer
+is in the conversation whether or not anyone waits.
 
-Delivery guarantee: once a message is accepted, it is in the conversation's session and is
+Delivery guarantee: once a message is accepted, it is in the runtime's conversation and is
 answered there. The HTTP response is the only push. With `agent.submissions` installed, a message
 is also recorded before the POST returns, the next process resumes its run at start if this one
 died, and a client that got a `202` reads the answer with `GET`. Without it, a run a dead process
-left waits for the next message to its conversation, and the answer is only in the session.
+left waits for the next message to its conversation, and the answer is only in the conversation.
 
 It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 characters.
 
@@ -118,7 +118,7 @@ It refuses to start when `PIKIT_HTTP_TOKEN` is missing or shorter than 16 charac
 
 `channel-http.test.ts` is copied with the component and runs in your project. It calls the routes
 as a server would, with small doubles for the runtime, the registry and the secrets. It covers the
-statuses above, a message steered into a busy run with both POSTs answered, per-conversation
+statuses above, a run answering several queued messages with every POST answered, per-conversation
 duplicates, cancellation, reset, the lifecycle conformance suite and the start failures; with
 `agent.submissions`, a `202` answered later by `GET` and by the same POST sent again, a failed run and
 unknown messages; without it, `GET`'s `501`.

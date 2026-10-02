@@ -21,8 +21,8 @@ test("the image leaves out .env, .pikit and node_modules, and runs as a user tha
 });
 
 test("the volume is mounted where pikit.config.ts keeps the sample's state", () => {
-  const sessions = config["sessions-jsonl"].root;
-  const state = sessions.slice(0, sessions.lastIndexOf("/"));
+  const database = config["storage-sqlite"].path;
+  const state = database.slice(0, database.lastIndexOf("/"));
   expect(state.endsWith("/samples/http/.pikit")).toBe(true);
   expect(read("compose.yaml")).toMatch(/^\s+- pikit-state:\/app\/samples\/http\/\.pikit$/m);
 });

@@ -1,5 +1,5 @@
 /**
- * execution-do's pi-durable environment (`durable-env.ts`) on a real SQLite-backed Durable Object:
+ * execution-do's pi-durable environment (`env.ts`) on a real SQLite-backed Durable Object:
  * pi-durable's `ExecutionEnv` contract, each case in an object of its own; then pi-durable's own
  * `read`, `write`, `edit` and `bash` tools, offered by a `Harness` whose faux model calls them, working
  * on the object's files and shell; a long output spilled into the object; and the files outliving the
@@ -8,11 +8,11 @@
 
 import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import type { WorkersHost } from "@pikit/contracts/cloudflare";
-import { BACKGROUND_CONTEXT, getOrThrow, harnessEnv } from "@pikit/pi-adapter/durable/execution";
-import { createDurableExecutionConformance, runToolCalls } from "@pikit/pi-adapter/durable/execution/testing";
-import { codingTool } from "@pikit/pi-adapter/durable/tools";
+import { BACKGROUND_CONTEXT, getOrThrow, harnessEnv } from "@pikit/pi-adapter/execution";
+import { createDurableExecutionConformance, runToolCalls } from "@pikit/pi-adapter/execution/testing";
+import { codingTool } from "@pikit/pi-adapter/tools";
 import { expect, it } from "vitest";
-import { objectExecution } from "../../../registry/components/execution-do/files/src/pikit/execution-do/durable-env.test-support.ts";
+import { objectExecution } from "../../../registry/components/execution-do/files/src/pikit/execution-do/env.test-support.ts";
 import type { DurableObjectFilesStorage } from "../../../registry/components/execution-do/files/src/pikit/execution-do/files.ts";
 import { hostOf, inObject, objectHost } from "./host.ts";
 

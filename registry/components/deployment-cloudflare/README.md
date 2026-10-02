@@ -128,6 +128,11 @@ export on its first event, never in its constructor:
   One handler of each per object. A second registration fails the start: one component (the
   platform's wakeups and mailbox) multiplexes them.
 - Its RPC interface is `health()`, `deliver()` and `alarm()`, nothing else.
+- With `runtime-pi`, the object is one chat: pi-durable keeps its conversations in the object's SQL
+  (`storage-do`), the first one being pi-durable's root, on the App's clock. Its runs are driven inside
+  the alarm (`runtime-pi.drive`, through `platform-cloudflare`'s `wakeups`); when what is left only
+  waits for a time (a model retry's backoff), the handler closes pi-durable inside that event, so the
+  object can be evicted until the alarm at that time opens it again.
 
 **The Worker** composes `export const worker` on its first request, once per isolate, with
 `WORKERS_HOST` `{ env, origin }` on its start context (`origin`: that of the request that started it,

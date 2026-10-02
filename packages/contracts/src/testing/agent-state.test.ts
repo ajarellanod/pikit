@@ -1,6 +1,6 @@
 /**
  * The `agent.state` suite run against an in-memory double: proof that the suite asks nothing
- * specific to Pi. The real state lives in the conversation's Pi session (`@pikit/pi-adapter`).
+ * specific to Pi. The real state lives in the runtime's conversation (`@pikit/pi-adapter`).
  */
 
 import { test } from "bun:test";
@@ -8,7 +8,7 @@ import type { AgentState } from "../agent-state.ts";
 import { isJsonObject } from "../json.ts";
 import { createAgentStateConformance } from "./agent-state.ts";
 
-/** A session's stored values: what survives a worker, and what a reset replaces. */
+/** A conversation's stored values: what survives a worker, and what a reset replaces. */
 type Store = { value?: Record<string, unknown> };
 
 function memoryState(store: Store, initial: Record<string, unknown>): AgentState {

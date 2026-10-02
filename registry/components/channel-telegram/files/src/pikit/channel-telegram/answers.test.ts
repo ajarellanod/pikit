@@ -10,7 +10,7 @@ import { createMemoryFeed, createMemoryKeyValueStorage } from "@pikit/contracts/
 import { type Cursors, openCursors, startAnswerReader } from "./answers.ts";
 
 function answer(key: string, requestId: string): RunSettlement {
-  return { conversation: { key, agent: "assistant", sessionId: `s-${key}` }, requestId, requestIds: [requestId], kind: "completed", text: `to ${requestId}` };
+  return { conversation: { key, agent: "assistant", conversationId: `s-${key}` }, requestId, requestIds: [requestId], kind: "completed", text: `to ${requestId}` };
 }
 
 function memoryCursors(options: { failGets?: number } = {}): Cursors & { value: string | undefined; gets: number[] } {

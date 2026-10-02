@@ -28,7 +28,7 @@ afterAll(() => {
 });
 
 const MESSAGES = ["r1", "r2"];
-const CONVERSATION = { key: "chat:1", agent: "support", sessionId: "session-1" };
+const CONVERSATION = { key: "chat:1", agent: "support", conversationId: "session-1" };
 const RETRY_MS = 1_000;
 
 const runOf = (requestId: string): RunSettlement => ({ conversation: CONVERSATION, requestId, requestIds: [requestId], kind: "completed", text: `answer: ${requestId}` });

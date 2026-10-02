@@ -8,7 +8,7 @@
  * types; the core never depends on them.
  *
  * `dispatch` returns an admission, not an answer: a run's answer is the `agent.settled` event,
- * which the runtime emits from Pi's `run_end` whether or not anyone is waiting. A run resumed by
+ * which the runtime emits when the run ends whether or not anyone is waiting. A run resumed by
  * a new worker after a crash has no caller, so a return value could not carry its answer.
  */
 
@@ -19,7 +19,7 @@ import { isJsonObject } from "./json.ts";
  * Pi payload types, filled in by `@pikit/pi-adapter`:
  *
  *   declare module "@pikit/contracts" {
- *     interface AgentPayloads { message: AgentMessage; tool: AgentHarnessTool; usage: Usage }
+ *     interface AgentPayloads { message: Message; tool: ToolRegistration; usage: Usage }
  *   }
  *
  * Without the adapter each payload is `unknown`: the contracts compile and stay neutral.
@@ -29,9 +29,9 @@ export interface AgentPayloads {}
 
 type Payload<K extends string> = AgentPayloads extends Record<K, infer T> ? T : unknown;
 
-/** One message of a transcript (Pi's `AgentMessage`). */
+/** One message of a transcript (pi-ai's `Message`). */
 export type AgentMessage = Payload<"message">;
-/** A tool the agent can call (Pi's harness tool). */
+/** A tool the agent can call (pi-durable's `ToolRegistration`). */
 export type AgentTool = Payload<"tool">;
 /** Token and cost accounting of a run (Pi's `Usage`). */
 export type Usage = Payload<"usage">;
@@ -47,8 +47,11 @@ export interface ConversationRef {
   key: string;
   /** Name of the `AgentDefinition` that runs this conversation (`agent.definition` key). */
   agent: string;
-  /** The Pi session that holds the conversation's state. A reset points to a new one. */
-  sessionId: string;
+  /**
+   * The runtime's conversation that holds the transcript and the state (a pi-durable conversation id),
+   * opaque to everyone but the runtime. A reset points the key to a new one.
+   */
+  conversationId: string;
 }
 
 /**
@@ -98,7 +101,7 @@ export interface AgentDefinition<S extends object = object> {
   tools?: readonly (AgentTool | string)[];
   /**
    * The initial state of each conversation: a JSON object. Tools update it through `AGENT_STATE`;
-   * it is stored in the conversation's Pi session and starts again from here after a reset. Absent,
+   * it is stored in the runtime's conversation and starts again from here after a reset. Absent,
    * it is `{}`.
    */
   state?: S;
@@ -130,7 +133,7 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
     if (!TOOL_NAME.test(name)) throw new Error(`agent "${definition.name}": tool name "${name}" is not a tool name`);
     if (named.indexOf(name) !== index) throw new Error(`agent "${definition.name}": tool "${name}" is named twice`);
   }
-  // Checked here, not at the first update: the state is stored in the session as JSON.
+  // Checked here, not at the first update: the state is stored in the conversation as JSON.
   if (definition.state !== undefined && !isJsonObject(definition.state)) {
     throw new Error(`agent "${definition.name}": state must be a JSON object`);
   }
@@ -143,17 +146,21 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
  * message prompts are added with the components that produce them.
  */
 export interface AgentRequest {
-  /** Logical identity of the message (`InboundMessage.id`); the `operationId` of a run it starts. */
+  /** Logical identity of the message (`InboundMessage.id`); the request id pi-durable deduplicates by. */
   requestId: string;
   conversation: ConversationRef;
   prompt: string;
 }
 
-/** What happened to a message, known as soon as it is durable in the conversation's session. */
+/** What happened to a message, known as soon as it is durable in the runtime's conversation. */
 export type Admission =
   /** The conversation was idle: a run started, identified by this request. */
   | { kind: "started"; requestId: string }
-  /** The conversation was busy: the message is in Pi's inbox and the run in progress answers it. */
+  /**
+   * The conversation was busy: the message waits in the conversation's inbox. Every message queued while
+   * a run goes is taken together by the next run, which starts once the run in progress ends and answers
+   * them all (its `requestIds`); its `agent.started` names the first of them.
+   */
   | { kind: "queued"; requestId: string }
   /** The conversation already has this request: nothing runs. */
   | { kind: "duplicate"; requestId: string };
@@ -164,9 +171,10 @@ export interface AgentResult {
   /** The request that started the run. */
   requestId: string;
   /**
-   * Every request the run took, in order: the one that started it, then each message that was
-   * queued into it while it ran. The run's answer answers all of them, so a channel that replies
-   * per message replies to each. A message withdrawn by `abort()` is not among them.
+   * Every request the run took, in order: the one that started it, then the other messages that were
+   * queued with it while the run before it went (they are taken together). The run's answer answers
+   * all of them, so a channel that replies per message replies to each. A message withdrawn by
+   * `abort()` is not among them.
    */
   requestIds: string[];
   kind: "completed" | "aborted" | "failed";
@@ -195,6 +203,19 @@ export interface AgentRuntime {
   resume(conversation: ConversationRef, ctx: AppContext): Promise<void>;
 }
 
+/**
+ * The `agent.conversations` capability: where the runtime keeps conversations. Provided by the agent
+ * runtime (`runtime-pi`) and used by `conversations.registry`, which records which key points to
+ * which conversation: a first message and a reset each create one here.
+ */
+export interface AgentConversations {
+  /**
+   * A new, empty conversation in the runtime's storage: its id, the `ConversationRef.conversationId`
+   * of every message sent to it. Usable once the runtime has started.
+   */
+  create(ctx: AppContext): Promise<string>;
+}
+
 declare module "@pikit/core" {
   interface AppEvents {
     /** Every admission, duplicates included. Emitted by the runtime in the caller's context. */
@@ -211,6 +232,7 @@ declare module "@pikit/core" {
 declare module "@pikit/core" {
   interface AppCapabilities {
     "agent.runtime": AgentRuntime;
+    "agent.conversations": AgentConversations;
   }
   interface AppKeyedCapabilities {
     /** One per agent, keyed by its name; provided by the project. */

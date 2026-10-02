@@ -1,164 +1,200 @@
 /**
- * The `agent.runtime` conformance fixture on Pi, whatever keeps its records. The records (where
- * sessions live, and how a worker dies mid-run) are the caller's: `createPiRuntimeFixture` keeps them
- * in a temporary directory and kills a real process; the workerd lane keeps them in a Durable Object
- * and abandons a run in the object (`interruptInProcess`). Neutral: it imports no runtime module.
+ * The `agent.runtime` conformance fixture on Pi (pi-durable), whatever keeps its records. The records
+ * are a `storage.sql` the caller provides: `createPiRuntimeFixture` keeps them in a SQLite file
+ * (`./fixture.ts`), the workerd lane in a Durable Object's SQL (storage-do). Neutral: it imports no
+ * runtime module.
  *
  * The runtime under test is built by the caller, so the same fixture checks the adapter and the
  * `runtime-pi` component. The fixture provides what it uses: the scripted `agent.definition` and the
- * `faux` `model.provider`; the records provide `sessions.store`.
+ * `faux` `model.provider`; the records provide `storage.sql`.
+ *
+ * pi-durable allows one Harness per storage. A conversation is made through the running worker's
+ * `agent.conversations` when there is one, and otherwise through a runtime opened over the records
+ * for that step and closed again. A worker that dies mid-run is such a runtime too, closed while its
+ * `hold` call runs: what a closed Harness leaves (the run `placed`, the tool call's intent recorded) is
+ * what a killed process or an evicted object leaves.
  */
 
-import { MemorySessionRepo } from "@earendil-works/pi-agent-core";
-import { type AppContext, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import type { AgentDefinition, ConversationRef } from "@pikit/contracts";
+import { type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import type { AgentConversations, AgentDefinition, ConversationRef, SqlDatabase } from "@pikit/contracts";
 import type { AgentRuntimeFixture } from "@pikit/contracts/testing";
-import type { HarnessHook } from "../conversation.ts";
 import { modelsFrom } from "../models.ts";
-import { createPiRuntime } from "../runtime.ts";
-import type { SessionStore } from "../types.ts";
+import { createDurableRuntime } from "../runtime.ts";
+import { openDurableStorage } from "../sql.ts";
 import { holdTool, scriptedAgent, scriptedProvider, type ScriptedProviderOptions } from "./script.ts";
-
-export interface PiRuntimeUnderTest {
-  /** Pass to the runtime: the fixture pauses runs at their end through Pi's `before_run_end` hook. */
-  onHarness: HarnessHook;
-}
 
 /** Where a runtime fixture keeps what outlives a worker. */
 export interface RuntimeFixtureRecords {
-  /** Given to every worker: they provide `sessions.store` (and whatever it needs). */
+  /** Given to every worker: they provide `storage.sql` over the records. */
   components: ComponentDefinition[];
-  /** A new session in the records, closed again; its id. */
-  createSession(): Promise<string>;
-  /**
-   * Leaves `sessionId` with an open run of the scripted agent's `hold` (request `requestId`, tool
-   * replay `"never"`) that no worker drives, as a worker that died mid-run leaves it.
-   */
-  interrupt(sessionId: string, requestId: string): Promise<void>;
-  /** Release what the records hold (a directory, a database). */
+  /** The records' database, for a step outside any worker; `close` closes it (not the records). */
+  open(): Promise<{ database: SqlDatabase; close(): Promise<void> }>;
+  /** Release what the records hold (a file, a database). */
   dispose?(): Promise<void>;
 }
 
-export function createRuntimeFixture(runtime: (underTest: PiRuntimeUnderTest) => ComponentDefinition[], records: RuntimeFixtureRecords): AgentRuntimeFixture {
+type Gate = { reach(): void; released: Promise<void> };
+
+function gate(): { gate: Gate; reached: Promise<void>; release(): void } {
+  let reach!: () => void;
+  let release!: () => void;
+  const reached = new Promise<void>((resolve) => (reach = resolve));
+  return { gate: { reach, released: new Promise<void>((resolve) => (release = resolve)) }, reached, release: () => release() };
+}
+
+export function createRuntimeFixture(runtime: ComponentDefinition[], records: RuntimeFixtureRecords): AgentRuntimeFixture {
   let release!: () => void;
   let started!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
   const holdStarted = new Promise<void>((resolve) => (started = resolve));
   const hold = holdTool(async (context) => {
     started();
-    const signal = context.abortSignal;
     await new Promise<void>((resolve, reject) => {
+      const signal = context.abortSignal;
+      if (signal?.aborted) return reject(signal.reason);
       signal?.addEventListener("abort", () => reject(signal.reason), { once: true });
       void released.then(resolve);
     });
     return "released";
   });
 
-  let end: { reach(): void; released: Promise<void> } | undefined;
-  const onHarness: HarnessHook = (harness) => {
-    // After the final answer, before Pi commits the run's end: the window of gap 2 in `pi-gaps.test.ts`.
-    harness.hooks.on("before_run_end", async () => {
-      const paused = end;
-      end = undefined;
-      if (paused !== undefined) {
-        paused.reach();
-        await paused.released;
-      }
-      return undefined;
-    });
+  let failing: Gate | undefined;
+  let ending: Gate | undefined;
+  const take = (armed: Gate | undefined) => {
+    armed?.reach();
+    return armed?.released;
   };
-
-  let failing: { reach(): void; released: Promise<void> } | undefined;
   const fail = (): Promise<string> | undefined => {
     const armed = failing;
-    if (armed === undefined) return undefined;
     failing = undefined;
-    armed.reach();
-    return armed.released.then(() => "scripted failure");
+    return take(armed)?.then(() => "scripted failure");
+  };
+  const atEnd = (): Promise<void> | undefined => {
+    const armed = ending;
+    ending = undefined;
+    return take(armed);
   };
 
   const agent = scriptedAgent(hold);
-  const support = testComponents({ agents: [agent], fail });
+  const support = testComponents({ agents: [agent], fail, atEnd });
+
+  /** The `agent.conversations` of the worker running now, if one is. */
+  let live: AgentConversations | undefined;
+  const probe = defineComponent({
+    name: "conversations-probe",
+    setup(pikit) {
+      const handle = pikit.use("agent.conversations");
+      let mine: AgentConversations | undefined;
+      return {
+        start() {
+          mine = handle.get();
+          live = mine;
+        },
+        stop() {
+          if (live === mine) live = undefined;
+        },
+      };
+    },
+  });
+
+  const refOf = (conversationId: string): ConversationRef => ({ key: `test:pi:${conversationId}`, agent: agent.name, conversationId });
 
   const conversation = async (): Promise<ConversationRef> => {
-    const sessionId = await records.createSession();
-    return { key: `test:pi:${sessionId}`, agent: agent.name, sessionId };
+    const running = live;
+    if (running !== undefined) return refOf(await running.create((await defineApp({ components: [], logger: silentLogger }).create()).context()));
+    return refOf(await overRecords(records.open, agent, (opened, ctx) => opened.createConversation(ctx)));
   };
 
   return {
-    components: [...records.components, support.agents, support.provider, ...runtime({ onHarness })],
+    components: [...records.components, support.agents, support.provider, probe, ...runtime],
     conversation,
     hold: { started: holdStarted, release: () => release() },
     holdAtEnd() {
-      let reach!: () => void;
-      let resume!: () => void;
-      const reached = new Promise<void>((resolve) => (reach = resolve));
-      end = { reach, released: new Promise<void>((resolve) => (resume = resolve)) };
-      return { reached, release: () => resume() };
+      const armed = gate();
+      ending = armed.gate;
+      return { reached: armed.reached, release: armed.release };
     },
     failNext() {
-      let reach!: () => void;
-      let resume!: () => void;
-      const reached = new Promise<void>((resolve) => (reach = resolve));
-      failing = { reach, released: new Promise<void>((resolve) => (resume = resolve)) };
-      return { reached, release: () => resume() };
+      const armed = gate();
+      failing = armed.gate;
+      return { reached: armed.reached, release: armed.release };
     },
     async interrupted() {
-      const ref = await conversation();
       const requestId = "r-crashed";
-      await records.interrupt(ref.sessionId, requestId);
-      return { conversation: ref, requestId };
+      return { conversation: await interruptRun(records.open, { requestId }), requestId };
     },
     dispose: async () => records.dispose?.(),
   };
 }
 
 /**
- * A worker that dies mid-run, inside this process: it dispatches `hold` to the scripted agent's
- * conversation `sessionId` over `sessions`, and once the tool runs, abandons the run. It is never
- * stopped, and its tool never returns, so what it leaves is what a killed process or a reset Durable
- * Object leaves: the request committed, the tool call's intent recorded, the run open. For runtimes
- * with no processes to kill (workerd); `killMidRun` kills a real one.
+ * A worker that dies mid-run, over the records `open` gives (no other worker may run over them): it
+ * creates a conversation of the scripted agent (key `test:pi:<id>` unless `key`), dispatches `hold`
+ * as `requestId`, and closes its Harness while the tool runs. What it leaves is what a killed process
+ * or an evicted object leaves: the request held, the tool call's intent recorded, the run open.
+ * `replay`: the `hold` tool's (default `unsafe`: the next worker gives the model an interrupted
+ * result instead of running it again).
  */
-export async function interruptInProcess(sessions: SessionStore, sessionId: string, requestId: string, replay: "safe" | "never" = "never"): Promise<void> {
-  let held!: () => void;
-  const reached = new Promise<void>((resolve) => (held = resolve));
-  const agent = scriptedAgent(
-    holdTool(() => {
-      held();
-      return new Promise<string>(() => {});
-    }, replay),
+export async function interruptRun(
+  open: RuntimeFixtureRecords["open"],
+  options: { requestId: string; key?: string; replay?: "safe" | "unsafe" },
+): Promise<ConversationRef> {
+  let holding!: () => void;
+  const held = new Promise<void>((resolve) => (holding = resolve));
+  const dying = scriptedAgent(
+    holdTool(async (context) => {
+      holding();
+      await new Promise<void>((_, reject) => context.abortSignal?.addEventListener("abort", () => reject(context.abortSignal?.reason), { once: true }));
+      return "never";
+    }, options.replay),
   );
-  const ctx: AppContext = (await defineApp({ components: [], logger: silentLogger }).create()).context();
-  const runtime = createPiRuntime({
-    sessions,
-    agent: (name) => (name === agent.name ? agent : undefined),
-    models: modelsFrom([scriptedProvider()]),
-    events: ctx,
+  return overRecords(open, dying, async (opened, ctx) => {
+    const id = await opened.createConversation(ctx);
+    const conversation = { key: options.key ?? `test:pi:${id}`, agent: dying.name, conversationId: id };
+    await opened.dispatch({ requestId: options.requestId, conversation, prompt: "hold" }, ctx);
+    await held;
+    return conversation;
   });
-  await runtime.dispatch({ requestId, conversation: { key: `test:pi:${sessionId}`, agent: agent.name, sessionId }, prompt: "hold" }, ctx);
-  await reached;
 }
 
-/** What a runtime uses, for tests: `sessions.store`, `agent.definition` and the `faux` provider. */
+/** A runtime over the records for one step (no worker runs), with `agent`, closed after `work`. */
+async function overRecords<T>(
+  open: RuntimeFixtureRecords["open"],
+  agent: AgentDefinition,
+  work: (runtime: ReturnType<typeof createDurableRuntime>, ctx: AppContext) => Promise<T>,
+): Promise<T> {
+  const { database, close } = await open();
+  const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
+  const opened = createDurableRuntime({
+    storage: () => openDurableStorage(database),
+    agent: (name) => (name === agent.name ? agent : undefined),
+    models: modelsFrom([scriptedProvider()]),
+    events: ctx.derive(() => BACKGROUND_CONTEXT),
+  });
+  try {
+    return await work(opened, ctx);
+  } finally {
+    await opened.close(ctx);
+    await close();
+  }
+}
+
+/** What a runtime uses, for tests: `agent.definition` and the `faux` provider (`model.provider`). */
 export interface TestComponents {
-  sessions: ComponentDefinition;
   agents: ComponentDefinition;
   provider: ComponentDefinition;
 }
 
 /**
- * Test providers of what `agent.runtime` uses. Sessions default to Pi's in-memory repo, agents to
- * the scripted one (whose `hold` returns at once); the provider is `faux`, model `faux/scripted`.
+ * Test providers of what `agent.runtime` uses besides its storage: agents default to the scripted one
+ * (whose `hold` returns at once); the provider is `faux`, model `faux/scripted`.
  */
 export function testComponents(
-  options: { sessions?: SessionStore; agents?: AgentDefinition[]; fail?: ScriptedProviderOptions["fail"] } = {},
+  options: { agents?: AgentDefinition[]; fail?: ScriptedProviderOptions["fail"]; atEnd?: ScriptedProviderOptions["atEnd"] } = {},
 ): TestComponents {
-  const sessions = options.sessions ?? new MemorySessionRepo();
   const agents = options.agents ?? [scriptedAgent(holdTool(async () => "released"))];
-  const provider = scriptedProvider(options.fail !== undefined ? { fail: options.fail } : {});
+  const provider = scriptedProvider({ ...(options.fail !== undefined && { fail: options.fail }), ...(options.atEnd !== undefined && { atEnd: options.atEnd }) });
   return {
-    sessions: defineComponent({ name: "sessions-fixture", setup: (pikit) => pikit.provide("sessions.store", sessions) }),
     agents: defineComponent({
       name: "agents-fixture",
       setup(pikit) {
@@ -168,6 +204,28 @@ export function testComponents(
     provider: defineComponent({
       name: "provider-faux",
       setup: (pikit) => pikit.provideKeyed("model.provider", provider.id, provider),
+    }),
+  };
+}
+
+/**
+ * A fake `agent.conversations` (ids `c1`, `c2`, …), for the tests of what uses it without a runtime
+ * (`conversations.registry` providers). `ids` lists every id it made, across the apps that share it.
+ */
+export function fakeConversations(): { component: ComponentDefinition; ids: string[] } {
+  const ids: string[] = [];
+  return {
+    ids,
+    component: defineComponent({
+      name: "conversations-fake",
+      setup: (pikit) =>
+        pikit.provide("agent.conversations", {
+          async create() {
+            const id = `c${ids.length + 1}`;
+            ids.push(id);
+            return id;
+          },
+        }),
     }),
   };
 }

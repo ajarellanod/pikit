@@ -72,7 +72,7 @@ export const GITIGNORE = `node_modules/
 .env
 .env.*
 !.env.example
-# State: sessions, conversations, model credentials, the agents' workspace.
+# State: the database (conversations, the registry), model credentials, the agents' workspace.
 .pikit/
 `;
 
@@ -117,7 +117,7 @@ export const CLOUDFLARE_CONFIG = `/**
  * that runs is listed in their \`components\`. Follow the imports to read it all.
  *
  * - The default export runs in each conversation's Durable Object: the channel's other half, the
- *   router, the runtime, sessions, storage, delivery. \`pikit add\` lists every component here.
+ *   router, the runtime, the registry, storage, delivery. \`pikit add\` lists every component here.
  * - \`worker\` runs in the Worker, which receives every request first: the ingress half of each
  *   channel, the mailbox, secrets. The Worker checks and routes; the object owns the conversation.
  *   \`pikit add\` lists here a component's Worker half (\`channelTelegramWebhookWorker\`, configured
@@ -228,7 +228,7 @@ read, edit and remove.
 | \`pikit.json\` | what \`pikit add\` installed: registry, version, commit, and each file's hash |
 | \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\` and \`@pikit/pi-adapter\`, until they are on npm |
 | \`.env\` | secrets, written by \`pikit configure\` (mode 0600, never committed) |
-| \`.pikit/\` | state: sessions, conversations, model credentials, the workspace |
+| \`.pikit/\` | state: the database (conversations, the registry), model credentials, the workspace |
 
 Installed: ${components.length > 0 ? components.map((c) => `\`${c}\``).join(", ") : "nothing yet"}.
 

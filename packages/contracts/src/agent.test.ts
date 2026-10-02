@@ -41,7 +41,7 @@ test("prepare is a plain function from state to what changes for the run", () =>
       };
     },
   });
-  const ctx = { conversation: { key: "t:http:c1", agent: "release", sessionId: "s1" } };
+  const ctx = { conversation: { key: "t:http:c1", agent: "release", conversationId: "s1" } };
 
   expect(release.prepare?.({ phase: "testing", testsPassed: false }, ctx)).toEqual({ model: undefined, tools: undefined });
   expect(release.prepare?.({ phase: "summarize", testsPassed: true }, ctx)).toEqual({
@@ -64,7 +64,7 @@ test("defineAgent rejects a state that is not a JSON object", () => {
 
 test("agent.runtime and agent.definition are typed capabilities, agent.* typed events", async () => {
   const support = defineAgent({ name: "support", model: "faux/scripted" });
-  const conversation = { key: "t:http:c1", agent: "support", sessionId: "s1" };
+  const conversation = { key: "t:http:c1", agent: "support", conversationId: "s1" };
   const seen: string[] = [];
 
   // A stand-in runtime: it only checks that the agent exists and reports a started run.
@@ -121,7 +121,7 @@ test("agent.runtime and agent.definition are typed capabilities, agent.* typed e
 });
 
 test("agent.settled carries completed or aborted runs; failures are agent.failed", () => {
-  const conversation = { key: "k", agent: "support", sessionId: "s" };
+  const conversation = { key: "k", agent: "support", conversationId: "s" };
   const failed: AppEvents["agent.failed"] = {
     conversation,
     requestId: "r1",

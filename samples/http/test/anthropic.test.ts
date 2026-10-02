@@ -1,6 +1,6 @@
 /**
  * The sample against Anthropic for real: the composition of `pikit.config.ts`, with a free port and
- * temporary sessions, and the sample's own credentials. It calls a paid API over the network, so it
+ * a temporary database, and the sample's own credentials. It calls a paid API over the network, so it
  * is opt-in: it runs only with `PIKIT_LIVE=1` AND a credential:
  * - the sample's credentials file has an `anthropic` entry (`bun samples/http/scripts/login.ts`), or
  * - `ANTHROPIC_API_KEY` is already exported.
@@ -44,7 +44,7 @@ async function liveSample(dataDir: string) {
     components,
     config: {
       ...config,
-      "sessions-jsonl": { root: join(dataDir, "sessions") },
+      "storage-sqlite": { path: join(dataDir, "pikit.db") },
       "conversations-file": { path: join(dataDir, "conversations.json") },
       "execution-local": { root: join(dataDir, "workspace") },
       "server-bun": { port: 0, hostname: "127.0.0.1" },

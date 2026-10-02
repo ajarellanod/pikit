@@ -64,7 +64,7 @@ Docker rotates the log files (5 × 10 MB). Read them with `pikit logs`, or
 - `vendor/` is copied before the install. Until `@pikit/*` is published on npm, `pikit new`
   vendors those packages there as tarballs, and `package.json` depends on them with
   `file:vendor/…`, so the image builds from the project's directory alone.
-- `.pikit/` (sessions, conversations, model credentials, the agent's workspace) is the volume
+- `.pikit/` (the database with the conversations, the registry, model credentials, the agent's workspace) is the volume
   `pikit-state`. It survives `down`, `up` and new images.
 - Secrets are never in the image. `.dockerignore` keeps `.env` out of the build, and compose passes
   `.env` to the container when it starts.

@@ -25,7 +25,7 @@
   ],
   "replay": {
     "tools": {
-      "bash": "never"
+      "bash": "unsafe"
     }
   },
   "dependencies": {

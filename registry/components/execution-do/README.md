@@ -2,9 +2,9 @@
 
 The agent's workspace and shell on Cloudflare, inside the conversation's Durable Object (SPEC §4.1,
 C7). Its files live in the object's own SQLite; its shell is a bash interpreter written in TypeScript,
-with `git`, `node` and `curl`. Pi's own `read`, `write`, `edit` and `bash` tools work on it unchanged.
+with `git`, `node` and `curl`. pi-durable's own `read`, `write`, `edit` and `bash` tools work on it unchanged.
 
-- **Provides:** `execution` and `execution.shell` (one Pi `ExecutionEnv`).
+- **Provides:** `execution` and `execution.shell` (one pi-durable `ExecutionEnv`, `env.ts`, whose files are the object's own namespace: `execution-do:<object id>`).
 - **Requires:** nothing. **Optional:** `secrets`, for the GitHub token.
 - **Target:** `cloudflare`. On a server, use `execution-local`.
 - **Installs to:** `src/pikit/execution-do/`.
@@ -36,8 +36,9 @@ context, and refuses to start without it, or on an object without SQLite.
 - **`git`**: isomorphic-git. `clone` (GitHub over HTTPS, latest commit only), `status`, `diff`, `add`,
   `commit -m` (takes every change, like `git add -A && git commit`), `log`, `push`, and `pr` (opens a
   pull request through GitHub's API: `git pr pikit/self/<topic> <title> [-b <body>]`).
-- **Pi's output rules.** A command's output reaches Pi's `bash` tool as Pi's own environment sends it:
-  the tail (or head) within the tool's limits, and, when cut, the whole of it in `/tmp`.
+- **pi-durable's output rules.** A command's output streams to pi-durable's `bash` tool, which keeps
+  what it shows within its limits; past them, the whole output is also written to a file under `/tmp`
+  (`spillPath`).
 
 ## The fences
 
@@ -86,9 +87,9 @@ run time). Wrangler's own rule matches only imports ending in `.wasm`, and this 
 export; without the rule, the build fails with `No loader is configured for ".wasm" files`.
 
 **Bundle size.** In the workerd lane (`tests/workerd`, `bun run --cwd tests/workerd bundle`),
-a conversation's object with storage-do, sessions-sql, runtime-pi and Pi's four tools is 216 KiB
-gzip without execution-do and 1,002 KiB with it (4.1 MB uncompressed, of which QuickJS's WebAssembly
-is 503 KB, 226 KiB gzip). The budget is 10 MB compressed.
+a conversation's object with storage-do, runtime-pi (pi-durable) and pi-durable's four tools is
+980 KiB gzip with execution-do (4.0 MB uncompressed, of which QuickJS's WebAssembly is 503 KB,
+226 KiB gzip). The budget is 10 MB compressed.
 
 ## Limits
 

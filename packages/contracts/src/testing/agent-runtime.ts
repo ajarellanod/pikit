@@ -13,9 +13,13 @@
  * - Each turn answers `answer: <text of the newest inbound message>`.
  * - A turn whose newest message is exactly `hold` first calls a tool that blocks until
  *   `fixture.hold.release()`. The tool honours cancellation. Once it returns, the turn answers the
- *   newest inbound message as usual (`answer: hold`, or a message that arrived meanwhile).
- * - `holdAtEnd()` pauses the next run after its final answer, before it ends.
+ *   newest inbound message as usual (`answer: hold`).
+ * - `holdAtEnd()` pauses the next run at its final answer, before it ends.
  * - `failNext()` makes the next model call wait, then fail: the run in progress fails.
+ *
+ * Messages that arrive while a run goes are queued (`Admission` `queued`) and taken together by the
+ * next run, which answers them all: its `requestIds` lists them, and only the first has an
+ * `agent.started`.
  */
 
 import {
@@ -35,13 +39,13 @@ import type { ConformanceCase } from "@pikit/core/testing";
 /** A fresh set of records and a scripted agent, built for one case. */
 export interface AgentRuntimeFixture {
   /**
-   * One worker: the component providing `agent.runtime` and everything it uses (agents, sessions,
+   * One worker: the component providing `agent.runtime` and everything it uses (agents, storage,
    * models). The suite may create several apps from them over the same records, one after the
    * other, so they must keep durable state outside the components' setup (in the fixture).
    */
   components: ComponentDefinition[];
   config?: Record<string, unknown>;
-  /** A new conversation of the scripted agent, with a new session. */
+  /** A new conversation of the scripted agent, new in the runtime's storage. */
   conversation(): Promise<ConversationRef>;
   /** The `hold` tool of this fixture. One hold per case. */
   hold: {
@@ -50,7 +54,7 @@ export interface AgentRuntimeFixture {
     /** Lets the tool return. */
     release(): void;
   };
-  /** Pause the next run that ends after its final answer, until `release()`. */
+  /** Pause the next run at its final answer (the model's answer has not ended the run yet), until `release()`. */
   holdAtEnd(): { reached: Promise<void>; release(): void };
   /**
    * Make the next model call wait until `release()`, then fail as a provider error that is not
@@ -119,23 +123,27 @@ export function createAgentRuntimeConformance(
       same(result.conversation, conversation, "result conversation");
     }),
 
-    runtimeCase("a message to a busy conversation is queued and the run in progress answers it", async (s) => {
+    runtimeCase("messages to a busy conversation are queued, and the next run takes them together", async (s) => {
       const w = await s.worker();
       const conversation = await s.fixture.conversation();
       await w.dispatch("r1", "hold", conversation);
       await s.within(s.fixture.hold.started, "the hold tool to start");
 
-      expect(await w.dispatch("r2", "change course", conversation), { kind: "queued", requestId: "r2" }, "admission");
+      expect(await w.dispatch("r2", "change course", conversation), { kind: "queued", requestId: "r2" }, "admission of r2");
+      expect(await w.dispatch("r3", "and hurry", conversation), { kind: "queued", requestId: "r3" }, "admission of r3");
       s.fixture.hold.release();
 
-      const result = await w.result("r1");
-      expect([result.kind, result.text], ["completed", "answer: change course"], "result of the run");
-      expect(result.requestIds, ["r1", "r2"], "the requests the run answered");
+      const first = await w.result("r1");
+      expect([first.kind, first.text, first.requestIds], ["completed", "answer: hold", ["r1"]], "result of the run in progress");
+      expect(await w.event("agent.started", (e) => e.requestId === "r2"), { conversation, requestId: "r2", resumed: false }, "agent.started of the next run");
+      const next = await w.result("r2");
+      expect([next.kind, next.text], ["completed", "answer: and hurry"], "result of the next run");
+      expect(next.requestIds, ["r2", "r3"], "the requests the next run answered");
       await s.quiet();
-      w.none((e) => e.name !== "agent.dispatched" && requestIdOf(e) === "r2", "a run of its own for the queued message");
+      w.none((e) => (e.name === "agent.started" || e.name === "agent.settled" || e.name === "agent.failed") && requestIdOf(e) === "r3", "a run of its own for r3");
     }),
 
-    runtimeCase("a message that arrives as the run ends is answered by that run", async (s) => {
+    runtimeCase("a message that arrives as the run ends gets the next run", async (s) => {
       const w = await s.worker();
       const conversation = await s.fixture.conversation();
       const end = s.fixture.holdAtEnd();
@@ -145,11 +153,10 @@ export function createAgentRuntimeConformance(
       expect(await w.dispatch("r2", "one more thing", conversation), { kind: "queued", requestId: "r2" }, "admission");
       end.release();
 
-      const result = await w.result("r1");
-      expect([result.kind, result.text], ["completed", "answer: one more thing"], "result of the run");
-      expect(result.requestIds, ["r1", "r2"], "the requests the run answered");
-      await s.quiet();
-      w.none((e) => e.name !== "agent.dispatched" && requestIdOf(e) === "r2", "a run of its own for the late message");
+      const first = await w.result("r1");
+      expect([first.kind, first.text, first.requestIds], ["completed", "answer: hello", ["r1"]], "result of the run");
+      const next = await w.result("r2");
+      expect([next.kind, next.text, next.requestIds], ["completed", "answer: one more thing", ["r2"]], "result of the next run");
     }),
 
     runtimeCase("a message queued behind a run that fails gets a run of its own, and its answer", async (s) => {
@@ -248,7 +255,7 @@ export function createAgentRuntimeConformance(
       expect((await w.result(requestId)).kind, "completed", "the resumed run");
     }),
 
-    runtimeCase("a message to a conversation with an interrupted run resumes it, and that run answers", async (s) => {
+    runtimeCase("a message to a conversation with an interrupted run resumes it, and the next run answers the message", async (s) => {
       const { conversation, requestId } = await s.fixture.interrupted();
       // The resumed run may be fast: keep it open until the message is admitted.
       const end = s.fixture.holdAtEnd();
@@ -257,9 +264,10 @@ export function createAgentRuntimeConformance(
       expect(await w.dispatch("r2", "after the crash", conversation), { kind: "queued", requestId: "r2" }, "admission");
       end.release();
 
-      const result = await w.result(requestId);
-      expect([result.kind, result.text], ["completed", "answer: after the crash"], "result of the resumed run");
-      expect(result.requestIds, [requestId, "r2"], "the requests the resumed run answered");
+      const resumed = await w.result(requestId);
+      expect([resumed.kind, resumed.requestIds], ["completed", [requestId]], "result of the resumed run");
+      const next = await w.result("r2");
+      expect([next.kind, next.text, next.requestIds], ["completed", "answer: after the crash", ["r2"]], "result of the next run");
     }),
   ];
 }
@@ -383,8 +391,8 @@ function expect(actual: unknown, expected: unknown, what: string): void {
 
 function same(actual: ConversationRef, expected: ConversationRef, what: string): void {
   expect(
-    { key: actual.key, agent: actual.agent, sessionId: actual.sessionId },
-    { key: expected.key, agent: expected.agent, sessionId: expected.sessionId },
+    { key: actual.key, agent: actual.agent, conversationId: actual.conversationId },
+    { key: expected.key, agent: expected.agent, conversationId: expected.conversationId },
     what,
   );
 }

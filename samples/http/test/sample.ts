@@ -19,7 +19,6 @@ import routerBasic from "../../../registry/components/router-basic/files/src/pik
 import { createRuntimePi } from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import { createServerBun } from "../../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
-import sessionsJsonl from "../../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
 import storageSqlite from "../../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
 import submissionsSql from "../../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
 import toolBash from "../../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
@@ -68,7 +67,6 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
   const app = await defineApp({
     components: [
       createSecretsEnv({ env: { PIKIT_HTTP_TOKEN: TOKEN } }),
-      sessionsJsonl,
       conversationsFile,
       provider,
       agents,
@@ -86,7 +84,6 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
       ...(options.extra ?? []),
     ],
     config: {
-      "sessions-jsonl": { root: join(dataDir, "sessions") },
       "conversations-file": { path: join(dataDir, "conversations.json") },
       "storage-sqlite": { path: join(dataDir, "pikit.db") },
       "execution-local": { root: join(dataDir, "workspace") },

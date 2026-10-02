@@ -1,8 +1,9 @@
 /**
  * execution-do: the agent's workspace and shell inside its Durable Object, on Cloudflare (SPEC §4.1, C7).
  *
- * It provides `execution` and `execution.shell`, one Pi `ExecutionEnv`, so Pi's own `read`, `write`,
- * `edit` and `bash` tools (the `tool-*` components) work there unmodified:
+ * It provides `execution` and `execution.shell`, one pi-durable `ExecutionEnv` (`env.ts`), so
+ * pi-durable's own `read`, `write`, `edit` and `bash` tools (the `tool-*` components) work there
+ * unmodified:
  * - **Files** live in the object's own SQLite, under `root` (`/work`), in the tables `execution_do_*`
  *   (`files.ts`). They survive evictions and deploys, as the object's storage does.
  * - **The shell** is just-bash, a bash interpreter in TypeScript, with `git` (isomorphic-git, fenced),
@@ -23,7 +24,7 @@
 import { defineComponent } from "@pikit/core";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import Type from "typebox";
-import { createExecutionEnv } from "./env.ts";
+import { createDurableExecutionEnv } from "./env.ts";
 import { createFiles, type DurableObjectFilesStorage } from "./files.ts";
 import { createGit } from "./git.ts";
 import { createShell } from "./shell.ts";
@@ -101,8 +102,10 @@ export default defineComponent({
       timeLimitMs: config.shell.timeLimitSeconds * 1_000,
       quickjs: { interruptBudget: config.node.interruptBudget, heapBytes: config.node.heapMegabytes * 1024 * 1024 },
     });
-    // One environment serves both capabilities.
-    const env = createExecutionEnv(files, shell, config.root);
+    // One environment serves both capabilities. Its files are the object's own: their namespace is the
+    // object (pi-durable serializes `edit` and `write` on a file by namespace and path), known at start.
+    let objectId: string | undefined;
+    const env = createDurableExecutionEnv(files, shell, config.root, { id: () => `execution-do:${objectId ?? "unstarted"}` });
     pikit.provide("execution", env);
     pikit.provide("execution.shell", env);
 
@@ -121,6 +124,7 @@ export default defineComponent({
           throw new Error("execution-do: the Durable Object's storage has no SQL API: declare its class in new_sqlite_classes (not new_classes) in the migrations of wrangler.jsonc.");
         }
         storage = candidate;
+        objectId = host.object.id;
         files.migrate();
         files.mkdirp(config.root);
       },

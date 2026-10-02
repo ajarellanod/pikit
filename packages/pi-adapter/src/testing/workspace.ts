@@ -1,6 +1,5 @@
 /**
- * `workspace` conformance. The contract is typed by the adapter (its `env` is Pi's
- * `ExecutionEnv`), so its suite lives here, next to `execution`'s. Runner-independent:
+ * `workspace` conformance. The contract is typed by the adapter (its `env` is pi-durable's * `ExecutionEnv`), so its suite lives here, next to `execution`'s. Runner-independent:
  *
  *   for (const c of createWorkspaceConformance(() => myFixture()))
  *     test(`${c.group}: ${c.name}`, () => c.run());
@@ -14,7 +13,7 @@
  * The environment itself is `execution`'s contract: run `createExecutionConformance` on it too.
  */
 
-import { BACKGROUND_CONTEXT } from "@earendil-works/pi-agent-core";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { ConversationRef } from "@pikit/contracts";
 import type { ConformanceCase } from "@pikit/core/testing";
 import type { WorkspaceProvider } from "../types.ts";
@@ -30,7 +29,7 @@ const GROUP = "workspace";
 const ctx = BACKGROUND_CONTEXT;
 
 function conversation(agent: string, id: string): ConversationRef {
-  return { key: `conformance:${agent}:${id}`, agent, sessionId: `session-${agent}-${id}` };
+  return { key: `conformance:${agent}:${id}`, agent, conversationId: `conversation-${agent}-${id}` };
 }
 
 export function createWorkspaceConformance(factory: () => WorkspaceFixture | Promise<WorkspaceFixture>): readonly ConformanceCase[] {

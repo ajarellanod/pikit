@@ -1,6 +1,6 @@
 /**
  * The sample with `channel-telegram` instead of `channel-http`, as `pikit new --preset telegram` makes
- * it: the same runtime, sessions and registry, the storage and submissions `runtime-pi` brings, and
+ * it: the same runtime and registry, the storage (pi-durable's tables) and submissions `runtime-pi` brings, and
  * the outbox and the key-value store (for its cursor) the channel brings. Telegram is the channel's own fake Bot API (`fake-telegram.ts`), and
  * the model Pi's faux provider, scripted.
  *
@@ -16,7 +16,6 @@ import outboundDurable from "../../../registry/components/outbound-durable/files
 import routerBasic from "../../../registry/components/router-basic/files/src/pikit/router-basic/index.ts";
 import { createRuntimePi } from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
-import sessionsJsonl from "../../../registry/components/sessions-jsonl/files/src/pikit/sessions-jsonl/index.ts";
 import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import storageSqlite from "../../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
 import submissionsSql from "../../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
@@ -37,13 +36,12 @@ export interface TelegramAppOptions {
 }
 
 export function telegramApp(options: TelegramAppOptions) {
-  // `never`: a resumed run does not run the tool again; Pi tells the model it was interrupted.
-  const agent = scriptedAgent(holdTool(options.hold, "never"));
+  // `unsafe`: a resumed run does not run the tool again; pi-durable tells the model it was interrupted.
+  const agent = scriptedAgent(holdTool(options.hold, "unsafe"));
   const { agents, provider } = testComponents({ agents: [agent] });
   return defineApp({
     components: [
       createSecretsEnv({ env: { TELEGRAM_BOT_TOKEN: BOT_TOKEN, TELEGRAM_ALLOWED_USERS: String(OWNER.id) } }),
-      sessionsJsonl,
       conversationsFile,
       provider,
       agents,
@@ -57,7 +55,6 @@ export function telegramApp(options: TelegramAppOptions) {
       channelTelegram,
     ],
     config: {
-      "sessions-jsonl": { root: join(options.dataDir, "sessions") },
       "conversations-file": { path: join(options.dataDir, "conversations.json") },
       "storage-sqlite": { path: join(options.dataDir, "pikit.db") },
       "router-basic": { defaultAgent: agent.name },

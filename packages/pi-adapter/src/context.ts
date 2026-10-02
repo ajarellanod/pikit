@@ -1,24 +1,26 @@
 /**
- * Contexts crossing into Pi: pikit's `Context` matches Chord's, and the adapter bridges it (SPEC K5).
+ * Contexts crossing into pi-durable (Chord 1.0): the same bridge as `../context.ts`, against the Chord
+ * that pi-durable resolves. pikit's `Context` has Chord's shape, but Chord's `withContextValue` reads
+ * cancellation through a private key, so a pikit context that pi-durable derives would lose its
+ * `abortSignal`. Re-attaching the signal with Chord's own `withAbortSignal` stores it under that key.
  */
 
-import { type Context as PiContext, withAbortSignal, withoutAbortSignal } from "@earendil-works/pi-agent-core";
-import type { Context } from "@pikit/core";
+import type { Context as ChordContext } from "@earendil-works/chord";
+import { withAbortSignal, withoutAbortSignal } from "@earendil-works/chord/context";
+import type { AppContext, Context } from "@pikit/core";
 
-/**
- * The one-line bridge. Chord's `withContextValue` reads cancellation through a private key, so a
- * pikit context that Pi derives (telemetry spans, hook admission) would lose its `abortSignal`.
- * Re-attaching the signal with Chord's own `withAbortSignal` stores it under that key.
- */
-export function toPi(ctx: Context): PiContext {
+/** A pikit context as the Chord context pi-durable takes, keeping its cancellation. */
+export function toChord(ctx: Context): ChordContext {
   const signal = ctx.abortSignal;
   return signal === undefined ? ctx : withAbortSignal(signal, ctx);
 }
 
-/**
- * The context a run lives in: the caller's values (tenant, trace) without its cancellation. A run
- * outlives the call that admitted it, as Pi's `Drive` does with `withoutAbortSignal`.
- */
-export function detached(ctx: Context): PiContext {
-  return withoutAbortSignal(toPi(ctx));
+/** The caller's values without its cancellation: what outlives the call that admitted a run. */
+export function detached(ctx: Context): Context {
+  return withoutAbortSignal(toChord(ctx));
+}
+
+/** An app context with the caller's values and logger, without its cancellation: where a run reports. */
+export function runContext(ctx: AppContext): AppContext {
+  return ctx.derive((inner) => detached(inner));
 }

@@ -18,10 +18,10 @@ components:
   - storage-do
   - storage-kv-sql
   - submissions-sql
-  - sessions-sql
-  - conversations-kv
   - provider-openrouter
   - runtime-pi
+  # After the runtime: the registry creates conversations through its `agent.conversations`.
+  - conversations-kv
   - router-basic
   - channel-telegram-webhook
   - execution-do

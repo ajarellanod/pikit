@@ -1,12 +1,12 @@
 /**
  * Scenario 1: talk to an agent over HTTP. `runtime-pi` + `server-bun` + `channel-http`,
- * with the sample's sessions, registry, secrets and router, over real HTTP on a free port. Pi runs
+ * with the sample's storage, registry, secrets and router, over real HTTP on a free port. Pi runs
  * the agent on its faux provider, scripted: each turn answers `answer: <newest message>`, and
  * `hold` blocks in a tool until the test releases it.
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { readFileSync, readdirSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { defineComponent } from "@pikit/core";
 import { type Admission } from "@pikit/contracts";
@@ -48,14 +48,17 @@ test("a message is answered in the HTTP response", async () => {
   expect(answered).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hello" } });
 });
 
-test("a message sent while the agent works changes its course, and both POSTs get the answer", async () => {
-  let admitted!: (admission: Admission) => void;
-  const secondAdmitted = new Promise<Admission>((resolve) => (admitted = resolve));
+test("messages sent while the agent works are answered together by its next run, and each POST gets that answer", async () => {
+  const admissions = new Map<string, Admission>();
+  let bothAdmitted!: () => void;
+  const admitted = new Promise<void>((resolve) => (bothAdmitted = resolve));
   const observer = defineComponent({
     name: "admissions",
     setup: (pikit) =>
       pikit.on("agent.dispatched", ({ admission }) => {
-        if (admission.requestId === "m2") admitted(admission);
+        if (admission.requestId === "m1") return;
+        admissions.set(admission.requestId, admission);
+        if (admissions.size === 2) bothAdmitted();
       }),
   });
   const { sample, hold } = await running([observer]);
@@ -63,13 +66,17 @@ test("a message sent while the agent works changes its course, and both POSTs ge
   const first = sample.post("/v1/messages", { conversationId: "c1", text: "hold", messageId: "m1" });
   await hold.started;
   const second = sample.post("/v1/messages", { conversationId: "c1", text: "change course", messageId: "m2" });
-  // Admitted into the running run: Pi's inbox, as a steer. pikit queues nothing of its own.
-  expect(await secondAdmitted).toEqual({ kind: "queued", requestId: "m2" });
+  const third = sample.post("/v1/messages", { conversationId: "c1", text: "and hurry", messageId: "m3" });
+  // Queued in pi-durable's inbox while the run goes. pikit queues nothing of its own.
+  await admitted;
+  expect([admissions.get("m2")?.kind, admissions.get("m3")?.kind]).toEqual(["queued", "queued"]);
   hold.release();
 
-  // The run took both messages (AgentResult.requestIds), so both POSTs get its one answer.
-  expect(await first).toEqual({ status: 200, body: { requestId: "m1", text: "answer: change course" } });
-  expect(await second).toEqual({ status: 200, body: { requestId: "m2", text: "answer: change course" } });
+  // The run in progress answers its own message; the next run took both queued ones
+  // (AgentResult.requestIds), so both their POSTs get its one answer.
+  expect(await first).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hold" } });
+  expect(await second).toEqual({ status: 200, body: { requestId: "m2", text: "answer: and hurry" } });
+  expect(await third).toEqual({ status: 200, body: { requestId: "m3", text: "answer: and hurry" } });
 });
 
 test("a wrong or missing token is a 401", async () => {
@@ -124,26 +131,25 @@ test("/health is 200 while the process lives; /ready is 200 only after runtime.r
   expect(whileStopping).toEqual([200, 503]);
 });
 
-test("reset starts the conversation over on a new session and keeps the old one", async () => {
+test("reset starts the conversation over on a new runtime conversation and keeps the old one", async () => {
   const { sample } = await running();
   await sample.post("/v1/messages", { conversationId: "c1", text: "hello", messageId: "m1" });
   const duplicate = await sample.post("/v1/messages", { conversationId: "c1", text: "hello", messageId: "m1" });
 
   const reset = await sample.post("/v1/conversations/c1/reset");
-  // The same message id is new again: it is in the old session, not in the new one.
+  // The same message id is new again: it is in the old conversation, not in the new one.
   const again = await sample.post("/v1/messages", { conversationId: "c1", text: "hello again", messageId: "m1" });
 
   // Sent again, it does not run again: it answers with what the first one got (submissions-sql).
   expect(duplicate).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hello" } });
   expect(reset.status).toBe(200);
-  expect(reset.body.sessionId).not.toBe(reset.body.previousSessionId);
+  expect(reset.body.runtimeConversationId).not.toBe(reset.body.previousRuntimeConversationId);
   expect(again).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hello again" } });
   const registry = JSON.parse(readFileSync(join(sample.dataDir, "conversations.json"), "utf8"));
   expect(registry.conversations["http:c1"]).toMatchObject({
-    sessionId: reset.body.sessionId,
-    previousSessionIds: [reset.body.previousSessionId],
+    conversationId: reset.body.runtimeConversationId,
+    previousConversationIds: [reset.body.previousRuntimeConversationId],
   });
-  expect(sessionFiles(sample.dataDir)).toHaveLength(2);
   expect((await sample.post("/v1/conversations/nobody/reset")).status).toBe(404);
 });
 
@@ -158,7 +164,7 @@ test("a conversation outlives the process: after a restart it is the same conver
   samples.push(second);
   await second.app.start();
 
-  // The registry and Pi's session were on disk: the message is known, and answered with its outcome
+  // The registry and pi-durable's conversation were on disk: the message is known, and answered with its outcome
   // (submissions-sql), not run again; the conversation continues.
   expect(await second.post("/v1/messages", { conversationId: "c1", text: "hello", messageId: "m1" })).toEqual({
     status: 200,
@@ -168,11 +174,5 @@ test("a conversation outlives the process: after a restart it is the same conver
     status: 200,
     body: { requestId: "m2", text: "answer: still there?" },
   });
-  expect(sessionFiles(second.dataDir)).toHaveLength(1);
 });
 
-/** Every session file Pi wrote under the sample's sessions root. */
-function sessionFiles(dataDir: string): string[] {
-  const root = join(dataDir, "sessions");
-  return readdirSync(root, { recursive: true, encoding: "utf8" }).filter((path) => path.endsWith(".jsonl"));
-}

@@ -52,12 +52,12 @@ included (`localhost`, your LAN, a cloud's metadata endpoint). On Cloudflare, a 
 your network, so it reaches what the internet reaches. If your server can reach something the agent must not, do not
 install this tool there, or put the server behind a firewall that refuses it.
 
-## Replay: `never`
+## Replay: `unsafe`
 
 pikit resumes a run after a crash. A tool that is `"safe"` is called again; one that is
-`"never"` is reported to the model as interrupted, and the model decides what to do.
+`"unsafe"` is reported to the model as interrupted, and the model decides what to do.
 
-`fetch` is `"never"` because a POST, PUT, PATCH or DELETE may have reached the server and had its
+`fetch` is `"unsafe"` because a POST, PUT, PATCH or DELETE may have reached the server and had its
 effect before the crash: sending it again could order twice, post twice or delete something that was
 recreated since. A replay is decided per tool, not per call, so a GET is reported as interrupted
 too; the model can simply fetch it again, which costs one call.

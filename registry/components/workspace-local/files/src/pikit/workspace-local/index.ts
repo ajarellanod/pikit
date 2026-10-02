@@ -8,7 +8,7 @@
  * conversation of one agent shares it; two agents never do. Without this component, every agent
  * works in `execution`'s one directory, as before.
  *
- * Each directory is Pi's own `NodeExecutionEnv` (through `createLocalExecution`), with a shell.
+ * Each directory is pi-durable's own `NodeExecutionEnv` (through `createLocalExecution`), with a shell.
  * Commands start from an allowlist of the server's variables, as `execution-local`'s do, so `env` in
  * a command does not print the server's secrets.
  *

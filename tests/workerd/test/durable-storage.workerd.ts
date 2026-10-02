@@ -1,6 +1,6 @@
 /**
  * pi-durable 1.0's `SqliteStorage` over storage-do's `storage.sql` on a real SQLite-backed Durable
- * Object (spike, packages/pi-adapter/src/durable/README.md): pi-durable's own storage conformance
+ * Object (packages/pi-adapter/src/README.md): pi-durable's own storage conformance
  * suite, each case in an object of its own; then a `Harness` over it, reopened in the same object,
  * after an eviction, and across the object's events.
  */
@@ -10,7 +10,7 @@ import type { SqlDatabase } from "@pikit/contracts";
 import type { WorkersHost } from "@pikit/contracts/cloudflare";
 import { withWorkersHost } from "@pikit/contracts/testing";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { openDurableStorage } from "@pikit/pi-adapter/durable";
+import { openDurableStorage } from "@pikit/pi-adapter";
 import {
   answerOnce,
   answerWithTool,
@@ -23,7 +23,7 @@ import {
   pendingWork,
   registerStorageConformance,
   resumeInterrupted,
-} from "@pikit/pi-adapter/durable/testing";
+} from "@pikit/pi-adapter/testing/harness";
 import { describe, expect, it } from "vitest";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import { hostOf, inObject, objectHost } from "./host.ts";

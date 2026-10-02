@@ -1,6 +1,6 @@
 # tool-read
 
-Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.
+pi-durable's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.
 
 - **Provides:** `agent.tool`, under the key `read`.
 - **Requires:** `execution` (for example `execution-local`).

@@ -9,32 +9,28 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppEvents, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withCancel } from "@pikit/core";
-import {
-  AGENT_STATE,
-  type AgentRuntime,
-  type AgentSubmissions,
-  type AgentTool,
-  type ConversationRef,
-  defineAgent,
-  type WakeupHandler,
-} from "@pikit/contracts";
+import { AGENT_STATE, type AgentRuntime, type AgentSubmissions, type AgentTool, type ConversationRef, defineAgent, type WakeupHandler } from "@pikit/contracts";
 import { createLifecycleConformance, createManualClock } from "@pikit/core/testing";
 import { createAgentRuntimeConformance, createMemorySubmissions, createMemoryWakeups } from "@pikit/contracts/testing";
-import type { Credential, CredentialStore, SessionStore } from "@pikit/pi-adapter";
-import { createJsonlSessionStore } from "@pikit/pi-adapter/node";
-import { createPiRuntimeFixture, holdTool, killMidRun, recordingBash, scriptedAgent, scriptedProvider, testComponents } from "@pikit/pi-adapter/testing";
+import type { Credential, CredentialStore } from "@pikit/pi-adapter";
+import {
+  createPiRuntimeFixture,
+  holdTool,
+  interruptRun,
+  openSqliteDatabase,
+  recordingBash,
+  scriptedAgent,
+  scriptedProvider,
+  sqliteStorage,
+  testComponents,
+} from "@pikit/pi-adapter/testing";
+import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
 import runtimePi, { createRuntimePi, DRIVE } from "./index.ts";
 
-// The agent.runtime contract, including a worker killed mid-run.
-for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture(({ onHarness }) => [createRuntimePi({ onHarness })]))) {
+// The agent.runtime contract, including a worker that died mid-run.
+for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture([runtimePi]))) {
   test(`runtime-pi ${c.group}: ${c.name}`, () => c.run(), 30_000);
-}
-
-// The same contract with sessions on storage.sql (the store sessions-sql provides, on a SQLite file held
-// to a Durable Object's limits), including a worker killed mid-run over that database.
-for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture(({ onHarness }) => [createRuntimePi({ onHarness })], { sessions: "sql" }))) {
-  test(`runtime-pi on sql sessions ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
 
 /** `agent.submissions` in memory, outliving the apps of a test as a database would. */
@@ -43,69 +39,62 @@ function memorySubmissions(submissions: AgentSubmissions = createMemorySubmissio
 }
 
 // The same contract with agent.submissions installed: recording changes nothing a channel sees.
-for (const c of createAgentRuntimeConformance(() =>
-  createPiRuntimeFixture(({ onHarness }) => [memorySubmissions(), createRuntimePi({ onHarness })]),
-)) {
+for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture([memorySubmissions(), runtimePi]))) {
   test(`runtime-pi with agent.submissions ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
 
 // The same contract with runs driven by wakeups (SPEC §4.1, C4), durable as a Durable Object's are, with
 // and without agent.submissions: what a channel sees does not change.
-for (const c of createAgentRuntimeConformance(() =>
-  createPiRuntimeFixture(({ onHarness }) => [createMemoryWakeups({ durable: true }), createRuntimePi({ onHarness })]),
-)) {
+for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture([createMemoryWakeups({ durable: true }), runtimePi]))) {
   test(`runtime-pi with wakeups ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
-for (const c of createAgentRuntimeConformance(() =>
-  createPiRuntimeFixture(({ onHarness }) => [createMemoryWakeups({ durable: true }), memorySubmissions(), createRuntimePi({ onHarness })]),
-)) {
+for (const c of createAgentRuntimeConformance(() => createPiRuntimeFixture([createMemoryWakeups({ durable: true }), memorySubmissions(), runtimePi]))) {
   test(`runtime-pi with wakeups and agent.submissions ${c.group}: ${c.name}`, () => c.run(), 30_000);
 }
 
 // Start and stop honour their deadline and leave nothing open, with and without agent.submissions and wakeups.
 for (const c of createLifecycleConformance(() => {
-  const { sessions, agents, provider } = testComponents();
-  return { component: runtimePi, providers: [sessions, agents, provider] };
+  const { storage, agents, provider } = testComponents();
+  return { component: runtimePi, providers: [storage, agents, provider] };
 })) {
   test(`runtime-pi ${c.group}: ${c.name}`, () => c.run());
 }
 for (const c of createLifecycleConformance(() => {
-  const { sessions, agents, provider } = testComponents();
-  return { component: runtimePi, providers: [sessions, agents, provider, memorySubmissions()] };
+  const { storage, agents, provider } = testComponents();
+  return { component: runtimePi, providers: [storage, agents, provider, memorySubmissions()] };
 })) {
   test(`runtime-pi with agent.submissions ${c.group}: ${c.name}`, () => c.run());
 }
 for (const c of createLifecycleConformance(() => {
-  const { sessions, agents, provider } = testComponents();
-  return { component: runtimePi, providers: [sessions, agents, provider, memorySubmissions(), createMemoryWakeups({ durable: true })] };
+  const { storage, agents, provider } = testComponents();
+  return { component: runtimePi, providers: [storage, agents, provider, memorySubmissions(), createMemoryWakeups({ durable: true })] };
 })) {
   test(`runtime-pi with wakeups ${c.group}: ${c.name}`, () => c.run());
 }
 
+/** A SQLite file in a temporary directory: the records a run outlives a worker in. */
+function databaseFile() {
+  const root = mkdtempSync(join(tmpdir(), "pikit-runtime-pi-"));
+  const path = join(root, "pikit.db");
+  return { path, open: async () => openSqliteDatabase(path), dispose: () => rmSync(root, { recursive: true, force: true }) };
+}
+
 test("at start, a conversation agent.submissions holds pending is resumed, with no new message", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pikit-runtime-pi-resume-"));
+  const file = databaseFile();
   try {
-    const store = createJsonlSessionStore({ root, cwd: root });
     const { submissions } = createMemorySubmissions();
     const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
-    const session = await store.create({ cwd: root }, ctx);
-    await session.close(ctx);
-    const conversation = { key: "test:resume", agent: "scripted", sessionId: session.metadata.id };
-    // A process admitted the message, told its platform, and was killed mid-run.
-    await killMidRun(root, conversation.sessionId, "r-killed", "never");
+    // A process admitted the message, told its platform, and died mid-run.
+    const conversation = await interruptRun(file.open, { requestId: "r-killed", key: "test:resume" });
     await submissions.admitted(conversation, "r-killed", ctx);
 
-    const { agents, provider, sessions } = testComponents({ sessions: store });
+    const { agents, provider } = testComponents();
     const settled: AppEvents["agent.settled"][] = [];
     const observer = defineComponent({ name: "observer", setup: (pikit) => pikit.on("agent.settled", (result) => void settled.push(result)) });
-    const app = await defineApp({ components: [sessions, agents, provider, memorySubmissions(submissions), runtimePi, observer], logger: silentLogger }).create();
+    const app = await defineApp({ components: [sqliteStorage(file.path), agents, provider, memorySubmissions(submissions), runtimePi, observer], logger: silentLogger }).create();
     await app.start();
     try {
-      const deadline = Date.now() + 10_000;
-      while (settled.length === 0) {
-        if (Date.now() > deadline) throw new Error("the interrupted run was never resumed");
-        await Bun.sleep(10);
-      }
+      await until(() => settled.length > 0, "the interrupted run to be resumed");
       expect(settled.map((r) => [r.requestId, r.kind])).toEqual([["r-killed", "completed"]]);
       expect((await submissions.get(conversation, "r-killed", app.context()))?.kind).toBe("settled");
       expect(await submissions.pending(app.context())).toEqual([]);
@@ -113,58 +102,48 @@ test("at start, a conversation agent.submissions holds pending is resumed, with 
       await app.stop();
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    file.dispose();
   }
 }, 30_000);
 
 test("at start, messages still unanswered after abandonPendingAfterHours are abandoned; younger ones are kept", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pikit-runtime-pi-abandon-"));
-  try {
-    const store = createJsonlSessionStore({ root, cwd: root });
-    const { submissions } = createMemorySubmissions();
-    const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
-    const twoHoursAgo = (await defineApp({ components: [], logger: silentLogger, clock: createManualClock(Date.now() - 2 * 60 * 60 * 1_000) }).create()).context();
-    const conversations = [];
-    for (const name of ["old", "young"]) {
-      const session = await store.create({ cwd: root }, ctx);
-      await session.close(ctx);
-      conversations.push({ key: `test:${name}`, agent: "scripted", sessionId: session.metadata.id });
-    }
-    const [old, young] = conversations as [ConversationRef, ConversationRef];
-    // Admitted, and then lost: no run and no inbox entry holds them (a reset, a lost write).
-    await submissions.admitted(old, "r-old", twoHoursAgo);
-    await submissions.admitted(young, "r-young", ctx);
+  const { submissions } = createMemorySubmissions();
+  const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
+  const twoHoursAgo = (await defineApp({ components: [], logger: silentLogger, clock: createManualClock(Date.now() - 2 * 60 * 60 * 1_000) }).create()).context();
+  const { storage, agents, provider } = testComponents();
+  // Two conversations, made by an earlier app over the same storage.
+  const before = observer();
+  const earlier = await defineApp({ components: [storage, agents, provider, runtimePi, before.component], logger: silentLogger }).create();
+  await earlier.start();
+  const old = await before.conversation("test:old");
+  const young = await before.conversation("test:young");
+  await earlier.stop();
+  // Admitted, and then lost: pi-durable never held them (a lost write).
+  await submissions.admitted(old, "r-old", twoHoursAgo);
+  await submissions.admitted(young, "r-young", ctx);
 
-    const { agents, provider, sessions } = testComponents({ sessions: store });
-    const failed: AppEvents["agent.failed"][] = [];
-    const observer = defineComponent({ name: "observer", setup: (pikit) => pikit.on("agent.failed", (result) => void failed.push(result)) });
-    const app = await defineApp({
-      components: [sessions, agents, provider, memorySubmissions(submissions), runtimePi, observer],
-      config: { "runtime-pi": { abandonPendingAfterHours: 1 } },
-      logger: silentLogger,
-    }).create();
-    await app.start();
-    try {
-      const deadline = Date.now() + 10_000;
-      while (failed.length === 0) {
-        if (Date.now() > deadline) throw new Error("the old message was never abandoned");
-        await Bun.sleep(10);
-      }
-      expect(failed.map((r) => [r.requestIds, r.error])).toEqual([[["r-old"], { code: "abandoned", message: "unanswered_too_long" }]]);
-      expect((await submissions.pending(app.context())).map((p) => p.requestIds)).toEqual([["r-young"]]);
-    } finally {
-      await app.stop();
-    }
+  const failed: AppEvents["agent.failed"][] = [];
+  const failures = defineComponent({ name: "failures", setup: (pikit) => pikit.on("agent.failed", (result) => void failed.push(result)) });
+  const app = await defineApp({
+    components: [storage, agents, provider, memorySubmissions(submissions), runtimePi, failures],
+    config: { "runtime-pi": { abandonPendingAfterHours: 1 } },
+    logger: silentLogger,
+  }).create();
+  await app.start();
+  try {
+    await until(() => failed.length > 0, "the old message to be abandoned");
+    expect(failed.map((r) => [r.requestIds, r.error])).toEqual([[["r-old"], { code: "abandoned", message: "unanswered_too_long" }]]);
+    expect((await submissions.pending(app.context())).map((p) => p.requestIds)).toEqual([["r-young"]]);
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    await app.stop();
   }
 }, 30_000);
 
 test("stop, with no deadline, does not wait for an agent.submissions whose pending() never answers", async () => {
   const { submissions } = createMemorySubmissions();
   const hung: AgentSubmissions = { ...submissions, pending: () => new Promise(() => {}) };
-  const { sessions, agents, provider } = testComponents();
-  const app = await defineApp({ components: [sessions, agents, provider, memorySubmissions(hung), runtimePi], logger: silentLogger }).create();
+  const { storage, agents, provider } = testComponents();
+  const app = await defineApp({ components: [storage, agents, provider, memorySubmissions(hung), runtimePi], logger: silentLogger }).create();
   await app.start();
 
   const stopped = app.stop().then(() => "stopped");
@@ -173,40 +152,46 @@ test("stop, with no deadline, does not wait for an agent.submissions whose pendi
 });
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
-  const { sessions, agents, provider } = testComponents();
-  const app = await defineApp({ components: [sessions, agents, provider, runtimePi], logger: silentLogger }).create();
+  const { storage, agents, provider } = testComponents();
+  const app = await defineApp({ components: [storage, agents, provider, runtimePi], logger: silentLogger }).create();
 
   const described = app.describe().components.find((component) => component.name === "runtime-pi");
 
   expect(described).toMatchObject({
-    provides: ["agent.runtime"],
-    requires: ["sessions.store"],
-    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "agent.submissions", "wakeups"],
+    provides: ["agent.runtime", "agent.conversations"],
+    requires: ["storage.sql"],
+    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "execution", "workspace", "agent.submissions", "wakeups"],
   });
 });
 
 // With `wakeups` (SPEC §4.1, C4): every run is driven inside a run of the handler `runtime-pi.drive`,
 // which waits for it one slice at a time; nothing is left running after the event that started it.
 
-/** Stands for a channel: it reaches `agent.runtime`, and records every `agent.settled` / `agent.failed`. */
+/** Stands for a channel: it reaches `agent.runtime` and `agent.conversations`, and records every result. */
 function observer() {
   const results: (AppEvents["agent.settled"] | AppEvents["agent.failed"])[] = [];
-  let reached: { runtime: AgentRuntime; sessions: SessionStore } | undefined;
+  let reached: { runtime: AgentRuntime; conversation(key: string): Promise<ConversationRef> } | undefined;
   const component = defineComponent({
     name: "observer",
     setup(pikit) {
       const runtimeHandle = pikit.use("agent.runtime");
-      const sessionsHandle = pikit.use("sessions.store");
+      const conversations = pikit.use("agent.conversations");
       pikit.on("agent.settled", (result) => void results.push(result));
       pikit.on("agent.failed", (result) => void results.push(result));
-      return { start: () => void (reached = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
+      return {
+        start: (ctx) =>
+          void (reached = {
+            runtime: runtimeHandle.get(),
+            conversation: async (key) => ({ key, agent: "scripted", conversationId: await conversations.get().create(ctx) }),
+          }),
+      };
     },
   });
   const reach = () => {
     if (reached === undefined) throw new Error("the observer has not started");
     return reached;
   };
-  return { component, results, runtime: () => reach().runtime, sessions: () => reach().sessions };
+  return { component, results, runtime: () => reach().runtime, conversation: (key: string) => reach().conversation(key) };
 }
 
 /** Waits until `probe` holds, polling. */
@@ -254,24 +239,14 @@ function handDrivenWakeups() {
   };
 }
 
-/** A conversation of the scripted agent, with a new session in `store`. */
-async function conversationIn(store: SessionStore, key: string): Promise<ConversationRef> {
-  const session = await store.create({ cwd: "/" }, BACKGROUND_CONTEXT);
-  await session.close(BACKGROUND_CONTEXT);
-  return { key, agent: "scripted", sessionId: session.metadata.id };
-}
-
-test("with wakeups, a run whose worker was killed mid-run completes when the next app's wakeup fires, with no new message", async () => {
-  const root = mkdtempSync(join(tmpdir(), "pikit-runtime-pi-wakeups-"));
+test("with wakeups, a run whose worker died mid-run completes when the next app's wakeup fires, with no new message", async () => {
+  const file = databaseFile();
   try {
-    const store = createJsonlSessionStore({ root, cwd: root });
     const { submissions } = createMemorySubmissions();
     // The object's storage: its wakeup rows outlive each App, as a Durable Object's SQL does.
     const wakeups = createMemoryWakeups({ durable: true });
-    const conversation = await conversationIn(store, "test:killed");
-
-    // The dead worker admitted the message, asked for a wakeup to drive its run, and was killed mid-run.
-    await killMidRun(root, conversation.sessionId, "r-killed", "never");
+    // The dead worker admitted the message, asked for a wakeup to drive its run, and died mid-run.
+    const conversation = await interruptRun(file.open, { requestId: "r-killed", key: "test:killed" });
     const asks = defineComponent({
       name: "dead-worker",
       setup(pikit) {
@@ -284,10 +259,10 @@ test("with wakeups, a run whose worker was killed mid-run completes when the nex
     await dead.start();
     await dead.stop();
 
-    const { agents, provider, sessions } = testComponents({ sessions: store });
+    const { agents, provider } = testComponents();
     const seen = observer();
     const app = await defineApp({
-      components: [sessions, agents, provider, memorySubmissions(submissions), wakeups, runtimePi, seen.component],
+      components: [sqliteStorage(file.path), agents, provider, memorySubmissions(submissions), wakeups, runtimePi, seen.component],
       logger: silentLogger,
     }).create();
     await app.start();
@@ -300,7 +275,7 @@ test("with wakeups, a run whose worker was killed mid-run completes when the nex
       await app.stop();
     }
   } finally {
-    rmSync(root, { recursive: true, force: true });
+    file.dispose();
   }
 }, 30_000);
 
@@ -314,18 +289,18 @@ test("with wakeups, a long run is driven over several slices: each cut asks agai
     await released;
     return "released";
   });
-  const { agents, provider, sessions } = testComponents({ agents: [scriptedAgent(hold)] });
+  const { agents, provider, storage } = testComponents({ agents: [scriptedAgent(hold)] });
   const wakeups = handDrivenWakeups();
   const seen = observer();
   const app = await defineApp({
-    components: [sessions, agents, provider, memorySubmissions(), wakeups.component, runtimePi, seen.component],
+    components: [storage, agents, provider, memorySubmissions(), wakeups.component, runtimePi, seen.component],
     logger: silentLogger,
   }).create();
   await app.start();
   // At start, with agent.submissions, a wakeup resumes what is pending: nothing here, so it ends at once.
   await wakeups.run(app).done;
   expect(wakeups.requests.has(DRIVE)).toBe(false);
-  const conversation = await conversationIn(seen.sessions(), "test:slices");
+  const conversation = await seen.conversation("test:slices");
   const runtime = seen.runtime();
 
   const before = Date.now();
@@ -356,31 +331,34 @@ test("with wakeups, a long run is driven over several slices: each cut asks agai
   await app.stop();
 }, 30_000);
 
-test("with wakeups, Pi's retry backoff is a wakeup at its notBefore, not a timer; the run answers when it fires", async () => {
+test("with wakeups, a model retry's backoff is a wakeup at its time, not a timer: the slice suspends pi-durable, and the run answers when it fires", async () => {
   let failed = false;
-  const { agents, provider, sessions } = testComponents({
-    // The first model call fails with an error Pi retries after 1 s.
-    fail: () => (failed ? undefined : ((failed = true), Promise.resolve("503 service unavailable"))),
+  const { agents, provider, storage } = testComponents({
+    // The first model call fails with an error pi-durable retries after its backoff.
+    fail: () => (failed ? undefined : ((failed = true), Promise.resolve("503 Service Unavailable"))),
   });
   const wakeups = handDrivenWakeups();
   const seen = observer();
   const app = await defineApp({
-    components: [sessions, agents, provider, memorySubmissions(), wakeups.component, runtimePi, seen.component],
+    components: [storage, agents, provider, memorySubmissions(), wakeups.component, createRuntimePi({ settings: { retry: { baseDelayMs: 1_000 } } }), seen.component],
     logger: silentLogger,
   }).create();
   await app.start();
-  const conversation = await conversationIn(seen.sessions(), "test:retry");
+  await wakeups.run(app).done;
+  const conversation = await seen.conversation("test:retry");
   const runtime = seen.runtime();
 
   const before = Date.now();
   await runtime.dispatch({ requestId: "r1", conversation, prompt: "hello" }, app.context());
-  // The slice drives the run to Pi's retry wait and ends there, asking to be woken when it is due.
+  // The slice drives the run to its retry wait and ends there, asking to be woken when it is due.
   await wakeups.run(app).done;
   const due = wakeups.requests.get(DRIVE) as number;
   expect(due).toBeGreaterThanOrEqual(before + 1_000);
   expect(seen.results).toEqual([]);
 
-  await Bun.sleep(Math.max(0, due - Date.now()));
+  await Bun.sleep(Math.max(0, due - Date.now()) + 50);
+  // Suspended: nothing ran the retry in the meantime; the wakeup reopens pi-durable and the run answers.
+  expect(seen.results).toEqual([]);
   await wakeups.run(app).done;
   expect(seen.results.map((r) => [r.requestId, r.kind, r.text])).toEqual([["r1", "completed", "answer: hello"]]);
   expect(wakeups.requests.has(DRIVE)).toBe(false);
@@ -390,10 +368,10 @@ test("with wakeups, Pi's retry backoff is a wakeup at its notBefore, not a timer
 test("with wakeups, stop cancels a handler waiting on agent.submissions' pending() and asks again for the next app", async () => {
   const { submissions } = createMemorySubmissions();
   const hung: AgentSubmissions = { ...submissions, pending: () => new Promise(() => {}) };
-  const { sessions, agents, provider } = testComponents();
+  const { storage, agents, provider } = testComponents();
   const wakeups = handDrivenWakeups();
   const app = await defineApp({
-    components: [sessions, agents, provider, memorySubmissions(hung), wakeups.component, runtimePi],
+    components: [storage, agents, provider, memorySubmissions(hung), wakeups.component, runtimePi],
     logger: silentLogger,
   }).create();
   await app.start();
@@ -409,7 +387,6 @@ test("with wakeups, stop cancels a handler waiting on agent.submissions' pending
   expect(wakeups.requests.has(DRIVE)).toBe(true);
 });
 
-
 /** Why `start()` failed: the app reports the component, the cause says why. */
 async function startFailure(app: { start(): Promise<void> }): Promise<string> {
   const error = await app.start().then(
@@ -421,17 +398,17 @@ async function startFailure(app: { start(): Promise<void> }): Promise<string> {
 }
 
 test("it refuses to start without an agent", async () => {
-  const { sessions, provider } = testComponents();
-  const app = await defineApp({ components: [sessions, provider, runtimePi], logger: silentLogger }).create();
+  const { storage, provider } = testComponents();
+  const app = await defineApp({ components: [storage, provider, runtimePi], logger: silentLogger }).create();
 
   expect(await startFailure(app)).toContain("no agent.definition");
 });
 
 test("it refuses to start when an agent names a model no provider has", async () => {
-  const { sessions, agents, provider } = testComponents({
+  const { storage, agents, provider } = testComponents({
     agents: [defineAgent({ name: "support", model: "anthropic/claude-sonnet" })],
   });
-  const app = await defineApp({ components: [sessions, agents, provider, runtimePi], logger: silentLogger }).create();
+  const app = await defineApp({ components: [storage, agents, provider, runtimePi], logger: silentLogger }).create();
 
   expect(await startFailure(app)).toContain('"anthropic/claude-sonnet"');
 });
@@ -458,39 +435,38 @@ function credentialsHolding(stored: Record<string, Credential>) {
 }
 
 test("it refuses to start when an agent's provider has no credentials", async () => {
-  const { sessions, agents } = testComponents();
-  const app = await defineApp({ components: [sessions, agents, keyedProvider, runtimePi], logger: silentLogger }).create();
+  const { storage, agents } = testComponents();
+  const app = await defineApp({ components: [storage, agents, keyedProvider, runtimePi], logger: silentLogger }).create();
 
   expect(await startFailure(app)).toContain('provider "faux", which has no credentials');
 });
 
-test("it builds the models with model.credentials: a stored key lets the agent answer", async () => {
-  const { sessions, agents } = testComponents();
-  let answered!: (text: string | undefined) => void;
-  const answer = new Promise<string | undefined>((resolve) => (answered = resolve));
-  let channel!: { runtime: AgentRuntime; sessions: SessionStore };
-  const observer = defineComponent({
-    name: "channel-test",
-    setup(pikit) {
-      const runtimeHandle = pikit.use("agent.runtime");
-      const sessionsHandle = pikit.use("sessions.store");
-      pikit.on("agent.settled", (result) => answered(result.text));
-      return { start: () => void (channel = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
-    },
-  });
-  const credentials = credentialsHolding({ faux: { type: "api_key", key: "made-up-key" } });
-  const app = await defineApp({
-    components: [sessions, agents, keyedProvider, credentials, runtimePi, observer],
-    logger: silentLogger,
-  }).create();
+/** Starts `components` with runtime-pi and a channel stand-in; `ask` answers with the run's text. */
+async function talk(components: Parameters<typeof defineApp>[0]["components"]) {
+  const answers = new Map<string, (text: string | undefined) => void>();
+  const seen = observer();
+  const settledBy = defineComponent({ name: "answers", setup: (pikit) => pikit.on("agent.settled", (result) => answers.get(result.requestId)?.(result.text)) });
+  const app = await defineApp({ components: [...components, runtimePi, seen.component, settledBy], logger: silentLogger }).create();
   await app.start();
+  const conversation = await seen.conversation("test:talk");
+  return {
+    app,
+    ask(requestId: string, prompt: string) {
+      const answer = new Promise<string | undefined>((resolve) => answers.set(requestId, resolve));
+      return seen
+        .runtime()
+        .dispatch({ requestId, conversation, prompt }, app.context())
+        .then(() => answer);
+    },
+  };
+}
 
-  const ctx = app.context();
-  const session = await channel.sessions.create({}, ctx);
-  await session.close(ctx);
-  await channel.runtime.dispatch({ requestId: "r1", conversation: { key: "test:keyed", agent: "scripted", sessionId: session.metadata.id }, prompt: "hello" }, ctx);
+test("it builds the models with model.credentials: a stored key lets the agent answer", async () => {
+  const { storage, agents } = testComponents();
+  const credentials = credentialsHolding({ faux: { type: "api_key", key: "made-up-key" } });
+  const { app, ask } = await talk([storage, agents, keyedProvider, credentials]);
 
-  expect(await answer).toBe("answer: hello");
+  expect(await ask("r1", "hello")).toBe("answer: hello");
   await app.stop();
 });
 
@@ -501,57 +477,38 @@ function bashComponent(ran: string[], key = "bash") {
 
 test("an agent's named tools are the installed agent.tool ones", async () => {
   const ran: string[] = [];
-  const { sessions, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
-  let answered!: (text: string | undefined) => void;
-  const answer = new Promise<string | undefined>((resolve) => (answered = resolve));
-  let channel!: { runtime: AgentRuntime; sessions: SessionStore };
-  const observer = defineComponent({
-    name: "channel-test",
-    setup(pikit) {
-      const runtimeHandle = pikit.use("agent.runtime");
-      const sessionsHandle = pikit.use("sessions.store");
-      pikit.on("agent.settled", (result) => answered(result.text));
-      return { start: () => void (channel = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
-    },
-  });
-  const app = await defineApp({ components: [sessions, agents, provider, bashComponent(ran), runtimePi, observer], logger: silentLogger }).create();
-  await app.start();
+  const { storage, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
+  const { app, ask } = await talk([storage, agents, provider, bashComponent(ran)]);
 
-  const ctx = app.context();
-  const session = await channel.sessions.create({}, ctx);
-  await session.close(ctx);
-  await channel.runtime.dispatch({ requestId: "r1", conversation: { key: "test:tools", agent: "scripted", sessionId: session.metadata.id }, prompt: "bash: ls" }, ctx);
-
-  expect(await answer).toBe("tool said: ran");
+  expect(await ask("r1", "bash: ls")).toBe("tool said: ran");
   expect(ran).toEqual(["ls"]);
   await app.stop();
 });
 
 test("it refuses to start when an agent names a tool no agent.tool provides", async () => {
-  const { sessions, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
-  const app = await defineApp({ components: [sessions, agents, provider, runtimePi], logger: silentLogger }).create();
+  const { storage, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
+  const app = await defineApp({ components: [storage, agents, provider, runtimePi], logger: silentLogger }).create();
 
   expect(await startFailure(app)).toContain('agent "scripted" names the tool "bash", which no agent.tool provides');
 });
 
 test("it refuses to start when a tool is provided under another name", async () => {
-  const { sessions, agents, provider } = testComponents();
-  const app = await defineApp({ components: [sessions, agents, provider, bashComponent([], "shell"), runtimePi], logger: silentLogger }).create();
+  const { storage, agents, provider } = testComponents();
+  const app = await defineApp({ components: [storage, agents, provider, bashComponent([], "shell"), runtimePi], logger: silentLogger }).create();
 
   expect(await startFailure(app)).toContain('the agent.tool "shell" is a tool named "bash"');
 });
 
 /** Moves the conversation's state to the phase it is called with (`agent.state`). */
-const advance: AgentTool = {
+const advance = defineTool({
   name: "advance",
-  label: "advance",
   description: "Moves the release to another phase",
   parameters: Type.Object({ phase: Type.String() }),
-  async execute(_toolCallId, params, _onUpdate, _toolContext, _invocation, context) {
-    await context.value(AGENT_STATE)?.update({ phase: (params as { phase: string }).phase }, context);
-    return { content: [{ type: "text", text: "advanced" }], details: undefined };
+  execute: async (args, _api, context) => {
+    await context.value(AGENT_STATE)?.update({ phase: args.phase }, context);
+    return { content: [{ type: "text", text: "advanced" }] };
   },
-};
+}) as unknown as AgentTool;
 
 test("an agent's prepare gives it bash once a tool has moved its state on", async () => {
   const ran: string[] = [];
@@ -562,28 +519,8 @@ test("an agent's prepare gives it bash once a tool has moved its state on", asyn
     state: { phase: "testing" },
     prepare: (state) => (state.phase === "deploying" ? { tools: [advance, "bash"] } : {}),
   });
-  const { sessions, agents, provider } = testComponents({ agents: [release] });
-  const answers = new Map<string, (text: string | undefined) => void>();
-  let channel!: { runtime: AgentRuntime; sessions: SessionStore };
-  const observer = defineComponent({
-    name: "channel-test",
-    setup(pikit) {
-      const runtimeHandle = pikit.use("agent.runtime");
-      const sessionsHandle = pikit.use("sessions.store");
-      pikit.on("agent.settled", (result) => answers.get(result.requestId)?.(result.text));
-      return { start: () => void (channel = { runtime: runtimeHandle.get(), sessions: sessionsHandle.get() }) };
-    },
-  });
-  const app = await defineApp({ components: [sessions, agents, provider, bashComponent(ran), runtimePi, observer], logger: silentLogger }).create();
-  await app.start();
-  const ctx = app.context();
-  const session = await channel.sessions.create({}, ctx);
-  await session.close(ctx);
-  const conversation = { key: "test:prepare", agent: "scripted", sessionId: session.metadata.id };
-  const ask = (requestId: string, prompt: string) => {
-    const answer = new Promise<string | undefined>((resolve) => answers.set(requestId, resolve));
-    return channel.runtime.dispatch({ requestId, conversation, prompt }, ctx).then(() => answer);
-  };
+  const { storage, agents, provider } = testComponents({ agents: [release] });
+  const { app, ask } = await talk([storage, agents, provider, bashComponent(ran)]);
 
   await ask("r1", "bash: ls");
   await ask("r2", 'call: advance {"phase":"deploying"}');

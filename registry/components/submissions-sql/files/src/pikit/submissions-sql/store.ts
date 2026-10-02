@@ -121,7 +121,7 @@ export function createStore(db: SqlDatabase) {
       await db.run(
         `INSERT INTO submissions_requests (session_id, request_id, conversation_key, agent, admitted_at)
          VALUES (?, ?, ?, ?, ?) ON CONFLICT (session_id, request_id) DO NOTHING`,
-        [conversation.sessionId, requestId, conversation.key, conversation.agent, now],
+        [conversation.conversationId, requestId, conversation.key, conversation.agent, now],
       );
     },
 
@@ -133,7 +133,7 @@ export function createStore(db: SqlDatabase) {
           `INSERT INTO submissions_answers (session_id, request_id, conversation_key, agent, request_ids, kind, text, error_code, error_message, settled_at)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (session_id, request_id) DO NOTHING`,
           [
-            conversation.sessionId,
+            conversation.conversationId,
             run.requestId,
             conversation.key,
             conversation.agent,
@@ -147,7 +147,7 @@ export function createStore(db: SqlDatabase) {
         );
         if (inserted.changes === 0) return;
         const [answer] = await tx.query<{ seq: number }>("SELECT seq FROM submissions_answers WHERE session_id = ? AND request_id = ?", [
-          conversation.sessionId,
+          conversation.conversationId,
           run.requestId,
         ]);
         if (answer === undefined) throw new Error("submissions-sql: a run just recorded cannot be read back");
@@ -158,7 +158,7 @@ export function createStore(db: SqlDatabase) {
             `INSERT INTO submissions_requests (session_id, request_id, conversation_key, agent, admitted_at, answer_seq)
              VALUES (?, ?, ?, ?, ?, ?)
              ON CONFLICT (session_id, request_id) DO UPDATE SET answer_seq = excluded.answer_seq WHERE submissions_requests.answer_seq IS NULL`,
-            [conversation.sessionId, requestId, conversation.key, conversation.agent, now, answer.seq],
+            [conversation.conversationId, requestId, conversation.key, conversation.agent, now, answer.seq],
           );
         }
       });
@@ -174,7 +174,7 @@ export function createStore(db: SqlDatabase) {
         for (const requestId of new Set(requestIds)) {
           const [row] = await tx.query<{ answer_seq: number | null }>(
             "SELECT answer_seq FROM submissions_requests WHERE session_id = ? AND request_id = ?",
-            [conversation.sessionId, requestId],
+            [conversation.conversationId, requestId],
           );
           if (row !== undefined && row.answer_seq === null) still.push(requestId);
         }
@@ -184,15 +184,15 @@ export function createStore(db: SqlDatabase) {
         await tx.run(
           `INSERT INTO submissions_answers (session_id, request_id, conversation_key, agent, request_ids, kind, text, error_code, error_message, settled_at)
            VALUES (?, ?, ?, ?, ?, 'failed', NULL, 'abandoned', ?, ?)`,
-          [conversation.sessionId, first, conversation.key, conversation.agent, JSON.stringify(still), reason, now],
+          [conversation.conversationId, first, conversation.key, conversation.agent, JSON.stringify(still), reason, now],
         );
         const [answer] = await tx.query<{ seq: number }>("SELECT seq FROM submissions_answers WHERE session_id = ? AND request_id = ?", [
-          conversation.sessionId,
+          conversation.conversationId,
           first,
         ]);
         if (answer === undefined) throw new Error("submissions-sql: a run just recorded cannot be read back");
         for (const requestId of still) {
-          await tx.run("UPDATE submissions_requests SET answer_seq = ? WHERE session_id = ? AND request_id = ?", [answer.seq, conversation.sessionId, requestId]);
+          await tx.run("UPDATE submissions_requests SET answer_seq = ? WHERE session_id = ? AND request_id = ?", [answer.seq, conversation.conversationId, requestId]);
         }
         return run;
       });
@@ -213,12 +213,12 @@ export function createStore(db: SqlDatabase) {
       return [...bySession.values()];
     },
 
-    async get(sessionId: string, requestId: string): Promise<SubmissionStatus | undefined> {
+    async get(conversationId: string, requestId: string): Promise<SubmissionStatus | undefined> {
       // One snapshot: a prune between the two reads would otherwise show a settled request with no run.
       return db.transaction(async (tx) => {
         const [request] = await tx.query<RequestRow>(
           "SELECT session_id, request_id, conversation_key, agent, admitted_at, answer_seq FROM submissions_requests WHERE session_id = ? AND request_id = ?",
-          [sessionId, requestId],
+          [conversationId, requestId],
         );
         if (request === undefined) return undefined;
         const base = { conversation: conversationOf(request), requestId };
@@ -265,7 +265,7 @@ export function createStore(db: SqlDatabase) {
 export type Store = ReturnType<typeof createStore>;
 
 function conversationOf(row: { session_id: string; conversation_key: string; agent: string }): ConversationRef {
-  return { key: row.conversation_key, agent: row.agent, sessionId: row.session_id };
+  return { key: row.conversation_key, agent: row.agent, conversationId: row.session_id };
 }
 
 function settlementOf(row: AnswerRow): RunSettlement {

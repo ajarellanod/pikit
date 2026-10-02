@@ -2,7 +2,9 @@
  * The `agent.runtime` suite run against an in-memory double (a contract is proven by an
  * implementation plus a double passing the same suite). The double follows the suite's script
  * with a plain transcript and inbox; it exists only to show that the suite asks nothing Pi-specific.
- * It is not an agent runtime: pikit's only runtime is Pi, through the adapter.
+ * It is not an agent runtime: pikit's only runtime is Pi (pi-durable), through the adapter. Like
+ * pi-durable with follow-ups taken all at once, a run takes the whole inbox when it starts, and what is
+ * queued while it goes waits for the next run.
  */
 
 import { test } from "bun:test";
@@ -37,7 +39,7 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
     name: "runtime-memory",
     setup(pikit) {
       let background: AppContext | undefined;
-      /** Runs this worker drives, by session. */
+      /** Runs this worker drives, by conversation id. */
       const live = new Map<string, { controller: AbortController; done: Promise<void> }>();
       let line: Promise<unknown> = Promise.resolve();
       const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -49,17 +51,20 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
       const drive = (ref: ConversationRef, record: Conversation, requestId: string, entry?: Entry): void => {
         const controller = new AbortController();
         record.open = { requestId };
-        /** The requests this run took: its starter, then what joined it. */
+        /** The requests this run took: its starter, then what was queued with it. */
         const taken = [requestId];
+        // A new run takes everything queued; a resumed one takes nothing more.
+        if (entry === undefined) {
+          for (const e of record.inbox.splice(0)) {
+            record.transcript.push(e);
+            if (e.requestId !== undefined && !taken.includes(e.requestId)) taken.push(e.requestId);
+          }
+        }
         const run = async (): Promise<
           { kind: "completed" | "aborted"; text?: string } | { kind: "failed"; error: { code: string; message: string } }
         > => {
           if (entry !== undefined) record.transcript.push({ kind: "tool", text: entry.text });
           for (;;) {
-            for (const e of record.inbox.splice(0)) {
-              record.transcript.push(e);
-              if (e.requestId !== undefined && !taken.includes(e.requestId)) taken.push(e.requestId);
-            }
             const last = record.transcript.at(-1);
             if (last?.kind === "in" && last.text === "hold") {
               try {
@@ -80,18 +85,15 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
             const newest = [...record.transcript].reverse().find((e) => e.kind === "in");
             const text = `answer: ${newest?.text}`;
             record.transcript.push({ kind: "out", text });
-            if (record.inbox.length > 0) continue;
             await script.atEnd();
-            if (record.inbox.length > 0) continue;
-            // The run ends in the same step that found the inbox empty: a message admitted as
-            // queued is always taken by this run (the double's version of Pi's gap 2, `pi-adapter`'s `pi-gaps.test.ts`).
+            // What was queued meanwhile waits for the next run.
             end();
             return { kind: "completed", text };
           }
         };
         const end = () => {
           delete record.open;
-          live.delete(ref.sessionId);
+          live.delete(ref.conversationId);
         };
         const done = run().then(async (result) => {
           end();
@@ -99,23 +101,23 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
           const base = { conversation: ref, requestId, requestIds: taken, messages: [] };
           if (result.kind === "failed") await ctx.emit("agent.failed", { ...base, ...result });
           else await ctx.emit("agent.settled", { ...base, ...result });
-          // What the run left queued gets a run of its own, named after the oldest message. Not
+          // What was queued while the run went gets the next run, named after the oldest message. Not
           // awaited: `abort()` waits for `done` in the line.
           void serial(async () => {
             const next = record.inbox.find((e) => e.requestId !== undefined)?.requestId;
-            if (next === undefined || live.has(ref.sessionId)) return;
+            if (next === undefined || live.has(ref.conversationId)) return;
             drive(ref, record, next);
             await background?.emit("agent.started", { conversation: ref, requestId: next, resumed: false });
           });
         });
-        live.set(ref.sessionId, { controller, done });
+        live.set(ref.conversationId, { controller, done });
       };
 
       /** Opening a conversation resumes the run a dead worker left open. */
       const open = async (ref: ConversationRef): Promise<Conversation> => {
-        const record = records.get(ref.sessionId);
-        if (record === undefined) throw new Error(`no session ${ref.sessionId}`);
-        if (record.open !== undefined && !live.has(ref.sessionId)) {
+        const record = records.get(ref.conversationId);
+        if (record === undefined) throw new Error(`no conversation ${ref.conversationId}`);
+        if (record.open !== undefined && !live.has(ref.conversationId)) {
           const { requestId } = record.open;
           await background?.emit("agent.started", { conversation: ref, requestId, resumed: true });
           drive(ref, record, requestId, { kind: "tool", text: "interrupted" });
@@ -134,7 +136,7 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
               admission = { kind: "duplicate", requestId };
             } else {
               record.inbox.push({ kind: "in", text: request.prompt, requestId });
-              if (live.has(conversation.sessionId)) {
+              if (live.has(conversation.conversationId)) {
                 admission = { kind: "queued", requestId };
               } else {
                 admission = { kind: "started", requestId };
@@ -148,7 +150,7 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
         abort: (conversation) =>
           serial(async () => {
             const record = await open(conversation);
-            const run = live.get(conversation.sessionId);
+            const run = live.get(conversation.conversationId);
             if (run === undefined) return;
             for (const e of record.inbox.splice(0)) if (e.requestId !== undefined) record.withdrawn.add(e.requestId);
             run.controller.abort(new Error("aborted"));
@@ -208,9 +210,9 @@ function memoryFixture(): AgentRuntimeFixture {
     },
   };
   const conversation = (): ConversationRef => {
-    const sessionId = `s${++next}`;
-    records.set(sessionId, { transcript: [], inbox: [], withdrawn: new Set() });
-    return { key: `test:memory:${sessionId}`, agent: "scripted", sessionId };
+    const conversationId = `s${++next}`;
+    records.set(conversationId, { transcript: [], inbox: [], withdrawn: new Set() });
+    return { key: `test:memory:${conversationId}`, agent: "scripted", conversationId };
   };
 
   return {
@@ -233,7 +235,7 @@ function memoryFixture(): AgentRuntimeFixture {
     },
     async interrupted() {
       const ref = conversation();
-      const record = records.get(ref.sessionId);
+      const record = records.get(ref.conversationId);
       // What a worker that died inside the hold tool leaves behind: the request in the transcript
       // and an open run nobody drives.
       record?.transcript.push({ kind: "in", text: "hold", requestId: "r-crashed" });

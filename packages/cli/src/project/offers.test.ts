@@ -52,8 +52,8 @@ test("a component that requires a capability marked offer brings its provider, a
     { component: "storage-kv-sql", capability: "storage.kv", for: "conversations-kv", why: "required" },
   ]);
   expect(offeredProviders(registry, ["conversations-kv"], ["storage-sqlite", "storage-kv-sql"], ["server"], composing(["storage-sqlite", "storage-kv-sql"]))).toEqual([]);
-  // What it requires and the catalogue does not mark offer (its sessions) stays the user's choice.
-  expect(offeredProviders(registry, ["conversations-kv"]).map((o) => o.capability)).not.toContain("sessions.store");
+  // What it requires and the catalogue does not mark offer (the runtime) stays the user's choice.
+  expect(offeredProviders(registry, ["conversations-kv"]).map((o) => o.capability)).not.toContain("agent.conversations");
 });
 
 test("the runtime brings the record of submissions, and the storage it requires", () => {
@@ -72,7 +72,7 @@ test("only providers that run on the project's targets are offered: on Cloudflar
 });
 
 test("on Cloudflare the Telegram webhook's object half brings the record of submissions and durable delivery; its Worker half nothing of the object's", () => {
-  const preset = ["storage-do", "sessions-sql", "conversations-kv", "storage-kv-sql", "deployment-cloudflare"];
+  const preset = ["storage-do", "storage-kv-sql", "deployment-cloudflare", "runtime-pi", "conversations-kv"];
   expect(offeredProviders(registry, ["channel-telegram-webhook"], preset, ["cloudflare"], composing(preset, ["cloudflare"]))).toEqual([
     { component: "submissions-sql", capability: "agent.submissions", for: "channel-telegram-webhook", why: "required" },
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram-webhook", why: "recommended" },

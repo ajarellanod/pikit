@@ -83,7 +83,7 @@ export default defineComponent({
         return store.abandoned(conversation, requestIds, reason, clock.now());
       },
       pending: () => running().store.pending(),
-      get: (conversation, requestId) => running().store.get(conversation.sessionId, requestId),
+      get: (conversation, requestId) => running().store.get(conversation.conversationId, requestId),
       answers: { read: (after, limit) => running().store.readAnswers(after, limit) },
     };
     pikit.provide("agent.submissions", submissions);

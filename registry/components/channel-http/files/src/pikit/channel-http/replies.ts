@@ -26,8 +26,8 @@ export class Replies {
   private readonly waiting = new Map<string, Set<(result: AgentResult) => void>>();
 
   /** Register before dispatching, so an answer that comes at once is not missed. */
-  expect(sessionId: string, requestId: string): Waiter {
-    const key = keyOf(sessionId, requestId);
+  expect(conversationId: string, requestId: string): Waiter {
+    const key = keyOf(conversationId, requestId);
     let deliver!: (result: AgentResult) => void;
     const answered = new Promise<AgentResult>((resolve) => (deliver = resolve));
     const set = this.waiting.get(key) ?? new Set();
@@ -66,7 +66,7 @@ export class Replies {
   /** Deliver a run's answer to every POST waiting for one of the requests it took. */
   answer(result: AgentResult): void {
     for (const requestId of result.requestIds) {
-      const key = keyOf(result.conversation.sessionId, requestId);
+      const key = keyOf(result.conversation.conversationId, requestId);
       const set = this.waiting.get(key);
       if (set === undefined) continue;
       this.waiting.delete(key);
@@ -82,6 +82,6 @@ export class Replies {
   }
 }
 
-function keyOf(sessionId: string, requestId: string): string {
-  return `${sessionId}\u0000${requestId}`;
+function keyOf(conversationId: string, requestId: string): string {
+  return `${conversationId}\u0000${requestId}`;
 }

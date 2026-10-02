@@ -30,7 +30,7 @@ const PROMPT = "PROMPT-my-card-is-4111";
 const ANSWER = "ANSWER-your-balance-is-42";
 const ERROR_DETAIL = "ERROR-DETAIL-quoting-the-prompt";
 
-const conversation = { key: "http:c1", agent: "assistant", sessionId: "s1" };
+const conversation = { key: "http:c1", agent: "assistant", conversationId: "s1" };
 const usage = {
   input: 100,
   output: 20,
@@ -48,7 +48,7 @@ function result(kind: AgentResult["kind"], extra: Partial<AgentResult> = {}): Ag
     kind,
     text: ANSWER,
     messages: [
-      { role: "custom", customType: "pikit.inbound", content: PROMPT, display: true, details: { requestId: "r1" }, timestamp: 0 },
+      { role: "user", content: PROMPT, timestamp: 0 },
       {
         role: "assistant",
         content: [{ type: "text", text: ANSWER }],
@@ -104,16 +104,16 @@ test("a run logs its dispatch, its start and its end, with duration, tokens and 
   await ctx.emit("agent.settled", settled());
 
   expect(c.lines).toEqual([
-    { level: "info", message: "agent.dispatched", fields: { conversation: "http:c1", agent: "assistant", session: "s1", requestId: "r1", admission: "started" } },
-    { level: "info", message: "agent.started", fields: { conversation: "http:c1", agent: "assistant", session: "s1", requestId: "r1", resumed: false } },
-    { level: "info", message: "agent.dispatched", fields: { conversation: "http:c1", agent: "assistant", session: "s1", requestId: "r2", admission: "queued" } },
+    { level: "info", message: "agent.dispatched", fields: { conversation: "http:c1", agent: "assistant", conversationId: "s1", requestId: "r1", admission: "started" } },
+    { level: "info", message: "agent.started", fields: { conversation: "http:c1", agent: "assistant", conversationId: "s1", requestId: "r1", resumed: false } },
+    { level: "info", message: "agent.dispatched", fields: { conversation: "http:c1", agent: "assistant", conversationId: "s1", requestId: "r2", admission: "queued" } },
     {
       level: "info",
       message: "agent.settled",
       fields: {
         conversation: "http:c1",
         agent: "assistant",
-        session: "s1",
+        conversationId: "s1",
         requestId: "r1",
         requestIds: ["r1", "r2"],
         run: "completed",
@@ -177,9 +177,9 @@ test("a reset, a halted pipeline and the runtime's lifecycle each log a line", a
   await created.start();
 
   await created.context().emit("conversation.reset", {
-    conversation: { ...conversation, sessionId: "s2" },
-    previousSessionId: "s1",
-    newSessionId: "s2",
+    conversation: { ...conversation, conversationId: "s2" },
+    previousConversationId: "s1",
+    newConversationId: "s2",
   });
   await created.context().run("inbound.normalize", {
     id: "m1",
@@ -193,7 +193,7 @@ test("a reset, a halted pipeline and the runtime's lifecycle each log a line", a
   await created.stop();
 
   expect(c.find("conversation.reset")).toEqual([
-    { level: "info", message: "conversation.reset", fields: { conversation: "http:c1", agent: "assistant", session: "s2", previousSession: "s1" } },
+    { level: "info", message: "conversation.reset", fields: { conversation: "http:c1", agent: "assistant", conversationId: "s2", previousConversationId: "s1" } },
   ]);
   expect(c.find("pipeline.halted")).toEqual([
     { level: "info", message: "pipeline.halted", fields: { pipeline: "inbound.normalize", stage: "spam", reason: "looks like spam" } },
@@ -272,6 +272,6 @@ test("a failure while logging cannot fail the code that emitted the event", asyn
   await expect(down.emit("agent.settled", settled())).resolves.toBeUndefined();
   await expect(down.emit("agent.failed", failed())).resolves.toBeUndefined();
   await expect(
-    down.emit("conversation.reset", { conversation, previousSessionId: "s0", newSessionId: "s1" }),
+    down.emit("conversation.reset", { conversation, previousConversationId: "s0", newConversationId: "s1" }),
   ).resolves.toBeUndefined();
 });

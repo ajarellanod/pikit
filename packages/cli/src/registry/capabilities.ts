@@ -16,7 +16,7 @@
  * registry). The kernel defines no capability: every contract is in `@pikit/contracts`, or in
  * `@pikit/pi-adapter` when its type is Pi's.
  *
- * The Pi-owned capabilities (`sessions.store`, `execution`…) are declared by `@pikit/pi-adapter`,
+ * The Pi-owned capabilities (`execution`, `model.credentials`…) are declared by `@pikit/pi-adapter`,
  * which the repository's single type-check program includes. It is deliberately not imported here:
  * importing it through the CLI's `node_modules` gives tsc a second path to `@pikit/core` and breaks
  * core's own tests. Were the adapter ever left out of the program, its entries below would fail
@@ -75,19 +75,25 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Runs the agents: dispatch a message to its conversation, abort or resume a run.",
   },
+  "agent.conversations": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Where the agent runtime keeps conversations: creates a new one, for the conversation registry (a first message, a reset).",
+  },
   "agent.submissions": {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
     summary: "What became of each admitted message: resumes unanswered conversations at start, and feeds every run's outcome to the channels.",
-    transitional: "shaped like pi-durable's submissions; bridged or deleted when the adapter moves to Pi's durable runtime (features/pi-durable-migration.md).",
+    transitional: "a bridge over pi-durable's own submissions; deleted once the channels read pi-durable directly (features/pi-durable-migration.md).",
     offer: true,
   },
   "conversations.registry": {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "Which session each conversation (channel:conversationId) is in now; resolve and reset.",
+    summary: "Which runtime conversation each conversation key (channel:conversationId) is in now; resolve and reset.",
   },
   secrets: {
     mode: "single",
@@ -133,12 +139,6 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Timers: a component registers a named handler and asks for it to run at or after a time, at least once, retried with backoff.",
   },
-  "sessions.store": {
-    mode: "single",
-    definedIn: "@pikit/pi-adapter",
-    stability: "experimental",
-    summary: "Pi's SessionRepo: where each conversation's session (its transcript and state) is stored.",
-  },
   "model.credentials": {
     mode: "single",
     definedIn: "@pikit/pi-adapter",
@@ -149,7 +149,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/pi-adapter",
     stability: "experimental",
-    summary: "Pi's ExecutionEnv: the filesystem the agent's file tools work on.",
+    summary: "pi-durable's ExecutionEnv: the filesystem the agent's file tools work on.",
   },
   "execution.shell": {
     mode: "single",
@@ -161,7 +161,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/pi-adapter",
     stability: "experimental",
-    summary: "Each agent's own ExecutionEnv, resolved per run from its conversation; the file and shell tools use it when installed.",
+    summary: "Each agent's own ExecutionEnv, resolved per tool call from its conversation; the runtime gives it to the file and shell tools when installed.",
   },
   "agent.definition": {
     mode: "keyed",

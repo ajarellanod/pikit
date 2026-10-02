@@ -42,9 +42,9 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   It is read through `secrets`, like the token, because it lives in `.env` next to it.
 - **Conversations:** each private chat is one conversation, `telegram:<chat id>`. Group messages
   are ignored for now.
-- **Messages sent while the agent is working** change its course (Pi steers the run), and the
-  run's answer covers them all.
-- **Commands:** `/new` starts a new conversation; the old one is kept in its session. `/start` and
+- **Messages sent while the agent is working** wait, and its next run answers them together, in one
+  reply.
+- **Commands:** `/new` starts a new conversation; the old one is kept. `/start` and
   `/help` explain. Any other command goes to the agent as text.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`: your stages in
   `inbound.normalize`, the router, the conversation). When the agent will not answer, the chat is
@@ -66,7 +66,7 @@ You never look up a user id, set a webhook, open a port or buy a domain.
     again after a crash starts with `↻ `, since Telegram cannot tell a repeated send apart.
   - Without it, answers are sent directly, retried in the process: after `retry_after` for
     Telegram's 429, and with backoff for network errors and 5xx. A reply lost to a crash while
-    sending is not sent again, but the answer is in the conversation's session.
+    sending is not sent again, but the answer is in the conversation.
 - **Answers that end while the channel is stopped.** A deploy stops the channel before the runtime,
   so a long answer can end in between.
   - With `submissions-sql` installed (`pikit add runtime-pi` offers it, with `storage-sqlite`) and

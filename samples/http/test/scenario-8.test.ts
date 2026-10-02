@@ -58,7 +58,7 @@ test("each conversation reaches its agent, with that agent's tools and directory
 
   // No rule for this conversation: router-basic's default agent, which has no tools at all.
   const other = await say("lobby", "bash: echo hi", "l1");
-  expect(other.body.text).toBe('tool said: Tool "bash" is unavailable');
+  expect(other.body.text).toContain("Tool bash is not available");
 });
 
 test("without router-rules, every conversation goes to the default agent (SPEC P3)", async () => {
@@ -68,5 +68,5 @@ test("without router-rules, every conversation goes to the default agent (SPEC P
 
   const asked = await sample.post("/v1/messages", { conversationId: "ops-room", text: "bash: echo hi", messageId: "o1" });
 
-  expect(asked.body.text).toBe('tool said: Tool "bash" is unavailable');
+  expect(asked.body.text).toContain("Tool bash is not available");
 });

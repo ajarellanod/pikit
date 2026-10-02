@@ -1,5 +1,5 @@
 /**
- * Wake-ups for pi-durable (`@pikit/pi-adapter/durable/wakeups`) on a real Durable Object:
+ * Wake-ups for pi-durable (`@pikit/pi-adapter/wakeups`) on a real Durable Object:
  * deployment-cloudflare's `Conversation` class (`PlatformConversation`, `src/platform.ts`) over an App
  * of storage-do, platform-cloudflare (its `wakeups` on the object's one alarm) and a small driver
  * component, which is the integration recipe in miniature:
@@ -20,7 +20,7 @@ import { env } from "cloudflare:workers";
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import type { Wakeups } from "@pikit/contracts";
 import { type AppContext, defineComponent } from "@pikit/core";
-import { driveSlice, nextWakeAt } from "@pikit/pi-adapter/durable/wakeups";
+import { driveSlice, nextWakeAt } from "@pikit/pi-adapter/wakeups";
 import {
   answerOf,
   context,
@@ -31,7 +31,7 @@ import {
   openClockedHarness,
   serviceUnavailable,
   submitInput,
-} from "@pikit/pi-adapter/durable/wakeups/testing";
+} from "@pikit/pi-adapter/wakeups/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import platformCloudflare from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
