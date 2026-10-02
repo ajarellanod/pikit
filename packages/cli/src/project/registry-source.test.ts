@@ -179,7 +179,7 @@ test("a second server provider of storage.sql leaves the repository's presets co
   // A preset that left its storage to the offer: with two providers nothing is offered, and it says so.
   const http = readFileSync(join(root, "presets", "http.yaml"), "utf8");
   writeFileSync(join(root, "presets", "leaning.yaml"), http.replace(/^\s+- storage-sqlite\n/m, ""));
-  expect(checkPresets(root)).toContain('presets/leaning.yaml: on server, submissions-sql requires "storage.sql", which nothing provides');
+  expect(checkPresets(root)).toContain('presets/leaning.yaml: on server, runtime-pi requires "storage.sql", which nothing provides');
 });
 
 test("a second Cloudflare provider of storage.kv leaves cloudflare-minimal composing: it names its storage", () => {

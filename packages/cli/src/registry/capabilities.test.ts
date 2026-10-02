@@ -56,8 +56,7 @@ test("usage lists every catalogued capability, its providers and its consumers, 
   expect(text).toContain("execution  (single, @pikit/pi-adapter, experimental)");
   expect(text).toContain("agent.definition  (keyed, @pikit/contracts, stable)\n  One agent per name (model, prompt, tools); provided by the project, not the registry.\n  provided by: the project");
   expect(text).toContain("used by:     runtime-x (optional)");
-  expect(text).toContain("agent.submissions  (single, @pikit/contracts, experimental, transitional)");
-  expect(text).toContain("  transitional: a bridge over pi-durable's own submissions; deleted once the channels read pi-durable directly");
+  expect(text).toContain("agent.submissions  (single, @pikit/contracts, experimental)\n");
   expect(text).toContain("made.up  (not in the catalogue)");
 });
 

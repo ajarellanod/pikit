@@ -128,9 +128,9 @@ test.skipIf(!E2E)(
     // The provider of the starter's model, which on Cloudflare is one that runs there.
     expect(agentBefore).toContain('model: "openrouter/z-ai/glm-5.3-flash"');
     await add("provider-openrouter");
-    // The runtime, with what it offers: the record of submissions (storage-do has its storage).
+    // The runtime, which brings nothing: it provides the record of submissions, and storage-do has its storage.
     const runtime = await add("runtime-pi");
-    expect(runtime.out).toContain("submissions-sql, for runtime-pi (agent.submissions)");
+    expect(runtime.out).not.toContain("for runtime-pi");
     // The registry, which creates conversations through the runtime's agent.conversations.
     await add("conversations-kv");
 
@@ -147,7 +147,6 @@ test.skipIf(!E2E)(
         "platformCloudflare",
         "providerOpenrouter",
         "runtimePi",
-        "submissionsSql",
         "conversationsKv",
         "channelTelegramWebhook",
         "outboundDurable",
@@ -156,7 +155,6 @@ test.skipIf(!E2E)(
     });
     const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
     expect(manifest.components["channel-telegram-webhook"].hooks).toEqual({ afterDeploy: "src/pikit/channel-telegram-webhook/deploy.ts" });
-    expect(manifest.components["submissions-sql"].installedFor).toEqual(["runtime-pi"]);
     expect(manifest.components["outbound-durable"].installedFor).toEqual(["channel-telegram-webhook"]);
 
     // The project installs (each add ran `bun install`), typechecks with both halves imported, and passes its tests.

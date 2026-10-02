@@ -325,8 +325,8 @@ test.skipIf(!E2E)(
       databases.filter((file) => {
         const db = new DatabaseSync(join(objects, file), { readOnly: true });
         try {
-          const tables = db.prepare("SELECT name FROM sqlite_master WHERE name = 'submissions_requests'").all();
-          return tables.length > 0 && db.prepare("SELECT 1 FROM submissions_requests WHERE conversation_key = ?").all(key).length > 0;
+          const tables = db.prepare("SELECT name FROM sqlite_master WHERE name = 'runtime_pi_answers'").all();
+          return tables.length > 0 && db.prepare("SELECT 1 FROM runtime_pi_answers WHERE conversation_key = ?").all(key).length > 0;
         } finally {
           db.close();
         }
@@ -336,7 +336,7 @@ test.skipIf(!E2E)(
     expect(others).toEqual([]);
     expect(chat).toBeDefined();
     const db = new DatabaseSync(join(objects, chat as string), { readOnly: true });
-    const answers = db.prepare("SELECT conversation_key, kind, text FROM submissions_answers").all();
+    const answers = db.prepare("SELECT conversation_key, kind, text FROM runtime_pi_answers").all();
     const pieces = db.prepare("SELECT conversation_key, state FROM outbound_pieces").all();
     db.close();
     expect(answers).toEqual([{ conversation_key: `telegram:${OWNER.id}`, kind: "completed", text: "answer: hello" }]);

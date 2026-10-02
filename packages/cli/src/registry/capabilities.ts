@@ -85,9 +85,8 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "What became of each admitted message: resumes unanswered conversations at start, and feeds every run's outcome to the channels.",
-    transitional: "a bridge over pi-durable's own submissions; deleted once the channels read pi-durable directly (features/pi-durable-migration.md).",
-    offer: true,
+    // Provided by the runtime (runtime-pi reads it from pi-durable), so never offered: the runtime is the user's choice.
+    summary: "What became of each admitted message, read from the runtime: what is pending, where one request is, and the feed of every run's outcome channels deliver from.",
   },
   "conversations.registry": {
     mode: "single",
