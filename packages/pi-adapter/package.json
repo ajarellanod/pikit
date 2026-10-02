@@ -16,7 +16,11 @@
     "./providers/openrouter": "./src/providers/openrouter.ts",
     "./tools": "./src/tools/index.ts",
     "./durable": "./src/durable/index.ts",
-    "./durable/testing": "./src/durable/testing.ts"
+    "./durable/testing": "./src/durable/testing.ts",
+    "./durable/models": "./src/durable/models.ts",
+    "./durable/credentials": "./src/durable/credentials.ts",
+    "./durable/providers/anthropic": "./src/durable/providers/anthropic.ts",
+    "./durable/providers/openrouter": "./src/durable/providers/openrouter.ts"
   },
   "files": [
     "src"
