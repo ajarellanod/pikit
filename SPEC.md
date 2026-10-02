@@ -231,7 +231,10 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   `sessions.store`, `sessions-sql` and `sessions-jsonl` go (`features/pi-durable-migration.md`).
   pi-durable 1.0's SQLite core runs over a thin facade on `storage.sql`, proven on storage-sqlite and
   on storage-do with pi-durable's own storage conformance, so one implementation serves a server and
-  a Durable Object, and `storage.sql` stays asynchronous so that Postgres fits. Its tables are not
+  a Durable Object. That core speaks SQLite's dialect, so it needs a SQLite-backed `storage.sql`;
+  `storage.sql` stays asynchronous so that a Postgres provider fits the kit's own records, but
+  conversations in Postgres need a Postgres backend of pi-durable's `Storage`
+  (`features/storage-postgres.md`). Its tables are not
   prefixed (an exception to `storage.sql`'s rule, proposed upstream), so one `storage.sql` holds one
   pi-durable Session.
 - **C6. Telegram by webhook is its own component.** `channel-telegram-webhook` (Worker half: the
@@ -320,9 +323,10 @@ Only it gets the self-knowledge and the self-change tools. Only senders trusted 
 ask it to change itself.
 
 **Knowing itself.**
-- A Pi skill, `pikit-self`, tells it what it is and how each part of it is changed, built from this
-  file, its components' READMEs and `pikit.json`. A skill is Pi's own way to load knowledge on demand
-  (Pi first).
+- A skill, `pikit-self`, tells it what it is and how each part of it is changed, built from this
+  file, its components' READMEs and `pikit.json`. pi-durable has no skills, so a skill is data: a
+  `SKILL.md` file in the project that the agent loads on demand (a read tool, or a system prompt
+  section listing what exists), never code (`features/learned-skills.md`).
 - A read-only tool, `pikit_self` (`replay: "safe"`), returns the live state: the composition
   (`APP_DESCRIPTION`, K13), its agents, health, and the messages waiting or unanswered. The dashboard
   reads the same sources.

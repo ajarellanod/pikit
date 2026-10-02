@@ -13,7 +13,10 @@ After a task that took many steps, the agent writes a skill (a `SKILL.md` folder
 it loads instructions instead of rediscovering them; a skill that proves wrong is corrected.
 
 ## How it fits pikit
-- A skill is a file of the project: `src/agents/{name}/skills/` (Pi's format). Writing
+- A skill is a file of the project: `src/agents/{name}/skills/` (a folder with a `SKILL.md`, the
+  format Pi's coding agent uses; pi-durable 1.0 has no skills, so pikit loads them as data: a system
+  prompt section lists each skill's name and description, and the agent reads the one it needs with
+  a read-only, replay-safe tool. Nothing in a skill is executed). Writing
   one changes the agent, so it is a self-change: a branch, `pikit doctor` and tests, a human's
   approval, a deploy (SPEC §6). There is no second path: a skill written into a live store
   that the running agent loads would bypass the gate, and is refused.

@@ -26,6 +26,17 @@ Conversations, sessions and every component's tables in Postgres, for a managed 
   Postgres backend of pi-durable's `Storage`, passing pi-durable's storage conformance (below).
 - The swap is selection or removal (`capabilities: { storage.sql: storage-postgres }`), with the
   router, channels and agents untouched (P3).
+- When a second conversation backend is wanted (Postgres, JSONL, libSQL/Turso), the runtime's
+  storage becomes a capability of its own (say `agent.storage`, a pi-durable `Storage`), whose
+  default provider runs pi-durable's SQLite core over `storage.sql`. Until then it is not added
+  (YAGNI): runtime-pi opens the storage over `storage.sql` itself.
+- One writer: pi-durable assumes one process owns a storage (its SQLite backend keeps the next id
+  and sequence in memory; there is no cross-process locking). Postgres alone therefore gives a
+  managed database and backups, not [several replicas](replicas.md) sharing conversations: those
+  need each conversation owned by one process (as one Durable Object per chat does) or multi-writer
+  support in pi-durable (to propose upstream).
+- Cloudflare D1 does not fit the SQLite core as far as known: D1 has batches, not the interactive
+  transactions the core's `SqliteDatabase` facade requires.
 - Server only: a Worker has Durable Object SQL instead.
 
 ## Pi first

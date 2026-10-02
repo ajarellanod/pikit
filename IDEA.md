@@ -73,8 +73,7 @@ Then, as needs grow:
 pikit add outbound-durable        # reliable delivery with retries
 pikit add scheduler             # cron-style routines
 pikit add approvals             # human-in-the-loop decisions
-pikit add storage-postgres      # swap SQLite for Postgres
-pikit remove storage-sqlite     # and nothing else changes
+pikit add channel-telegram      # a second channel: router and agents unchanged
 ```
 
 And when the shape changes entirely:
