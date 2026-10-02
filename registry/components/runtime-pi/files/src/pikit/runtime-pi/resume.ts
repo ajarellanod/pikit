@@ -1,19 +1,20 @@
 /**
- * At start, resume the conversations holding a message nobody answered (SPEC P5), with
- * `agent.submissions` installed. The platform was told "received" (Telegram will not send the message
- * again), the process died, and without this the user would wait until they write again.
+ * At start, resume the conversations holding a message nobody answered (SPEC P5): pi-durable still
+ * queues or runs it (`agent.submissions`' `pending`). The platform was told "received" (Telegram will
+ * not send the message again), the process died, and without this the user would wait until they
+ * write again.
  *
  * Each conversation is opened as a new message would open it: a run the dead process left open is
- * resumed, a message waiting in the inbox gets a run, and a run that ended without its end recorded is
- * settled from pi-durable (`recover`, in the adapter). A few at a time, in the background: start does
- * not wait for them, and stop aborts what has not started. With `wakeups`, the handler that drives the
+ * resumed, a message waiting in the inbox gets a run, and a run that ended without its end logged is
+ * logged and announced (`recover`, in the adapter). A few at a time, in the background: start does not
+ * wait for them, and stop aborts what has not started. With `wakeups`, the handler that drives the
  * runs calls this at each run instead, skipping what its App drives already (`index.ts`).
  *
  * A message nothing can answer is abandoned (`runtime.abandon`): its channel tells the user to send it
- * again, and it stops being retried at every start. At once when its agent or conversation is gone
- * (`recover` does it); and when its conversation's oldest pending message is older than
- * `abandonAfterMs` (runtime-pi's `abandonPendingAfterHours`), for the messages resuming did not
- * answer: no run and no inbox entry holds them, or the conversation fails to resume.
+ * again, and it stops being retried at every start. At once when its agent is gone (`recover` does it);
+ * and when its conversation's oldest pending message is older than `abandonAfterMs` (runtime-pi's
+ * `abandonPendingAfterHours`) and resuming the conversation fails, for the messages still queued (a
+ * run that took one settles it).
  */
 
 import type { AppContext } from "@pikit/core";

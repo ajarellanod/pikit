@@ -3,12 +3,13 @@
 The agent runtime: Pi runs your agents (`@earendil-works/pi-durable` 1.0), and this component plugs
 it into the app.
 
-- **Provides:** `agent.runtime`, and `agent.conversations` (where `conversations.registry` creates the
-  conversation of a new key, or of a reset).
+- **Provides:** `agent.runtime`, `agent.conversations` (where `conversations.registry` creates the
+  conversation of a new key, or of a reset), and `agent.submissions` (what became of each message,
+  and the `answers` feed channels deliver from: "Nothing admitted goes unanswered" below).
 - **Requires:** `storage.sql`: pi-durable keeps every conversation there (its transcript, its state,
   its runs and the messages it holds). On a server that is `storage-sqlite`, in a Cloudflare object
   `storage-do`. Its tables are pi-durable's (`conversations`, `entries`, `tasks`, `submissions`,
-  `documents`…), unprefixed: one runtime per database.
+  `documents`…), unprefixed: one runtime per database; and the answers log, `runtime_pi_answers`.
 - **Uses:**
   - `agent.definition`: the agents, one per name;
   - `model.provider`: the providers the agents name as `provider/modelId`;
@@ -19,8 +20,6 @@ it into the app.
   - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth tokens).
     pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read only their
     environment variables (`ANTHROPIC_API_KEY`);
-  - `agent.submissions`, if installed (`submissions-sql`, which `pikit add runtime-pi` offers): where
-    each admitted message and each run's end are recorded ("Nothing admitted goes unanswered" below);
   - `wakeups`, if installed: runs are driven inside wakeups, in slices, instead of by promises left
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes.
 
@@ -54,39 +53,40 @@ pi-durable runs every conversation of the storage in one scheduler, opened at th
 at start, with `wakeups`). Stopping the app leaves unfinished runs pending in the storage, and the
 next process resumes them.
 
-A conversation key points to a pi-durable conversation id (`ConversationRef.conversationId`). A
-conversation made before pikit moved to pi-durable (a Pi 0.99 session id in the registry) starts a
-new conversation at its next message (`conversations-file`, `conversations-kv`); a message such a
-conversation had pending in `agent.submissions` is settled aborted at start, which no channel tells
-the user about, rather than abandoned.
+A conversation key points to a pi-durable conversation id (`ConversationRef.conversationId`).
 
 ## Nothing admitted goes unanswered
 
-With `agent.submissions` installed (`submissions-sql`):
-- `dispatch` records the message once pi-durable holds it and before it resolves, so a channel tells
-  its platform "received" only once both hold it;
-- every run's end is recorded before its `agent.settled` / `agent.failed` (a failed record is tried
-  again in the background), and a message `abort()` withdrew is recorded aborted;
-- **at start**, in the background, the conversations holding a message nobody answered are resumed,
-  four at a time (`RESUME_AT_ONCE` in `resume.ts`): a run the last process left open continues, a
-  message waiting in the inbox gets a run, and a run that ended without its end recorded is settled
-  from pi-durable and announced. Start does not wait for them; stop cancels what has not started.
-  Progress and failures are logged. With `wakeups`, start asks for a wakeup instead, and its handler
-  resumes them ("Cloudflare" below).
-- a message nothing can answer is **abandoned**: settled unanswered (`failed`, code `abandoned`) and
-  announced as `agent.failed`, so its channel asks the user to send it again, instead of being retried
-  at every start. At once when the conversation's agent is no longer defined (`agent_removed`) or its
-  conversation is gone (`conversation_missing`); and when, after resuming, it is still unanswered and
-  its conversation's oldest pending message is older than `abandonPendingAfterHours`:
+pi-durable keeps every message it admitted and how it ended; `agent.submissions` reads them
+(`@pikit/pi-adapter`'s README, "Submissions"):
+- `dispatch` resolves once pi-durable holds the message, so a channel tells its platform "received"
+  only then; `get` says where one message is (HTTP's `GET`), `pending` which conversations hold
+  messages a run has not ended yet;
+- every run's end is appended to the `answers` log, once, before its `agent.settled` /
+  `agent.failed`; a message `abort()` withdrew is logged aborted, unannounced. Channels deliver from
+  that feed with a cursor of their own, so an answer that ends while they are stopped (a deploy) is
+  delivered when they start again. A run's end stays in the log `keepSettledDays`; `get` then reads it
+  from pi-durable:
 
 ```json
-"runtime-pi": { "abandonPendingAfterHours": 72 }
+"runtime-pi": { "keepSettledDays": 7, "abandonPendingAfterHours": 72 }
 ```
 
-Channels deliver from its `answers` feed, so an answer that ends while they are stopped (a deploy) is
-delivered when they start again. Without it, a run the last process left open waits for the next
-message to its conversation, and an answer that ends while its channel is stopped stays in the
-transcript.
+- a run that ended while its log was never written (a crash between the two) is logged and announced
+  by the next reconciliation of its conversation: at start, when one of its messages is delivered
+  again, or when the conversation is resumed. A batch answered together is logged as one run, never
+  split;
+- **at start**, in the background, the conversations holding a message nobody answered are resumed,
+  four at a time (`RESUME_AT_ONCE` in `resume.ts`): a run the last process left open continues, and a
+  message waiting in the inbox gets a run. Start does not wait for them; stop cancels what has not
+  started. Progress and failures are logged. With `wakeups`, start asks for a wakeup instead, and its
+  handler resumes them ("Cloudflare" below).
+- a message nothing can answer is **abandoned**: settled unanswered in pi-durable (reason
+  `abandoned`), logged and announced as `agent.failed` (code `abandoned`), so its channel asks the
+  user to send it again, instead of being retried at every start. At once when the conversation's
+  agent is no longer defined (`agent_removed`); and when resuming its conversation fails and its
+  oldest pending message is older than `abandonPendingAfterHours`. Only messages still queued are
+  abandoned: a run that took one settles it.
 
 ## Cloudflare: runs driven by wakeups, in slices
 
@@ -94,8 +94,7 @@ A Durable Object keeps running only while an event is in progress (a request, an
 promise left running after its event is killed when the object is evicted, 70 to 140 s after it went
 idle, and waiting on an outbound `fetch` (a model call) does not keep it alive: measured, a 180 s run
 was lost. So on Cloudflare (SPEC §4.1, C4) a run is driven inside an event: install a `wakeups`
-provider (`platform-cloudflare`: the object's alarm, multiplexed) and `agent.submissions`
-(`submissions-sql` over the object's SQL), and runtime-pi does the rest.
+provider (`platform-cloudflare`: the object's alarm, multiplexed), and runtime-pi does the rest.
 
 In an object's App (`WORKERS_HOST` has an `object`), the object is one chat: its first conversation is
 pi-durable's root (later ones, after a reset, are ownerless), and pi-durable's clock is the app's
@@ -109,10 +108,11 @@ instance; a model error's backoff waited out with the object gone.
 It registers the wakeup handler `runtime-pi.drive`, and asks for it whenever a run may be left going:
 after a `dispatch` or a `resume` that leaves a run in the conversation (before `dispatch` resolves,
 so a channel acknowledges its platform only once a wakeup will drive it), and at start when pi-durable
-has work pending (or `agent.submissions` is installed). The handler:
-1. opens pi-durable if this instance has not (a new instance after an eviction): what it finds resumes;
-2. resumes the conversations `agent.submissions` holds pending that this App is not driving (a
-   message it never answered: as at start, four at a time, abandoned after `abandonPendingAfterHours`);
+has work pending. The handler:
+1. opens pi-durable if this instance has not (a new instance after an eviction): what it finds resumes,
+   and a run's end an eviction left unlogged is logged;
+2. resumes the conversations holding pending messages that this App is not driving (a message it
+   never answered: as at start, four at a time, abandoned after `abandonPendingAfterHours`);
 3. waits until this App drives no run, or until its slice ends;
 4. asks again at once when runs are still going. When what is left only waits for a time (a model
    retry's backoff, a deferred response's poll), the runtime asked for a wakeup at that time
@@ -120,8 +120,7 @@ has work pending (or `agent.submissions` is installed). The handler:
    pi-durable inside its event (`suspend`) so the object can be evicted until then; the wakeup opens
    it again and the wait continues from its checkpoint.
 
-A request carries nothing: the handler reads what to do from pi-durable and `agent.submissions` each
-time. So a handler that runs twice (delivery is at least once), late, or in a new object after an
+A request carries nothing: the handler reads what to do from pi-durable each time. So a handler that runs twice (delivery is at least once), late, or in a new object after an
 eviction does the right thing. An object evicted mid-run is started again by its alarm, and the run
 resumes from the storage under pi-durable's replay rules (a `safe` tool's interrupted call runs again;
 an `unsafe` one's gives the model an interrupted result).
@@ -135,12 +134,9 @@ fresh budget. An alarm the platform cuts (a deploy) is retried, and the cut slic
 one already or runs again: either way the run continues from the storage.
 
 **What still runs in memory, and why that is fine.** The run itself, while the handler waits for it
-(the handler's alarm is the event that keeps the object alive); the events' listeners; and recording a
-run's end again after `agent.submissions` failed to (1, 5, 30 and 120 s later). If the object is
-evicted before such a retry, the request stays pending, and the next run of the handler (the next
-message, at the latest) settles it from pi-durable and announces it. Without `agent.submissions`, the
-handler keeps this App's runs alive, and pi-durable's own record of live work brings them back after
-an eviction (at start, `nextWakeAt`).
+(the handler's alarm is the event that keeps the object alive), and the events' listeners. If the
+object is evicted between a run's end and its log, the next opening of pi-durable (the next handler
+run, at the latest) logs and announces it.
 
 ## Pi extensions
 
@@ -210,9 +206,12 @@ model nothing provides, the conversation gets the static definition and the erro
 `runtime-pi.test.ts` is copied with the component and runs in your project. It uses the scripted
 model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
 - the `agent.runtime` conformance suite (queued messages batched into the next run, a worker that died
-  mid-run), with and without `agent.submissions` and `wakeups`;
+  mid-run), with and without `wakeups`;
 - the lifecycle conformance suite, the same ways;
-- a run that died mid-way resumed at start, with no new message, when `agent.submissions` holds it;
+- a run that died mid-way resumed at start, with no new message, and its answer in `agent.submissions`;
+  an answer in `answers` at the next start;
+- `resume.ts`: which messages are abandoned after `abandonPendingAfterHours`, and that a `pending()`
+  that never answers does not hold `stop`;
 - `wakeups`: a run that died mid-way completed by the next App's wakeup; a long run driven over
   several slices, each cut asking again at once; a model retry's backoff as a wakeup at its time, with
   pi-durable suspended meanwhile; stop cancelling a waiting handler, which asks again;
