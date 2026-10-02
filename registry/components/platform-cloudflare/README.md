@@ -9,7 +9,7 @@ them runs on both.
 - **Provides:** `actor.mailbox`, `actor.inbox`, `wakeups`.
 - **Requires:** nothing; it reads the platform from `WORKERS_HOST`, which `deployment-cloudflare`'s
   entrypoints put in each App's start context.
-- **Target:** `cloudflare`. On a server, use `mailbox-local` and `wakeups-timers`.
+- **Target:** `durable`. On a server, use `mailbox-local` and `wakeups-timers`.
 - **Installs to:** `src/pikit/platform-cloudflare/`.
 - **npm dependencies:** none beyond pikit's (`typebox` for its config).
 

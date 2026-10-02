@@ -1,5 +1,5 @@
 /**
- * A Telegram bot on Cloudflare, end to end on this machine (SPEC §4.1): `pikit new --target cloudflare
+ * A Telegram bot on Cloudflare, end to end on this machine (SPEC §4.1): `pikit new --target durable
  * --preset telegram-cloudflare`, `pikit configure` (without a terminal, then walked through in one),
  * then the Worker and its objects in workerd (`wrangler dev`, as `pikit dev` runs it, on a free port).
  * `pikit up`'s after-deploy step registers the webhook against it, and a person's message posted to
@@ -67,9 +67,9 @@ function env(): Record<string, string> {
 }
 
 test.skipIf(!E2E)(
-  "pikit new --target cloudflare --preset telegram-cloudflare: a bot that composes, bundles, typechecks and passes its tests; doctor asks for Telegram",
+  "pikit new --target durable --preset telegram-cloudflare: a bot that composes, bundles, typechecks and passes its tests; doctor asks for Telegram",
   async () => {
-    const created = await pikit(["new", NAME, "--target", "cloudflare", "--preset", "telegram-cloudflare"], { cwd: parent });
+    const created = await pikit(["new", NAME, "--target", "durable", "--preset", "telegram-cloudflare"], { cwd: parent });
     expect(created.err).not.toContain("✗");
     expect(created.code).toBe(0);
 

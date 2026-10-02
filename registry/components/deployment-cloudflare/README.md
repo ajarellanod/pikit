@@ -8,7 +8,7 @@ objects running the project's two Apps, `wrangler.jsonc`, and the commands
   the Apps rather than running inside them.
 - **Requires:** nothing. It runs whatever `pikit.config.ts` composes: its default export in each
   Durable Object, and `export const worker` in the Worker.
-- **Target:** `cloudflare`. Only `entrypoint.ts` imports `cloudflare:workers`; only `commands.ts`,
+- **Target:** `durable`. Only `entrypoint.ts` imports `cloudflare:workers`; only `commands.ts`,
   which runs on your machine, imports `node:*`.
 - **Installs to:** `src/pikit/deployment-cloudflare/`, plus `wrangler.jsonc` at the project's root.
 - **npm dependencies:** `@pikit/contracts`; and `wrangler` 4.143.0 as a dev dependency
@@ -29,7 +29,7 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
 The installer puts `pikit` on the machine (git, curl, Bun, as for a server), skips Docker, which
 Cloudflare does not need, and checks Node.js >= 22, which wrangler runs on (it says how to install
 it if it is missing). Then, at the terminal, it runs
-`pikit new --target cloudflare --preset telegram-cloudflare`, which asks, in order:
+`pikit new --target durable --preset telegram-cloudflare`, which asks, in order:
 
 1. **the bot's name**, its folder (`my-agent` on Enter); then it writes the project and runs `bun install`;
 2. **"Configure it now?"**: `pikit configure`'s questions, below: the bot's token from @BotFather,
@@ -53,7 +53,7 @@ raises both. What you pay for is the **model's tokens**, to OpenRouter, per mess
 ## Your Telegram bot on Cloudflare
 
 ```sh
-pikit new my-bot --target cloudflare --preset telegram-cloudflare
+pikit new my-bot --target durable --preset telegram-cloudflare
 cd my-bot
 pikit configure
 pikit up

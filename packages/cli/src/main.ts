@@ -24,7 +24,7 @@ const USAGE = `pikit: a kit for Pi.
 
 Usage:
   pikit new [--target <t>] [--preset <p>]   a new agent, step by step (in a terminal); flags answer its questions
-  pikit new <dir> [--target server|cloudflare] [--preset <name> [--with <component>]...] [--registry <path>]   a new project
+  pikit new <dir> [--target server|durable] [--preset <name> [--with <component>]...] [--registry <path>]   a new project
   pikit add <component> [--registry <path>] [--force] [--yes]
   pikit remove <component> [--force]
   pikit upgrade [<component>...] [--dry-run] [--force] [--yes]   take the registry's version, merging your edits

@@ -41,7 +41,7 @@ function project(telegram: FakeTelegram, env: string): string {
   // As `pikit add channel-telegram-webhook` records it (the manifest's hooks.afterDeploy, by project path).
   const manifest = JSON.parse(readFileSync(join(PIKIT_ROOT, "registry", "components", CHANNEL, "component.json"), "utf8")) as { hooks: { afterDeploy: string } };
   const components = { [CHANNEL]: { hooks: { afterDeploy: `src/pikit/${CHANNEL}/${manifest.hooks.afterDeploy}` } }, "storage-do": {} };
-  writeFileSync(join(dir, "pikit.json"), JSON.stringify({ version: 2, targets: ["cloudflare"], registries: { default: "builtin" }, components }));
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify({ version: 2, targets: ["durable"], registries: { default: "builtin" }, components }));
   mkdirSync(join(dir, "src", "pikit"), { recursive: true });
   symlinkSync(join(PIKIT_ROOT, "registry", "components", CHANNEL, "files", "src", "pikit", CHANNEL), join(dir, "src", "pikit", CHANNEL));
   mkdirSync(join(dir, "node_modules", "@pikit"), { recursive: true });
@@ -135,7 +135,7 @@ function mcpProject(url: string): string {
   writeFileSync(join(dir, "package.json"), JSON.stringify({ name: "mcp-bot" }));
   const manifest = JSON.parse(readFileSync(join(TOOL_MCP, "component.json"), "utf8")) as { hooks: Record<string, string> };
   const hooks = Object.fromEntries(Object.entries(manifest.hooks).map(([hook, file]) => [hook, `src/pikit/tool-mcp/${file}`]));
-  writeFileSync(join(dir, "pikit.json"), JSON.stringify({ version: 2, targets: ["cloudflare"], registries: { default: "builtin" }, components: { "tool-mcp": { hooks } } }));
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify({ version: 2, targets: ["durable"], registries: { default: "builtin" }, components: { "tool-mcp": { hooks } } }));
   cpSync(join(TOOL_MCP, "files", "src"), join(dir, "src"), { recursive: true });
   symlinkSync(join(PIKIT_ROOT, "node_modules"), join(dir, "node_modules"));
   writeFileSync(

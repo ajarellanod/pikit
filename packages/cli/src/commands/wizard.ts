@@ -13,7 +13,7 @@
  * same project without a terminal.
  *
  * `--target`, `--preset` and `--with` answer their questions: the installer's `--cloudflare` runs
- * `pikit new --target cloudflare --preset telegram-cloudflare`, which asks only the name.
+ * `pikit new --target durable --preset telegram-cloudflare`, which asks only the name.
  *
  * It offers presets that make an agent you talk to, those with a channel-* component, when a target
  * has any: `cloudflare-minimal`, storage only, is for `pikit new <dir> --preset`.
@@ -34,7 +34,7 @@ import { kindOf, TARGETS } from "../registry/manifest.ts";
 import { ask, beginGuided, Cancelled, CliError, choose, confirm, intro, log, outro, spinner } from "../ui.ts";
 import { configure } from "./configure.ts";
 import { deployment, dev } from "./deployment.ts";
-import { newProject, UNFINISHED, validProjectName } from "./new.ts";
+import { checkTarget, newProject, UNFINISHED, validProjectName } from "./new.ts";
 
 const DEFAULT_NAME = "my-agent";
 const DEFAULT_TARGET = NEW_PROJECT_TARGETS[0] as string;
@@ -48,7 +48,7 @@ const TARGET_TEXT: Record<string, { label: string; hint: string; up: string; upH
     upHint: "it keeps running after you log out",
     running: "Your agent is running. In its folder (`cd {name}`): `pikit logs --follow` to watch it, `pikit status`, `pikit down` to stop it.",
   },
-  cloudflare: {
+  durable: {
     label: "On Cloudflare",
     hint: "no server to keep: Workers and a Durable Object per chat; the Workers Free plan is enough",
     up: "On Cloudflare (`pikit up`)",
@@ -70,9 +70,7 @@ export interface WizardOptions {
 export async function newWizard(parentDir: string, options: WizardOptions = {}): Promise<number> {
   const registryPath = options.registry ?? DEFAULT_REGISTRY;
   // A flag that cannot be used is refused before the first question.
-  if (options.target !== undefined && !(TARGETS as readonly string[]).includes(options.target)) {
-    throw new CliError(`--target is one of ${TARGETS.join(", ")}, not "${options.target}"`, 2);
-  }
+  if (options.target !== undefined) checkTarget(options.target);
   if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions: it needs --preset", 2);
   beginGuided();
   intro("pikit: a new agent");

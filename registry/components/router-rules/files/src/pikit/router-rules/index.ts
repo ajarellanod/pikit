@@ -19,7 +19,7 @@
  *
  * It refuses to start when a rule names an agent that is not an `agent.definition`.
  *
- * Targets: `server` and `cloudflare` (it imports nothing platform-specific).
+ * Targets: `server` and `durable` (it imports nothing platform-specific).
  */
 
 import { defineComponent } from "@pikit/core";

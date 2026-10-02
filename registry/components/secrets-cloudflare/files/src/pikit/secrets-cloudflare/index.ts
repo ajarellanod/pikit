@@ -10,7 +10,7 @@
  *   `undefined`, as does an empty string: a token that is `""` is as missing as no token.
  * - It never writes or logs a value.
  *
- * Target: `cloudflare` (on a server, `secrets-env` reads the process environment).
+ * Target: `durable` (on a server, `secrets-env` reads the process environment).
  */
 
 import { defineComponent } from "@pikit/core";

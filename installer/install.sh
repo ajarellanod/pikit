@@ -17,7 +17,7 @@
 #      at the prompt); on macOS it points to Docker Desktop. With --cloudflare it skips Docker and
 #      checks Node.js >= 22 instead, which wrangler (Cloudflare's CLI, in each project) runs on;
 #   6. on a terminal, runs `pikit new`, which asks everything and starts your first agent; with
-#      --cloudflare, `pikit new --target cloudflare --preset telegram-cloudflare`, a Telegram bot on
+#      --cloudflare, `pikit new --target durable --preset telegram-cloudflare`, a Telegram bot on
 #      Cloudflare, which asks its name, `pikit configure`'s questions, then deploys it with `pikit up`
 #      (PIKIT_NO_WIZARD=1 skips it; Ctrl-C stops it, and `pikit new` continues later).
 # Running it again updates pikit and changes nothing else. It never runs sudo without saying so
@@ -254,7 +254,7 @@ fi
 # Ctrl-C stops it, and `pikit new` continues later. With a new docker group, `sg` gives it that group
 # now, since this shell only gets it at the next login.
 if [ -n "$PIKIT_CLOUDFLARE" ]; then
-  set -- new --target cloudflare --preset telegram-cloudflare
+  set -- new --target durable --preset telegram-cloudflare
 else
   set -- new
 fi

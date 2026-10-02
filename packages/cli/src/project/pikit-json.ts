@@ -11,13 +11,14 @@
  *
  * Version 2 records registries by what resolves on any machine (`registry-location.ts`). Version 1
  * recorded the path of the CLI's checkout; it is read and converted in memory, and the next write
- * saves version 2.
+ * saves version 2. A target that was renamed (`cloudflare`, now `durable`) is read with its new name,
+ * which the next write saves (`RENAMED_TARGETS`).
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { confinedPath } from "./paths.ts";
-import type { EnvironmentVariable, Hook } from "../registry/manifest.ts";
+import { type EnvironmentVariable, type Hook, RENAMED_TARGETS } from "../registry/manifest.ts";
 import { BUILTIN_REGISTRY, isCheckoutRegistry, recordedLocation } from "./registry-location.ts";
 
 export const PIKIT_JSON = "pikit.json";
@@ -105,10 +106,10 @@ export function readProjectManifest(projectDir: string): ProjectManifest {
   if (!existsSync(path)) {
     throw new Error(`${projectDir} is not a pikit project: there is no ${PIKIT_JSON} (create one with \`pikit new\`)`);
   }
-  const manifest = JSON.parse(readFileSync(path, "utf8")) as ProjectManifest | ProjectManifestV1;
-  if (manifest.version === 1) return fromV1(projectDir, manifest);
-  if (manifest.version !== 2) throw new Error(`${PIKIT_JSON} has version ${String((manifest as { version: unknown }).version)}; this CLI reads versions 1 and 2`);
-  return manifest;
+  const read = JSON.parse(readFileSync(path, "utf8")) as ProjectManifest | ProjectManifestV1;
+  if (read.version !== 1 && read.version !== 2) throw new Error(`${PIKIT_JSON} has version ${String((read as { version: unknown }).version)}; this CLI reads versions 1 and 2`);
+  const manifest = Array.isArray(read.targets) ? { ...read, targets: [...new Set(read.targets.map((t) => RENAMED_TARGETS.get(t) ?? t))] } : read;
+  return manifest.version === 1 ? fromV1(projectDir, manifest) : manifest;
 }
 
 /** Version 1: registries are absolute paths, those of the machine that installed. */

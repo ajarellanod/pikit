@@ -17,7 +17,7 @@
  * The tool itself is `createFetchTool` in @pikit/pi-adapter/tools (pi-durable's `defineTool`); this
  * component provides it.
  *
- * Targets: `server` and `cloudflare`: it uses only `fetch`, streams and `HTMLRewriter`, which Workers
+ * Targets: `server` and `durable`: it uses only `fetch`, streams and `HTMLRewriter`, which Workers
  * and Bun both have.
  */
 

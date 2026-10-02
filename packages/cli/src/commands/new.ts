@@ -1,5 +1,5 @@
 /**
- * `pikit new <dir> [--target <server|cloudflare>] [--preset <name> [--with <component>]...] [--registry <path>]`:
+ * `pikit new <dir> [--target <server|durable>] [--preset <name> [--with <component>]...] [--registry <path>]`:
  * a new project.
  *
  * It writes the project's own part (`starter.ts`), vendors the kit packages into `vendor/`, adds
@@ -9,7 +9,8 @@
  *
  * The target (`server` unless `--target` says otherwise) is recorded in `pikit.json`'s `targets`: every
  * component installed then and later must run there (`checkCompatible`), and the providers offered are
- * the ones that do. On `cloudflare`, `pikit.config.ts` has two Apps (SPEC C1). The target is never
+ * the ones that do. A target is a runtime model, not a provider (SPEC §4): on `durable` (an actor per
+ * conversation, on Cloudflare), `pikit.config.ts` has two Apps (SPEC C1). The target is never
  * guessed from the preset: a preset for another target is refused, with the command that makes it.
  *
  * The starter agent's model is the preset's `model`, or the starter's for the target (`STARTER_MODEL`).
@@ -31,7 +32,7 @@ import { starterModelProblem } from "../project/starter-model.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
-import { TARGETS } from "../registry/manifest.ts";
+import { RENAMED_TARGETS, TARGETS } from "../registry/manifest.ts";
 import { CliError, log } from "../ui.ts";
 import { checkCompatible, installComponent, notPortable, warnUnchosen } from "./add.ts";
 import { doctor } from "./doctor.ts";
@@ -47,8 +48,20 @@ export interface NewOptions {
   next?: boolean;
   /** Say what is done, not each component's files and `bun install`'s output (the guided path). */
   quiet?: boolean;
-  /** Where it runs: `server` (default) or `cloudflare`. */
+  /** Where it runs: `server` (default) or `durable`. */
   target?: string;
+}
+
+/**
+ * Refuses a `--target` that is not one (exit 2). A renamed one (`cloudflare`, now `durable`) says its
+ * new name: a script that still uses it is told, not obeyed.
+ */
+export function checkTarget(target: string): void {
+  const renamed = RENAMED_TARGETS.get(target);
+  if (renamed !== undefined) {
+    throw new CliError(`the target "${target}" is now "${renamed}": a target names the runtime model, and Cloudflare is its provider; use --target ${renamed}`, 2);
+  }
+  if (!(TARGETS as readonly string[]).includes(target)) throw new CliError(`--target is one of ${TARGETS.join(", ")}, not "${target}"`, 2);
 }
 
 /**
@@ -75,7 +88,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
 
   // Everything that can be refused is checked before the first file is written.
   const target = options.target ?? (NEW_PROJECT_TARGETS[0] as string);
-  if (!(TARGETS as readonly string[]).includes(target)) throw new CliError(`--target is one of ${TARGETS.join(", ")}, not "${target}"`, 2);
+  checkTarget(target);
   const targets = [target];
   const registry = openRegistry(options.registry ?? DEFAULT_REGISTRY);
   if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions: it needs --preset");
@@ -157,7 +170,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   rmSync(join(projectDir, UNFINISHED));
   if (options.quiet !== true) log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
   if (options.next === false) return;
-  const elsewhere = target === "cloudflare" ? "deploy it to Cloudflare" : "run it in Docker";
+  const elsewhere = target === "durable" ? "deploy it to Cloudflare" : "run it in Docker";
   log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev         # or \`pikit up\` to ${elsewhere}`);
 }
 

@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "description": "The agent's workspace and shell inside its Durable Object, on Cloudflare: files in the object's SQL, a bash without processes, git with fenced pushes, and node in QuickJS.",
   "targets": [
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

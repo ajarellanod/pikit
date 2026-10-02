@@ -5,7 +5,7 @@
   "description": "Each conversation goes to the agent of the first rule in config it matches.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

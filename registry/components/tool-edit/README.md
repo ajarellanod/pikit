@@ -5,7 +5,7 @@ pi-durable's own `edit` tool, for the agents that name it: it replaces exact pie
 - **Provides:** `agent.tool`, under the key `edit`.
 - **Requires:** `execution` (for example `execution-local`).
 - **Optional:** `workspace` (for example `workspace-local`): each agent's own directory.
-- **Targets:** `server` and `cloudflare`: any target with an `execution` provider.
+- **Targets:** `server` and `durable`: any target with an `execution` provider.
 - **Installs to:** `src/pikit/tool-edit/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi).
 

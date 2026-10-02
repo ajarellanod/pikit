@@ -118,7 +118,7 @@ test("--cloudflare skips Docker, checks the Node.js wrangler runs on, and hands 
   expect(run.out).toContain("Cloudflare: no Docker needed");
   expect(run.out).toContain("Node.js v22.11.0 found: wrangler can run");
   expect(run.out).not.toMatch(/Docker is not installed|Docker with Compose found|docker group/);
-  expect(run.out).toContain("pikit new --target cloudflare --preset telegram-cloudflare starts another Telegram bot on Cloudflare");
+  expect(run.out).toContain("pikit new --target durable --preset telegram-cloudflare starts another Telegram bot on Cloudflare");
   expect(existsSync(join(run.home, ".pikit", "bin", "pikit"))).toBe(true);
 
   // PIKIT_CLOUDFLARE=1 is the same; an old Node.js is named, and the install still completes.

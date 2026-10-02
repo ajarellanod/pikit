@@ -44,7 +44,7 @@ function project(): string {
 function logEventsRegistry(): string {
   const root = temp();
   cpSync(join(DEFAULT_REGISTRY, "components", "log-events"), join(root, "components", "log-events"), { recursive: true });
-  const index = { "log-events": { version: "0.0.0", description: "log-events", targets: ["server", "cloudflare"], path: "components/log-events" } };
+  const index = { "log-events": { version: "0.0.0", description: "log-events", targets: ["server", "durable"], path: "components/log-events" } };
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   return root;
 }

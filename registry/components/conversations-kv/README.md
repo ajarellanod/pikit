@@ -6,7 +6,7 @@ The same code runs on a server and in a Cloudflare Durable Object.
 - **Provides:** `conversations.registry`.
 - **Requires:** `storage.kv` (where the pointers live) and `agent.conversations` (the agent runtime's:
   `runtime-pi`; it creates each conversation there).
-- **Targets:** `server` and `cloudflare` (it imports nothing platform-specific).
+- **Targets:** `server` and `durable` (it imports nothing platform-specific).
 - **Installs to:** `src/pikit/conversations-kv/`.
 - **npm dependencies:** `typebox` (and `@pikit/pi-adapter` for its tests' fake `agent.conversations`).
 

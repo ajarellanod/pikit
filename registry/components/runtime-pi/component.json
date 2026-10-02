@@ -5,7 +5,7 @@
   "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

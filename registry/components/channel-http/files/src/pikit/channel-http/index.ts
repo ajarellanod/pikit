@@ -44,7 +44,7 @@
  * Guarantee: a message accepted by `dispatch` (any answer but 4xx/5xx before it) is in the session
  * and will be answered there, at least once.
  *
- * Targets: `server` and `cloudflare` (fetch handlers and Web Crypto only).
+ * Targets: `server` and `durable` (fetch handlers and Web Crypto only).
  */
 
 import { type AppContext, defineComponent, Halt } from "@pikit/core";

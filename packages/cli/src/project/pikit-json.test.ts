@@ -1,7 +1,7 @@
 /**
  * `pikit.json` version 2: registries recorded by what resolves on any machine. A
  * version 1 file (absolute paths, the installing machine's) is read in version 2's shape, and the next
- * write saves version 2.
+ * write saves version 2. The renamed target `durable` is read as `durable`.
  */
 
 import { afterAll, expect, test } from "bun:test";
@@ -60,6 +60,21 @@ test("a version 1 file is read as version 2: a pikit checkout's registry is buil
   expect(JSON.parse(text).version).toBe(2);
   expect(text.indexOf('"src/a.ts"')).toBeLessThan(text.indexOf('"src/b.ts"'));
   expect(readProjectManifest(project)).toEqual(read);
+});
+
+test("the target that was called cloudflare is read as durable, and the next write saves durable", () => {
+  for (const version of [1, 2]) {
+    const project = temp();
+    writeFileSync(join(project, PIKIT_JSON), JSON.stringify({ ...emptyManifest(), version, targets: ["cloudflare"] }));
+    const read = readProjectManifest(project);
+    expect(read.targets).toEqual(["durable"]);
+    writeProjectManifest(project, read);
+    expect(JSON.parse(readFileSync(join(project, PIKIT_JSON), "utf8")).targets).toEqual(["durable"]);
+  }
+  // Both names in one file are one target; others are left as they are.
+  const project = temp();
+  writeFileSync(join(project, PIKIT_JSON), JSON.stringify({ ...emptyManifest(), targets: ["server", "cloudflare", "durable"] }));
+  expect(readProjectManifest(project).targets).toEqual(["server", "durable"]);
 });
 
 test("a registry directory that is not a checkout's stays a path; an unknown version is refused", () => {

@@ -21,9 +21,9 @@ export const APP_LABEL: Record<AppName, string> = {
   worker: "the Worker's App (export const worker)",
 };
 
-/** A project on Cloudflare has the Worker's App besides the default one (SPEC C1). */
+/** A project on the durable target (Cloudflare) has the Worker's App besides the default one (SPEC C1). */
 export function hasWorkerApp(targets: readonly string[]): boolean {
-  return targets.includes("cloudflare");
+  return targets.includes("durable");
 }
 
 /** The Apps `manifest` goes in on a project of `targets`, each with what it declares there. */

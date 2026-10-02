@@ -21,7 +21,7 @@
       "version": "0.0.0",
       "description": "Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.",
       "targets": [
-        "cloudflare"
+        "durable"
       ],
       "path": "components/channel-telegram-webhook"
     },
@@ -38,7 +38,7 @@
       "description": "The conversation registry in storage.kv: which Pi session each conversation is in now, on a server or in a Durable Object.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/conversations-kv"
     },
@@ -54,7 +54,7 @@
       "version": "0.0.0",
       "description": "Runs a pikit project on Cloudflare: the Worker and its Durable Objects running the project's two Apps, wrangler.jsonc, and the commands `pikit up | down | logs | status | dev` delegate to.",
       "targets": [
-        "cloudflare"
+        "durable"
       ],
       "path": "components/deployment-cloudflare"
     },
@@ -70,7 +70,7 @@
       "version": "0.0.0",
       "description": "The agent's workspace and shell inside its Durable Object, on Cloudflare: files in the object's SQL, a bash without processes, git with fenced pushes, and node in QuickJS.",
       "targets": [
-        "cloudflare"
+        "durable"
       ],
       "path": "components/execution-do"
     },
@@ -87,7 +87,7 @@
       "description": "One structured log line per operational event: what reached which agent, how each run ended, how long it took and what it cost.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/log-events"
     },
@@ -104,7 +104,7 @@
       "description": "Every answer is stored before it is sent, then delivered in order per conversation, retried, and sent again after a crash.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/outbound-durable"
     },
@@ -112,7 +112,7 @@
       "version": "0.0.0",
       "description": "Reaches each conversation's Durable Object from the Worker, and wakes components in it on its one alarm: actor.mailbox, actor.inbox and wakeups on Cloudflare.",
       "targets": [
-        "cloudflare"
+        "durable"
       ],
       "path": "components/platform-cloudflare"
     },
@@ -129,7 +129,7 @@
       "description": "The models OpenRouter serves, for your agents. An agent names one as `openrouter/<vendor>/<model>`, for example `openrouter/z-ai/glm-5.3-flash`.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/provider-openrouter"
     },
@@ -138,7 +138,7 @@
       "description": "Every message goes to one agent: `defaultAgent`.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/router-basic"
     },
@@ -147,7 +147,7 @@
       "description": "Each conversation goes to the agent of the first rule in config it matches.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/router-rules"
     },
@@ -156,7 +156,7 @@
       "description": "The agent runtime: Pi runs your agents, and this component plugs it into the app.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/runtime-pi"
     },
@@ -164,7 +164,7 @@
       "version": "0.0.0",
       "description": "Secrets from the Worker's env on Cloudflare: its secrets and variables, never its bindings.",
       "targets": [
-        "cloudflare"
+        "durable"
       ],
       "path": "components/secrets-cloudflare"
     },
@@ -188,7 +188,7 @@
       "version": "0.0.0",
       "description": "The app's SQL database (storage.sql) in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",
       "targets": [
-        "cloudflare"
+        "durable"
       ],
       "path": "components/storage-do"
     },
@@ -197,7 +197,7 @@
       "description": "Small JSON values each component keeps across restarts, by key, in a namespace of its own: storage.kv on the app's SQL database.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/storage-kv-sql"
     },
@@ -214,7 +214,7 @@
       "description": "No admitted message ends without its answer: unanswered conversations resume at start, and channels deliver every answer from a feed, even one that ended while they were stopped.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/submissions-sql"
     },
@@ -223,7 +223,7 @@
       "description": "Pi's own `bash` tool, for the agents that name it: it runs a shell command in the working directory and returns its output (the last lines when it is long), with an optional timeout.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/tool-bash"
     },
@@ -232,7 +232,7 @@
       "description": "Pi's own `edit` tool, for the agents that name it: it replaces exact pieces of text in a file, each one unique in it.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/tool-edit"
     },
@@ -241,7 +241,7 @@
       "description": "The `fetch` tool, for the agents that name it: one HTTP(S) request to a web page or an API, with HTML as readable text and links, JSON pretty-printed, and binary content refused.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/tool-fetch"
     },
@@ -250,7 +250,7 @@
       "description": "The tools of remote MCP servers (Streamable HTTP), for the agents that name them: each tool named in config becomes the agent tool <server>_<tool>.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/tool-mcp"
     },
@@ -259,7 +259,7 @@
       "description": "Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/tool-read"
     },
@@ -268,7 +268,7 @@
       "description": "The `websearch` tool, for the agents that name it: searches the web with the Brave Search API, whose key the model never sees.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/tool-websearch-brave"
     },
@@ -277,7 +277,7 @@
       "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",
       "targets": [
         "server",
-        "cloudflare"
+        "durable"
       ],
       "path": "components/tool-write"
     },

@@ -5,7 +5,7 @@
   "description": "Pi's own `read` tool, for the agents that name it: it reads a text file (from a line, up to a number of lines) or an image, and truncates long files for the model.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

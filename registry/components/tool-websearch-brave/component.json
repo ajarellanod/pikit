@@ -5,7 +5,7 @@
   "description": "The `websearch` tool, for the agents that name it: searches the web with the Brave Search API, whose key the model never sees.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

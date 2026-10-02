@@ -17,7 +17,7 @@
  * It follows Hermes' delivery ledger, with what NanoClaw and OpenClaw lack: backoff, order per
  * conversation, progress per piece, one send path.
  *
- * Targets: `server` and `cloudflare`: it imports nothing platform-specific; its storage is
+ * Targets: `server` and `durable`: it imports nothing platform-specific; its storage is
  * `storage.sql` and its time is the app's clock.
  */
 

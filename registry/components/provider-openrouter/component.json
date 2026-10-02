@@ -5,7 +5,7 @@
   "description": "The models OpenRouter serves, for your agents. An agent names one as `openrouter/<vendor>/<model>`, for example `openrouter/z-ai/glm-5.3-flash`.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

@@ -50,7 +50,7 @@ export interface Template {
 export const TEMPLATES: Record<string, Template> = {
   "telegram-cloudflare": {
     preset: "telegram-cloudflare",
-    target: "cloudflare",
+    target: "durable",
     name: "pikit-telegram-bot",
     description: "An AI agent in Telegram, on Cloudflare: a pikit project.",
     repo: "https://github.com/ajarellanod/pikit-telegram-cloudflare",

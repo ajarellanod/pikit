@@ -1,5 +1,5 @@
 /**
- * A project on Cloudflare, end to end on this machine (SPEC §4.1): `pikit new --target cloudflare
+ * A project on Cloudflare, end to end on this machine (SPEC §4.1): `pikit new --target durable
  * --preset cloudflare-minimal`, `pikit doctor`, the project's own tests (with its `wrangler deploy
  * --dry-run`) and typecheck, then `pikit dev` (wrangler dev, workerd) answering `/health` from the
  * object's App. Then a Telegram agent on Cloudflare: `pikit add` of secrets-cloudflare and
@@ -36,12 +36,12 @@ async function run(command: string[], cwd = project) {
 }
 
 test.skipIf(!E2E)(
-  "pikit new --target cloudflare: a project that composes, bundles, typechecks and passes its own tests",
+  "pikit new --target durable: a project that composes, bundles, typechecks and passes its own tests",
   async () => {
-    const created = await run([process.execPath, MAIN, "new", "edge-bot", "--target", "cloudflare", "--preset", "cloudflare-minimal"], parent);
+    const created = await run([process.execPath, MAIN, "new", "edge-bot", "--target", "durable", "--preset", "cloudflare-minimal"], parent);
     expect(created.err).not.toContain("✗");
     expect(created.code).toBe(0);
-    expect(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).targets).toEqual(["cloudflare"]);
+    expect(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).targets).toEqual(["durable"]);
     // wrangler comes with deployment-cloudflare, which declares it: the starter adds none.
     expect(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components["deployment-cloudflare"].devDependencies).toEqual({ wrangler: "4.143.0" });
     expect(devDependencies().wrangler).toBe("4.143.0");

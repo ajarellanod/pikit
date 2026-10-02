@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "description": "Secrets from the Worker's env on Cloudflare: its secrets and variables, never its bindings.",
   "targets": [
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

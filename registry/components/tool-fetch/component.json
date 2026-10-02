@@ -5,7 +5,7 @@
   "description": "The `fetch` tool, for the agents that name it: one HTTP(S) request to a web page or an API, with HTML as readable text and links, JSON pretty-printed, and binary content refused.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

@@ -34,7 +34,7 @@
  *   A crash between creating a conversation and storing its pointer leaves an unused conversation behind,
  *   never a pointer to a conversation that does not exist.
  *
- * Targets: `server` and `cloudflare`: it imports nothing platform-specific, and its records are
+ * Targets: `server` and `durable`: it imports nothing platform-specific, and its records are
  * whatever provides `storage.kv` there.
  */
 

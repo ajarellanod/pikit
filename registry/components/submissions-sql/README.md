@@ -8,7 +8,7 @@ pikit add storage-sqlite      # the database it keeps its records in
 pikit add submissions-sql
 ```
 
-**Target:** `server` and `cloudflare`. On Cloudflare its database is the conversation's Durable
+**Target:** `server` and `durable`. On Cloudflare its database is the conversation's Durable
 Object (`storage-do`), and the records are that conversation's.
 
 `pikit add runtime-pi` offers it (with `storage-sqlite`). The runtime and the channels that support it

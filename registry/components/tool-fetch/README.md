@@ -5,7 +5,7 @@ answer as text the model can read.
 
 - **Provides:** `agent.tool`, under the key `fetch`.
 - **Requires:** nothing.
-- **Targets:** `server` and `cloudflare`: it uses only `fetch`, streams and `HTMLRewriter`, which
+- **Targets:** `server` and `durable`: it uses only `fetch`, streams and `HTMLRewriter`, which
   Workers and Bun both have.
 - **Installs to:** `src/pikit/tool-fetch/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi), `typebox`.

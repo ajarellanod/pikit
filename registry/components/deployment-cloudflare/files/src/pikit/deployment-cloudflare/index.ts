@@ -13,7 +13,7 @@
  * This file exports only what runs on the machine and what is neutral: `entrypoint.ts` imports
  * `cloudflare:workers` and loads only in workerd.
  *
- * Target: `cloudflare`.
+ * Target: `durable`.
  */
 
 export {

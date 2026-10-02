@@ -6,7 +6,7 @@ long it took and what it cost.
 - **Provides:** nothing. It listens to `agent.*`, `conversation.reset`, `pipeline.halted` and
   `runtime.*`.
 - **Uses:** nothing. It writes through the app's logger (`ctx.logger`).
-- **Targets:** `server` and `cloudflare`.
+- **Targets:** `server` and `durable`.
 - **Installs to:** `src/pikit/log-events/`.
 - **npm dependencies:** none.
 

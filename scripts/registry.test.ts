@@ -170,10 +170,10 @@ test("imports: node:* only when targets are exactly [\"server\"]; tests are exem
   f.append("sample.test.ts", `import "node:fs";`);
   expect((await validate(f.root)).problems).toEqual([]);
 
-  f.writeManifest({ ...f.manifest(), targets: ["server", "cloudflare"] });
+  f.writeManifest({ ...f.manifest(), targets: ["server", "durable"] });
   await generate(f.root);
   const found = await problems(f);
-  expect(found).toContain(`index.ts imports "node:path", but targets are ["server","cloudflare"]`);
+  expect(found).toContain(`index.ts imports "node:path", but targets are ["server","durable"]`);
   expect(found).not.toContain("node:fs");
 });
 
@@ -185,10 +185,10 @@ test("imports: a server-only kit export (@pikit/pi-adapter/node) needs targets [
   await generate(f.root);
   expect((await validate(f.root)).problems).toEqual([]);
 
-  f.writeManifest({ ...f.manifest(), targets: ["server", "cloudflare"] });
+  f.writeManifest({ ...f.manifest(), targets: ["server", "durable"] });
   await generate(f.root);
   const found = await problems(f);
-  expect(found).toContain(`index.ts imports "@pikit/pi-adapter/node", but targets are ["server","cloudflare"]: a server-only kit export needs targets ["server"]`);
+  expect(found).toContain(`index.ts imports "@pikit/pi-adapter/node", but targets are ["server","durable"]: a server-only kit export needs targets ["server"]`);
   expect(found).not.toContain("@pikit/pi-adapter/testing");
 });
 
@@ -198,16 +198,16 @@ const DEPLOYMENT_INDEX = deploymentIndex("up", "down", "logs", "status");
 
 test("imports: a deployment component's commands.ts runs on the deploying machine, so it may import node:* on any target (SPEC §4)", async () => {
   const f = await fixture({ name: "deployment-sample", index: DEPLOYMENT_INDEX });
-  f.writeManifest({ ...f.manifest(), targets: ["cloudflare"] });
+  f.writeManifest({ ...f.manifest(), targets: ["durable"] });
   writeFileSync(join(f.own, "commands.ts"), `import "node:child_process";\n`);
   await generate(f.root);
   expect((await validate(f.root)).problems).toEqual([]);
 
   // Only that file, and only in a deployment component: its entrypoint still runs on the target.
   f.append("index.ts", `import "node:path";`);
-  expect(await problems(f)).toContain(`index.ts imports "node:path", but targets are ["cloudflare"]`);
+  expect(await problems(f)).toContain(`index.ts imports "node:path", but targets are ["durable"]`);
   const other = await fixture();
-  other.writeManifest({ ...other.manifest(), targets: ["server", "cloudflare"] });
+  other.writeManifest({ ...other.manifest(), targets: ["server", "durable"] });
   writeFileSync(join(other.own, "commands.ts"), `import "node:child_process";\n`);
   await generate(other.root);
   expect(await problems(other)).toContain(`commands.ts imports "node:child_process"`);
@@ -215,7 +215,7 @@ test("imports: a deployment component's commands.ts runs on the deploying machin
 
 test("imports: test support (*.test-support.ts) is held like tests, and only tests may import it (SPEC §4)", async () => {
   const f = await fixture();
-  f.writeManifest({ ...f.manifest(), targets: ["server", "cloudflare"] });
+  f.writeManifest({ ...f.manifest(), targets: ["server", "durable"] });
   writeFileSync(join(f.own, "storage.test-support.ts"), `import "node:sqlite";\n`);
   f.append("sample.test.ts", `import "./storage.test-support.ts";`);
   await generate(f.root);

@@ -13,7 +13,7 @@
  * `bash` only to the agents that need it, and know the limits of the environment it runs in:
  * `execution-local` is not a sandbox.
  *
- * Targets: wherever an `execution.shell` provider is installed (`server` with `execution-local`, `cloudflare` with `execution-do`).
+ * Targets: wherever an `execution.shell` provider is installed (`server` with `execution-local`, `durable` with `execution-do`).
  */
 
 import { defineComponent } from "@pikit/core";

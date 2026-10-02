@@ -78,7 +78,7 @@ export const GITIGNORE = `node_modules/
 
 /** `.gitignore` for a project on `target`. */
 export function gitignore(target = "server"): string {
-  if (target !== "cloudflare") return GITIGNORE;
+  if (target !== "durable") return GITIGNORE;
   return `${GITIGNORE}# wrangler's own: local secrets, the local objects' state and its build cache.
 .dev.vars*
 .wrangler/
@@ -156,7 +156,7 @@ export const worker = defineApp({
 
 /** `pikit.config.ts` for a project on `target`. */
 export function configFile(target = "server"): string {
-  return target === "cloudflare" ? CLOUDFLARE_CONFIG : CONFIG;
+  return target === "durable" ? CLOUDFLARE_CONFIG : CONFIG;
 }
 
 export function agent(tools: string[], model = starterModel()): string {
@@ -201,7 +201,7 @@ export default defineComponent({
 
 export function readme(name: string, components: string[], target = "server"): string {
   const run =
-    target === "cloudflare"
+    target === "durable"
       ? `pikit configure   # the variables in .env.example (they go up as the Worker's secrets), and a model API key
 pikit doctor      # the component graph; green when everything is provided and configured
 pikit dev         # run it here in workerd (wrangler dev), reloading on change
@@ -211,7 +211,7 @@ pikit doctor      # the component graph; green when everything is provided and c
 pikit dev         # run it here, reloading on change
 pikit up          # or run it in Docker (deployment-docker): then pikit status, logs, down`;
   const composition =
-    target === "cloudflare"
+    target === "durable"
       ? "the composition root: two Apps, the default export in each conversation's Durable Object and `worker` in the Worker, and their config values"
       : "the composition root: every component that runs, and their config values";
   return `# ${name}

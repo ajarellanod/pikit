@@ -5,7 +5,7 @@
   "description": "One structured log line per operational event: what reached which agent, how each run ended, how long it took and what it cost.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

@@ -4,7 +4,7 @@
   "version": "0.0.0",
   "description": "Reaches each conversation's Durable Object from the Worker, and wakes components in it on its one alarm: actor.mailbox, actor.inbox and wakeups on Cloudflare.",
   "targets": [
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

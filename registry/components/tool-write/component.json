@@ -5,7 +5,7 @@
   "description": "Pi's own `write` tool, for the agents that name it: it creates or overwrites a file, creating its parent directories.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

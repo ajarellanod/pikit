@@ -58,7 +58,7 @@ it("GET /health starts the health object's App, with the object in WORKERS_HOST,
 
   const { stub } = newObject(env.CONVERSATION.idFromName(HEALTH_OBJECT));
   const id = await runInDurableObject(stub, (_instance, state) => state.id.toString());
-  expect(await stored(stub, "host")).toEqual({ id, variable: "from wrangler vars", bound: true, target: "cloudflare" });
+  expect(await stored(stub, "host")).toEqual({ id, variable: "from wrangler vars", bound: true, target: "durable" });
 });
 
 it("the Worker's App starts with WORKERS_HOST { env, origin } and serves its http.route", async () => {

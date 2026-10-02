@@ -28,7 +28,7 @@ it into the app.
   names a tool no component provides, and when an agent's provider has no credentials at all. That
   last check makes no network call and refreshes nothing: it only asks whether a credential is stored
   or an environment variable set.
-- **Target:** `server` and `cloudflare`. On Cloudflare it goes in the conversation object's App, with
+- **Target:** `server` and `durable`. On Cloudflare it goes in the conversation object's App, with
   `platform-cloudflare` for `wakeups` ("Cloudflare" below).
 - **Installs to:** `src/pikit/runtime-pi/`.
 - **npm dependencies:** `@pikit/pi-adapter`, pinned with Pi.

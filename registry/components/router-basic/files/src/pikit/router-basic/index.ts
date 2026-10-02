@@ -9,7 +9,7 @@
  * It refuses to start when `defaultAgent` names no `agent.definition`: a router that sends every
  * message to an agent that does not exist is a broken deployment.
  *
- * Targets: `server` and `cloudflare` (it imports nothing platform-specific).
+ * Targets: `server` and `durable` (it imports nothing platform-specific).
  */
 
 import { defineComponent } from "@pikit/core";

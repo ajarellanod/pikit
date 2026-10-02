@@ -1,5 +1,5 @@
 # yaml-language-server: $schema=../schema/preset.schema.json
-# A project on Cloudflare (SPEC §4, C1): `pikit new my-agent --target cloudflare --preset cloudflare-minimal`.
+# A project on Cloudflare (SPEC §4, C1): `pikit new my-agent --target durable --preset cloudflare-minimal`.
 # Each conversation's Durable Object has its own SQLite (storage-do, and storage.kv over it), and
 # deployment-cloudflare deploys it; `pikit up` checks that the object's App starts there (/health).
 # No channel, no runtime and so no conversation registry yet (conversations-kv creates conversations

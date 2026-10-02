@@ -32,7 +32,7 @@
  * there; a handler that rejects gets its row moved by the backoff. At start, if rows exist, the
  * alarm is set again: a reset may have lost it.
  *
- * Target: `cloudflare`. It imports nothing from `cloudflare:*`: what it uses of the object's storage
+ * Target: `durable`. It imports nothing from `cloudflare:*`: what it uses of the object's storage
  * and of the namespace binding is typed here, structurally.
  */
 

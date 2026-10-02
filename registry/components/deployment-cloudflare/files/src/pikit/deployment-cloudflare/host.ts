@@ -266,7 +266,7 @@ function compose(definition: AppDefinition | undefined, own: AppDefinition["comp
   return defineApp({
     components: [...(definition?.components ?? []), ...own],
     config: { ...(definition?.config ?? {}) },
-    target: "cloudflare",
+    target: "durable",
     logger,
   }).create();
 }

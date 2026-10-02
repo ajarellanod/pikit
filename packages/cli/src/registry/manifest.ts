@@ -21,7 +21,18 @@ import { join } from "node:path";
 import Type, { type Static, type TSchema } from "typebox";
 import Value from "typebox/value";
 
-export const TARGETS = ["server", "cloudflare"] as const;
+/**
+ * Where a component runs: a runtime model, never a provider (`Target` in @pikit/core, SPEC §4).
+ * `server` is a long-lived process with a persistent disk; `durable` is an actor per
+ * conversation (a Durable Object, on Cloudflare). Providers are `deployment-*` components.
+ */
+export const TARGETS = ["server", "durable"] as const;
+
+/**
+ * Targets that were renamed, old name → new: `durable` was `cloudflare`, its provider's name.
+ * `pikit.json` is read with the new name (and written so next time); `--target` refuses the old one.
+ */
+export const RENAMED_TARGETS: ReadonlyMap<string, (typeof TARGETS)[number]> = new Map([["cloudflare", "durable"]]);
 
 /** Where the registry's JSON Schemas live, relative to its root. */
 export const SCHEMA_DIR = "schema";

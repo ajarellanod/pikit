@@ -36,7 +36,7 @@
  * - **A failure the server reports** (an MCP result with `isError`) is an error result with its text.
  *
  * Transport: Streamable HTTP over `fetch`, through Pi's MCP client (pi-mcp) (`@pikit/pi-adapter/mcp`), with no
- * long-lived server-to-client stream (SPEC §4.1, C4). Targets: `server` and `cloudflare`. A server run
+ * long-lived server-to-client stream (SPEC §4.1, C4). Targets: `server` and `durable`. A server run
  * as a local process (stdio) is not this component's.
  */
 
