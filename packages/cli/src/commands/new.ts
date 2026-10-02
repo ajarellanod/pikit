@@ -23,7 +23,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
@@ -125,6 +125,11 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     const channels = components.filter((c) => kindOf(c) === "channel").map((c) => ({ name: c, title: registry.manifest(c).title }));
     write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels));
     write("src/extensions/agents.ts", starter.AGENTS);
+    // The kit's skills for AI agents: how to write a component for this project.
+    for (const skill of starter.skillFiles()) {
+      mkdirSync(dirname(join(projectDir, skill.path)), { recursive: true });
+      write(skill.path, skill.text);
+    }
     // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
     const location = recordedLocation(projectDir, registry.root);
     if (!isPortable(location)) log.warn(notPortable(location));

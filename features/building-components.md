@@ -82,3 +82,11 @@ MANIFESTO principle 13 promises a conformance suite for every contract. These do
   halt; nothing checks a router (router-basic, router-rules) against a shared list of cases.
 - **`agent.definition`.** Data the project provides (`defineAgent` validates it); runtime-pi refuses
   to start on an agent it cannot run.
+
+## Skills: how they reach a project (decided)
+The skills for AI agents live in the kit repository, `.agents/skills/<skill>/SKILL.md`, and
+`pikit new` copies them into every project's `.agents/skills/` (`skillFiles` in
+`packages/cli/src/commands/starter.ts`). Not a component: a skill provides no capability and runs
+nothing, and every project needs it from the first minute. A project made by an older CLI copies a
+newer skill by hand. The first one is `pikit-component` (the steps above, executable by an agent);
+"add a dashboard view" and "write an extension" come with `admin-dashboard` and `agent.extension`.

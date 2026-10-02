@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { agent, introduction } from "./starter.ts";
+import { agent, introduction, SKILLS_DIR, skillFiles } from "./starter.ts";
 
 test("the starter prompt says where the agent is reached: by the channels being installed", () => {
   expect(introduction([{ name: "channel-http" }])).toBe("You are a helpful assistant reached over an HTTP API, by programs and the people behind them.");
@@ -17,4 +17,13 @@ test("the starter agent's file carries that prompt, quoted for TypeScript", () =
   expect(file).toContain(`"You are a helpful assistant that people talk to in Telegram chats. Answer briefly and plainly.",`);
   expect(file).toContain(`model: "faux/echo"`);
   expect(file).not.toContain("HTTP API");
+});
+
+test("the kit's skills for AI agents are what pikit new copies, by their path in the project", () => {
+  const skills = skillFiles();
+
+  expect(skills.map((skill) => skill.path)).toContain(`${SKILLS_DIR}/pikit-component/SKILL.md`);
+  const component = skills.find((skill) => skill.path.endsWith("pikit-component/SKILL.md"));
+  expect(component?.text).toStartWith("---\nname: pikit-component\n");
+  expect(skillFiles("/nonexistent")).toEqual([]);
 });

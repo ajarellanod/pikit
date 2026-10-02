@@ -78,6 +78,8 @@ test.skipIf(!E2E)(
     expect(manifest.components["storage-sqlite"].installedFor).toBeUndefined();
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
+    // The skills for the user's AI agent come with every project.
+    expect(readFileSync(join(project, ".agents", "skills", "pikit-component", "SKILL.md"), "utf8")).toContain("name: pikit-component");
   },
   TIMEOUT,
 );

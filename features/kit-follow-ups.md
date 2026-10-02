@@ -44,8 +44,10 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   view, a feature from its design note); a conformance suite for every contract (the execution
   environment and the tool shape still lack one in `@pikit/contracts`); each ⭐ feature note as a
   build guide (contract, Pi pieces, guarantees, tests); Git registries to share what users build.
-- **When:** right after the base dashboard; the skills together with it (adding a view is the
-  first one).
+- **Where it stands:** the first skill, `pikit-component` (`.agents/skills/`), is written and
+  `pikit new` copies it into every project; the contracts still without a suite are listed in
+  [building components](building-components.md).
+- **When:** the other skills with what they teach (adding a view with the dashboard).
 
 ## Upstream contributions (pending the owner's decision)
 - **Chord's context loses a foreign parent's `abortSignal`.**
