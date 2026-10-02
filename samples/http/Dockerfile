@@ -20,7 +20,6 @@ COPY scripts/require-bun.ts scripts/
 COPY packages/core/package.json packages/core/
 COPY packages/contracts/package.json packages/contracts/
 COPY packages/pi-adapter/package.json packages/pi-adapter/
-COPY packages/pi-extension-shim/package.json packages/pi-extension-shim/
 RUN bun install --frozen-lockfile
 
 COPY packages packages

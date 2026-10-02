@@ -14,12 +14,13 @@ that conversation.
 ## How it fits pikit
 - Commands are the channel's today: `channel-telegram` handles its own (`/new` resets), and
   `packages/contracts/src/inbound.ts` keeps commands out of `admitInbound`.
-- Extension commands are registered per conversation, when it opens (`AgentDefinition.extensions`),
-  so a channel cannot know them in advance: it asks the runtime to run a command in a conversation.
+- Extension commands are registered per conversation, when it opens, so a channel cannot know them
+  in advance: it asks the runtime to run a command in a conversation.
   That is a new method or capability on the `agent.runtime` side (a contract change, suite first).
 - Platforms that list commands (Telegram `setMyCommands`, Slack and Discord slash commands) are
   told the names by the channel's `configure` step.
-- Absent: a command from an extension stays tier C (a warning when it loads).
+- Absent: no extension registers commands. Running Pi coding-agent extensions was dropped with the
+  move to pi-durable; pi-durable's own extensions will replace it.
 
 ## Pi first
 Pi's `registerCommand` defines the commands and their handlers; `/skill:name` loads a skill. pikit

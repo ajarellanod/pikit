@@ -11,7 +11,6 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type ComponentDefinition, defineApp, silentLogger } from "@pikit/core";
 import { type AgentDefinition } from "@pikit/contracts";
-import type { PiExtension } from "@pikit/pi-adapter";
 import { testComponents } from "@pikit/pi-adapter/testing";
 import channelHttp from "../../../registry/components/channel-http/files/src/pikit/channel-http/index.ts";
 import conversationsFile from "../../../registry/components/conversations-file/files/src/pikit/conversations-file/index.ts";
@@ -33,8 +32,6 @@ export const TOKEN = "sample-test-token-0123456789abcdef";
 export interface SampleOptions {
   /** The agents; the first one is the router's default. */
   agents: AgentDefinition[];
-  /** Pi extensions for the runtime, unmodified. */
-  extensions?: PiExtension[];
   /** Reuse a previous sample's state: a restart. Default: a new temporary directory. */
   dataDir?: string;
   /** Components added after the sample's own (tests that watch the lifecycle, scenario 8's). */
@@ -82,7 +79,7 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
       toolBash,
       storageSqlite,
       submissionsSql,
-      createRuntimePi(options.extensions !== undefined ? { extensions: options.extensions } : {}),
+      createRuntimePi(),
       routerBasic,
       channelHttp,
       createServerBun({ onListening: listened }),

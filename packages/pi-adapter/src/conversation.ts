@@ -37,8 +37,6 @@ import {
   type RunSettlement,
 } from "@pikit/contracts";
 import { detached, toPi } from "./context.ts";
-import type { PiExtension } from "./extensions/api.ts";
-import { type BoundExtensions, loadExtensions } from "./extensions/host.ts";
 import { hasRequest, inboundMessage, inInbox, LANE, queuedRequest, recordWithdrawn, requestsBefore, withdrawnWith } from "./inbound.ts";
 import { settlementOf, toResult } from "./result.ts";
 import { sessionState } from "./state.ts";
@@ -78,8 +76,6 @@ export interface OpenOptions {
   models: Models;
   host: ConversationHost;
   onHarness?: HarnessHook | undefined;
-  /** Pi extensions, loaded for this conversation as Pi loads them for a session. */
-  extensions?: readonly PiExtension[] | undefined;
 }
 
 /** What `admit` did, and for a run it started, how the caller lets that run report its end. */
@@ -100,7 +96,6 @@ export class PiConversation {
   /** One per run being driven: resolved once its end is handled, or the conversation closed (`runsEnded`). */
   private readonly ending = new Map<Promise<void>, () => void>();
   private closed = false;
-  private extensions: BoundExtensions | undefined;
 
   private constructor(
     readonly ref: ConversationRef,
@@ -115,13 +110,8 @@ export class PiConversation {
   static async open(options: OpenOptions, ctx: AppContext): Promise<PiConversation> {
     const { ref, session, agent, models, host } = options;
     const pi = toPi(ctx);
-    // Extensions load first: their tools and providers belong in the harness from the start.
-    const loaded =
-      options.extensions !== undefined && options.extensions.length > 0
-        ? await loadExtensions(options.extensions, { models, logger: ctx.logger })
-        : undefined;
     const state = sessionState(session, agent.state);
-    const source = { agent, models, tool: options.tool, extensionTools: loaded?.tools ?? [] };
+    const source = { agent, models, tool: options.tool };
     const turns = new Turns(source, ref, state, ctx.logger);
     const { harness, open } = await AgentHarness.create<undefined>(
       {
@@ -139,7 +129,6 @@ export class PiConversation {
       const lane = await harness.lane(LANE, pi);
       const conversation = new PiConversation(ref, session, harness, lane, host, state);
       if (agent.prepare !== undefined) {
-        // Registered before the extensions bind, so their `before_agent_start` sees the prepared prompt.
         harness.hooks.on("before_run", async (_event, hookCtx) => {
           await turns.prepareRun(harness, lane, hookCtx).catch((error: unknown) => {
             ctx.logger.error("preparing a run failed", { conversation: ref.key, error: String(error) });
@@ -148,22 +137,8 @@ export class PiConversation {
         });
       }
       const interrupted = open.find((operation) => operation.lane === LANE);
-      // Pi runs `before_run` only when a run starts: a resumed run is prepared here (see turns.ts),
-      // before the extensions bind, so they start from the tools it was prepared with.
+      // Pi runs `before_run` only when a run starts: a resumed run is prepared here (see turns.ts).
       if (interrupted?.kind === "run" && agent.prepare !== undefined) await turns.prepareRun(harness, lane, pi);
-      // Bound before any run is resumed, so a resumed run is seen by the extensions too.
-      conversation.extensions = await loaded?.bind(
-        {
-          harness,
-          lane,
-          cwd: session.metadata.cwd ?? "/",
-          get systemPrompt() {
-            return turns.systemPrompt;
-          },
-          abort: () => host.serial(() => conversation.abort(host.events)),
-        },
-        pi,
-      );
       if (interrupted !== undefined) conversation.resumeOpen(interrupted.operationId, interrupted.kind === "run", ctx);
       // A message a dead worker queued and never started (it died between `steer` and `accept`).
       else await conversation.reconcile(ctx);
@@ -268,8 +243,7 @@ export class PiConversation {
    * the queued messages out of the inbox; they are recorded as withdrawn (gap 4).
    */
   async abort(ctx: AppContext): Promise<void> {
-    // An extension's `ctx.abort()` can reach the line after the conversation closed (host.ts): a
-    // closed conversation drives no run, so there is nothing to stop.
+    // A closed conversation drives no run, so there is nothing to stop.
     if (this.closed) return;
     const pi = toPi(ctx);
     const aborted = await this.lane.abort(pi);
@@ -366,7 +340,6 @@ export class PiConversation {
     this.closed = true;
     for (const resolve of this.ending.values()) resolve();
     this.ending.clear();
-    await this.extensions?.close(toPi(ctx));
     await this.harness.close(toPi(ctx));
   }
 

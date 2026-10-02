@@ -8,7 +8,6 @@ import type { AgentHarnessTool, AgentMessage, Context, ExecutionEnv, SessionMeta
 import type { CredentialStore, Provider, Usage } from "@earendil-works/pi-ai";
 import type { Context as PikitContext } from "@pikit/core";
 import type { ConversationRef } from "@pikit/contracts";
-import type { PiExtension } from "./extensions/api.ts";
 
 /**
  * Any `SessionRepo`: JSONL, memory, SQLite. Their metadata and options differ; the adapter only
@@ -86,10 +85,5 @@ declare module "@pikit/core" {
   interface AppKeyedCapabilities {
     /** One pi-ai model provider per key (its id): `anthropic`, `openai`, `faux` in tests. */
     "model.provider": Provider;
-    /**
-     * One Pi extension factory per key (its name), unmodified (tier A, `extensions/surface.ts`). An
-     * agent loads it only if it names it in `AgentDefinition.extensions`.
-     */
-    "agent.extension": PiExtension;
   }
 }

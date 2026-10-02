@@ -221,7 +221,7 @@ test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each ha
   );
   // The object owns the conversation: everything else, and the router sends every message to the agent.
   expect(config).toContain(
-    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    submissionsSql,\n    sessionsSql,\n    conversationsKv,\n    providerOpenrouter,\n    createRuntimePi({ extensions: [permissionGate] }),\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n  ],",
+    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    submissionsSql,\n    sessionsSql,\n    conversationsKv,\n    providerOpenrouter,\n    runtimePi,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n  ],",
   );
   expect(config).toContain('"router-basic": { defaultAgent: "assistant" },');
   expect(config).not.toContain("deploymentCloudflare");
@@ -434,22 +434,14 @@ test("doctor fails when an agent names a tool no installed component provides", 
   expect(broken.err).toContain('agent "soporte" names the tool "shell", which no installed component provides (agent.tool)');
 });
 
-test("doctor fails on a Pi extension importing what the shim lacks, and notes what pikit does not provide", async () => {
+test("doctor fails when the project's own code imports Pi: only @pikit/pi-adapter does (S1)", async () => {
   const dir = agentProject(["bash"]);
-  const alias = '"@earendil-works/pi-coding-agent"';
-  writeFileSync(
-    join(dir, "src/extensions/tui.ts"),
-    `import type { ExtensionAPI } from ${alias};\n\nexport default function (pi: ExtensionAPI) {\n  pi.on("input", (_event, ctx) => ctx.ui.custom(() => undefined));\n}\n`,
-  );
-  const noted = await runCli(["doctor"], dir);
-  expect(noted.out).toContain('src/extensions/tui.ts uses what pikit does not provide to Pi extensions; it does nothing or fails when called (runtime-pi\'s README, "Pi extensions"): pi.on("input"), ctx.ui.custom');
-  expect(noted.out).toContain("pikit doctor: green");
-  expect(noted.code).toBe(0);
-
-  writeFileSync(join(dir, "src/extensions/header.ts"), `import { VERSION, type ExtensionAPI } from ${alias};\n\nexport default (pi: ExtensionAPI) => void VERSION;\n`);
+  // Built, so this file does not import Pi itself in the boundaries' eyes.
+  const pi = '"@earendil-works/pi-ai"';
+  writeFileSync(join(dir, "src/extensions/pi.ts"), `import type { Models } from ${pi};\n\nexport type M = Models;\n`);
   const broken = await runCli(["doctor"], dir);
   expect(broken.code).toBe(1);
-  expect(broken.err).toContain("src/extensions/header.ts imports `VERSION` from @earendil-works/pi-coding-agent, which pikit does not provide (runtime-pi's README, \"Pi extensions\")");
+  expect(broken.err).toContain('src/extensions/pi.ts imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi (S1)');
 });
 
 test("remove refuses to take a tool an agent names; with --force it removes it, and doctor reports the name", async () => {

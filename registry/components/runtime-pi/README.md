@@ -9,7 +9,6 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
   - `model.provider`: the providers your agents name as `provider/modelId`;
   - `agent.tool`: the installed tools (`tool-read`, `tool-bash`…) that your agents name in their
     `tools`;
-  - `agent.extension`: the installed Pi extensions that your agents name in their `extensions`;
   - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth
     tokens). pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read
     only their environment variables (`ANTHROPIC_API_KEY`);
@@ -19,7 +18,7 @@ The agent runtime: Pi runs your agents, and this component plugs it into the app
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes.
 
   It refuses to start without an agent, when an agent names a model that no provider has, when an
-  agent names a tool or an extension that no component provides, or when an agent's provider has no credentials at
+  agent names a tool that no component provides, or when an agent's provider has no credentials at
   all. That last check makes no network call and
   refreshes nothing: it only asks whether a credential is stored or an environment variable is
   set.
@@ -135,55 +134,8 @@ knows which conversation had one: it waits for its next message, as on a server.
 
 ## Pi extensions
 
-A Pi extension that uses only what pikit promises (tier A, listed in @pikit/pi-adapter's
-`extensions/surface.ts`: tool policy, the run's lifecycle and notifications, its own tools) runs
-unmodified. Its terminal UI is inert: `ctx.hasUI` is `false`, and `ctx.ui.*` does nothing. `pikit doctor` fails on an import pikit does not provide,
-and notes anything else an extension uses that never fires or does nothing here.
-
-An agent names the extensions it uses, as it names its tools. A component of yours installs each
-one under its name, as `agent.extension`:
-
-```ts
-// src/extensions/permission-gate.ts
-import { defineComponent } from "@pikit/core";
-import permissionGate from "../../extensions/permission-gate.ts";
-
-export default defineComponent({
-  name: "permission-gate",
-  setup(pikit) {
-    pikit.provideKeyed("agent.extension", "permission-gate", permissionGate);
-  },
-});
-```
-
-```ts
-// src/agents/coder/agent.ts
-import { defineAgent } from "@pikit/contracts";
-
-export default defineAgent({ name: "coder", model: "anthropic/claude-sonnet", tools: ["bash"], extensions: ["permission-gate"] });
-```
-
-Only the conversations of `coder` load it; an agent that does not name it never sees it.
-
-An extension for every agent goes where you compose the app instead:
-
-```ts
-import { createRuntimePi } from "./src/pikit/runtime-pi";
-import permissionGate from "./extensions/permission-gate.ts";
-
-const runtimePi = createRuntimePi({ extensions: [permissionGate] });
-```
-
-They import `@earendil-works/pi-coding-agent`. Your project installs `@pikit/pi-extension-shim`
-under that name, so the import resolves without the coding agent itself:
-
-```json
-"@earendil-works/pi-coding-agent": "npm:@pikit/pi-extension-shim@…"
-```
-
-Each conversation loads the extensions when it opens: those given to `createRuntimePi` first, then
-the ones its agent names, in that order, each once. What pikit supports is listed in
-@pikit/pi-adapter's `extensions/surface.ts`; anything else logs a warning and does nothing.
+Not supported. Running unmodified Pi coding-agent extensions was dropped with the move to
+`@earendil-works/pi-durable`, whose own extensions will replace it.
 
 ## Your agents
 
@@ -215,8 +167,7 @@ of your own. Installing `tool-bash` gives no agent a shell until one of them nam
 A tool of your own that more than one agent names is a component: `toolComponent` from
 `@pikit/pi-adapter/tools`, with its `replay` (`"safe"` runs it again when a run resumes after a crash;
 `"never"` tells the model it was interrupted), or a `defineComponent` providing `agent.tool` when it
-needs a capability (a secret, `execution`). Pi's `defineTool` belongs inside a Pi extension: the
-tools an extension registers are always `"never"`, and `pikit doctor` notes them. `toolComponent` is a
+needs a capability (a secret, `execution`). `toolComponent` is a
 bridge: when the adapter moves to Pi's durable runtime, a tool is Pi's own object, with its `replay`
 inside (`features/completed/tool-component.md`, "Migration").
 

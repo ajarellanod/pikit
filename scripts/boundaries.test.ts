@@ -137,10 +137,11 @@ test("a Node builtin without its scheme, and a relative import out of the packag
   ]);
 });
 
-test("Pi's unmodified example extensions may import the extension alias; nothing else in the adapter may", () => {
-  const alias = `import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";\n`;
-  const root = packages({ "pi-adapter": adapter({ "src/extensions/pi-examples/hello.ts": alias, "src/extensions/host.ts": alias }) });
-  expect(checkBoundaries(root)).toEqual([
-    `packages/pi-adapter/src/extensions/host.ts imports "@earendil-works/pi-coding-agent", which is not a dependency of @pikit/pi-adapter`,
-  ]);
+test("an allowed import is allowed only where ALLOWED says: the starter may import the contracts; nothing else in the CLI may", () => {
+  const contracts = `import { defineAgent } from "@pikit/contracts";\n`;
+  const cli = {
+    json: { name: "@pikit/cli", dependencies: { "@pikit/core": "workspace:*" } },
+    files: { "src/commands/starter.ts": contracts, "src/commands/new.ts": contracts },
+  };
+  expect(checkBoundaries(packages({ cli }))).toEqual([`packages/cli/src/commands/new.ts imports "@pikit/contracts", which is not a dependency of @pikit/cli`]);
 });

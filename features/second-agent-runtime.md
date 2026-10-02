@@ -14,7 +14,7 @@ Another agent loop (another SDK, a hosted agent) behind the same channels, routi
 - A `runtime-*` component that provides `agent.runtime` and passes its conformance suite
   (`createAgentRuntimeConformance`, `@pikit/contracts/testing`): `dispatch` returning an admission,
   `agent.settled` / `agent.failed`, `resume()`.
-- What does not carry over: Pi extensions (`agent.extension`), Pi's tools and `replay`, `prepare`
+- What does not carry over: Pi's tools and `replay`, `prepare`
   applied through Pi's hooks, Pi sessions as the conversation's state. Its `doctor` must say which
   parts of an `AgentDefinition` it cannot honour.
 - Absent: `runtime-pi`.

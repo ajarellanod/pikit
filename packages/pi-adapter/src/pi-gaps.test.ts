@@ -145,8 +145,7 @@ describe("Pi gaps (pi-agent-core 0.99.0)", () => {
 
   test('tools: a tool\'s executionMode "sequential" is ignored; its calls overlap', async () => {
     // Pi's `agent-loop` runs a batch one call at a time when a tool of it is sequential; the harness
-    // reads only its own `toolExecution` ("parallel" by default). The extension host holds such calls
-    // itself (`extensions/host.ts`, `SequentialCalls`).
+    // reads only its own `toolExecution` ("parallel" by default).
     let running = 0;
     let most = 0;
     const alone: ReturnType<typeof holdTool> = {

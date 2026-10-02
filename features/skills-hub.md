@@ -28,7 +28,7 @@ format. pikit must not invent a skill package format: it reads Pi packages and a
 and adds only the copy into the project as owned, recorded source.
 
 ## Open questions
-- Install from Pi packages directly (their skills, and their extensions as `agent.extension`), or
-  only from pikit registries?
+- Install from Pi packages directly (their skills; their extensions only once pikit adopts
+  pi-durable's, since running Pi coding-agent extensions was dropped), or only from pikit registries?
 - Trust: pinned commits only, or signatures?
 - Updating a skill the agent has since improved: the same three-way merge as components (P6).

@@ -35,12 +35,6 @@ export const KERNEL_DEPENDENCIES: readonly string[] = ["typebox"];
 /** A specifier some files may import beyond their dependencies, and why. */
 export const ALLOWED: readonly { dir: string; files: string; specifier: string; why: string }[] = [
   {
-    dir: "pi-adapter",
-    files: "src/extensions/pi-examples/",
-    specifier: "@earendil-works/pi-coding-agent",
-    why: "Pi's example extensions, unmodified: a project aliases that name to @pikit/pi-extension-shim",
-  },
-  {
     dir: "cli",
     files: "src/commands/starter.ts",
     specifier: "@pikit/contracts",

@@ -35,18 +35,17 @@ export interface BindOptions {
 }
 
 /**
- * A tool in the shape of Pi's `defineTool` (`@earendil-works/pi-coding-agent`), for `toolComponent`:
+ * A tool in the shape of Pi's `defineTool` (Pi's coding agent), for `toolComponent`:
  * the subset of Pi's `ToolDefinition` a pikit tool needs (`name`, `label`, `description`,
  * `parameters`, `prepareArguments`, `execute`), with the same `execute` order. Pi's (0.99.0) has more,
  * all for its CLI and its extension host: `promptSnippet`, `promptGuidelines`, `constrainedSampling`,
  * `outputSchema`, `exposure`, `namespace`, `annotations`, `defaultActive`, `prepareLoadout`,
  * `executionMode`, `renderShell` and the renderers. Only `execute`'s fifth argument differs: the run's
  * context (its conversation, `context.value(CONVERSATION)`; its cancellation), not Pi's
- * `ExtensionToolContext`, which only an extension's host has. So a Pi tool's object with only those
+ * `ExtensionToolContext`, which only Pi's extension host has. So a Pi tool's object with only those
  * core fields moves in unchanged, written inside `toolComponent`; one typed by Pi's `defineTool`
- * promises that context and does not compile here, and a tool that uses it stays an extension's tool.
- * `executionMode` is not taken: the harness ignores a tool's mode (`pi-gaps.test.ts`, "tools"), and
- * only the extension host holds sequential calls, when a conversation has extensions.
+ * promises that context and does not compile here.
+ * `executionMode` is not taken: the harness ignores a tool's mode (`pi-gaps.test.ts`, "tools").
  *
  * Deleted with `toolComponent` when the adapter moves to Pi's durable runtime, whose `ToolRegistration`
  * is then the one shape of a tool (see `toolComponent`, "Migration").
@@ -80,16 +79,13 @@ export interface ToolDefinition<TParams extends TSchema = TSchema, TDetails = un
  *
  * `replay` is required, because pikit resumes runs after a crash: `"safe"` runs it again
  * (it only reads), `"never"` tells the model it was interrupted (it changes something; derive an
- * idempotency key from the run's conversation and `toolCallId`). A Pi extension's tools are always
- * `"never"`.
+ * idempotency key from the run's conversation and `toolCallId`).
  *
  * A tool that needs a capability (an environment, a secret) or config is a `defineComponent` of its
  * own that `use`s it and provides `agentTool(tool, { replay })`; this one declares none.
  *
  * **Which to use.** A tool of your own for pikit: `toolComponent`, or a `defineComponent` when it needs
- * a capability. Pi's `defineTool` (imported from `@earendil-works/pi-coding-agent`, pikit's shim) only
- * inside a Pi extension: one you bring from Pi unchanged, or one that must also run in Pi's CLI. The
- * shim exports it so those extensions load; it is not pikit's way to write a tool.
+ * a capability.
  *
  * **Migration: a bridge until Pi's durable runtime.** In `@earendil-works/pi-durable` (Pi's Pico
  * runtime: `ToolRegistration`, `packages/durable/src/harness/types.ts` and `docs/pico-v5.md` §7.3 in

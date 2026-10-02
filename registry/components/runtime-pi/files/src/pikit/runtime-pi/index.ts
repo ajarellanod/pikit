@@ -6,7 +6,6 @@
  * - `agent.definition`: your agents, one per name (a project component provides them);
  * - `model.provider`: the model providers your agents name as `provider/modelId`;
  * - `agent.tool`: the installed tools (`tool-*` components) that agents name in their `tools`;
- * - `agent.extension`: the installed Pi extensions that agents name in their `extensions`;
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
  *   read only their environment variables (`ANTHROPIC_API_KEY`).
  * - `agent.submissions`, if installed (`submissions-sql`): where each admitted message and each run's
@@ -32,7 +31,7 @@
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
 import { type AgentRuntime, type AgentSubmissions, type ConversationRef, type Wakeups } from "@pikit/contracts";
-import { createPiRuntime, type HarnessHook, modelsFrom, type PiExtension, type PiRuntime } from "@pikit/pi-adapter";
+import { createPiRuntime, type HarnessHook, modelsFrom, type PiRuntime } from "@pikit/pi-adapter";
 import Type from "typebox";
 import { resumePending, type ResumeOptions } from "./resume.ts";
 
@@ -54,13 +53,6 @@ const Config = Type.Object({
 export const DRIVE = "runtime-pi.drive";
 
 export interface RuntimePiOptions {
-  /**
-   * Pi extensions, unmodified, for every agent: `createRuntimePi({ extensions: [permissionGate] })`
-   * in `pikit.config.ts`. Each conversation loads them when it opens, as Pi loads them per session,
-   * then the extensions its agent names (`agent.extension`). There is no terminal UI: `ctx.hasUI` is
-   * false and `ctx.ui.*` does nothing (runtime-pi's README).
-   */
-  extensions?: readonly PiExtension[];
   /** Attach Pi hooks to each conversation's harness when it opens (tests). */
   onHarness?: HarnessHook;
 }
@@ -75,7 +67,6 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const providers = pikit.useKeyed("model.provider");
       const credentials = pikit.useOptional("model.credentials");
       const tools = pikit.useKeyed("agent.tool");
-      const extensions = pikit.useKeyed("agent.extension");
       // Optional: with it, admitted messages and run ends are recorded, and resumed at start.
       const submissions = pikit.useOptional("agent.submissions");
       // Optional: with it, runs are driven inside wakeups, in slices, instead of in the background.
@@ -132,11 +123,6 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
                 throw new Error(`runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides (install tool-${tool}?)`);
               }
             }
-            for (const extension of agents.get(name)?.extensions ?? []) {
-              if (extensions.get(extension) === undefined) {
-                throw new Error(`runtime-pi: agent "${name}" names the extension "${extension}", which no agent.extension provides`);
-              }
-            }
             const model = agents.get(name)?.model ?? "";
             const slash = model.indexOf("/");
             if (models.getModel(model.slice(0, slash), model.slice(slash + 1)) === undefined) {
@@ -161,11 +147,9 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             sessions: sessions.get(),
             agent: (name) => agents.get(name),
             tool: (name) => tools.get(name),
-            extension: (name) => extensions.get(name),
             models,
             events: background,
             ...(options.onHarness !== undefined && { onHarness: options.onHarness }),
-            ...(options.extensions !== undefined && { extensions: options.extensions }),
             ...(recorded !== undefined && { submissions: recorded }),
             ...(drives !== undefined && { retryAt: drives.retryAt }),
           });

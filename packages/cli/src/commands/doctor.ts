@@ -9,16 +9,12 @@
  * - `bun.lock` matches `package.json`'s dependencies (`lockfile.ts`), read offline: no `bun install`;
  * - the app composes: every required capability has a provider, selections are valid, the config
  *   matches the merged schema (the core's own `create()` decides);
- * - every tool, extension and model provider an agent names statically is an installed key, when a
+ * - every tool and model provider an agent names statically is an installed key, when a
  *   component (the runtime) uses it: the runtime would refuse to start otherwise (`references.ts`);
  * - every variable a component marks required is set in the environment or in `.env` (names
  *   only, never a value);
- * - the Pi import rule (S1): only `@pikit/pi-adapter` imports Pi. Components never import
- *   `@earendil-works/*`; project code only imports `@earendil-works/pi-coding-agent`, the name Pi
- *   extensions use, which resolves to `@pikit/pi-extension-shim`;
- * - a Pi extension of the project imports nothing the shim lacks (`pi-extensions.ts`). What an
- *   extension uses that pikit does not provide (an event it never fires, `ctx.sessionManager`,
- *   terminal UI) is listed as information, one line per extension: it is read by heuristics;
+ * - the Pi import rule (S1): only `@pikit/pi-adapter` imports Pi. Neither components nor project
+ *   code import `@earendil-works/*`;
  * - each installed component's own check, the file its `hooks.doctor` names (`component-doctor.ts`),
  *   once the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
  *   network; a project without one runs none.
@@ -37,9 +33,7 @@ import type { AppDescription, ProbeResult } from "../project/probe.ts";
 import { brokenReferences } from "../project/references.ts";
 import { checkLockfile } from "../project/lockfile.ts";
 import { incompleteOperation, incompleteOperationMessage } from "../project/operation.ts";
-import { checkPiExtensions } from "../project/pi-extensions.ts";
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
-import { EXTENSION_ALIAS } from "../project/vendor.ts";
 import { log } from "../ui.ts";
 import { confinedPath } from "../project/paths.ts";
 
@@ -117,9 +111,6 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
   try {
     const sources = projectSources(projectDir);
     problems.push(...checkPiImports(projectDir, sources));
-    const extensions = checkPiExtensions(projectDir, sources);
-    problems.push(...extensions.problems);
-    notes.push(...extensions.notes);
   } catch (error) {
     problems.push(`the project's source files cannot be checked: ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -174,15 +165,13 @@ function printGraph(description: AppDescription, indent = ""): void {
   log.info(`${indent}Config:\n${JSON.stringify(config, null, 2).replace(/^/gm, `${indent}  `)}`);
 }
 
-/** S1 in the project: `@earendil-works/*` is imported only by the adapter, and by Pi extensions under their alias. */
+/** S1 in the project: `@earendil-works/*` is imported only by the adapter. */
 export function checkPiImports(projectDir: string, sources: readonly string[] = projectSources(projectDir)): string[] {
   const problems: string[] = [];
   for (const file of sources) {
-    const inComponent = file.startsWith("src/pikit/");
     for (const specifier of scanImports(readFileSync(join(projectDir, file), "utf8"))) {
       if (!specifier.startsWith("@earendil-works/")) continue;
-      if (!inComponent && packageName(specifier) === EXTENSION_ALIAS) continue;
-      problems.push(`${file} imports "${specifier}": only @pikit/pi-adapter imports Pi (S1)${inComponent ? "" : `; a Pi extension imports ${EXTENSION_ALIAS}`}`);
+      problems.push(`${file} imports "${specifier}": only @pikit/pi-adapter imports Pi (S1)`);
     }
   }
   return problems;

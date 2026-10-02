@@ -4,7 +4,6 @@
 export { createPiRuntime } from "./runtime.ts";
 export type { PiRuntime, PiRuntimeOptions } from "./runtime.ts";
 export type { HarnessHook } from "./conversation.ts";
-export type { ExtensionAPI, PiExtension } from "./extensions/api.ts";
 export { modelsFrom } from "./models.ts";
 export type { ModelsOptions } from "./models.ts";
 export type { SessionStore, Workspace, WorkspaceProvider } from "./types.ts";
