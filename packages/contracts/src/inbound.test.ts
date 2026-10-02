@@ -42,7 +42,7 @@ function ends() {
   const conversations: ConversationRegistry = {
     async resolve(key, agent) {
       steps.push(`resolve ${key} ${agent}`);
-      return { key, agent, sessionId: `session-of-${key}` };
+      return { key, agent, conversationId: `conversation-of-${key}` };
     },
     get: async () => undefined,
     reset: async () => undefined,
@@ -82,7 +82,7 @@ test("admitInbound: normalized, routed, into its conversation, dispatched as the
   const outcome = await admitInbound(ctx, message, { ...e, key: "test:c1" });
 
   expect(outcome).toMatchObject({ kind: "admitted", admission: { kind: "started", requestId: "m1" }, conversation: { key: "test:c1", agent: "support" } });
-  expect(e.dispatched).toEqual([{ requestId: "m1", prompt: "HELLO", conversation: { key: "test:c1", agent: "support", sessionId: "session-of-test:c1" } }]);
+  expect(e.dispatched).toEqual([{ requestId: "m1", prompt: "HELLO", conversation: { key: "test:c1", agent: "support", conversationId: "conversation-of-test:c1" } }]);
 });
 
 test("admitInbound: a redelivered message is a duplicate, and runs once", async () => {
@@ -143,6 +143,6 @@ test("admitInbound: beforeDispatch sees the conversation after it resolves and b
     },
   });
   expect(e.steps).toEqual(["resolve test:c1 support", "beforeDispatch", "dispatch m1"]);
-  expect(seen?.sessionId).toBe("session-of-test:c1");
+  expect(seen?.conversationId).toBe("conversation-of-test:c1");
 });
 

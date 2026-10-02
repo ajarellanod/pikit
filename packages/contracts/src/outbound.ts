@@ -19,16 +19,16 @@ import type { ConversationRef } from "./agent.ts";
 import type { Feed } from "./feed.ts";
 
 /**
- * The key of a run's answer: `${sessionId}:${requestId}`, where `requestId` is the request that started
+ * The key of a run's answer: `${conversationId}:${requestId}`, where `requestId` is the request that started
  * the run. Stable across retries and restarts, so a run resumed after a crash is not answered twice.
  *
  * One formula for everyone who names that answer: the channel that enqueues it (from `AgentResult`),
- * and whoever waits for its delivery, a tool included (from `CONVERSATION` and Pi's
- * `invocation.operationId`, which is the same request). Its receipts (`OutboundQueue.receipts`) carry
+ * and whoever waits for its delivery, a tool included (from `CONVERSATION` and the request of the run
+ * it runs in). Its receipts (`OutboundQueue.receipts`) carry
  * it as their `idempotencyKey`.
  */
-export function answerKey(conversation: Pick<ConversationRef, "sessionId">, requestId: string): string {
-  return `${conversation.sessionId}:${requestId}`;
+export function answerKey(conversation: Pick<ConversationRef, "conversationId">, requestId: string): string {
+  return `${conversation.conversationId}:${requestId}`;
 }
 
 /** One answer to deliver. */

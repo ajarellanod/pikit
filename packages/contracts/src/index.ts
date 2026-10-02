@@ -8,6 +8,7 @@
 export { defineAgent } from "./agent.ts";
 export type {
   Admission,
+  AgentConversations,
   AgentDefinition,
   AgentMessage,
   AgentPayloads,

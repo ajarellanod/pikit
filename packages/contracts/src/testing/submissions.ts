@@ -42,7 +42,7 @@ export interface SubmissionsConformanceOptions {
 const GROUP = "agent.submissions";
 const expect = expecter(GROUP);
 
-const conversation = (n: number): ConversationRef => ({ key: `test:c${n}`, agent: "support", sessionId: `session-${n}` });
+const conversation = (n: number): ConversationRef => ({ key: `test:c${n}`, agent: "support", conversationId: `conversation-${n}` });
 
 const completed = (on: ConversationRef, requestIds: string[], text = `answer to ${requestIds.join(", ")}`): RunSettlement => ({
   conversation: on,
@@ -74,7 +74,7 @@ export function createSubmissionsConformance(
   });
   const answers = async (f: SubmissionsFixture): Promise<RunSettlement[]> =>
     (await f.submissions().answers.read(undefined, 100)).items.map((item) => item.fact);
-  const pending = (list: readonly PendingConversation[]) => list.map((p) => [p.conversation.sessionId, p.requestIds]);
+  const pending = (list: readonly PendingConversation[]) => list.map((p) => [p.conversation.conversationId, p.requestIds]);
 
   const cases: ConformanceCase[] = [
     submissionsCase("empty records: nothing pending, no answers, and an unknown request is undefined", async (f, c) => {
@@ -91,7 +91,7 @@ export function createSubmissionsConformance(
       await s.admitted(conversation(1), "r3", c);
 
       const list = await s.pending(c);
-      expect(pending(list), [["session-1", ["r1", "r3"]], ["session-2", ["r2"]]], "pending");
+      expect(pending(list), [["conversation-1", ["r1", "r3"]], ["conversation-2", ["r2"]]], "pending");
       const [first, second] = list.map((p) => p.oldestAdmittedAt);
       expect(Number.isFinite(first) && Number.isFinite(second) && (first as number) <= (second as number), true, "oldestAdmittedAt: a time, the oldest first");
       expect(list[0]?.conversation, conversation(1), "the conversation of the first");
@@ -106,7 +106,7 @@ export function createSubmissionsConformance(
 
       await s.settled(completed(conversation(1), ["r1"]), c);
 
-      expect(pending(await s.pending(c)), [["session-2", ["r2"]], ["session-1", ["r3"]]], "pending");
+      expect(pending(await s.pending(c)), [["conversation-2", ["r2"]], ["conversation-1", ["r3"]]], "pending");
     }),
 
     submissionsCase("admitting a request again changes nothing", async (f, c) => {
@@ -115,7 +115,7 @@ export function createSubmissionsConformance(
       await s.admitted(conversation(1), "r2", c);
       await s.admitted(conversation(1), "r1", c);
 
-      expect(pending(await s.pending(c)), [["session-1", ["r1", "r2"]]], "pending");
+      expect(pending(await s.pending(c)), [["conversation-1", ["r1", "r2"]]], "pending");
     }),
 
     submissionsCase("a run settles every request it took, and is appended to answers once", async (f, c) => {
@@ -127,7 +127,7 @@ export function createSubmissionsConformance(
 
       await s.settled(run, c);
 
-      expect(pending(await s.pending(c)), [["session-2", ["r3"]]], "pending after the run");
+      expect(pending(await s.pending(c)), [["conversation-2", ["r3"]]], "pending after the run");
       expect(await s.get(conversation(1), "r2", c), { kind: "settled", conversation: conversation(1), requestId: "r2", run }, "a request the run took");
       expect(await answers(f), [run], "answers");
     }),
@@ -173,17 +173,17 @@ export function createSubmissionsConformance(
       expect(await s.pending(c), [], "pending");
     }),
 
-    submissionsCase("requests are per session: one id in two sessions is two requests", async (f, c) => {
+    submissionsCase("requests are per conversation: one id in two conversations is two requests", async (f, c) => {
       const s = f.submissions();
       await s.admitted(conversation(1), "m1", c);
       await s.admitted(conversation(2), "m1", c);
 
       await s.settled(completed(conversation(1), ["m1"]), c);
 
-      expect((await s.get(conversation(1), "m1", c))?.kind, "settled", "m1 in session-1");
-      expect((await s.get(conversation(2), "m1", c))?.kind, "pending", "m1 in session-2");
+      expect((await s.get(conversation(1), "m1", c))?.kind, "settled", "m1 in conversation-1");
+      expect((await s.get(conversation(2), "m1", c))?.kind, "pending", "m1 in conversation-2");
       await s.settled(completed(conversation(2), ["m1"]), c);
-      expect((await answers(f)).map((a) => a.conversation.sessionId), ["session-1", "session-2"], "answers: one run per session");
+      expect((await answers(f)).map((a) => a.conversation.conversationId), ["conversation-1", "conversation-2"], "answers: one run per conversation");
     }),
 
     submissionsCase("a settlement keeps what the run said: its kind, text and error", async (f, c) => {
@@ -223,7 +223,7 @@ export function createSubmissionsConformance(
       const expected = abandon(conversation(1), ["r1", "r2"], "agent_removed");
       expect(appended, expected, "the settlement appended");
       expect(await answers(f), [expected], "answers");
-      expect(pending(await s.pending(c)), [["session-2", ["r3"]]], "pending");
+      expect(pending(await s.pending(c)), [["conversation-2", ["r3"]]], "pending");
       expect(await s.get(conversation(1), "r2", c), { kind: "settled", conversation: conversation(1), requestId: "r2", run: expected }, "get");
     }),
 
@@ -246,12 +246,12 @@ export function createSubmissionsConformance(
       const s = f.submissions();
       await s.admitted(conversation(1), "r1", c);
 
-      await s.abandoned(conversation(1), ["r1"], "session_missing", c);
-      const again = await s.abandoned(conversation(1), ["r1"], "session_missing", c);
-      const none = await s.abandoned(conversation(2), ["r9"], "session_missing", c);
+      await s.abandoned(conversation(1), ["r1"], "conversation_missing", c);
+      const again = await s.abandoned(conversation(1), ["r1"], "conversation_missing", c);
+      const none = await s.abandoned(conversation(2), ["r9"], "conversation_missing", c);
 
       expect([again, none], [undefined, undefined], "what abandoning again appended");
-      expect(await answers(f), [abandon(conversation(1), ["r1"], "session_missing")], "answers");
+      expect(await answers(f), [abandon(conversation(1), ["r1"], "conversation_missing")], "answers");
       await s.settled(completed(conversation(1), ["r1"]), c);
       expect((await answers(f)).length, 1, "answers after a late run of the abandoned request");
       const status = await s.get(conversation(1), "r1", c);
@@ -271,7 +271,7 @@ export function createSubmissionsConformance(
         await f.restart();
 
         const s = f.submissions();
-        expect(pending(await s.pending(c)), [["session-2", ["r2"]]], "pending");
+        expect(pending(await s.pending(c)), [["conversation-2", ["r2"]]], "pending");
         expect(await s.get(conversation(1), "r1", c), { kind: "settled", conversation: conversation(1), requestId: "r1", run }, "get");
         expect(await answers(f), [run], "answers");
       }),
@@ -306,7 +306,7 @@ export function createSubmissionsConformance(
         await f.prune();
 
         const after = f.submissions();
-        expect(pending(await after.pending(c)), [["session-2", ["r2"]]], "pending");
+        expect(pending(await after.pending(c)), [["conversation-2", ["r2"]]], "pending");
         expect(await after.get(conversation(1), "r1", c), undefined, "a pruned settlement");
         expect(await answers(f), [], "answers");
         await after.settled(completed(conversation(2), ["r2"]), c);
@@ -355,25 +355,25 @@ export interface MemorySubmissions {
  */
 export function createMemorySubmissions(): MemorySubmissions {
   const answers = createMemoryFeed<RunSettlement>();
-  /** By `${sessionId}\0${requestId}`, in admission order (a Map keeps insertion order). */
+  /** By `${conversationId}\0${requestId}`, in admission order (a Map keeps insertion order). */
   const requests = new Map<string, { conversation: ConversationRef; requestId: string; admittedAt: number; run?: RunSettlement }>();
-  /** Runs already settled, by `${sessionId}\0${requestId}` of their starter. */
+  /** Runs already settled, by `${conversationId}\0${requestId}` of their starter. */
   const runs = new Set<string>();
-  const keyOf = (sessionId: string, requestId: string) => `${sessionId}\u0000${requestId}`;
+  const keyOf = (conversationId: string, requestId: string) => `${conversationId}\u0000${requestId}`;
   const copy = <T>(value: T): T => structuredClone(value);
 
   const submissions: AgentSubmissions = {
     async admitted(conversation, requestId, ctx) {
-      const key = keyOf(conversation.sessionId, requestId);
+      const key = keyOf(conversation.conversationId, requestId);
       if (!requests.has(key)) requests.set(key, { conversation: copy(conversation), requestId, admittedAt: ctx.clock.now() });
     },
     async settled(run, ctx) {
-      const runKey = keyOf(run.conversation.sessionId, run.requestId);
+      const runKey = keyOf(run.conversation.conversationId, run.requestId);
       if (runs.has(runKey)) return;
       runs.add(runKey);
       const stored = copy(run);
       for (const requestId of run.requestIds) {
-        const key = keyOf(run.conversation.sessionId, requestId);
+        const key = keyOf(run.conversation.conversationId, requestId);
         const request = requests.get(key);
         if (request === undefined) requests.set(key, { conversation: copy(run.conversation), requestId, admittedAt: ctx.clock.now(), run: stored });
         else if (request.run === undefined) request.run = stored;
@@ -382,14 +382,14 @@ export function createMemorySubmissions(): MemorySubmissions {
     },
     async abandoned(conversation, requestIds, reason) {
       const still = [...new Set(requestIds)].filter((id) => {
-        const request = requests.get(keyOf(conversation.sessionId, id));
+        const request = requests.get(keyOf(conversation.conversationId, id));
         return request !== undefined && request.run === undefined;
       });
       const [first] = still;
       if (first === undefined) return undefined;
       const run: RunSettlement = { conversation: copy(conversation), requestId: first, requestIds: still, kind: "failed", error: { code: "abandoned", message: reason } };
-      runs.add(keyOf(conversation.sessionId, first));
-      for (const id of still) (requests.get(keyOf(conversation.sessionId, id)) as { run?: RunSettlement }).run = run;
+      runs.add(keyOf(conversation.conversationId, first));
+      for (const id of still) (requests.get(keyOf(conversation.conversationId, id)) as { run?: RunSettlement }).run = run;
       answers.append(run);
       return copy(run);
     },
@@ -397,19 +397,19 @@ export function createMemorySubmissions(): MemorySubmissions {
       const bySession = new Map<string, PendingConversation>();
       for (const request of requests.values()) {
         if (request.run !== undefined) continue;
-        const entry = bySession.get(request.conversation.sessionId) ?? {
+        const entry = bySession.get(request.conversation.conversationId) ?? {
           conversation: copy(request.conversation),
           requestIds: [],
           oldestAdmittedAt: request.admittedAt,
         };
         entry.requestIds.push(request.requestId);
         entry.oldestAdmittedAt = Math.min(entry.oldestAdmittedAt, request.admittedAt);
-        bySession.set(request.conversation.sessionId, entry);
+        bySession.set(request.conversation.conversationId, entry);
       }
       return [...bySession.values()];
     },
     async get(conversation, requestId) {
-      const request = requests.get(keyOf(conversation.sessionId, requestId));
+      const request = requests.get(keyOf(conversation.conversationId, requestId));
       if (request === undefined) return undefined;
       const base = { conversation: copy(request.conversation), requestId };
       return request.run === undefined ? { kind: "pending", ...base } : { kind: "settled", ...base, run: copy(request.run) };

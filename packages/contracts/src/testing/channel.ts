@@ -204,7 +204,7 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
   };
 }
 
-/** `conversations.registry` in memory: one session per key. Not under test. */
+/** `conversations.registry` in memory: one runtime conversation per key. Not under test. */
 function fakeConversations(): ComponentDefinition {
   return defineComponent({
     name: "conformance-conversations",
@@ -212,7 +212,7 @@ function fakeConversations(): ComponentDefinition {
       const known = new Map<string, ConversationRef>();
       const registry: ConversationRegistry = {
         async resolve(key, agent) {
-          const conversation = known.get(key) ?? { key, agent, sessionId: `conformance-session-${known.size + 1}` };
+          const conversation = known.get(key) ?? { key, agent, conversationId: `conformance-conversation-${known.size + 1}` };
           known.set(key, conversation);
           return conversation;
         },

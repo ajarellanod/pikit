@@ -1,12 +1,12 @@
 /**
  * `agent.state`: the per-conversation JSON document an agent's `prepare(state)` reads
- * and its tools update. It lives in the conversation's Pi session, so it commits with the session,
- * survives restarts and eviction, and starts fresh after a reset (a new session). The runtime
+ * and its tools update. It lives in the runtime's conversation (a pi-durable document), so it commits with it,
+ * survives restarts and eviction, and starts fresh after a reset (a new conversation). The runtime
  * provides it; pikit keeps no store of its own.
  *
  * A tool reaches the state of the conversation it runs in through its context, not through a
  * global or a capability: the runtime puts the conversation's `AgentState` in the context of every
- * run, and Pi hands that context to each tool call.
+ * run, and pi-durable hands that context to each tool call.
  *
  *   const state = context.value(AGENT_STATE);
  *   await state?.update({ phase: "deploying" }, context);

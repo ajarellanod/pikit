@@ -9,21 +9,14 @@
  *   (K3), so an answer that ended while the channel was stopped, or whose delivery failed, is
  *   delivered when the channel reads again. `get` answers for one request (HTTP's `GET`).
  *
- * Shaped like the submissions of Pi's durable runtime (`packages/durable/docs/pico-v5.md` §6):
- * `pending` is its `queued` and `placed`; a `completed` settlement is `done` with its answer; `failed`,
- * `aborted` and `abandoned` are `unanswered` with a reason. `@earendil-works/pi-durable` 0.99.0 ships
- * them: `Conversation.submit()` deduplicates by request id and returns a `Submission` (`status`,
- * `wait`, `abort`), `Harness.submission()` reacquires one after a reopen, run tasks settle the inputs
- * they answer with `Tx.settleSubmission()`, `Storage.scanSubmissions()` lists them by conversation and
- * status, `Harness.resume()` starts scheduling (the tasks a reopen found running included), and a run
- * the scheduler ends `faulted` or `orphaned` settles its submissions `unanswered`. The adapter cannot
- * use them yet: `pi-agent-core` 0.99.0, whose `AgentHarness` it drives, does not depend on
- * `pi-durable` (`features/pi-durable-migration.md`). When the adapter moves to them, `admitted` and `settled`
- * become Pi's own records and this contract is bridged or deleted; what stays is what one Pi session
- * cannot know: which sessions hold pending work (`pending`, an index across sessions;
- * `scanSubmissions` sees one storage), and the feed channels deliver from.
+ * Shaped like pi-durable's own submissions: `pending` is its `queued` and `placed`; a `completed`
+ * settlement is `done` with its answer; `failed`, `aborted` and `abandoned` are `unanswered` with a
+ * reason. The runtime runs on pi-durable, which keeps them itself (`Conversation.submit()` deduplicates
+ * by request id); this contract bridges them for what one pi-durable storage cannot answer: which
+ * conversations hold pending work across storages (`pending`, an index; a Durable Object per chat has
+ * a storage each), and the feed channels deliver from.
  *
- * The session stays the source of truth. A settlement carries the run's final text, not its
+ * The runtime's conversation stays the source of truth. A settlement carries the run's final text, not its
  * transcript (`messages`) or usage: what a channel needs to deliver it after a restart, kept only as
  * long as the provider's retention.
  *
@@ -60,7 +53,7 @@ export interface PendingConversation {
 export interface AgentSubmissions {
   /**
    * The runtime admitted `requestId` in `conversation`: it is pending until a run settles it. Called
-   * after the message is durable in the session and before `dispatch` resolves, so a channel
+   * after the message is durable in the runtime's conversation and before `dispatch` resolves, so a channel
    * acknowledges its platform only once both hold it. A request already known, pending or settled,
    * is left as it is.
    */
@@ -69,13 +62,13 @@ export interface AgentSubmissions {
    * A run ended: every request in `run.requestIds` is settled by it, and `run` is appended to
    * `answers`, in one commit. A request never admitted is recorded settled all the same (its
    * admission was lost with a crash). Idempotent within the provider's retention: a run already
-   * settled (the same session and `requestId`) changes nothing, and a request keeps the first run
+   * settled (the same conversation and `requestId`) changes nothing, and a request keeps the first run
    * that settled it. Once a settlement is pruned, the provider no longer knows it: settling the same
    * run again appends it to `answers` a second time.
    */
   settled(run: RunSettlement, ctx: AppContext): Promise<void>;
   /**
-   * The runtime gives up on requests nothing can answer (their agent was removed, their session is
+   * The runtime gives up on requests nothing can answer (their agent was removed, their conversation is
    * gone, or they waited too long with no run to take them): those of `requestIds` still pending are
    * settled unanswered, and one settlement is appended to `answers` for them, in one commit: `failed`,
    * `error: { code: "abandoned", message: reason }`, `requestId` the first of them and `requestIds`
@@ -91,11 +84,11 @@ export interface AgentSubmissions {
    */
   pending(ctx: AppContext): Promise<PendingConversation[]>;
   /**
-   * Where `requestId` is in the conversation's session, or `undefined` if it is unknown there (never
-   * admitted, or settled longer ago than the provider keeps settlements). Requests are per session,
-   * as Pi deduplicates them.
+   * Where `requestId` is in the runtime's conversation, or `undefined` if it is unknown there (never
+   * admitted, or settled longer ago than the provider keeps settlements). Requests are per conversation,
+   * as pi-durable deduplicates them.
    */
-  get(conversation: Pick<ConversationRef, "sessionId">, requestId: string, ctx: AppContext): Promise<SubmissionStatus | undefined>;
+  get(conversation: Pick<ConversationRef, "conversationId">, requestId: string, ctx: AppContext): Promise<SubmissionStatus | undefined>;
   /**
    * Every settlement, in the order it was committed (SPEC K3). A channel delivers from it with a
    * cursor of its own; `agent.settled` and `agent.failed` only wake it.

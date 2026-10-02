@@ -23,7 +23,7 @@ export interface AgentStateFixture {
    * from storage, not from its memory. The previous handle is not used again.
    */
   reopen(): Promise<AgentState>;
-  /** The same conversation after a reset: a new session, so the state starts from `initial`. */
+  /** The same conversation after a reset: a new runtime conversation, so the state starts from `initial`. */
   reset(): Promise<AgentState>;
   /** Release what the fixture holds. */
   dispose?(): Promise<void>;
@@ -128,7 +128,7 @@ export function createAgentStateConformance(
 
       expect(await fresh.get(ctx), INITIAL, "get() after the reset");
       await fresh.update({ testsPassed: true }, ctx);
-      expect(await fresh.get(ctx), { ...INITIAL, testsPassed: true }, "get() after an update on the new session");
+      expect(await fresh.get(ctx), { ...INITIAL, testsPassed: true }, "get() after an update on the new conversation");
     }),
   ];
 }
