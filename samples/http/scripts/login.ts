@@ -2,11 +2,14 @@
  * Log in to Anthropic with a Claude Pro/Max subscription, and store the tokens in this sample's
  * credentials file (`.pikit/credentials.json`, mode 0600):
  *
- *   bun samples/http/scripts/login.ts
+ *   bun samples/http/scripts/login.ts [browser | copy_code]
  *
- * It runs pi-ai's own OAuth flow (no terminal UI needed): it prints a URL to open in a browser,
- * waits for the browser to come back to a callback on localhost:53692, and also accepts the final
- * redirect URL pasted here when the browser is on another machine. pi-ai then writes the tokens
+ * It runs pi-ai's own OAuth flow (no terminal UI needed). It first asks the login method, unless
+ * given as the argument (`copy_code` in a container, whose callback a browser cannot reach):
+ * - browser: it prints a URL to open, waits for the browser to come back to a callback on
+ *   localhost:53692, and also accepts the final redirect URL pasted here;
+ * - copy_code: it prints a URL to open, and Anthropic's page shows a code to paste here.
+ * The adapter's `loginInteraction` asks the prompts; a secret is not echoed. pi-ai then writes the tokens
  * through `model.credentials`, which is the same `credentials-file` component the app uses, so the
  * app refreshes them later and writes the new ones back.
  *
@@ -15,8 +18,10 @@
  */
 
 import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import { defineApp, defineComponent } from "@pikit/core";
-import { type AuthInteraction, type CredentialStore, modelsFrom, type Provider } from "@pikit/pi-adapter";
+import { type CredentialStore, modelsFrom, type Provider } from "@pikit/pi-adapter";
+import { type AuthInteraction, type LoginTerminal, loginInteraction } from "@pikit/pi-adapter/durable/credentials";
 import credentialsFile from "../../../registry/components/credentials-file/files/src/pikit/credentials-file/index.ts";
 import providerAnthropic from "../../../registry/components/provider-anthropic/files/src/pikit/provider-anthropic/index.ts";
 import { config } from "../pikit.config.ts";
@@ -38,15 +43,35 @@ const app = await defineApp({
 await app.start();
 if (found?.provider === undefined) throw new Error("login: provider-anthropic is not installed");
 
-const terminal = createInterface({ input: process.stdin, output: process.stdout });
-const interaction: AuthInteraction = {
-  notify(event) {
-    if (event.type === "auth_url") console.info(`\nOpen this URL in a browser to log in:\n\n  ${event.url}\n\n${event.instructions ?? ""}\n`);
-    else if (event.type === "device_code") console.info(`\nGo to ${event.verificationUri} and enter ${event.userCode}\n`);
-    else console.info(event.message);
+// What is typed is echoed through `echo`, muted while a secret is typed.
+let muted = false;
+const echo = new Writable({
+  write(chunk, _encoding, done) {
+    if (!muted) process.stdout.write(chunk);
+    done();
   },
-  // pi-ai cancels this prompt (its signal) when the browser reaches the callback first.
-  prompt: (prompt) => terminal.question(`${prompt.message} `, prompt.signal ? { signal: prompt.signal } : {}),
+});
+const lines = createInterface({ input: process.stdin, output: echo, terminal: process.stdin.isTTY === true });
+const terminal: LoginTerminal = {
+  print: (text) => console.info(text),
+  async ask(question, { secret, signal }) {
+    process.stdout.write(`${question} `);
+    muted = secret;
+    try {
+      // pi-ai cancels a prompt (its signal) when the browser reaches the callback first.
+      return await lines.question("", signal === undefined ? {} : { signal });
+    } finally {
+      if (muted) process.stdout.write("\n");
+      muted = false;
+    }
+  },
+};
+const method = process.argv[2];
+const asked = loginInteraction(terminal);
+const interaction: AuthInteraction = {
+  ...asked,
+  // The method given as the argument answers the login's choice without asking.
+  prompt: async (prompt) => (prompt.type === "select" && prompt.options.some((option) => option.id === method) ? (method as string) : await asked.prompt(prompt)),
 };
 
 let code = 0;
@@ -57,7 +82,7 @@ try {
   console.error("login failed:", error instanceof Error ? error.message : String(error));
   code = 1;
 } finally {
-  terminal.close();
+  lines.close();
   await app.stop();
 }
 process.exit(code);
