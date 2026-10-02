@@ -20,7 +20,6 @@ import { createRuntimePi } from "../../../registry/components/runtime-pi/files/s
 import { createSecretsEnv } from "../../../registry/components/secrets-env/files/src/pikit/secrets-env/index.ts";
 import { createServerBun } from "../../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
 import storageSqlite from "../../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
-import submissionsSql from "../../../registry/components/submissions-sql/files/src/pikit/submissions-sql/index.ts";
 import toolBash from "../../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
 import toolEdit from "../../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
 import toolRead from "../../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
@@ -76,7 +75,6 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
       toolEdit,
       toolBash,
       storageSqlite,
-      submissionsSql,
       createRuntimePi(),
       routerBasic,
       channelHttp,

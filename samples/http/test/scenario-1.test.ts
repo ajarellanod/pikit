@@ -140,7 +140,7 @@ test("reset starts the conversation over on a new runtime conversation and keeps
   // The same message id is new again: it is in the old conversation, not in the new one.
   const again = await sample.post("/v1/messages", { conversationId: "c1", text: "hello again", messageId: "m1" });
 
-  // Sent again, it does not run again: it answers with what the first one got (submissions-sql).
+  // Sent again, it does not run again: it answers with what the first one got (runtime-pi's agent.submissions).
   expect(duplicate).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hello" } });
   expect(reset.status).toBe(200);
   expect(reset.body.runtimeConversationId).not.toBe(reset.body.previousRuntimeConversationId);
@@ -165,7 +165,7 @@ test("a conversation outlives the process: after a restart it is the same conver
   await second.app.start();
 
   // The registry and pi-durable's conversation were on disk: the message is known, and answered with its outcome
-  // (submissions-sql), not run again; the conversation continues.
+  // (runtime-pi's agent.submissions), not run again; the conversation continues.
   expect(await second.post("/v1/messages", { conversationId: "c1", text: "hello", messageId: "m1" })).toEqual({
     status: 200,
     body: { requestId: "m1", text: "answer: hello" },

@@ -19,12 +19,9 @@ function preset(): string[] {
 
 /** Components this sample defines itself, which a project keeps in `src/extensions/`. */
 const PROJECT_LOCAL = new Set(["agents"]);
-/** What `runtime-pi` brings: `agent.submissions`, over the preset's storage. */
-const OFFERED = new Set(["submissions-sql"]);
-
 test("the http preset lists exactly the sample's registry components, and deployment-docker", () => {
   const listed = preset();
-  const sample = definition.components.map((component) => component.name).filter((name) => !PROJECT_LOCAL.has(name) && !OFFERED.has(name));
+  const sample = definition.components.map((component) => component.name).filter((name) => !PROJECT_LOCAL.has(name));
 
   expect([...listed].sort()).toEqual([...sample, "deployment-docker"].sort());
   expect(new Set(listed).size).toBe(listed.length);
