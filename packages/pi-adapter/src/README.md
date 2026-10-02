@@ -136,15 +136,21 @@ pi-durable is the only record of what became of each message; `agent.submissions
 - **Live** settlements come from the commits: the inputs a commit settles are grouped exactly
   (`runsOf`), in the order the commits are observed. **`reconcile(conversation)`** handles what a
   crash left: every request of the conversation in `pikit.admissions` that pi-durable holds settled,
-  grouped at once (`storedRunsOf`), so a batch is never split, and ordered by the commit sequence of
-  each run's answer entry (or last input entry; withdrawn inputs last). It runs at every opening (for
-  each conversation in `pikit.admissions`), on a redelivery of a settled request (`duplicate`), in
-  `recover`, and for `settled`.
-- **Unanswered grouping is a heuristic.** pi-durable records which run took an input only while it is
-  live (`pi.live.run.inputs`), not with its end. Reconciled unanswered inputs are one run when their
-  `pi.user` entries follow each other and they ended the same way; two failed runs with nothing
-  between them are taken for one, whose channel then tells the user once instead of twice. Exact
-  grouping needs pi-durable to keep a run's inputs with its end (docs/upstream, proposal 13).
+  grouped at once (`storedRunsOf`), and ordered by the commit sequence of each run's answer entry
+  (or input entries; withdrawn inputs last). It runs at every opening (for each conversation in
+  `pikit.admissions`), on a redelivery of a settled request (`duplicate`), in `recover`, and for
+  `settled`.
+- **Reconciled runs are grouped exactly.** An answered run's inputs share its answer entry. Any other
+  placed run's inputs share the commit of their `pi.user` entries (`storage.entry`'s `commitSeq`):
+  pi-durable places a run's inputs in the one commit that starts it, and settles exactly those when
+  it ends (pi-facts.test.ts). So a batch is never split, two runs (even adjacent ones that failed the
+  same way) are never merged, and a run has the inputs, hence the key, it had live: one appended
+  before a crash kept its requests in `pikit.admissions` is not appended again, and the runs beside
+  it are logged. Inputs abandoned with the same detail are one run; another withdrawn input is its own.
+- **Steers are not submitted**, and the grouping assumes none: pi-durable places a steer at a tool
+  boundary, in a later commit, and adds it to the run going. When pikit submits them (an operator's
+  UI), it will mark their request ids in `pikit.admissions` at admission and assign each to the run
+  in progress at its placement.
 
 ### Gaps bridged (asserted in `pi-facts.test.ts`)
 
