@@ -411,7 +411,7 @@ test("it refuses to start without PIKIT_HTTP_TOKEN, or with a short one", async 
 });
 
 // ---------------------------------------------------------------------------------------------
-// With agent.submissions (submissions-sql): a message's outcome, later.
+// With agent.submissions (runtime-pi provides it): a message's outcome, later.
 
 const get = (s: Subject, conversationId: string, messageId: string, headers: Record<string, string> = AUTH) =>
   s.call("GET /v1/conversations/:id/messages/:messageId", `/v1/conversations/${conversationId}/messages/${messageId}`, { method: "GET", headers });

@@ -2,7 +2,7 @@
 
 The app's SQL database on Cloudflare: each conversation's Durable Object keeps its records in its own
 SQLite. It provides `storage.sql` (SPEC §4.1, C5), so what uses `storage.sql` on a server
-(`submissions-sql`, `storage-kv-sql`, runtime-pi's pi-durable tables) runs unchanged in the object.
+(`storage-kv-sql`, runtime-pi's pi-durable tables and answers log) runs unchanged in the object.
 
 - **Provides:** `storage.sql`.
 - **Requires:** nothing; it reads the object from `WORKERS_HOST`, which `deployment-cloudflare`'s
@@ -56,5 +56,5 @@ object until the object is deleted: it is your data.
 Copied with the component, they run in your project under `bun test`, over a double of a Durable
 Object's storage (`node:sqlite` in memory): the `storage.sql` conformance suite (values, bound
 parameters, transactions, isolation, data that survives a restart), the lifecycle suite, and what it
-refuses at start. pikit also runs the `storage.sql` suite, and `storage-kv-sql` and `submissions-sql`
+refuses at start. pikit also runs the `storage.sql` suite, `storage-kv-sql`, and runtime-pi's answers feed and reconciliation
 over this component, in workerd on a real SQLite-backed Durable Object (`tests/workerd`).

@@ -13,7 +13,7 @@
  * - Ingress (`poller.ts`, `inbound.ts`): a message is acknowledged to Telegram only once its
  *   conversation durably accepted it; a redelivery is a duplicate request, answered once.
  * - Replies: the chat gets one answer per run, whichever messages the run took.
- *   - With `agent.submissions` (`submissions-sql`) and `storage.kv` (`storage-kv-sql`) installed,
+ *   - With `agent.submissions` (runtime-pi provides it) and `storage.kv` (`storage-kv-sql`) installed,
  *     answers are read from its feed with a cursor of this channel's own (`answers.ts`), and `agent.settled` /
  *     `agent.failed` only wake the reader: an answer that ended while the channel was stopped (a
  *     deploy), or whose delivery failed, is delivered when it reads again. Its cursor moves only past
@@ -136,7 +136,7 @@ export default defineComponent({
         return;
       }
       if (now === undefined) {
-        ctx.logger.warn("channel-telegram: an answer ended while the channel was stopped, and is not sent; install submissions-sql to deliver it when the channel starts again", {
+        ctx.logger.warn("channel-telegram: an answer ended while the channel was stopped, and is not sent; install a runtime that provides agent.submissions (runtime-pi) to deliver it when the channel starts again", {
           conversation: result.conversation.key,
           run: result.requestId,
         });
@@ -154,7 +154,7 @@ export default defineComponent({
         return;
       }
       await deliver(result, now.bots, now.queue).catch((error: unknown) =>
-        now.background.logger.error("channel-telegram: an answer could not be stored for delivery, and is not sent; install submissions-sql to try it again", {
+        now.background.logger.error("channel-telegram: an answer could not be stored for delivery, and is not sent; install a runtime that provides agent.submissions (runtime-pi) to try it again", {
           conversation: result.conversation.key,
           run: result.requestId,
           error: String(error),

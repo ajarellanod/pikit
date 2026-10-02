@@ -69,7 +69,7 @@ You never look up a user id, set a webhook, open a port or buy a domain.
     sending is not sent again, but the answer is in the conversation.
 - **Answers that end while the channel is stopped.** A deploy stops the channel before the runtime,
   so a long answer can end in between.
-  - With `submissions-sql` installed (`pikit add runtime-pi` offers it, with `storage-sqlite`) and
+  - With `agent.submissions` (runtime-pi provides it) and
     `storage-kv-sql` (`pikit add channel-telegram` offers it), the channel reads every run's outcome
     from its `answers` feed, from a cursor it keeps in `storage.kv` (the key `answers-cursor` of its
     namespace, `channel-telegram`): when it starts, whenever a run ends, and
@@ -80,8 +80,8 @@ You never look up a user id, set a webhook, open a port or buy a domain.
     past an answer not delivered, so other chats go on for at most 200 answers past a stuck one.
     With the outbox, an answer read twice after a crash is stored once; without it, it may be sent
     twice (one sent just before a crash, or those other chats got past a stuck one). The first time
-    the channel reads the feed it starts at its end: installing it in a project that already had
-    `submissions-sql` does not send old answers again.
+    the channel reads the feed it starts at its end: installing it in a project whose runtime
+    already logged answers does not send them again.
   - Without either of them, answers come from the runtime's events only: one that ends while the
     channel is stopped is not sent, and a warning says so.
 

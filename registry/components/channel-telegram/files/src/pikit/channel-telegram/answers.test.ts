@@ -155,7 +155,7 @@ test("when storage fails, the reader backs off and tries again", async () => {
 test("a cursor opened for the first time starts at the feed's end; one opened on an empty feed starts at its first answer", async () => {
   const upgraded = createMemoryKeyValueStorage().namespace("channel-telegram");
   const fresh = createMemoryKeyValueStorage().namespace("channel-telegram");
-  // A project that already had submissions-sql: its answers were delivered by events.
+  // A project whose feed already held answers: they were delivered by events.
   const old = createMemoryFeed<RunSettlement>();
   for (let i = 0; i < 520; i++) old.append(answer("telegram:1", `old-${i}`));
   const cursors = await openCursors(upgraded, old.feed);
