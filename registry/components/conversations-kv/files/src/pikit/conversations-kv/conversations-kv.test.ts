@@ -285,33 +285,3 @@ test("two processes resetting one key at once: both succeed, the last write wins
   await a.app.stop();
   await b.app.stop();
 });
-
-test("a pointer written before the move to pi-durable is none: its conversation starts anew, transparently, logged once", async () => {
-  const r = records();
-  // A Pi 0.99 pointer: it names a session, which the runtime no longer has.
-  await r.kv.namespace(NAMESPACE).set("http:c1", { agent: "assistant", sessionId: "0199-legacy", previousSessionIds: [], createdAt: 1, updatedAt: 1 });
-  const logged: string[] = [];
-  const logger = { ...silentLogger, info: (message: string) => void logged.push(message) };
-  let registry: ConversationRegistry | undefined;
-  const reader = defineComponent({
-    name: "registry-reader",
-    setup(pikit) {
-      const handle = pikit.use("conversations.registry");
-      return { start: () => void (registry = handle.get()) };
-    },
-  });
-  const app = await defineApp({ components: [kvProvider(r.kv), r.conversations, conversationsKv, reader], logger }).create();
-  await app.start();
-  if (registry === undefined) throw new Error("conversations.registry was not resolved");
-  const ctx = app.context();
-
-  expect(await registry.get("http:c1", ctx)).toBeUndefined();
-  expect(await registry.reset("http:c1", ctx)).toBeUndefined();
-  const fresh = await registry.resolve("http:c1", "assistant", ctx);
-  expect(await registry.resolve("http:c1", "assistant", ctx)).toEqual(fresh);
-
-  expect(fresh).toEqual({ key: "http:c1", agent: "assistant", conversationId: "c1" });
-  expect(logged.filter((message) => message.includes("starts a new one"))).toHaveLength(1);
-  expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({ conversationId: "c1", previousConversationIds: [] });
-  await app.stop();
-});

@@ -88,7 +88,7 @@ test("the file records each pointer and the conversations a conversation was in 
 
   const file = JSON.parse(readFileSync(r.path, "utf8"));
 
-  expect(file.version).toBe(2);
+  expect(file.version).toBe(1);
   expect(file.conversations["http:c1"]).toMatchObject({
     agent: "assistant",
     conversationId: reset?.newConversationId,
@@ -112,7 +112,7 @@ test("a key named __proto__ is a key like any other, also after a restart", asyn
 });
 
 test("it refuses to start over a file that is not a registry", async () => {
-  for (const content of ["{ not json", JSON.stringify({ version: 3, conversations: {} }), JSON.stringify({ version: 2, conversations: { k: { agent: "a" } } })]) {
+  for (const content of ["{ not json", JSON.stringify({ version: 2, conversations: {} }), JSON.stringify({ version: 1, conversations: { k: { agent: "a" } } })]) {
     const r = records();
     const app = await defineApp({
       components: [r.conversations, conversationsFile],
@@ -158,35 +158,4 @@ test("the registry is refused while the app is not running", async () => {
 
   await expect(registry.get("http:c1", app.context())).rejects.toThrow("while the app is not running");
   await expect(registry.resolve("http:c1", "assistant", app.context())).rejects.toThrow("while the app is not running");
-});
-
-test("a registry written before the move to pi-durable starts each conversation anew, transparently, logged once", async () => {
-  const r = records();
-  // Version 1: its pointers name Pi 0.99 sessions, which the runtime no longer has.
-  const old = { agent: "assistant", sessionId: "0199-legacy", previousSessionIds: [], createdAt: 1, updatedAt: 1 };
-  await Bun.write(r.path, JSON.stringify({ version: 1, conversations: { "http:c1": old } }));
-  const logged: string[] = [];
-  const logger = { ...silentLogger, info: (message: string) => void logged.push(message) };
-  let registry: ConversationRegistry | undefined;
-  const reader = defineComponent({
-    name: "registry-reader",
-    setup(pikit) {
-      const handle = pikit.use("conversations.registry");
-      return { start: () => void (registry = handle.get()) };
-    },
-  });
-  const app = await defineApp({ components: [r.conversations, conversationsFile, reader], config: { "conversations-file": { path: r.path } }, logger }).create();
-  await app.start();
-  if (registry === undefined) throw new Error("conversations.registry was not resolved");
-  const ctx = app.context();
-
-  expect(await registry.get("http:c1", ctx)).toBeUndefined();
-  const fresh = await registry.resolve("http:c1", "assistant", ctx);
-  expect(await registry.resolve("http:c1", "assistant", ctx)).toEqual(fresh);
-
-  expect(fresh).toEqual({ key: "http:c1", agent: "assistant", conversationId: "c1" });
-  expect(logged.filter((message) => message.includes("starts a new one"))).toHaveLength(1);
-  const file = JSON.parse(readFileSync(r.path, "utf8"));
-  expect(file).toEqual({ version: 2, conversations: { "http:c1": expect.objectContaining({ conversationId: "c1", previousConversationIds: [] }) } });
-  await app.stop();
 });

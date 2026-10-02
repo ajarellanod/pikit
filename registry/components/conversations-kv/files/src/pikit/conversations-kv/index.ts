@@ -8,10 +8,6 @@
  * the pointer, keeping the old conversation and remembering it. No pointer is ever deleted, and
  * nothing here is dropped when a conversation goes idle.
  *
- * A pointer written before pikit moved to pi-durable (it names a Pi 0.99 session id, which the
- * runtime no longer has) counts as none: its conversation starts a new one at its next message,
- * logged once, and the new pointer replaces it. Nothing is migrated.
- *
  * Dependency direction: the registry uses `agent.conversations`, the runtime never uses the registry.
  * So the runtime starts first, and conversations are created only once it runs.
  *
@@ -50,15 +46,12 @@ export const NAMESPACE = "conversations-kv";
 const Pointer = Type.Object({
   agent: Type.String({ minLength: 1 }),
   conversationId: Type.String({ minLength: 1 }),
-  /** Sessions this conversation was in before, oldest first. Kept, never deleted. */
+  /** Conversations this key was in before, oldest first. Kept, never deleted. */
   previousConversationIds: Type.Array(Type.String()),
   createdAt: Type.Number(),
   updatedAt: Type.Number(),
 });
 type Pointer = Static<typeof Pointer>;
-
-/** A pointer of Pi 0.99's time: it names a session. Only recognised, never read. */
-const LegacyPointer = Type.Object({ sessionId: Type.String() });
 
 export default defineComponent({
   name: "conversations-kv",
@@ -93,22 +86,12 @@ export default defineComponent({
     };
     const ref = (key: string, pointer: Pointer): ConversationRef => ({ key, agent: pointer.agent, conversationId: pointer.conversationId });
 
-    /**
-     * The pointer stored at `key`: `undefined` when there is none, `"legacy"` for one of Pi 0.99's time.
-     * A value that is neither fails.
-     */
-    const read = async (from: KeyValueStore, key: string): Promise<Pointer | "legacy" | undefined> => {
+    /** The pointer stored at `key`, `undefined` when there is none. A value that is not a pointer fails. */
+    const current = async (from: KeyValueStore, key: string): Promise<Pointer | undefined> => {
       const value = await from.get(key);
       if (value === undefined || Value.Check(Pointer, value)) return value;
-      if (Value.Check(LegacyPointer, value)) return "legacy";
       const [first] = Value.Errors(Pointer, value);
       throw new Error(`conversations-kv: the value at ${JSON.stringify(key)} is not a conversation pointer (${first?.instancePath || "/"}: ${first?.message})`);
-    };
-
-    /** The pointer at `key`, a legacy one counting as none. */
-    const current = async (from: KeyValueStore, key: string): Promise<Pointer | undefined> => {
-      const found = await read(from, key);
-      return found === "legacy" ? undefined : found;
     };
 
     /** A new, empty conversation in the agent runtime. */
@@ -118,16 +101,10 @@ export default defineComponent({
       resolve: (key, agent, ctx) =>
         inLine(key, async () => {
           const from = running();
-          const found = await read(from, key);
-          if (found !== undefined && found !== "legacy") return ref(key, found);
+          const found = await current(from, key);
+          if (found !== undefined) return ref(key, found);
           const now = ctx.clock.now();
           const pointer: Pointer = { agent, conversationId: await newConversation(ctx), previousConversationIds: [], createdAt: now, updatedAt: now };
-          if (found === "legacy") {
-            // Replaced, not set if absent: the old pointer is there, and names nothing the runtime has.
-            await from.set(key, pointer);
-            ctx.logger.info("conversations-kv: a conversation recorded before the move to pi-durable starts a new one", { conversation: key });
-            return ref(key, pointer);
-          }
           if (await from.setIfAbsent(key, pointer)) return ref(key, pointer);
           // Another process wrote first: its pointer is the conversation, and the conversation created
           // above stays unused. It may have been reset since; either way it is there, as no pointer
