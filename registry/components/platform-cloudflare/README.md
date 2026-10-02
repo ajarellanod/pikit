@@ -32,6 +32,14 @@ object, a handler that rejected, the object unreachable, or `ctx` cancelled firs
 the channel does not acknowledge its platform, which delivers again: delivery is at-least-once, so
 handlers recognise a message they already hold.
 
+`call(key, type, message, ctx)` asks the object for an answer, by its `call` RPC: the object runs
+the handler registered with `actor.inbox`'s `answer(type, handler)` and returns an outcome (the
+JSON answer, or a code and a message), which the Worker turns back into the answer or an
+`ActorCallError` with that code: an RPC keeps only an error's message, so the code travels in the
+outcome. A failed RPC is `unreachable`, a cancelled `ctx` is `cancelled`, a handler's own
+`ActorCallError` keeps its code, and anything else it throws is `failed`. This is how the Worker
+reads a conversation's state (a dashboard), which it cannot read from its storage.
+
 It refuses to start when `env.CONVERSATION` (or the binding you configure) is not a Durable Object
 namespace. Its `actor.inbox` and `wakeups` throw there, saying they belong in the object's App.
 

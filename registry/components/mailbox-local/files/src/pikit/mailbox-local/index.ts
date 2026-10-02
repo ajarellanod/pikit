@@ -18,27 +18,50 @@
  * - **Nothing is queued.** A message lives only in the call: when `send` rejects, the channel does not
  *   acknowledge it, and its platform delivers it again. Delivery is at-least-once, so handlers
  *   recognise a message they already hold.
+ * - **Calls** (`call(key, type, message, ctx)`) reach the handler registered with
+ *   `answer(type, handler)` the same way, and resolve with a JSON copy of its answer; a failure is an
+ *   `ActorCallError` with its code, as on Cloudflare.
  *
  * Targets: `server`. It imports nothing platform-specific, but on Cloudflare the actors live in other
  * objects, and the Cloudflare provider reaches them.
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import type { ActorInboxHandler, JsonValue } from "@pikit/contracts";
+import { type ActorCallHandler, ActorCallError, type ActorInboxHandler, answerCall, callResult, type JsonValue } from "@pikit/contracts";
 
 export default defineComponent({
   name: "mailbox-local",
   setup(pikit) {
     /** The handler of each message type, registered by the actors' components in their start. */
     const registered = new Map<string, ActorInboxHandler>();
+    /** The handler of each call type (`answer`). */
+    const answering = new Map<string, ActorCallHandler>();
     /** While the app runs: the handlers' context, and what `stop` cancels and waits for. */
     let running: { handlers: AppContext; stop: AbortController; inFlight: Set<Promise<void>> } | undefined;
+
+    /** Runs `work` with the handlers' context; `stop` waits for it. */
+    const track = <T>(r: NonNullable<typeof running>, work: () => Promise<T>): Promise<T> => {
+      const handled = Promise.resolve().then(work);
+      // `stop` waits for what is in flight; a settled call leaves the set.
+      const settled = handled.then(
+        () => {},
+        () => {},
+      );
+      r.inFlight.add(settled);
+      void settled.then(() => r.inFlight.delete(settled));
+      return handled;
+    };
 
     pikit.provide("actor.inbox", {
       handle(type, handler) {
         if (typeof type !== "string" || type === "") throw new TypeError("mailbox-local: a message type is a non-empty string, prefixed with the component that handles it");
         if (registered.has(type)) throw new Error(`mailbox-local: the message type "${type}" already has a handler; a type has one handler in an app`);
         registered.set(type, handler);
+      },
+      answer(type, handler) {
+        if (typeof type !== "string" || type === "") throw new TypeError("mailbox-local: a call type is a non-empty string, prefixed with the component that answers it");
+        if (answering.has(type)) throw new Error(`mailbox-local: the call type "${type}" already has a handler; a type has one answer handler in an app`);
+        answering.set(type, handler);
       },
     });
 
@@ -57,13 +80,36 @@ export default defineComponent({
         const copy = copyOf(message, type);
         ctx.abortSignal?.throwIfAborted();
 
-        const { handlers, inFlight } = running;
-        const handled = Promise.resolve().then(() => handler(key, copy, handlers));
-        // `stop` waits for what is in flight; a settled call leaves the set.
-        const settled = handled.catch(() => {});
-        inFlight.add(settled);
-        void settled.then(() => inFlight.delete(settled));
-        return untilCancelled(handled, ctx.abortSignal);
+        const r = running;
+        return untilCancelled(
+          track(r, () => handler(key, copy, r.handlers)),
+          ctx.abortSignal,
+        );
+      },
+
+      async call(key, type, message, ctx) {
+        if (running === undefined) throw new ActorCallError("unreachable", "mailbox-local: actor.mailbox was used while the app is not running; call from start or later");
+        if (typeof key !== "string" || key === "") throw new ActorCallError("invalid", `mailbox-local: the key of a "${type}" call must be a non-empty string`);
+        const handler = answering.get(type);
+        if (handler === undefined) {
+          const known = [...answering.keys()];
+          throw new ActorCallError(
+            "no_handler",
+            `mailbox-local: no actor.inbox answer handler for the call type "${type}" (answered: ${known.length > 0 ? known.join(", ") : "none"}); ` +
+              "install the component that answers it, or check the type the caller names",
+          );
+        }
+        const text = JSON.stringify(message) as string | undefined;
+        if (text === undefined) throw new ActorCallError("invalid", `mailbox-local: a "${type}" call's message must be JSON (not undefined or a function)`);
+        if (ctx.abortSignal?.aborted) throw new ActorCallError("cancelled", `mailbox-local: the "${type}" call was cancelled before it was made`, { cause: ctx.abortSignal.reason });
+        const r = running;
+        const outcome = await untilCancelled(
+          track(r, () => answerCall(handler, key, JSON.parse(text) as JsonValue, r.handlers)),
+          ctx.abortSignal,
+        ).catch((reason: unknown) => {
+          throw new ActorCallError("cancelled", `mailbox-local: the "${type}" call was cancelled before it was answered`, { cause: reason });
+        });
+        return callResult(outcome);
       },
     });
 
@@ -85,6 +131,7 @@ export default defineComponent({
         await untilCancelled(Promise.all(stopping.inFlight).then(() => {}), ctx.abortSignal).catch(() => {});
         // The next app's components register theirs again.
         registered.clear();
+        answering.clear();
       },
     };
   },
@@ -98,9 +145,9 @@ function copyOf(message: JsonValue, type: string): JsonValue {
 }
 
 /** `work`, or a rejection with `signal`'s reason as soon as it is cancelled. `work` goes on either way. */
-function untilCancelled(work: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+function untilCancelled<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (signal === undefined) return work;
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const abort = () => reject(signal.reason);
     if (signal.aborted) return abort();
     signal.addEventListener("abort", abort, { once: true });

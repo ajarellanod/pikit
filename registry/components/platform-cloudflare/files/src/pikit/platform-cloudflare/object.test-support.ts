@@ -14,7 +14,7 @@
  */
 
 import { type App, BACKGROUND_CONTEXT, type Clock, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import type { JsonValue } from "@pikit/contracts";
+import type { ActorCallOutcome, JsonValue } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import type { ConversationNamespace, ObjectStorage } from "./index.ts";
 
@@ -32,6 +32,8 @@ export interface SimulatedObject {
   fired(): number;
   /** The `deliver` RPC: the message arrives as a structured clone, as over an RPC. */
   deliver(type: string, key: string, message: JsonValue): Promise<void>;
+  /** The `call` RPC: the message and the outcome cross as structured clones. */
+  call(type: string, key: string, message: JsonValue): Promise<ActorCallOutcome>;
 }
 
 export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: string; env?: Record<string, unknown> } = {}): SimulatedObject {
@@ -43,6 +45,7 @@ export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: strin
   let generation = 0;
   let onAlarm: (() => Promise<void>) | undefined;
   let onDeliver: ((type: string, key: string, message: JsonValue) => Promise<void>) | undefined;
+  let onCall: ((type: string, key: string, message: JsonValue) => Promise<ActorCallOutcome>) | undefined;
 
   const schedule = () => {
     const mine = ++generation;
@@ -85,6 +88,7 @@ export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: strin
         storage,
         onAlarm: (handler) => void (onAlarm = handler),
         onDeliver: (handler) => void (onDeliver = handler),
+        onCall: (handler) => void (onCall = handler),
       },
     },
     component: defineComponent({
@@ -99,6 +103,10 @@ export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: strin
     async deliver(type, key, message) {
       if (onDeliver === undefined) throw new Error("simulated object: nothing registered onDeliver");
       await onDeliver(type, key, structuredClone(message));
+    },
+    async call(type, key, message) {
+      if (onCall === undefined) throw new Error("simulated object: nothing registered onCall");
+      return structuredClone(await onCall(type, key, structuredClone(message)));
     },
   };
 }
@@ -143,6 +151,7 @@ export function simulatedNamespace(
     idFromName: (name) => ({ name, toString: () => `id:${name}` }),
     get: (id: never) => ({
       deliver: async (type, key, message) => (await open((id as { name: string }).name)).deliver(type, key, message),
+      call: async (type, key, message) => (await open((id as { name: string }).name)).call(type, key, message),
     }),
   };
   env[binding] = namespace;

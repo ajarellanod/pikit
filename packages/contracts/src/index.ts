@@ -35,7 +35,8 @@ export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
 export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
 export type { Feed, FeedItem, FeedPage } from "./feed.ts";
-export type { ActorInbox, ActorInboxHandler, ActorMailbox } from "./actor.ts";
+export type { ActorCallErrorCode, ActorCallHandler, ActorCallOutcome, ActorInbox, ActorInboxHandler, ActorMailbox } from "./actor.ts";
+export { ActorCallError, answerCall, callResult } from "./actor.ts";
 export type { WakeupHandler, Wakeups } from "./wakeups.ts";
 export type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "./submissions.ts";
 export type {

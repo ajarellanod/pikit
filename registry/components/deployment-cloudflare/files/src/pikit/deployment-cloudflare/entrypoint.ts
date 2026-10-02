@@ -9,7 +9,7 @@
  */
 
 import type { AppDefinition } from "@pikit/core";
-import type { JsonValue } from "@pikit/contracts";
+import type { ActorCallOutcome, JsonValue } from "@pikit/contracts";
 import type { WorkersHost } from "@pikit/contracts/cloudflare";
 // @ts-ignore: typed by Workers' runtime types (`wrangler types`) where they are installed; under Bun's
 // types the class below extends an untyped base, and host.ts types what is used of it.
@@ -33,7 +33,7 @@ export function createEntrypoint(object: AppDefinition, worker: AppDefinition | 
 
     /**
      * Built on the first event, not in the constructor: an object that is never asked starts nothing.
-     * `#`-private, so RPC does not expose it: only the three methods below are the object's interface.
+     * `#`-private, so RPC does not expose it: only the methods below are the object's interface.
      */
     #objectHost(): ObjectHost {
       // `ctx` and `env` are DurableObject's; read structurally, so this compiles with or without Workers' types.
@@ -49,6 +49,11 @@ export function createEntrypoint(object: AppDefinition, worker: AppDefinition | 
     /** RPC from `actor.mailbox` on the Worker: resolves once the object's handler holds the message. */
     async deliver(type: string, key: string, message: JsonValue): Promise<void> {
       await this.#objectHost().deliver(type, key, message);
+    }
+
+    /** RPC from `actor.mailbox.call`: the object's answer, or why it has none. */
+    async call(type: string, key: string, message: JsonValue): Promise<ActorCallOutcome> {
+      return await this.#objectHost().call(type, key, message);
     }
 
     async alarm(): Promise<void> {

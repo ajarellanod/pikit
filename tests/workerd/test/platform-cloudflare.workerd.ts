@@ -10,7 +10,8 @@
  * - Then, on that class, the real alarm: `at` and `cancel` set it, `runDurableObjectAlarm` fires it
  *   through the class's `alarm()`, and it survives an eviction; the slice (a handler that waits it out
  *   holds up none of the others), the backoff, a request waiting for its handler; and an object's own
- *   mailbox.
+ *   mailbox. The suite's calls (`call`, answered by `answer`) cross the class's `call` RPC; one more
+ *   test reads an object's state by a call after its eviction.
  *
  * When a test says so, `Date` (the apps' system clock: the tests and the objects share one isolate)
  * runs a day ahead: a request asked for a day later sets a real alarm the runtime does not fire by
@@ -19,8 +20,8 @@
 
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
-import { type AppContext, defineComponent } from "@pikit/core";
-import type { ActorMailbox, JsonValue, WakeupHandler, Wakeups } from "@pikit/contracts";
+import { type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { ActorCallError, type ActorMailbox, type JsonValue, type WakeupHandler, type Wakeups } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { createMailboxConformance, createWakeupsConformance, withWorkersHost } from "@pikit/contracts/testing";
 import { afterEach, expect, it, vi } from "vitest";
@@ -245,6 +246,52 @@ it("in a real alarm, a handler that waits the whole slice does not hold up one t
   await vi.waitFor(() => expect(cutAt).toBeDefined(), { timeout: 5_000 });
   const during = ticks.filter((at) => at < (cutAt as number));
   expect(during.length).toBeGreaterThanOrEqual(5);
+});
+
+it("a call reads what an object keeps, from the Worker's App, after the object was evicted; a refusal keeps its code across the RPC", async () => {
+  // An actor that counts its messages in its own SQL and answers how many it holds: what a dashboard asks.
+  const counter = defineComponent({
+    name: "test-counter",
+    setup(pikit) {
+      const inbox = pikit.use("actor.inbox");
+      return {
+        start(ctx) {
+          const storage = ctx.value(WORKERS_HOST)?.object?.storage as DurableObjectStorage;
+          storage.sql.exec("CREATE TABLE IF NOT EXISTS test_counter (n INTEGER NOT NULL)");
+          inbox.get().handle("test.count", async () => void storage.sql.exec("INSERT INTO test_counter (n) VALUES (1)"));
+          inbox.get().answer("test.how-many", async (key) => {
+            if (key === "nobody") throw new ActorCallError("not_found", "no such conversation");
+            return { key, count: storage.sql.exec("SELECT COUNT(*) AS n FROM test_counter").one().n as number };
+          });
+        },
+      };
+    },
+  });
+  composeObjects([platformCloudflare, counter]);
+  let mailbox: ActorMailbox | undefined;
+  const caller = defineComponent({
+    name: "test-caller",
+    setup(pikit) {
+      const handle = pikit.use("actor.mailbox");
+      return { start: () => void (mailbox = handle.get()) };
+    },
+  });
+  const app = await defineApp({ components: [...withWorkersHost({ env: workerEnv }, [platformCloudflare]), caller], config: WORKER_CONFIG, logger: silentLogger }).create();
+  await app.start();
+  try {
+    const send = mailbox as ActorMailbox;
+    await send.send("conv-counted", "test.count", null, app.context());
+    await send.send("conv-counted", "test.count", null, app.context());
+    // The object goes (no alarm runs in it): its next App starts on the call, over the same SQL.
+    await evictDurableObject(env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.idFromName("conv-counted")));
+    expect(await send.call("conv-counted", "test.how-many", null, app.context())).toEqual({ key: "conv-counted", count: 2 });
+
+    const refused = await send.call("nobody", "test.how-many", null, app.context()).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(ActorCallError);
+    expect([(refused as ActorCallError).code, (refused as ActorCallError).message]).toEqual(["not_found", "no such conversation"]);
+  } finally {
+    await app.stop();
+  }
 });
 
 it("in an object, actor.mailbox delivers to its own key locally and to any other key by RPC to that key's object", async () => {

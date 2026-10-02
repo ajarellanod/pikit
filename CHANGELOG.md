@@ -5,6 +5,7 @@ line names its area.
 
 ## Unreleased
 
+- contracts, mailbox-local, platform-cloudflare, deployment-cloudflare: **breaking.** Actors answer requests: `ActorMailbox.call(key, type, message, ctx)` resolves with the JSON answer of the handler registered with `ActorInbox.answer(type, handler)`, and fails with an `ActorCallError` (`code`: `invalid`, `no_handler`, `cancelled`, `unreachable`, `failed`, or the handler's own). On Cloudflare it is the object's new `call` RPC (`WORKERS_HOST`'s `onCall`); the mailbox suite has 9 call cases, run on both providers and in workerd.
 - registry, runtime-pi, pi-adapter: **breaking.** `submissions-sql` is removed: pi-durable is the one
   record of what became of each message, and **runtime-pi provides `agent.submissions`** from it
   (`get` is pi-durable's submission, `pending` its queued and placed inputs). The `answers` feed is a

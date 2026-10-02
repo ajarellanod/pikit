@@ -45,6 +45,20 @@ return new Response("ok");             // only now acknowledge Telegram
 - **A type has one handler.** Registering it twice throws, naming it. Handlers are dropped at `stop`;
   the next app's components register theirs again in their `start`.
 
+**Calls ask an actor for an answer.** The actor registers `answer(type, handler)`; a caller (a
+dashboard reading a conversation's state) gets what the handler resolved with:
+
+```ts
+inbox.get().answer("memory.recall", async (key, message, ctx) => ({ facts: await recall(key, message) }));
+const answer = await mailbox.get().call(`telegram:${chatId}`, "memory.recall", { about: "travel" }, ctx);
+```
+
+The answer is a JSON copy. A failure is an `ActorCallError` with a `code`: `invalid`, `no_handler`,
+`cancelled` (bound a call with `withAbortSignal(AbortSignal.timeout(ms), ctx)`), the code of an
+`ActorCallError` the handler threw (`not_found`), or `failed`. A call is not a delivery: nothing
+retries it, so a handler that changes state makes the change idempotent. Message and call types are
+apart: a type may have both a `handle` and an `answer` handler.
+
 Handlers are registered, not provided, so this component depends on none of them: a component may
 handle messages and also send them, wake itself with `wakeups`, or use the runtime, with no
 dependency cycle.
@@ -64,6 +78,7 @@ keeps no state.
 
 Copied with the component, they run in your project: the `actor.mailbox` and `actor.inbox`
 conformance suite (the send resolves only with its handler, types, one handler per type, JSON copies,
-rejections, missing handlers, the handler's own context, concurrent sends, a handler that sends), again
+rejections, missing handlers, the handler's own context, concurrent sends, a handler that sends; calls:
+answers as copies, typed refusals, cancellation, calls apart from messages, a handler that calls), again
 with `wakeups` in the app (an actor that wakes itself), the lifecycle suite, what a stop does to
 running handlers, and handlers registered again by the next app.
