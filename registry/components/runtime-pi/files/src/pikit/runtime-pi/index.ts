@@ -33,8 +33,9 @@
  * Delivery: `dispatch` resolves once the message is durable in pi-durable (the point where a channel
  * may acknowledge it); the answer arrives as `agent.settled`, also for a run resumed after a crash, and
  * in `answers`, where a channel that was stopped finds it. Messages that arrive while a run goes are
- * queued and answered together by the next run. At-least-once: a crash can repeat an answer, never
- * lose an accepted message.
+ * queued and answered together by the next run; a steer (`whenBusy: "steer"`) joins the run in
+ * progress after its tool round instead, and a steer to an idle conversation starts a run, as any
+ * message does. At-least-once: a crash can repeat an answer, never lose an accepted message.
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
@@ -123,9 +124,6 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const conversations: AgentConversations = { create: (ctx) => current().createConversation(ctx) };
       pikit.provide("agent.conversations", conversations);
       const submissions: AgentSubmissions = {
-        admitted: (conversation, requestId, ctx) => current().submissions.admitted(conversation, requestId, ctx),
-        settled: (run, ctx) => current().submissions.settled(run, ctx),
-        abandoned: (conversation, requestIds, reason, ctx) => current().submissions.abandoned(conversation, requestIds, reason, ctx),
         pending: (ctx) => current().submissions.pending(ctx),
         get: (conversation, requestId, ctx) => current().submissions.get(conversation, requestId, ctx),
         answers: { read: (after, limit) => current().submissions.answers.read(after, limit) },

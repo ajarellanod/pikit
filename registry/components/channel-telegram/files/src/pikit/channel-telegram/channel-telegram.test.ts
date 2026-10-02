@@ -24,7 +24,7 @@ import {
   type PendingConversation,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createMemoryFeed, createMemoryKeyValueStorage, createMemorySubmissions } from "@pikit/contracts/testing";
+import { createMemoryFeed, createMemoryKeyValueStorage, createMemorySubmissions, type RecordingSubmissions } from "@pikit/contracts/testing";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
 import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";
@@ -76,7 +76,7 @@ const router = defineComponent({
  * Records every dispatch; one run per session at a time; a request seen before is a duplicate. With
  * `submissions`, it records admissions and run ends there, as runtime-pi does.
  */
-function scriptedRuntime(seen: Set<string> = new Set(), submissions?: AgentSubmissions) {
+function scriptedRuntime(seen: Set<string> = new Set(), submissions?: RecordingSubmissions) {
   const dispatched: { requestId: string; key: string; prompt: string }[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
@@ -163,7 +163,7 @@ interface StartOptions {
   seen?: Set<string>;
   queue?: ReturnType<typeof recordingQueue>;
   /** Installs `agent.submissions` (the runtime records there). */
-  submissions?: AgentSubmissions;
+  submissions?: RecordingSubmissions;
   /** Installs `storage.kv`: the channel keeps its cursor there. */
   kv?: KeyValueStorage;
   logger?: Logger;

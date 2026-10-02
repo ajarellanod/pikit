@@ -19,7 +19,9 @@
  *
  * Messages that arrive while a run goes are queued (`Admission` `queued`) and taken together by the
  * next run, which answers them all: its `requestIds` lists them, and only the first has an
- * `agent.started`.
+ * `agent.started`. A steer (`whenBusy: "steer"`) is queued too, but joins the run in progress after
+ * its tool round (the `hold` tool's), which answers it; one that arrives as the run answers gets the
+ * next run, as a follow-up; one to an idle conversation starts a run.
  */
 
 import {
@@ -237,6 +239,50 @@ export function createAgentRuntimeConformance(
       expect((await w.result("r3")).text, "answer: hello", "its answer");
     }),
 
+    runtimeCase("a steer to a busy conversation joins the run in progress after its tool round, and that run answers it", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      await w.dispatch("r1", "hold", conversation);
+      await s.within(s.fixture.hold.started, "the hold tool to start");
+
+      expect(await w.steer("r2", "change course", conversation), { kind: "queued", requestId: "r2" }, "admission of the steer");
+      s.fixture.hold.release();
+
+      const result = await w.result("r1");
+      expect([result.kind, result.text, result.requestIds], ["completed", "answer: change course", ["r1", "r2"]], "the run it joined");
+      await s.quiet();
+      w.none((e) => (e.name === "agent.started" || e.name === "agent.settled" || e.name === "agent.failed") && requestIdOf(e) === "r2", "a run of its own for the steer");
+      expect(await w.steer("r2", "change course", conversation), { kind: "duplicate", requestId: "r2" }, "a redelivered steer");
+    }),
+
+    runtimeCase("a steer that arrives as the run answers gets the next run, as a follow-up", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const end = s.fixture.holdAtEnd();
+      await w.dispatch("r1", "hello", conversation);
+      await s.within(end.reached, "the run to reach its end");
+
+      expect(await w.steer("r2", "one more thing", conversation), { kind: "queued", requestId: "r2" }, "admission");
+      end.release();
+
+      const first = await w.result("r1");
+      expect([first.kind, first.text, first.requestIds], ["completed", "answer: hello", ["r1"]], "result of the run");
+      expect(await w.event("agent.started", (e) => e.requestId === "r2"), { conversation, requestId: "r2", resumed: false }, "agent.started of the next run");
+      const next = await w.result("r2");
+      expect([next.kind, next.text, next.requestIds], ["completed", "answer: one more thing", ["r2"]], "result of the next run");
+    }),
+
+    runtimeCase("a steer to an idle conversation starts a run", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+
+      expect(await w.steer("r1", "hello", conversation), { kind: "started", requestId: "r1" }, "admission");
+
+      expect(await w.event("agent.started", (e) => e.requestId === "r1"), { conversation, requestId: "r1", resumed: false }, "agent.started");
+      const result = await w.result("r1");
+      expect([result.kind, result.text, result.requestIds], ["completed", "answer: hello", ["r1"]], "result");
+    }),
+
     runtimeCase("resume() continues a run a dead worker left open, and agent.settled arrives", async (s) => {
       const { conversation, requestId } = await s.fixture.interrupted();
       const w = await s.worker();
@@ -276,6 +322,8 @@ interface Worker {
   app: App;
   runtime: AgentRuntime;
   dispatch(requestId: string, prompt: string, conversation: ConversationRef, ctx?: AppContext): Promise<Admission>;
+  /** `dispatch` with `whenBusy: "steer"`. */
+  steer(requestId: string, prompt: string, conversation: ConversationRef): Promise<Admission>;
   event<K extends AgentEventName>(name: K, match: (payload: AppEvents[K]) => boolean): Promise<AppEvents[K]>;
   /** The `agent.settled` or `agent.failed` of the run started by `requestId`. */
   result(requestId: string): Promise<Result>;
@@ -360,6 +408,8 @@ function createSubject(fixture: AgentRuntimeFixture, workers: Worker[], timeoutM
         runtime: agentRuntime,
         dispatch: (requestId, prompt, conversation, ctx) =>
           within(agentRuntime.dispatch({ requestId, conversation, prompt }, ctx ?? app.context()), `dispatch(${requestId})`),
+        steer: (requestId, prompt, conversation) =>
+          within(agentRuntime.dispatch({ requestId, conversation, prompt, whenBusy: "steer" }, app.context()), `steer(${requestId})`),
         event: (name, match) => waitFor(() => find(name, match)[0], `${name} matching the case`),
         result: (requestId) =>
           waitFor(

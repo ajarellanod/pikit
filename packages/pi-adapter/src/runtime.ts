@@ -11,9 +11,12 @@
  *   storage; `"root"`, the root conversation first, as in a per-chat Durable Object).
  * - **`dispatch`** submits the prompt as an `input` with the request id: a request id pi-durable already
  *   holds is `duplicate`; an input it queued in the inbox (a run is going) is `queued`; an input it placed
- *   at once is `started`. Every input is a follow-up, and follow-ups are placed all at once
- *   (`followUpMode: "all"`): the messages queued while a run goes start the next run together, whose
- *   `requestIds` lists them all and whose `agent.started` names the first.
+ *   at once is `started`. An input is a follow-up unless the request steers (`whenBusy: "steer"`).
+ *   Follow-ups are placed all at once (`followUpMode: "all"`): the messages queued while a run goes start
+ *   the next run together, whose `requestIds` lists them all and whose `agent.started` names the first.
+ *   Steers are placed after the run's current tool round, all at once (`steeringMode: "all"`), and join
+ *   that run (`pi.live.run.inputs`), which settles them with its other inputs; a run that answers before
+ *   another tool round places them as the next run's inputs.
  * - **Settlements** are read from pi-durable's commits: the inputs of a run settle in one commit, and
  *   are one `AgentResult`. Settled `done` is `agent.settled` (completed), `unanswered` with `aborted` is
  *   `agent.settled` (aborted), any other reason is `agent.failed` with that reason as its code. One
@@ -128,8 +131,7 @@ export interface DurableRuntimeOptions {
 export interface DurableRuntime extends AgentRuntime {
   /**
    * `agent.submissions`, read from pi-durable: `get` and `pending` are its records, `answers` the log of
-   * every run's end. `admitted` does nothing (`dispatch` admits), `settled` reconciles the run's
-   * conversation, `abandoned` is `abandon`'s settlement.
+   * every run's end. `dispatch` admits, a run's end settles, `abandon` gives up.
    */
   readonly submissions: AgentSubmissions;
   /**
@@ -342,8 +344,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       {
         models: options.models,
         registry,
-        // Every input is a follow-up; those queued while a run goes start the next run together. No
-        // input is a steer; were one, it would be taken the same way, all at once.
+        // Follow-ups queued while a run goes start the next run together; steers join the run in
+        // progress together, after its tool round.
         settings: { ...options.settings, steeringMode: "all", followUpMode: "all" },
         ...(env !== undefined && { env }),
         now,
@@ -726,15 +728,6 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   };
 
   const submissions: AgentSubmissions = {
-    // `dispatch` admitted it, in pi-durable and in `AdmissionsDoc`.
-    async admitted() {},
-    async settled(run, ctx) {
-      const id = durableId(run.conversation.conversationId);
-      if (id === undefined) return;
-      const harness = await harnessOf(ctx);
-      await inLine(id, () => reconcile(harness, id));
-    },
-    abandoned: (conversation, requestIds, reason, ctx) => abandonQueued(conversation, requestIds, reason, ctx),
     async pending(ctx) {
       const { harness, storage: stored } = await opened(ctx);
       const chord = toChord(ctx);
@@ -840,7 +833,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           runs.set(key, { ctx: runContext(ctx), announced: admissionAnnounced });
           admitting.set(key, undefined);
           try {
-            const submission = await conversation.submit({ type: "input", content: request.prompt, requestId }, toChord(ctx));
+            const whenBusy = request.whenBusy === "steer" ? ({ whenBusy: "steer" } as const) : {};
+            const submission = await conversation.submit({ type: "input", content: request.prompt, requestId, ...whenBusy }, toChord(ctx));
             const status = admitting.get(key) ?? (await submission.status(toChord(ctx))).status;
             return { kind: status === "queued" ? "queued" : "started", requestId } as const;
           } catch (error) {

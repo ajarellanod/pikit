@@ -150,6 +150,15 @@ export interface AgentRequest {
   requestId: string;
   conversation: ConversationRef;
   prompt: string;
+  /**
+   * What the message does to a conversation with a run going. `followUp` (the default): it waits for
+   * that run to end, and the next run answers it. `steer`: it joins the run in progress after the
+   * run's current tool round (a person correcting course, an operator from the dashboard), and that
+   * run's result answers it with the others it took (`AgentResult.requestIds`); a run that answers
+   * before another tool round leaves it to the next run, as a follow-up. A conversation with no run
+   * going starts one either way.
+   */
+  whenBusy?: "followUp" | "steer";
 }
 
 /** What happened to a message, known as soon as it is durable in the runtime's conversation. */
@@ -157,9 +166,10 @@ export type Admission =
   /** The conversation was idle: a run started, identified by this request. */
   | { kind: "started"; requestId: string }
   /**
-   * The conversation was busy: the message waits in the conversation's inbox. Every message queued while
-   * a run goes is taken together by the next run, which starts once the run in progress ends and answers
-   * them all (its `requestIds`); its `agent.started` names the first of them.
+   * The conversation was busy: the message waits in the conversation's inbox. Every follow-up queued
+   * while a run goes is taken together by the next run, which starts once the run in progress ends and
+   * answers them all (its `requestIds`); its `agent.started` names the first of them. A steer joins the
+   * run in progress at its next tool round instead (`AgentRequest.whenBusy`).
    */
   | { kind: "queued"; requestId: string }
   /** The conversation already has this request: nothing runs. */
@@ -172,9 +182,9 @@ export interface AgentResult {
   requestId: string;
   /**
    * Every request the run took, in order: the one that started it, then the other messages that were
-   * queued with it while the run before it went (they are taken together). The run's answer answers
-   * all of them, so a channel that replies per message replies to each. A message withdrawn by
-   * `abort()` is not among them.
+   * queued with it while the run before it went (they are taken together), and the steers that joined
+   * it. The run's answer answers all of them, so a channel that replies per message replies to each. A
+   * message withdrawn by `abort()` is not among them.
    */
   requestIds: string[];
   kind: "completed" | "aborted" | "failed";
@@ -189,9 +199,10 @@ export interface AgentResult {
 /** The `agent.runtime` capability. */
 export interface AgentRuntime {
   /**
-   * Hand a message to its conversation. Resolves once the message is durable (the ack point for a
-   * channel), not when it is answered. `ctx` bounds this call only: cancelling it never stops a
-   * run. Opening a conversation first continues the runs a dead worker left open.
+   * Hand a message to its conversation, as a follow-up or a steer (`AgentRequest.whenBusy`). Resolves
+   * once the message is durable (the ack point for a channel), not when it is answered. `ctx` bounds
+   * this call only: cancelling it never stops a run. Opening a conversation first continues the runs a
+   * dead worker left open.
    */
   dispatch(request: AgentRequest, ctx: AppContext): Promise<Admission>;
   /** Stop the conversation's active run now. Cooperative: running tools see their signal. */

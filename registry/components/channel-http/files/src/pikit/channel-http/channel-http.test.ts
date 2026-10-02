@@ -18,7 +18,7 @@ import {
   type HttpRoute,
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createMemorySubmissions } from "@pikit/contracts/testing";
+import { createMemorySubmissions, type RecordingSubmissions } from "@pikit/contracts/testing";
 import channelHttp from "./index.ts";
 
 const TOKEN = "test-token-0123456789abcdef";
@@ -68,7 +68,7 @@ const router = defineComponent({
  * An agent runtime double: one run per session at a time; messages to a busy session join it. With
  * `submissions`, it records admissions and run ends there, as runtime-pi does.
  */
-function scriptedRuntime(submissions?: AgentSubmissions) {
+function scriptedRuntime(submissions?: RecordingSubmissions) {
   const dispatched: { requestId: string; key: string; agent: string; prompt: string }[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
@@ -148,7 +148,7 @@ interface Options {
   router?: ReturnType<typeof defineComponent> | null;
   extra?: ReturnType<typeof defineComponent>[];
   /** Installs `agent.submissions`, where the runtime double records. */
-  submissions?: AgentSubmissions;
+  submissions?: RecordingSubmissions;
 }
 
 async function started(options: Options = {}): Promise<Subject> {

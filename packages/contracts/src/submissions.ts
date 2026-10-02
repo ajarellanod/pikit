@@ -1,10 +1,11 @@
 /**
- * `agent.submissions`: what became of each admitted message, across processes.
+ * `agent.submissions`: what became of each admitted message, across processes, read from the runtime.
  *
- * The runtime records a message when it admits it and settles it when the run that took it ends. Two
- * readers need that record and cannot get it from events, which die with their process (SPEC K3):
- * - **the runtime, at start** (`pending`): the conversations holding a message nobody answered yet,
- *   to resume them without waiting for a new message;
+ * The runtime records a message when it admits it and settles it when the run that took it ends; it
+ * is the only writer, and this contract is how the others read it. Two readers need that record and
+ * cannot get it from events, which die with their process (SPEC K3):
+ * - **the runtime's host, at start** (`pending`): the conversations holding a message nobody answered
+ *   yet, to resume them without waiting for a new message;
  * - **the channels** (`answers`): every run's outcome, as a feed read from a cursor of their own
  *   (K3), so an answer that ended while the channel was stopped, or whose delivery failed, is
  *   delivered when the channel reads again. `get` answers for one request (HTTP's `GET`).
@@ -13,15 +14,16 @@
  * settlement is `done` with its answer; `failed`, `aborted` and `abandoned` are `unanswered` with a
  * reason. The runtime provides it (runtime-pi, from pi-durable, which keeps every submission and
  * deduplicates by request id): `pending` and `get` are the runtime's records, and `answers` is a log
- * derived from them, which pi-durable has no feed for.
+ * derived from them, which pi-durable has no feed for. Giving up on messages nothing can answer is the
+ * runtime's own operation (runtime-pi's `abandon`), not this contract's: a settlement is appended to
+ * `answers` like any other, `failed` with `error.code` `abandoned`.
  *
  * The runtime's conversation stays the source of truth. A settlement carries the run's final text, not its
  * transcript (`messages`) or usage: what a channel needs to deliver it after a restart, kept in
  * `answers` only as long as the provider's retention.
  *
- * A provider that is not the runtime (the in-memory double of `@pikit/contracts/testing`) records what
- * the runtime tells it through `admitted`, `settled` and `abandoned`; a runtime that provides it keeps
- * them from its own records, and those calls are hints it may answer from them.
+ * The in-memory double of `@pikit/contracts/testing` (`createMemorySubmissions`) adds the writes a
+ * runtime double makes (`admitted`, `settled`, `abandoned`), for the tests of channels.
  */
 
 import type { AppContext } from "@pikit/core";
@@ -51,35 +53,6 @@ export interface PendingConversation {
 }
 
 export interface AgentSubmissions {
-  /**
-   * The runtime admitted `requestId` in `conversation`: it is pending until a run settles it. Called
-   * after the message is durable in the runtime's conversation and before `dispatch` resolves, so a channel
-   * acknowledges its platform only once both hold it. A request already known, pending or settled,
-   * is left as it is. A runtime that provides this contract admitted it already: nothing to do.
-   */
-  admitted(conversation: ConversationRef, requestId: string, ctx: AppContext): Promise<void>;
-  /**
-   * A run ended: every request in `run.requestIds` is settled by it, and `run` is appended to
-   * `answers`, in one commit. A request never admitted is recorded settled all the same (its
-   * admission was lost with a crash). Idempotent within the provider's retention: a run already
-   * settled (the same conversation and `requestId`) changes nothing, and a request keeps the first run
-   * that settled it. Once a settlement is pruned, the provider no longer knows it: settling the same
-   * run again appends it to `answers` a second time. A runtime that provides this contract reads the
-   * run from its own records instead (`run` names its conversation), and never appends one twice.
-   */
-  settled(run: RunSettlement, ctx: AppContext): Promise<void>;
-  /**
-   * The runtime gives up on requests nothing can answer (their agent was removed, their conversation is
-   * gone, or they waited too long with no run to take them): those of `requestIds` still pending are
-   * settled unanswered, and one settlement is appended to `answers` for them, in one commit: `failed`,
-   * `error: { code: "abandoned", message: reason }`, `requestId` the first of them and `requestIds`
-   * them all. Never pretends they were answered; tells their channel so, which tells the user.
-   * A request already settled, or unknown, is left as it is. Resolves with the settlement appended,
-   * or `undefined` when none of them was pending (so abandoning again changes nothing), for the
-   * caller to announce it as `agent.failed`. A runtime that provides this contract settles them in its
-   * own records and announces them itself; one a run took is left to the run.
-   */
-  abandoned(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<RunSettlement | undefined>;
   /**
    * Every conversation with a request admitted and not settled, ordered by its oldest pending request
    * (a request already settled does not count).

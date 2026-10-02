@@ -393,7 +393,8 @@ test("abandon settles the queued requests unanswered, logs and announces them as
   ]);
   expect((await w.runtime.submissions.pending(w.ctx)).map((p) => p.requestIds)).toEqual([["r1"]]);
   // Abandoning again changes nothing; the run still answers its own request.
-  expect(await w.runtime.submissions.abandoned(conversation, ["r2", "r3"], "unanswered_too_long", w.ctx)).toBeUndefined();
+  await w.runtime.abandon(conversation, ["r2", "r3"], "unanswered_too_long", w.ctx);
+  expect(await answers(w)).toHaveLength(1);
   hold.release();
   expect((await w.result("r1")).kind).toBe("completed");
   await w.runtime.whenIdle(w.ctx);

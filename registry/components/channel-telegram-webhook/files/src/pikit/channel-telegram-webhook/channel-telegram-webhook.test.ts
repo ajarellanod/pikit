@@ -28,7 +28,15 @@ import {
 } from "@pikit/contracts";
 import type { WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createMemoryFeed, createMemoryKeyValueStorage, createMemoryMailbox, createMemorySubmissions, createMemoryWakeups, withWorkersHost } from "@pikit/contracts/testing";
+import {
+  createMemoryFeed,
+  createMemoryKeyValueStorage,
+  createMemoryMailbox,
+  createMemorySubmissions,
+  createMemoryWakeups,
+  type RecordingSubmissions,
+  withWorkersHost,
+} from "@pikit/contracts/testing";
 import { accountsOf } from "./account.ts";
 import { registerInbox } from "./actor-inbox.ts";
 import { LOGIN_COOL_DOWN_MS } from "./login.ts";
@@ -89,7 +97,7 @@ const router = defineComponent({
  * Records every dispatch; a request seen before is a duplicate. It records admissions and run ends in
  * `submissions`, as runtime-pi does, and emits the run's events.
  */
-function scriptedRuntime(submissions: AgentSubmissions, seen: Set<string> = new Set()) {
+function scriptedRuntime(submissions: RecordingSubmissions, seen: Set<string> = new Set()) {
   const dispatched: { requestId: string; key: string; prompt: string }[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
@@ -212,7 +220,7 @@ interface StartOptions {
   telegram?: FakeTelegram;
   secrets?: Record<string, string>;
   accounts?: string[];
-  submissions?: AgentSubmissions;
+  submissions?: RecordingSubmissions;
   kv?: KeyValueStorage;
   seen?: Set<string>;
   queue?: ReturnType<typeof recordingQueue>;

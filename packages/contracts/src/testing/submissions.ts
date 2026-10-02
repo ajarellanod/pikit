@@ -1,12 +1,14 @@
 /**
  * `agent.submissions` conformance: what every record of submissions must do, wherever
- * it keeps them. Runner-independent, like the lifecycle suite:
+ * it keeps them, for a record a runtime writes through `SubmissionsRecorder` (a double's writes: the
+ * contract itself is read-only, and a runtime that provides it writes its own records). Runner-independent,
+ * like the lifecycle suite:
  *
  *   for (const c of createSubmissionsConformance(() => myFixture(), { prunes: true, restarts: true }))
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
- * The suite calls the contract as the runtime (`admitted`, `settled`, `abandoned`) and the channels (`pending`,
- * `get`, `answers`) do. `answers` also runs the feed suite (SPEC K3), each fact committed by a `settled`.
+ * The suite writes as a runtime does (`admitted`, `settled`, `abandoned`) and reads as the channels and the
+ * runtime's host do (`pending`, `get`, `answers`). `answers` also runs the feed suite (SPEC K3), each fact committed by a `settled`.
  * Pruning and restarting are the provider's to do; the cases that need them run only when the options
  * say the fixture can.
  *
@@ -21,10 +23,44 @@ import type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionSt
 import { expecter } from "./assert.ts";
 import { createFeedConformance, createMemoryFeed } from "./feed.ts";
 
+/**
+ * What a runtime tells a record of submissions it does not keep itself (the in-memory double): the
+ * writes the `agent.submissions` contract leaves to its provider.
+ */
+export interface SubmissionsRecorder {
+  /**
+   * The runtime admitted `requestId` in `conversation`: it is pending until a run settles it. Called
+   * after the message is durable in the runtime's conversation and before `dispatch` resolves, so a channel
+   * acknowledges its platform only once both hold it. A request already known, pending or settled,
+   * is left as it is.
+   */
+  admitted(conversation: ConversationRef, requestId: string, ctx: AppContext): Promise<void>;
+  /**
+   * A run ended: every request in `run.requestIds` is settled by it, and `run` is appended to
+   * `answers`, in one commit. A request never admitted is recorded settled all the same (its
+   * admission was lost with a crash). Idempotent within the record's retention: a run already
+   * settled (the same conversation and `requestId`) changes nothing, and a request keeps the first run
+   * that settled it. Once a settlement is pruned, the record no longer knows it: settling the same
+   * run again appends it to `answers` a second time.
+   */
+  settled(run: RunSettlement, ctx: AppContext): Promise<void>;
+  /**
+   * The runtime gives up on requests nothing can answer: those of `requestIds` still pending are
+   * settled unanswered, and one settlement is appended to `answers` for them, in one commit: `failed`,
+   * `error: { code: "abandoned", message: reason }`, `requestId` the first of them and `requestIds`
+   * them all. A request already settled, or unknown, is left as it is. Resolves with the settlement
+   * appended, or `undefined` when none of them was pending (so abandoning again changes nothing).
+   */
+  abandoned(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<RunSettlement | undefined>;
+}
+
+/** The contract and the writes a runtime double makes to it. */
+export type RecordingSubmissions = AgentSubmissions & SubmissionsRecorder;
+
 /** A provider over fresh, empty records, built for one case. */
 export interface SubmissionsFixture {
-  /** The contract as the provider exposes it now; asked again after `restart()`. */
-  submissions(): AgentSubmissions;
+  /** The record as the provider exposes it now, read and written; asked again after `restart()`. */
+  submissions(): RecordingSubmissions;
   /** Prunes every settlement committed so far, as the provider's retention would. Required by `prunes`. */
   prune?(): Promise<void>;
   /** A new process over the same records. Required by `restarts`. */
@@ -341,9 +377,9 @@ export function createSubmissionsConformance(
 
 // ---------------------------------------------------------------------------------------------
 
-/** An in-memory record of submissions, for tests: the contract, and `prune` as a provider's retention. */
+/** An in-memory record of submissions, for tests: the contract and its writes, and `prune` as a provider's retention. */
 export interface MemorySubmissions {
-  readonly submissions: AgentSubmissions;
+  readonly submissions: RecordingSubmissions;
   /** Prunes every settlement committed so far, and the requests they settled. */
   prune(): void;
 }
@@ -362,7 +398,7 @@ export function createMemorySubmissions(): MemorySubmissions {
   const keyOf = (conversationId: string, requestId: string) => `${conversationId}\u0000${requestId}`;
   const copy = <T>(value: T): T => structuredClone(value);
 
-  const submissions: AgentSubmissions = {
+  const submissions: RecordingSubmissions = {
     async admitted(conversation, requestId, ctx) {
       const key = keyOf(conversation.conversationId, requestId);
       if (!requests.has(key)) requests.set(key, { conversation: copy(conversation), requestId, admittedAt: ctx.clock.now() });
