@@ -5,6 +5,7 @@ line names its area.
 
 ## Unreleased
 
+- contracts: `startAnswerDelivery(ctx, { name, answers, store, transports, route, text, queue?, wakeups?, policy })`, the outbound counterpart of `admitInbound`: a channel's answers from `agent.submissions`' feed and its own cursor, one ordered lane per conversation, retries with the channel's own waits, idempotency keys, marks so a crash resends at most the piece in flight (marked), on `wakeups` in slices or a timer in the process. `Feed`'s doc now states both ways a reader saves its cursor.
 - contracts, mailbox-local, platform-cloudflare, deployment-cloudflare: **breaking.** Actors answer requests: `ActorMailbox.call(key, type, message, ctx)` resolves with the JSON answer of the handler registered with `ActorInbox.answer(type, handler)`, and fails with an `ActorCallError` (`code`: `invalid`, `no_handler`, `cancelled`, `unreachable`, `failed`, or the handler's own). On Cloudflare it is the object's new `call` RPC (`WORKERS_HOST`'s `onCall`); the mailbox suite has 9 call cases, run on both providers and in workerd.
 - registry, runtime-pi, pi-adapter: **breaking.** `submissions-sql` is removed: pi-durable is the one
   record of what became of each message, and **runtime-pi provides `agent.submissions`** from it
