@@ -68,3 +68,42 @@ pi-durable resolves its own pi-ai 1.0 (the same copy as `pi-ai-v1`).
   the alarm (`await harness.waitForIdle()`), as runtime-pi does today, is the safe shape.
 - **pi-ai 1.0**: the adapter's providers (`providers/*.ts`) are written for 0.99 and must move to
   `createModels`/`Provider`; `@pikit/core`'s `Context` and chord's are separate types.
+
+## pi-ai 1.0: models, providers and credentials
+
+New, beside the 0.99 code (which stays as it is until the switch):
+
+| File (export) | What |
+|---|---|
+| `models.ts` (`./durable/models`) | `modelsFrom(providers, { credentials, authContext })`: a 1.0 `Models`, same semantics as `../models.ts`; `modelRefOf(models, agent, "provider/modelId")`: pi-durable's `ModelRef`, split at the first slash (`openrouter/z-ai/glm-5.3-flash`), failing on a bad name, an unknown provider (listing the installed ones) or an unknown model |
+| `providers/anthropic.ts`, `providers/openrouter.ts` (`./durable/providers/*`) | 1.0 providers by subpath; `openrouterProvider({ apiBase })` takes over provider-openrouter's `at()`, and also moves image/classifier models |
+| `credentials.ts` (`./durable/credentials`) | the 1.0 credential types; `loginInteraction(terminal)`: an `AuthInteraction` that answers every prompt type, `select` included |
+
+0.99.0 → 1.0.0 differences that touch pikit (the `.d.ts` files differ only in `env-api-keys` and
+`constrained-sampling`; the rest is behaviour):
+
+| Area | 0.99 → 1.0 | For pikit |
+|---|---|---|
+| Entry points | new `@earendil-works/pi-ai/models`: `createModels`, `createProvider`, `Provider`/`Models`, `ModelsError`, without TypeBox or catalogs. Auth types stay on the root (`import type`) | `durable/models.ts` uses it (Workers bundle size) |
+| Providers | `anthropicProvider()`, `openrouterProvider()`: same ids, signatures, credential order; catalogue data refreshed. Anthropic adds workload identity federation (`ANTHROPIC_FEDERATION_RULE_ID` + `ANTHROPIC_ORGANIZATION_ID` + `ANTHROPIC_IDENTITY_TOKEN_FILE`), after the keys | `checkAuth("anthropic")` also reports configured with those set |
+| Models | `createModels`/`setProvider`/`getModel`/`checkAuth`/`getAuth`/`login`/`logout` unchanged (0.99 already had them). pi-durable takes `Models` plus a `ModelRef {provider, modelId}` instead of a resolved `Model` | `modelRefOf` replaces `turns.ts`'s `resolveModel` |
+| Credentials | `CredentialStore`, `Credential`, `OAuthCredential` unchanged; refresh still runs inside `modify` and is written back; a failed refresh (`ModelsError` code `oauth`) keeps the stored credential | credentials-file works as is, file format unchanged: **no migration** of existing `.pikit/credentials.json` (tested on a 0.99-format file) |
+| Auth/OAuth | Anthropic's OAuth `login` first asks a `select` prompt (`browser` or `copy_code`; copy-code shows a code on Anthropic's page, no localhost callback). The `select` prompt type existed in 0.99, no flow used it | an interaction that answers free text fails ("Unknown Anthropic login method"): use `loginInteraction` |
+| Usage/cost | `Usage`, `calculateCost` unchanged. pi-durable keeps a per-conversation `pi.usage` ledger keyed `provider/modelId` (pikit's names) plus per-tool buckets | usage accounting can read pi-durable's ledger |
+| `Context` | pi-ai's request `Context` unchanged. pi-durable's calls take chord's `Context` (cancellation, deadline), a third type besides `@pikit/core`'s | name imports apart (`ChordContext`) |
+| Type identity | 0.99 and 1.0 declarations are structurally the same, so TypeScript accepts a 0.99 `Provider` in a 1.0 `Models` (it would run 0.99 code) | import each module's providers from one version |
+
+What the switch must change:
+
+- **provider-anthropic**: import `anthropicProvider` from the 1.0 module; README: federation variables.
+- **provider-openrouter**: `openrouterProvider({ apiBase: config.apiBase })` replaces its `at()`.
+- **credentials-file**: no code change (its `CredentialStore` type comes from the 1.0 adapter);
+  `testing/credentials.ts` (its conformance) moves to 1.0's `createProvider` and `modelsFrom`.
+- **`pikit configure`** (`packages/cli/src/project/credentials.ts`) and `samples/http/scripts/login.ts`:
+  their `prompt` returns the typed line for every prompt, so `--login anthropic` would fail at the
+  method question. Build the interaction with the adapter's `loginInteraction` (secret prompts
+  without echo); the `AuthInteraction` described in the CLI script gains `select`. Where the app runs
+  (`pikit up`, Docker), copy-code needs no localhost callback (browser login still accepts the pasted
+  redirect URL); configure's hint ("paste the page's address back") should name both. `check` is
+  unchanged.
+- Drop the `pi-ai-v1` alias: pin `@earendil-works/pi-ai@1.0.0` and rewrite `pi-ai-v1` imports.
