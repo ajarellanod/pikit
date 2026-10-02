@@ -217,16 +217,3 @@ test("at a terminal, a first setup offers to choose a password: one too short is
   expect(await configure(allowed.io)).toEqual([]);
   expect(allowed.env.has("TELEGRAM_PASSWORD")).toBe(false);
 });
-
-test("the password's former name, TELEGRAM_CLAIM_CODE, is checked and said to be renamed, not moved; asked for no password", async () => {
-  const telegram = fake();
-  const legacy = terminal(telegram, { env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_CLAIM_CODE: "correct horse battery staple" }, answers: ["y"] });
-  setTimeout(() => telegram.say(OWNER, "hi"), 100);
-  expect(await configure(legacy.io)).toEqual([]);
-  expect(legacy.said.join("\n")).toContain("TELEGRAM_CLAIM_CODE is deprecated: rename it TELEGRAM_PASSWORD in .env (the same value keeps the chats that logged in)");
-  expect(legacy.env.has("TELEGRAM_PASSWORD")).toBe(false);
-  expect(legacy.asked.filter((question) => question.includes("password"))).toEqual([]);
-
-  const short = terminal(telegram, { interactive: false, env: { TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1001", TELEGRAM_CLAIM_CODE: "1234" } });
-  expect(await configure(short.io)).toEqual(["TELEGRAM_CLAIM_CODE: choose a password of at least 8 characters, or remove it"]);
-});

@@ -134,8 +134,7 @@ export default defineComponent({
           const token = await secrets.get().get(account.tokenSecret);
           if (token === undefined) throw new Error(`channel-telegram-webhook: ${account.tokenSecret} is not set. Create a bot with @BotFather, then run \`pikit configure\``);
           bots.push(createBot(account, createTelegramApi(token, config.apiBase)));
-          // Its former name too, silently: the Worker's half warns once, not every object.
-          const password = await passwordOf((await readPassword(account, (name) => secrets.get().get(name)))?.value);
+          const password = await passwordOf(await readPassword(account, (name) => secrets.get().get(name)));
           if (password !== undefined) passwords.set(account.instance, password);
         }
         const store = storage.get().namespace(NAME);

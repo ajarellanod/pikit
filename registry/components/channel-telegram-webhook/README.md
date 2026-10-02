@@ -370,8 +370,8 @@ secret: no bot, token or network needed. Only tests import it.
   again when Telegram has it, back when it was moved, nothing over HTTP or off Cloudflare, a refusal
   logged), and `setup-webhook.mjs` run as a build runs it. The password: strangers told `/login` only
   with a password, a login and its redelivery, an allowed chat's `/login`, wrong passwords and the
-  cool-down, a login kept across restarts and after the password is removed, logged out by a new
-  password, and the former names still accepted.
+  cool-down, a login kept across restarts and after the password is removed, and logged out by a new
+  password.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`.
 - `configure.test.ts` covers the setup: a checked token, the generated secret, allowing whoever
   messages the bot, a bot that already has a webhook, the same without a terminal, and the password:
