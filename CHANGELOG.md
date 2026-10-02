@@ -18,8 +18,7 @@ line names its area.
   `createDurableRuntime` takes `db` (the `storage.sql`) instead of `storage`, and no `submissions`;
   `DurableRuntime.submissions` is the contract. The capability `agent.submissions` is no longer
   transitional nor offered (`pikit add runtime-pi` brings nothing); the `telegram-cloudflare` preset
-  drops `submissions-sql`. runtime-pi drops the 0.99-era handling of conversation ids that are not
-  pi-durable's.
+  drops `submissions-sql`.
 - core, cli, registry: **breaking.** The target `cloudflare` is now `durable`: a target names a
   runtime model (`server`, a long-lived process with a persistent disk; `durable`, an actor per
   conversation with its own SQLite and one alarm), and Cloudflare is `durable`'s provider. `Target` in
