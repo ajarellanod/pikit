@@ -5,6 +5,42 @@ line names its area.
 
 ## Unreleased
 
+- pi-adapter, runtime-pi: **breaking.** The runtime moves from Pi 0.99's `AgentHarness` to
+  `@earendil-works/pi-durable` 1.0 (with `chord`, `pi-ai` and `pi-mcp` 1.0, exact pins);
+  `pi-agent-core` is gone. runtime-pi keeps every conversation in `storage.sql` (pi-durable's tables:
+  storage-sqlite on a server, storage-do on Cloudflare) and provides `agent.conversations`. The
+  adapter's main layout is the former `./durable/*` (`.`, `./tools`, `./mcp`, `./execution`, `./node`,
+  `./providers/*`, `./credentials`, `./wakeups`, `./testing`…); `./sql` (Pi 0.99's session repo),
+  `createPiRuntime`, `toolComponent`, `agentTool` and `bindTool` are removed: a tool is pi-durable's
+  `defineTool` object.
+- registry: **breaking.** `sessions-sql`, `sessions-jsonl` and the `sessions.store` capability are
+  removed; the `http`, `telegram-cloudflare` and `cloudflare-minimal` presets drop them
+  (`cloudflare-minimal` also drops `conversations-kv`, which now needs the runtime).
+- contracts: **breaking.** `ConversationRef.sessionId` is `conversationId`;
+  `ConversationReset.previousSessionId`/`newSessionId` are `previousConversationId`/`newConversationId`
+  (and `Pick<ConversationRef, "conversationId">` in `agent.submissions`, `answerKey`). New capability
+  `agent.conversations` (the runtime creates a conversation). channel-http's reset answers
+  `{ conversationId, previousRuntimeConversationId, runtimeConversationId }`; log-events logs
+  `conversationId`/`previousConversationId` instead of `session`/`previousSession`.
+- conversations-file, conversations-kv: **breaking.** Existing conversations start fresh after
+  upgrading: a pointer written before the switch (a Pi 0.99 session id) counts as none, and the next
+  message starts a new conversation, transparently and logged once; nothing is migrated. They create
+  conversations through `agent.conversations` (install runtime-pi first). conversations-file writes
+  its file in version 2. A message `agent.submissions` held pending for such a conversation is settled
+  aborted at start (no channel tells the user), never abandoned.
+- registry, cli: **breaking.** A tool's replay is pi-durable's word: `"never"` is `"unsafe"`
+  (`component.json` `replay.tools`, `registry validate`). tool-read/write/edit/bash provide
+  pi-durable's own tools (`codingTool`); the runtime gives each call its environment (the
+  conversation's `workspace`, else `execution`). An MCP tool's reported failure (`isError`) is an error
+  result, not a throw. execution-do's environment is pi-durable's (`env.ts`), its files namespaced per
+  object; provider-openrouter's `apiBase` also moves image and classifier models.
+- runtime-pi: messages sent while a run goes are queued and taken together by the next run, which
+  answers them all (`requestIds`, one `agent.started` for the first); before, they steered the run in
+  progress. A tool's `agent.state` update applies from the run's next model request, not the next run.
+  With `wakeups`, a model retry's backoff is a wakeup at its time and pi-durable is closed meanwhile
+  (`suspend`), so a Durable Object can be evicted; the conformance suite's three steering cases now
+  describe the batching.
+
 - pi-adapter, cli, contracts: **breaking.** Unmodified Pi coding-agent extensions no longer run.
   The compatibility layer is gone: the `@pikit/pi-extension-shim` package and the
   `@earendil-works/pi-coding-agent` alias to it, `@pikit/pi-adapter/extensions` (the vendored

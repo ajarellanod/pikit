@@ -4,6 +4,7 @@
 - Failed-install rollback tests must explicitly assert the unfinished-operation marker, then compare the other restored files; the marker intentionally survives because `node_modules` is not restored.
 - Validation worktree dependency links must remap workspace source directories only, never local `node_modules` directories (otherwise `.bin/vitest` can link to itself).
 - For files shared with a background agent, reread the exact current block before editing. Every replacement must be unique; merge overlapping edits and omit speculative/nonexistent matches.
+- workerd lane: `evictDurableObject` hangs while an alarm event is still driving a run, and `abortAllDurableObjects()` during an in-flight event crashes the Vitest pool. To evict mid-run, fake `Date` a day ahead (alarms then do not fire on their own), fire each alarm with `runDurableObjectAlarm`, and evict between two alarms.
 
 # Downloaded references
 
