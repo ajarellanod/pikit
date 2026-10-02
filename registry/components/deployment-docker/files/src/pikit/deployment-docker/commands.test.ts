@@ -38,7 +38,7 @@ function projectWithBeforeHook(env: string): string {
   dirs.push(cwd);
   writeFileSync(join(cwd, ".env"), env);
   const components = { "tool-a": { hooks: { beforeDeploy: "src/pikit/tool-a/deploy.ts" } }, "deployment-docker": {} };
-  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 2, targets: ["server"], registries: {}, components }));
+  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 1, targets: ["server"], registries: {}, components }));
   writeFileSync(join(cwd, "pikit.config.ts"), `export default { config: { "tool-a": { server: "wiki" } } };\n`);
   mkdirSync(join(cwd, "src", "pikit", "tool-a"), { recursive: true });
   writeFileSync(

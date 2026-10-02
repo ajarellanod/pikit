@@ -147,7 +147,7 @@ test("remove takes out only the packages add put in package.json: one the projec
   // Another component put left-pad there; the project had @pikit/contracts and is-odd.
   const manifest = readManifest(dir);
   manifest.components["tool-other"] = {
-    registry: "default", version: "0.0.0", files: {}, dependencies: { "left-pad": "1.3.0" }, addedDependencies: ["left-pad"], environment: [],
+    registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, files: {}, dependencies: { "left-pad": "1.3.0" }, addedDependencies: ["left-pad"], environment: [],
   };
   // Known already: add records a registry it does not know.
   manifest.registries.local = registry;
@@ -226,7 +226,7 @@ test("what was installed for a component goes with it, and then doctor reports w
   writeFileSync(join(dir, file), "export const extra = 1;\n");
   const manifest = readManifest(dir);
   manifest.components["tool-extra"] = {
-    installedFor: ["log-events"], registry: "default", version: "0.0.0", files: { [file]: { hash: hashOf("export const extra = 1;\n") } }, dependencies: {}, environment: [],
+    installedFor: ["log-events"], registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { [file]: { hash: hashOf("export const extra = 1;\n") } }, dependencies: {}, environment: [],
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   // Built in two pieces: this test's own imports are checked (scripts/boundaries.ts).
@@ -253,7 +253,7 @@ async function withProviderFor(dir: string, content = "export const extra = 1;\n
   writeFileSync(join(dir, file), content);
   const manifest = readManifest(dir);
   manifest.components["tool-extra"] = {
-    installedFor: ["log-events"], registry: "default", version: "0.0.0", files: { [file]: { hash: hashOf("export const extra = 1;\n") } }, dependencies: {}, environment: [],
+    installedFor: ["log-events"], registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { [file]: { hash: hashOf("export const extra = 1;\n") } }, dependencies: {}, environment: [],
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   return { file, manifest };

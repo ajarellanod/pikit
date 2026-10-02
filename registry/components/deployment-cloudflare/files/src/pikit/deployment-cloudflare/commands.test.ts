@@ -159,7 +159,7 @@ function projectWithHooks(env: string): string {
   const cwd = project(env);
   const hook = (name: string) => `src/pikit/${name}/deploy.ts`;
   const components = { "channel-a": { hooks: { afterDeploy: hook("channel-a") } }, "storage-b": {}, "channel-c": { hooks: { afterDeploy: hook("channel-c") } } };
-  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 2, targets: ["durable"], registries: {}, components }));
+  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 1, targets: ["durable"], registries: {}, components }));
   writeFileSync(join(cwd, "pikit.config.ts"), `export default { config: { "channel-a": { greeting: "hello" } } };\n`);
   for (const name of ["channel-a", "channel-c"]) {
     mkdirSync(join(cwd, "src", "pikit", name), { recursive: true });
@@ -239,7 +239,7 @@ test("a new version that does not answer runs no hook", async () => {
 function projectWithBeforeHook(env: string, body?: string): string {
   const cwd = project(env);
   const components = { "tool-a": { hooks: { beforeDeploy: "src/pikit/tool-a/deploy.ts" } }, "storage-b": {} };
-  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 2, targets: ["durable"], registries: {}, components }));
+  writeFileSync(join(cwd, "pikit.json"), JSON.stringify({ version: 1, targets: ["durable"], registries: {}, components }));
   writeFileSync(join(cwd, "pikit.config.ts"), `export default { config: { "tool-a": { server: "wiki" } } };\n`);
   mkdirSync(join(cwd, "src", "pikit", "tool-a"), { recursive: true });
   writeFileSync(

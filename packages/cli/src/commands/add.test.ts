@@ -51,7 +51,7 @@ async function pikitAnsweringEnter(args: string[], cwd: string, question: string
 function otherKitProject(installed: string[] = [], kit?: string): string {
   const dir = temp();
   const manifest = emptyManifest(undefined, kit);
-  for (const name of installed) manifest.components[name] = { registry: "default", version: "0.0.0", files: {}, dependencies: {}, environment: [] };
+  for (const name of installed) manifest.components[name] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
   writeProjectManifest(dir, manifest);
   mkdirSync(join(dir, "vendor"));
   const overrides: Record<string, string> = {};
@@ -199,7 +199,7 @@ test("a reinstall that fails puts back the bases it replaced, and removes those 
   const file = "src/pikit/log-events/index.ts";
   const hash = hashOf("the older log-events\n");
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
-  manifest.components["log-events"] = { registry: "default", version: "0.0.0", files: { [file]: { hash } }, dependencies: {}, environment: [] };
+  manifest.components["log-events"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { [file]: { hash } }, dependencies: {}, environment: [] };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   mkdirSync(join(dir, "src", "pikit", "log-events"), { recursive: true });
   writeFileSync(join(dir, file), "the older log-events\n");
@@ -223,7 +223,7 @@ test("a reinstall that fails puts back a file it deleted, in a directory a new f
   const files = { [`${own}index.ts`]: "export default {};\n", [`${own}sub/old.ts`]: "the older tool-fake\n" };
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
   manifest.components["tool-fake"] = {
-    registry: "default", version: "0.0.0", dependencies: {}, environment: [],
+    registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], dependencies: {}, environment: [],
     files: Object.fromEntries(Object.entries(files).map(([file, text]) => [file, { hash: hashOf(text) }])),
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
@@ -378,16 +378,12 @@ test("on a project that does not compose, nothing is offered nor guessed, and it
 test("a kit an installed component does not accept is refused before any write, each one named; --force replaces it", async () => {
   const dir = otherKitProject();
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
-  const record = { registry: "default", version: "0.0.0", files: {}, environment: [] };
+  const record = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, files: {}, addedDependencies: [], environment: [] };
   manifest.components = {
     "tool-core": { ...record, requires: { pikit: ">=1.0.0" }, dependencies: {} },
     "tool-fine": { ...record, requires: { pikit: "0.0.0", contracts: "0.0.0" }, dependencies: { "@pikit/contracts": "0.0.0" } },
     "tool-newer": { ...record, requires: { pikit: "0.0.0", contracts: "^0.1.0" }, dependencies: { "@pikit/contracts": "0.1.0" } },
-    // Recorded before pikit.json kept `requires`: held to the contracts it pinned.
-    "tool-pinned": { ...record, dependencies: { "@pikit/contracts": "0.2.0" } },
-    // And to the adapter it pinned.
-    "tool-pinned-adapter": { ...record, dependencies: { "@pikit/pi-adapter": "0.2.0" } },
-    "tool-unknown": { ...record, dependencies: {} },
+    "tool-newer-adapter": { ...record, requires: { pikit: "0.0.0", adapter: "^0.2.0" }, dependencies: { "@pikit/pi-adapter": "0.2.0" } },
   };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
@@ -396,11 +392,10 @@ test("a kit an installed component does not accept is refused before any write, 
   const refused = await runCli(["add", "log-events", "--yes"], dir);
   expect(refused.code).toBe(1);
   expect(refused.err).toContain(
-    "which these installed components do not accept:\n  tool-core requires @pikit/core >=1.0.0\n  tool-newer requires @pikit/contracts ^0.1.0\n  tool-pinned requires @pikit/contracts 0.2.0\n  tool-pinned-adapter requires @pikit/pi-adapter 0.2.0\n",
+    "which these installed components do not accept:\n  tool-core requires @pikit/core >=1.0.0\n  tool-newer requires @pikit/contracts ^0.1.0\n  tool-newer-adapter requires @pikit/pi-adapter ^0.2.0\n",
   );
   expect(refused.err).toContain("pass --force to replace the kit anyway");
   expect(refused.err).not.toContain("tool-fine");
-  expect(refused.err).not.toContain("tool-unknown");
   expect(refused.out).not.toContain("log-events 0.0.0 from");
   expect(snapshot(dir)).toEqual(before);
 

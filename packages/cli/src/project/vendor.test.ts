@@ -15,14 +15,14 @@ const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 test("a project on another kit gets this CLI's: tarballs, dependencies and overrides; the old tarballs go", () => {
-  // The old kit predates @pikit/contracts: it gets an override, since the other kit packages name it.
+  // The other kit has no @pikit/contracts (a kit package added since): it gets an override, since the other kit packages name it.
   const project = mkdtempSync(join(tmpdir(), "pikit-vendor-"));
   dirs.push(project);
   mkdirSync(join(project, "vendor"));
-  // What `pikit new` wrote before tarballs carried a hash.
+  // What another checkout's `pikit new` wrote.
   const old = {
-    "@pikit/core": "file:vendor/pikit-core-0.0.0.tgz",
-    "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0.tgz",
+    "@pikit/core": "file:vendor/pikit-core-0.0.0-0123456789.tgz",
+    "@pikit/pi-adapter": "file:vendor/pikit-pi-adapter-0.0.0-0123456789.tgz",
   };
   for (const specifier of Object.values(old)) writeFileSync(join(project, specifier.slice("file:".length)), "an older kit");
   writeFileSync(
@@ -53,7 +53,7 @@ test("a project on another kit gets this CLI's: tarballs, dependencies and overr
   });
   // The old tarballs stay until the install rewrote bun.lock; then they go.
   for (const specifier of Object.values(old)) expect(existsSync(join(project, specifier.slice("file:".length)))).toBe(true);
-  expect(pruneVendor(project).sort()).toEqual(["pikit-core-0.0.0.tgz", "pikit-pi-adapter-0.0.0.tgz"]);
+  expect(pruneVendor(project).sort()).toEqual(["pikit-core-0.0.0-0123456789.tgz", "pikit-pi-adapter-0.0.0-0123456789.tgz"]);
   expect(readdirSync(join(project, "vendor")).sort()).toEqual(
     Object.values(pkg.overrides ?? {})
       .map((s) => s.slice("file:vendor/".length))

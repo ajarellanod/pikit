@@ -28,12 +28,6 @@ import Value from "typebox/value";
  */
 export const TARGETS = ["server", "durable"] as const;
 
-/**
- * Targets that were renamed, old name → new: `durable` was `cloudflare`, its provider's name.
- * `pikit.json` is read with the new name (and written so next time); `--target` refuses the old one.
- */
-export const RENAMED_TARGETS: ReadonlyMap<string, (typeof TARGETS)[number]> = new Map([["cloudflare", "durable"]]);
-
 /** Where the registry's JSON Schemas live, relative to its root. */
 export const SCHEMA_DIR = "schema";
 export const COMPONENT_SCHEMA_FILE = `${SCHEMA_DIR}/component.schema.json`;

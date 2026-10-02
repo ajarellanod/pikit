@@ -69,8 +69,8 @@ const RIGHT = "\x1b[C";
 /** Answers "Where should it run?" with the target at `down` arrows from the first, the server. */
 async function runOn(w: ReturnType<typeof wizard>, down: number): Promise<void> {
   await w.waitFor("Where should it run?");
-  await w.waitFor("On Cloudflare");
-  expect(w.text()).toContain("On a server or this computer");
+  await w.waitFor("durable — on Cloudflare (Workers + Durable Objects)");
+  expect(w.text()).toContain("server — a long-lived process (Docker on a VPS)");
   await Bun.sleep(100);
   w.type(DOWN.repeat(down));
   await Bun.sleep(100);
@@ -217,7 +217,7 @@ test.skipIf(!E2E)(
 );
 
 test.skipIf(!E2E)(
-  "the installer's --cloudflare: pikit new --target durable --preset telegram-cloudflare asks only the name",
+  "the installer's --durable: pikit new --target durable --preset telegram-cloudflare asks only the name",
   async () => {
     const w = wizard({}, ["--target", "durable", "--preset", "telegram-cloudflare"]);
     await w.waitFor("Name of your agent");

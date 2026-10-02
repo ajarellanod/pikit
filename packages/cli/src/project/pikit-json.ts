@@ -7,19 +7,15 @@
  * it was installed, the ones `add` put in package.json for it (the only ones `remove` may take out),
  * and the kit versions it accepts (`requires`), which `add` checks before it changes the project's
  * kit. Whether a file is modified is not stored: it is computed by comparing its hash,
- * so it can never go stale.
- *
- * Version 2 records registries by what resolves on any machine (`registry-location.ts`). Version 1
- * recorded the path of the CLI's checkout; it is read and converted in memory, and the next write
- * saves version 2. A target that was renamed (`cloudflare`, now `durable`) is read with its new name,
- * which the next write saves (`RENAMED_TARGETS`).
+ * so it can never go stale. Registries are recorded by what resolves on any machine
+ * (`registry-location.ts`).
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { confinedPath } from "./paths.ts";
-import { type EnvironmentVariable, type Hook, RENAMED_TARGETS } from "../registry/manifest.ts";
-import { BUILTIN_REGISTRY, isCheckoutRegistry, recordedLocation } from "./registry-location.ts";
+import { type EnvironmentVariable, type Hook } from "../registry/manifest.ts";
+import { BUILTIN_REGISTRY } from "./registry-location.ts";
 
 export const PIKIT_JSON = "pikit.json";
 
@@ -38,18 +34,17 @@ export interface InstalledComponent {
   /**
    * The packages of `dependencies` that `add` put in package.json for it: those the project did not
    * have, and those another installed component had put there (the last of them to go takes them
-   * out). `remove` takes out only these, when nothing else needs them. Absent in a record made before
-   * it was kept (`ownedDependencies`).
+   * out). `remove` takes out only these, when nothing else needs them (`ownedDependencies`).
    */
-  addedDependencies?: string[];
+  addedDependencies: string[];
   /** The same for `devDependencies`; absent when it added none. */
   addedDevDependencies?: string[];
   /**
    * Its manifest's `requires.pikit`, `requires.contracts` and `requires.adapter`: the @pikit/core,
-   * @pikit/contracts and @pikit/pi-adapter versions it works with. Absent in a record made before
-   * they were recorded (`kitRanges`).
+   * @pikit/contracts and @pikit/pi-adapter versions it works with; `contracts` and `adapter` absent
+   * when it does not depend on them.
    */
-  requires?: { pikit: string; contracts?: string; adapter?: string };
+  requires: { pikit: string; contracts?: string; adapter?: string };
   /** Its manifest's `environment`. */
   environment: EnvironmentVariable[];
   /**
@@ -77,11 +72,10 @@ export interface InstalledComponent {
 
 export interface ProjectManifest {
   /** Schema version of `pikit.json`. */
-  version: 2;
+  version: 1;
   /**
    * The kit in `vendor/`: the commit of the pikit checkout it was packed from (`vendor.ts`, `kitCommit`),
-   * `-dirty` when its packages had uncommitted changes. Absent when unknown: made before version 2, or
-   * by a CLI not in Git.
+   * `-dirty` when its packages had uncommitted changes. Absent when unknown: made by a CLI not in Git.
    */
   kit?: { commit: string };
   targets: string[];
@@ -98,7 +92,7 @@ export const NEW_PROJECT_TARGETS: readonly string[] = ["server"];
  * kit's commit, `targets` where it runs (`pikit new --target`).
  */
 export function emptyManifest(registry: string = BUILTIN_REGISTRY, kit?: string, targets: readonly string[] = NEW_PROJECT_TARGETS): ProjectManifest {
-  return { version: 2, ...(kit !== undefined && { kit: { commit: kit } }), targets: [...targets], registries: { default: registry }, components: {} };
+  return { version: 1, ...(kit !== undefined && { kit: { commit: kit } }), targets: [...targets], registries: { default: registry }, components: {} };
 }
 
 export function readProjectManifest(projectDir: string): ProjectManifest {
@@ -106,22 +100,9 @@ export function readProjectManifest(projectDir: string): ProjectManifest {
   if (!existsSync(path)) {
     throw new Error(`${projectDir} is not a pikit project: there is no ${PIKIT_JSON} (create one with \`pikit new\`)`);
   }
-  const read = JSON.parse(readFileSync(path, "utf8")) as ProjectManifest | ProjectManifestV1;
-  if (read.version !== 1 && read.version !== 2) throw new Error(`${PIKIT_JSON} has version ${String((read as { version: unknown }).version)}; this CLI reads versions 1 and 2`);
-  const manifest = Array.isArray(read.targets) ? { ...read, targets: [...new Set(read.targets.map((t) => RENAMED_TARGETS.get(t) ?? t))] } : read;
-  return manifest.version === 1 ? fromV1(projectDir, manifest) : manifest;
-}
-
-/** Version 1: registries are absolute paths, those of the machine that installed. */
-type ProjectManifestV1 = Omit<ProjectManifest, "version"> & { version: 1 };
-
-/** Version 1 in version 2's shape: a pikit checkout's registry is `builtin`, one inside the project relative. */
-function fromV1(projectDir: string, manifest: ProjectManifestV1): ProjectManifest {
-  const registries: Record<string, string> = {};
-  for (const [name, location] of Object.entries(manifest.registries)) {
-    registries[name] = isCheckoutRegistry(location) ? BUILTIN_REGISTRY : recordedLocation(projectDir, location);
-  }
-  return { ...manifest, version: 2, registries };
+  const read = JSON.parse(readFileSync(path, "utf8")) as ProjectManifest;
+  if (read.version !== 1) throw new Error(`${PIKIT_JSON} has version ${String((read as { version: unknown }).version)}; this CLI reads version 1`);
+  return read;
 }
 
 /** Stable text: components and files sorted, so the file's diff shows only what changed. */
@@ -160,27 +141,8 @@ export function modifiedFiles(projectDir: string, component: InstalledComponent)
     .map(([file]) => file);
 }
 
-/**
- * The @pikit/core, @pikit/contracts and @pikit/pi-adapter ranges an installed component accepts, as
- * recorded. When no contracts (or adapter) range is recorded (a record made before `requires` was, or
- * a manifest that declares none), the version its manifest pinned in `dependencies` stands for it: the
- * component was written against that one. No core range is guessed.
- */
-export function kitRanges(component: InstalledComponent): { pikit?: string; contracts?: string; adapter?: string } {
-  const pikit = component.requires?.pikit;
-  const contracts = component.requires?.contracts ?? component.dependencies["@pikit/contracts"];
-  const adapter = component.requires?.adapter ?? component.dependencies["@pikit/pi-adapter"];
-  return { ...(pikit === undefined ? {} : { pikit }), ...(contracts === undefined ? {} : { contracts }), ...(adapter === undefined ? {} : { adapter }) };
-}
-
-/**
- * The packages `remove` may take out of package.json for an installed component: those `add` put
- * there for it. A record made before `addedDependencies` was kept gives every package it declared.
- */
+/** The packages `remove` may take out of package.json for an installed component: those `add` put there for it. */
 export function ownedDependencies(component: InstalledComponent): { dependencies: string[]; devDependencies: string[] } {
-  if (component.addedDependencies === undefined) {
-    return { dependencies: Object.keys(component.dependencies), devDependencies: Object.keys(component.devDependencies ?? {}) };
-  }
   return { dependencies: component.addedDependencies, devDependencies: component.addedDevDependencies ?? [] };
 }
 
