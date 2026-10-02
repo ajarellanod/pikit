@@ -21,6 +21,7 @@ here with the Pi version.
 | 10 | chord | [A stability statement](#10-chord-a-stability-statement) | Why Chord stays out of `@pikit/core` | low | draft (here) |
 | 11 | pi-mcp | [`StreamableHttpTransport` on Workers](#11-pi-mcp-streamablehttptransport-on-workers) | A `fetch` wrapper in the adapter | low | draft (here) |
 | 12 | pi-ai | [A default for `select` login prompts](#12-pi-ai-a-default-for-select-login-prompts) | Non-interactive logins broke on 1.0 | low | note (here) |
+| 13 | pi-durable | [Settlement order and run identity on submissions](#13-settlement-order-and-run-identity-on-submissions) | Delivering answers exactly once after a crash | **high** | draft (here) |
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
 ([storage-postgres](../../features/storage-postgres.md)), an `ExecutionEnv` conformance suite (pikit
@@ -155,3 +156,45 @@ ported one: `packages/pi-adapter/src/durable/execution-testing.ts`), and a Durab
   browser|code`.
 - **Ask (minor).** A documented default option for `select` prompts (or a `prompt.default` field),
   so non-interactive callers keep working across new choices. A note rather than a request.
+
+## 13. Settlement order and run identity on submissions
+- **Problem.** A host that delivers answers outside the process (a chat channel) must know, durably
+  and exactly, which runs ended and in what order, to deliver each once, even if it crashed right
+  after pi-durable settled them. A terminal `SubmissionRecord` carries neither when it was settled
+  nor which run settled it: `SubmissionRecordBase` is `{ id, conversationId, requestId? }`; `done`
+  adds `entry` and `answer`, `unanswered` adds `entry?`, `reason`, `detail`. `scanSubmissions` filters
+  by conversation and status and pages by submission id, not by settlement.
+- **Consequences.** Live, a host groups inputs by the commit that settles them
+  (`subscribeCommits`), which is exact. After a crash between that commit and the host's own record,
+  it must rebuild:
+  - `done` inputs are grouped exactly by their shared `answer`, and ordered by the answer entry's
+    `commitSeq` (an extra read per run);
+  - `unanswered` inputs of one failed run cannot be told apart from two consecutive failed runs (a
+    heuristic: adjacent `pi.user` entries and the same reason);
+  - a cross-conversation "answers in the order they ended" feed needs a second store the host keeps
+    and reconciles.
+  Before its fix, pikit even delivered one batched answer twice (a redelivered non-first input
+  announced alone, the rest later).
+- **pikit meanwhile.** pi-durable is the source of truth for state; pikit keeps only a derived
+  answers index in `storage.sql`, idempotent by run key (the answer entry id, or the first input of
+  an unanswered group), bounded by a per-conversation watermark document, and rebuilt by one
+  per-conversation reconciliation used at start, on recover and on redelivery.
+- **Ask** (additive; any one helps, (a)+(b) remove the workaround entirely):
+  - (a) **`settledSeq`** on terminal submissions: the commit sequence that made them terminal (the
+    storage knows it when it writes the record).
+  - (b) **`runId`** (or `placedBy`: the generation task that placed the input) on `placed`, `done`
+    and `unanswered` inputs, so inputs taken by one run are identified as one.
+  - (c) **`scanSubmissions({ settledAfter: Seq, status: ["done", "unanswered"] })`** ordered by
+    `settledSeq` across conversations, with a `Seq` cursor: the host's feed becomes a read of
+    pi-durable's own storage.
+  - Alternative shape they may prefer: a host hook that runs **inside the commit that settles a run**
+    (e.g. `HarnessOptions.onRunSettled(tx, inputs, outcome)`), so a host appends its own outbox row
+    atomically.
+- **Will they accept it?** Likely, in some form. It is additive, small for the storage (one column or
+  JSON field, written in the commit that settles), and matches pi-durable's own principle ("everything
+  a UI needs is committed state"). Earendil announced Slack and GitHub bots on pi-durable: any bot
+  that posts answers to an external platform hits this exactly-once delivery problem, so it serves
+  their own use. They may prefer the in-commit hook or a different API to these fields; any of them
+  removes pikit's reconciliation. Lead with the problem and the repro, not a fixed API.
+- **Evidence to attach.** pikit's regression test for the duplicated batch, and the reconciliation
+  code it needs today (`packages/pi-adapter/src/`, after the native `agent.submissions` lands).
