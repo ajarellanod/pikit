@@ -99,8 +99,7 @@ uses `fetch`.
   keeps only what is imported: tool-mcp adds 48 KiB (11 KiB gzip) to a conversation object's bundle,
   with no Node module (`tests/workerd/README.md`; `mcp.test.ts` bundles the adapter export to hold it).
 - **"Illegal invocation".** Workers refuse the platform `fetch` called on another object. pi-mcp
-  calls it without a receiver, and `mcpHttpTransport` passes `(input, init) => fetch(input, init)`
-  too; the workerd lane pins that pi-mcp's own transport works there.
+  calls it without a receiver (since pi-mcp 1.0, after pikit's report #10188); the workerd lane pins that pi-mcp's own transport works there.
 - **No server-to-client stream.** `openGetStream: false` always: a Durable Object does not stay alive
   for an outbound stream (C4), and each held stream takes one of its six outbound connections. A
   request's own response may still stream (SSE).

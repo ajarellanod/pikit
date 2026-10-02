@@ -1,8 +1,8 @@
 # Upstream proposals
 
 Everything pikit works around in Pi's packages, written down so that none is lost. Each entry says
-what is wrong, how we know, what pikit does meanwhile, and what we would ask for. Nothing here has
-been sent yet: each is opened upstream (`earendil-works/pi`) only when the owner decides.
+what is wrong, how we know, what pikit does meanwhile, and what we would ask for. Each is opened
+upstream (`earendil-works/pi`) only when the owner decides, following [how to send](#how-to-send).
 
 When Pi ships one, delete its workaround in pikit (MANIFESTO, principle 1) and mark it **shipped**
 here with the Pi version.
@@ -16,12 +16,12 @@ here with the Pi version.
 | 5 | pi-durable | [Per-conversation scheduling scope](#5-per-conversation-scheduling-scope) | Servers holding many conversations | medium | draft ([file](pi-durable-scheduling-scope.md)) |
 | 6 | pi-durable | [Provider session id](#6-provider-session-id) | Prompt-cache cost on long chats | medium | draft ([file](pi-durable-provider-session-id.md)) |
 | 7 | pi-durable | [Table prefix for `SqliteStorage`](#7-table-prefix-for-sqlitestorage) | Generic table names in a shared database | low | draft ([file](pi-durable-table-prefix.md)) |
-| 8 | chord | [Foreign parent's `abortSignal`](#8-chord-foreign-parents-abortsignal) | A bridge (`toChord`) in the adapter | low | draft (here) |
+| 8 | chord | [Foreign parent's `abortSignal`](#8-chord-foreign-parents-abortsignal) | A bridge (`toChord`) in the adapter | low | **declined** ([#10189](https://github.com/earendil-works/pi/issues/10189), `no-action`) |
 | 9 | chord | [`esbuild` only for the bundler](#9-chord-esbuild-only-for-the-bundler) | An unused dependency installed everywhere | low | draft (here) |
 | 10 | chord | [A stability statement](#10-chord-a-stability-statement) | Why Chord stays out of `@pikit/core` | low | draft (here) |
-| 11 | pi-mcp | [`StreamableHttpTransport` on Workers](#11-pi-mcp-streamablehttptransport-on-workers) | A `fetch` wrapper in the adapter | low | draft (here) |
+| 11 | pi-mcp | [`StreamableHttpTransport` on Workers](#11-pi-mcp-streamablehttptransport-on-workers) | A `fetch` wrapper in the adapter | low | **shipped** in pi-mcp 1.0 ([#10188](https://github.com/earendil-works/pi/issues/10188)) |
 | 12 | pi-ai | [A default for `select` login prompts](#12-pi-ai-a-default-for-select-login-prompts) | Non-interactive logins broke on 1.0 | low | note (here) |
-| 13 | pi-durable | [Settlement order and run identity on submissions](#13-settlement-order-and-run-identity-on-submissions) | Delivering answers exactly once after a crash | **high** | draft (here) |
+| 13 | pi-durable | [Settlement order and run identity on submissions](#13-settlement-order-and-run-identity-on-submissions) | Nothing now: pikit groups runs exactly itself | low (nice to have) | not to send |
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
 ([storage-postgres](../../features/storage-postgres.md)), an `ExecutionEnv` conformance suite (pikit
@@ -124,9 +124,12 @@ ported one: `packages/pi-adapter/src/durable/execution-testing.ts`), and a Durab
 - **Problem.** Chord's `withContextValue` reads cancellation through a private key
   (`context/index.ts`), so deriving from a context of another implementation (pikit's `Context`,
   same shape on purpose) drops its `abortSignal`.
-- **pikit meanwhile.** `toChord` in `packages/pi-adapter/src/durable/context.ts` re-attaches it.
+- **pikit meanwhile.** `toChord` in `packages/pi-adapter/src/context.ts` re-attaches it, and stays.
 - **Ask.** `abortSignal` returns its own value when it holds the abort key, `parent.abortSignal`
   otherwise. A few lines and a test.
+- **Outcome.** Sent as [#10189](https://github.com/earendil-works/pi/issues/10189) (2026-09-29),
+  closed `not planned` with the `no-action` label and no reply: a `Context` Chord did not create is
+  not something they support. Not to be sent again; the bridge is pikit's to keep.
 
 ## 9. Chord: `esbuild` only for the bundler
 - **Problem.** `esbuild` is a hard dependency of `@earendil-works/chord`, though only the `./bundler`
@@ -145,8 +148,12 @@ ported one: `packages/pi-adapter/src/durable/execution-testing.ts`), and a Durab
 - **Problem.** It stores `options.fetch ?? globalThis.fetch` and calls `this.fetch(...)`, which
   Workers reject ("Illegal invocation"), and its SSE parser uses `Buffer.byteLength`, which needs
   `nodejs_compat` ([mcp](../../features/completed/mcp.md), "On Cloudflare").
-- **pikit meanwhile.** `mcpHttpTransport` wraps `fetch`; the workerd lane pins the gap.
 - **Ask.** Call `fetch` unbound-safe (`(...a) => f(...a)`), measure with `TextEncoder`.
+- **Outcome: shipped.** Sent as [#10188](https://github.com/earendil-works/pi/issues/10188)
+  (2026-09-29); a maintainer confirmed it in workerd and fixed it on main the next day
+  (`7ef68d4f2`, in pi-mcp 1.0), with a regression test. `Buffer.byteLength` stays, but current
+  compatibility dates expose `Buffer`. pikit's `fetch` wrapper is removed; `mcpHttpTransport` keeps
+  only its own setting (the GET stream stays closed).
 
 ## 12. pi-ai: a default for `select` login prompts
 - **Problem.** In 1.0 Anthropic's OAuth login first asks a `select` (browser or copy-code). An
@@ -169,16 +176,19 @@ ported one: `packages/pi-adapter/src/durable/execution-testing.ts`), and a Durab
   it must rebuild:
   - `done` inputs are grouped exactly by their shared `answer`, and ordered by the answer entry's
     `commitSeq` (an extra read per run);
-  - `unanswered` inputs of one failed run cannot be told apart from two consecutive failed runs (a
-    heuristic: adjacent `pi.user` entries and the same reason);
+  - `unanswered` inputs are grouped by the `commitSeq` of their `pi.user` entries (one read each);
   - a cross-conversation "answers in the order they ended" feed needs a second store the host keeps
     and reconciles.
-  Before its fix, pikit even delivered one batched answer twice (a redelivered non-first input
-  announced alone, the rest later).
-- **pikit meanwhile.** pi-durable is the source of truth for state; pikit keeps only a derived
-  answers index in `storage.sql`, idempotent by run key (the answer entry id, or the first input of
-  an unanswered group), bounded by a per-conversation watermark document, and rebuilt by one
-  per-conversation reconciliation used at start, on recover and on redelivery.
+- **pikit meanwhile, and why this is not sent.** pi-durable is the source of truth for state; pikit
+  keeps only a derived answers index in `storage.sql`, idempotent by run key (the answer entry id,
+  or the first input of an unanswered run), bounded by `pikit.admissions`, and rebuilt by one
+  per-conversation reconciliation used at start, on recover and on redelivery. Grouping is exact
+  without any new field: a run's inputs are placed by one boundary in one commit (`applyBoundary`,
+  `inbox.ts`) and settled together (`endRun`, `live.ts`), so they share their `pi.user` entries'
+  `commitSeq` (`Storage.entry`), pinned by pikit's pi-facts test. Steers, which join a run in a
+  later commit, are pikit's own submissions and are marked at admission. What is left of this
+  proposal is convenience (one read less per run, a cross-conversation feed); not worth a request
+  under Pi's contribution rules.
 - **Ask** (additive; any one helps, (a)+(b) remove the workaround entirely):
   - (a) **`settledSeq`** on terminal submissions: the commit sequence that made them terminal (the
     storage knows it when it writes the record).
@@ -190,11 +200,36 @@ ported one: `packages/pi-adapter/src/durable/execution-testing.ts`), and a Durab
   - Alternative shape they may prefer: a host hook that runs **inside the commit that settles a run**
     (e.g. `HarnessOptions.onRunSettled(tx, inputs, outcome)`), so a host appends its own outbox row
     atomically.
-- **Will they accept it?** Likely, in some form. It is additive, small for the storage (one column or
-  JSON field, written in the commit that settles), and matches pi-durable's own principle ("everything
-  a UI needs is committed state"). Earendil announced Slack and GitHub bots on pi-durable: any bot
-  that posts answers to an external platform hits this exactly-once delivery problem, so it serves
-  their own use. They may prefer the in-commit hook or a different API to these fields; any of them
-  removes pikit's reconciliation. Lead with the problem and the repro, not a fixed API.
-- **Evidence to attach.** pikit's regression test for the duplicated batch, and the reconciliation
-  code it needs today (`packages/pi-adapter/src/`, after the native `agent.submissions` lands).
+- **If it is ever raised:** on Discord or in an RFC, not as an issue: it is an API request, which
+  Pi's issue tracker does not favour (see below), and pikit no longer needs it.
+
+---
+
+## How to send
+
+Pi's [CONTRIBUTING.md](https://github.com/earendil-works/pi/blob/main/CONTRIBUTING.md) is strict, and
+its penalty is a permanent block. What our two issues taught (2026-09-29):
+
+| Issue | Kind | Result |
+|---|---|---|
+| [#10188](https://github.com/earendil-works/pi/issues/10188) pi-mcp on Workers | A concrete crash, a short repro, a one-line fix | reopened and fixed by a maintainer the next day |
+| [#10189](https://github.com/earendil-works/pi/issues/10189) Chord foreign context | "make your design accept my integration" | closed `not planned`, `no-action`, no reply |
+
+Rules for pikit:
+
+- **Only concrete bugs, with a repro, as issues.** One at a time; the next only after the previous
+  got an answer. Use their issue template; it must fit on one screen; say why it matters and
+  whether we would implement it.
+- **Written in the owner's own voice.** If an LLM helped, add a clearly labelled AI-disclosure
+  comment (as on #10188/#10189).
+- **API or design requests** (proposals 1, 3, 4, 5, 6, 7, 9, 10, 12, 13) **go to Discord first**, or
+  to an RFC (`rfc.earendil.com`) when large. Pi's core is minimal by policy: "if it does not belong in
+  core, it should be an extension".
+- **Never in volume, never automated.** Ignoring the guide twice, or many agent-written issues, gets
+  the account blocked permanently.
+- New contributors' issues are auto-closed and reopened by maintainers when worthwhile; a reply
+  `lgtmi` from a maintainer keeps future issues open, `lgtm` also allows PRs. We have neither yet.
+- Avoid Friday to Sunday: issues then may be missed.
+
+Next candidate, if any: proposal 2 (queued inputs stuck after a failed run) reads as a bug, but
+pi-durable's README documents it as the behaviour, so ask on Discord before opening an issue.

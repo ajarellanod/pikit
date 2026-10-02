@@ -48,15 +48,12 @@ export type {
 export type McpHttpTransportOptions = Omit<StreamableHttpTransportOptions, "openGetStream">;
 
 /**
- * Pi's Streamable HTTP transport to `options.url`, ready for every target: `fetch` (the global one, or
- * `options.fetch`) is called as a plain function (Workers reject the platform's `fetch` called as a
- * method), and the server-to-client GET stream stays closed (a Durable Object does not stay alive for
- * an outbound stream; requests' own responses still stream).
+ * Pi's Streamable HTTP transport to `options.url`, ready for every target: the server-to-client GET
+ * stream stays closed (a Durable Object does not stay alive for an outbound stream; requests' own
+ * responses still stream). pi-mcp calls `fetch` without a receiver itself, which Workers require.
  */
 export function mcpHttpTransport(options: McpHttpTransportOptions): StreamableHttpTransport {
-  const own = options.fetch;
-  const call: McpFetch = own === undefined ? (input, init) => fetch(input, init) : (input, init) => own(input, init);
-  return new StreamableHttpTransport({ ...options, fetch: call, openGetStream: false });
+  return new StreamableHttpTransport({ ...options, openGetStream: false });
 }
 
 /**

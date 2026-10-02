@@ -36,5 +36,4 @@ A tool's replay is one value for all its calls, recorded with the call's intent 
 `mcpTool({ name, label, call })` is provided at setup and described at start (`describe(remote,
 replay)`): pi-durable reads a tool's `description`, `parameters` and `replay` from the registered object
 at each use. A result with `isError` is an error result with the server's content. pi-mcp 1.0 calls
-`fetch` without a receiver, so its own transport works in workerd; `mcpHttpTransport` keeps its wrapper
-and never opens the server-to-client GET stream.
+`fetch` without a receiver, so its own transport works in workerd; `mcpHttpTransport` only makes sure it never opens the server-to-client GET stream.
