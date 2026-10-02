@@ -284,11 +284,16 @@ records and diff tables, prompt bars, an agent chat harness).
   components. What must not be missed comes from feeds, not from events (K3). A view whose
   capability is not installed does not appear. Live views of conversations and tasks build on
   pi-durable's `watch()` and `taskGraph()`, reached through the adapter, not on a copy of their state.
-- **It runs on both targets** (§4). The UI is static assets built by the component (React and
-  Tailwind v4, the stack of Beautiful UI's primitives; no Next.js server runtime), served by
-  `server-bun` on a server and as Workers static assets on Cloudflare. Live updates use a stream
-  both targets offer (server-sent events on the server; the Durable Object's hibernating WebSocket
-  on Cloudflare).
+- **It runs wherever the app runs, and closes no deployment** (§4,
+  `features/deployment-targets.md`). The UI is static assets built by the component (React and
+  Tailwind v4, the stack of Beautiful UI's primitives; no Next.js server runtime). Assets and API are
+  served by the component's own `http.route` handlers (standard fetch handlers), so any host that
+  serves the app serves the dashboard: `server-bun`, a Worker, and later hosts (Vercel, E2B,
+  exe.dev, Modal) with no dashboard change. Live updates are server-sent events (a plain streaming
+  response every such host offers); commands are plain `POST`s. Host-specific shortcuts (Workers
+  static assets, a Durable Object's hibernating WebSocket) are optional optimizations behind the
+  same API, never requirements. Reading a conversation is location-transparent: on Cloudflare the
+  Worker lists conversations from an index and streams one from its Durable Object.
 - **Its build is its own.** Building the dashboard's assets does not become a build step every
   pikit app needs (no magic, principle 9).
 - **It is safe by default.** Authenticated; never shows a secret or a credential. Operational logs stay without message text; the transcript views are an explicit,

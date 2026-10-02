@@ -242,8 +242,10 @@ And it is a project, not a company. Being wrong is allowed.
 
 ## Strategy and kill criteria
 
-The bet is checked in a time-box of four to six weeks: a first preset, Telegram on Cloudflare (a
-"Deploy to Cloudflare" template), with a minimal operator UI, shown to the Pi community.
+The bet is checked with the smallest complete thing: a first preset, Telegram on Cloudflare (a
+"Deploy to Cloudflare" template), with a minimal operator UI, shown to the Pi community. Built with
+AI agents, that is a matter of hours to days, not weeks, so the check comes early and cheap; what
+takes time is people trying it.
 
 pikit stops if:
 

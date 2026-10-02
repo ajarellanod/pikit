@@ -15,15 +15,29 @@ how big.
 - **Size:** large, and it removes code. The decisions it follows are in the migration file.
 
 ## Upstream proposals for pi-durable (pending the owner's decision to send)
-The gaps pikit works around, one file each in [`docs/upstream/`](../docs/upstream/):
-[next due time](../docs/upstream/pi-durable-next-wake.md),
-[inbox stuck after a failed run](../docs/upstream/pi-durable-inbox-after-failure.md),
-[session id for prompt caching](../docs/upstream/pi-durable-provider-session-id.md),
-[per-conversation resume](../docs/upstream/pi-durable-scheduling-scope.md),
-[table prefix](../docs/upstream/pi-durable-table-prefix.md). Not yet written up: one process per
-storage, and a caller's context values (tenant, trace) not reaching tools. Each one Pi ships removes
-a workaround in the adapter or a limit of the kit.
+Every gap pikit works around in Pi's packages (pi-durable, Chord, pi-mcp, pi-ai), with problem,
+evidence, workaround, ask, priority and status, is listed in
+[`docs/upstream/README.md`](../docs/upstream/README.md) so that none is lost; the longer ones have
+their own file there. Each one Pi ships removes a workaround in the adapter or a limit of the kit.
 - **Size:** small to write; each is sent when the owner decides.
+
+## Publish the kit to npm; then upgrade the deployed bot
+- **Why:** generated projects get the kit as tarballs vendored from a commit (`vendor/*.tgz`,
+  `pikit.json`'s `kit.commit`), so a project's dependencies are pinned to source text from this
+  repository's commits. Published `@pikit/*` packages make them ordinary versioned dependencies.
+- **The deployed bot** (`pikit-telegram-cloudflare`, the first preset's template) is upgraded to
+  the pi-durable kit, and its code improved, once everything is on npm, not from commits. Its
+  conversations start fresh then (decided: no migration).
+- **When:** after the pi-durable switch-over is merged.
+- **Size:** medium: package publishing, `pikit new`/`upgrade` resolving versions instead of commits.
+
+## Dashboard and deployment stay open
+- **Decided:** the operator dashboard is a component (`admin-dashboard`, SPEC §5), designed for
+  every host: its own `http.route` handlers, server-sent events, no host API; deployment is never
+  closed to server and Cloudflare (Vercel, E2B, exe.dev, Modal are expected), see
+  [deployment targets](deployment-targets.md).
+- **When:** the dashboard is the next piece after the switch-over, in its minimal form:
+  conversations, a live view of one, steer/abort, cost per conversation.
 
 ## Upstream contributions (pending the owner's decision)
 - **pi-mcp's `StreamableHttpTransport` on Workers.**

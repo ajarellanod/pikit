@@ -44,6 +44,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
 | [conversation-routing](conversation-routing.md) | | Decided: a conversation is one chat of one channel; its key is never rewritten | No |
 | [deployment-systemd](deployment-systemd.md) | | Run as a systemd service, without Docker | No |
+| [deployment-targets](deployment-targets.md) | | Targets as runtime models; Vercel, E2B, exe.dev, Modal without closing deployment | No; the dashboard (SPEC §5) follows its rules |
 | [health](health.md) | | Components report failures; essential ones restart the process | Yes: SPEC §5 and §6 |
 | [inbound-dedup](inbound-dedup.md) | | Transport deduplication for platforms that redeliver | No; the first webhook channel |
 | [interaction](interaction.md) | | Pi extensions' questions answered in the chat | No |
