@@ -5,7 +5,7 @@ Each conversation goes to the agent of the first rule in config it matches.
 - **Provides:** nothing. It adds the stage `router-rules` (priority 1) to the `route.resolve`
   pipeline.
 - **Uses:** `agent.definition`, to check at start that every agent a rule names exists.
-- **Targets:** `server` and `cloudflare`.
+- **Targets:** `server` and `durable`.
 - **Installs to:** `src/pikit/router-rules/`.
 - **npm dependencies:** `typebox`.
 

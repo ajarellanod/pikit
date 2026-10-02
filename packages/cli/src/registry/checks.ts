@@ -176,7 +176,7 @@ export function checkImports(componentDir: string, name: string, targets: readon
   const packages = new Set<string>();
   const filesDir = join(componentDir, "files");
   const serverOnly = targets.length === 1 && targets[0] === "server";
-  const cloudflareOnly = targets.length === 1 && targets[0] === "cloudflare";
+  const durableOnly = targets.length === 1 && targets[0] === "durable";
 
   for (const file of listFiles(filesDir).filter((f) => SOURCE.test(f))) {
     const at = `files/${file}`;
@@ -201,8 +201,9 @@ export function checkImports(componentDir: string, name: string, targets: readon
         if ((scheme === "node" || scheme === "bun") && !serverOnly) {
           problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: node:* and bun:* need targets ["server"] (SPEC §4)`);
         }
-        if (scheme === "cloudflare" && !cloudflareOnly) {
-          problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: cloudflare:* needs targets ["cloudflare"] (SPEC §4)`);
+        // Only Cloudflare provides the durable target today, so its runtime modules are durable's.
+        if (scheme === "cloudflare" && !durableOnly) {
+          problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: cloudflare:* needs targets ["durable"] (SPEC §4)`);
         }
         continue;
       }

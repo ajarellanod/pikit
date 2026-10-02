@@ -11,7 +11,7 @@
  * What needs queries, or several records changed together, belongs in a component's own tables in
  * `storage.sql`, not here.
  *
- * Targets: `server` and `cloudflare`: it imports nothing platform-specific, and its storage is
+ * Targets: `server` and `durable`: it imports nothing platform-specific, and its storage is
  * whatever provides `storage.sql` there.
  */
 

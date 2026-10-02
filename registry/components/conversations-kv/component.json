@@ -5,7 +5,7 @@
   "description": "The conversation registry in storage.kv: which Pi session each conversation is in now, on a server or in a Durable Object.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

@@ -108,7 +108,7 @@ test("new refuses a preset component that does not run on a new project's target
     optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }],
   });
   const index: Record<string, unknown> = {};
-  for (const [name, targets] of [["secrets-env", ["server"]], ["channel-edge", ["cloudflare"]]] as const) {
+  for (const [name, targets] of [["secrets-env", ["server"]], ["channel-edge", ["durable"]]] as const) {
     mkdirSync(join(registry, "components", name), { recursive: true });
     writeFileSync(join(registry, "components", name, "component.json"), JSON.stringify(manifest(name, [...targets])));
     index[name] = { version: "0.0.0", description: name, targets, path: `components/${name}` };
@@ -120,7 +120,7 @@ test("new refuses a preset component that does not run on a new project's target
   const parent = temp();
   const run = await runCli(["new", "fresh", "--preset", "edge", "--registry", registry], parent);
   expect(run.code).toBe(1);
-  expect(run.err).toContain("channel-edge runs on cloudflare, not on this project's server target");
+  expect(run.err).toContain("channel-edge runs on durable, not on this project's server target");
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 
@@ -128,32 +128,37 @@ test("new --target: an unknown target, and a preset that does not run on the cho
   const parent = temp();
   const mars = await runCli(["new", "fresh", "--target", "mars"], parent);
   expect(mars.code).toBe(2);
-  expect(mars.err).toContain('--target is one of server, cloudflare, not "mars"');
+  expect(mars.err).toContain('--target is one of server, durable, not "mars"');
+  // The target that was called after its provider is refused with its new name, never taken as an alias.
+  const renamed = await runCli(["new", "fresh", "--target", "cloudflare", "--preset", "cloudflare-minimal"], parent);
+  expect(renamed.code).toBe(2);
+  expect(renamed.err).toContain('the target "cloudflare" is now "durable"');
+  expect(renamed.err).toContain("Cloudflare is its provider; use --target durable");
 
-  const server = await runCli(["new", "fresh", "--target", "cloudflare", "--preset", "http"], parent);
+  const server = await runCli(["new", "fresh", "--target", "durable", "--preset", "http"], parent);
   expect(server.code).toBe(1);
-  expect(server.err).toContain("runs on server, not on this project's cloudflare target");
+  expect(server.err).toContain("runs on server, not on this project's durable target");
   const edge = await runCli(["new", "fresh", "--preset", "cloudflare-minimal"], parent);
   expect(edge.code).toBe(1);
-  expect(edge.err).toContain("storage-do runs on cloudflare, not on this project's server target");
+  expect(edge.err).toContain("storage-do runs on durable, not on this project's server target");
   // The target is never guessed from the preset, but the refusal says which one it runs on.
-  expect(edge.err).toContain('the preset "cloudflare-minimal" runs on cloudflare: pikit new fresh --target cloudflare --preset cloudflare-minimal');
+  expect(edge.err).toContain('the preset "cloudflare-minimal" runs on durable: pikit new fresh --target durable --preset cloudflare-minimal');
   const bot = await runCli(["new", "fresh", "--preset", "telegram-cloudflare"], parent);
   expect(bot.code).toBe(1);
-  expect(bot.err).toContain("pikit new fresh --target cloudflare --preset telegram-cloudflare");
+  expect(bot.err).toContain("pikit new fresh --target durable --preset telegram-cloudflare");
   // A target that was chosen gets no hint: it was not forgotten.
   expect(server.err).not.toContain("runs on server: pikit new");
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 
-test("new --target cloudflare records the target, and writes two Apps, wrangler and the Cloudflare components", async () => {
+test("new --target durable records the target, and writes two Apps, wrangler and the Cloudflare components", async () => {
   const parent = temp();
   // Nothing resolves: `bun install` fails at once, after every file is written.
-  const run = await runCli(["new", "edge", "--target", "cloudflare", "--preset", "cloudflare-minimal"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  const run = await runCli(["new", "edge", "--target", "durable", "--preset", "cloudflare-minimal"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
   expect(run.err).toContain("`bun install` failed");
   const project = join(parent, "edge");
   const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
-  expect(manifest.targets).toEqual(["cloudflare"]);
+  expect(manifest.targets).toEqual(["durable"]);
   expect(Object.keys(manifest.components).sort()).toEqual(["deployment-cloudflare", "storage-do", "storage-kv-sql"]);
   // The preset names storage-kv-sql (not an offer that a second storage.kv provider would cancel).
   expect(manifest.components["storage-kv-sql"].installedFor).toBeUndefined();
@@ -178,17 +183,17 @@ test("new --target cloudflare records the target, and writes two Apps, wrangler 
   expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
 }, 60_000);
 
-test("new --target cloudflare --preset telegram-cloudflare: a whole bot, each half in its App, its agent naming the installed tools", async () => {
+test("new --target durable --preset telegram-cloudflare: a whole bot, each half in its App, its agent naming the installed tools", async () => {
   const parent = temp();
   // Nothing resolves: `bun install` fails at once, after every file is written.
-  const run = await runCli(["new", "bot", "--target", "cloudflare", "--preset", "telegram-cloudflare"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
+  const run = await runCli(["new", "bot", "--target", "durable", "--preset", "telegram-cloudflare"], parent, { env: { NPM_CONFIG_REGISTRY: "http://127.0.0.1:9/" } });
   expect(run.err).toContain("`bun install` failed");
   // Every add was accepted: nothing refused, nothing missing in either App along the way.
   expect(run.err).not.toContain("is not provided");
   expect(run.out).toContain("outbound-durable, for channel-telegram-webhook");
   const project = join(parent, "bot");
   const manifest = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8"));
-  expect(manifest.targets).toEqual(["cloudflare"]);
+  expect(manifest.targets).toEqual(["durable"]);
   expect(Object.keys(manifest.components).sort()).toEqual([
     "secrets-cloudflare",
     "platform-cloudflare",

@@ -17,7 +17,7 @@
  * address is under it (`<apiBase>/v1` for most). A proxy in front of OpenRouter, or a test double,
  * replaces it.
  *
- * Targets: `server` and `cloudflare`: the provider's module imports nothing node-only, and an API key
+ * Targets: `server` and `durable`: the provider's module imports nothing node-only, and an API key
  * needs nothing more.
  */
 

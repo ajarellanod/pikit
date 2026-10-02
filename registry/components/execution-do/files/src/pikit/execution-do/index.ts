@@ -18,7 +18,7 @@
  * nothing from `cloudflare:*`. Its dependencies use Node's `Buffer`: the Worker needs the
  * `nodejs_compat` compatibility flag.
  *
- * Target: `cloudflare`. On a server, `execution-local` gives the agent the machine's own shell.
+ * Target: `durable`. On a server, `execution-local` gives the agent the machine's own shell.
  */
 
 import { defineComponent } from "@pikit/core";

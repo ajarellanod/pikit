@@ -350,11 +350,11 @@ test("a completed add clears its marker before reporting a failed doctor", async
 
 test("channel-http is refused on Cloudflare before writing or creating an operation marker", async () => {
   const dir = composingProject();
-  writeProjectManifest(dir, emptyManifest(undefined, undefined, ["cloudflare"]));
+  writeProjectManifest(dir, emptyManifest(undefined, undefined, ["durable"]));
   const before = snapshot(dir);
   const run = await runCli(["add", "channel-http", "--yes"], dir);
   expect(run.code).toBe(1);
-  expect(run.err).toContain("channel-http runs on server, not on this project's cloudflare target");
+  expect(run.err).toContain("channel-http runs on server, not on this project's durable target");
   expect(snapshot(dir)).toEqual(before);
 });
 

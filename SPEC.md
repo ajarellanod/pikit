@@ -160,6 +160,24 @@ The same project, with the same agents, routing and channels, runs on Cloudflare
 Durable Objects. This is not a feature: it is the proof that the contracts hide no server
 (Manifesto, principle 11).
 
+**A target is a runtime model; a provider is a `deployment-*` component.** A target (`targets` in a
+`component.json`, `pikit.json`'s `targets`, `pikit new --target`) names how code lives, never whose
+machine it is. There are two first-class targets:
+- **`server`: a long-lived process.** A process that stays up, a persistent local disk, in-process
+  timers, one process per storage. Docker on a VPS, systemd, exe.dev, E2B, Modal and Fly are its
+  providers, each a `deployment-*` component. `server` guarantees a persistent disk: a provider without
+  one supplies it (a volume) and its `deployment-*` checks it in `pikit doctor`; otherwise it is not
+  `server`.
+- **`durable`: an actor per conversation.** One actor (a Durable Object) per conversation, with its
+  own SQLite and one alarm, evicted between events, its work driven in slices (`driveSlice`, C4).
+  Cloudflare is its only provider today, so the pieces specific to it keep Cloudflare's name
+  (`deployment-cloudflare`, `platform-cloudflare`, `secrets-cloudflare`, `@pikit/contracts/cloudflare`,
+  `WORKERS_HOST`); only the target is `durable`.
+
+A third value is a core change (`Target` in `@pikit/core`, the schema's enum, the CLI), made only when
+a host of another runtime model is built: stateless functions would be `functions`
+(`features/deployment-targets.md`). A new provider of an existing model changes no core.
+
 What it requires:
 - **Neutral layers.** The kernel, the contracts, the adapter's shipped exports and every component
   in the required set import no `node:*`, `bun:*` or `cloudflare:*` (checked by

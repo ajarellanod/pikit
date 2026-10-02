@@ -91,7 +91,7 @@ test("every builtin preset installs its starter model's provider on the target i
   const builtin = openRegistry(DEFAULT_REGISTRY);
   for (const { name } of builtin.presets()) {
     const components = builtin.preset(name);
-    for (const target of ["server", "cloudflare"]) {
+    for (const target of ["server", "durable"]) {
       if (!components.every((c) => builtin.manifest(c).targets.includes(target))) continue;
       expect(() => checkStarterModel(builtin, components, target, builtin.presetModel(name) ?? starterModel(target), name)).not.toThrow();
     }

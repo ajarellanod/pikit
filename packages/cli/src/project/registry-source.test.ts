@@ -93,7 +93,7 @@ test("malformed presets are refused when read", () => {
 });
 
 test("slots with targets offer only the components that run on them", () => {
-  const r = openRegistry(registry({ ...COMPONENTS, "channel-edge": { title: "Edge: on Workers", targets: ["cloudflare"] } }, { base: BASE }));
+  const r = openRegistry(registry({ ...COMPONENTS, "channel-edge": { title: "Edge: on Workers", targets: ["durable"] } }, { base: BASE }));
   expect(r.slots("base")[0]?.options.map((o) => o.name)).toEqual(["channel-a", "channel-b", "channel-edge"]);
   expect(r.slots("base", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-a", "channel-b"]);
 });
@@ -134,7 +134,7 @@ test("registry validate reports a preset that does not compose on its target, an
       // Nothing provides storage.sql: an answer that cannot compose.
       "channel-b": { title: "B", ...requires(["storage.sql"]) },
       // Runs only on Cloudflare: not an answer on a server, so not checked there.
-      "channel-edge": { title: "Edge", targets: ["cloudflare"], ...requires(["storage.sql"]) },
+      "channel-edge": { title: "Edge", targets: ["durable"], ...requires(["storage.sql"]) },
       "server-bun": undefined,
     },
     {
@@ -147,7 +147,7 @@ test("registry validate reports a preset that does not compose on its target, an
   expect(checkPresets(root).sort()).toEqual([
     'presets/base.yaml: with channel-b, on server, channel-b requires "storage.sql", which nothing provides',
     'presets/lonely.yaml: on server, channel-a requires "secrets", which nothing provides',
-    "presets/nowhere.yaml: no target runs all its components (not on server: channel-edge; not on cloudflare: secrets-env)",
+    "presets/nowhere.yaml: no target runs all its components (not on server: channel-edge; not on durable: secrets-env)",
     'presets/twice.yaml: on server, "secrets" takes one provider, and secrets-env and secrets-file each provide it',
   ]);
 });
@@ -207,7 +207,7 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   expect(r.slots("http")[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram", "channel-telegram-webhook"]);
   // A server project is not offered the webhook; Cloudflare has neither the poller nor an HTTP Worker half.
   expect(r.slots("http", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram"]);
-  expect(r.slots("http", ["cloudflare"])[0]?.options.map((o) => o.name)).toEqual(["channel-telegram-webhook"]);
+  expect(r.slots("http", ["durable"])[0]?.options.map((o) => o.name)).toEqual(["channel-telegram-webhook"]);
 });
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {

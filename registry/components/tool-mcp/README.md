@@ -12,7 +12,7 @@ you want from it; each becomes the agent tool `<server>_<tool>`. Pi's own MCP cl
   `storage.kv`, to keep each server's tool listing: a start then reaches no server (below).
 - **Hooks** (`component.json`): `doctor` (`doctor.ts`), its step of `pikit doctor`; `beforeDeploy`
   (`deploy.ts`), which `pikit up` runs before it builds and which writes `seed.ts` (below).
-- **Targets:** `server` and `cloudflare`: Streamable HTTP over `fetch`. A server run as a local
+- **Targets:** `server` and `durable`: Streamable HTTP over `fetch`. A server run as a local
   process (stdio) is not this component's (see `features/completed/mcp.md`).
 - **Installs to:** `src/pikit/tool-mcp/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi), `typebox`.

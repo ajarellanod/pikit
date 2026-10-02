@@ -34,7 +34,7 @@ uses `fetch`.
     schema with `properties`, as pi-mcp's README advises), `mcpToolResult` (below);
   - `@pikit/pi-adapter/mcp/testing`: a fake Streamable HTTP server as a `fetch` handler, for the
     component's tests, the adapter's and the workerd lane's.
-- **`tool-mcp`** (targets server and cloudflare). Config names each server (`url`, `tools`, and
+- **`tool-mcp`** (targets server and durable). Config names each server (`url`, `tools`, and
   optionally `secret`, `headers`, `timeoutMs`); each tool named becomes the `agent.tool`
   `<server>_<tool>`. An agent gets a tool only by naming it.
   - **Named in config, not a proxy.** Keyed capabilities' keys are fixed at `setup`, so

@@ -8,7 +8,7 @@ receives Telegram's messages, and one Durable Object per chat where the agent ru
 workspace, a shell, web fetch and web search. It is private: only the people who log in with the
 password you choose can talk to it.
 
-It is a [pikit](https://github.com/ajarellanod/pikit) project (`pikit new --target cloudflare --preset
+It is a [pikit](https://github.com/ajarellanod/pikit) project (`pikit new --target durable --preset
 telegram-cloudflare`), so every part of it is source in this repository, yours to read and change.
 
 ## Before you click

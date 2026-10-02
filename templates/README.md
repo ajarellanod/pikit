@@ -8,7 +8,7 @@ commit it was made from.
 
 | Template | Made from | Published at |
 |---|---|---|
-| `telegram-cloudflare` | `pikit new pikit-telegram-bot --target cloudflare --preset telegram-cloudflare` | `github.com/ajarellanod/pikit-telegram-cloudflare` |
+| `telegram-cloudflare` | `pikit new pikit-telegram-bot --target durable --preset telegram-cloudflare` | `github.com/ajarellanod/pikit-telegram-cloudflare` |
 
 ## Making one
 

@@ -43,7 +43,7 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
   nor offered. Instead it checks **Node.js >= 22**, which wrangler (Cloudflare's CLI, a dev dependency
   of each project) runs on, and says how to install it when it is missing or older; it does not
   install it.
-- **`pikit new --target cloudflare --preset telegram-cloudflare`** instead of `pikit new`: a Telegram
+- **`pikit new --target durable --preset telegram-cloudflare`** instead of `pikit new`: a Telegram
   bot on Cloudflare Workers, a Durable Object per chat. It asks:
   1. the bot's name (its folder), then writes it and runs `bun install`;
   2. "Configure it now?": the bot's token from @BotFather (checked with Telegram), who may talk to it
@@ -56,7 +56,7 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
 
 Without the flag, answering "On Cloudflare" to `pikit new`'s "Where should it run?" leads to the same
 bot (on Linux without Docker, the installer asks about Docker first: answer N). By hand, in a project: `pikit new my-bot --target
-cloudflare --preset telegram-cloudflare`, `cd my-bot`, `pikit configure`, `pikit up`.
+durable --preset telegram-cloudflare`, `cd my-bot`, `pikit configure`, `pikit up`.
 
 **Costs.** Cloudflare's Workers Free plan is enough (100,000 requests a day, 5 GB of Durable Object
 storage; the Paid plan, $5 a month, raises them). What you pay for is the model's tokens (OpenRouter),

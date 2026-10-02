@@ -61,7 +61,7 @@ export function deploymentComponent(projectDir: string): string {
   const project = readProjectManifest(projectDir);
   const names = Object.keys(project.components).filter((name) => name.startsWith("deployment-"));
   if (names.length === 0) {
-    const example = project.targets.includes("cloudflare") ? "deployment-cloudflare" : "deployment-docker";
+    const example = project.targets.includes("durable") ? "deployment-cloudflare" : "deployment-docker";
     throw new CliError(`no deployment-* component is installed; add one, e.g. \`pikit add ${example}\``);
   }
   if (names.length > 1) throw new CliError(`several deployment components are installed (${names.join(", ")}); remove all but one`);

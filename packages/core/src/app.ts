@@ -54,7 +54,19 @@ declare module "./events.ts" {
   }
 }
 
-export type Target = "server" | "cloudflare";
+/**
+ * Where an App runs: a runtime model, not a provider (SPEC §4). Providers are `deployment-*`
+ * components on a target.
+ * - `server`: a long-lived process. A process that stays up, a persistent local disk, in-process
+ *   timers, one process per storage (Docker on a VPS, systemd, exe.dev, E2B, Modal, Fly…). A provider
+ *   without a persistent disk supplies one (a volume), and its `deployment-*` checks it in `pikit doctor`.
+ * - `durable`: one actor (a Durable Object) per conversation, with its own SQLite and one alarm,
+ *   evicted between events; work is driven in slices (`driveSlice`). Cloudflare provides it today.
+ *
+ * A value is added only when a host of a new runtime model is built (stateless functions would be
+ * `functions`).
+ */
+export type Target = "server" | "durable";
 
 /**
  * What every handler receives (SPEC K5). `emit`/`run` propagate this same context.

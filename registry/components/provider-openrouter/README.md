@@ -7,7 +7,7 @@ API key. An agent names one as `openrouter/<vendor>/<model>`, for example
 - **Provides:** `model.provider`, under the key `openrouter`.
 - **Requires:** nothing. The agent runtime reads credentials from `model.credentials` when it is
   installed.
-- **Targets:** `server` and `cloudflare`: the provider's module imports nothing node-only.
+- **Targets:** `server` and `durable`: the provider's module imports nothing node-only.
 - **Installs to:** `src/pikit/provider-openrouter/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi), `typebox`.
 

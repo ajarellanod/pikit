@@ -5,7 +5,7 @@ pi-durable's own `read` tool, for the agents that name it: it reads a text file 
 - **Provides:** `agent.tool`, under the key `read`.
 - **Requires:** `execution` (for example `execution-local`).
 - **Optional:** `workspace` (for example `workspace-local`): each agent's own directory.
-- **Targets:** `server` and `cloudflare`: any target with an `execution` provider.
+- **Targets:** `server` and `durable`: any target with an `execution` provider.
 - **Installs to:** `src/pikit/tool-read/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi).
 

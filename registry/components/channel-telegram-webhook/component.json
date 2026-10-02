@@ -5,7 +5,7 @@
   "title": "Telegram by webhook: chat with your agent from the Telegram app, on Cloudflare",
   "description": "Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each message to your Worker.",
   "targets": [
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

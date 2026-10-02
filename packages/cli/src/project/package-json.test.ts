@@ -89,7 +89,7 @@ const installed = (dependencies: Record<string, string>, devDependencies?: Recor
 
 test("remove takes out a dev dependency no remaining component declares, as either, and no project file imports", () => {
   const dir = temp();
-  const project = emptyManifest(undefined, undefined, ["cloudflare"]);
+  const project = emptyManifest(undefined, undefined, ["durable"]);
   // What remains once deployment-cloudflare is gone.
   project.components["storage-do"] = installed({ "@pikit/contracts": "0.0.0" });
   expect(unneededDependencies(dir, project, ["wrangler"])).toEqual(["wrangler"]);

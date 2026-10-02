@@ -2,7 +2,7 @@
  * The guided path, in a real pseudo-terminal, as the installer runs it: `pikit new` with no
  * arguments asks the agent's name, where it runs, and where to talk to it (the registry's channel-* components), writes the
  * project, then runs the channel's own setup and the model's step, and offers to start it.
- * On Cloudflare, chosen in the menu or with the installer's `--target cloudflare --preset
+ * On Cloudflare, chosen in the menu or with the installer's `--target durable --preset
  * telegram-cloudflare`, it asks only the name before writing the bot.
  *
  * Telegram is channel-telegram's `fake-telegram.ts`. Ctrl-C stops the wizard with nothing written;
@@ -194,7 +194,7 @@ async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string):
   w.type("\r");
   expect(await w.exited).toBe(0);
   const pikitJson = JSON.parse(readFileSync(join(parent, name, "pikit.json"), "utf8")) as { targets: string[]; components: Record<string, unknown> };
-  expect(pikitJson.targets).toEqual(["cloudflare"]);
+  expect(pikitJson.targets).toEqual(["durable"]);
   expect(Object.keys(pikitJson.components)).toContain("channel-telegram-webhook");
   expect(Object.keys(pikitJson.components)).toContain("deployment-cloudflare");
   return w.text();
@@ -210,21 +210,21 @@ test.skipIf(!E2E)(
     const text = await writtenNotConfigured(w, "cf-bot");
     // One preset runs on Cloudflare and makes an agent you talk to: no question of presets.
     expect(text).not.toContain("Which preset do you start from?");
-    expect(text).toContain("The same, in a script: pikit new cf-bot --target cloudflare --preset telegram-cloudflare");
+    expect(text).toContain("The same, in a script: pikit new cf-bot --target durable --preset telegram-cloudflare");
     expect(text).toContain("Later: cd cf-bot && pikit configure && pikit up");
   },
   TIMEOUT,
 );
 
 test.skipIf(!E2E)(
-  "the installer's --cloudflare: pikit new --target cloudflare --preset telegram-cloudflare asks only the name",
+  "the installer's --cloudflare: pikit new --target durable --preset telegram-cloudflare asks only the name",
   async () => {
-    const w = wizard({}, ["--target", "cloudflare", "--preset", "telegram-cloudflare"]);
+    const w = wizard({}, ["--target", "durable", "--preset", "telegram-cloudflare"]);
     await w.waitFor("Name of your agent");
     w.type("flag-bot\r");
     const text = await writtenNotConfigured(w, "flag-bot");
     expect(text).not.toContain("Where should it run?");
-    expect(text).toContain("The same, in a script: pikit new flag-bot --target cloudflare --preset telegram-cloudflare");
+    expect(text).toContain("The same, in a script: pikit new flag-bot --target durable --preset telegram-cloudflare");
   },
   TIMEOUT,
 );

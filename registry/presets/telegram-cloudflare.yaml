@@ -1,6 +1,6 @@
 # yaml-language-server: $schema=../schema/preset.schema.json
 # An agent in Telegram, on Cloudflare (SPEC §4, C1):
-#   pikit new my-bot --target cloudflare --preset telegram-cloudflare
+#   pikit new my-bot --target durable --preset telegram-cloudflare
 #   pikit configure   # the bot's token, who may talk to it, the webhook's secret, the model's key
 #   pikit up          # deploy, wait until /health answers the new version, then set the webhook
 # deployment-cloudflare's README, "Your Telegram bot on Cloudflare", walks through it.

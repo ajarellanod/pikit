@@ -46,7 +46,7 @@
         "type": "string",
         "enum": [
           "server",
-          "cloudflare"
+          "durable"
         ]
       },
       "minItems": 1,

@@ -9,7 +9,7 @@ Talk to your agent in Telegram when it runs on Cloudflare: Telegram posts each m
   `actor.inbox`, where it registers the handler of `telegram.update`. A router (such as
   `router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (durable sending).
-- **Target:** `cloudflare`. On a server, use `channel-telegram` (long polling, no public URL needed):
+- **Target:** `durable`. On a server, use `channel-telegram` (long polling, no public URL needed):
   absence, not flags (SPEC §4.1, C6).
 - **Installs to:** `src/pikit/channel-telegram-webhook/`.
 - **npm dependencies:** `typebox`.
@@ -57,7 +57,7 @@ the same `wakeups`) in one App with `platform-cloudflare`, which provides `actor
 there, with no dependency cycle.
 
 It also runs with both halves in one App on a server (with `mailbox-local`, `wakeups-timers`, and
-`server-bun` behind HTTPS): its tests run it that way. Its target stays `cloudflare`, since on a server
+`server-bun` behind HTTPS): its tests run it that way. Its target stays `durable`, since on a server
 `channel-telegram` needs no public URL.
 
 ## Set it up
@@ -93,7 +93,7 @@ see "Registering the webhook" below.
 
 ### With a "Deploy to Cloudflare" button
 
-The button clones a template (a project made with `pikit new --target cloudflare --preset
+The button clones a template (a project made with `pikit new --target durable --preset
 telegram-cloudflare`, published as a public repository) into the user's GitHub, asks for its secrets
 in a form, and builds and deploys it with Workers Builds (`wrangler deploy`), again on every push.
 There is no `pikit configure` and no `pikit up`, so the template does three things:

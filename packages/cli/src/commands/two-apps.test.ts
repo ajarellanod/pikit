@@ -47,14 +47,14 @@ export const worker = defineApp({
 `;
 
 /** A project on `target` whose kit is this CLI's, with `@pikit/core` linked: `add` needs no install. */
-function project(target: "server" | "cloudflare"): string {
+function project(target: "server" | "durable"): string {
   const dir = temp();
   writeProjectManifest(dir, emptyManifest(undefined, undefined, [target]));
   const contracts = kitSpecifier("@pikit/contracts");
   mkdirSync(join(dir, "vendor"));
   writeFileSync(join(dir, contracts.slice("file:".length)), "this CLI's kit");
   writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "edge", dependencies: { "@pikit/contracts": contracts } }, null, 2)}\n`);
-  writeFileSync(join(dir, "pikit.config.ts"), target === "cloudflare" ? TWO_APPS : ONE_APP);
+  writeFileSync(join(dir, "pikit.config.ts"), target === "durable" ? TWO_APPS : ONE_APP);
   mkdirSync(join(dir, "node_modules", "@pikit"), { recursive: true });
   for (const kit of ["core", "contracts"]) symlinkSync(join(PACKAGES_DIR, kit), join(dir, "node_modules", "@pikit", kit));
   return dir;
@@ -96,7 +96,7 @@ function registry(): string {
     mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
     for (const [file, text] of Object.entries(files)) writeFileSync(join(dir, "files", "src", "pikit", name, file), text);
     const full = {
-      name, version: "0.0.0", description: name, targets: ["server", "cloudflare"], requires: { pikit: "0.0.0", capabilities: [] },
+      name, version: "0.0.0", description: name, targets: ["server", "durable"], requires: { pikit: "0.0.0", capabilities: [] },
       optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...manifest,
     };
     writeFileSync(join(dir, "component.json"), JSON.stringify(full));
@@ -107,7 +107,7 @@ function registry(): string {
 }
 
 test("on Cloudflare, add puts each half in its App, checks each App, records the hook; remove undoes both", async () => {
-  const dir = project("cloudflare");
+  const dir = project("durable");
   const from = registry();
   const configPath = join(dir, "pikit.config.ts");
 

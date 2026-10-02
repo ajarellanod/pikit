@@ -21,7 +21,7 @@
  * a cache in this process: a run started by a worker that died, or before a Durable Object
  * hibernated, ends without `durationMs`, which is better than a wrong one.
  *
- * Targets: `server` and `cloudflare` (it imports nothing platform-specific).
+ * Targets: `server` and `durable` (it imports nothing platform-specific).
  */
 
 import { type AppContext, type AppEvents, defineComponent } from "@pikit/core";

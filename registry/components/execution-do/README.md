@@ -6,7 +6,7 @@ with `git`, `node` and `curl`. pi-durable's own `read`, `write`, `edit` and `bas
 
 - **Provides:** `execution` and `execution.shell` (one pi-durable `ExecutionEnv`, `env.ts`, whose files are the object's own namespace: `execution-do:<object id>`).
 - **Requires:** nothing. **Optional:** `secrets`, for the GitHub token.
-- **Target:** `cloudflare`. On a server, use `execution-local`.
+- **Target:** `durable`. On a server, use `execution-local`.
 - **Installs to:** `src/pikit/execution-do/`.
 - **npm dependencies:** `just-bash` 3.4.2, `isomorphic-git` 1.42.3, `quickjs-emscripten-core` and
   `@jitl/quickjs-wasmfile-release-sync` 0.32.0, `diff` 8.0.4, `@pikit/pi-adapter` (pinned with Pi),

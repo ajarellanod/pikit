@@ -5,7 +5,7 @@ returns the most relevant results. The API key stays a secret: the model never s
 
 - **Provides:** `agent.tool`, under the key `websearch`.
 - **Requires:** `secrets` (for example `secrets-env`), holding `BRAVE_API_KEY`.
-- **Targets:** `server` and `cloudflare`: it uses only `fetch`, wherever a `secrets` provider is
+- **Targets:** `server` and `durable`: it uses only `fetch`, wherever a `secrets` provider is
   installed.
 - **Installs to:** `src/pikit/tool-websearch-brave/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi), `typebox`.

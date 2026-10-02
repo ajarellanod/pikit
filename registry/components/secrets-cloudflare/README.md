@@ -5,7 +5,7 @@ Secrets from the Worker's `env`, on Cloudflare.
 - **Provides:** `secrets`.
 - **Requires:** nothing; it reads the Worker's `env` from `WORKERS_HOST`, which
   `deployment-cloudflare`'s entrypoint puts in the start context of each App.
-- **Target:** `cloudflare`. On a server, secrets are environment variables: `secrets-env`.
+- **Target:** `durable`. On a server, secrets are environment variables: `secrets-env`.
 - **Installs to:** `src/pikit/secrets-cloudflare/`.
 - **npm dependencies:** none.
 

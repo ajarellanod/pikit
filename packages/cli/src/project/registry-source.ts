@@ -8,7 +8,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join, posix, resolve } from "node:path";
 import { parse } from "yaml";
 import Type, { type Static } from "typebox";
-import { kindOf, type Manifest, ManifestSchema, readManifest, type RegistryIndex, SCHEMA_DIR, schemaProblems } from "../registry/manifest.ts";
+import { kindOf, type Manifest, ManifestSchema, readManifest, type RegistryIndex, SCHEMA_DIR, schemaProblems, TARGETS } from "../registry/manifest.ts";
 import { BASES_DIR } from "./bases.ts";
 import { CONFIG_FILE } from "./config-file.ts";
 import { ENV_EXAMPLE, ENV_FILE } from "./env-file.ts";
@@ -205,7 +205,7 @@ const RegistryIndexSchema = Type.Object({
   components: Type.Record(Type.String({ pattern: KEBAB }), Type.Object({
     version: Type.String({ minLength: 1 }),
     description: Type.String(),
-    targets: Type.Array(Type.String({ enum: ["server", "cloudflare"] }), { minItems: 1, uniqueItems: true }),
+    targets: Type.Array(Type.String({ enum: [...TARGETS] }), { minItems: 1, uniqueItems: true }),
     path: Type.String({ minLength: 1 }),
   }, { additionalProperties: false }), { additionalProperties: false }),
 }, { additionalProperties: false });

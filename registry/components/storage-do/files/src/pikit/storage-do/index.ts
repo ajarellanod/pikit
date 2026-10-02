@@ -15,7 +15,7 @@
  *   `SELECT changes()`, since a DO cursor does not report it.
  * - It refuses to start outside a Durable Object's App.
  *
- * Target: `cloudflare`. It imports nothing from `cloudflare:*`: the storage is typed here by what is
+ * Target: `durable`. It imports nothing from `cloudflare:*`: the storage is typed here by what is
  * used of it.
  */
 

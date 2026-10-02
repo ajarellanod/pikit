@@ -18,7 +18,7 @@
  * of this component goes; the index across sessions (`pending`) and the feed stay
  * (features/pi-durable-migration.md).
  *
- * Targets: `server` and `cloudflare`. It imports nothing platform-specific (its storage is
+ * Targets: `server` and `durable`. It imports nothing platform-specific (its storage is
  * `storage.sql`, its time the app's clock); on Cloudflare its storage is the conversation object's
  * (`storage-do`), where pikit's workerd lane runs its suites.
  */

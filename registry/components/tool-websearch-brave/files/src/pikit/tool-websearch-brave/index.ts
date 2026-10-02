@@ -12,7 +12,7 @@
  * The tool itself is `createBraveSearchTool` in @pikit/pi-adapter/tools (pi-durable's `defineTool`);
  * this component gives it the key and `apiBase`.
  *
- * Targets: `server` and `cloudflare`: it uses only `fetch`, wherever a `secrets` provider is
+ * Targets: `server` and `durable`: it uses only `fetch`, wherever a `secrets` provider is
  * installed.
  */
 

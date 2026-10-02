@@ -45,7 +45,7 @@ const objectApp: AppDefinition = {
   get config() {
     return current().config;
   },
-  create: () => defineApp({ components: current().components, config: current().config, target: "cloudflare", logger: silentLogger }).create(),
+  create: () => defineApp({ components: current().components, config: current().config, target: "durable", logger: silentLogger }).create(),
 };
 
 export const platformEntrypoint = createEntrypoint(objectApp, undefined, { logger: silentLogger });

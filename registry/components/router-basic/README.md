@@ -4,7 +4,7 @@ Every message goes to one agent: `defaultAgent`.
 
 - **Provides:** nothing. It adds the stage `router-basic` to the `route.resolve` pipeline.
 - **Uses:** `agent.definition`, to check at start that `defaultAgent` exists.
-- **Targets:** `server` and `cloudflare`.
+- **Targets:** `server` and `durable`.
 - **Installs to:** `src/pikit/router-basic/`.
 - **npm dependencies:** `typebox`.
 

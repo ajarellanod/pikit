@@ -5,7 +5,7 @@
   "description": "Pi's own `edit` tool, for the agents that name it: it replaces exact pieces of text in a file, each one unique in it.",
   "targets": [
     "server",
-    "cloudflare"
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",

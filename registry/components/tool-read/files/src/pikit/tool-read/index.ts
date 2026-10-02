@@ -9,7 +9,7 @@
  * each call, the conversation's own `workspace` when one is installed (`workspace-local`: a directory
  * per agent), otherwise `execution`.
  *
- * Targets: `server` and `cloudflare`, wherever an `execution` provider is installed.
+ * Targets: `server` and `durable`, wherever an `execution` provider is installed.
  */
 
 import { defineComponent } from "@pikit/core";

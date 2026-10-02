@@ -7,7 +7,7 @@ SQLite. It provides `storage.sql` (SPEC §4.1, C5), so what uses `storage.sql` o
 - **Provides:** `storage.sql`.
 - **Requires:** nothing; it reads the object from `WORKERS_HOST`, which `deployment-cloudflare`'s
   entrypoint puts in the start context.
-- **Target:** `cloudflare`. On a server, use `storage-sqlite`.
+- **Target:** `durable`. On a server, use `storage-sqlite`.
 - **Installs to:** `src/pikit/storage-do/`.
 - **npm dependencies:** none.
 

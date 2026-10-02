@@ -65,7 +65,7 @@ test("the runtime brings the record of submissions, and the storage it requires"
 
 test("only providers that run on the project's targets are offered: on Cloudflare, the storage is storage-do", () => {
   // storage-sqlite does not run on Cloudflare, so storage-do is the one provider of storage.sql there.
-  expect(offeredProviders(registry, ["channel-http"], [], ["cloudflare"])).toEqual([
+  expect(offeredProviders(registry, ["channel-http"], [], ["durable"])).toEqual([
     { component: "storage-do", capability: "storage.sql", for: "submissions-sql", why: "required" },
     { component: "submissions-sql", capability: "agent.submissions", for: "channel-http", why: "recommended" },
   ]);
@@ -73,7 +73,7 @@ test("only providers that run on the project's targets are offered: on Cloudflar
 
 test("on Cloudflare the Telegram webhook's object half brings the record of submissions and durable delivery; its Worker half nothing of the object's", () => {
   const preset = ["storage-do", "storage-kv-sql", "deployment-cloudflare", "runtime-pi", "conversations-kv"];
-  expect(offeredProviders(registry, ["channel-telegram-webhook"], preset, ["cloudflare"], composing(preset, ["cloudflare"]))).toEqual([
+  expect(offeredProviders(registry, ["channel-telegram-webhook"], preset, ["durable"], composing(preset, ["durable"]))).toEqual([
     { component: "submissions-sql", capability: "agent.submissions", for: "channel-telegram-webhook", why: "required" },
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram-webhook", why: "recommended" },
   ]);
@@ -81,21 +81,21 @@ test("on Cloudflare the Telegram webhook's object half brings the record of subm
 
 test("each half declares in its own App; a component in both Apps declares its whole in each; a server project has one App", () => {
   const webhook = registry.manifest("channel-telegram-webhook");
-  const [objectHalf, workerHalf] = declaredByApp(webhook, ["cloudflare"]);
+  const [objectHalf, workerHalf] = declaredByApp(webhook, ["durable"]);
   expect(objectHalf?.[0]).toBe("default");
   expect(objectHalf?.[1].requires).not.toContain("actor.mailbox");
   expect(workerHalf).toEqual(["worker", { provides: ["http.route"], requires: ["secrets", "actor.mailbox"], optional: [] }]);
-  expect(declaredByApp(registry.manifest("secrets-cloudflare"), ["cloudflare"])).toEqual([
+  expect(declaredByApp(registry.manifest("secrets-cloudflare"), ["durable"])).toEqual([
     ["default", { provides: ["secrets"], requires: [], optional: [] }],
     ["worker", { provides: ["secrets"], requires: [], optional: [] }],
   ]);
-  expect(declaredByApp(registry.manifest("storage-do"), ["cloudflare"]).map(([app]) => app)).toEqual(["default"]);
+  expect(declaredByApp(registry.manifest("storage-do"), ["durable"]).map(([app]) => app)).toEqual(["default"]);
   expect(declaredByApp(webhook, ["server"])).toEqual([["default", { provides: webhook.provides, requires: webhook.requires.capabilities, optional: webhook.optional.capabilities }]]);
 });
 
-/** A registry of these manifests only (targets cloudflare), for what the repository's cannot show yet. */
+/** A registry of these manifests only (targets durable), for what the repository's cannot show yet. */
 function fakeRegistry(manifests: Partial<Manifest>[]): Registry {
-  const full = manifests.map((m) => ({ version: "0.0.0", description: m.name, targets: ["cloudflare"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {}, files: [], ...m }) as Manifest);
+  const full = manifests.map((m) => ({ version: "0.0.0", description: m.name, targets: ["durable"], requires: { pikit: "0.0.0", capabilities: [] }, optional: { capabilities: [] }, provides: [], dependencies: {}, files: [], ...m }) as Manifest);
   return {
     names: () => full.map((m) => m.name),
     manifest: (name: string) => {
@@ -110,19 +110,19 @@ test("a provider is offered in the App that misses it: one that goes only in the
   const half = (requires: string[]) => ({ provides: [], requires, optional: [] });
   const channel = { name: "channel-x", requires: { pikit: "0.0.0", capabilities: ["storage.kv"] }, apps: { worker: "worker" }, halves: { default: half(["storage.kv"]), worker: half(["storage.kv"]) } };
   const objectOnly = fakeRegistry([channel, { name: "storage-kv-object", provides: ["storage.kv"] }]);
-  expect(offeredProviders(objectOnly, ["channel-x"], [], ["cloudflare"])).toEqual([{ component: "storage-kv-object", capability: "storage.kv", for: "channel-x", why: "required" }]);
+  expect(offeredProviders(objectOnly, ["channel-x"], [], ["durable"])).toEqual([{ component: "storage-kv-object", capability: "storage.kv", for: "channel-x", why: "required" }]);
   // Installed already, it still does not serve the Worker's App: nothing there to offer, `pikit add` warns.
-  expect(offeredProviders(objectOnly, ["channel-x"], ["storage-kv-object"], ["cloudflare"], composing(["storage-kv-object"], ["cloudflare"], objectOnly))).toEqual([]);
+  expect(offeredProviders(objectOnly, ["channel-x"], ["storage-kv-object"], ["durable"], composing(["storage-kv-object"], ["durable"], objectOnly))).toEqual([]);
 
   // A provider in both Apps serves each; offered once. One only in the Worker's is offered for the Worker's half.
   const both = fakeRegistry([channel, { name: "storage-kv-both", provides: ["storage.kv"], apps: { worker: "default" } }]);
-  expect(offeredProviders(both, ["channel-x"], [], ["cloudflare"])).toEqual([{ component: "storage-kv-both", capability: "storage.kv", for: "channel-x", why: "required" }]);
+  expect(offeredProviders(both, ["channel-x"], [], ["durable"])).toEqual([{ component: "storage-kv-both", capability: "storage.kv", for: "channel-x", why: "required" }]);
   const workerOnly = fakeRegistry([
     channel,
     { name: "storage-kv-object", provides: ["storage.kv"] },
     { name: "storage-kv-edge", provides: ["storage.kv"], apps: { worker: "worker" }, halves: { default: half([]), worker: { provides: ["storage.kv"], requires: [], optional: [] } } },
   ]);
-  expect(offeredProviders(workerOnly, ["channel-x"], ["storage-kv-object"], ["cloudflare"], composing(["storage-kv-object"], ["cloudflare"], workerOnly))).toEqual([
+  expect(offeredProviders(workerOnly, ["channel-x"], ["storage-kv-object"], ["durable"], composing(["storage-kv-object"], ["durable"], workerOnly))).toEqual([
     { component: "storage-kv-edge", capability: "storage.kv", for: "channel-x", why: "required", app: "worker" },
   ]);
 });
