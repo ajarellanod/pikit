@@ -9,12 +9,13 @@ gives components Pi's tools, models, MCP client and execution environments by su
 
 | Export | File | What | Targets |
 |---|---|---|---|
-| `.` | `index.ts` | `createDurableRuntime` (`runtime.ts`); `openDurableStorage` (`sql.ts`); `modelsFrom`, `modelRefOf` (`models.ts`); `nextWakeAt`, `nextWakeAtOf`, `driveSlice` (`wakeups.ts`); `harnessEnv`; `loginInteraction`; the capability types (`types.ts`) and Pi's types | every |
-| `./tools` | `tools/index.ts` | `codingTool(name)` (pi-durable's `read`/`write`/`edit`/`bash` with pikit's replay), `createFetchTool`, `createBraveSearchTool`, `defineTool` (`tools/README.md`) | every |
+| `.` | `index.ts` | `createDurableRuntime` (`runtime.ts`); `createObserver`, `agent.observe` on pi-durable (`observe.ts`); `openDurableStorage` (`sql.ts`); `modelsFrom`, `modelRefOf` (`models.ts`); `nextWakeAt`, `nextWakeAtOf`, `driveSlice` (`wakeups.ts`); `harnessEnv`; `loginInteraction`; the capability types (`types.ts`) and Pi's types | every |
+| `./tools` | `tools/index.ts` | `defineTool` (what a `tool-*` component writes its tool with: tool-fetch and tool-websearch-brave are the references), `codingTool(name)` (pi-durable's `read`/`write`/`edit`/`bash` with pikit's replay) (`tools/README.md`) | every |
 | `./mcp` | `mcp.ts` | pi-mcp's client, `mcpHttpTransport`, `mcpToolName`, `mcpTool` (provided at setup, described at start) | every |
 | `./execution` | `execution.ts` | pi-durable's `ExecutionEnv` types and helpers; `harnessEnv`, `atCwd` | every |
-| `./node` | `node.ts` | `createLocalExecution` on pi-durable's `NodeExecutionEnv` | server |
+| `./node` | `node.ts` | `createLocalExecution` on pi-durable's `NodeExecutionEnv`: plumbing (a subclass of Pi's class that starts commands from the variables given, never this process's); which variables and which directory is the components' policy (`execution-local`, `workspace-local`) | server |
 | `./providers/anthropic`, `./providers/openrouter` | `providers/*.ts` | pi-ai 1.0's providers by subpath (`openrouterProvider({ apiBase })`) | every |
+| `./providers/faux` | `providers/faux.ts` | pi-ai 1.0's faux provider, for tests only (`provider-faux`) | every |
 | `./credentials` | `credentials.ts` | pi-ai's credential types; `loginInteraction(terminal)`, an `AuthInteraction` that answers every prompt type, `select` included | every |
 | `./wakeups` | `wakeups.ts` | the same as the root's wake-up functions | every |
 | `./testing` | `testing/index.ts` | `./testing/neutral`, plus `createPiRuntimeFixture` (a SQLite file), `sqliteStorage`, `openSqliteDatabase`, `testComponents` with a `storage.sql` in memory | server |

@@ -11,6 +11,8 @@ export type { DurableMessage, DurableUsage } from "./result.ts";
 export { toChord } from "./context.ts";
 export { modelRefOf, modelsFrom, parseModelName } from "./models.ts";
 export type { ModelsOptions } from "./models.ts";
+export { createObserver, OBSERVE_MAX_PAGE, OBSERVE_PAGE } from "./observe.ts";
+export type { ObservedRuntime } from "./observe.ts";
 export { driveSlice, nextWakeAt, nextWakeAtOf } from "./wakeups.ts";
 export type { DriveSliceOptions, LiveTaskRecord, SliceResult, WakeOptions } from "./wakeups.ts";
 export { harnessEnv } from "./execution.ts";

@@ -23,7 +23,7 @@
  */
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
@@ -32,7 +32,7 @@ import { starterModelProblem } from "../project/starter-model.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
-import { TARGETS } from "../registry/manifest.ts";
+import { kindOf, TARGETS } from "../registry/manifest.ts";
 import { CliError, log } from "../ui.ts";
 import { checkCompatible, installComponent, notPortable, warnUnchosen } from "./add.ts";
 import { doctor } from "./doctor.ts";
@@ -121,8 +121,15 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write(".gitignore", starter.gitignore(target));
     write("README.md", starter.readme(name, components, target));
     write(CONFIG_FILE, starter.configFile(target));
-    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model));
+    // Its prompt says where people reach it: the channels being installed.
+    const channels = components.filter((c) => kindOf(c) === "channel").map((c) => ({ name: c, title: registry.manifest(c).title }));
+    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels));
     write("src/extensions/agents.ts", starter.AGENTS);
+    // The kit's skills for AI agents: how to write a component for this project.
+    for (const skill of starter.skillFiles()) {
+      mkdirSync(dirname(join(projectDir, skill.path)), { recursive: true });
+      write(skill.path, skill.text);
+    }
     // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
     const location = recordedLocation(projectDir, registry.root);
     if (!isPortable(location)) log.warn(notPortable(location));

@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import Type from "typebox";
 import { BACKGROUND_CONTEXT, createContextKey, withAbortSignal, withContextValue } from "./context.ts";
 import { silentLogger } from "./logger.ts";
-import { defineComponent, defineApp, type AppContext, type AppOptions, type Pikit } from "./app.ts";
+import { APP_DESCRIPTION, defineComponent, defineApp, type AppContext, type AppDescription, type AppOptions, type Pikit } from "./app.ts";
 import { Halt } from "./pipeline.ts";
 
 declare module "@pikit/core" {
@@ -909,4 +909,43 @@ test("a context carries cancellation and values into handlers, nested emits and 
   ]);
   expect(app.context().abortSignal).toBeUndefined();
   expect(app.context().value(TENANT)).toBeUndefined();
+});
+
+test("APP_DESCRIPTION: every context the app creates carries describe(), frozen, from start on (K13)", async () => {
+  const seen: { atStart?: AppDescription | undefined; inHandler?: AppDescription | undefined; derived?: AppDescription | undefined } = {};
+  const store = defineComponent({
+    name: "store",
+    config: Type.Object({ path: Type.String({ default: "data.db" }) }),
+    setup(pikit) {
+      pikit.provide("test.store", { name: "store" });
+      pikit.on("test.app.ping", (_e, ctx) => {
+        seen.inHandler = ctx.value(APP_DESCRIPTION);
+        // A context derived to drop the caller's values still belongs to the app.
+        seen.derived = ctx.derive(() => BACKGROUND_CONTEXT).value(APP_DESCRIPTION);
+      });
+      return { start: (ctx) => void (seen.atStart = ctx.value(APP_DESCRIPTION)) };
+    },
+  });
+  const app = await defineApp(quiet({ components: [store] })).create();
+  await app.start();
+  await app.context().emit("test.app.ping", { via: "test" });
+
+  const description = app.context().value(APP_DESCRIPTION);
+  expect(description).toEqual(app.describe());
+  expect(description).toMatchObject({
+    version: 1,
+    target: "server",
+    components: [{ name: "store", provides: ["test.store"], requires: [], optional: [] }],
+    capabilities: { "test.store": { providers: ["store"], selected: "store" } },
+    config: { store: { path: "data.db" } },
+  });
+  expect(seen.atStart).toBe(description);
+  expect(seen.inHandler).toBe(description);
+  expect(seen.derived).toBe(description);
+  expect(Object.isFrozen(description)).toBe(true);
+  expect(Object.isFrozen(description?.components[0]?.provides)).toBe(true);
+  // A context given by another App (K7) keeps that App's own: the app's wins.
+  const other = await defineApp(quiet({ components: [] })).create();
+  expect(app.context(other.context()).value(APP_DESCRIPTION)).toBe(description);
+  expect(JSON.parse(JSON.stringify(description))).toEqual(description);
 });

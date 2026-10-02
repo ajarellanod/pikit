@@ -25,7 +25,7 @@ in-process timer:
 These hosts have a durable timer of their own (a Durable Object alarm, a scheduled queue message).
 They need pi-durable to tell them **when**.
 
-## Current workaround (pikit, `packages/pi-adapter/src/durable/wakeups.ts`)
+## Current workaround (pikit, `packages/pi-adapter/src/wakeups.ts`)
 
 `nextWakeAt(harness)` derives the time from `harness.inspect()`:
 

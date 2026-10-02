@@ -1,7 +1,7 @@
 /**
- * The `fetch` tool on pi-durable: `tool-fetch`'s tool (same name, parameters, description, limits
- * and answers), written with `defineTool`. One HTTP(S) request to a web page or an API, its answer as
- * text the model can read:
+ * The `fetch` tool, written with `defineTool` (pi-durable's, from `@pikit/pi-adapter/tools`: the only
+ * door to Pi a component uses). One HTTP(S) request to a web page or an API, its answer as text the
+ * model can read:
  * - HTML as readable text (title, text by blocks, no scripts or styles) and its links, absolute;
  * - JSON pretty-printed; other text as it is;
  * - binary content (images, PDFs, archives) refused, unread.
@@ -16,8 +16,8 @@
  * fetches again. A GET-only tool could be `"safe"`, at the price of another tool name.
  */
 
-import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
-import { Type } from "@earendil-works/pi-ai";
+import { defineTool, type ToolRegistration } from "@pikit/pi-adapter/tools";
+import Type from "typebox";
 
 export const FETCH_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"] as const;
 export const FETCH_TIMEOUT_MS = 20_000;
@@ -242,7 +242,7 @@ async function htmlToText(bytes: Uint8Array, contentType: string, base: string):
 }
 
 /** HTML's character references (`&amp;`, `&#39;`, `&#x2014;`): the parser hands text over undecoded. */
-export function decodeEntities(text: string): string {
+function decodeEntities(text: string): string {
   const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
   return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) => {
     if (name[0] === "#") {

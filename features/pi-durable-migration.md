@@ -3,7 +3,7 @@
 **Public appeal:** —
 
 **Specified:** decided (below, and SPEC P1, §4.1 C5); the adapter's side is described in
-`packages/pi-adapter/src/durable/README.md` and `durable/tools/README.md`.
+`packages/pi-adapter/src/README.md` and `tools/README.md`.
 
 **Needed by:** everything. Pi 1.0 removed the 0.99 `AgentHarness` pikit was built on, so the kit
 runs on `@earendil-works/pi-durable` or on nothing.

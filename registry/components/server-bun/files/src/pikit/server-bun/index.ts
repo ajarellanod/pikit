@@ -8,7 +8,9 @@
  *   and from the moment the app starts stopping. A load balancer sends traffic only when it is 200.
  *
  * Routes are standard fetch handlers, so channels never see Hono, and the same handler runs on
- * Cloudflare. Hono only does the routing.
+ * Cloudflare. Hono only does the routing: keys are registered most specific first
+ * (`compareHttpRoutes`), since Hono serves a request with the first route registered that matches,
+ * and a prefix key (`GET /admin/*`) is Hono's own wildcard, which matches `/admin` too.
  *
  * Each request gets a context of its own, never `start`'s: its cancellation fires when the client
  * goes away or the server stops. Stopping cancels every request in flight, so a handler that waits
@@ -18,6 +20,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
+import { compareHttpRoutes, type HttpRouteKey, parseHttpRouteKey } from "@pikit/contracts";
 import { Hono } from "hono";
 import Type from "typebox";
 
@@ -34,9 +37,7 @@ const Config = Type.Object({
   idleTimeoutSeconds: Type.Integer({ minimum: 1, maximum: 255, default: 255 }),
 });
 
-/** `"METHOD /path"` as `http.route` defines it (@pikit/contracts' http.ts). */
-const ROUTE_KEY = /^(GET|POST|PUT|PATCH|DELETE) (\/|(\/([A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9]*))+)$/;
-/** This server's own routes. */
+/** This server's own routes, served before any key. */
 const RESERVED = new Set(["GET /health", "GET /ready"]);
 
 export interface ServerBunOptions {
@@ -74,12 +75,18 @@ export function createServerBun(options: ServerBunOptions = {}) {
           const app = new Hono();
           app.get("/health", (c) => c.json({ status: "ok" }));
           app.get("/ready", (c) => (ready ? c.json({ status: "ready" }) : c.json({ status: "not_ready" }, 503)));
+          const table: (HttpRouteKey & { key: string })[] = [];
           for (const key of routes.keys()) {
-            if (!ROUTE_KEY.test(key)) throw new Error(`server-bun: cannot serve the http.route key "${key}" (expected "METHOD /path")`);
+            // `"METHOD /path"` as `http.route` defines it (@pikit/contracts' http.ts).
+            const parsed = parseHttpRouteKey(key);
+            if (parsed === undefined) throw new Error(`server-bun: cannot serve the http.route key "${key}" (expected "METHOD /path" or "METHOD /prefix/*")`);
             if (RESERVED.has(key)) throw new Error(`server-bun: "${key}" is the server's own route`);
+            table.push({ ...parsed, key });
+          }
+          for (const { key, method, segments, prefix } of table.sort(compareHttpRoutes)) {
             const route = routes.get(key);
             if (route === undefined) continue;
-            const [method = "", path = ""] = key.split(" ");
+            const path = `/${[...segments, ...(prefix ? ["*"] : [])].join("/")}`;
             app.on(method, path, (c) => {
               const request = c.req.raw;
               const signal = AbortSignal.any([request.signal, shutdown.signal]);

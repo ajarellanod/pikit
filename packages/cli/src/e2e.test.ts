@@ -1,7 +1,9 @@
 /**
  * Five minutes, end to end, as a user runs it (SPEC P2): `pikit new my-agent --preset http`,
- * `pikit configure`, then the agent answers. And P3: a component added and removed leaves the
- * project exactly as it was.
+ * `pikit configure`, then the agent answers a message sent to `pikit dev`. The model is provider-faux
+ * (a fake model for tests only, installed here: no account, no network), so the answer is known:
+ * `faux: <the message>`, through channel-http, runtime-pi and pi-durable as a real model's would be.
+ * And P3: a component added and removed leaves the project exactly as it was.
  *
  * Slow (it runs `bun install` and the generated project's own tests), so it runs only with
  * `PIKIT_E2E=1`. The Docker half (`pikit up | status | down`) also needs `PIKIT_E2E_DOCKER=1`, a
@@ -25,7 +27,7 @@ const parent = mkdtempSync(join(tmpdir(), "pikit-e2e-"));
 const project = join(parent, "my-agent");
 afterAll(() => rmSync(parent, { recursive: true, force: true }));
 
-/** Dummies: nothing here reaches a model. */
+/** A dummy: the agent's model is provider-faux's, and nothing here reaches Anthropic. */
 const DUMMY_KEY = "sk-ant-e2e-dummy-not-a-key";
 const timings: Record<string, number> = {};
 
@@ -41,9 +43,11 @@ async function pikit(args: string[], options: { cwd?: string; env?: Record<strin
   return { code, out, err };
 }
 
-function sh(command: string[], cwd = project) {
-  const run = Bun.spawnSync(command, { cwd, stdout: "pipe", stderr: "pipe" });
-  return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString() };
+/** A command, run to its end. Async: Bun's spawnSync can lose a child's exit (AGENTS.md). */
+async function sh(command: string[], cwd = project) {
+  const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const [out, err, code] = await Promise.all([new Response(child.stdout).text(), new Response(child.stderr).text(), child.exited]);
+  return { code, out, err };
 }
 
 const git = (...args: string[]) => sh(["git", "-c", "user.email=e2e@pikit.test", "-c", "user.name=e2e", ...args]);
@@ -74,6 +78,8 @@ test.skipIf(!E2E)(
     expect(manifest.components["storage-sqlite"].installedFor).toBeUndefined();
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
+    // The skills for the user's AI agent come with every project.
+    expect(readFileSync(join(project, ".agents", "skills", "pikit-component", "SKILL.md"), "utf8")).toContain("name: pikit-component");
   },
   TIMEOUT,
 );
@@ -87,9 +93,9 @@ test.skipIf(!E2E)(
     expect(doctor.err).toContain("PIKIT_HTTP_TOKEN is not set");
     expect(doctor.err).not.toContain("✗");
 
-    const tests = sh([process.execPath, "test"]);
+    const tests = await sh([process.execPath, "test"]);
     expect(tests.code).toBe(0);
-    expect(sh([process.execPath, "run", "typecheck"]).code).toBe(0);
+    expect((await sh([process.execPath, "run", "typecheck"])).code).toBe(0);
   },
   TIMEOUT,
 );
@@ -117,12 +123,22 @@ test.skipIf(!E2E)(
 );
 
 test.skipIf(!E2E)(
-  "pikit dev answers /health and /ready, and 401 without the token",
+  "pikit dev answers /health and /ready, 401 without the token, and a message with the agent's answer",
   async () => {
+    // The starter's prompt says where it is reached: this preset's channel is the HTTP API.
+    const agentPath = join(project, "src", "agents", "assistant", "agent.ts");
+    const agentBefore = readFileSync(agentPath, "utf8");
+    expect(agentBefore).toContain("reached over an HTTP API");
+    // A model with no account: provider-faux (tests only), and the starter agent on it.
+    const faux = await pikit(["add", "provider-faux", "--yes"]);
+    expect(faux.code).toBe(0);
+    writeFileSync(agentPath, agentBefore.replace(/model: "[^"]+"/, 'model: "faux/echo"'));
+
     const port = freePort();
     const configPath = join(project, "pikit.config.ts");
     const original = readFileSync(configPath, "utf8");
     writeFileSync(configPath, setConfigEntry(original, "server-bun", `{ port: ${port}, hostname: "127.0.0.1" }`));
+    const token = /^PIKIT_HTTP_TOKEN=(.*)$/m.exec(readFileSync(join(project, ".env"), "utf8"))?.[1] ?? "";
     const started = performance.now();
     const dev = Bun.spawn([process.execPath, MAIN, "dev"], { cwd: project, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
     try {
@@ -133,16 +149,37 @@ test.skipIf(!E2E)(
       expect((await fetch(`${base}/ready`)).status).toBe(200);
       const anonymous = await fetch(`${base}/v1/messages`, { method: "POST", body: "{}", headers: { "content-type": "application/json" } });
       expect(anonymous.status).toBe(401);
+
+      // A message, and the agent's answer in the response: channel-http → router → runtime-pi → the model.
+      const send = (text: string, messageId: string) =>
+        fetch(`${base}/v1/messages`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${token}`, "content-type": "application/json" },
+          body: JSON.stringify({ conversationId: "e2e-1", messageId, text }),
+        });
+      const first = await send("hello from the e2e", "m1");
+      expect(first.status).toBe(200);
+      expect(await first.json()).toMatchObject({ requestId: "m1", text: "faux: hello from the e2e" });
+      timings.answered = performance.now() - started;
+      // The same conversation goes on: the second message is answered in it.
+      const second = await send("and again", "m2");
+      expect(await second.json()).toMatchObject({ requestId: "m2", text: "faux: and again" });
+      // A repeated message is not run again: its outcome is the first one's.
+      expect(await (await send("hello from the e2e", "m1")).json()).toMatchObject({ requestId: "m1", text: "faux: hello from the e2e" });
     } finally {
       dev.kill("SIGTERM");
       await dev.exited;
       writeFileSync(configPath, original);
+      writeFileSync(agentPath, agentBefore);
     }
     const logs = await new Response(dev.stdout).text();
     expect(logs).toContain('"msg":"pikit: started"');
     expect(logs).toContain('"msg":"pikit: stopped"');
+    // Operational logs carry no message text (SPEC §5).
+    expect(logs).not.toContain("hello from the e2e");
+    expect((await pikit(["remove", "provider-faux"])).code).toBe(0);
     console.info(
-      `e2e timings: new ${ms(timings.new)} (bun install and doctor included), configure ${ms(timings.configure)}, dev to /ready ${ms(timings.devReady)}; new → answering ${ms((timings.new ?? 0) + (timings.configure ?? 0) + (timings.devReady ?? 0))}`,
+      `e2e timings: new ${ms(timings.new)} (bun install and doctor included), configure ${ms(timings.configure)}, dev to /ready ${ms(timings.devReady)}, to the first answer ${ms(timings.answered)}; new → answering ${ms((timings.new ?? 0) + (timings.configure ?? 0) + (timings.answered ?? 0))}`,
     );
   },
   TIMEOUT,
@@ -151,33 +188,33 @@ test.skipIf(!E2E)(
 test.skipIf(!E2E)(
   "P3: add then remove leaves no trace, and remove refuses to leave a required capability unprovided",
   async () => {
-    expect(git("init", "-q").code).toBe(0);
-    expect(git("add", "-A").code).toBe(0);
-    expect(git("commit", "-qm", "new").code).toBe(0);
+    expect((await git("init", "-q")).code).toBe(0);
+    expect((await git("add", "-A")).code).toBe(0);
+    expect((await git("commit", "-qm", "new")).code).toBe(0);
 
     // server-bun brings an npm dependency only it uses (hono); channel-http brings a variable.
     for (const name of ["server-bun", "channel-http"]) {
       expect((await pikit(["remove", name])).code).toBe(0);
-      git("add", "-A");
-      git("commit", "-qm", `without ${name}`);
+      await git("add", "-A");
+      await git("commit", "-qm", `without ${name}`);
 
       const added = await pikit(["add", name, "--yes"]);
       expect(added.code).toBe(0);
       expect(added.out).toContain("`pikit doctor` is green");
-      expect(git("status", "--porcelain").out).not.toBe("");
+      expect((await git("status", "--porcelain")).out).not.toBe("");
 
       const removed = await pikit(["remove", name]);
       expect(removed.code).toBe(0);
-      expect(git("status", "--porcelain").out).toBe("");
+      expect((await git("status", "--porcelain")).out).toBe("");
       expect((await pikit(["doctor"])).code).toBe(0);
-      git("reset", "-q", "--hard", "HEAD~1");
-      sh([process.execPath, "install"]);
+      await git("reset", "-q", "--hard", "HEAD~1");
+      await sh([process.execPath, "install"]);
     }
 
     const refused = await pikit(["remove", "storage-sqlite"]);
     expect(refused.code).toBe(1);
     expect(refused.err).toContain("runtime-pi requires storage.sql");
-    expect(git("status", "--porcelain").out).toBe("");
+    expect((await git("status", "--porcelain")).out).toBe("");
 
     // A file the user changed is never deleted without --force.
     const edited = join(project, "src/pikit/log-events/fields.ts");
@@ -186,8 +223,8 @@ test.skipIf(!E2E)(
     expect(kept.code).toBe(1);
     expect(kept.err).toContain("src/pikit/log-events/fields.ts");
     expect((await pikit(["doctor"])).out).toContain("modified: src/pikit/log-events/fields.ts");
-    git("checkout", "--", ".");
-    expect(git("status", "--porcelain").out).toBe("");
+    await git("checkout", "--", ".");
+    expect((await git("status", "--porcelain")).out).toBe("");
 
     // A component that brings providers (`offers.ts`): they are installed for it, and leave with it.
     const brought = await pikit(["add", "channel-telegram", "--yes"]);
@@ -199,7 +236,7 @@ test.skipIf(!E2E)(
     const removedWith = await pikit(["remove", "channel-telegram"]);
     expect(removedWith.code).toBe(0);
     expect(removedWith.out).toContain("outbound-durable was installed for channel-telegram, and nothing uses it now");
-    expect(git("status", "--porcelain").out).toBe("");
+    expect((await git("status", "--porcelain")).out).toBe("");
   },
   TIMEOUT,
 );
@@ -218,7 +255,7 @@ test.skipIf(!DOCKER)(
       // A credential stored in the app's volume, where `pikit configure` logs in for `pikit up` (an
       // OAuth login lands in the same file; a stored key needs no browser).
       const store = `require("node:fs").writeFileSync(".pikit/credentials.json", JSON.stringify({ anthropic: { type: "api_key", key: "${DUMMY_KEY}" } }), { mode: 0o600 })`;
-      expect(sh(["docker", "compose", "run", "--rm", "-T", "app", "bun", "--eval", store]).code).toBe(0);
+      expect((await sh(["docker", "compose", "run", "--rm", "-T", "app", "bun", "--eval", store])).code).toBe(0);
       const configured = await pikit(["configure", "--yes"], { env: { ANTHROPIC_API_KEY: "" } });
       expect(configured.code).toBe(0);
       expect(configured.out).toContain("model provider anthropic: has credentials for `pikit up`");
@@ -235,7 +272,7 @@ test.skipIf(!DOCKER)(
       expect((await pikit(["down"])).code).toBe(0);
       expect((await pikit(["status"])).out).toContain("no containers");
     } finally {
-      sh(["docker", "compose", "down", "--volumes", "--rmi", "local"]);
+      await sh(["docker", "compose", "down", "--volumes", "--rmi", "local"]);
     }
   },
   TIMEOUT,

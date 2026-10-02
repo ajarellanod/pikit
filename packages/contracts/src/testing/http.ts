@@ -102,6 +102,55 @@ export function createHttpRouteConformance(
       },
     })),
 
+    routeCase("a prefix key (`/path/*`) serves its path and everything under it, nothing beside it", () => ({
+      routes: {
+        "GET /conformance/files/*": (request) => text(`files ${new URL(request.url).pathname}`),
+        "POST /conformance/files/*": () => text("posted", 201),
+      },
+      async run({ fetch }) {
+        for (const path of ["/conformance/files", "/conformance/files/", "/conformance/files/a", "/conformance/files/assets/app.js"]) {
+          const response = await fetch(path);
+          expect([response.status, await response.text()], [200, `files ${path}`], `GET ${path}`);
+        }
+        const posted = await fetch("/conformance/files/x", { method: "POST" });
+        const beside = await fetch("/conformance/filesystem");
+        const above = await fetch("/conformance");
+
+        expect([posted.status, await posted.text()], [201, "posted"], "POST /conformance/files/x");
+        expect(beside.status, 404, "GET /conformance/filesystem");
+        expect(above.status, 404, "GET /conformance");
+      },
+    })),
+
+    routeCase("the most specific key serves: a literal path, then parameters, then the longest prefix", () => ({
+      routes: {
+        // Listed least specific first: a server must not serve by the order keys come in.
+        "GET /*": () => text("everything"),
+        "GET /conformance/*": () => text("conformance prefix"),
+        "GET /conformance/deep/*": () => text("deep prefix"),
+        "GET /conformance/deep/:id": () => text("parameter"),
+        "GET /conformance/deep/fixed": () => text("literal"),
+      },
+      async run({ fetch }) {
+        const served: Record<string, string> = {};
+        for (const path of ["/conformance/deep/fixed", "/conformance/deep/7", "/conformance/deep/7/more", "/conformance/other", "/elsewhere"]) {
+          served[path] = await (await fetch(path)).text();
+        }
+
+        expect(
+          served,
+          {
+            "/conformance/deep/fixed": "literal",
+            "/conformance/deep/7": "parameter",
+            "/conformance/deep/7/more": "deep prefix",
+            "/conformance/other": "conformance prefix",
+            "/elsewhere": "everything",
+          },
+          "which route served each path",
+        );
+      },
+    })),
+
     routeCase("a request no route matches is a 404; a known path with another method is a 404 or 405", () => ({
       routes: { "POST /conformance/only-post": () => text("posted") },
       async run({ fetch }) {
@@ -246,7 +295,16 @@ export function createHttpRouteConformance(
       };
     }),
 
-    ...["FETCH /conformance/x", "GET conformance/x", "GET /conformance/x/", "GET /conformance/{x}", "get /conformance/x"].map(
+    ...[
+      "FETCH /conformance/x",
+      "GET conformance/x",
+      "GET /conformance/x/",
+      "GET /conformance/{x}",
+      "get /conformance/x",
+      "GET /conformance/*/x",
+      "GET /conformance/x*",
+      "GET /conformance/**",
+    ].map(
       (key): ConformanceCase => ({
         group: GROUP,
         name: `a key it cannot serve fails start: "${key}"`,

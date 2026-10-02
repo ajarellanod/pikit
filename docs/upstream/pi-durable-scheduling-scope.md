@@ -26,7 +26,7 @@ it means:
 `resume()`'s doc comment ("Enable task scheduling. Idempotent… Calls that ask for progress enable it
 too"); `Harness.waitForIdle()` waits for "every ownerless conversation". pikit's runtime notes it:
 "pi-durable's scheduler is global: it runs every conversation's work, not one conversation's"
-(`packages/pi-adapter/src/durable/runtime.ts`).
+(`packages/pi-adapter/src/runtime.ts`).
 
 ## pikit's workaround
 

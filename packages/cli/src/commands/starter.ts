@@ -5,7 +5,10 @@
  *
  * - `pikit.config.ts`, the composition root, listing the project's agents;
  * - one agent, `assistant` (`src/agents/assistant/agent.ts`), provided by `src/extensions/agents.ts`;
- * - `package.json`, `tsconfig.json`, `.gitignore`, a README.
+ * - `package.json`, `tsconfig.json`, `.gitignore`, a README;
+ * - the kit's skills for AI agents, `.agents/skills/` (`skillFiles`): how to write a component.
+ *   They are the kit's, not a component's: no capability, nothing that runs, and every project gets
+ *   them; a newer CLI's `pikit new` brings newer ones (an existing project copies them by hand).
  *
  * One line depends on what gets installed, and only on that: `router-basic` sends every message to
  * `assistant`.
@@ -17,7 +20,7 @@
  * installs it: never the starter.
  */
 
-import { readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PIKIT_ROOT } from "../paths.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
@@ -35,6 +38,20 @@ export const STARTER_WIRING: Record<string, Omit<ComponentEntry, "name">> = {};
 export const STARTER_CONFIG: Record<string, string> = {
   "router-basic": `{ defaultAgent: "${STARTER_AGENT}" }`,
 };
+
+/** Where the skills for AI agents are, in the kit and in a project (the `.agents/skills/` convention). */
+export const SKILLS_DIR = ".agents/skills";
+
+/** The kit's skills, each file by its path in a project, sorted: what `pikit new` copies. */
+export function skillFiles(root = PIKIT_ROOT): { path: string; text: string }[] {
+  const dir = join(root, SKILLS_DIR);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((entry) => entry.isFile())
+    .map((entry) => join(entry.parentPath, entry.name).slice(dir.length + 1))
+    .sort()
+    .map((file) => ({ path: `${SKILLS_DIR}/${file}`, text: readFileSync(join(dir, file), "utf8") }));
+}
 
 export function packageJson(name: string, kit: Record<string, string>): string {
   const root = JSON.parse(readFileSync(join(PIKIT_ROOT, "package.json"), "utf8")) as { devDependencies: Record<string, string> };
@@ -159,7 +176,32 @@ export function configFile(target = "server"): string {
   return target === "durable" ? CLOUDFLARE_CONFIG : CONFIG;
 }
 
-export function agent(tools: string[], model = starterModel()): string {
+/**
+ * Where people reach the agent, per channel component, for the starter's prompt: the model answers
+ * differently to a program calling an API and to a person in a chat. A channel not listed here is
+ * named by its `component.json` title (the part before `:`).
+ */
+export const CHANNEL_REACH: Readonly<Record<string, string>> = {
+  "channel-http": "reached over an HTTP API, by programs and the people behind them",
+  "channel-telegram": "that people talk to in Telegram chats",
+  "channel-telegram-webhook": "that people talk to in Telegram chats",
+};
+
+/** A channel being installed: its name and its `component.json` title. */
+export interface StarterChannel {
+  name: string;
+  title?: string | undefined;
+}
+
+/** The starter prompt's first sentence: who the agent is, and where it is reached. */
+export function introduction(channels: readonly StarterChannel[]): string {
+  const reach = [
+    ...new Set(channels.map((channel) => CHANNEL_REACH[channel.name] ?? `reached through ${(channel.title ?? channel.name).split(":")[0]?.trim()}`)),
+  ];
+  return reach.length === 0 ? "You are a helpful assistant." : `You are a helpful assistant ${reach.join(", and ")}.`;
+}
+
+export function agent(tools: string[], model = starterModel(), channels: readonly StarterChannel[] = []): string {
   const workspace =
     tools.length > 0
       ? `\n    "You work in a workspace directory: use your tools to read, write and edit files there, and to run commands in it.",`
@@ -176,7 +218,7 @@ export default defineAgent({
   name: "${STARTER_AGENT}",
   model: "${model}",
   systemPrompt: [
-    "You are a helpful assistant reached over an HTTP API. Answer briefly and plainly.",${workspace}
+    ${JSON.stringify(`${introduction(channels)} Answer briefly and plainly.`)},${workspace}
   ].join(" "),
   tools: ${JSON.stringify(tools)},
 });
@@ -226,6 +268,7 @@ read, edit and remove.
 | \`src/extensions/\` | your own components (\`agents.ts\`) |
 | \`src/pikit/<component>/\` | installed components, with their tests and a README |
 | \`pikit.json\` | what \`pikit add\` installed: registry, version, commit, and each file's hash |
+| \`.agents/skills/\` | skills for your AI agent: how to write a component for this project (\`pikit-component\`) |
 | \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\` and \`@pikit/pi-adapter\`, until they are on npm |
 | \`.env\` | secrets, written by \`pikit configure\` (mode 0600, never committed) |
 | \`.pikit/\` | state: the database (conversations, the registry), model credentials, the workspace |

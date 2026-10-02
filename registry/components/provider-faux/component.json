@@ -1,0 +1,33 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "provider-faux",
+  "version": "0.0.0",
+  "description": "A fake model for tests only: an agent naming `faux/echo` gets `faux: <your message>` at once, with no network, key or cost.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "model.provider"
+  ],
+  "modelProviders": [
+    "faux"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

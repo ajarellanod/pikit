@@ -13,6 +13,20 @@ decide with the dashboard on Cloudflare.
 A global list of the conversations of a Cloudflare deployment, when each one lives in its own
 Durable Object.
 
+## Where it stands
+Not built. `agent.observe` (`packages/contracts/src/observe.ts`, provided by runtime-pi from
+pi-durable's records, `packages/pi-adapter/src/observe.ts`) lists the conversations of the storage it
+runs on: on a server, all of them; in a Durable Object, **only that object's own** (its root
+conversation, and those a reset made). That is the stub the dashboard starts from on Cloudflare:
+listing every conversation needs this index; reading or watching one conversation needs only the
+Worker to reach its object (an RPC to `idFromName(key)`, as `actor.mailbox` does), which comes with the
+dashboard's Cloudflare half.
+
+The smallest index that would do: the object, in the commit path of its first message, upserts
+`(key, agent, conversationId, lastActivity)` into D1 (`conversations-d1-index`), and the Worker's
+`agent.observe` lists from D1 and asks each object for the rest. Events can be missed (K3), so the
+upsert is part of the object's own work (a wakeup or the runtime's settle), not an `agent.*` listener.
+
 ## How it fits pikit
 - On Cloudflare each Durable Object holds its own conversation pointer (`conversations-kv` on its
   storage, C1, C5); nothing lists them all.

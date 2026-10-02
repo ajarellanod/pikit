@@ -15,6 +15,7 @@ import { join } from "node:path";
 
 const KERNEL = [
   // Composition: define, compose, describe.
+  "APP_DESCRIPTION",
   "App",
   "AppCapabilities",
   "AppContext",

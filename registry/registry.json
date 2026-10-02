@@ -1,6 +1,15 @@
 {
   "version": 1,
   "components": {
+    "admin-auth-token": {
+      "version": "0.0.0",
+      "description": "Who is an operator: a request carrying the bearer token PIKIT_ADMIN_TOKEN. What admin routes (the dashboard) ask before answering.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/admin-auth-token"
+    },
     "channel-http": {
       "version": "0.0.0",
       "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
@@ -123,6 +132,15 @@
         "server"
       ],
       "path": "components/provider-anthropic"
+    },
+    "provider-faux": {
+      "version": "0.0.0",
+      "description": "A fake model for tests only: an agent naming `faux/echo` gets `faux: <your message>` at once, with no network, key or cost.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/provider-faux"
     },
     "provider-openrouter": {
       "version": "0.0.0",

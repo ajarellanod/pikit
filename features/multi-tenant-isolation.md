@@ -31,7 +31,7 @@ Nothing in Pi: tenants are a property of the service around it.
 
 But pi-durable weighs on it: a caller's context values (the tenant a message belongs to, a trace
 id) no longer reach tools, since a run is durable tasks the scheduler starts with its own context
-(`packages/pi-adapter/src/durable/README.md`). Isolation needs every tool call to know its tenant
+(`packages/pi-adapter/src/README.md`). Isolation needs every tool call to know its tenant
 without trusting the model, durably across restarts. Meanwhile a tenant fixed per conversation can
 live in a conversation document that tools read; per-message values cannot. The ask is durable
 submission attributes ([upstream proposal 3](../docs/upstream/README.md#3-caller-context-values-reach-tools)),

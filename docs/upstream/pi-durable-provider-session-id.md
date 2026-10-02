@@ -21,7 +21,7 @@ hits by key, a long conversation pays for its whole prefix again and loses affin
 
 ## Repro
 
-`packages/pi-adapter/src/durable/pi-facts.test.ts`, "pi-durable sends the provider no session id":
+`packages/pi-adapter/src/pi-facts.test.ts`, "pi-durable sends the provider no session id":
 a faux response step records `streamOptions?.sessionId` for one submitted input; it is `undefined`.
 pi-ai's faux provider simulates prompt caching only when `sessionId` is set, so its cache figures stay
 at zero too.

@@ -1,7 +1,7 @@
 /**
- * The `websearch` tool on pi-durable: `tool-websearch-brave`'s tool (same name, parameters,
- * description and answers), written with `defineTool`. It searches the web with the Brave Search API
- * and returns title, address, age when Brave knows it, and a snippet.
+ * The `websearch` tool, written with `defineTool` (pi-durable's, from `@pikit/pi-adapter/tools`). It
+ * searches the web with the Brave Search API and returns title, address, age when Brave knows it, and
+ * a snippet.
  *
  * - **The key is a secret.** `apiKey()` is asked at each call (the component reads `BRAVE_API_KEY`
  *   through `secrets`) and the key is sent only to Brave, in `X-Subscription-Token`. It is in no
@@ -10,9 +10,8 @@
  * - **Replay `"safe"`**: a search only reads, so an interrupted call searches again on recovery.
  */
 
-import { defineTool, type ToolRegistration } from "@earendil-works/pi-durable";
-import { Type } from "@earendil-works/pi-ai";
-import { decodeEntities } from "./fetch.ts";
+import { defineTool, type ToolRegistration } from "@pikit/pi-adapter/tools";
+import Type from "typebox";
 
 /** The secret holding the Brave Search API key (api-dashboard.search.brave.com). */
 export const BRAVE_KEY_SECRET = "BRAVE_API_KEY";
@@ -110,4 +109,16 @@ function plain(text: string): string {
   return decodeEntities(text.replace(/<[^>]*>/g, ""))
     .replace(/\s+/g, " ")
     .trim();
+}
+
+/** HTML's character references (`&amp;`, `&#39;`, `&#x2014;`) as the characters they stand for. */
+function decodeEntities(text: string): string {
+  const named: Record<string, string> = { amp: "&", lt: "<", gt: ">", quot: '"', apos: "'", nbsp: " " };
+  return text.replace(/&(#x[0-9a-f]+|#\d+|[a-z]+);/gi, (entity, name: string) => {
+    if (name[0] === "#") {
+      const code = name[1] === "x" || name[1] === "X" ? Number.parseInt(name.slice(2), 16) : Number.parseInt(name.slice(1), 10);
+      return code > 0 && code <= 0x10ffff ? String.fromCodePoint(code) : entity;
+    }
+    return named[name.toLowerCase()] ?? entity;
+  });
 }
