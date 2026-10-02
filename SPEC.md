@@ -15,7 +15,7 @@ Four outcomes are required. Without any one of them, pikit is not what it set ou
 
 1. **A reliable, source-owned service.** One command from an empty server to an agent that
    answers; every harness piece is source the user owns; nothing is lost or pretended (§2).
-2. **The same project runs on a server and on Cloudflare** (§4).
+2. **The same agents, routing and contracts run on a server and on Cloudflare** (§4).
 3. **The service is visible and operable from a base dashboard** built with shadcn/ui, small on
    purpose and made to be extended (§5).
 4. **The main agent knows what it is and can improve itself**, internally (its components) and
@@ -51,12 +51,16 @@ Its exports, and those of `@pikit/core/testing` that components' tests import, a
 Each decision states what the kernel promises and why it keeps holding as pikit grows. Status
 (built or not) is not tracked here: the code and its tests say what is built.
 
-- **K1. The kernel knows no target.** `Target`, `pikit.target` and `ctx.target` leave the kernel.
-  A component's targets are declared in its `component.json`; a component that needs something
-  different per target gets it through a capability. *Why:* nothing reads it today, a closed list
-  would change the kernel for every new runtime, and `setup` that branches per target makes the
-  generated manifest depend on which target it was generated for. Adding it back later would be
-  additive.
+- **K1. The kernel names the runtime model, and nothing branches on it.** `Target`
+  (`"server" | "durable"`), `pikit.target` and `ctx.target` stay in the kernel: they name the runtime
+  model an App runs on (§4), never a provider, and the CLI, the component schema's `targets` enum and
+  `defineApp({ target })` share that one closed list. A component's targets are declared in its
+  `component.json`; a component that needs something different per target gets it through a
+  capability (or `WORKERS_HOST`, C5), never by branching on `pikit.target` in `setup`. *Why:* a target
+  is part of the composition (a deployment recomposes the App on its own), so the kernel carries it;
+  `setup` that branches on it would make the generated manifest depend on the target it was generated
+  for. A third value (`functions`) is a kernel change recorded here, made only when a host of that
+  runtime model is built (`features/deployment-targets.md`).
 - **K2. Whoever runs the app bounds the rollback.** The kernel keeps no timeouts.
   A failed start's rollback is bounded by a `stop(ctx)` with a deadline, which the host calls while
   `start()` is pending or after it rejects. Every `deployment-*` component's entrypoint does so, and
@@ -157,9 +161,19 @@ registers itself (C8).
 
 ## 4. Cloudflare is required
 
-The same project, with the same agents, routing and channels, runs on Cloudflare Workers and
-Durable Objects. This is not a feature: it is the proof that the contracts hide no server
-(Manifesto, principle 11).
+The same agents, routing and contracts run on Cloudflare Workers and Durable Objects as on a
+server. This is not a feature: it is the proof that the contracts hide no server (Manifesto,
+principle 11).
+
+**The honest rule.** A project is made for one target (`pikit new --target`, recorded in
+`pikit.json`'s `targets`). Most components declare both targets and are the same code on each. The
+few that touch how code lives come one per runtime model and say so in their `targets`:
+`channel-telegram` (long polling) and `channel-telegram-webhook` (C6), `channel-http` and
+`execution-local` (a process) and `execution-do` (C7), `storage-sqlite` and `storage-do`,
+`wakeups-timers` and `platform-cloudflare`. The required set (below) has a provider on each target
+for every capability it needs; a component outside it may exist for one target only (`channel-http`
+has no Cloudflare twin yet). Moving a project to the other target is swapping those components,
+never changing an agent, a route or a contract.
 
 **A target is a runtime model; a provider is a `deployment-*` component.** A target (`targets` in a
 `component.json`, `pikit.json`'s `targets`, `pikit new --target`) names how code lives, never whose
@@ -335,7 +349,14 @@ cost per conversation; health. The rest below comes as the components it needs a
   one, `@central-icons-react`, which the dashboard does not take). Every copied primitive is
   attributed in `NOTICE`.
 
-The dashboard reads the composition through `APP_DESCRIPTION` (K13).
+The dashboard reads the composition through `APP_DESCRIPTION` (K13), the runtime through
+`agent.observe` (`packages/contracts/src/observe.ts`: conversations with their agent, busy state and
+cost, a transcript, a live event stream, usage; runtime-pi provides it from pi-durable's records), and
+asks `admin.auth` (`packages/contracts/src/admin.ts`; `admin-auth-token`, a bearer token from
+`secrets`, on both targets) before every answer. Its assets and API are prefix routes
+(`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves. On
+Cloudflare `agent.observe` sees one object's conversations: the list across objects is
+`features/cloudflare-conversation-index.md`.
 
 **Decision still open** `[open]`:
 - **How primitives reach the registry.** Copied into `registry/components/admin-dashboard/` and

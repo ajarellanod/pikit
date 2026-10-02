@@ -63,3 +63,22 @@ cannot give itself (channels, delivery, deployment, the dashboard) is a pikit co
   part of `admin-dashboard`'s first version or comes with the first component that needs a view.
 - Whether skills live in the kit repository (copied by `pikit new`) or are a component
   (`agent-skills`) like any other.
+
+## Contracts without a suite (today)
+MANIFESTO principle 13 promises a conformance suite for every contract. These do not have one in
+`@pikit/contracts/testing` yet; a provider of one proves itself with its own tests:
+- **`agent.tool`, the tool shape.** A tool is pi-durable's `ToolRegistration`; `runToolCalls`
+  (`@pikit/pi-adapter/execution/testing`) runs it in a real Harness turn, but nothing checks every
+  tool the same way (a description, a `replay`, errors the model can read, cancellation honoured).
+- **`execution` and `execution.shell`.** Their suite exists but lives in the adapter
+  (`createDurableExecutionConformance`, `@pikit/pi-adapter/execution/testing`), since the contract is
+  pi-durable's `ExecutionEnv`. Likewise `workspace` (`createWorkspaceConformance`) and
+  `model.credentials` (`createCredentialStoreConformance`), in `@pikit/pi-adapter/testing/neutral`.
+- **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openrouter and
+  provider-faux each test their own.
+- **`agent.conversations`.** Only exercised through the `agent.runtime` and `conversations.registry`
+  suites (a fixture creates conversations with it), never on its own.
+- **`route.resolve` as a router's stage.** The channel suite checks that a channel honours a stage's
+  halt; nothing checks a router (router-basic, router-rules) against a shared list of cases.
+- **`agent.definition`.** Data the project provides (`defineAgent` validates it); runtime-pi refuses
+  to start on an agent it cannot run.

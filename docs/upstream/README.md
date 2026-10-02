@@ -25,7 +25,7 @@ here with the Pi version.
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
 ([storage-postgres](../../features/storage-postgres.md)), an `ExecutionEnv` conformance suite (pikit
-ported one: `packages/pi-adapter/src/durable/execution-testing.ts`), and a Durable Object example
+ported one: `packages/pi-adapter/src/testing/execution.ts`), and a Durable Object example
 (pikit's `storage-do` + `openDurableStorage`, proven with pi-durable's storage conformance).
 
 ---
@@ -36,7 +36,7 @@ ported one: `packages/pi-adapter/src/durable/execution-testing.ts`), and a Durab
   an event (a Durable Object, a function) is evicted while a task sleeps, and nothing wakes it: the
   run stalls until an unrelated event reopens the Harness.
 - **Evidence.** `scheduler.ts` `#sleep` / `delay`; there is no API returning when work is next due.
-- **pikit meanwhile.** `nextWakeAt(harness)` / `driveSlice` (`packages/pi-adapter/src/durable/wakeups.ts`)
+- **pikit meanwhile.** `nextWakeAt(harness)` / `driveSlice` (`packages/pi-adapter/src/wakeups.ts`)
   derive the time from `harness.inspect()` and the private checkpoints of `pi.generation` and
   `pi.compaction`; the object's alarm is set from it. Custom task sleeps are invisible unless the task
   checkpoints `until`.
@@ -65,7 +65,7 @@ ported one: `packages/pi-adapter/src/durable/execution-testing.ts`), and a Durab
   workspace, which secrets, which quota) without trusting the model; tracing needs one trace id
   across a run. After a restart the original caller is gone, so the values must be durable, not
   in-memory.
-- **Evidence.** The durable runtime's README (`packages/pi-adapter/src/durable/README.md`, "a
+- **Evidence.** The durable runtime's README (`packages/pi-adapter/src/README.md`, "a
   dispatching caller's values no longer reach tools"): a tool's context is built from the Harness's
   context plus the conversation. `runtime.test.ts` ("contexts") dispatches with a `tenant` value
   and checks what the tool sees; a test asserting the tenant's absence should pin it before this is

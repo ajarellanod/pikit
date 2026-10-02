@@ -1,122 +1,74 @@
-# A tool of your own in one call (`toolComponent`)
+# A tool of your own
 
 **Public appeal:** —
 
-**Status:** built, in `@pikit/pi-adapter/tools`. No change to the kernel or the contracts. **A bridge:**
-it is deleted when the adapter moves to Pi's durable runtime ("Migration" below).
+**Status:** built. A tool is pi-durable's own `ToolRegistration`, written with `defineTool` from
+`@pikit/pi-adapter/tools`, and a component provides it as `agent.tool`. pikit adds no wrapper.
 
-**Needed by:** anyone who adds a tool to an agent. Before, the choices were a Pi extension's tool
-(always `replay: "never"`, hidden inside the extension, the agent names the extension) or a full
-`defineComponent` providing `agent.tool` in the harness's six-argument shape.
+**Needed by:** anyone who adds a tool to an agent.
 
 ## What it gives
-A tool written in the shape of Pi's `defineTool` becomes a component that provides `agent.tool`, and
-an agent names it in `tools`:
+A tool written in Pi's shape, in a component the user owns, that an agent names in `tools`:
 
 ```ts
-import { toolComponent } from "@pikit/pi-adapter/tools";
-import { Type } from "typebox";
+// src/pikit/tool-greeting/index.ts
+import { defineComponent } from "@pikit/core";
+import { defineTool } from "@pikit/pi-adapter/tools";
+import Type from "typebox";
 
-export default toolComponent(
-  {
-    name: "greeting",
-    label: "Greeting",
-    description: "Greets someone",
-    parameters: Type.Object({ name: Type.String() }),
-    async execute(toolCallId, params, signal, onUpdate, context) {
-      return { content: [{ type: "text", text: `Hello, ${params.name}!` }], details: undefined };
-    },
+export const greeting = defineTool({
+  name: "greeting",
+  description: "Greets someone by name.",
+  parameters: Type.Object({ name: Type.String() }),
+  replay: "safe", // it only computes: a call a crash interrupted runs again
+  async execute(args, api, context) {
+    // api.conversationId, api.env (files and shell); context.abortSignal (the call's cancellation)
+    return { content: [{ type: "text", text: `Hello, ${args.name}!` }] };
   },
-  { replay: "safe" },
-);
+});
+
+export default defineComponent({
+  name: "tool-greeting",
+  setup(pikit) {
+    pikit.provideKeyed("agent.tool", "greeting", greeting);
+  },
+});
 
 // defineAgent({ ..., tools: ["greeting"] })
 ```
 
+## The references to copy
+- **`tool-fetch`** (`registry/components/tool-fetch`): a tool that needs nothing from the app. `fetch.ts`
+  is the tool, `index.ts` the component, `tool-fetch.test.ts` its tests from the inside out (`execute`
+  directly, installed in an app, a real Harness turn with `runToolCalls`). Its README is "how this
+  tool is built".
+- **`tool-websearch-brave`**: a tool that needs a secret (read through `secrets` at each call, never
+  in the tool), config values (`apiBase`), and a step of `pikit configure` (`configure.ts`).
+- **`tool-read`, `tool-write`, `tool-edit`, `tool-bash`**: Pi's own coding tools, provided as they are
+  with pikit's replay (`codingTool(name)` in the adapter); they work on `api.env`, which the runtime
+  builds per call from `workspace` or `execution`.
+
 ## How it fits pikit
-- **It is a component**, `tool-<name>` (`_` becomes `-`: `web_search` is `tool-web-search`), that
-  provides `agent.tool` under the tool's name. `pikit doctor` lists it; removing it is removing the
-  file. No new verb, no registration by import (no magic).
-- **`replay` is required** (`agentTool`, `packages/pi-adapter/src/tools/index.ts`): `"safe"` runs it
-  again after a crash (it only reads); `"never"` tells the model it was interrupted (it changes
-  something: derive an idempotency key from the run's conversation and `toolCallId`).
-- **The fifth `execute` argument is the run's context**: its conversation
-  (`context.value(CONVERSATION)`) and its cancellation. `signal` is the same cancellation, in Pi's
-  place.
-- **A tool that needs a capability** (an environment, a secret) or config is a `defineComponent` of
-  its own that `use`s it and provides `agentTool(tool, { replay })`, the same tool without the
-  component (`tool-websearch-brave` reads its key through `secrets`); `toolComponent` declares none.
-  Pi's own tools bound to an environment use `bindTool` instead, as `tool-read` does.
+- **It is a component**, `tool-<name>`, that provides `agent.tool` under the tool's own name, which
+  runtime-pi checks at start. An agent gets only the tools it names. `pikit doctor` lists it;
+  removing it is removing its directory.
+- **`replay` is the tool's decision**, one value for every call: `"safe"` runs an interrupted call
+  again (it only reads or computes); `"unsafe"` (pi-durable's default) gives the model an
+  `interrupted` result with the output so far. A tool with an effect is `"unsafe"`, or makes its
+  effect idempotent from the call's identity. `component.json`'s `replay.tools` repeats it, so
+  `pikit add` can show it.
+- **What it needs comes through capabilities**: a secret through `secrets`, records through
+  `storage.kv`/`storage.sql`, files through `api.env`. Never `process.env` or a binding directly: that
+  would make it server-only or Cloudflare-only.
+- **The tool shape has no conformance suite of its own** (`features/building-components.md`, "Contracts
+  without a suite"): `runToolCalls` (`@pikit/pi-adapter/execution/testing`) runs a real Harness turn,
+  which validates the parameters and records the result.
 
 ## Pi first
-Pi already has `defineTool` (in Pi's coding agent). So `toolComponent` takes Pi's shape (same
-fields, same `execute` order) instead of a new one, and has another name so the two are never confused. It adds only what pikit owns: the component, the
-`agent.tool` key, and `replay`.
-
-The one difference is deliberate. Pi's fifth argument is its `ExtensionContext`, which only an
-extension's host has. Pi's `defineTool` always types it, so:
-- a Pi tool's **object** moves in as it is, written inside `toolComponent`;
-- an object **typed by Pi's `defineTool`** does not compile with `toolComponent`: the compiler says
-  so, not a conversation.
-
-## Which to use
-
-| You want | Use |
-|---|---|
-| A tool of your own for pikit that needs nothing from the app | `toolComponent` |
-| A tool that needs a capability (a secret, `execution`, `workspace`, `storage.kv`) | a `defineComponent` that `use`s it and provides `agent.tool` (as `tool-read` does) |
-
-Running unmodified Pi coding-agent extensions (and with them Pi's `defineTool` and
-`pi.registerTool` in a pikit project) was dropped with the move to pi-durable; pi-durable's own
-extensions will replace it.
-
-## Migration: a bridge until Pi's durable runtime
-
-Pi is moving to a durable runtime, `@earendil-works/pi-durable` (Pico; published, still changing:
-its changelog lists unreleased breaking changes; Pi's coding agent is being moved onto it,
-`packages/durable/docs/pico-v5-handoff.md` §16). There, extension code registers tools through one
-registry (`registry.tools.add(tool)`, `packages/durable/docs/pico-v5.md` §7), and a tool is one object:
-
-```ts
-type ToolRegistration = Tool & {
-  readonly replay?: "safe" | "unsafe"; // omitted: "unsafe"
-  execute(args: JsonValue, api: ToolExecutionApi, context: Context): Promise<ToolExecutionResult>;
-};
-```
-
-It carries its own `replay`, and its `api` knows its conversation (`api.conversationId`): the two things
-`toolComponent` adds today. On recovery it reruns only when the stored intent and the current
-declaration both say `safe`, as pi-agent-core does now. So, when pikit's adapter moves to it:
-
-- **A tool is Pi's object, unchanged.** An agent takes it directly (`tools: ["read", clima]`;
-  `AgentDefinition.tools` already accepts objects), or a `defineComponent` provides it as `agent.tool`
-  when it is shared by name, installed from a registry, or needs a capability.
-- **`toolComponent` and its `ToolDefinition` are deleted**, and `replay` takes Pi's words (`"unsafe"`
-  where pikit says `"never"`), in that one change, with the other `tool-*` components.
-- **If Pi ships a helper that types such an object**, it is used under Pi's own name: pikit adds none.
-
-Decided on the way there (September 2026):
-- `toolComponent` is not renamed (`createToolComponent` was considered): a name for something that
-  goes away is not worth a change.
-- No second word for `"never"` now: two words for one thing is the confusion this avoids, and Pi's
-  vocabulary may still change before the migration.
-- `defineTool` stayed exported by `@pikit/pi-adapter/extensions`, the shim's source, until that
-  module and the shim were removed with the move to pi-durable.
-- No issue or pull request to Pi: its contribution gate closes new contributors' issues and PRs
-  (a PR needs a maintainer's `lgtm` first), and `pi-durable` already gives tools a `replay`. What is
-  left is the current `ToolDefinition` of Pi's extension API, which that migration replaces.
+pi-durable's `defineTool` and `ToolRegistration` are the tool: pikit adds no shape of its own. A tool
+that is not shared by name can also go straight into an agent's `tools` as an object.
 
 ## Where it is
-- `packages/pi-adapter/src/tools/index.ts` (`ToolDefinition`, `toolComponent`, `agentTool`).
-- `packages/pi-adapter/src/tools/tools.test.ts`: component name, key, `replay`, Pi's argument order,
-  `onUpdate`; Pi's `hello` object unchanged.
-- `packages/pi-adapter/src/run-context.test.ts`: an agent names the tool, Pi runs it, and it gets the
-  run's conversation.
-
-## Open questions
-- Config for such a tool (an API URL, a limit): today it is a `defineComponent` providing
-  `agentTool(...)` (as `tool-websearch-brave` does). Not added to a bridge; after the migration, a
-  `defineComponent` with a config schema provides Pi's object.
-- When the adapter moves to `pi-durable`: decided with the rest of that move (sessions, submissions,
-  Cloudflare storage; `features/pi-durable-migration.md`), not for tools alone. That move is now
-  under way; the tools' side is in `packages/pi-adapter/src/durable/tools/README.md`.
+- `packages/pi-adapter/src/tools/index.ts`: `defineTool` and its types, `codingTool`.
+- `registry/components/tool-fetch`, `registry/components/tool-websearch-brave`: the references.
+- `packages/pi-adapter/src/testing/execution.ts`: `callTool`, `runToolCalls`.

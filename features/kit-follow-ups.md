@@ -5,15 +5,6 @@ itself. Features have their own files ([README](README.md)); no file tracks stat
 leaves this list when its change lands (and the CHANGELOG says so). Each item says why, when and
 how big.
 
-## Move the adapter to Pi's durable runtime (switch-over)
-- **Why:** P1. Pi 1.0 removed the 0.99 `AgentHarness` pikit ran on; `pi-durable` carries
-  conversations, submissions, resume, the inbox, compaction, tasks and subagents. Once the kit runs on
-  it, `sessions.store`, `sessions-sql`, `sessions-jsonl` and `@pikit/pi-adapter/sql` go
-  ([pi-durable migration](pi-durable-migration.md)).
-- **When:** now. The spike held and the adapter's pieces are built; the switch-over of the
-  components is in progress.
-- **Size:** large, and it removes code. The decisions it follows are in the migration file.
-
 ## Upstream proposals for pi-durable (pending the owner's decision to send)
 Every gap pikit works around in Pi's packages (pi-durable, Chord, pi-mcp, pi-ai), with problem,
 evidence, workaround, ask, priority and status, is listed in
@@ -27,7 +18,8 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   repository's commits. Published `@pikit/*` packages make them ordinary versioned dependencies.
 - **The deployed bot** (`pikit-telegram-cloudflare`, the first preset's template) is upgraded to
   the pi-durable kit, and its code improved, once everything is on npm, not from commits.
-- **When:** after the pi-durable switch-over is merged.
+- **When:** now that the kit runs on pi-durable (the switch-over is done:
+  [pi-durable migration](pi-durable-migration.md)).
 - **Size:** medium: package publishing, `pikit new`/`upgrade` resolving versions instead of commits.
 
 ## Dashboard and deployment stay open
@@ -38,9 +30,11 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **A base UI with shadcn/ui, extensible by components.** Not the largest interface: enough to
   start, and every other view comes from a component that brings it (SPEC §5). No platform
   under pikit (Pi Durable, Cloudflare, Rivet) offers an interface that is the user's to extend.
-- **When:** the dashboard is the next piece after the switch-over, in its minimal form:
-  conversations, a live view of one (joinable while the user talks in their chat), steer/abort,
-  cost per conversation, health.
+- **When:** next, in its minimal form: conversations, a live view of one (joinable while the user
+  talks in their chat), steer/abort, cost per conversation, health. What it reads is built:
+  `APP_DESCRIPTION` (K13), `agent.observe` (conversations, transcript, live events, usage),
+  `admin.auth` (`admin-auth-token`) and prefix routes (`GET /admin/*`). Listing every conversation on
+  Cloudflare still needs [an index](cloudflare-conversation-index.md).
 
 ## Building on the bases must be the easy path
 - **Why:** pikit gives the bases and the user builds their assistant on them (SPEC P1, MANIFESTO
@@ -54,17 +48,10 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   first one).
 
 ## Upstream contributions (pending the owner's decision)
-- **pi-mcp's `StreamableHttpTransport` on Workers.**
-  - *Why:* it stores `options.fetch ?? globalThis.fetch` and calls `this.fetch(...)`, which Workers
-    reject ("Illegal invocation"); and its SSE parser measures events with `Buffer.byteLength`, a Node
-    global that needs `nodejs_compat` ([mcp](completed/mcp.md), "On Cloudflare"). pikit wraps `fetch` in
-    `mcpHttpTransport` (`packages/pi-adapter/src/mcp/index.ts`), and the workerd lane pins the gap.
-  - *When:* once the owner decides to send it.
-  - *Size:* a small upstream patch for each; then `mcpHttpTransport`'s wrapper goes.
 - **Chord's context loses a foreign parent's `abortSignal`.**
   - *Why:* Chord's `withContextValue` reads cancellation through a private key, so a pikit context
-    that Pi derives loses its signal; `toPi()` in `packages/pi-adapter/src/context.ts` re-attaches it
-    (`toChord` in `durable/context.ts` for Chord 1.0, which still has the gap).
+    that Pi derives loses its signal; `toChord` in `packages/pi-adapter/src/context.ts` re-attaches it
+    (Chord 1.0 still has the gap).
     Proposed fix: `ContextValue.abortSignal` returns its own value when it holds the abort key, and
     `parent.abortSignal` otherwise. With it, pikit deletes the bridge.
   - *When:* once the owner decides to send it.
@@ -73,7 +60,7 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 ## Chord: through the adapter and components, never in `@pikit/core`
 - **Decided (re-checked against Chord 1.0):** `@pikit/core` stays, and Chord does not enter the
   kernel. The kernel's only runtime dependency is `typebox` (SPEC §3); `Context` is pikit's own and
-  frozen (K5), matching Chord's shape and bridged by the adapter (`toChord`, `toPi()`).
+  frozen (K5), matching Chord's shape and bridged by the adapter (`toChord`).
 - **Why, with Chord 1.0:** portability is no longer the objection (it runs in Bun and in bare
   workerd). What remains:
   - its 1.0 is 1.0 in name, not stable: it comes from Pi's lockstep versioning, and Chord's

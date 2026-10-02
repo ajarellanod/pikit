@@ -96,9 +96,16 @@ conversation and never pretends a message was answered.
 
 ### 11. Run where you want.
 
-The same project runs on a single server, in Docker, or on Cloudflare Durable Objects. This
-is not a feature. It is the proof that the contracts are real, because a system that runs in
-only one place has hidden dependencies it has not admitted to.
+The same agents, routing and contracts run on a single server, in Docker, or on Cloudflare
+Durable Objects. This is not a feature. It is the proof that the contracts are real, because a
+system that runs in only one place has hidden dependencies it has not admitted to.
+
+We say exactly how far it goes. A project is made for one runtime model (`pikit new --target`): a
+long-lived process, or an actor per conversation. Most components run on both. The few that touch
+how code lives come in one per model, and their manifest says so: Telegram by long polling on a
+server and by webhook on Cloudflare, local execution on a server and execution inside the object on
+Cloudflare. Moving a project is swapping those few, never rewriting an agent, a route or a
+contract.
 
 ### 12. Five minutes, then it's yours.
 
@@ -111,7 +118,8 @@ edited or removed like anything else.
 
 pikit gives the bases; the assistant is yours to build. So building on it must be easy for a
 person and for the AI working with them: every contract has a conformance suite that says
-whether a new component is right, every feature has a design note that says how to build it,
+whether a new component is right (the few still missing are listed, in
+`features/building-components.md`, until they are written), every feature has a design note that says how to build it,
 the repository carries skills that teach an agent to write a channel, a tool, a store or a
 dashboard view, and durability comes with the contracts, so a component never has to think
 about crashes. What one user builds, others can install from that user's own registry.

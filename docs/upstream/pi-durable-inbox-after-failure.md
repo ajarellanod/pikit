@@ -18,7 +18,7 @@ submission's status stays `queued`.
 
 ## Repro
 
-`packages/pi-adapter/src/durable/pi-facts.test.ts`, "a run that fails leaves the follow-ups in the
+`packages/pi-adapter/src/pi-facts.test.ts`, "a run that fails leaves the follow-ups in the
 inbox", on pi-ai's faux provider:
 
 1. submit input `r1`; its model call is held, then returns `stopReason: "error"`;
@@ -29,7 +29,7 @@ inbox", on pi-ai's faux provider:
 
 ## pikit's workaround
 
-`packages/pi-adapter/src/durable/runtime.ts`, `reconcileInbox`: after an input settles unanswered,
+`packages/pi-adapter/src/runtime.ts`, `reconcileInbox`: after an input settles unanswered,
 and after opening a Harness, the runtime looks at `pi.live` and `pi.inbox`. With no run going and an
 input queued, it submits `{ type: "write", entry: { kind: "pikit.inbox-kick" } }`: an entry without
 model messages, so the model never sees it, whose admission boundary places the oldest input and

@@ -21,7 +21,7 @@ so that is not a choice.
 The table names are in pi-durable's `storage/sqlite/migrations.js`; `SqliteStorage.open(db:
 SqliteDatabase)` in `storage/sqlite/storage.d.ts`. pikit's `storage.sql` contract asks every
 component to prefix its tables; pikit's facade documents the exception
-(`packages/pi-adapter/src/durable/README.md`, "Limits and open questions").
+(`packages/pi-adapter/src/README.md`, "Limits and open questions").
 
 ## pikit's workaround
 
