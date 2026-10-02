@@ -8,7 +8,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import type { WorkersHost } from "@pikit/contracts";
+import type { WorkersHost } from "@pikit/contracts/cloudflare";
 import type { DurableObjectFilesStorage } from "./files.ts";
 
 const MAX_ROW_BYTES = 2 * 1024 * 1024;

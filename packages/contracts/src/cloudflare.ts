@@ -1,5 +1,7 @@
 /**
  * The Cloudflare platform, in the start context of an App that runs on it (SPEC §4.1, C5).
+ * `@pikit/contracts/cloudflare`: only Cloudflare components import it, so the neutral root does not
+ * export it. It imports nothing from Cloudflare and runs on every target.
  *
  * `deployment-cloudflare`'s entrypoints put a `WorkersHost` on each App's start context: the Worker's
  * `env` in both Apps, and in a Durable Object's App the object itself. The few components that must

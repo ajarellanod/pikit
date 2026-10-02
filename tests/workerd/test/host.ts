@@ -12,7 +12,7 @@
 
 import { abortAllDurableObjects, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
-import type { WorkersHost } from "@pikit/contracts";
+import type { WorkersHost } from "@pikit/contracts/cloudflare";
 import type { ConformanceCase } from "@pikit/core/testing";
 import { forgetComposition } from "../src/platform.ts";
 

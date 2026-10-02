@@ -7,7 +7,8 @@
 
 import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type SqlDatabase, WORKERS_HOST, type WorkersHost } from "@pikit/contracts";
+import type { SqlDatabase } from "@pikit/contracts";
+import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createSqlDatabaseConformance, withWorkersHost } from "@pikit/contracts/testing";
 import storageDo from "./index.ts";

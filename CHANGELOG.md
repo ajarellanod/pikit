@@ -5,6 +5,18 @@ line names its area.
 
 ## Unreleased
 
+- contracts: **breaking.** `WORKERS_HOST` and `WorkersHost` move from `@pikit/contracts` to its new
+  `@pikit/contracts/cloudflare` export (`src/cloudflare.ts`, formerly `src/workers-host.ts`); the
+  neutral root no longer exports them. `deployment-cloudflare`, `platform-cloudflare`, `storage-do`,
+  `execution-do`, `secrets-cloudflare`, `channel-telegram-webhook` and the workerd lane import them
+  from there. A project whose copied Cloudflare components still import them from the root gets them
+  back with `pikit upgrade`, or changes the import to `@pikit/contracts/cloudflare`. `withWorkersHost`
+  stays in `@pikit/contracts/testing`.
+- cli/registry: the capability catalogue may mark a contract `transitional` (expected to be bridged or
+  deleted, with what replaces it); `pikit registry capabilities` prints it next to its stability and
+  on its own line. `agent.submissions` is marked so: it goes when the adapter moves to `pi-durable`.
+- docs: MCP is a completed feature (`features/completed/mcp.md`); OAuth and stdio stay open in it.
+
 - cli/registry: declarative file operations validate the registry index and portable paths and reject symlinks below project/component roots, including sources, copied files, rollback, bases and vendor tarballs. A symlinked root itself is supported; this is not a sandbox for trusted setup code.
 - cli: `add` and `upgrade` resolve offers from the project's actual composition, separately per App, not another registry's manifests for installed names. An unknown composition gets a warning and no automatic offers.
 - cli/registry: installation and validation share contracts/adapter compatibility checks. A component depending on either must declare a meaningful range (`requires.contracts` / `requires.adapter`); installed adapter ranges are recorded and checked before a kit refresh.

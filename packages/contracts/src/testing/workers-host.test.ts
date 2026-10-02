@@ -6,7 +6,7 @@
 
 import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { WORKERS_HOST, type WorkersHost } from "../workers-host.ts";
+import { WORKERS_HOST, type WorkersHost } from "../cloudflare.ts";
 import { withWorkersHost } from "./workers-host.ts";
 
 const host: WorkersHost = { env: { TOKEN: "t" } };

@@ -14,7 +14,8 @@
  */
 
 import { type App, BACKGROUND_CONTEXT, type Clock, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type JsonValue, WORKERS_HOST, type WorkersHost } from "@pikit/contracts";
+import type { JsonValue } from "@pikit/contracts";
+import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import type { ConversationNamespace, ObjectStorage } from "./index.ts";
 
 /** How long the simulated platform waits before retrying an alarm whose handler rejected. */

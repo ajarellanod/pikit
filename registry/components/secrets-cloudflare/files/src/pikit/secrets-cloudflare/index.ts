@@ -14,7 +14,8 @@
  */
 
 import { defineComponent } from "@pikit/core";
-import { type SecretStore, WORKERS_HOST } from "@pikit/contracts";
+import type { SecretStore } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 
 export default defineComponent({
   name: "secrets-cloudflare",

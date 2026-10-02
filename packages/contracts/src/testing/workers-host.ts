@@ -11,7 +11,7 @@
  */
 
 import { type AppContext, type ComponentDefinition, type ComponentLifecycle, withContextValue } from "@pikit/core";
-import { WORKERS_HOST, type WorkersHost } from "../workers-host.ts";
+import { WORKERS_HOST, type WorkersHost } from "../cloudflare.ts";
 
 /** `components`, each receiving `host` as `WORKERS_HOST` in the context of its `start` and `stop`. */
 export function withWorkersHost(host: WorkersHost, components: readonly ComponentDefinition[]): ComponentDefinition[] {

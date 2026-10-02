@@ -11,7 +11,8 @@
  */
 
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type ActorMailbox, type ConversationRef, WORKERS_HOST } from "@pikit/contracts";
+import type { ActorMailbox, ConversationRef } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";

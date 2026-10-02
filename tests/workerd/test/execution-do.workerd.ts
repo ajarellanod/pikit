@@ -6,7 +6,8 @@
  */
 
 import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type AgentTool, WORKERS_HOST, type WorkersHost } from "@pikit/contracts";
+import type { AgentTool } from "@pikit/contracts";
+import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { withWorkersHost } from "@pikit/contracts/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
 import { createExecutionConformance } from "@pikit/pi-adapter/testing/neutral";

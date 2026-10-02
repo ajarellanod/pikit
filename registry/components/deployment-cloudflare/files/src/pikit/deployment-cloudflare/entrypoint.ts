@@ -9,7 +9,8 @@
  */
 
 import type { AppDefinition } from "@pikit/core";
-import type { JsonValue, WorkersHost } from "@pikit/contracts";
+import type { JsonValue } from "@pikit/contracts";
+import type { WorkersHost } from "@pikit/contracts/cloudflare";
 // @ts-ignore: typed by Workers' runtime types (`wrangler types`) where they are installed; under Bun's
 // types the class below extends an untyped base, and host.ts types what is used of it.
 import { DurableObject } from "cloudflare:workers";

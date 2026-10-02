@@ -36,7 +36,8 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import { type JsonValue, WORKERS_HOST, type WorkersHost } from "@pikit/contracts";
+import type { JsonValue } from "@pikit/contracts";
+import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, conversationKeyOf } from "./account.ts";
 import { createTelegramApi, parseAllowedUsers, type TelegramApi } from "./api.ts";

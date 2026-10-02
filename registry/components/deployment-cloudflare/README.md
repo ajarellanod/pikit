@@ -117,7 +117,7 @@ export on its first event, never in its constructor:
   `blockConcurrencyWhile`: Cloudflare resets the object, the event that started it fails, and the
   next event starts a new App (SPEC K2). The App is never stopped otherwise: an object is evicted
   without warning (K6), and an evicted object starts its App again on its next event.
-- The start context carries `WORKERS_HOST` (`@pikit/contracts`): `env`, and `object` with the
+- The start context carries `WORKERS_HOST` (`@pikit/contracts/cloudflare`): `env`, and `object` with the
   object's `id`, its `storage` (for `storage-do`), and two hooks:
   - `onAlarm(handler)`: `alarm()` calls it. A rejection makes Cloudflare retry the alarm. An alarm
     with no handler is logged and dropped.

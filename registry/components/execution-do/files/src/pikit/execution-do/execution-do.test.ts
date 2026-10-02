@@ -7,7 +7,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts";
+import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { withWorkersHost } from "@pikit/contracts/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";

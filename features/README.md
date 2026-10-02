@@ -27,7 +27,6 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [channel-whatsapp](channel-whatsapp.md) | ⭐ | WhatsApp, by the Cloud API or a linked device | No |
 | [import-from-openclaw-hermes](import-from-openclaw-hermes.md) | ⭐ | `pikit import`: persona, skills, memories, channels from an existing setup | No |
 | [learned-skills](learned-skills.md) | ⭐ | Skills the agent writes from experience, through the self-change gate | No; builds on SPEC §6 |
-| [mcp](mcp.md) | ⭐ | Tools of remote MCP servers for the agents that name them | No |
 | [memory](memory.md) | ⭐ | Memory and user profiles across conversations and channels | No |
 | [pairing](pairing.md) | ⭐ | Unknown senders approved by the owner from the chat | No |
 | [rich-content](rich-content.md) | ⭐ | Images, files and buttons; the shape is decided, kept in its file | No |
@@ -68,5 +67,6 @@ how it fits pikit, what Pi already does, where the code and its tests are, and w
 
 | Feature | One line |
 |---|---|
+| [mcp](completed/mcp.md) | Tools of remote MCP servers for the agents that name them: `tool-mcp` over Pi's `pi-mcp` (Streamable HTTP, both targets); OAuth and stdio still open |
 | [storage-kv](completed/storage-kv.md) | `storage.kv`: small JSON values per component, by key; `storage-kv-sql` provides it, `channel-telegram` keeps its cursor there |
 | [tool-component](completed/tool-component.md) | `toolComponent`: a tool in the shape of Pi's `defineTool` as a component providing `agent.tool`, with its `replay`. A bridge until the adapter moves to `pi-durable` |

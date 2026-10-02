@@ -31,7 +31,8 @@ import {
   withAbortSignal,
   withContextValue,
 } from "@pikit/core";
-import { type HttpRoute, type JsonValue, WORKERS_HOST, type WorkersHost } from "@pikit/contracts";
+import type { HttpRoute, JsonValue } from "@pikit/contracts";
+import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 
 /**
  * Longest an App's start may take. An object's start runs inside `blockConcurrencyWhile`, which

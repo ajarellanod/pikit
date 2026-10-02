@@ -5,7 +5,8 @@
  */
 
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type SecretStore, WORKERS_HOST } from "@pikit/contracts";
+import type { SecretStore } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { createSecretStoreConformance, withWorkersHost } from "@pikit/contracts/testing";
 import { expect, it } from "vitest";
 import secretsCloudflare from "../../../registry/components/secrets-cloudflare/files/src/pikit/secrets-cloudflare/index.ts";

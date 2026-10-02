@@ -44,6 +44,11 @@ export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
   /** One line: what a consumer gets from it. */
   summary: string;
   /**
+   * Transitional: the contract is expected to be bridged or deleted, not to settle. One line: what
+   * replaces it and when, so a component author knows before depending on it.
+   */
+  transitional?: string;
+  /**
    * Offered: when a component that can use it (`useOptional`) or requires it (`use`) is added and
    * nothing provides it, `pikit add` and `pikit new` offer its provider (`project/offers.ts`).
    * For a capability with one obvious provider that changes nothing else; not for a choice like a
@@ -75,6 +80,7 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/contracts",
     stability: "experimental",
     summary: "What became of each admitted message: resumes unanswered conversations at start, and feeds every run's outcome to the channels.",
+    transitional: "shaped like pi-durable's submissions; bridged or deleted when the adapter moves to Pi's durable runtime (features/pi-durable-migration.md).",
     offer: true,
   },
   "conversations.registry": {
@@ -245,11 +251,13 @@ export function formatCapabilities(usage: readonly CapabilityUsage[]): string {
   const list = (names: string[]) => (names.length > 0 ? names.join(", ") : "none in the registry");
   return usage
     .map(({ name, entry, providers, consumers }) => {
-      const head = entry ? `${name}  (${entry.mode}, ${entry.definedIn}, ${entry.stability})` : `${name}  (not in the catalogue)`;
+      const level = entry?.transitional === undefined ? entry?.stability : `${entry.stability}, transitional`;
+      const head = entry ? `${name}  (${entry.mode}, ${entry.definedIn}, ${level})` : `${name}  (not in the catalogue)`;
       const users = consumers.map((c) => (c.optional ? `${c.name} (optional)` : c.name));
       return [
         head,
         ...(entry ? [`  ${entry.summary}`] : []),
+        ...(entry?.transitional !== undefined ? [`  transitional: ${entry.transitional}`] : []),
         `  provided by: ${entry?.providedBy === "project" ? "the project" : list(providers)}`,
         `  used by:     ${list(users)}`,
       ].join("\n");

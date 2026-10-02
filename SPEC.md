@@ -220,7 +220,7 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   `storage.kv`) have neutral providers that run on both targets; the only Cloudflare-specific storage
   is `storage-do` (`storage.sql` on the object's SQLite, whose transactions pass the `storage.sql`
   suite unchanged). Platform objects reach components through one context key in
-  `@pikit/contracts`, `WORKERS_HOST`, which `deployment-cloudflare`'s entrypoints put on each App's
+  `@pikit/contracts/cloudflare`, `WORKERS_HOST`, which `deployment-cloudflare`'s entrypoints put on each App's
   start context: the Worker's `env` (and, in the Worker's App, the origin its first request reached),
   and in an object its id, its storage, and the hooks its alarm and RPC call. Its types are structural: no `cloudflare:*` import leaves the entrypoints. *Why:* the
   components that must touch the platform are few and say so by reading one key; everything else is

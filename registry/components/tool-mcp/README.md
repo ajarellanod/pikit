@@ -13,7 +13,7 @@ you want from it; each becomes the agent tool `<server>_<tool>`. Pi's own MCP cl
 - **Hooks** (`component.json`): `doctor` (`doctor.ts`), its step of `pikit doctor`; `beforeDeploy`
   (`deploy.ts`), which `pikit up` runs before it builds and which writes `seed.ts` (below).
 - **Targets:** `server` and `cloudflare`: Streamable HTTP over `fetch`. A server run as a local
-  process (stdio) is not this component's (see `features/mcp.md`).
+  process (stdio) is not this component's (see `features/completed/mcp.md`).
 - **Installs to:** `src/pikit/tool-mcp/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi), `typebox`.
 
@@ -107,7 +107,7 @@ server is down. Install `storage.kv` there too (`storage-kv-sql` over `storage-d
 keeps the listing in its own storage, refreshed on each connection, and each later wake starts from
 it. With neither (an empty seed, no `storage.kv`), each object's start makes one `initialize`, one
 `notifications/initialized` and one `tools/list` per server (about 0.9 s against
-`mcp.deepwiki.com`, measured in `features/mcp.md`). No stream stays open between requests: the
+`mcp.deepwiki.com`, measured in `features/completed/mcp.md`). No stream stays open between requests: the
 server-to-client stream of MCP is not opened, since an object does not stay alive for it (SPEC
 §4.1, C4).
 

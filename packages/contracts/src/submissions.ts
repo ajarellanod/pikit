@@ -26,6 +26,9 @@
  * The session stays the source of truth. A settlement carries the run's final text, not its
  * transcript (`messages`) or usage: what a channel needs to deliver it after a restart, kept only as
  * long as the provider's retention.
+ *
+ * **Transitional**, not only `experimental`: the capability catalogue marks it so, and `pikit registry
+ * capabilities` says it, so that a component outside this repository knows before depending on it.
  */
 
 import type { AppContext } from "@pikit/core";

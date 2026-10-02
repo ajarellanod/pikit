@@ -21,7 +21,7 @@
  */
 
 import { defineComponent } from "@pikit/core";
-import { WORKERS_HOST } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import Type from "typebox";
 import { createExecutionEnv } from "./env.ts";
 import { createFiles, type DurableObjectFilesStorage } from "./files.ts";

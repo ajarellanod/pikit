@@ -12,7 +12,7 @@ A `codemode` tool: the model writes a short JavaScript program that calls the ag
 and only what the program prints or returns reaches the model. Many tool calls, loops and filtering
 cost one model turn and none of the intermediate results. With it come the tools that are reachable
 only from scripts or by search (`exposure: "codemode"`, `"deferred"`) and `tool_search`, which
-matter once an agent has many tools, for example several MCP servers ([mcp](mcp.md)).
+matter once an agent has many tools, for example several MCP servers ([mcp](completed/mcp.md)).
 
 ## Pi first
 Checked against Pi 0.99.0:

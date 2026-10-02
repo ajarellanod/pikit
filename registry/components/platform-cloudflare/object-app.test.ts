@@ -16,7 +16,8 @@
 
 import { afterAll, expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, type Clock, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type ConversationRef, type JsonValue, WORKERS_HOST, type WorkersHost } from "@pikit/contracts";
+import type { ConversationRef, JsonValue } from "@pikit/contracts";
+import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createManualClock } from "@pikit/core/testing";
 import type {} from "@pikit/pi-adapter";
 import { holdTool, scriptedAgent, testComponents } from "@pikit/pi-adapter/testing";

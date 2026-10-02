@@ -25,8 +25,8 @@ import {
   type KeyValueStorage,
   type OutboundMessage,
   type OutboundQueue,
-  type WorkersHost,
 } from "@pikit/contracts";
+import type { WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createMemoryFeed, createMemoryKeyValueStorage, createMemoryMailbox, createMemorySubmissions, createMemoryWakeups, withWorkersHost } from "@pikit/contracts/testing";
 import { accountsOf } from "./account.ts";

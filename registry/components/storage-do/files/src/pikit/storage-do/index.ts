@@ -20,7 +20,8 @@
  */
 
 import { defineComponent } from "@pikit/core";
-import { type SqlDatabase, type SqlRow, type SqlStatements, type SqlValue, WORKERS_HOST } from "@pikit/contracts";
+import type { SqlDatabase, SqlRow, SqlStatements, SqlValue } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 
 /** What this component uses of a `DurableObjectStorage` (Cloudflare's type, written structurally). */
 export interface DurableObjectSqlStorage {

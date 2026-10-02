@@ -7,7 +7,8 @@
 
 import { expect, test } from "bun:test";
 import { type AppContext, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
-import { type JsonValue, WORKERS_HOST, type WorkersHost } from "@pikit/contracts";
+import type { JsonValue } from "@pikit/contracts";
+import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createObjectHost, createWorkerHost, HEALTH_OBJECT, type ObjectState } from "./host.ts";
 
 /** A DurableObjectState's part the entrypoint uses; counts `blockConcurrencyWhile` calls and whether one is running. */

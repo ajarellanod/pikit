@@ -8,7 +8,7 @@
  */
 
 import { DatabaseSync } from "node:sqlite";
-import type { WorkersHost } from "@pikit/contracts";
+import type { WorkersHost } from "@pikit/contracts/cloudflare";
 import type { DurableObjectSqlStorage } from "./index.ts";
 
 export function fakeDurableObjectStorage(): DurableObjectSqlStorage {

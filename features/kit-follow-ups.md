@@ -15,31 +15,11 @@ how big.
 - **Size:** the spike is bounded (a message in, tool calls and an answer out, a busy conversation,
   owned runs); the migration after it is large and removes code.
 
-## `WORKERS_HOST` under `@pikit/contracts/cloudflare`
-- **Why:** `WORKERS_HOST` (`packages/contracts/src/workers-host.ts`, C5) is Cloudflare-specific, yet
-  it is exported from the neutral root of `@pikit/contracts`. A subpath says what it is, as
-  `@pikit/pi-adapter` does with `./node`.
-- **When:** not decided. It is a breaking change of an `experimental` contract (K8): cheapest while
-  every importer is in this repository, since copied components import it too and would take it
-  through `pikit upgrade` (P6).
-- **Size:** small and mechanical: 31 files import or mention it (the contract and its test kit,
-  `deployment-cloudflare`, `platform-cloudflare`, `storage-do`, `execution-do`,
-  `secrets-cloudflare`, the workerd lane), plus a new `exports` entry and a CHANGELOG line.
-
-## `agent.submissions` says it is transitional
-- **Why:** `packages/contracts/src/submissions.ts` is shaped like `pi-durable`'s submissions and says
-  it is "bridged or deleted" when the adapter moves there. Its catalogue entry
-  (`packages/cli/src/registry/capabilities.ts`) is `experimental` like every other contract, which
-  does not tell a component author that it may go.
-- **When:** before a component outside this repository depends on it.
-- **Size:** small: a stability level (or a marked note) for transitional contracts in the catalogue,
-  what `registry capabilities` prints for it, and one line in `submissions.ts`.
-
 ## Upstream contributions (pending the owner's decision)
 - **pi-mcp's `StreamableHttpTransport` on Workers.**
   - *Why:* it stores `options.fetch ?? globalThis.fetch` and calls `this.fetch(...)`, which Workers
     reject ("Illegal invocation"); and its SSE parser measures events with `Buffer.byteLength`, a Node
-    global that needs `nodejs_compat` ([mcp](mcp.md), "On Cloudflare"). pikit wraps `fetch` in
+    global that needs `nodejs_compat` ([mcp](completed/mcp.md), "On Cloudflare"). pikit wraps `fetch` in
     `mcpHttpTransport` (`packages/pi-adapter/src/mcp/index.ts`), and the workerd lane pins the gap.
   - *When:* once the owner decides to send it.
   - *Size:* a small upstream patch for each; then `mcpHttpTransport`'s wrapper goes.

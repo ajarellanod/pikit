@@ -37,7 +37,8 @@
  */
 
 import { type AppContext, defineComponent, withAbortSignal } from "@pikit/core";
-import { type ActorInbox, type ActorInboxHandler, type ActorMailbox, type JsonValue, type WakeupHandler, type Wakeups, WORKERS_HOST } from "@pikit/contracts";
+import type { ActorInbox, ActorInboxHandler, ActorMailbox, JsonValue, WakeupHandler, Wakeups } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import Type from "typebox";
 
 const SECOND = 1_000;

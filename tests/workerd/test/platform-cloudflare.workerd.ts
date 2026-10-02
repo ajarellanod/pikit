@@ -20,7 +20,8 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { type AppContext, defineComponent } from "@pikit/core";
-import { type ActorMailbox, type JsonValue, type WakeupHandler, type Wakeups, WORKERS_HOST } from "@pikit/contracts";
+import type { ActorMailbox, JsonValue, WakeupHandler, Wakeups } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { createMailboxConformance, createWakeupsConformance, withWorkersHost } from "@pikit/contracts/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import platformCloudflare, { BACKOFF_MS, WAKEUPS_TABLE } from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";

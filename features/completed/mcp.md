@@ -3,10 +3,10 @@
 **Public appeal:** ⭐ Connect the agent to any MCP server (GitHub, Linear, a database) without writing
 a tool. Hermes supports MCP, and users look for it in any agent's tool list.
 
-**Specified:** partly (phase 1 built: `tool-mcp` and `@pikit/pi-adapter/mcp`, Streamable HTTP with a
-bearer token from `secrets`, on both targets; strict at deploy (`pikit doctor` reaches each server),
-tolerant at run time (tool listings kept in `storage.kv`, and a seed of them `pikit up` bundles);
-OAuth and stdio are the open questions below)
+**Status:** built (phase 1): `tool-mcp` and `@pikit/pi-adapter/mcp`, Streamable HTTP with a bearer
+token from `secrets`, on both targets; strict at deploy (`pikit doctor` reaches each server),
+tolerant at run time (tool listings kept in `storage.kv`, and a seed of them `pikit up` bundles).
+OAuth and stdio are the open questions below; each would be a new component.
 
 **Needed by:** nothing required.
 
@@ -136,10 +136,10 @@ uses `fetch`.
   half on Cloudflare), keep tokens and client registration in `storage.kv` through pi-mcp's
   `McpOAuthStateStore`, and start the login from `pikit configure` or the dashboard. Where a token
   lives across a project's Durable Objects (per tenant, per server) is to decide with
-  [multi-tenant isolation](multi-tenant-isolation.md).
+  [multi-tenant isolation](../multi-tenant-isolation.md).
 - **stdio** is a process: a separate, server-only `tool-mcp-stdio` component over pi-mcp's
   `StdioTransport` (it may import it from the adapter's `./node` export), ideally through
-  [sandboxed execution](sandboxed-execution.md). Never a flag of `tool-mcp`.
+  [sandboxed execution](../sandboxed-execution.md). Never a flag of `tool-mcp`.
 - **Pi's gaps (upstream issue pending the user's decision).** pi-mcp 0.99 calls `globalThis.fetch` as
   a method of its transport ("Illegal invocation" on Workers) and measures SSE events with
   `Buffer.byteLength` (needs `nodejs_compat`). Whether to report them to Pi is the user's call; until
@@ -175,10 +175,9 @@ uses `fetch`.
   like `hooks.beforeDeploy` and `hooks.afterDeploy`, so `registry validate` checks its export and
   only what `pikit.json` records runs. `configure.ts` is still found by its path; declaring it as
   `hooks.configure` is the same change, not made.
-- **The manifest.** `registry generate` describes `setup` with an empty config, so `component.json`
-  lists no `provides` for tool-mcp. The config schema now carries one full example (`examples`:
-  deepwiki with `ask_wiki_question`, `read_wiki_structure`); `registry generate` learning to describe
-  setup with each example is in progress separately, and will list those keys.
-- **Per-agent server lists**, and servers per tenant ([multi-tenant isolation](multi-tenant-isolation.md)).
+- **The manifest.** `registry generate` describes `setup` with the default config and with each of
+  the config schema's `examples` (deepwiki with `ask_wiki_question`, `read_wiki_structure`), so
+  `component.json` lists `agent.tool` in `provides` for tool-mcp.
+- **Per-agent server lists**, and servers per tenant ([multi-tenant isolation](../multi-tenant-isolation.md)).
 - **Resources, prompts and tool-list changes** (`notifications/tools/list_changed`) are not used: with
   tools named in config, a new server tool needs a config change anyway.

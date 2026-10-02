@@ -8,7 +8,7 @@
  */
 
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { WORKERS_HOST } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { createEntrypoint } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/entrypoint.ts";
 
 const objectProbe = defineComponent({
