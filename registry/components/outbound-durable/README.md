@@ -62,9 +62,9 @@ Receipts are kept as long as their pieces (7 days delivered, 30 abandoned).
 
 ## Schema versions
 
-The tables carry a schema version (`outbound_meta`). Starting this component on a database made by
-an older one adds what is missing (the receipts table came in version 2); a database written by a
-newer one is refused at start.
+The tables carry a schema version (`outbound_meta`), so a later version of this component can add
+what it needs to a database that already exists; a database written by a newer one is refused at
+start.
 
 ## Seeing what happened
 
