@@ -52,9 +52,10 @@ now does, pikit's goes.
 - **Removed:** `sessions.store` and its providers `sessions-sql` and `sessions-jsonl`, with the
   adapter's `@pikit/pi-adapter/sql`. pi-durable's storage over `storage.sql` serves both a server
   and a Durable Object.
-- **Kept, transitional:** `agent.submissions`, which channels read answers from and which resumes
-  what pi-durable finished while nobody recorded it. It goes when pi-durable's own records can serve
-  its readers.
+- **Kept, read from pi-durable:** `agent.submissions`, which channels read answers from and which
+  resumes conversations at start. runtime-pi provides it from pi-durable's own submissions; the
+  `answers` feed is a log derived from them (pi-durable has no feed). `submissions-sql`, the second
+  record that bridged them, is removed.
 - **Kept, pikit's:** `agent.runtime` as the contract components use, `conversations.registry`
   (keys to conversations), `wakeups` (how an object is woken), channels, delivery, deployment.
 
@@ -64,7 +65,7 @@ now does, pikit's goes.
 - **`sessionId` is renamed `conversationId`** in the contracts (`ConversationRef` and what carries
   it): it is the pi-durable conversation's id.
 - **`sessions.store`, `sessions-sql` and `sessions-jsonl` are removed** (above).
-- **`agent.submissions` stays, marked transitional** (above).
+- **`agent.submissions` stays, provided by runtime-pi from pi-durable** (above).
 - **No code hot reload; a reload is a restart** ([kit follow-ups](kit-follow-ups.md)).
 
 ## Open problems (pi-durable gaps, to propose upstream)
@@ -92,4 +93,5 @@ Each has, or will have, a proposal in [`docs/upstream/`](../docs/upstream/):
   `storage.sql`.
 - How its tasks and documents map onto pikit's features (approvals, the scheduler) when they are
   built.
-- When `agent.submissions` can go: what its readers (channels, resume at start) would read instead.
+- When the `answers` log can go: when pi-durable records which inputs a run took with its end, and
+  offers a feed of settlements (docs/upstream, proposal 13).

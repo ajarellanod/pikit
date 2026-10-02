@@ -67,8 +67,8 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
 - **Where the key is used opaquely** (no change needed): the registries' maps
   (`conversations-kv/index.ts:63`, `conversations-file/index.ts:57`), the answer lanes
   (`channel-telegram/answers.ts:178`), the outbox's per-conversation order
-  (`outbound-durable/queue.ts:164`), log fields (`log-events/fields.ts:15-16`), the submissions' rows
-  (`submissions-sql/store.ts:56-80`). channel-http matches its answers by session and request, not by
+  (`outbound-durable/queue.ts:164`), log fields (`log-events/fields.ts:15-16`), the answers log's rows
+  (`packages/pi-adapter/src/answers.ts`). channel-http matches its answers by session and request, not by
   key (`channel-http/index.ts:164`).
 - **What goes wrong if a key is rewritten.** Every channel passes over settlements that are not its
   own, as it must, because the `answers` feed is shared (`channel-telegram/index.ts:104-105`,
@@ -117,11 +117,11 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
 4. **Carried by the runtime and the submissions.** The runtime passes the `ConversationRef` it is given
    through to its events and `CONVERSATION` (`packages/pi-adapter/src/conversation.ts:106,397`). Two
    places copy it field by field and would drop the address: `settlementOf`
-   (`packages/pi-adapter/src/result.ts:42`) and `submissions-sql`'s `conversationOf`
-   (`submissions-sql/store.ts:267-268`), whose rows keep key, agent and session in columns
-   (`store.ts:56-80`). `submissions-sql` gains a second migration (the `MIGRATIONS` steps,
-   `store.ts:54`) with two nullable columns in both tables, so a run resumed at start
-   (`runtime-pi/resume.ts:39,59`, from `pending`) still has its address.
+   (`packages/pi-adapter/src/result.ts:42`) and the answers log's `settlementOf`
+   (`packages/pi-adapter/src/answers.ts`), whose rows keep key, agent and conversation in columns.
+   The log gains two nullable columns, and `pending` reads the address from the conversation's
+   `pikit.conversation` document, so a run resumed at start (`runtime-pi/resume.ts`, from `pending`)
+   still has its address.
 5. **Channels match answers on the address.** An answer is the channel's when
    `conversation.address?.channel` is one of its instances; the chat is `address.conversationId`. When
    there is no address (a settlement, pointer or pending row written before), the channel falls back to
@@ -196,7 +196,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   outbox rows and the channels' cursors keep matching: nothing is rewritten in storage.
 - **Each step deploys alone**, because every reader falls back to the key: contracts (the optional
   field and parameter) → `admitInbound` passes the address → the registries record it → the adapter's
-  `settlementOf` copies it → `submissions-sql`'s migration → the channels read it. A registry that
+  `settlementOf` copies it → the answers log's columns → the channels read it. A registry that
   ignores the new parameter still satisfies the interface (a function with fewer parameters is
   assignable), so a user's edited copy of `conversations-kv` keeps compiling and behaves as today.
 - **channel-telegram and channel-telegram-webhook**: `find`/`ours`/`findBot` read the address first

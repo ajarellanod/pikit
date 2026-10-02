@@ -5,6 +5,21 @@ line names its area.
 
 ## Unreleased
 
+- registry, runtime-pi, pi-adapter: **breaking.** `submissions-sql` is removed: pi-durable is the one
+  record of what became of each message, and **runtime-pi provides `agent.submissions`** from it
+  (`get` is pi-durable's submission, `pending` its queued and placed inputs). The `answers` feed is a
+  log runtime-pi derives from pi-durable, `runtime_pi_answers` in `storage.sql`, one row per run under
+  its run key (the answer entry of an answered run), appended once, kept `keepSettledDays` (runtime-pi
+  config, default 7). A run whose log a crash never wrote is logged by the next reconciliation of its
+  conversation (at start, on a redelivery, in `recover`), as one run: a batch answered together is
+  no longer announced in pieces (a redelivered message of it used to be answered alone, then the
+  rest: the same answer twice). `abandon` settles queued messages unanswered in pi-durable (reason
+  `abandoned`) and runtime-pi announces them; a message a run took is left to it.
+  `createDurableRuntime` takes `db` (the `storage.sql`) instead of `storage`, and no `submissions`;
+  `DurableRuntime.submissions` is the contract. The capability `agent.submissions` is no longer
+  transitional nor offered (`pikit add runtime-pi` brings nothing); the `telegram-cloudflare` preset
+  drops `submissions-sql`. runtime-pi drops the 0.99-era handling of conversation ids that are not
+  pi-durable's.
 - core, cli, registry: **breaking.** The target `cloudflare` is now `durable`: a target names a
   runtime model (`server`, a long-lived process with a persistent disk; `durable`, an actor per
   conversation with its own SQLite and one alarm), and Cloudflare is `durable`'s provider. `Target` in
