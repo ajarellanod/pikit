@@ -118,4 +118,5 @@ Decided on the way there (September 2026):
   `agentTool(...)` (as `tool-websearch-brave` does). Not added to a bridge; after the migration, a
   `defineComponent` with a config schema provides Pi's object.
 - When the adapter moves to `pi-durable`: decided with the rest of that move (sessions, submissions,
-  Cloudflare storage; `features/pi-durable-migration.md`), not for tools alone.
+  Cloudflare storage; `features/pi-durable-migration.md`), not for tools alone. That move is now
+  under way; the tools' side is in `packages/pi-adapter/src/durable/tools/README.md`.

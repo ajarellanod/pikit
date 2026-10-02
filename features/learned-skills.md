@@ -30,7 +30,9 @@ it loads instructions instead of rediscovering them; a skill that proves wrong i
 Pi implements the Agent Skills specification: skills are listed by name and description and loaded
 on demand (`Skill` and `AgentHarnessResources.skills` in `pi-agent-core`; `docs/skills.md` of
 `pi-coding-agent`). Pi's durable runtime makes a code change a generation boundary. pikit builds no
-skill format, loader or store.
+skill format, loader or store. `pi-durable` 1.0, which the kit is moving to, has no skills of its own:
+there a skill is data the agent reads (a document or a file), changed live without a code reload
+([kit follow-ups](kit-follow-ups.md), "No code hot reload").
 
 ## Open questions
 - Approval fatigue: batch skill proposals, or let the autonomy policy take low-risk ones?

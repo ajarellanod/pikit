@@ -30,7 +30,10 @@ Pi streams: `message_update` events carry the deltas (pi-agent-core 0.99.0's `Ag
 and the adapter forwards them to extensions), and Pi 0.99.0 adds `provider_stream_event` to its
 extension API and `onProviderStreamEvent` to pi-agent-core and pi-ai, for the provider's parsed events
 before normalization. pikit forwards what Pi emits; it builds no streaming of model calls. The adapter
-needs to re-emit message updates as an `agent.*` event, which today it does not.
+needs to re-emit message updates as an `agent.*` event, which today it does not. With the move to
+`pi-durable` ([pi-durable migration](pi-durable-migration.md)), `AgentHarness` is gone: pi-durable
+commits the partial answer to the conversation's live state (`pi.live`) as it streams, throttled,
+which a preview can read (a conversation's `watch()`).
 
 ## Open questions
 - Edit rate limits (Telegram allows about one edit per second per chat) and long answers split

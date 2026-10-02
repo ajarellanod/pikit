@@ -1,65 +1,97 @@
-# Moving the adapter to Pi's durable runtime
+# Moving the kit to Pi's durable runtime
 
 **Public appeal:** —
 
-**Specified:** partly (SPEC P1; §4.1 C5; `packages/contracts/src/submissions.ts`, which is shaped like
-`pi-durable`'s submissions so the move is the adapter's)
+**Specified:** decided (below, and SPEC P1, §4.1 C5); the adapter's side is described in
+`packages/pi-adapter/src/durable/README.md` and `durable/tools/README.md`.
 
-**Needed by:** nothing today; it removes pikit code once Pi carries it.
+**Needed by:** everything. Pi 1.0 removed the 0.99 `AgentHarness` pikit was built on, so the kit
+runs on `@earendil-works/pi-durable` or on nothing.
 
 ## What it gives
-Less pikit: sessions, the record of admitted messages and their answers, and the resume after a crash
-become Pi's own, as SPEC P1 asks ("when Pi ships something pikit built, pikit deletes its own").
+Less pikit: conversations, the record of admitted messages and their answers, the inbox, compaction,
+tasks, subagents and the resume after a crash become Pi's own, as SPEC P1 asks ("when Pi ships
+something pikit built, pikit deletes its own").
 
-## Where Pi stands (checked September 2026, Pi 0.99.0)
-- `@earendil-works/pi-durable` 0.99.0 runs a first input-to-answer path, not only records and
-  storage: `Harness.open()` over a storage, `Conversation.submit()` with request-id deduplication,
-  `Submission` handles (`status()`, `wait()`, `abort()`), `Harness.submission()` to reacquire one
-  after a reopen, and `Harness.resume()` to start scheduling. The built-in `pi.generation` task calls
-  the model and settles its inputs with `Tx.settleSubmission()`; a run the scheduler ends `faulted`
-  or `orphaned` settles them `unanswered`. `Storage.scanSubmissions()` lists submissions by
-  conversation and status.
-- Also new: durable tasks (`defineTask()`: phases, an `abort` handler, memos, `sleep()`, and
-  `getTask()`, `waitForTask()`, `abortTask()` on the harness); a registry (`createRegistry()`) for
-  tools, tool wrappers, hooks, tasks and system prompt sections; typed entries (`defineEntry()`) and
-  documents; the JSONL backend (`@earendil-works/pi-durable/storage/jsonl`, and
-  `openNodeJsonlStorage()` from `/storage/jsonl/node`); an execution environment for files and shell
-  (`/env`, and `NodeExecutionEnv` from `/env/node`); and the storage conformance suite and benchmarks,
-  exported from `/testing`.
-- That path is not yet what pikit's runtime needs. Its handoff (`pico-v5-handoff.md`) has packages
-  1–15 implemented; 16 (tool turns and hook dispatch), 17 (the inbox: steer, follow-up and passive
-  writes to a busy conversation) and 18 (owned conversations and subagents) are not. In 0.99.0 a
-  tool call settles as the answer, and a submission to a busy conversation rejects with
-  `ConversationBusy` and writes nothing.
-- `@earendil-works/pi-agent-core` 0.99.0, whose `AgentHarness` `runtime-pi` drives, does not depend
-  on `pi-durable`: the harness still has its own session `Storage`.
-- `pi-durable`'s SQLite core takes a **synchronous** database facade. Its README names Bun's SQLite and
-  a Cloudflare Durable Object's SQLite as environments that can implement it without Node APIs, and
-  says an asynchronous API such as D1 cannot. Pi ships no Durable Object adapter for it.
+## Kit, not framework
+Pi owns the agent runtime: durability, resume, request-id deduplication, the inbox and steering,
+compaction, subagents and tasks. pikit owns what Pi does not: channels, routing, delivery to
+platforms, deployment (a Bun server, Cloudflare Workers with one Durable Object per chat), the
+CLI and installer (zero friction from installer to a running agent), and, later, an operator UI
+built on pi-durable's `watch()` and `taskGraph()`. Where pikit had built something that pi-durable
+now does, pikit's goes.
 
-## What changes when it moves
-- **Removed:** `sessions-sql` and the adapter's `@pikit/pi-adapter/sql`, with the two Pi helpers they
-  copy. `submissions-sql`'s per-session half, since `admitted` and `settled` become Pi's records (the
-  index across sessions and the answers feed may stay: `submissions.ts` says which).
-- **Sessions on a server:** `pi-durable`'s own Node adapters (SQLite or JSONL).
-- **Sessions on Cloudflare:** `pi-durable`'s SQLite core over the object's SQL directly, through a
-  small synchronous facade reached by `WORKERS_HOST` (C5). Not over `storage.sql`, which is
-  asynchronous so that Postgres fits and stays the store of components' own records.
-- **The runtime:** `runtime-pi`'s drive, resume and slices (C4) sit on `pi-durable`'s run control;
-  `wakeups` stays the way an object is woken.
+## Where Pi stands (checked against Pi 1.0.0)
+- `@earendil-works/pi-durable` 1.0.0 is marked **experimental**: its API changes without notice
+  between releases. pikit pins it and re-checks on each bump.
+- It is a durable harness: `Harness.open()` over a storage, conversations (`root()`,
+  `createConversation()`), `submit()` with request-id deduplication, an inbox for a busy
+  conversation (steers, follow-ups, writes; `steeringMode` / `followUpMode`), `resume()` after a
+  reopen, compaction, durable tasks and child tasks (subagents), documents, per-conversation agents
+  (`configure()`), extensions (`defineExtension`, a registry), a usage ledger, and live views
+  (`watch()`, `taskGraph()`).
+- Storage: memory, JSONL, and a SQLite core over a small `SqliteDatabase` facade. pikit's facade over
+  `storage.sql` passes pi-durable's storage conformance on storage-sqlite (Bun) and storage-do
+  (workerd).
+- pi-ai 1.0 (`createModels`, providers by subpath) and Chord 1.0 come with it. `pi-agent-core`'s
+  `AgentHarness` is gone.
 
-## When
-A bounded spike of the adapter on `pi-durable` once packages 16–18 land (a message in, tool calls and
-an answer out, messages to a busy conversation queued, and owned runs, through its own run control)
-and a Pi release makes it the harness's storage or offers it alongside. Until then, build nothing that
-duplicates `pi-durable`; shape new work so that it can drop in.
+## Done and doing
+- **Done** (on `feat/pi-durable`, beside the 0.99 code): pi-durable's storage over `storage.sql` on
+  both targets; models, providers and credentials on pi-ai 1.0; tools, MCP and execution on
+  pi-durable; wake-ups for hosts that are evicted (a next due time derived from the Harness); a
+  runtime implementing `agent.runtime` on pi-durable. Before them, unmodified Pi coding-agent
+  extensions stopped running: pi-durable's own extensions are the extension model from now on.
+- **Doing:** the switch-over. The components move to those pieces (`runtime-pi`,
+  `deployment-cloudflare` and the Durable Object hosts, the conversation registries, the tools and
+  providers), the contracts follow, and the 0.99 code is deleted.
 
-The spike is deferred by the owner until Pi ships packages 16–18 (tool turns, the busy-conversation
-inbox, owned runs). Re-check `pico-v5-handoff.md` and `pi-durable`'s changelog on each Pi bump, and
-update "Where Pi stands" above. It is listed in [kit follow-ups](kit-follow-ups.md).
+## What moves to Pi, and what goes
+- **Pi's now:** sessions (pi-durable conversations), resume after a crash or eviction, request-id
+  deduplication, queueing behind a busy conversation, compaction, retries of model calls.
+- **Removed:** `sessions.store` and its providers `sessions-sql` and `sessions-jsonl`, with the
+  adapter's `@pikit/pi-adapter/sql`. pi-durable's storage over `storage.sql` serves both a server
+  and a Durable Object.
+- **Kept, transitional:** `agent.submissions`, which channels read answers from and which resumes
+  what pi-durable finished while nobody recorded it. It goes when pi-durable's own records can serve
+  its readers.
+- **Kept, pikit's:** `agent.runtime` as the contract components use, `conversations.registry`
+  (keys to conversations), `wakeups` (how an object is woken), channels, delivery, deployment.
+
+## Decisions of the switch-over
+- **Messages that arrive during a run are batched into the next run** (`followUpMode: "all"`): the
+  next run takes every message queued behind the current one.
+- **Existing conversations are not migrated.** After upgrading, conversations start fresh: pointers
+  that hold 0.99 session ids are not carried over.
+- **`sessionId` is renamed `conversationId`** in the contracts (`ConversationRef` and what carries
+  it): it is the pi-durable conversation's id.
+- **`sessions.store`, `sessions-sql` and `sessions-jsonl` are removed** (above).
+- **`agent.submissions` stays, marked transitional** (above).
+- **No code hot reload; a reload is a restart** ([kit follow-ups](kit-follow-ups.md)).
+
+## Open problems (pi-durable gaps, to propose upstream)
+Each has, or will have, a proposal in [`docs/upstream/`](../docs/upstream/):
+- **No API for the next due time.** A host that is evicted cannot know when sleeping work is due;
+  pikit derives it from the built-in tasks' checkpoints
+  ([proposal](../docs/upstream/pi-durable-next-wake.md)).
+- **A failed run leaves queued inputs stuck** in the inbox until the next submission; pikit kicks the
+  inbox with an invisible `pikit.inbox-kick` write
+  ([proposal](../docs/upstream/pi-durable-inbox-after-failure.md)).
+- **No session id reaches the provider**, so prompt-cache keys get none
+  ([proposal](../docs/upstream/pi-durable-provider-session-id.md)).
+- **The scheduler is global:** opening a Harness resumes every conversation's work, not one's
+  ([proposal](../docs/upstream/pi-durable-scheduling-scope.md)).
+- **Table names are unprefixed** (`conversations`, `entries`, `tasks`…), against `storage.sql`'s
+  "prefix your tables" rule, so one database holds one pi-durable Session
+  ([proposal](../docs/upstream/pi-durable-table-prefix.md)).
+- **One process per storage:** the next id is cached in memory and there is no cross-process lock,
+  so two processes over one SQLite file are unsupported ([replicas](replicas.md)).
+- **A caller's context values (tenant, trace) do not reach tools:** tasks run in the Harness's
+  context, so only the run's events see them.
 
 ## Open questions
-- Whether `pi-durable` ships its own Durable Object facade, or pikit keeps a few lines for it (0.99.0
-  ships none).
-- How its tasks and documents map onto pikit's features (approvals, the scheduler) before they are
+- Whether `pi-durable` ships its own Durable Object facade, or pikit keeps its few lines over
+  `storage.sql`.
+- How its tasks and documents map onto pikit's features (approvals, the scheduler) when they are
   built.
+- When `agent.submissions` can go: what its readers (channels, resume at start) would read instead.

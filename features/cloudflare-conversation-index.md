@@ -5,7 +5,7 @@
 **Specified:** partly (moved from the former SPEC §16)
 
 **Needed by:** possibly required work on Cloudflare: the dashboard lists conversations (SPEC §5),
-and resuming at start relies on `agent.submissions.pending()` across sessions
+and resuming at start relies on `agent.submissions.pending()` across conversations
 (`packages/contracts/src/submissions.ts`), which a store inside each Durable Object cannot answer. To
 decide with the dashboard on Cloudflare.
 
