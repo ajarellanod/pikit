@@ -6,7 +6,8 @@
  *                                            from what they did, validates it
  *     .start()                               runtime.starting → start() in order → runtime.ready
  *     .stop()                                runtime.stopping → stop() in reverse → runtime.stopped
- *     .describe()                            what `pikit doctor` prints
+ *     .describe()                            what `pikit doctor` prints; every context the app
+ *                                            creates carries it as `APP_DESCRIPTION` (K13)
  *
  * There is no `provides`/`requires` manifest: `setup` is the only truth. The app records
  * each `pikit.provide(name)` and `pikit.use(name)` and derives the graph from them (as Chord's
@@ -33,7 +34,7 @@ import {
   type Keyed,
 } from "./capabilities.ts";
 import { checkUniqueNames, readSelection, validateConfig } from "./config.ts";
-import { BACKGROUND_CONTEXT, type Context } from "./context.ts";
+import { BACKGROUND_CONTEXT, type Context, createContextKey } from "./context.ts";
 import { type Clock, systemClock } from "./clock.ts";
 import { consoleLogger, type Logger } from "./logger.ts";
 import { createEventBus, type EventBus, type AppEvents } from "./events.ts";
@@ -204,7 +205,15 @@ export interface AppOptions {
   clock?: Clock;
 }
 
+/**
+ * What an App is made of, for observers (SPEC K13): `describe()`, and the frozen snapshot every
+ * context the App creates carries under `APP_DESCRIPTION`. JSON. It changes additively; `version`
+ * says which shape it is.
+ */
 export interface AppDescription {
+  /** The shape of this description; a change that is not additive is a new version. */
+  version: 1;
+  /** The runtime model this App runs on (SPEC §4). */
   target: Target;
   /**
    * In start order. `provides`/`requires`/`optional` are derived from setup; `component.json` is
@@ -214,9 +223,23 @@ export interface AppDescription {
   components: { name: string; version?: string; provides: string[]; requires: string[]; optional: string[] }[];
   /** `selected` for single capabilities; `keys` (key → provider) for keyed ones. */
   capabilities: Record<string, { providers: string[]; selected?: string; keys?: Record<string, string> }>;
+  /** Each pipeline's stages, in the order they run. */
   pipelines: Record<string, ResolvedStage[]>;
+  /**
+   * The validated config, under each component's name. It holds no secret: a component reads its
+   * secrets through `secrets`, and its config names them at most (`tokenSecret: "GITHUB_TOKEN"`).
+   */
   config: Readonly<Record<string, unknown>>;
 }
+
+/**
+ * The App's description (SPEC K13), on every context it creates once its graph is valid (`start`,
+ * `stop`, handlers, `app.context()`): `ctx.value(APP_DESCRIPTION)`. A frozen snapshot, the same
+ * object for the App's whole life. For observation only: the dashboard (`admin-*`) and the agent's
+ * self-knowledge read it; a component never changes its behaviour by what else is installed
+ * (that is `useOptional`'s job).
+ */
+export const APP_DESCRIPTION = createContextKey<AppDescription>("pikit.app-description");
 
 export interface App {
   /** App context over `parent` (its cancellation and values); `BACKGROUND_CONTEXT` if omitted. */
@@ -273,11 +296,15 @@ export function defineApp(options: AppOptions): AppDefinition {
       const capabilities: CapabilityRegistry<AppCapabilities, AppKeyedCapabilities> =
         createCapabilityRegistry(selection);
 
+      /** `describe()`, frozen once the graph is valid: what `APP_DESCRIPTION` carries (K13). */
+      let description: AppDescription | undefined;
+
       // Reading `abortSignal` once is safe because a context never changes after derivation.
       const context = (inner: Context = BACKGROUND_CONTEXT): AppContext => {
         const ctx: AppContext = {
           abortSignal: inner.abortSignal,
-          value: (key) => inner.value(key),
+          // This App's own description wins over one a parent context carries (another App's, K7).
+          value: (key) => (key.token === APP_DESCRIPTION.token && description !== undefined ? (description as never) : inner.value(key)),
           toString: () => inner.toString(),
           target,
           logger,
@@ -391,6 +418,30 @@ export function defineApp(options: AppOptions): AppDefinition {
       const ordered = orderRecords(records, capabilities);
       validated = true;
 
+      const describe = (): AppDescription => ({
+        version: 1,
+        target,
+        components: ordered.map(({ component, provides, uses }) => ({
+          name: component.name,
+          ...(component.version !== undefined && { version: component.version }),
+          provides: [...provides],
+          requires: uses.filter((u) => !u.optional).map((u) => u.name),
+          optional: uses.filter((u) => u.optional).map((u) => u.name),
+        })),
+        capabilities: Object.fromEntries(
+          capabilities.names().map((name) => {
+            const providers = capabilities.providers(name);
+            if (capabilities.mode(name) === "keyed") return [name, { providers, keys: capabilities.keys(name) }];
+            const selected = capabilities.selected(name);
+            return [name, { providers, ...(selected && { selected }) }];
+          }),
+        ),
+        pipelines: Object.fromEntries(pipelines.names().map((name) => [name, pipelines.chain(name)])),
+        config,
+      });
+      // Registration is sealed, so the graph no longer changes: one snapshot serves the App's life.
+      description = deepFreeze(describe());
+
       const lifecycle = createLifecycle({
         components: ordered.flatMap(({ component, hooks }) => (hooks ? [{ name: component.name, hooks }] : [])),
         context,
@@ -402,31 +453,18 @@ export function defineApp(options: AppOptions): AppDefinition {
         start: (parent = BACKGROUND_CONTEXT) => lifecycle.start(parent),
         stop: (parent = BACKGROUND_CONTEXT) => lifecycle.stop(parent),
 
-        describe() {
-          return {
-            target,
-            components: ordered.map(({ component, provides, uses }) => ({
-              name: component.name,
-              ...(component.version !== undefined && { version: component.version }),
-              provides: [...provides],
-              requires: uses.filter((u) => !u.optional).map((u) => u.name),
-              optional: uses.filter((u) => u.optional).map((u) => u.name),
-            })),
-            capabilities: Object.fromEntries(
-              capabilities.names().map((name) => {
-                const providers = capabilities.providers(name);
-                if (capabilities.mode(name) === "keyed") return [name, { providers, keys: capabilities.keys(name) }];
-                const selected = capabilities.selected(name);
-                return [name, { providers, ...(selected && { selected }) }];
-              }),
-            ),
-            pipelines: Object.fromEntries(pipelines.names().map((name) => [name, pipelines.chain(name)])),
-            config,
-          };
-        },
+        describe,
       };
     },
   };
+}
+
+function deepFreeze<T>(value: T): T {
+  if (typeof value === "object" && value !== null && !Object.isFrozen(value)) {
+    for (const inner of Object.values(value)) deepFreeze(inner);
+    Object.freeze(value);
+  }
+  return value;
 }
 
 function isThenable(value: unknown): boolean {

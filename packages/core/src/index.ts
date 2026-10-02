@@ -2,7 +2,7 @@
 // word of the domain. The vocabulary components share is in @pikit/contracts. Additive changes only
 // within a major; a new export needs a [decision] (SPEC §3.2), and `exports.test.ts` holds this list.
 
-export { defineComponent, defineApp } from "./app.ts";
+export { APP_DESCRIPTION, defineComponent, defineApp } from "./app.ts";
 export type {
   ComponentDefinition,
   ComponentLifecycle,
