@@ -25,7 +25,9 @@
     "./durable/execution/testing": "./src/durable/execution-testing.ts",
     "./durable/mcp": "./src/durable/mcp.ts",
     "./durable/node": "./src/durable/node.ts",
-    "./durable/tools": "./src/durable/tools/index.ts"
+    "./durable/tools": "./src/durable/tools/index.ts",
+    "./durable/wakeups": "./src/durable/wakeups.ts",
+    "./durable/wakeups/testing": "./src/durable/wakeups-testing.ts"
   },
   "files": [
     "src"
