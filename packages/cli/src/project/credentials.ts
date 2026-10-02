@@ -1,5 +1,5 @@
 /**
- * Run as `bun credentials.ts <project-dir> <output-file> check | login <provider>` in the project's
+ * Run as `bun credentials.ts <project-dir> <output-file> check | login <provider> [<option>]` in the project's
  * directory: on this machine for `pikit dev`, or where the app runs for `pikit up` (the deployment's
  * `exec`). The model-credential half of `pikit configure`, as `samples/http/scripts/login.ts`:
  *
@@ -8,8 +8,12 @@
  *   config `pikit.config.ts` gives them, so the tokens land exactly where the app reads them.
  * - `check` reports, per provider, whether anything is configured (a stored credential or the
  *   provider's variable in the environment), without a network call or an OAuth refresh.
- * - `login <provider>` runs pi-ai's own OAuth flow through `@pikit/pi-adapter` and pi-ai writes the
- *   tokens through `model.credentials`.
+ * - `login <provider> [<option>]` runs pi-ai's own OAuth flow through `@pikit/pi-adapter` and pi-ai
+ *   writes the tokens through `model.credentials`. The adapter's `loginInteraction` asks pi-ai's
+ *   prompts on this terminal: a choice (Anthropic's login method: browser or copy-code) as a numbered
+ *   list, a secret without echo. `<option>` answers a choice that offers it without asking
+ *   (`copy_code` where the app runs: its container publishes no port, so a browser cannot reach the
+ *   login's callback); without a terminal, a choice takes its first option, pi-ai's default.
  *
  * It uses the project's `@pikit/core` and `@pikit/pi-adapter`, resolved from its `node_modules`.
  * It never prints a credential, and never reads or writes Pi's own `~/.pi/agent/auth.json`: a
@@ -19,6 +23,7 @@
 import { writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
+import { Writable } from "node:stream";
 import { pathToFileURL } from "node:url";
 import type { AppDefinition, ComponentDefinition, defineApp, defineComponent } from "@pikit/core";
 
@@ -33,16 +38,28 @@ import type { AppDefinition, ComponentDefinition, defineApp, defineComponent } f
 type Provider = { readonly id: string };
 /** pi-ai's `CredentialStore`, passed through untouched. */
 type CredentialStore = object;
-/** The events and prompts pi-ai's login flow uses (pi-ai's `AuthInteraction`). */
+/** pi-ai's `AuthPrompt`: what its login flow asks. */
+type AuthPrompt = { message: string; signal?: AbortSignal | undefined } & (
+  | { type: "text" | "secret" | "manual_code"; placeholder?: string | undefined }
+  | { type: "select"; options: readonly { id: string; label: string; description?: string | undefined }[] }
+);
+/** pi-ai's `AuthInteraction`; its events are passed through untouched. */
 interface AuthInteraction {
-  notify(
-    event:
-      | { type: "auth_url"; url: string; instructions?: string }
-      | { type: "device_code"; userCode: string; verificationUri: string }
-      | { type: "info" | "progress"; message: string },
-  ): void;
-  prompt(prompt: { message: string; signal?: AbortSignal }): Promise<string>;
+  signal?: AbortSignal | undefined;
+  notify(event: never): void;
+  prompt(prompt: AuthPrompt): Promise<string>;
 }
+/** The adapter's `LoginTerminal`: what `loginInteraction` asks and shows through. */
+export interface LoginTerminal {
+  print(text: string): void;
+  ask(question: string, options: { secret: boolean; signal?: AbortSignal | undefined }): Promise<string>;
+}
+/** The adapter's credentials module, reduced to `loginInteraction`. */
+export interface CredentialsModule {
+  loginInteraction(terminal: LoginTerminal, signal?: AbortSignal): AuthInteraction;
+}
+/** Where the adapter keeps `loginInteraction`, resolved from the project. */
+export const CREDENTIALS_MODULE = "@pikit/pi-adapter/durable/credentials";
 /** `modelsFrom` of `@pikit/pi-adapter`, reduced to the two calls made here. */
 type ModelsFrom = (
   providers: Provider[],
@@ -61,10 +78,14 @@ interface Found {
   providers: Map<string, Provider>;
 }
 
+/** A module of the project, resolved from its `node_modules`. */
+async function load<T>(specifier: string, projectDir: string): Promise<T> {
+  return (await import(pathToFileURL(Bun.resolveSync(specifier, projectDir)).href)) as T;
+}
+
 async function openCredentials(projectDir: string): Promise<{ found: Found; stop(): Promise<void>; store: string | undefined; models: ModelsFrom }> {
-  const load = async <T>(specifier: string): Promise<T> => (await import(pathToFileURL(Bun.resolveSync(specifier, projectDir)).href)) as T;
-  const core = await load<{ defineApp: typeof defineApp; defineComponent: typeof defineComponent }>("@pikit/core");
-  const adapter = await load<{ modelsFrom: ModelsFrom }>("@pikit/pi-adapter");
+  const core = await load<{ defineApp: typeof defineApp; defineComponent: typeof defineComponent }>("@pikit/core", projectDir);
+  const adapter = await load<{ modelsFrom: ModelsFrom }>("@pikit/pi-adapter", projectDir);
   const definition = ((await import(pathToFileURL(join(projectDir, "pikit.config.ts")).href)) as { default: AppDefinition }).default;
 
   // Which components provide what, as the app itself resolves it.
@@ -110,24 +131,17 @@ async function check(projectDir: string): Promise<CredentialsResult> {
   }
 }
 
-async function login(projectDir: string, providerId: string): Promise<CredentialsResult> {
+async function login(projectDir: string, providerId: string, preferred: string | undefined): Promise<CredentialsResult> {
   const { found, stop, store, models } = await openCredentials(projectDir);
-  const terminal = createInterface({ input: process.stdin, output: process.stdout });
+  const { loginInteraction } = await load<CredentialsModule>(CREDENTIALS_MODULE, projectDir);
+  const terminal = lineTerminal(process.stdin, process.stdout);
   try {
     const provider = found.providers.get(providerId);
     if (provider === undefined) return { ok: false, error: `no installed component provides the model provider "${providerId}"` };
     if (found.credentials === undefined) {
       return { ok: false, error: "no installed component provides model.credentials, so a login has nowhere to be stored (install credentials-file)" };
     }
-    const interaction: AuthInteraction = {
-      notify(event) {
-        if (event.type === "auth_url") console.info(`\nOpen this URL in a browser to log in:\n\n  ${event.url}\n\n${event.instructions ?? ""}\n`);
-        else if (event.type === "device_code") console.info(`\nGo to ${event.verificationUri} and enter ${event.userCode}\n`);
-        else console.info(event.message);
-      },
-      // pi-ai cancels this prompt (its signal) when the browser reaches the callback first.
-      prompt: (prompt) => terminal.question(`${prompt.message} `, prompt.signal ? { signal: prompt.signal } : {}),
-    };
+    const interaction = choosing(loginInteraction(terminal), terminal, { preferred, interactive: process.stdin.isTTY === true });
     await models([provider], { credentials: found.credentials }).login(providerId, "oauth", interaction);
     return { ok: true, providers: { [providerId]: true }, store };
   } finally {
@@ -136,13 +150,67 @@ async function login(projectDir: string, providerId: string): Promise<Credential
   }
 }
 
+/**
+ * `interaction`, with a choice answered without asking: by its `preferred` option when it offers it,
+ * by its first one (pi-ai's default) when nobody can be asked. Any other choice, and every other
+ * prompt, is `interaction`'s.
+ */
+export function choosing(interaction: AuthInteraction, terminal: Pick<LoginTerminal, "print">, options: { preferred: string | undefined; interactive: boolean }): AuthInteraction {
+  return {
+    ...(interaction.signal !== undefined && { signal: interaction.signal }),
+    notify: (event) => interaction.notify(event),
+    async prompt(prompt) {
+      if (prompt.type === "select") {
+        const chosen = prompt.options.find((option) => option.id === options.preferred) ?? (options.interactive ? undefined : prompt.options[0]);
+        if (chosen !== undefined) {
+          terminal.print(`${prompt.message} ${chosen.label}`);
+          return chosen.id;
+        }
+      }
+      return await interaction.prompt(prompt);
+    },
+  };
+}
+
+/**
+ * A `LoginTerminal` over `input` and `output`, the one place this script reads the terminal (only this
+ * directory is shared where the app runs, so the CLI's own prompts are out of reach). A secret's
+ * keystrokes are not echoed. `terminal`: line editing, as on a TTY.
+ */
+export function lineTerminal(input: NodeJS.ReadableStream, output: NodeJS.WritableStream, terminal = (input as { isTTY?: boolean }).isTTY === true): LoginTerminal & { close(): void } {
+  let muted = false;
+  // readline echoes what is typed through its output: muted while a secret is typed.
+  const echo = new Writable({
+    write(chunk, _encoding, done) {
+      if (!muted) output.write(chunk);
+      done();
+    },
+  });
+  const lines = createInterface({ input, output: echo, terminal });
+  return {
+    print: (text) => void output.write(`${text}\n`),
+    async ask(question, { secret, signal }) {
+      output.write(`${question} `);
+      muted = secret;
+      try {
+        // pi-ai cancels a prompt (its signal) when the browser reaches the callback first.
+        return await lines.question("", signal === undefined ? {} : { signal });
+      } finally {
+        if (muted) output.write("\n");
+        muted = false;
+      }
+    },
+    close: () => lines.close(),
+  };
+}
+
 if (import.meta.main) {
-  const [dir = ".", output = "", mode, providerId = ""] = process.argv.slice(2);
+  const [dir = ".", output = "", mode, providerId = "", preferred] = process.argv.slice(2);
   // Where the app runs (`runScriptInApp`), the project is passed as `.`.
   const projectDir = resolve(dir);
   let result: CredentialsResult;
   try {
-    result = mode === "login" ? await login(projectDir, providerId) : await check(projectDir);
+    result = mode === "login" ? await login(projectDir, providerId, preferred) : await check(projectDir);
   } catch (error) {
     result = { ok: false, error: error instanceof Error ? error.message : String(error) };
   }
