@@ -10,8 +10,8 @@ how big.
   conversations, submissions, resume, the inbox, compaction, tasks and subagents. Once the kit runs on
   it, `sessions.store`, `sessions-sql`, `sessions-jsonl` and `@pikit/pi-adapter/sql` go
   ([pi-durable migration](pi-durable-migration.md)).
-- **When:** now. The spike held and the adapter's pieces are built beside the 0.99 code; the
-  switch-over of the components is in progress.
+- **When:** now. The spike held and the adapter's pieces are built; the switch-over of the
+  components is in progress.
 - **Size:** large, and it removes code. The decisions it follows are in the migration file.
 
 ## Upstream proposals for pi-durable (pending the owner's decision to send)
@@ -26,8 +26,7 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   `pikit.json`'s `kit.commit`), so a project's dependencies are pinned to source text from this
   repository's commits. Published `@pikit/*` packages make them ordinary versioned dependencies.
 - **The deployed bot** (`pikit-telegram-cloudflare`, the first preset's template) is upgraded to
-  the pi-durable kit, and its code improved, once everything is on npm, not from commits. Its
-  conversations start fresh then (decided: no migration).
+  the pi-durable kit, and its code improved, once everything is on npm, not from commits.
 - **When:** after the pi-durable switch-over is merged.
 - **Size:** medium: package publishing, `pikit new`/`upgrade` resolving versions instead of commits.
 

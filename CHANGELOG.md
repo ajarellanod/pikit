@@ -10,10 +10,10 @@ line names its area.
   conversation with its own SQLite and one alarm), and Cloudflare is `durable`'s provider. `Target` in
   `@pikit/core`, `ctx.target`, the component schema's `targets` enum and every component's `targets`
   say `durable`; component, preset and package names keep Cloudflare's (`deployment-cloudflare`,
-  `telegram-cloudflare`, `@pikit/contracts/cloudflare`). A project's `pikit.json` with
-  `targets: ["cloudflare"]` is read as `durable` and saved so on the next write; `pikit new --target
-  cloudflare` is refused (exit 2) with `--target durable` as the hint. SPEC §4 and
-  `features/deployment-targets.md` say what each target guarantees and what Modal or Vercel would add.
+  `telegram-cloudflare`, `@pikit/contracts/cloudflare`). The guided `pikit new` names each target's
+  model and provider ("durable — on Cloudflare (Workers + Durable Objects)", "server — a long-lived
+  process (Docker on a VPS)"). SPEC §4 and `features/deployment-targets.md` say what each target
+  guarantees and what Modal or Vercel would add.
 - pi-adapter, runtime-pi: **breaking.** The runtime moves from Pi 0.99's `AgentHarness` to
   `@earendil-works/pi-durable` 1.0 (with `chord`, `pi-ai` and `pi-mcp` 1.0, exact pins);
   `pi-agent-core` is gone. runtime-pi keeps every conversation in `storage.sql` (pi-durable's tables:
@@ -31,12 +31,8 @@ line names its area.
   `agent.conversations` (the runtime creates a conversation). channel-http's reset answers
   `{ conversationId, previousRuntimeConversationId, runtimeConversationId }`; log-events logs
   `conversationId`/`previousConversationId` instead of `session`/`previousSession`.
-- conversations-file, conversations-kv: **breaking.** Existing conversations start fresh after
-  upgrading: a pointer written before the switch (a Pi 0.99 session id) counts as none, and the next
-  message starts a new conversation, transparently and logged once; nothing is migrated. They create
-  conversations through `agent.conversations` (install runtime-pi first). conversations-file writes
-  its file in version 2. A message `agent.submissions` held pending for such a conversation is settled
-  aborted at start (no channel tells the user), never abandoned.
+- conversations-file, conversations-kv: **breaking.** A pointer names a pi-durable conversation
+  (`conversationId`), created through `agent.conversations` (install runtime-pi first).
 - registry, cli: **breaking.** A tool's replay is pi-durable's word: `"never"` is `"unsafe"`
   (`component.json` `replay.tools`, `registry validate`). tool-read/write/edit/bash provide
   pi-durable's own tools (`codingTool`); the runtime gives each call its environment (the
@@ -64,9 +60,7 @@ line names its area.
   `@pikit/contracts/cloudflare` export (`src/cloudflare.ts`, formerly `src/workers-host.ts`); the
   neutral root no longer exports them. `deployment-cloudflare`, `platform-cloudflare`, `storage-do`,
   `execution-do`, `secrets-cloudflare`, `channel-telegram-webhook` and the workerd lane import them
-  from there. A project whose copied Cloudflare components still import them from the root gets them
-  back with `pikit upgrade`, or changes the import to `@pikit/contracts/cloudflare`. `withWorkersHost`
-  stays in `@pikit/contracts/testing`.
+  from there. `withWorkersHost` stays in `@pikit/contracts/testing`.
 - cli/registry: the capability catalogue may mark a contract `transitional` (expected to be bridged or
   deleted, with what replaces it); `pikit registry capabilities` prints it next to its stability and
   on its own line. `agent.submissions` is marked so: it goes when the adapter moves to `pi-durable`.
@@ -92,7 +86,7 @@ line names its area.
 - registry: `component.json` has a generated `modelProviders`, the `model.provider` keys a component provides (`provider-anthropic`: `anthropic`, `provider-openrouter`: `openrouter`); `registry validate` reports it when it drifts from setup.
 - cli: a `pikit new` that fails after writing (its `bun install`, or doctor's problems) or is stopped with Ctrl-C leaves its directory marked unfinished (`.pikit-new-unfinished`) and says to delete it and run `pikit new` again; `pikit new <dir>` on it says the same, and the guided path no longer continues it as a finished project: it offers to delete it and make it again.
 - registry: `component.json`'s `requires.contracts` says which `@pikit/contracts` versions a component works with (a semver range). Every component that depends on the contracts declares it, and `registry validate` checks that it accepts this repository's contracts and that a component depending on them declares it.
-- cli: `pikit add` refuses a component whose `requires.contracts` does not accept the contracts this CLI vendors. Before it replaces the project's kit, it checks every installed component's recorded core and contracts ranges (`requires` in `pikit.json`; a component with no contracts range recorded is held to the `@pikit/contracts` version it pinned). It refuses and names each component that does not accept them, unless `--force`.
+- cli: `pikit add` refuses a component whose `requires.contracts` does not accept the contracts this CLI vendors. Before it replaces the project's kit, it checks every installed component's recorded core and contracts ranges (`requires` in `pikit.json`). It refuses and names each component that does not accept them, unless `--force`.
 - cli: a reinstall (`pikit add <name> --force`) deletes the files the installed version wrote that the new one no longer ships (and their bases), and replaces the component's `.env.example` block with the new version's variables. A dropped file you modified is kept, named, and still recorded, so `pikit remove` asks for `--force` before deleting it.
 - cli: `pikit.json` records the npm packages `pikit add` actually put in `package.json` for a component (`addedDependencies`, `addedDevDependencies`), and `pikit remove` takes out only those, so a package the project already had stays.
 - cli: `pikit remove` puts back everything it wrote when a step fails (a `bun install`): `pikit.config.ts`, the files, `.env.example`, `pikit.json`, the bases, `package.json` and `bun.lock`. The components installed only for the removed one are removed before the final `pikit doctor`, which reports problems without skipping that cleanup.
@@ -109,7 +103,7 @@ line names its area.
 - docs: `docs/architecture-audit.md`, a verified audit of the registry's composition, core, contracts and CLI, with the findings these changes address.
 
 - component/platform-cloudflare: an alarm's slice runs its due wakeup handlers at the same time (one run per name) and keeps starting those that come due while any runs, until its deadline; before, they ran one at a time, so a Telegram chat showed "typing…" once and not again while `runtime-pi.drive` waited for the model. The README says what a slice costs in subrequests.
-- component/channel-telegram-webhook: the claim code is now the bot's **password**, in words anyone understands: the secret is `TELEGRAM_[<NAME>_]PASSWORD` (8 characters at least) and the command `/login <password>`. Every reply says so: a stranger is told "This bot is private. If you have its password, send /login <password>." with their id, a login "✓ You're logged in…", a wrong one "Wrong password.". Changing the password logs out every chat that logged in with the old one (a login keeps the password's fingerprint), and each is told once how to log in again; removing it stops new logins. `pikit configure` offers to choose a password on a first setup (Enter skips). Compatibility: `TELEGRAM_[<NAME>_]CLAIM_CODE` is still read when the password is not set, with one deprecation warning at the Worker's start (renamed with the same value, the chats stay logged in), and `/claim` still works as `/login`; neither is documented. The template (`scripts/template.ts`) asks for `TELEGRAM_PASSWORD`, and its README explains the password in six steps.
+- component/channel-telegram-webhook: the bot's **password**, in words anyone understands: the secret is `TELEGRAM_[<NAME>_]PASSWORD` (8 characters at least) and the command `/login <password>`. Every reply says so: a stranger is told "This bot is private. If you have its password, send /login <password>." with their id, a login "✓ You're logged in…", a wrong one "Wrong password.". Changing the password logs out every chat that logged in with the old one (a login keeps the password's fingerprint), and each is told once how to log in again; removing it stops new logins. `pikit configure` checks a password it finds and saves it to `.env` (so `pikit up` uploads it), and offers to choose one on a first setup (Enter skips). The template (`scripts/template.ts`) asks for `TELEGRAM_PASSWORD`, and its README explains the password in six steps.
 - cli: a component's `doctor` hook may resolve with `{ problems, notes }`; notes are printed and fail nothing. `pikit up` skips the `doctor` hook of a component that has a `beforeDeploy`, which it runs right before the build and which checks the same, so an MCP server is reached once per deploy, not twice (`pikit doctor` and `pikit dev` still run it).
 - registry: `component.json`'s `generated` names files of the component's own directory that a hook rewrites; `pikit add` records them in `pikit.json`, `pikit doctor` never lists them as modified, `pikit remove` deletes them without `--force`, and `registry validate` checks each is a non-test file of the component.
 - component/tool-mcp: `seed.ts` is declared `generated` (a deployed project no longer shows it modified, and `pikit remove tool-mcp` no longer needs `--force`). `pikit doctor` gives a note when `seed.ts` does not hold what a server lists now (run `pikit up`, or commit its seed, before a deploy without the CLI), and a start whose seed lacks a server's listing logs a warning.
@@ -124,7 +118,7 @@ line names its area.
 - contracts: `json.ts` holds `JsonValue` and `isJsonObject`, shared by every contract that carries JSON (`storage.kv`, `actor.mailbox`, `agent.state`, `WORKERS_HOST`); `isJsonObject` is exported. The adapter's `agent.state` checks patches with it instead of a private copy.
 - spec: C2 and C3 say what the code does: an actor registers its handler with `actor.inbox`'s `handle(type, …)` and a timer's owner with `wakeups`' `handle(name, …)`, in `start`, not as keyed capabilities (a keyed `actor.inbox` made the mailbox depend on every handler's component, a cycle on Cloudflare through `platform-cloudflare`).
 - repository: the workerd lane runs `tool-mcp` and `@pikit/pi-adapter/mcp`'s transport on workerd's real `fetch`, with fake MCP servers behind its outbound service (`test/mcp-outbound.ts`): JSON and server-sent event answers, tools described at start, calls, a reported failure, a forgotten session, a secret token; it pins pi-mcp's own transport failing with "Illegal invocation". tool-mcp adds 48 KiB (11 KiB gzip) to a conversation object's bundle.
-- repository: `bun run --cwd tests/workerd bundle` measures with its own `wrangler.bundle.jsonc` (the dry run failed on the suites' classes, which `src/bundle.ts` does not export); re-measured on Pi 0.99.0: 4,188 KiB, 1,005 KiB gzip with `execution-do`.
+- repository: `bun run --cwd tests/workerd bundle` measures with its own `wrangler.bundle.jsonc` (the dry run failed on the suites' classes, which `src/bundle.ts` does not export); measured on pi-durable 1.0: 4,045 KiB, 980 KiB gzip with `execution-do`.
 - repository: `scripts/pi-extension-drift.ts` also compares Pi's `ToolDefinition` and `ExtensionToolContext`, so new tool fields (as 0.99's `exposure` and `defaultActive`) no longer go unnoticed.
 - component/tool-mcp: new. The tools of remote MCP servers for the agents that name them, each as `<server>_<tool>`, through Pi's own client (`@earendil-works/pi-mcp`): `servers` in config (`url`, the `tools` to give, an optional `secret` naming a bearer token read through `secrets`, `headers`, `timeoutMs`). Tools are provided at setup and described at start from the server's `tools/list` (or from its cache, below); a server that cannot be reached or lacks a named tool, with nothing cached, stops the app. An MCP `isError` fails the call; calls honour cancellation; a forgotten session reconnects; stop ends sessions. `replay` is `safe` only for a tool the server marks read-only. Targets `server` and `cloudflare` (Streamable HTTP only).
 - adapter: `@pikit/pi-adapter/mcp`: pi-mcp 0.99.0's client core and Streamable HTTP transport (never stdio or the OAuth callback server, so a Worker bundle has no Node module), `mcpHttpTransport` (calls `fetch` unbound, which Workers require, and opens no server-to-client stream, SPEC C4), `mcpAgentTool` (a remote tool as `agent.tool`: named at setup, described at start; an MCP `isError` throws), `mcpToolName`, `mcpParameters` and `mcpToolResult`; `@pikit/pi-adapter/mcp/testing` is a fake Streamable HTTP MCP server as a fetch handler.
@@ -136,20 +130,19 @@ line names its area.
 - cli: a component may declare its own check of `pikit doctor`, `"hooks": { "doctor": "doctor.ts" }` in `component.json` (a file exporting `doctor({ config, get })` that resolves with its problems); `pikit doctor` runs the checks `pikit.json` records in a child process, and `up` and `dev` refuse on what they report. A project with none starts no process; `add`, `remove` and `new` skip these checks.
 - registry: `registry generate` also describes a component from its root config schema's `examples`: `setup` runs with the default config and with each example, and `provides`, `requires` and `optional` are their union (tool-mcp now provides `agent.tool`). `replay.tools` keeps the default config's tools only (`pikit new` copies them into the starter agent). An example that is not a valid config fails generate and validate.
 - adapter: Pi extensions' tools honour `executionMode: "sequential"`: such a call waits for the calls started before it and holds the ones after it (Pi's `AgentHarness` ignores a per-tool mode, pinned in `pi-gaps`). A tool registered after the extensions loaded is ignored with a warning, as before but no longer silently. `features/codemode.md` records what the extension host leaves for a codemode feature (`constrainedSampling`, codemode and deferred exposure, tool search, nested calls, `structuredContent`).
-- repository: `bun scripts/template.ts telegram-cloudflare <dir>` makes the Deploy to Cloudflare template from pikit's own `pikit new --target cloudflare --preset telegram-cloudflare`: `wrangler.jsonc` names the Worker (`pikit-telegram-bot`), `.dev.vars.example` and `package.json`'s `cloudflare.bindings` ask for and describe `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_CLAIM_CODE`, `OPENROUTER_API_KEY` and `BRAVE_API_KEY`, the `deploy` script registers the webhook after `wrangler deploy`, npm's `package-lock.json` replaces `bun.lock`, and its README has the button, the five steps after deploying, the costs and the security notes. Deterministic and idempotent; `PIKIT_E2E=1 bun test scripts/template.test.ts` checks it as Workers Builds takes it (`npm ci`, the bundle, the bot in workerd). `.github/workflows/template.yml` can push it to its repository from main, and is off until `PIKIT_TEMPLATE_REPO` and `PIKIT_TEMPLATE_TOKEN` are set (`templates/README.md`).
+- repository: `bun scripts/template.ts telegram-cloudflare <dir>` makes the Deploy to Cloudflare template from pikit's own `pikit new --target durable --preset telegram-cloudflare`: `wrangler.jsonc` names the Worker (`pikit-telegram-bot`), `.dev.vars.example` and `package.json`'s `cloudflare.bindings` ask for and describe `TELEGRAM_BOT_TOKEN`, `TELEGRAM_WEBHOOK_SECRET`, `TELEGRAM_PASSWORD`, `OPENROUTER_API_KEY` and `BRAVE_API_KEY`, the `deploy` script registers the webhook after `wrangler deploy`, npm's `package-lock.json` replaces `bun.lock`, and its README has the button, the five steps after deploying, the costs and the security notes. Deterministic and idempotent; `PIKIT_E2E=1 bun test scripts/template.test.ts` checks it as Workers Builds takes it (`npm ci`, the bundle, the bot in workerd). `.github/workflows/template.yml` can push it to its repository from main, and is off until `PIKIT_TEMPLATE_REPO` and `PIKIT_TEMPLATE_TOKEN` are set (`templates/README.md`).
 - component/deployment-cloudflare: a `name` in `wrangler.jsonc` (a Deploy to Cloudflare template's, which Workers Builds deploys under) names the Worker for `up`, `down`, `logs`, `status` and `dev` instead of `package.json`'s, so `pikit up` from a clone deploys the same Worker. pikit's own `wrangler.jsonc` still names none.
 - registry: `component.json` may declare `devDependencies`, npm packages the project needs besides what its files import (a tool the component runs), each pinned to an exact version. `pikit add` puts them in the project's `package.json` devDependencies (reported, and put back with the rest when the install fails), `pikit remove` takes out those no other installed component declares and no project file imports, and `pikit.json` records them. `registry validate` refuses one that is also in `dependencies`, and a kit package.
 - component/deployment-cloudflare: declares `wrangler` 4.143.0 in `devDependencies`, so `pikit add deployment-cloudflare` brings it to any project and `pikit remove` takes it away. `pikit new --target cloudflare` no longer adds wrangler itself: the CLI knows nothing of it.
-- installer: Cloudflare in one line, `curl -fsSL …/installer/install.sh | sh -s -- --cloudflare` (or `PIKIT_CLOUDFLARE=1`): Docker is neither checked nor offered, Node.js >= 22 (what wrangler runs on) is checked instead, and it hands over to `pikit new --target cloudflare --preset telegram-cloudflare`, which asks the name, then `pikit configure`'s questions, then runs `pikit up`. The installer's README and deployment-cloudflare's have "Cloudflare in one line": the commands, what each step asks, and what it costs (the Workers Free plan is enough; the model's tokens are what you pay).
+- installer: Cloudflare in one line, `curl -fsSL …/installer/install.sh | sh -s -- --durable` (or `PIKIT_DURABLE=1`): Docker is neither checked nor offered, Node.js >= 22 (what wrangler runs on) is checked instead, and it hands over to `pikit new --target durable --preset telegram-cloudflare`, which asks the name, then `pikit configure`'s questions, then runs `pikit up`. The installer's README and deployment-cloudflare's have "Cloudflare in one line": the commands, what each step asks, and what it costs (the Workers Free plan is enough; the model's tokens are what you pay).
 - cli: the guided `pikit new` asks "Where should it run?" (a server, or Cloudflare) when the registry has presets for both, offers the presets that have a channel, and takes `--target`, `--preset` and `--with` as answers to its questions; its "Start it?" says what `pikit up` does on the project's target.
 - component/deployment-cloudflare: `up`, `down`, `logs` and `status` check the Cloudflare login first (`login()`: a `CLOUDFLARE_API_TOKEN`, exported or in `.env`, else `wrangler whoami`); at a terminal they offer `wrangler login` and continue, without one they say what to do (`bunx wrangler login`, or a token from the "Edit Cloudflare Workers" template). A first deploy on an account without a `workers.dev` subdomain fails saying how to choose one, and a wrangler without Node.js says so.
 - component/channel-telegram-webhook: the Worker registers its own webhook, for a deploy with no `pikit up` (a Deploy to Cloudflare button, Workers Builds): on Cloudflare, when its App starts (once per isolate, on its first request, `/health` included) it asks `getWebhookInfo` and calls `setWebhook` only when Telegram has another URL or other updates (HTTPS origins only; a failure is logged, never a failed start); `GET /telegram/setup` always sets every bot's webhook at the Worker's origin with its own secret and answers what it did as JSON (`502` when Telegram refused). No auth: it can only point the bot at this Worker, with this Worker's secret.
 - component/channel-telegram-webhook: `setup-webhook.mjs`, a dependency-free script for a build's deploy command (`wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs`, or given the URL): it waits until `/health` answers the version deployed, then calls `GET /telegram/setup`, prints one line per bot and exits 1 on a failure. It needs no secret.
-- component/channel-telegram-webhook: `/claim <code>`: with `TELEGRAM_[<NAME>_]CLAIM_CODE` set (8 characters at least), a private chat that sends it may talk to the bot, kept in the chat's object (`storage.kv`) across restarts. Compared in constant time; 5 wrong codes in a row make the chat wait 15 minutes. When a claim code is set or nobody is listed, the Worker hands strangers' updates to their chat's object (`telegram.stranger`), which tells them their id and, only with a claim code, `/claim`. Removing the code closes new claims and keeps the chats that claimed (while nobody is listed); changing it revokes them. `TELEGRAM_ALLOWED_USERS` works as before and may now be empty: the Worker starts, and says only chats that claimed can talk. `/claim` from an allowed chat is answered by the channel and never reaches the agent.
-- component/channel-telegram-webhook: `pikit configure` checks a `TELEGRAM_CLAIM_CODE` it finds and saves it to `.env` (so `pikit up` uploads it); it never asks for one.
+- component/channel-telegram-webhook: logins, kept in the chat's object (`storage.kv`) across restarts. A login is compared in constant time; 5 wrong passwords in a row make the chat wait 15 minutes. When a password is set or nobody is listed, the Worker hands strangers' updates to their chat's object (`telegram.stranger`), which tells them their id and, only with a password, `/login`. Removing the password closes new logins and keeps the chats that logged in (while nobody is listed). `TELEGRAM_ALLOWED_USERS` may be empty: the Worker starts, and says only chats that logged in can talk. `/login` from an allowed chat is answered by the channel and never reaches the agent.
 - contracts: `WorkersHost.origin`: in the Worker's App, the origin of the request that started it, where the Worker is reached.
 - component/deployment-cloudflare: the Worker's App starts with `WORKERS_HOST` `{ env, origin }`, from its first request (`/health` included).
-- repository: `e2e-telegram-cloudflare.test.ts` also runs the bot as a Deploy to Cloudflare button leaves it (nobody listed, a claim code): `setup-webhook.mjs` has the Worker in workerd register its webhook, and the owner claims the bot with `/claim` and is answered.
+- repository: `e2e-telegram-cloudflare.test.ts` also runs the bot as a Deploy to Cloudflare button leaves it (nobody listed, a password): `setup-webhook.mjs` has the Worker in workerd register its webhook, and the owner logs in with `/login` and is answered.
 - repository: `e2e-telegram-cloudflare.test.ts` (`PIKIT_E2E=1`) makes the bot from the preset, configures it without and with a terminal against a fake Telegram, bundles it, and runs it in workerd (`wrangler dev`): `up`'s after-deploy hook sets the webhook, and a signed update posted to `/telegram` is answered at the fake's `sendMessage` through the mailbox, the chat's object, its inbox, the runtime in the object's alarm, and delivery, with a fake OpenRouter as the model.
 - preset/telegram-cloudflare: new. `pikit new my-bot --target cloudflare --preset telegram-cloudflare`: a Telegram bot on Cloudflare, `pikit configure`, `pikit up`. secrets-cloudflare and platform-cloudflare in both Apps, channel-telegram-webhook's Worker half in the Worker's, and in each chat's Durable Object storage-do, storage-kv-sql, submissions-sql, sessions-sql, conversations-kv, provider-openrouter, runtime-pi, router-basic, the channel (with outbound-durable, offered), execution-do and tool-read, -write, -edit, -bash, -fetch and -websearch-brave; deployment-cloudflare runs it. The starter agent names every installed tool. deployment-cloudflare's README has "Your Telegram bot on Cloudflare": new, configure, up, and what `up` does.
 - cli: `pikit new --target cloudflare` starts the agent on `openrouter/z-ai/glm-5.3-flash` (provider-anthropic is server-only); on a server it stays `anthropic/claude-sonnet-4-6`.
@@ -354,10 +347,9 @@ line names its area.
   and a required dashboard built with Beautiful UI. `ROADMAP.md` gains the required tracks K (the
   kernel is stable) and D (the service is visible). SPEC §12 no longer describes a
   `config/pikit.yaml` the CLI never read.
-- cli: **`pikit.json` version 2.** The CLI's own registry is recorded as `builtin`, not as this
-  machine's path, so a project cloned elsewhere keeps working; a registry inside the project is
-  recorded relative to it, and any other `--registry` path draws a "not portable" warning. A version 1
-  file is read and converted on the next write.
+- cli: `pikit.json` (version 1) records the CLI's own registry as `builtin`, not as this machine's
+  path, so a project cloned elsewhere keeps working; a registry inside the project is recorded
+  relative to it, and any other `--registry` path draws a "not portable" warning.
 - cli: `pikit add` keeps the original of every file it installs in `pikit-bases/<sha256>` (committed
   with the project), the base M3's `upgrade` will merge from; `remove` deletes the ones nothing uses.
   The plan warns when the registry has uncommitted changes.
@@ -423,11 +415,8 @@ line names its area.
   - their conformance suites, now in `@pikit/contracts/testing`. `@pikit/core/testing` keeps
     `createLifecycleConformance` and `createManualClock`.
 
-  To migrate a project, import those names from `@pikit/contracts` and declare it in
-  `package.json`. The kernel's export list is held by a test: adding to it is a decision.
-- cli: `pikit new` vendors `@pikit/contracts` with the rest of the kit. `pikit add` on a project made
-  before the split adds its tarball and its override. The project's own imports still have to be
-  moved by hand.
+  The kernel's export list is held by a test: adding to it is a decision.
+- cli: `pikit new` vendors `@pikit/contracts` with the rest of the kit.
 - registry: every component that imports `@pikit/contracts` lists it in `component.json`'s
   `dependencies`, with its own version; `requires.pikit` covers the kernel only.
 - component/channel-http: **breaking.** `inbound.authenticate` is now `http.authenticate`, and
@@ -453,8 +442,8 @@ line names its area.
   `DeliveryReceipt`s: one per piece that settled, delivered (with the platform's message id) or
   abandoned (with its reason), in the order they settled (SPEC §5). `outbound-durable` writes each in
   the same transaction as the piece's state (`outbound_receipts`), prunes them with their pieces, and
-  now versions its tables (`outbound_meta`): an existing database gains the receipts table, and one
-  written by a newer outbox is refused at start. The queue suite checks receipts, and runs the feed
+  versions its tables (`outbound_meta`, one initial step for now): a database written by a newer
+  outbox is refused at start. The queue suite checks receipts, and runs the feed
   suite over them.
 - core, component/channel-telegram: `answerKey(conversation, requestId)`, the one formula for a run's
   answer key (`${sessionId}:${requestId}`, SPEC §5). The channel enqueues answers under it; a tool finds
@@ -546,8 +535,8 @@ line names its area.
   `channel-*` component in the registry that runs on the new project, by the new `title` in its
   `component.json`; a new channel shows up there without editing any preset. `--with <component>`
   answers in a script (`pikit new my-bot --preset http --with channel-telegram`), and the guided
-  path prints that command. `telegram` is now an alias (`extends: http`, `with: [channel-telegram]`),
-  so `--preset telegram` works as before. `pikit new` checks every component against the project's
+  path prints that command. `telegram` is `http` with `channel-telegram`
+  (`extends: http`, `with: [channel-telegram]`). `pikit new` checks every component against the project's
   target before writing anything.
 - registry: `component.json` and presets have JSON Schemas (`registry/schema/`), generated from the
   CLI's own definitions. Every `component.json` names its schema in `$schema` and each preset in a

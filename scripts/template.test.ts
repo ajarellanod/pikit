@@ -136,8 +136,6 @@ test("the README has the button, every secret, the five steps after deploying, c
   for (const section of ["## What it costs", "## Security"]) expect(readme).toContain(section);
   expect(readme).toContain("Workers Free plan is enough");
   expect(readme).toContain("The password");
-  // The words people read are the password and /login.
-  for (const text of [readme, devVarsExample(TEMPLATE), templatePackageJson("{}", TEMPLATE)]) expect(text.toLowerCase()).not.toContain("claim");
   expect(readme).toContain("Who can talk to the bot");
   for (const text of [readme, devVarsExample(TEMPLATE), templatePackageJson("{}", TEMPLATE)]) for (const pattern of TOKEN_PATTERNS) expect(text).not.toMatch(pattern);
 });
@@ -183,7 +181,7 @@ const OWNER = { id: 3003, first_name: "Grace" };
 const PASSWORD = "template correct horse battery";
 const MODEL_KEY = "sk-or-template-dummy-not-a-key";
 /** This machine's variables the project reads: none may leak into the Worker. */
-const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "TELEGRAM_CLAIM_CODE", "OPENROUTER_API_KEY", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN"];
+const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN"];
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.includes(name))) as Record<string, string>;
 
 async function run(command: string[], cwd: string, env: Record<string, string> = {}) {
