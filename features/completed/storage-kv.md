@@ -49,7 +49,7 @@ interface KeyValueStore {
   storage for tests, checked by the same suite.
 - **`storage-kv-sql`** provides it on `storage.sql`: one table, `storage_kv_sql_entries`
   (`namespace`, `entry_key`, `json`), created at start; one statement per call, no cache;
-  `setIfAbsent` is `INSERT … ON CONFLICT DO NOTHING`. Targets `server` and `cloudflare`.
+  `setIfAbsent` is `INSERT … ON CONFLICT DO NOTHING`. Targets `server` and `durable`.
 - **Offered.** The catalogue marks `storage.kv` `offer`: `pikit add channel-telegram` brings
   `storage-kv-sql` (and `storage-sqlite` when nothing provides `storage.sql`), and so does
   `pikit add conversations-kv`, which requires it.

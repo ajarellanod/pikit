@@ -5,6 +5,15 @@ line names its area.
 
 ## Unreleased
 
+- core, cli, registry: **breaking.** The target `cloudflare` is now `durable`: a target names a
+  runtime model (`server`, a long-lived process with a persistent disk; `durable`, an actor per
+  conversation with its own SQLite and one alarm), and Cloudflare is `durable`'s provider. `Target` in
+  `@pikit/core`, `ctx.target`, the component schema's `targets` enum and every component's `targets`
+  say `durable`; component, preset and package names keep Cloudflare's (`deployment-cloudflare`,
+  `telegram-cloudflare`, `@pikit/contracts/cloudflare`). A project's `pikit.json` with
+  `targets: ["cloudflare"]` is read as `durable` and saved so on the next write; `pikit new --target
+  cloudflare` is refused (exit 2) with `--target durable` as the hint. SPEC §4 and
+  `features/deployment-targets.md` say what each target guarantees and what Modal or Vercel would add.
 - pi-adapter, runtime-pi: **breaking.** The runtime moves from Pi 0.99's `AgentHarness` to
   `@earendil-works/pi-durable` 1.0 (with `chord`, `pi-ai` and `pi-mcp` 1.0, exact pins);
   `pi-agent-core` is gone. runtime-pi keeps every conversation in `storage.sql` (pi-durable's tables:
