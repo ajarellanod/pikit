@@ -10,7 +10,7 @@ import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { add } from "./commands/add.ts";
 import { newWizard } from "./commands/wizard.ts";
-import { configure } from "./commands/configure.ts";
+import { configure, LOGIN_METHODS, type LoginMethod } from "./commands/configure.ts";
 import { DEPLOYMENT_COMMANDS, type DeploymentCommand, deployment, dev } from "./commands/deployment.ts";
 import { doctor } from "./commands/doctor.ts";
 import { newProject } from "./commands/new.ts";
@@ -29,7 +29,7 @@ Usage:
   pikit remove <component> [--force]
   pikit upgrade [<component>...] [--dry-run] [--force] [--yes]   take the registry's version, merging your edits
   pikit doctor                        the component graph, and what is missing
-  pikit configure [--yes] [--generate <NAME>]... [--login <provider> [--local]]
+  pikit configure [--yes] [--generate <NAME>]... [--login <provider> [--login-method browser|code] [--local]]
   pikit dev                           run the project here, reloading on change (on Cloudflare: wrangler dev)
   pikit up | down | restart | status  delegate to the installed deployment-* component
   pikit logs [--follow] [--tail <n>]
@@ -73,6 +73,7 @@ async function main(argv: string[]): Promise<number> {
       yes: { type: "boolean", short: "y" },
       generate: { type: "string", multiple: true },
       login: { type: "string" },
+      "login-method": { type: "string" },
       local: { type: "boolean" },
       follow: { type: "boolean", short: "f" },
       tail: { type: "string" },
@@ -132,14 +133,21 @@ async function main(argv: string[]): Promise<number> {
       const report = await doctor(cwd);
       return report.problems.length + report.unconfigured.length > 0 ? 1 : 0;
     }
-    case "configure":
+    case "configure": {
+      const method = values["login-method"];
+      if (method !== undefined && values.login === undefined) throw new CliError("--login-method needs --login <provider>", 2);
+      if (method !== undefined && !(LOGIN_METHODS as readonly string[]).includes(method)) {
+        throw new CliError(`--login-method must be one of: ${LOGIN_METHODS.join(", ")}`, 2);
+      }
       await configure(cwd, {
         yes: values.yes === true,
         generate: values.generate ?? [],
         ...(values.login !== undefined && { login: values.login }),
+        ...(method !== undefined && { loginMethod: method as LoginMethod }),
         local: values.local === true,
       });
       return 0;
+    }
     case "dev":
       return await dev(cwd);
     case "registry":

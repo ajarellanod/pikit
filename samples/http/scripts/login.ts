@@ -2,13 +2,13 @@
  * Log in to Anthropic with a Claude Pro/Max subscription, and store the tokens in this sample's
  * credentials file (`.pikit/credentials.json`, mode 0600):
  *
- *   bun samples/http/scripts/login.ts [browser | copy_code]
+ *   bun samples/http/scripts/login.ts [browser | code]
  *
  * It runs pi-ai's own OAuth flow (no terminal UI needed). It first asks the login method, unless
- * given as the argument (`copy_code` in a container, whose callback a browser cannot reach):
+ * given as the argument (`code` in a container, whose callback a browser cannot reach):
  * - browser: it prints a URL to open, waits for the browser to come back to a callback on
  *   localhost:53692, and also accepts the final redirect URL pasted here;
- * - copy_code: it prints a URL to open, and Anthropic's page shows a code to paste here.
+ * - code: it prints a URL to open, and Anthropic's page shows a code to paste here.
  * The adapter's `loginInteraction` asks the prompts; a secret is not echoed. pi-ai then writes the tokens
  * through `model.credentials`, which is the same `credentials-file` component the app uses, so the
  * app refreshes them later and writes the new ones back.
@@ -66,7 +66,8 @@ const terminal: LoginTerminal = {
     }
   },
 };
-const method = process.argv[2];
+// `code` is pi-ai's `copy_code` option, as `pikit configure --login-method code` names it.
+const method = process.argv[2] === "code" ? "copy_code" : process.argv[2];
 const asked = loginInteraction(terminal);
 const interaction: AuthInteraction = {
   ...asked,

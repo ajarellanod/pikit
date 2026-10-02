@@ -36,13 +36,25 @@ export interface ConfigureOptions {
   /**
    * Run this provider's OAuth login (in a terminal: it prints a URL to open). It logs in where the app
    * runs for `pikit up` when the deployment can run a command there (`exec`), else on this machine.
-   * Where the app runs, the login method is copy-code (paste back the code the page shows); here, the
-   * login asks (browser or copy-code), or takes pi-ai's default (browser) without a terminal.
+   * Where the app runs, the login method is `code` (paste back the code the page shows); here, the
+   * login asks (browser or code), or takes pi-ai's default (browser) without a terminal.
    */
   login?: string;
+  /**
+   * The login method, when the provider offers a choice (Anthropic): `browser` (it comes back by itself)
+   * or `code` (paste the code the page shows). Without it, as above.
+   */
+  loginMethod?: LoginMethod;
   /** Log in on this machine, for `pikit dev`, even when the deployment could run the login. */
   local?: boolean;
 }
+
+/** The login methods `--login-method` names. */
+export const LOGIN_METHODS = ["browser", "code"] as const;
+export type LoginMethod = (typeof LOGIN_METHODS)[number];
+
+/** pi-ai's id of each method (its `select` option values). */
+const PI_LOGIN_METHOD: Record<LoginMethod, string> = { browser: "browser", code: "copy_code" };
 
 export async function configure(projectDir: string, options: ConfigureOptions = {}): Promise<void> {
   const interactive = options.yes !== true && isInteractive();
@@ -131,7 +143,7 @@ async function configureModels(
 
   if (options.login !== undefined) {
     if (!ids.includes(options.login)) throw new CliError(`no installed component provides the model provider "${options.login}"`);
-    await login(projectDir, options.login, here.store, exec);
+    await login(projectDir, options.login, here.store, exec, options.loginMethod);
     return ids.filter((id) => here.providers[id] !== true && id !== options.login);
   }
 
@@ -171,7 +183,7 @@ async function configureModels(
       ...(!canLogIn
         ? []
         : inApp
-          ? [{ value: "up" as const, label: "Log in with your subscription, for `pikit up`", hint: "OAuth, copy-code login: open a URL, sign in, paste the code the page shows back here" }]
+          ? [{ value: "up" as const, label: "Log in with your subscription, for `pikit up`", hint: "OAuth, code login: open a URL, sign in, paste the code the page shows back here" }]
           : [{ value: "dev" as const, label: `Log in with your subscription${exec === undefined ? "" : ", for `pikit dev` only"}`, hint: LOGIN_HERE }]),
       ...(hasKeyVariable ? [{ value: "key" as const, label: "Paste an API key", hint: `stored in ${ENV_FILE} as ${keyName}; \`pikit up\` and \`pikit dev\` both read it` }] : []),
       ...(canLogIn && inApp ? [{ value: "dev" as const, label: "Log in with your subscription, for `pikit dev` only", hint: `on this machine; ${LOGIN_HERE}` }] : []),
@@ -191,25 +203,27 @@ async function configureModels(
   return left;
 }
 
-const LOGIN_HERE = "OAuth: browser login (it comes back by itself) or copy-code login (paste the code the page shows)";
+const LOGIN_HERE = "OAuth: browser login (it comes back by itself) or code login (paste the code the page shows)";
 
 /**
- * Where the app runs, a choice of login method (Anthropic's: browser or copy-code) is answered with
- * copy-code: the app's container publishes no port, so the browser cannot come back to the login's
+ * Where the app runs, a choice of login method (Anthropic's: browser or code) is answered with
+ * `code`: the app's container publishes no port, so the browser cannot come back to the login's
  * callback. On this machine, the login asks.
  */
-const IN_APP_LOGIN_METHOD = "copy_code";
+const IN_APP_LOGIN_METHOD: LoginMethod = "code";
 
 /**
  * Logs in where the app will run: through the deployment's `exec` for `pikit up`, else here.
  * `credentials.ts` runs pi-ai's flow and stores the tokens with the project's `model.credentials`.
  */
-async function login(projectDir: string, id: string, store: string | undefined, exec: AppExec | undefined): Promise<void> {
+async function login(projectDir: string, id: string, store: string | undefined, exec: AppExec | undefined, method?: LoginMethod): Promise<void> {
   if (exec !== undefined) log.step(`logging in to ${id} where the app runs (\`pikit up\`); the first time, its image is built`);
+  const chosen = method ?? (exec === undefined ? undefined : IN_APP_LOGIN_METHOD);
+  const args = ["login", id, ...(chosen === undefined ? [] : [PI_LOGIN_METHOD[chosen]])];
   const result =
     exec === undefined
-      ? await runScript<CredentialsResult>("credentials.ts", projectDir, ["login", id], { interactive: true })
-      : await runScriptInApp<CredentialsResult>(exec, "credentials.ts", ["login", id, IN_APP_LOGIN_METHOD], { interactive: true });
+      ? await runScript<CredentialsResult>("credentials.ts", projectDir, args, { interactive: true })
+      : await runScriptInApp<CredentialsResult>(exec, "credentials.ts", args, { interactive: true });
   if (!result.ok) throw new CliError(`login to ${id} failed: ${result.error}`);
   const where = exec === undefined ? "on this machine, for `pikit dev`" : "where the app runs, for `pikit up`";
   log.ok(`logged in to ${id} ${where}; the tokens are stored by ${store ?? "model.credentials"} (see its config in pikit.config.ts)`);

@@ -464,3 +464,13 @@ test("remove refuses to take a tool an agent names; with --force it removes it, 
   expect(doctor.code).toBe(1);
   expect(doctor.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool)');
 });
+
+test("configure --login-method takes browser or code, and only with --login", async () => {
+  const cwd = tinyProject();
+  const alone = await runCli(["configure", "--yes", "--login-method", "code"], cwd);
+  expect(alone.code).toBe(2);
+  expect(alone.err).toContain("--login-method needs --login <provider>");
+  const unknown = await runCli(["configure", "--yes", "--login", "anthropic", "--login-method", "copy_code"], cwd);
+  expect(unknown.code).toBe(2);
+  expect(unknown.err).toContain("--login-method must be one of: browser, code");
+});
