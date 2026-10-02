@@ -123,7 +123,11 @@ duplicates, cancellation, reset, the lifecycle conformance suite and the start f
 `agent.submissions`, a `202` answered later by `GET` and by the same POST sent again, a failed run and
 unknown messages; without it, `GET`'s `501`.
 `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
-channel does with a message (routed, deduplicated, stopped, denied, no router), over these routes.
+channel does with a message (routed, deduplicated, stopped, denied, no router), over these routes,
+and, as a channel whose answers are in its responses (`answers: "in-response"`), that an answer that
+ended while the channel was stopped, or whose event was lost, is what the same POST sent again gets
+after a restart. The suite's cases for a pushed answer (a platform's failures, a send cut mid-flight)
+do not apply: the client's retry is its transport.
 The `samples/http` tests run the same channel with Pi, over real HTTP.
 
 The CLI generates capability declarations in `component.json` from `setup`; targets are declared

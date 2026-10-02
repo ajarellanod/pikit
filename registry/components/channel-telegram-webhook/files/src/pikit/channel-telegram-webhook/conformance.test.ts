@@ -1,24 +1,22 @@
 /**
  * channel-telegram-webhook against the channel conformance suite (`@pikit/contracts/testing`): what
- * every channel does with a message. The suite brings the runtime, the conversation registry, a router
- * and stages that halt, deny or move messages; this fixture speaks Telegram by webhook through
- * `fake-telegram.test-support.ts`, with both halves in one App (a mailbox, wakeups, storage.kv and
- * agent.submissions from the in-memory doubles). Each of the suite's conversations is an allowed
- * user's private chat; delivering an id again is Telegram posting the same update again.
- *
- * The suite's runtime answers by events only, and this channel delivers from `agent.submissions`'
- * feed: `recorder` writes each run's end there, as runtime-pi does. It is listed before the channel,
- * so the answer is in the feed when the channel's listener asks for the delivery.
+ * every channel does with a message, and how its answers survive what happens to the process. The
+ * suite brings the runtime, the conversation registry, `agent.submissions`, `storage.kv`, `wakeups`,
+ * a router and stages that halt, deny or move messages; this fixture speaks Telegram by webhook
+ * through `fake-telegram.test-support.ts`, with both halves in one App (and the in-memory mailbox).
+ * Each of the suite's conversations is an allowed user's private chat; delivering an id again is
+ * Telegram posting the same update again. The platform fails a chat's sends with a 502, or takes one
+ * and never answers; a piece sent again as a possible duplicate starts with `↻ `.
  */
 
 import { test } from "bun:test";
-import { type AgentResult } from "@pikit/contracts";
-import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { createChannelConformance, createMemoryKeyValueStorage, createMemoryMailbox, createMemorySubmissions, createMemoryWakeups } from "@pikit/contracts/testing";
+import { BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { createChannelConformance, createMemoryMailbox } from "@pikit/contracts/testing";
 import type { TelegramUpdate } from "./api.ts";
 import { afterDeploy } from "./deploy.ts";
 import { startFakeTelegram } from "./fake-telegram.test-support.ts";
 import channelTelegramWebhook, { NAME, worker, WORKER_NAME } from "./index.ts";
+import { POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
 
 const SECRET = "conformance-webhook-secret-0123";
 
@@ -35,17 +33,6 @@ for (const c of createChannelConformance(({ conversations }) => {
     TELEGRAM_ALLOWED_USERS: [...users.values()].map((u) => u.id).join(","),
     TELEGRAM_WEBHOOK_SECRET: SECRET,
   };
-  const { submissions } = createMemorySubmissions();
-  const recorder = defineComponent({
-    name: "recorder-test",
-    setup(pikit) {
-      pikit.use("agent.submissions");
-      const record = async ({ conversation, requestId, requestIds, kind, text, error }: AgentResult, ctx: AppContext) =>
-        submissions.settled({ conversation, requestId, requestIds, kind, ...(text !== undefined && { text }), ...(error !== undefined && { error }) }, ctx);
-      pikit.on("agent.settled", record);
-      pikit.on("agent.failed", record);
-    },
-  });
   let url = "";
   const server = defineComponent({
     name: "server-test",
@@ -67,13 +54,10 @@ for (const c of createChannelConformance(({ conversations }) => {
     },
   });
   const posted = new Map<string, TelegramUpdate>();
+  const told = (conversation: string) => telegram.sent.filter((m) => m.chatId === user(conversation).id).map((m) => m.text);
   return {
     components: [
       defineComponent({ name: "secrets-test", setup: (pikit) => pikit.provide("secrets", { get: async (name) => secrets[name] }) }),
-      defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", submissions) }),
-      defineComponent({ name: "kv-test", setup: (pikit) => pikit.provide("storage.kv", createMemoryKeyValueStorage()) }),
-      createMemoryWakeups(),
-      recorder,
       channelTelegramWebhook,
       createMemoryMailbox(),
       worker,
@@ -81,7 +65,8 @@ for (const c of createChannelConformance(({ conversations }) => {
     ],
     config: { [NAME]: { apiBase: telegram.url }, [WORKER_NAME]: { apiBase: telegram.url } },
     async deliver({ id, conversation, text }) {
-      if (telegram.webhookUrl === "") {
+      // What `pikit up` does once a deploy answers: a restarted App serves on another port.
+      if (!telegram.webhookUrl.startsWith(url)) {
         const problems = await afterDeploy({ url, config: { apiBase: telegram.url }, get: (name) => secrets[name], say: () => {} });
         if (problems.length > 0) throw new Error(problems.join("; "));
       }
@@ -89,7 +74,12 @@ for (const c of createChannelConformance(({ conversations }) => {
       posted.set(id, update);
       await telegram.post(update);
     },
-    told: (conversation) => telegram.sent.filter((m) => m.chatId === user(conversation).id).map((m) => m.text),
+    told,
+    platform: {
+      fail: (conversation, count) => void telegram.failChat.set(user(conversation).id, count),
+      hang: (conversation) => void telegram.hangChat.add(user(conversation).id),
+      received: (conversation) => told(conversation).map((text) => ({ text, possibleDuplicate: text.startsWith(POSSIBLE_DUPLICATE_MARK) })),
+    },
     dispose: () => telegram.stop(),
   };
 })) {

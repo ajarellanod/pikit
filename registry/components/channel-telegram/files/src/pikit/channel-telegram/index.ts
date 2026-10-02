@@ -12,18 +12,18 @@
  *   (`router-rules`).
  * - Ingress (`poller.ts`, `inbound.ts`): a message is acknowledged to Telegram only once its
  *   conversation durably accepted it; a redelivery is a duplicate request, answered once.
- * - Replies: the chat gets one answer per run, whichever messages the run took.
- *   - With `agent.submissions` (runtime-pi provides it) and `storage.kv` (`storage-kv-sql`) installed,
- *     answers are read from its feed with a cursor of this channel's own (`answers.ts`), and `agent.settled` /
- *     `agent.failed` only wake the reader: an answer that ended while the channel was stopped (a
- *     deploy), or whose delivery failed, is delivered when it reads again. Its cursor moves only past
- *     answers delivered: stored in the outbox, or sent to Telegram.
- *   - Without them, the channel answers from `agent.settled` / `agent.failed` directly. An answer that
- *     arrives while it is stopped is not sent, and is logged as such.
- *   With an `outbound.queue` installed (`outbound-durable`), the answer is enqueued, stored before it
- *   is sent, and delivered through the bot's transport (`transport.ts`), which the channel attaches
- *   while it runs: it survives crashes and outages. Without one, it is sent directly (`replies.ts`),
- *   retried in the process: best effort.
+ * - Answers: one per run, whichever messages the run took, delivered by `startAnswerDelivery`
+ *   (`@pikit/contracts`) from `agent.submissions`' feed (runtime-pi provides it), with a cursor and
+ *   marks in this channel's namespace of `storage.kv` (`storage-kv-sql`). `agent.settled` /
+ *   `agent.failed` only wake it: an answer that ended while the channel was stopped (a deploy), whose
+ *   event was lost, or whose delivery failed, is delivered when it reads again. One chat's answers go
+ *   in order, and chats do not wait for each other. The channel supplies only what is Telegram's: its
+ *   bots' transports (`transport.ts`), which bot a conversation is, its words (`replyText`) and its
+ *   waits (`DELIVERY`).
+ *   With an `outbound.queue` installed (`outbound-durable`), answers are enqueued, stored before
+ *   they are sent, through the same transports; without one, each piece is sent directly and marked,
+ *   so a crash resends at most the piece in flight, marked `↻ `.
+ * - Replies of its own (commands, a stranger told their id) and "typing…" go through `replies.ts`.
  *
  * It refuses to start when a bot has no valid token, no allowed user, or a webhook (Telegram
  * delivers to the webhook or by polling, never both).
@@ -32,14 +32,13 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type AgentResult, answerKey, type OutboundQueue, type RunSettlement } from "@pikit/contracts";
+import { type AgentResult, type AnswerDelivery, type ChannelTransport, type DeliveryPolicy, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, chatIn } from "./account.ts";
-import { type AnswerReader, openCursors, startAnswerReader } from "./answers.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, TelegramError } from "./api.ts";
 import { handleUpdate, type InboundDeps } from "./inbound.ts";
 import { type Poller, startPolling } from "./poller.ts";
-import { createDelivery, type Delivery } from "./replies.ts";
+import { createReplies, type Replies } from "./replies.ts";
 import { createTelegramTransport } from "./transport.ts";
 
 /** The default bot's secrets; a named account's are in `account.ts`. */
@@ -55,10 +54,19 @@ const Config = Type.Object({
   accounts: Type.Array(Type.String({ pattern: ACCOUNT_NAME }), { default: [], uniqueItems: true }),
 });
 
+/**
+ * How answers are delivered (`startAnswerDelivery`): an answer that failed is tried again after 1 s,
+ * 5 s, 30 s, then every minute (or after Telegram's `retry_after`), and logged as an error from its
+ * 3rd failure in a row; other chats go on, up to 200 answers past one stuck; a run sends at most 20
+ * pieces before it reads again; a send Telegram has not answered after 30 s may have reached it.
+ */
+const DELIVERY: DeliveryPolicy = { retryMs: [1_000, 5_000, 30_000, 60_000], blockedAfter: 3, window: 200, piecesPerRun: 20, sendTimeoutMs: 30_000 };
+
 /** One bot, running. */
 interface RunningBot {
   account: Account;
-  delivery: Delivery;
+  transport: ChannelTransport;
+  replies: Replies;
   poller: Poller;
 }
 
@@ -69,22 +77,14 @@ export default defineComponent({
     const secrets = pikit.use("secrets");
     const conversations = pikit.use("conversations.registry");
     const runtime = pikit.use("agent.runtime");
+    // Every run's end, recorded by the runtime, and this channel's place in it: no answer is lost
+    // while the channel is stopped.
+    const submissions = pikit.use("agent.submissions");
+    const storage = pikit.use("storage.kv");
     // Optional: with it, answers are stored before they are sent (@pikit/contracts' outbound.ts).
     const outbound = pikit.useOptional("outbound.queue");
-    // Optional, together: with them, answers are delivered from the record of every run's end, from a
-    // cursor kept in storage.kv, so none is lost while the channel is stopped (`answers.ts`).
-    const submissions = pikit.useOptional("agent.submissions");
-    const storage = pikit.useOptional("storage.kv");
 
-    let running: { bots: RunningBot[]; queue: OutboundQueue | undefined; background: AppContext; reader: AnswerReader | undefined } | undefined;
-    /**
-     * Whether answers come from the feed: decided by what is installed, not by whether the channel
-     * started, since the runtime resumes runs (and ends some) before the channel's first start.
-     */
-    const fromFeed = (): boolean => submissions.get() !== undefined && storage.get() !== undefined;
-    /** Every instance this channel serves, from config: a key of theirs is this channel's, running or not. */
-    const instances = accountsOf(config.accounts).map((account) => account.instance);
-    const ours = (key: string): boolean => instances.some((instance) => chatIn(instance, key) !== undefined);
+    let running: { bots: RunningBot[]; answers: AnswerDelivery } | undefined;
 
     /** The bot and chat of a conversation this channel made, or `undefined` for another channel's. */
     const find = (bots: readonly RunningBot[], key: string): { bot: RunningBot; chatId: number } | undefined => {
@@ -95,117 +95,59 @@ export default defineComponent({
       return undefined;
     };
 
-    /**
-     * Hands one run's answer to its chat: enqueued with the outbox, else sent directly. Rejects when
-     * the outbox could not store it, or Telegram could not be reached (or the channel stopped) before
-     * it was sent. A run that answered nothing (aborted, or an empty text) sends nothing.
-     */
-    const deliver = async (answer: RunSettlement, bots: readonly RunningBot[], queue: OutboundQueue | undefined): Promise<void> => {
-      const found = find(bots, answer.conversation.key);
-      if (found === undefined) return;
-      const { bot, chatId } = found;
-      bot.delivery.typingStopped(chatId);
-      const text = replyText(answer);
-      if (text === undefined) return;
-      if (queue === undefined) {
-        await bot.delivery.sendOrFail(chatId, text);
-        return;
-      }
-      // One key per run (the request that started it): a run resumed after a crash is not answered twice.
-      await queue.enqueue({
-        idempotencyKey: answerKey(answer.conversation, answer.requestId),
-        channel: bot.account.instance,
-        conversationKey: answer.conversation.key,
-        text,
-      });
-    };
-
     pikit.on("agent.started", ({ conversation }) => {
       const found = find(running?.bots ?? [], conversation.key);
-      found?.bot.delivery.typingStarted(found.chatId);
+      found?.bot.replies.typingStarted(found.chatId);
     });
-    const answer = async (result: AgentResult, ctx: AppContext): Promise<void> => {
-      if (!ours(result.conversation.key)) return;
+    // A run ended: its answer is in the feed, and delivery reads it now (or when the channel starts again).
+    const ended = async (result: AgentResult, ctx: AppContext): Promise<void> => {
       const now = running;
-      if (fromFeed()) {
-        // The answer is in the feed: the reader delivers it now, or when the channel starts again.
-        if (now === undefined) return;
-        const found = find(now.bots, result.conversation.key);
-        found?.bot.delivery.typingStopped(found.chatId);
-        now.reader?.wake();
-        return;
-      }
-      if (now === undefined) {
-        ctx.logger.warn("channel-telegram: an answer ended while the channel was stopped, and is not sent; install a runtime that provides agent.submissions (runtime-pi) to deliver it when the channel starts again", {
-          conversation: result.conversation.key,
-          run: result.requestId,
-        });
-        return;
-      }
-      if (find(now.bots, result.conversation.key) === undefined) {
-        ctx.logger.warn("channel-telegram: an answer for a bot that is not running is not sent", { conversation: result.conversation.key, run: result.requestId });
-        return;
-      }
-      if (now.queue === undefined) {
-        // Best effort: nothing would try it again.
-        void deliver(result, now.bots, undefined).catch((error: unknown) =>
-          now.background.logger.error("channel-telegram: a reply could not be sent", { conversation: result.conversation.key, run: result.requestId, error: String(error) }),
-        );
-        return;
-      }
-      await deliver(result, now.bots, now.queue).catch((error: unknown) =>
-        now.background.logger.error("channel-telegram: an answer could not be stored for delivery, and is not sent; install a runtime that provides agent.submissions (runtime-pi) to try it again", {
-          conversation: result.conversation.key,
-          run: result.requestId,
-          error: String(error),
-        }),
-      );
+      const found = find(now?.bots ?? [], result.conversation.key);
+      if (now === undefined || found === undefined) return;
+      found.bot.replies.typingStopped(found.chatId);
+      await now.answers.wake(ctx);
     };
-    pikit.on("agent.settled", answer);
-    pikit.on("agent.failed", answer);
+    pikit.on("agent.settled", ended);
+    pikit.on("agent.failed", ended);
 
     return {
       async start(ctx) {
         // Updates and replies outlive start: they get the app's context, not start's.
         const background: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
-        const queue = outbound.get();
-        const recorded = submissions.get();
-        const kv = storage.get();
-        if (recorded !== undefined && kv === undefined) {
-          background.logger.warn("channel-telegram: agent.submissions is installed but storage.kv is not, so answers come from events only: one that ends while the channel is stopped is not sent; install storage-kv-sql");
-        }
-        const cursors = recorded !== undefined && kv !== undefined ? await openCursors(kv.namespace("channel-telegram"), recorded.answers) : undefined;
         const bots: RunningBot[] = [];
         try {
-          for (const account of accountsOf(config.accounts)) {
-            bots.push(await startBot(account, ctx.abortSignal, background, queue));
-          }
+          for (const account of accountsOf(config.accounts)) bots.push(await startBot(account, ctx.abortSignal, background));
+          // Once the bots run: what ended while the channel was stopped is delivered now.
+          const answers = await startAnswerDelivery(ctx, {
+            name: "channel-telegram",
+            answers: submissions.get().answers,
+            store: storage.get().namespace("channel-telegram"),
+            transports: new Map(bots.map((bot) => [bot.account.instance, bot.transport])),
+            route: (key) => find(bots, key)?.bot.account.instance,
+            text: replyText,
+            queue: outbound.get(),
+            policy: DELIVERY,
+          });
+          running = { bots, answers };
         } catch (error) {
           // A bot that could not start leaves none of the others running.
-          await stopBots(bots, queue, undefined);
+          await stopBots(bots, undefined);
           throw error;
         }
-        // Once the bots run: the first read delivers what ended while the channel was stopped.
-        const reader =
-          recorded !== undefined && cursors !== undefined
-            ? startAnswerReader({ answers: recorded.answers, cursors, deliver: (fact) => deliver(fact, bots, queue), logger: background.logger })
-            : undefined;
-        running = { bots, queue, background, reader };
       },
 
       async stop(ctx) {
         const stopping = running;
         running = undefined;
         if (stopping === undefined) return;
-        // The reader stops; a direct send in flight is aborted with the bots, and its answer is not
-        // behind the saved cursor: it is sent at the next start.
-        const reading = stopping.reader?.halt();
-        await stopBots(stopping.bots, stopping.queue, ctx.abortSignal);
-        if (reading !== undefined) await Promise.race([reading, aborted(ctx.abortSignal)]);
+        // A direct send in flight is aborted, and its piece stays `sending`: sent again, marked, at
+        // the next start. The queue's sends through these transports end or are aborted too.
+        await stopping.answers.stop(ctx.abortSignal);
+        await stopBots(stopping.bots, ctx.abortSignal);
       },
     };
 
-    async function startBot(account: Account, signal: AbortSignal | undefined, background: AppContext, queue: OutboundQueue | undefined): Promise<RunningBot> {
+    async function startBot(account: Account, signal: AbortSignal | undefined, background: AppContext): Promise<RunningBot> {
       const token = await secrets.get().get(account.tokenSecret);
       if (token === undefined) {
         throw new Error(`channel-telegram: ${account.tokenSecret} is not set. Create a bot with @BotFather, then run \`pikit configure\``);
@@ -230,13 +172,12 @@ export default defineComponent({
       }
 
       const transport = createTelegramTransport(api, account.instance);
-      const delivery = createDelivery(api, transport, background.logger, account.instance);
-      queue?.attach(account.instance, transport);
+      const replies = createReplies(api, transport, background.logger, account.instance);
       const deps: InboundDeps = {
         instance: account.instance,
         bot: me,
         allowed,
-        delivery,
+        delivery: replies,
         conversations: conversations.get(),
         runtime: runtime.get(),
         ctx: background,
@@ -249,29 +190,19 @@ export default defineComponent({
         link: botLink(me),
         allowedUsers: allowed.size,
       });
-      return { account, delivery, poller };
+      return { account, transport, replies, poller };
     }
   },
 });
 
-/** Stops polling, takes each transport back from the queue (sends in flight end or are aborted), and stops "typing…". */
-async function stopBots(bots: RunningBot[], queue: OutboundQueue | undefined, signal: AbortSignal | undefined): Promise<void> {
+/** Stops polling and "typing…", and waits for the replies in flight. */
+async function stopBots(bots: RunningBot[], signal: AbortSignal | undefined): Promise<void> {
   await Promise.all(
-    bots.map(async ({ account, delivery, poller }) => {
+    bots.map(async ({ replies, poller }) => {
       await poller.stop(signal);
-      await queue?.detach(account.instance, signal);
-      await delivery.close();
+      await replies.close();
     }),
   );
-}
-
-/** Resolves when `signal` aborts; never, without one. */
-function aborted(signal: AbortSignal | undefined): Promise<void> {
-  return new Promise((resolve) => {
-    if (signal === undefined) return;
-    if (signal.aborted) resolve();
-    else signal.addEventListener("abort", () => resolve(), { once: true });
-  });
 }
 
 /**

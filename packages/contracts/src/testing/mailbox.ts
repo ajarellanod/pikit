@@ -15,6 +15,9 @@
  * message's handler). So every fixture proves that one component can handle and send, and one with
  * `wakeups: true` that an actor waking itself composes with its mailbox: none is a dependency cycle.
  *
+ * It also answers calls (`answer`, reached by `call`): the answer is JSON and a copy, a refusal
+ * reaches the caller as an `ActorCallError` with its code, and calls and messages are apart.
+ *
  * `createMemoryMailbox` is the in-memory double: it passes this suite, and it stands in for a
  * mailbox in the tests of a channel or an actor.
  */
@@ -31,7 +34,7 @@ import {
   withCancel,
 } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
-import type { ActorInboxHandler, ActorMailbox } from "../actor.ts";
+import { type ActorCallHandler, ActorCallError, type ActorInboxHandler, type ActorMailbox, answerCall, callResult } from "../actor.ts";
 import type { JsonValue } from "../json.ts";
 import type { Wakeups } from "../wakeups.ts";
 import { checker, expecter } from "./assert.ts";
@@ -54,6 +57,8 @@ const check = checker(GROUP);
 /** The message types the suite's inbox handles. */
 const TYPE = "conformance";
 const OTHER_TYPE = "conformance.other";
+/** A type only answered (calls), never handled (messages). */
+const ASK_TYPE = "conformance.ask";
 /** The wakeup handler the suite's actors register when `wakeups` is provided. */
 const WAKE = "mailbox-conformance.wake";
 
@@ -65,6 +70,15 @@ interface Received {
   /** The actor App's own mailbox and wakeups (when provided): what its handlers may use. */
   mailbox: ActorMailbox;
   wakeups: Wakeups | undefined;
+}
+
+/** One call an answer handler got. */
+interface Asked {
+  type: string;
+  key: string;
+  message: JsonValue;
+  ctx: AppContext;
+  mailbox: ActorMailbox;
 }
 
 const rejection = (promise: Promise<unknown>): Promise<unknown> =>
@@ -133,7 +147,13 @@ export function createMailboxConformance(
           registration: inbox.registration,
           behave: inbox.behave,
           hold: inbox.hold,
+          asked: inbox.asked,
+          get answered() {
+            return inbox.answered;
+          },
+          answerWith: inbox.answerWith,
           send: (key, type, message, ctx = started.context()) => resolved.send(key, type, message, ctx),
+          call: (key, type, message, ctx = started.context()) => resolved.call(key, type, message, ctx),
           context: (parent) => started.context(parent),
         });
       } finally {
@@ -270,6 +290,116 @@ export function createMailboxConformance(
     }),
   ];
 
+  /** What a call rejected with, as an `ActorCallError`; fails the case when it resolved or rejected with another error. */
+  const callError = async (call: Promise<JsonValue>, what: string): Promise<ActorCallError> => {
+    const error = await rejection(call);
+    check(error instanceof ActorCallError, `${what} to reject with an ActorCallError, got ${error === undefined ? "an answer" : String(error)}`);
+    return error as ActorCallError;
+  };
+
+  cases.push(
+    mailboxCase("call resolves with the answer handler's answer, and the handler gets the key and the message", async (s) => {
+      const answer = await s.call("actor-1", ASK_TYPE, { question: "how many?" });
+      expect(answer, { key: "actor-1", type: ASK_TYPE, message: { question: "how many?" } }, "the answer");
+      expect(s.asked.map(({ type, key, message }) => ({ type, key, message })), [{ type: ASK_TYPE, key: "actor-1", message: { question: "how many?" } }], "what the handler got");
+      expect(s.received.length, 0, "message handlers called by a call");
+    }),
+
+    mailboxCase("every kind of JSON value is answered as it was, and both the message and the answer are copies", async (s) => {
+      const values: JsonValue[] = ["ñandú ✓ \"quoted\" \\ \n", 9_007_199_254_740_991, -1.5, true, false, null, [1, "two", null, [3]], { nested: { deep: [true, { x: "y" }] }, empty: {} }];
+      s.answerWith(async (a) => a.message);
+      for (const value of values) expect(await s.call("actor-1", ASK_TYPE, value), value, `the answer to ${JSON.stringify(value)}`);
+
+      // The handler keeps what it answered and changes the message it got; the caller changes its message and the answer.
+      const kept: number[] = [7];
+      s.answerWith(async (a) => {
+        (a.message as number[]).push(99);
+        return kept;
+      });
+      const sent = [1, 2];
+      const answer = (await s.call("actor-1", ASK_TYPE, sent)) as number[];
+      sent.push(3);
+      answer.push(8);
+      expect([sent, kept], [[1, 2, 3], [7]], "the caller's message and the handler's answer after the other side changed its copy");
+    }),
+
+    mailboxCase("calls and messages are apart: a call reaches only an answer handler, and a send only a message handler", async (s) => {
+      const noAnswer = await callError(s.call("actor-1", TYPE, 1), "a call to a type handled only as messages");
+      expect(noAnswer.code, "no_handler", "its code");
+      check((await rejection(s.send("actor-1", ASK_TYPE, 1))) !== undefined, "a send to a type only answered to reject");
+      expect([s.received.length, s.asked.length], [0, 0], "handlers called");
+    }),
+
+    mailboxCase("with no answer handler for its type, call rejects with no_handler, naming the type", async (s) => {
+      const error = await callError(s.call("actor-1", "conformance.nobody-answers-this", 1), "a call nobody answers");
+      expect(error.code, "no_handler", "its code");
+      check(error.message.includes("conformance.nobody-answers-this"), `an error naming the type, got ${error.message}`);
+    }),
+
+    mailboxCase("a handler's ActorCallError reaches the caller with its code and message; any other error is failed, with its message", async (s) => {
+      s.answerWith(async () => {
+        throw new ActorCallError("not_found", "no such approval");
+      });
+      const refused = await callError(s.call("actor-1", ASK_TYPE, { id: "a1" }), "a call the handler refuses");
+      expect([refused.code, refused.message], ["not_found", "no such approval"], "the refusal");
+
+      s.answerWith(async () => {
+        throw new Error("the actor's storage is down");
+      });
+      const failed = await callError(s.call("actor-1", ASK_TYPE, 1), "a call whose handler throws");
+      expect(failed.code, "failed", "its code");
+      check(failed.message.includes("the actor's storage is down"), `the handler's message, got ${failed.message}`);
+
+      s.answerWith(async () => undefined as unknown as JsonValue);
+      expect((await callError(s.call("actor-1", ASK_TYPE, 1), "a call answered with undefined")).code, "failed", "an answer that is not JSON");
+    }),
+
+    mailboxCase("an empty key, or a message that is not JSON, is refused as invalid and nothing is called", async (s) => {
+      expect((await callError(s.call("", ASK_TYPE, 1), "a call with an empty key")).code, "invalid", "an empty key");
+      expect((await callError(s.call("actor-1", ASK_TYPE, undefined as unknown as JsonValue), "a call with undefined")).code, "invalid", "undefined");
+      expect((await callError(s.call("actor-1", ASK_TYPE, (() => 1) as unknown as JsonValue), "a call with a function")).code, "invalid", "a function");
+      expect(s.asked.length, 0, "answer handlers called");
+    }),
+
+    mailboxCase("a call's context bounds it: cancelled, it rejects as cancelled, and the handler goes on with its own context", async (s) => {
+      let release = () => {};
+      const released = new Promise<void>((resolve) => (release = resolve));
+      s.answerWith(async () => {
+        await released;
+        return "late";
+      });
+      const caller = withCancel(BACKGROUND_CONTEXT);
+      const asked = s.call("actor-1", ASK_TYPE, 1, s.context(caller.context));
+      await eventually(() => s.asked.length === 1, "the answer handler to be called");
+      caller.cancel(new Error("the dashboard's request timed out"));
+      expect((await callError(asked, "a cancelled call")).code, "cancelled", "its code");
+      check((s.asked[0] as Asked).ctx.abortSignal?.aborted !== true, "the handler's context not to be cancelled by the caller's");
+      release();
+      await eventually(() => s.answered === 1, "the handler to finish after the caller stopped waiting");
+
+      const gone = withAbortSignal(AbortSignal.timeout(1), BACKGROUND_CONTEXT);
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      expect((await callError(s.call("actor-1", ASK_TYPE, 1, s.context(gone)), "a call past its deadline")).code, "cancelled", "a deadline already passed");
+    }),
+
+    mailboxCase("concurrent calls to many keys are each answered by their own actor", async (s) => {
+      const keys = Array.from({ length: 20 }, (_, i) => `actor-${i}`);
+      const answers = await Promise.all(keys.map((key) => s.call(key, ASK_TYPE, key)));
+      expect(
+        answers,
+        keys.map((key) => ({ key, type: ASK_TYPE, message: key })),
+        "each answer",
+      );
+    }),
+
+    mailboxCase("an answer handler may call another actor, and registering one twice throws, naming its type", async (s) => {
+      s.answerWith(async (a) => (a.key === "actor-1" ? { relayed: await a.mailbox.call("actor-2", ASK_TYPE, a.message, a.ctx) } : { from: a.key }));
+      expect(await s.call("actor-1", ASK_TYPE, "hi"), { relayed: { from: "actor-2" } }, "the relayed answer");
+      const [, , again] = s.registration;
+      check(again instanceof Error && again.message.includes(ASK_TYPE), `an error naming "${ASK_TYPE}", got ${String(again)}`);
+    }),
+  );
+
   if (options.wakeups) {
     cases.push(
       mailboxCase("an actor that handles messages also registers a wakeup handler, and asks for it from a message's handler", async (s) => {
@@ -293,17 +423,25 @@ interface Inbox {
   readonly finished: number;
   /** How many times the actors' wakeup handler ran. */
   readonly woken: number;
-  /** What registering `TYPE` again, then an empty type, threw in the actor's start (the last one's). */
+  /** What registering `TYPE` again, an empty type, then `ASK_TYPE`'s answer again threw in the actor's start (the last one's). */
   registration: unknown[];
   /** What the handlers do after recording a call; by default they resolve at once. */
   behave(run: (received: Received) => Promise<void>): void;
   /** Makes the handlers wait until `release()`. */
   hold(): { release(): void };
+  /** Every call the answer handler got, in the order they began. */
+  asked: Asked[];
+  /** How many calls the answer handler resolved. */
+  readonly answered: number;
+  /** What the answer handler answers; by default `{ key, type, message }`. */
+  answerWith(run: (asked: Asked) => Promise<JsonValue>): void;
 }
 
 interface Subject extends Omit<Inbox, "component"> {
   /** Sends through the app's `actor.mailbox`; `ctx` defaults to the app's background context. */
   send(key: string, type: string, message: JsonValue, ctx?: AppContext): Promise<void>;
+  /** Calls through the app's `actor.mailbox`; `ctx` defaults to the app's background context. */
+  call(key: string, type: string, message: JsonValue, ctx?: AppContext): Promise<JsonValue>;
   context(parent?: Parameters<App["context"]>[0]): AppContext;
 }
 
@@ -314,10 +452,13 @@ interface Subject extends Omit<Inbox, "component"> {
  */
 function createInbox(): Inbox {
   const received: Received[] = [];
+  const asked: Asked[] = [];
   const registration: unknown[] = [];
   let finished = 0;
+  let answered = 0;
   let woken = 0;
   let behaviour: (received: Received) => Promise<void> = async () => {};
+  let answering: (asked: Asked) => Promise<JsonValue> = async ({ key, type, message }) => ({ key, type, message });
   const attempt = (register: () => void): unknown => {
     try {
       register();
@@ -346,16 +487,37 @@ function createInbox(): Inbox {
               };
             inbox.get().handle(TYPE, handler(TYPE));
             inbox.get().handle(OTHER_TYPE, handler(OTHER_TYPE));
-            registration.splice(0, registration.length, attempt(() => inbox.get().handle(TYPE, handler(TYPE))), attempt(() => inbox.get().handle("", handler(""))));
+            const answer: ActorCallHandler = async (key, message, ctx) => {
+              const call = { type: ASK_TYPE, key, message, ctx, mailbox: own.mailbox };
+              asked.push(call);
+              const value = await answering(call);
+              answered++;
+              return value;
+            };
+            inbox.get().answer(ASK_TYPE, answer);
+            registration.splice(
+              0,
+              registration.length,
+              attempt(() => inbox.get().handle(TYPE, handler(TYPE))),
+              attempt(() => inbox.get().handle("", handler(""))),
+              attempt(() => inbox.get().answer(ASK_TYPE, answer)),
+            );
             own.wakeups?.handle(WAKE, async () => void woken++);
           },
         };
       },
     }),
     received,
+    asked,
     registration,
     get finished() {
       return finished;
+    },
+    get answered() {
+      return answered;
+    },
+    answerWith(run) {
+      answering = run;
     },
     get woken() {
       return woken;
@@ -383,6 +545,7 @@ export function createMemoryMailbox(): ComponentDefinition {
     name: "memory-mailbox",
     setup(pikit) {
       const handlers = new Map<string, ActorInboxHandler>();
+      const answerers = new Map<string, ActorCallHandler>();
       let running: { ctx: AppContext; stop: AbortController } | undefined;
       pikit.provide("actor.inbox", {
         handle(type, handler) {
@@ -390,7 +553,21 @@ export function createMemoryMailbox(): ComponentDefinition {
           if (handlers.has(type)) throw new Error(`memory-mailbox: the type "${type}" already has a handler`);
           handlers.set(type, handler);
         },
+        answer(type, handler) {
+          if (typeof type !== "string" || type === "") throw new TypeError("memory-mailbox: a call type is a non-empty string");
+          if (answerers.has(type)) throw new Error(`memory-mailbox: the call type "${type}" already has a handler`);
+          answerers.set(type, handler);
+        },
       });
+      /** `work`, or a rejection with `signal`'s reason once it is cancelled. */
+      const bounded = <T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> => {
+        if (signal === undefined) return work;
+        return new Promise<T>((resolve, reject) => {
+          const abort = () => reject(signal.reason);
+          signal.addEventListener("abort", abort, { once: true });
+          work.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+        });
+      };
       pikit.provide("actor.mailbox", {
         async send(key, type, message, ctx) {
           if (running === undefined) throw new Error("memory-mailbox: actor.mailbox used while the app is not running");
@@ -400,14 +577,20 @@ export function createMemoryMailbox(): ComponentDefinition {
           const text = JSON.stringify(message) as string | undefined;
           if (text === undefined) throw new TypeError("memory-mailbox: a message must be JSON");
           ctx.abortSignal?.throwIfAborted();
-          const handled = handler(key, JSON.parse(text) as JsonValue, running.ctx);
-          if (ctx.abortSignal === undefined) return handled;
-          const signal = ctx.abortSignal;
-          return new Promise<void>((resolve, reject) => {
-            const abort = () => reject(signal.reason);
-            signal.addEventListener("abort", abort, { once: true });
-            handled.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+          return bounded(handler(key, JSON.parse(text) as JsonValue, running.ctx), ctx.abortSignal);
+        },
+        async call(key, type, message, ctx) {
+          if (running === undefined) throw new ActorCallError("unreachable", "memory-mailbox: actor.mailbox used while the app is not running");
+          if (typeof key !== "string" || key === "") throw new ActorCallError("invalid", "memory-mailbox: a key is a non-empty string");
+          const handler = answerers.get(type);
+          if (handler === undefined) throw new ActorCallError("no_handler", `memory-mailbox: no actor.inbox answer handler for the call type "${type}"`);
+          const text = JSON.stringify(message) as string | undefined;
+          if (text === undefined) throw new ActorCallError("invalid", "memory-mailbox: a message must be JSON");
+          if (ctx.abortSignal?.aborted) throw new ActorCallError("cancelled", "memory-mailbox: the call was cancelled", { cause: ctx.abortSignal.reason });
+          const outcome = await bounded(answerCall(handler, key, JSON.parse(text) as JsonValue, running.ctx), ctx.abortSignal).catch((reason: unknown) => {
+            throw new ActorCallError("cancelled", "memory-mailbox: the call was cancelled before it was answered", { cause: reason });
           });
+          return callResult(outcome);
         },
       });
       return {
@@ -421,6 +604,7 @@ export function createMemoryMailbox(): ComponentDefinition {
           running?.stop.abort(new Error("memory-mailbox: the app is stopping"));
           running = undefined;
           handlers.clear();
+          answerers.clear();
         },
       };
     },

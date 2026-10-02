@@ -1,18 +1,15 @@
 /**
- * Sending the agent's answers to Telegram chats directly, and "typing…" while it works.
+ * The channel's own short replies (commands, a refused stranger, a hint) and "typing…" while the
+ * agent works. The agent's answers are not sent here: `startAnswerDelivery` delivers them
+ * (`index.ts`), with or without `outbound.queue`.
  *
- * - Used when no `outbound.queue` is installed; with one (`outbound-durable`), answers are enqueued
- *   instead (`index.ts`) and only "typing…" and the channel's own short replies (commands, a refused
- *   stranger) go through here.
- * - One chat's messages go out one at a time, in order; chats do not wait for each other.
+ * - One chat's replies go out one at a time, in order; chats do not wait for each other.
  * - Each piece goes through the channel's transport (`transport.ts`: HTML or plain text, failures
  *   classified), retried in this process: a rate limit after Telegram's wait (at most a minute), a
  *   transient failure with backoff. A permanent one is logged and dropped.
  *
- * Delivery guarantee: best effort within the process. The answer is always in the conversation's
- * session; a reply lost to a crash while sending is not sent again. `outbound-durable` is the durable
- * delivery. An answer read from `agent.submissions`' feed is sent with `sendOrFail`, which rejects
- * when it could not be sent, so the feed's reader keeps it and tries again (`answers.ts`).
+ * Guarantee: best effort within the process. A reply lost to a crash while sending is not sent again:
+ * it answered a message the user can send again, and it is never the agent's answer.
  */
 
 import { type Logger } from "@pikit/core";
@@ -27,26 +24,18 @@ const TYPING_AT_MOST_MS = 10 * 60_000;
 const ATTEMPTS = 4;
 const LONGEST_WAIT_MS = 60_000;
 
-export interface Delivery {
+export interface Replies {
   /** Show "typing…" in `chatId` until `typingStopped` (or a limit). */
   typingStarted(chatId: number): void;
   typingStopped(chatId: number): void;
   /** Queue `text` for `chatId`. Resolves when it was sent or given up (logged); never rejects. */
   send(chatId: number, text: string): Promise<void>;
-  /**
-   * Queue `text` for `chatId`, in the same line as `send`. Resolves once it was sent, or refused for
-   * good (the user blocked the bot, the chat is gone: logged, as sending it again would fail the same
-   * way). Rejects when Telegram could not be reached after the retries, or the channel stopped first:
-   * the caller still has the answer and sends it again later. A long answer sent again may repeat
-   * the pieces that had gone out.
-   */
-  sendOrFail(chatId: number, text: string): Promise<void>;
   /** Stop every "typing…", abandon waits between retries, and wait for sends in flight. */
   close(): Promise<void>;
 }
 
-/** Direct delivery through one bot: `instance` is its account's. */
-export function createDelivery(api: TelegramApi, transport: ChannelTransport, logger: Logger, instance: string): Delivery {
+/** The replies of one bot: `instance` is its account's. */
+export function createReplies(api: TelegramApi, transport: ChannelTransport, logger: Logger, instance: string): Replies {
   const closing = new AbortController();
   const lines = new Map<number, Promise<void>>();
   const typing = new Map<number, ReturnType<typeof setInterval>>();
@@ -111,14 +100,6 @@ export function createDelivery(api: TelegramApi, transport: ChannelTransport, lo
     typingStopped,
     send(chatId, text) {
       return line(chatId, text).catch((error: unknown) => logger.error("channel-telegram: a reply could not be sent", { chat: chatId, error: String(error) }));
-    },
-    async sendOrFail(chatId, text) {
-      try {
-        await line(chatId, text);
-      } catch (error) {
-        if (closing.signal.aborted || !(error instanceof DeliveryError) || error.kind !== "permanent") throw error;
-        logger.error("channel-telegram: Telegram refused a reply for good; it is not sent", { chat: chatId, error: String(error) });
-      }
     },
     async close() {
       closing.abort(new Error("channel-telegram: stopping"));

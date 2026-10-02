@@ -4,8 +4,16 @@
  * Events are notices and can be missed: a listener that throws, or a process that dies between a
  * commit and the event about it, loses one (K3). A reaction that must not be lost reads the
  * producer's feed instead. It reads from its saved cursor when it starts and whenever an event
- * wakes it, applies what it reads idempotently, and saves the new cursor in the same transaction
- * as what it did. A crash only delays it.
+ * wakes it, and applies what it reads idempotently. Then it saves the new cursor, in one of two ways:
+ * - **in the same transaction as what it did**, when both are in one database (its own records in
+ *   `storage.sql`): nothing is ever applied twice;
+ * - **after what it did**, when they cannot share a transaction (a platform's API, another
+ *   component's storage): what it did is committed first, idempotently (a key the other side
+ *   deduplicates, a mark of its own), and the cursor after. A crash between the two applies the same
+ *   fact again, which the idempotency absorbs; it must say what is left (a send cut mid-flight may
+ *   reach a platform twice, marked). `startAnswerDelivery` (`delivery.ts`) is this kind.
+ *
+ * Either way the cursor never passes a fact whose effect is not committed, so a crash only delays it.
  *
  * A feed is a contract type, not a capability: a producer exposes one inside its own contract
  * (`outbound.queue`'s `receipts`). There is no bus and no registry of feeds, and the core stores

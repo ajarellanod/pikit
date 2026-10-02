@@ -21,7 +21,7 @@ import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createManualClock } from "@pikit/core/testing";
 import type {} from "@pikit/pi-adapter";
 import { holdTool, scriptedAgent, testComponents } from "@pikit/pi-adapter/testing";
-import { TYPING_EVERY_MS } from "../channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/delivery.ts";
+import { TYPING_EVERY_MS } from "../channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/typing.ts";
 import channelTelegramWebhook from "../channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/index.ts";
 import { type FakeTelegram, startFakeTelegram } from "../channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/fake-telegram.test-support.ts";
 import conversationsKv from "../conversations-kv/files/src/pikit/conversations-kv/index.ts";

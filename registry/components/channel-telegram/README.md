@@ -4,9 +4,11 @@ Talk to your agent in Telegram: send your bot a message, get the answer in the c
 
 - **Provides:** nothing to other components. It receives messages and sends answers.
 - **Requires:** `secrets` (the bot token and the allowed users), `conversations.registry`,
-  `agent.runtime`. A router (such as `router-basic`) picks the agent.
-- **Uses, if installed:** `outbound.queue` (durable sending), and `agent.submissions` with
-  `storage.kv` (no answer lost while the channel is stopped): "Sending" below.
+  `agent.runtime`, `agent.submissions` (runtime-pi provides it: every run's end) and `storage.kv`
+  (`storage-kv-sql`, which `pikit add` brings: its place in them). A router (such as
+  `router-basic`) picks the agent.
+- **Uses, if installed:** `outbound.queue` (answers stored before they are sent, with receipts):
+  "Sending" below.
 - **Target:** `server`: it receives messages by long polling, which needs a process that keeps
   running.
 - **Installs to:** `src/pikit/channel-telegram/`.
@@ -60,30 +62,25 @@ You never look up a user id, set a webhook, open a port or buy a domain.
     `abandoned`) gets "Sorry, we could not answer your message. Please send it again."
 - **A message is acknowledged to Telegram only once its conversation has it.** A message delivered
   again after a crash is recognised by its id (`telegram:<chat>:<message>`) and answered once.
-- **Sending:**
-  - With `outbound-durable` installed (`pikit add channel-telegram` and `pikit new` offer it; `pikit add` also offers the `storage-sqlite` it needs, which the presets list), every answer is stored before it
-    is sent and delivered even across crashes, outages and rate limits: see its README. A piece sent
-    again after a crash starts with `↻ `, since Telegram cannot tell a repeated send apart.
-  - Without it, answers are sent directly, retried in the process: after `retry_after` for
-    Telegram's 429, and with backoff for network errors and 5xx. A reply lost to a crash while
-    sending is not sent again, but the answer is in the conversation.
-- **Answers that end while the channel is stopped.** A deploy stops the channel before the runtime,
-  so a long answer can end in between.
-  - With `agent.submissions` (runtime-pi provides it) and
-    `storage-kv-sql` (`pikit add channel-telegram` offers it), the channel reads every run's outcome
-    from its `answers` feed, from a cursor it keeps in `storage.kv` (the key `answers-cursor` of its
-    namespace, `channel-telegram`): when it starts, whenever a run ends, and
-    every 30 seconds. That answer is sent when the channel starts again; one the outbox could not
-    store, or Telegram could not take, is tried again (after 1 s, 5 s, 30 s, then every minute)
-    instead of being dropped, and logged as an error with its conversation from the 3rd failure.
-    Each chat's answers go in order, and chats do not wait for each other; the cursor never moves
-    past an answer not delivered, so other chats go on for at most 200 answers past a stuck one.
-    With the outbox, an answer read twice after a crash is stored once; without it, it may be sent
-    twice (one sent just before a crash, or those other chats got past a stuck one). The first time
-    the channel reads the feed it starts at its end: installing it in a project whose runtime
-    already logged answers does not send them again.
-  - Without either of them, answers come from the runtime's events only: one that ends while the
-    channel is stopped is not sent, and a warning says so.
+- **Sending** is `startAnswerDelivery`'s (`@pikit/contracts`), the one delivery every chat
+  channel shares; this channel gives it only what is Telegram's: its bots' transports, which bot a
+  conversation is, its words, and its waits (`DELIVERY` in `index.ts`, yours to edit).
+  - Every run's outcome is read from `agent.submissions`' `answers` feed, from a cursor in
+    `storage.kv` (the key `answers-cursor` of its namespace, `channel-telegram`): when the
+    channel starts, and whenever a run ends. An answer that ended while the channel was stopped (a
+    deploy stops the channel before the runtime), or whose event was lost, is sent when it reads
+    again.
+  - With `outbound-durable` installed (`pikit add channel-telegram` and `pikit new` offer it), an
+    answer is enqueued under its key and the queue sends it: see its README. Without it, each piece
+    is sent directly and marked in `storage.kv` (`sending`, then `sent`): a crash or a stop
+    during a send sends that piece again once, starting with `↻ ` (Telegram cannot tell a repeated
+    send apart), and never a piece already sent.
+  - An answer Telegram could not take, or the outbox could not store, is tried again after 1 s, 5 s,
+    30 s, then every minute (or Telegram's `retry_after`), and logged as an error with its
+    conversation from the 3rd failure; one Telegram refuses for good (the user blocked the bot) is
+    logged and given up. Each chat's answers go in order, chats do not wait for each other, and the
+    cursor never moves past an answer not delivered: other chats go on for at most 200 answers past
+    a stuck one.
 
 It refuses to start:
 - without a token, or with a token Telegram does not know;
@@ -129,14 +126,15 @@ The tests are copied with the component and run in your project against `fake-te
 local stand-in of the Bot API: no bot, token or network needed.
 - `channel-telegram.test.ts` covers the whole conversation: allowed and refused users, commands,
   "typing…", formatting and splitting, retries, a redelivered message answered once, the
-  acknowledgement at stop, the lifecycle conformance suite and the start failures; with
-  `agent.submissions`, answers from its feed, one that ended while the channel was stopped delivered
-  at the next start (and only then), a failed enqueue or send tried again, answers of other channels
-  skipped; without it, the warning for an answer that could not be sent.
-- `answers.test.ts` covers the feed's reader alone: a stuck chat holds up only itself and the cursor,
-  each gap reported, backoff when storage fails, and where a new cursor starts.
+  acknowledgement at stop, the lifecycle conformance suite and the start failures; answers from
+  the feed, one that ended while the channel was stopped delivered at the next start (and only
+  then), a failed enqueue or send tried again, a send the stop aborted sent at the next start,
+  answers of other channels skipped.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
-  channel does with a message (routed, deduplicated, stopped, denied, no router), through Telegram.
+  channel does with a message (routed, deduplicated, stopped, denied, no router), and what comes with
+  durability (an answer that ended while stopped or whose event was lost, delivered once; a failed
+  send tried again in order; a send cut mid-flight resent once, marked; one chat's failures holding
+  up no other), through Telegram. The delivery itself is tested in `@pikit/contracts`.
 - `configure.test.ts` covers the setup: a checked token, allowing whoever messages the bot, and
   the same without a terminal.
 

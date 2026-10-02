@@ -73,10 +73,10 @@ const router = defineComponent({
 });
 
 /**
- * Records every dispatch; one run per session at a time; a request seen before is a duplicate. With
- * `submissions`, it records admissions and run ends there, as runtime-pi does.
+ * Records every dispatch; one run per session at a time; a request seen before is a duplicate. It
+ * records admissions and run ends in `submissions`, as runtime-pi does.
  */
-function scriptedRuntime(seen: Set<string> = new Set(), submissions?: RecordingSubmissions) {
+function scriptedRuntime(seen: Set<string> = new Set(), submissions: RecordingSubmissions = createMemorySubmissions().submissions) {
   const dispatched: { requestId: string; key: string; prompt: string }[] = [];
   let release!: () => void;
   const released = new Promise<void>((resolve) => (release = resolve));
@@ -90,18 +90,18 @@ function scriptedRuntime(seen: Set<string> = new Set(), submissions?: RecordingS
           if (seen.has(requestId)) return { kind: "duplicate", requestId } satisfies Admission;
           seen.add(requestId);
           const ctx = (events ?? BACKGROUND_CONTEXT) as AppContext;
-          await submissions?.admitted(conversation, requestId, ctx);
+          await submissions.admitted(conversation, requestId, ctx);
           void (async () => {
             await ctx.emit("agent.started", { conversation, requestId, resumed: false });
             if (prompt === "hold") await released;
             const base = { conversation, requestId, requestIds: [requestId], messages: [] };
             if (prompt === "fail") {
               const error = { code: "provider_error", message: "no" };
-              await submissions?.settled({ conversation, requestId, requestIds: [requestId], kind: "failed", error }, ctx);
+              await submissions.settled({ conversation, requestId, requestIds: [requestId], kind: "failed", error }, ctx);
               await ctx.emit("agent.failed", { ...base, kind: "failed", error });
             } else {
               const text = prompt === "long" ? "word ".repeat(1800) : `answer: **${prompt}**`;
-              await submissions?.settled({ conversation, requestId, requestIds: [requestId], kind: "completed", text }, ctx);
+              await submissions.settled({ conversation, requestId, requestIds: [requestId], kind: "completed", text }, ctx);
               await ctx.emit("agent.settled", { ...base, kind: "completed", text });
             }
           })();
@@ -162,9 +162,9 @@ interface StartOptions {
   telegram?: FakeTelegram;
   seen?: Set<string>;
   queue?: ReturnType<typeof recordingQueue>;
-  /** Installs `agent.submissions` (the runtime records there). */
+  /** `agent.submissions` (the runtime records there); a new one by default. */
   submissions?: RecordingSubmissions;
-  /** Installs `storage.kv`: the channel keeps its cursor there. */
+  /** `storage.kv`: the channel keeps its cursor and marks there; a new one by default. */
   kv?: KeyValueStorage;
   logger?: Logger;
   /** Components that start after the runtime and before the channel. */
@@ -174,7 +174,8 @@ interface StartOptions {
 async function started(options: StartOptions = {}): Promise<Subject> {
   const telegram = options.telegram ?? startFakeTelegram();
   if (options.telegram === undefined) fakes.push(telegram);
-  const runtime = scriptedRuntime(options.seen, options.submissions);
+  const submissions = options.submissions ?? createMemorySubmissions().submissions;
+  const runtime = scriptedRuntime(options.seen, submissions);
   const resets: string[] = [];
   const app = await defineApp({
     components: [
@@ -183,8 +184,8 @@ async function started(options: StartOptions = {}): Promise<Subject> {
       router,
       runtime.component,
       ...(options.queue === undefined ? [] : [options.queue.component]),
-      ...(options.submissions === undefined ? [] : [submissionsWith(options.submissions)]),
-      ...(options.kv === undefined ? [] : [kvWith(options.kv)]),
+      submissionsWith(submissions),
+      kvWith(options.kv ?? createMemoryKeyValueStorage()),
       ...(options.before ?? []),
       channelTelegram,
     ],
@@ -201,7 +202,7 @@ async function startFailure(secrets: Record<string, string>, prepare?: (telegram
   fakes.push(telegram);
   prepare?.(telegram);
   const app = await defineApp({
-    components: [secretsWith(secrets), memoryRegistry([]), router, scriptedRuntime().component, channelTelegram],
+    components: [secretsWith(secrets), memoryRegistry([]), router, scriptedRuntime().component, ...durable(), channelTelegram],
     config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
     logger: silentLogger,
   }).create();
@@ -214,12 +215,12 @@ async function startFailure(secrets: Record<string, string>, prepare?: (telegram
 }
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
-  const app = await defineApp({ components: [secretsWith({}), memoryRegistry([]), scriptedRuntime().component, channelTelegram], logger: silentLogger }).create();
+  const app = await defineApp({ components: [secretsWith({}), memoryRegistry([]), scriptedRuntime().component, ...durable(), channelTelegram], logger: silentLogger }).create();
 
   expect(app.describe().components.find((component) => component.name === "channel-telegram")).toMatchObject({
     provides: [],
-    requires: ["secrets", "conversations.registry", "agent.runtime"],
-    optional: ["outbound.queue", "agent.submissions", "storage.kv"],
+    requires: ["secrets", "conversations.registry", "agent.runtime", "agent.submissions", "storage.kv"],
+    optional: ["outbound.queue"],
   });
 });
 
@@ -228,7 +229,7 @@ for (const c of createLifecycleConformance(() => {
   fakes.push(telegram);
   return {
     component: channelTelegram,
-    providers: [secretsWith({ TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1" }), memoryRegistry([]), scriptedRuntime().component],
+    providers: [secretsWith({ TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1" }), memoryRegistry([]), scriptedRuntime().component, ...durable()],
     config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
   };
 })) {
@@ -287,6 +288,8 @@ test("/start and /help explain, /new starts the conversation over", async () => 
 
   s.telegram.say(OWNER, "/start");
   s.telegram.say(OWNER, "hello");
+  // The answer first, as a user who reads it before starting over.
+  await s.telegram.sentCount(2);
   s.telegram.say(OWNER, "/new@pikit_test_bot");
   await s.telegram.sentCount(3);
 
@@ -457,9 +460,10 @@ async function twoBots(secrets: Record<string, string>) {
   const telegram = startFakeTelegram();
   fakes.push(telegram);
   const ops = telegram.addBot(OPS_TOKEN, OPS_BOT);
-  const runtime = scriptedRuntime();
+  const { submissions } = createMemorySubmissions();
+  const runtime = scriptedRuntime(new Set(), submissions);
   const app = await defineApp({
-    components: [secretsWith(secrets), memoryRegistry([]), router, runtime.component, channelTelegram],
+    components: [secretsWith(secrets), memoryRegistry([]), router, runtime.component, ...durable(submissions), channelTelegram],
     config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1, accounts: ["ops"] } },
     logger: silentLogger,
   }).create();
@@ -540,28 +544,15 @@ function submissionsWith(submissions: AgentSubmissions) {
   return defineComponent({ name: "submissions-test", setup: (pikit) => pikit.provide("agent.submissions", submissions) });
 }
 
+/** What the channel requires to deliver durably: `agent.submissions` (the runtime's record) and `storage.kv`, new and empty. */
+function durable(submissions = createMemorySubmissions().submissions): ComponentDefinition[] {
+  return [submissionsWith(submissions), kvWith(createMemoryKeyValueStorage())];
+}
+
 /** A logger that keeps the warnings. */
 function recordingLogger(): Logger & { warnings: string[] } {
   const warnings: string[] = [];
   return { debug() {}, info() {}, warn: (message) => void warnings.push(message), error: (message) => void warnings.push(message), warnings };
-}
-
-for (const c of createLifecycleConformance(() => {
-  const telegram = startFakeTelegram();
-  fakes.push(telegram);
-  return {
-    component: channelTelegram,
-    providers: [
-      secretsWith({ TELEGRAM_BOT_TOKEN: telegram.token, TELEGRAM_ALLOWED_USERS: "1" }),
-      memoryRegistry([]),
-      scriptedRuntime().component,
-      submissionsWith(createMemorySubmissions().submissions),
-      kvWith(createMemoryKeyValueStorage()),
-    ],
-    config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1 } },
-  };
-})) {
-  test(`channel-telegram with agent.submissions ${c.group}: ${c.name}`, () => c.run());
 }
 
 test("with agent.submissions, the answer comes from its feed, once, with and without an outbound.queue", async () => {
@@ -632,30 +623,14 @@ test("an answer the outbox could not store is tried again, not dropped", async (
   expect(queue.enqueued).toHaveLength(2);
 }, 15_000);
 
-test("without agent.submissions, an answer that ends while the channel is stopped is logged, never silently dropped", async () => {
-  const logger = recordingLogger();
-  const s = await started({ logger });
-  s.telegram.say(OWNER, "hold");
-  while (s.runtime.dispatched.length === 0) await Bun.sleep(5);
-
-  await s.app.stop();
-  s.runtime.release();
-  const deadline = Date.now() + 2_000;
-  while (!logger.warnings.some((w) => w.includes("while the channel was stopped"))) {
-    if (Date.now() > deadline) throw new Error(`no warning: ${JSON.stringify(logger.warnings)}`);
-    await Bun.sleep(5);
-  }
-  expect(s.telegram.sent).toEqual([]);
-});
-
 test("without an outbox, an answer Telegram could not take is not lost: it is sent once Telegram is back", async () => {
   const s = await started({ submissions: createMemorySubmissions().submissions, kv: createMemoryKeyValueStorage() });
   const outage = { code: 502, description: "Bad Gateway", attempts: 0 };
   s.telegram.failSends = outage;
 
   s.telegram.say(OWNER, "hello");
-  // Past the send's own retries (1 s, 2 s, 4 s): before, the answer was given up here, and the cursor moved past it.
-  while (outage.attempts < 5) await Bun.sleep(20);
+  // Two failed tries (the second after 1 s): the answer stays before the cursor, and is tried again after 5 s.
+  while (outage.attempts < 2) await Bun.sleep(20);
   delete s.telegram.failSends;
 
   expect(await s.telegram.sentCount(1, 8_000)).toEqual([{ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true }]);

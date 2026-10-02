@@ -21,6 +21,15 @@
  * `update_id`, an HTTP `messageId`). A message whose type has no handler is rejected too, and nothing
  * is delivered: the platform delivers it again, and by then the actor's `start` has registered it.
  *
+ * **A call asks the actor for an answer** (`call`, handled by `answer(type, handler)`): what the
+ * Worker cannot read itself on Cloudflare, where a conversation's state is its Durable Object's (a
+ * dashboard listing it, a person's memory, an approval's decision). The answer is JSON too, a copy. A
+ * call is not a delivery: nothing is acknowledged by it and nothing retries it, so a handler that
+ * changes state makes the change idempotent (its caller may call again after a rejection). Its
+ * failures are typed (`ActorCallError`, with a `code`), so a caller can tell an actor that said no from
+ * one it could not reach. Types of messages and of calls are apart: `handle` and `answer` may both
+ * register a type, and `call` reaches only `answer`'s handler.
+ *
  * Why handlers are registered by method, as `wakeups`' are, and not provided as a keyed capability:
  * a keyed capability makes its user depend on every provider, so the mailbox would start after every
  * handler's component and depend on everything that component uses. An actor's handler admits the
@@ -53,6 +62,23 @@ export interface ActorMailbox {
    * order keeps it in its own state.
    */
   send(key: string, type: string, message: JsonValue, ctx: AppContext): Promise<void>;
+  /**
+   * Asks the actor that owns `key` for an answer: calls its `answer` handler for `type` with a copy
+   * of `message`, and resolves with a copy of what the handler resolved with.
+   *
+   * Rejects with an `ActorCallError` whose `code` says why:
+   * - `invalid`: `key` is empty, or `message` is not JSON (nothing is called);
+   * - `no_handler`: no `answer` handler is registered for `type` where the actor runs (the message
+   *   names the type);
+   * - `cancelled`: `ctx` was cancelled first (a deadline: `withAbortSignal(AbortSignal.timeout(ms), …)`).
+   *   The caller stops waiting; the handler, which has its own context, may still finish;
+   * - `unreachable`: the actor could not be reached (its object failed to start, the network);
+   * - the code of an `ActorCallError` the handler threw (its own refusal: `not_found`), or `failed`
+   *   for any other error it threw or an answer that is not JSON. The message is the handler's.
+   *
+   * Not at-least-once and not deduplicated: a call that rejected may or may not have run.
+   */
+  call(key: string, type: string, message: JsonValue, ctx: AppContext): Promise<JsonValue>;
 }
 
 /** The actor's side: where the handler of each type of message is registered. */
@@ -63,6 +89,12 @@ export interface ActorInbox {
    * handler per type, the error names it) or is empty.
    */
   handle(type: string, handler: ActorInboxHandler): void;
+  /**
+   * Registers `handler` to answer the calls of `type` (`ActorMailbox.call`), until the App stops. Call
+   * it in the `start` of the component that answers them. Throws when `type` already has an answer
+   * handler in this App (the error names it) or is empty. Apart from `handle`'s: a type may have both.
+   */
+  answer(type: string, handler: ActorCallHandler): void;
 }
 
 /**
@@ -75,6 +107,57 @@ export interface ActorInbox {
  * actor's App stops, never when the sender stops waiting.
  */
 export type ActorInboxHandler = (key: string, message: JsonValue, ctx: AppContext) => Promise<void>;
+
+/**
+ * Answers one type of call for the actor `key`: resolve with a JSON value. Throw an `ActorCallError`
+ * to refuse with a code of yours (`not_found`); any other error reaches the caller as `failed`, with
+ * its message. `ctx` is the handler's own, as `ActorInboxHandler`'s.
+ */
+export type ActorCallHandler = (key: string, message: JsonValue, ctx: AppContext) => Promise<JsonValue>;
+
+/** Why a call failed: what `ActorMailbox.call` rejects with, and what a handler throws to refuse. */
+export type ActorCallErrorCode = "invalid" | "no_handler" | "cancelled" | "unreachable" | "failed" | (string & {});
+
+/**
+ * A failed `call`. Only `code` and `message` cross to the caller (on Cloudflare, an RPC): a cause or
+ * a stack stays where it was thrown.
+ */
+export class ActorCallError extends Error {
+  readonly code: ActorCallErrorCode;
+
+  constructor(code: ActorCallErrorCode, message: string, options: { cause?: unknown } = {}) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "ActorCallError";
+    this.code = code;
+  }
+}
+
+/** What crosses from the actor to the caller of `call`: its answer, or why it has none. */
+export type ActorCallOutcome = { ok: true; answer: JsonValue } | { ok: false; code: string; message: string };
+
+/**
+ * Runs `handler` for one call and says what came of it, as an outcome that crosses an RPC whole: the
+ * answer as a JSON copy, a thrown `ActorCallError`'s code, `failed` otherwise. For providers, on the
+ * actor's side.
+ */
+export async function answerCall(handler: ActorCallHandler, key: string, message: JsonValue, ctx: AppContext): Promise<ActorCallOutcome> {
+  let answer: JsonValue;
+  try {
+    answer = await handler(key, message, ctx);
+  } catch (error) {
+    if (error instanceof ActorCallError) return { ok: false, code: error.code, message: error.message };
+    return { ok: false, code: "failed", message: error instanceof Error ? error.message : String(error) };
+  }
+  const text = JSON.stringify(answer) as string | undefined;
+  if (text === undefined) return { ok: false, code: "failed", message: "the handler answered with something that is not JSON (undefined or a function)" };
+  return { ok: true, answer: JSON.parse(text) as JsonValue };
+}
+
+/** The caller's side of `answerCall`: the answer, or the `ActorCallError` it stands for. For providers. */
+export function callResult(outcome: ActorCallOutcome): JsonValue {
+  if (outcome.ok) return outcome.answer;
+  throw new ActorCallError(outcome.code, outcome.message);
+}
 
 declare module "@pikit/core" {
   interface AppCapabilities {

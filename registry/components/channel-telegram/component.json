@@ -13,14 +13,14 @@
     "capabilities": [
       "secrets",
       "conversations.registry",
-      "agent.runtime"
+      "agent.runtime",
+      "agent.submissions",
+      "storage.kv"
     ]
   },
   "optional": {
     "capabilities": [
-      "outbound.queue",
-      "agent.submissions",
-      "storage.kv"
+      "outbound.queue"
     ]
   },
   "provides": [],

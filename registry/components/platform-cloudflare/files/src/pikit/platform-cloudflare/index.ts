@@ -26,6 +26,11 @@
  *   - `actor.mailbox` too, so a component in the object can reach another conversation: another key
  *     is an RPC like the Worker's; this object's own key is a local call, which spends no subrequest
  *     and does not re-enter the object. (Its own key is the one whose `idFromName` is this object.)
+ * - **Calls** (`call(key, type, message)`): an RPC to the object's `call`, as `send` is to its
+ *   `deliver`, answered by the handler registered with `actor.inbox`'s `answer`. The object returns an
+ *   outcome (`ActorCallOutcome`: the answer, or a code and a message), never throws one: an RPC keeps
+ *   only an error's message, and the caller rebuilds the `ActorCallError` with its code. A failed RPC
+ *   (the object did not start, the network) is `unreachable`.
  *
  * Durability (K6): a row is deleted only when its handler resolved. An alarm cut by the platform (a
  * deploy, 15 minutes of wall clock, an eviction) is retried by the platform and finds the row still
@@ -37,7 +42,19 @@
  */
 
 import { type AppContext, defineComponent, withAbortSignal } from "@pikit/core";
-import type { ActorInbox, ActorInboxHandler, ActorMailbox, JsonValue, WakeupHandler, Wakeups } from "@pikit/contracts";
+import {
+  type ActorCallHandler,
+  ActorCallError,
+  type ActorCallOutcome,
+  type ActorInbox,
+  type ActorInboxHandler,
+  type ActorMailbox,
+  answerCall,
+  callResult,
+  type JsonValue,
+  type WakeupHandler,
+  type Wakeups,
+} from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import Type from "typebox";
 
@@ -67,10 +84,13 @@ export interface ObjectStorage {
   deleteAlarm(): Promise<void>;
 }
 
-/** What it uses of a `DurableObjectNamespace` whose class has the `deliver` RPC method. */
+/** What it uses of a `DurableObjectNamespace` whose class has the `deliver` and `call` RPC methods. */
 export interface ConversationNamespace {
   idFromName(name: string): unknown;
-  get(id: never): { deliver(type: string, key: string, message: JsonValue): Promise<void> };
+  get(id: never): {
+    deliver(type: string, key: string, message: JsonValue): Promise<void>;
+    call(type: string, key: string, message: JsonValue): Promise<ActorCallOutcome>;
+  };
 }
 
 /** A pending request: its handler runs at or after `time`; `failures` in a row so far. */
@@ -102,6 +122,8 @@ export default defineComponent({
     const { clock, logger } = pikit;
     /** The handler of each message type, registered by the actors' components in their start. */
     const inboxHandlers = new Map<string, ActorInboxHandler>();
+    /** The handler of each call type (`answer`). */
+    const callHandlers = new Map<string, ActorCallHandler>();
     const handlers = new Map<string, WakeupHandler>();
     /** The runs in progress, by name: `at` or `cancel` for a name during its run decides what its outcome does. */
     const inProgress = new Map<string, { touched: boolean }>();
@@ -338,6 +360,27 @@ export default defineComponent({
       await deliver(r, type, key, message);
     };
 
+    /** Runs this App's answer handler for `type`; never rejects: the outcome says what came of it. `stop` waits for it. */
+    const answerHere = (r: Running, type: string, key: string, message: JsonValue): Promise<ActorCallOutcome> => {
+      if (running !== r) return Promise.resolve({ ok: false, code: "unreachable", message: "platform-cloudflare: the conversation object's App is not running" });
+      const handler = callHandlers.get(type);
+      if (handler === undefined) {
+        const known = [...callHandlers.keys()];
+        return Promise.resolve({
+          ok: false,
+          code: "no_handler",
+          message:
+            `platform-cloudflare: no actor.inbox answer handler for the call type "${type}" in the conversation object's App (answered: ${known.length > 0 ? known.join(", ") : "none"}); ` +
+            "install the component that answers it in the default export of pikit.config.ts, or check the type the caller names",
+        });
+      }
+      const answered = answerCall(handler, key, message, r.inbox);
+      const settled = answered.then(() => {});
+      r.inFlight.add(settled);
+      void settled.then(() => r.inFlight.delete(settled));
+      return answered;
+    };
+
     const actorInbox: ActorInbox = {
       handle(type, handler) {
         if (typeof type !== "string" || type === "") throw new TypeError("platform-cloudflare: a message type is a non-empty string, prefixed with the component that handles it");
@@ -348,6 +391,16 @@ export default defineComponent({
         }
         if (inboxHandlers.has(type)) throw new Error(`platform-cloudflare: the message type "${type}" already has a handler; a type has one handler in an app`);
         inboxHandlers.set(type, handler);
+      },
+      answer(type, handler) {
+        if (typeof type !== "string" || type === "") throw new TypeError("platform-cloudflare: a call type is a non-empty string, prefixed with the component that answers it");
+        if (opened().object === undefined) {
+          throw new Error(
+            "platform-cloudflare: actor.inbox exists only in a Durable Object's App, and this is the Worker's: a component that answers calls belongs in the default export of pikit.config.ts.",
+          );
+        }
+        if (callHandlers.has(type)) throw new Error(`platform-cloudflare: the call type "${type}" already has a handler; a type has one answer handler in an app`);
+        callHandlers.set(type, handler);
       },
     };
     pikit.provide("actor.inbox", actorInbox);
@@ -367,6 +420,27 @@ export default defineComponent({
         // RPC: the object's `deliver` resolves once its handler did. `Promise.resolve` adopts the
         // RPC's thenable result.
         return untilCancelled(Promise.resolve(namespace.get(id as never).deliver(type, key, copy)), ctx.abortSignal);
+      },
+      async call(key, type, message, ctx) {
+        const r = running;
+        if (r === undefined) throw new ActorCallError("unreachable", "platform-cloudflare: used while the app is not running; call from start or later");
+        if (typeof key !== "string" || key === "") throw new ActorCallError("invalid", `platform-cloudflare: the key of a "${type}" call must be a non-empty string`);
+        const text = JSON.stringify(message) as string | undefined;
+        if (text === undefined) throw new ActorCallError("invalid", `platform-cloudflare: a "${type}" call's message must be JSON (not undefined or a function)`);
+        const copy = JSON.parse(text) as JsonValue;
+        if (ctx.abortSignal?.aborted) throw new ActorCallError("cancelled", `platform-cloudflare: the "${type}" call was cancelled before it was made`, { cause: ctx.abortSignal.reason });
+        const namespace = namespaceOf(r);
+        const id = namespace.idFromName(key);
+        const outcome =
+          r.object !== undefined && String(id) === r.object.id
+            ? answerHere(r, type, key, copy)
+            : Promise.resolve()
+                .then(() => namespace.get(id as never).call(type, key, copy))
+                .catch((error: unknown): ActorCallOutcome => ({ ok: false, code: "unreachable", message: `platform-cloudflare: the conversation object of "${key}" could not be reached: ${error instanceof Error ? error.message : String(error)}` }));
+        const answered = await untilCancelled(outcome, ctx.abortSignal).catch((reason: unknown) => {
+          throw new ActorCallError("cancelled", `platform-cloudflare: the "${type}" call was cancelled before it was answered`, { cause: reason });
+        });
+        return callResult(answered);
       },
     };
     pikit.provide("actor.mailbox", mailbox);
@@ -403,6 +477,7 @@ export default defineComponent({
         running = r;
         host.object.onAlarm(onAlarm(r));
         host.object.onDeliver(onDeliver(r));
+        host.object.onCall?.((type, key, message) => answerHere(r, type, key, message));
         // A deploy or a reset may have lost the alarm; the handlers are not registered yet, so any row sets it.
         if (rows(storage).length > 0) await arm(r, true);
       },
@@ -417,6 +492,7 @@ export default defineComponent({
         await untilCancelled(pending, ctx.abortSignal).catch(() => {});
         handlers.clear();
         inboxHandlers.clear();
+        callHandlers.clear();
       },
     };
   },
@@ -440,9 +516,9 @@ function copyOf(message: JsonValue, type: string): JsonValue {
 }
 
 /** `work`, or a rejection with `signal`'s reason as soon as it is cancelled. `work` goes on either way. */
-function untilCancelled(work: Promise<void>, signal: AbortSignal | undefined): Promise<void> {
+function untilCancelled<T>(work: Promise<T>, signal: AbortSignal | undefined): Promise<T> {
   if (signal === undefined) return work;
-  return new Promise<void>((resolve, reject) => {
+  return new Promise<T>((resolve, reject) => {
     const abort = () => reject(signal.reason);
     if (signal.aborted) return abort();
     signal.addEventListener("abort", abort, { once: true });

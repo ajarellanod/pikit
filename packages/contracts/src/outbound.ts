@@ -7,7 +7,12 @@
  *   pieces in order, retries, and gives up. `durable` means it survives the process.
  * - A channel attaches its transport to the queue while it runs (`attach` / `detach`). A keyed
  *   capability for transports would be a cycle: the queue would use the channels, and the channels
- *   the queue. Without a queue, a channel sends through its own transport directly, best effort.
+ *   the queue.
+ * - A channel's answers reach either through `startAnswerDelivery` (`delivery.ts`): from
+ *   `agent.submissions`' feed, enqueued when a queue is installed, else sent directly through the
+ *   transport, each piece marked in the channel's `storage.kv` so a crash resends at most the piece in
+ *   flight. The queue adds what the direct path lacks: delivery receipts, and retries that outlive
+ *   the channel's own (an outage longer than the channel's stop).
  *
  * The guarantee is at-least-once. A piece whose send may have reached the platform (the process
  * died during it, a timeout) is sent again as a possible duplicate: an idempotent transport passes the

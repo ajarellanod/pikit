@@ -32,6 +32,14 @@ object, a handler that rejected, the object unreachable, or `ctx` cancelled firs
 the channel does not acknowledge its platform, which delivers again: delivery is at-least-once, so
 handlers recognise a message they already hold.
 
+`call(key, type, message, ctx)` asks the object for an answer, by its `call` RPC: the object runs
+the handler registered with `actor.inbox`'s `answer(type, handler)` and returns an outcome (the
+JSON answer, or a code and a message), which the Worker turns back into the answer or an
+`ActorCallError` with that code: an RPC keeps only an error's message, so the code travels in the
+outcome. A failed RPC is `unreachable`, a cancelled `ctx` is `cancelled`, a handler's own
+`ActorCallError` keeps its code, and anything else it throws is `failed`. This is how the Worker
+reads a conversation's state (a dashboard), which it cannot read from its storage.
+
 It refuses to start when `env.CONVERSATION` (or the binding you configure) is not a Durable Object
 namespace. Its `actor.inbox` and `wakeups` throw there, saying they belong in the object's App.
 
@@ -121,8 +129,8 @@ slice of 60 s while the model thinks:
 | Who | Subrequests |
 |---|---|
 | `runtime-pi.drive`: each model call, and each tool call that fetches or reaches another object | 1 each |
-| `channel-telegram-webhook.deliver`: "typing", renewed every 4 s while a message waits for its run | up to 15 (60 s / 4 s) |
-| `channel-telegram-webhook.deliver`: the answer, once the run ends | 1 per piece (at most 20 per run) |
+| `channel-telegram-webhook.typing`: "typing", renewed every 4 s while a message waits for its run | up to 15 (60 s / 4 s) |
+| `channel-telegram-webhook.answers`: the answer, once the run ends | 1 per piece (at most 20 per run) |
 
 So about 35 remain for the run's model and tool calls on the Free plan: enough for several turns.
 A shorter `sliceMs` gives each alarm fewer renewals and the next alarm 50 of its own. A handler that

@@ -20,6 +20,7 @@
  */
 
 import { type ContextKey, createContextKey } from "@pikit/core";
+import type { ActorCallOutcome } from "./actor.ts";
 import type { JsonValue } from "./json.ts";
 
 export interface WorkersHost {
@@ -41,6 +42,11 @@ export interface WorkersHost {
     onAlarm(handler: () => Promise<void>): void;
     /** The entrypoint calls it when a message is delivered to this object by RPC. */
     onDeliver(handler: (type: string, key: string, message: JsonValue) => Promise<void>): void;
+    /**
+     * The entrypoint calls it when a call is made to this object by RPC (`actor.mailbox.call`); the
+     * outcome crosses back whole. Absent where nothing can call the object (a test's double).
+     */
+    onCall?(handler: (type: string, key: string, message: JsonValue) => Promise<ActorCallOutcome>): void;
   };
 }
 

@@ -184,7 +184,8 @@ test("a second server provider of storage.sql leaves the repository's presets co
 
 test("a second Cloudflare provider of storage.kv leaves cloudflare-minimal composing: it names its storage", () => {
   const kv = openRegistry(DEFAULT_REGISTRY).manifest("storage-kv-sql");
-  const root = repositoryWith([{ ...kv, name: "storage-kv-other", description: "A second storage.kv." }]);
+  // Cloudflare's only: on a server storage-kv-sql stays the one provider, which a chat channel's required storage.kv brings.
+  const root = repositoryWith([{ ...kv, name: "storage-kv-other", description: "A second storage.kv.", targets: ["durable"] }]);
   expect(checkPresets(root)).toEqual([]);
 });
 

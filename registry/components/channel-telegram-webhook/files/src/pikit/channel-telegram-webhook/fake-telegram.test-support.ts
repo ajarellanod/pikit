@@ -57,6 +57,13 @@ export interface FakeTelegram {
   failNextSend?: { code: number; description: string };
   /** Every `sendMessage` fails with this Telegram error while it is set: an outage. `attempts` counts them. */
   failSends?: { code: number; description: string; attempts: number };
+  /** The next sends to a chat fail with a 502, as many as its count: a platform failing for one chat. */
+  failChat: Map<number, number>;
+  /**
+   * The next send to a chat in it reaches the chat (it is in `sent`) but is never answered, until the
+   * request is given up or the server stops: a send cut after it left.
+   */
+  hangChat: Set<number>;
   /** Updates Telegram still holds for `getUpdates` (not confirmed by an offset). */
   pending(): TelegramUpdate[];
   /**
@@ -121,6 +128,8 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
   /** The long poll in progress; a new `getUpdates` ends it with 409, as Telegram does. */
   let polling: ((conflict: Response) => void) | undefined;
   const sentWaiters = new Set<() => void>();
+  /** The sends left hanging (`hangChat`): the server's stop ends them. */
+  const hung = new Set<() => void>();
 
   const fake: FakeTelegram = {
     url: shared.url,
@@ -134,6 +143,8 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
     webhooksSet: 0,
     webhookInfoAsked: 0,
     rejectHtml: false,
+    failChat: new Map(),
+    hangChat: new Set(),
     message(user, text, options = {}) {
       const from: TelegramUser = { is_bot: false, first_name: "Someone", ...user };
       const chat = options.chat === "group" ? { id: -1000 - user.id, type: "group" as const, title: "A group" } : { id: user.id, type: "private" as const };
@@ -216,6 +227,22 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
         fake.actions.push({ chatId: Number(body.chat_id), action: String(body.action) });
         return ok(true);
       case "sendMessage": {
+        const chatId = Number(body.chat_id);
+        const failing = fake.failChat.get(chatId) ?? 0;
+        if (failing > 0) {
+          fake.failChat.set(chatId, failing - 1);
+          return fail(502, "Bad Gateway");
+        }
+        if (fake.hangChat.delete(chatId)) {
+          fake.sent.push({ chatId, text: String(body.text), html: body.parse_mode === "HTML" });
+          for (const resolve of sentWaiters) resolve();
+          sentWaiters.clear();
+          return await new Promise<Response>((resolve) => {
+            const end = () => resolve(fail(504, "Gateway Timeout"));
+            hung.add(end);
+            request.signal.addEventListener("abort", end, { once: true });
+          });
+        }
         if (fake.failSends !== undefined) {
           fake.failSends.attempts++;
           return fail(fake.failSends.code, fake.failSends.description);
@@ -263,5 +290,12 @@ function fakeBot(token: string, bot: TelegramUser, shared: Shared): { fake: Fake
         return fail(404, `Not Found: method ${method}`);
     }
   };
-  return { fake, handle, endPoll: () => polling?.(fail(409, "Conflict: server stopped")) };
+  return {
+    fake,
+    handle,
+    endPoll: () => {
+      polling?.(fail(409, "Conflict: server stopped"));
+      for (const end of hung) end();
+    },
+  };
 }

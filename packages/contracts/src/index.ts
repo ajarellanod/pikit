@@ -1,8 +1,10 @@
 // Public surface of @pikit/contracts (SPEC §3): the vocabulary components share. Types, identities,
-// names of events and pipelines, capability interfaces, one protocol function (`admitInbound`), the
-// check of what the contracts take as a JSON object (`isJsonObject`) and the grammar of `http.route`
-// keys (`parseHttpRouteKey`, `matchesHttpRoute`), so that no provider has its own.
-// No implementation, no policy. Each contract has a stability level (SPEC K8); the capabilities'
+// names of events and pipelines, capability interfaces, two protocol functions (`admitInbound` in,
+// `startAnswerDelivery` out: the paths every channel must get right, written and tested once), the
+// check of what the contracts take as a JSON object (`isJsonObject`), the grammar of `http.route`
+// keys (`parseHttpRouteKey`, `matchesHttpRoute`) and the envelope of an actor's call (`answerCall`,
+// `callResult`), so that no provider has its own. No policy: what a protocol waits, retries and says
+// is its caller's, passed in. Each contract has a stability level (SPEC K8); the capabilities'
 // levels are in the catalogue (`packages/cli/src/registry/capabilities.ts`). What only Cloudflare
 // components use (`WORKERS_HOST`) is in `@pikit/contracts/cloudflare`, not here.
 
@@ -39,7 +41,8 @@ export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
 export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";
 export type { Feed, FeedItem, FeedPage } from "./feed.ts";
-export type { ActorInbox, ActorInboxHandler, ActorMailbox } from "./actor.ts";
+export type { ActorCallErrorCode, ActorCallHandler, ActorCallOutcome, ActorInbox, ActorInboxHandler, ActorMailbox } from "./actor.ts";
+export { ActorCallError, answerCall, callResult } from "./actor.ts";
 export type { WakeupHandler, Wakeups } from "./wakeups.ts";
 export type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "./submissions.ts";
 export type {
@@ -51,3 +54,5 @@ export type {
   OutboundQueue,
 } from "./outbound.ts";
 export { answerKey, DeliveryError } from "./outbound.ts";
+export type { AnswerDelivery, AnswerDeliveryOptions, DeliveryPolicy } from "./delivery.ts";
+export { startAnswerDelivery } from "./delivery.ts";

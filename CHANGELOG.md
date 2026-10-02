@@ -25,14 +25,20 @@ there.
   (read-only: `pending`, `get` and the `answers` feed), `agent.state`,
   `agent.observe` (conversations with agent, busy state and cost; a transcript; a live event stream;
   usage), `agent.tool`, `agent.definition`.
-- Inbound and outbound: `admitInbound` (`inbound.normalize`, `route.resolve`), `conversations.registry`
-  (a key's runtime conversation, resolve and reset), `outbound.queue` with `ChannelTransport` and
-  `DeliveryError`, `Feed` (what must not be missed, read with a cursor, K3).
+- Inbound and outbound: `admitInbound` (`inbound.normalize`, `route.resolve`) and its outbound
+  counterpart `startAnswerDelivery` (a channel's answers from the `answers` feed and its own cursor,
+  one ordered lane per conversation, retries with the channel's own waits, idempotency keys, a crash
+  resends at most the piece in flight, marked; on `wakeups` in slices or a timer in the process),
+  `conversations.registry` (a key's runtime conversation, resolve and reset), `outbound.queue` with
+  `ChannelTransport` and `DeliveryError`, `Feed` (what must not be missed, read with a cursor, K3).
 - Platform: `http.route` (fetch handlers by `"METHOD /path"`, parameters and prefix keys such as
   `GET /admin/*`), `admin.auth` (whether a request is an operator's), `secrets`, `storage.sql`,
-  `storage.kv`, `actor.mailbox` / `actor.inbox` (C2), `wakeups` (C3), and `WORKERS_HOST` in
+  `storage.kv`, `actor.mailbox` / `actor.inbox` (C2: `send`, and `call` answered by `answer`, failing
+  with a coded `ActorCallError`), `wakeups` (C3), and `WORKERS_HOST` in
   `@pikit/contracts/cloudflare` (C5).
-- The channel suite checks any channel end to end; the convergence suite checks crash recovery.
+- The channel suite checks any channel end to end, durability included (an answer settled while the
+  channel was stopped, a lost event, retries in order, a cut send resent at most once, independent
+  lanes); the convergence suite checks crash recovery.
   Contracts still without a suite are listed in `features/building-components.md`.
 
 ### Pi adapter (`@pikit/pi-adapter`, the only package that imports Pi)
@@ -57,7 +63,8 @@ there.
   model for tests only), `credentials-file`.
 - Channels: `channel-http` (server), `channel-telegram` (long polling, server),
   `channel-telegram-webhook` (Cloudflare: a Worker half and an object half, bot password and `/login`,
-  self-registering webhook). Routing: `router-basic`, `router-rules`. Delivery: `outbound-durable`.
+  self-registering webhook); both deliver through `startAnswerDelivery`. Routing: `router-basic`,
+  `router-rules`. Delivery: `outbound-durable`.
 - Conversations and storage: `conversations-file`, `conversations-kv`, `storage-sqlite`, `storage-do`,
   `storage-kv-sql`, `secrets-env`, `secrets-cloudflare`, `mailbox-local`, `wakeups-timers`,
   `platform-cloudflare` (mailbox, inbox and wakeups over one alarm).
