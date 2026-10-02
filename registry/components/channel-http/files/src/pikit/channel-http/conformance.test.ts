@@ -4,7 +4,9 @@
  * halt, deny or move messages; this fixture speaks HTTP. It calls `POST /v1/messages` as a server
  * would, with no socket: what a sender is told is each response (status and body), and a handler
  * that throws is the `500` a server answers. Delivering an id again is a client retrying with the
- * same `messageId`.
+ * same `messageId`. Its answers are in its responses (`answers: "in-response"`): after a restart, a
+ * client reads an answer that ended meanwhile by sending the message again, which `agent.submissions`
+ * (the suite's) answers with the run's outcome.
  */
 
 import { test } from "bun:test";
@@ -53,6 +55,6 @@ for (const c of createChannelConformance(() => {
     },
     told: (conversation) => told.get(conversation) ?? [],
   };
-})) {
+}, { answers: "in-response" })) {
   test(`${c.group}: ${c.name}`, () => c.run(), 15_000);
 }

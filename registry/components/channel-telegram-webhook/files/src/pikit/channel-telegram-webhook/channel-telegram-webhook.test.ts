@@ -567,7 +567,7 @@ test("a send Telegram refused is tried again later, not marked ↻, and the curs
 
   await s.telegram.write(OWNER, "hello");
   await until(() => logger.lines.some((line) => line.includes("delivering an answer failed")), "the failure");
-  expect(await s.kv.namespace(NAME).get("answers-cursor")).toBe("");
+  expect(await s.kv.namespace(NAME).get("answers-cursor")).toBeUndefined();
 
   expect(await s.telegram.sentCount(1, 5_000)).toEqual([{ chatId: OWNER.id, text: "answer: <b>hello</b>", html: true }]);
 });

@@ -129,8 +129,8 @@ slice of 60 s while the model thinks:
 | Who | Subrequests |
 |---|---|
 | `runtime-pi.drive`: each model call, and each tool call that fetches or reaches another object | 1 each |
-| `channel-telegram-webhook.deliver`: "typing", renewed every 4 s while a message waits for its run | up to 15 (60 s / 4 s) |
-| `channel-telegram-webhook.deliver`: the answer, once the run ends | 1 per piece (at most 20 per run) |
+| `channel-telegram-webhook.typing`: "typing", renewed every 4 s while a message waits for its run | up to 15 (60 s / 4 s) |
+| `channel-telegram-webhook.answers`: the answer, once the run ends | 1 per piece (at most 20 per run) |
 
 So about 35 remain for the run's model and tool calls on the Free plan: enough for several turns.
 A shorter `sliceMs` gives each alarm fewer renewals and the next alarm 50 of its own. A handler that

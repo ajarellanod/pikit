@@ -9,8 +9,9 @@ pikit add storage-sqlite      # the database it keeps its records in
 pikit add outbound-durable
 ```
 
-A channel that supports it (`channel-telegram`) uses it as soon as it is installed; remove it and
-the channel sends directly again, best effort.
+A channel that delivers through `startAnswerDelivery` (`channel-telegram`, `channel-telegram-webhook`)
+uses it as soon as it is installed; remove it and the channel sends directly again, still from its
+cursor and with each piece marked, but with no receipts and no retries past the channel's own.
 
 ## What it does
 

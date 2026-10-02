@@ -23,14 +23,14 @@ import { type AppContext } from "@pikit/core";
 import { admitInbound, type AgentRuntime, type ConversationRegistry, type InboundMessage } from "@pikit/contracts";
 import type { TelegramMessage, TelegramUpdate, TelegramUser } from "./api.ts";
 import { conversationKeyOf } from "./account.ts";
-import type { Delivery } from "./replies.ts";
+import type { Replies } from "./replies.ts";
 
 export interface InboundDeps {
   /** The bot's channel instance: `telegram`, or `telegram:<account>`. */
   instance: string;
   bot: TelegramUser;
   allowed: ReadonlySet<number>;
-  delivery: Delivery;
+  delivery: Replies;
   conversations: ConversationRegistry;
   runtime: AgentRuntime;
   /** A context of the channel's own, never `start`'s. */

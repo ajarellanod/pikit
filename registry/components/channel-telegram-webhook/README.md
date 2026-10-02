@@ -186,14 +186,16 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
 ### Delivering answers
 
 Nothing waits for a run in memory: an object keeps running only while an event is in progress (C4).
-Answers are delivered by the wakeup `channel-telegram-webhook.deliver`, which the object's half
-registers with `wakeups.handle` at start, and asks for at every start, whenever a message arrives, and
-whenever a run of its conversations ends.
+Answers are delivered by `startAnswerDelivery` (`@pikit/contracts`), the one delivery every chat
+channel shares, run by the wakeup `channel-telegram-webhook.answers`: at every start, whenever a
+message arrives, and whenever a run of its conversations ends. The channel gives it only what is
+Telegram's: its bots' transports, which bot a conversation is, its words (`replyText`) and its waits
+(`DELIVERY` in `index.ts`).
 
 - It reads every run's outcome from `agent.submissions`' `answers` feed, from a cursor it keeps in
   `storage.kv` (the key `answers-cursor` of its namespace, `channel-telegram-webhook`). The cursor
-  moves only past answers delivered. An answer that ended while no wakeup ran (an eviction, a
-  restart, a deploy) is delivered at the next one.
+  moves only past answers delivered. An answer that ended while nothing ran (an eviction, a restart,
+  a deploy), or whose event was lost, is delivered at the next run.
 - Without `outbound.queue`, each piece is marked in `storage.kv`, `sending` before it goes and `sent`
   after. A piece found `sending` (the object died during the send, or it timed out) is sent again
   starting with `↻ `, since Telegram cannot tell a repeated send apart; one Telegram refused outright
@@ -202,12 +204,13 @@ whenever a run of its conversations ends.
 - A failure waits: Telegram's `retry_after` for a 429; 1 s, 5 s, 30 s, then every minute otherwise,
   logged as an error from the 3rd in a row. A permanent refusal (the user blocked the bot) is logged
   and the answer given up.
-- Answers go in the feed's order, so one that cannot be delivered holds up the ones after it. On
-  Cloudflare each object owns one conversation, so it holds up only its own chat; with both halves in
-  one App on a server, it holds up every chat.
+- Each conversation's answers go in the feed's order, so one that cannot be delivered holds up the
+  ones after it in its chat only; other chats go on (with both halves in one App on a server, up to
+  200 answers past a stuck one).
 - One run stops at its slice's deadline or after 20 pieces, and asks to run again at once.
-- The first time it opens its cursor, it starts at the feed's end: answers already there ended before
-  the channel was installed.
+- "typing…" is its own wakeup, `channel-telegram-webhook.typing` (`typing.ts`): every 4 s while a
+  message of one of its chats waits for its run (`agent.submissions`' `pending`), for at most 10
+  minutes.
 
 It refuses to start: the Worker's half without a token or a usable webhook secret, with an allowed
 users list that is not ids, or with a password shorter than 8 characters; the object's half without
@@ -372,7 +375,10 @@ secret: no bot, token or network needed. Only tests import it.
   with a password, a login and its redelivery, an allowed chat's `/login`, wrong passwords and the
   cool-down, a login kept across restarts and after the password is removed, and logged out by a new
   password.
-- `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`.
+- `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
+  channel does with a message, and what comes with durability (an answer that ended while stopped or
+  whose event was lost, delivered once; a failed send tried again in order; a send cut mid-flight
+  resent once, marked; one chat's failures holding up no other).
 - `configure.test.ts` covers the setup: a checked token, the generated secret, allowing whoever
   messages the bot, a bot that already has a webhook, the same without a terminal, and the password:
   offered on a first setup, checked and saved.
