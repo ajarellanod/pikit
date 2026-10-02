@@ -1,84 +1,73 @@
 /**
- * The `agent.runtime` conformance fixture on Pi, on a server. Sessions are in a temporary directory
- * (Pi's JSONL files, or the SQL store on a SQLite file: `sessions`), so they outlive a worker as a
- * real store does, and `interrupted()` kills a real process mid-run (SIGKILL) for the next worker to
- * resume. The fixture itself is `createRuntimeFixture` (`runtime-fixture.ts`, neutral); this file
- * gives it records on disk and a process to kill.
+ * The `agent.runtime` conformance fixture on Pi, on a server: the records are a SQLite file in a
+ * temporary directory (what storage-sqlite provides), so they outlive a worker as a real database does.
+ * The fixture itself is `createRuntimeFixture` (`runtime-fixture.ts`, neutral); this file gives it a
+ * file. And `sqliteStorage`, a `storage.sql` for tests, on a file or in memory.
  */
 
-import { spawn } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createInterface } from "node:readline";
-import { fileURLToPath } from "node:url";
-import { BACKGROUND_CONTEXT, type ComponentDefinition, defineComponent } from "@pikit/core";
+import { type ComponentDefinition, defineComponent } from "@pikit/core";
+import type { SqlDatabase } from "@pikit/contracts";
 import type { AgentRuntimeFixture } from "@pikit/contracts/testing";
-import { createRuntimeFixture, type PiRuntimeUnderTest } from "./runtime-fixture.ts";
-import { type SessionsKind, sessionsAt } from "./stores.ts";
+import { createRuntimeFixture, testComponents as neutralComponents, type TestComponents } from "./runtime-fixture.ts";
+import { openSqliteDatabase, type SqliteDatabase } from "./sqlite.ts";
 
-const WORKER = fileURLToPath(new URL("./interrupted-worker.ts", import.meta.url));
-
-export interface PiRuntimeFixtureOptions {
-  /**
-   * Where sessions live: Pi's JSONL files (the default), or `@pikit/pi-adapter/sql`'s store on a
-   * SQLite file held to a Durable Object's limits (what `sessions-sql` provides). Killed workers use
-   * the same.
-   */
-  sessions?: SessionsKind;
-}
-
-export function createPiRuntimeFixture(
-  runtime: (underTest: PiRuntimeUnderTest) => ComponentDefinition[],
-  options: PiRuntimeFixtureOptions = {},
-): AgentRuntimeFixture {
+export function createPiRuntimeFixture(runtime: ComponentDefinition[]): AgentRuntimeFixture {
   const root = mkdtempSync(join(tmpdir(), "pikit-pi-"));
-  const kind = options.sessions ?? "jsonl";
-  const store = sessionsAt(root, kind);
-  const sessions = store.store;
-
+  const path = join(root, "pikit.db");
   return createRuntimeFixture(runtime, {
-    // The store is usable once its tables exist: what uses it starts after them.
-    components: [
-      defineComponent({
-        name: "sessions-fixture",
-        setup(pikit) {
-          pikit.provide("sessions.store", sessions);
-          return { start: () => store.ready };
-        },
-      }),
-    ],
-    async createSession() {
-      await store.ready;
-      const session = await sessions.create({ cwd: root }, BACKGROUND_CONTEXT);
-      // The runtime opens it again from the store: one open Session per process at a time.
-      await session.close(BACKGROUND_CONTEXT);
-      return session.metadata.id;
-    },
-    interrupt: (sessionId, requestId) => killMidRun(root, sessionId, requestId, "never", kind),
-    async dispose() {
-      await store.close();
-      rmSync(root, { recursive: true, force: true });
-    },
+    components: [sqliteStorage(path)],
+    open: async () => openSqliteDatabase(path),
+    dispose: async () => rmSync(root, { recursive: true, force: true }),
   });
 }
 
 /**
- * Run `hold` in a separate process over the sessions in `root` (JSONL files by default, or the SQL
- * store's database there), and SIGKILL it once the tool runs. The session is left with an open run
- * whose tool call has no result.
+ * `storage.sql` for tests, as storage-sqlite provides it: over the SQLite file at `path`, opened at
+ * start and closed at stop, so apps one after the other share what it holds. Without `path`, one
+ * database in memory, open from the first start on and never closed: every app the component is in
+ * shares it, as a restart over a database would.
  */
-export async function killMidRun(root: string, sessionId: string, requestId: string, replay: "safe" | "never", sessions: SessionsKind = "jsonl"): Promise<void> {
-  const worker = spawn(process.execPath, [WORKER, root, sessionId, requestId, replay, sessions], { stdio: ["ignore", "pipe", "inherit"] });
-  const exited = new Promise((resolve) => worker.once("exit", resolve));
-  let held = false;
-  for await (const line of createInterface({ input: worker.stdout })) {
-    if (line === "held") {
-      held = true;
-      break;
-    }
-  }
-  worker.kill("SIGKILL");
-  await exited;
-  if (!held) throw new Error("the interrupted worker died before its run reached the tool");
+export function sqliteStorage(path?: string): ComponentDefinition {
+  let memory: SqliteDatabase | undefined;
+  return defineComponent({
+    name: "storage-test",
+    setup(pikit) {
+      let open: SqliteDatabase | undefined;
+      const current = (): SqlDatabase => {
+        if (open === undefined) throw new Error("storage-test: storage.sql used while the app is not running");
+        return open.database;
+      };
+      pikit.provide("storage.sql", {
+        query: (sql, params) => current().query(sql, params),
+        run: (sql, params) => current().run(sql, params),
+        transaction: (work) => current().transaction(work),
+      });
+      return {
+        start() {
+          open = path === undefined ? (memory ??= openSqliteDatabase(":memory:")) : openSqliteDatabase(path);
+        },
+        async stop() {
+          const closing = open;
+          open = undefined;
+          if (path !== undefined) await closing?.close();
+        },
+      };
+    },
+  });
+}
+
+/** What a runtime uses, for tests on a server: `testComponents` (neutral) and `storage.sql` in memory. */
+export interface ServerTestComponents extends TestComponents {
+  storage: ComponentDefinition;
+}
+
+/**
+ * `testComponents` with `storage`: a `storage.sql` in memory (`sqliteStorage()`), which runtime-pi
+ * keeps its conversations in.
+ */
+export function testComponents(options: Parameters<typeof neutralComponents>[0] = {}): ServerTestComponents {
+  return { ...neutralComponents(options), storage: sqliteStorage() };
 }

@@ -1,5 +1,5 @@
 /**
- * The `workspace` suite run against its simplest double: Pi's `NodeExecutionEnv` per agent, in a
+ * The `workspace` suite run against its simplest double: pi-durable's `NodeExecutionEnv` per agent, in a
  * directory of its own. `workspace-local` runs it against the real provider.
  */
 
@@ -7,8 +7,8 @@ import { test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { ExecutionEnv } from "@earendil-works/pi-agent-core";
-import { NodeExecutionEnv } from "@earendil-works/pi-agent-core/node";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import { NodeExecutionEnv } from "@earendil-works/pi-durable/env/node";
 import { createWorkspaceConformance } from "./workspace.ts";
 
 for (const c of createWorkspaceConformance(() => {

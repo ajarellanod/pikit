@@ -2,32 +2,24 @@
  * Pi's exact types for the contracts' opaque agent payloads and for the capabilities whose contract
  * is Pi's own (a contract whose type is Pi's lives here). Importing `@pikit/pi-adapter` anywhere in
  * a project makes them precise everywhere, by declaration merging, as `AppEvents` is extended.
+ *
+ * Pi is pi-durable 1.0 and pi-ai 1.0: an agent's tool is pi-durable's `ToolRegistration`
+ * (`defineTool`), the environment its tools work on is pi-durable's `ExecutionEnv`, and messages and
+ * usage are pi-ai's.
  */
 
-import type { AgentHarnessTool, AgentMessage, Context, ExecutionEnv, SessionMetadata, SessionRepo } from "@earendil-works/pi-agent-core";
-import type { CredentialStore, Provider, Usage } from "@earendil-works/pi-ai";
+import type { ToolRegistration } from "@earendil-works/pi-durable";
+import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
+import type { CredentialStore } from "@earendil-works/pi-ai";
+import type { Provider } from "@earendil-works/pi-ai/models";
 import type { Context as PikitContext } from "@pikit/core";
 import type { ConversationRef } from "@pikit/contracts";
+import type { DurableMessage, DurableUsage } from "./result.ts";
 
 /**
- * Any `SessionRepo`: JSONL, memory, SQLite. Their metadata and options differ; the adapter only
- * lists, opens and creates, so it accepts them all.
- */
-// biome-ignore lint/suspicious/noExplicitAny: the repo's metadata type is the store's own
-export interface SessionStore extends SessionRepo<any, any, any> {
-  /**
-   * The metadata `open` needs for the session `id`, or `undefined` when there is none. Pi's repos
-   * open a session from its metadata and can only find it by listing every session; a store that can
-   * look one up by id (an index, a SQL `WHERE id = ?`) offers `find`, and the runtime uses it for
-   * every conversation it opens. Optional: without it, the runtime lists.
-   */
-  find?(id: string, context: Context): Promise<SessionMetadata | undefined>;
-}
-
-/**
- * The `workspace` capability: where an agent's tools work. The tool components ask it for
- * the workspace of the conversation a run belongs to (`CONVERSATION` in the run's context); without a
- * provider they work on `execution`, as every agent did before.
+ * The `workspace` capability: where an agent's tools work. The runtime asks it for the workspace of
+ * the conversation a tool call belongs to (`harnessEnv`); without a provider tools work on
+ * `execution`, as every agent did before.
  *
  * Built so far: `resolve` and `env`. `ref` (the `WorkspaceRef` kept in the conversation registry),
  * `checkpoint` and `release` are `[planned]` with the providers that need them (snapshots, git).
@@ -43,47 +35,43 @@ export interface WorkspaceProvider {
 
 export interface Workspace {
   /**
-   * Pi's `ExecutionEnv`: files and shell. A provider without a real shell answers `exec` with
-   * `shell_unavailable`, and Pi's `bash` then fails every call: do not give `bash` to its agents.
+   * pi-durable's `ExecutionEnv`: files and shell. A provider without a real shell answers `exec` with
+   * `shell_unavailable`, and `bash` then fails every call: do not give `bash` to its agents.
    */
   env: ExecutionEnv;
 }
 
 declare module "@pikit/contracts" {
   interface AgentPayloads {
-    message: AgentMessage;
-    // The tool context (Pi's own tools take `{ env }`) is decided with the tool-* components.
-    // biome-ignore lint/suspicious/noExplicitAny: see above
-    tool: AgentHarnessTool<any>;
-    usage: Usage;
+    message: DurableMessage;
+    tool: ToolRegistration;
+    usage: DurableUsage;
   }
 }
 
 declare module "@pikit/core" {
   interface AppCapabilities {
-    /** Pi's `SessionRepo`: where conversations' sessions live. */
-    "sessions.store": SessionStore;
     /**
      * pi-ai's `CredentialStore`: the credentials the model providers use, stored per provider id.
-     * Tokens that Pi refreshes are written back through it. Without it, providers read only their
+     * Tokens that pi-ai refreshes are written back through it. Without it, providers read only their
      * environment variables (`ANTHROPIC_API_KEY`).
      */
     "model.credentials": CredentialStore;
     /**
-     * Pi's `ExecutionEnv`: the filesystem the agent's tools work on. Its `exec` may answer
+     * pi-durable's `ExecutionEnv`: the filesystem the agent's tools work on. Its `exec` may answer
      * `shell_unavailable`.
      */
     execution: ExecutionEnv;
     /** The same contract, provided only when `exec` really runs commands. Shell tools require it. */
     "execution.shell": ExecutionEnv;
     /**
-     * Where each agent's tools work: the file and shell tools resolve it per run, from the
-     * run's conversation. Optional for them: without it they work on `execution`.
+     * Where each agent's tools work: the runtime resolves it per tool call, from the call's
+     * conversation. Optional: without it tools work on `execution`.
      */
     workspace: WorkspaceProvider;
   }
   interface AppKeyedCapabilities {
-    /** One pi-ai model provider per key (its id): `anthropic`, `openai`, `faux` in tests. */
+    /** One pi-ai model provider per key (its id): `anthropic`, `openrouter`, `faux` in tests. */
     "model.provider": Provider;
   }
 }

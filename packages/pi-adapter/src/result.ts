@@ -1,45 +1,59 @@
 /**
- * A run's terminal record (what Pi's `run_end` announces) as the core's `AgentResult`.
+ * The settled pi-durable input submissions of one run as the core's `AgentResult`.
+ *
+ * The runtime admits every message as a follow-up, and pi-durable places the follow-ups queued while a
+ * run goes all at once, as the inputs of the next run: they settle together, and are one result whose
+ * `requestId` is the first and whose `requestIds` lists them all, in order. Its transcript is the
+ * entries from the first input's `pi.user` entry to the answer (`done`), or, unanswered, to the entry
+ * before the next `pi.user` that is not one of its inputs (the next run's).
  */
 
-import type { AgentLane, AgentMessage, Context, Entry, OperationResultRecord } from "@earendil-works/pi-agent-core";
-import type { Usage } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/chord";
+import type { Conversation, EntryId, EntryRecord, SubmissionRecord } from "@earendil-works/pi-durable";
 import type { AgentResult, ConversationRef, RunSettlement } from "@pikit/contracts";
-import { requestIdOf } from "./inbound.ts";
 
-export async function toResult(
-  lane: AgentLane,
-  conversation: ConversationRef,
-  record: OperationResultRecord,
-  ctx: Context,
-): Promise<AgentResult> {
-  const entries = await runEntries(lane, record, ctx);
-  const messages = entries.flatMap((entry) => (entry.type === "message" ? [entry.message] : []));
-  const base = {
-    conversation,
-    requestId: record.operationId,
-    requestIds: requestsOf(record.operationId, messages),
-    messages,
-    usage: runUsage(entries),
-  };
-  if (record.status === "completed") {
-    const text = finalText(messages);
-    return { ...base, kind: "completed", ...(text !== undefined && { text }) };
-  }
-  if (record.status === "aborted") return { ...base, kind: "aborted" };
-  // `declined` belongs to compactions and navigations; a run that reports it did not answer.
-  const error = record.error ?? { code: record.status, message: `run ended as ${record.status}` };
-  return { ...base, kind: "failed", error: { code: error.code, message: error.message } };
+/** A pi-ai 1.0 message, as pi-durable entries carry them. */
+export type DurableMessage = NonNullable<EntryRecord["model"]>[number];
+/** pi-ai 1.0's `Usage`. */
+export type DurableUsage = Extract<DurableMessage, { role: "assistant" }>["usage"];
+
+/** A settled input submission. */
+export type SettledInput = Extract<SubmissionRecord, { type: "input"; status: "done" | "unanswered" }>;
+
+export function isSettledInput(record: SubmissionRecord): record is SettledInput {
+  return record.type === "input" && (record.status === "done" || record.status === "unanswered");
 }
 
-/**
- * What `agent.submissions` keeps of a result: everything but the transcript and the usage, which stay
- * in the session. The final text is what a channel delivers after a restart.
- */
+const PAGE = 100;
+
+/** `records`: the inputs one run took, oldest first (or one input withdrawn while queued). */
+export async function toResult(conversation: Conversation, ref: ConversationRef, records: readonly SettledInput[], ctx: Context): Promise<AgentResult> {
+  const [record] = records;
+  if (record === undefined) throw new Error("toResult: a run takes at least one input");
+  const requestIds = records.map((input) => input.requestId ?? String(input.id));
+  const entries = await runEntries(conversation, records, ctx);
+  const messages = entries.flatMap((entry) => entry.model ?? []).filter((message) => message.role !== "system");
+  const base = {
+    conversation: ref,
+    requestId: requestIds[0] as string,
+    requestIds,
+    messages: messages as AgentResult["messages"],
+    usage: runUsage(messages),
+  };
+  if (record.status === "done") {
+    const text = answerText(entries, record.answer);
+    return { ...base, kind: "completed", ...(text !== undefined && { text }) };
+  }
+  if (record.reason === "aborted") return { ...base, kind: "aborted" };
+  const message = typeof record.detail === "string" ? record.detail : `the run ended unanswered (${record.reason})`;
+  return { ...base, kind: "failed", error: { code: record.reason, message } };
+}
+
+/** What `agent.submissions` keeps of a result: everything but the transcript and the usage. */
 export function settlementOf(result: AgentResult): RunSettlement {
   const { conversation, requestId, requestIds, kind, text, error } = result;
   return {
-    conversation: { key: conversation.key, agent: conversation.agent, sessionId: conversation.sessionId },
+    conversation: { key: conversation.key, agent: conversation.agent, conversationId: conversation.conversationId },
     requestId,
     requestIds,
     kind,
@@ -48,59 +62,56 @@ export function settlementOf(result: AgentResult): RunSettlement {
   };
 }
 
-/**
- * The entries the run added, oldest first: its branch from `tipId` back to `fromTipId`, excluded. Pi
- * walks a branch from `start` towards the root only `newestFirst` (`oldestFirst` starts at the root),
- * and includes the `stopAtId` entry; checked on 0.99.0.
- */
-async function runEntries(lane: AgentLane, record: OperationResultRecord, ctx: Context): Promise<Entry[]> {
-  if (record.tipId === null || record.tipId === record.fromTipId) return [];
-  const entries = await lane.findEntries(
-    { start: record.tipId, ...(record.fromTipId !== null && { stopAtId: record.fromTipId }), order: "newestFirst" },
-    ctx,
-  );
-  return entries.reverse().filter((entry) => entry.id !== record.fromTipId);
+/** The run's entries, oldest first; none for an input that was never placed (withdrawn while queued). */
+async function runEntries(conversation: Conversation, records: readonly SettledInput[], ctx: Context): Promise<EntryRecord[]> {
+  const inputs = new Set(records.flatMap((record) => (record.entry === undefined ? [] : [record.entry])));
+  if (inputs.size === 0) return [];
+  const from = Math.min(...inputs) as EntryId;
+  const record = records[0] as SettledInput;
+  const to = record.status === "done" ? record.answer : undefined;
+  const newestFirst: EntryRecord[] = [];
+  let cursor: Parameters<Conversation["entries"]>[2];
+  do {
+    const page = await conversation.entries({ minEntryId: from, ...(to !== undefined && { maxEntryId: to }) }, PAGE, cursor, ctx);
+    newestFirst.push(...page.items);
+    cursor = page.next;
+  } while (cursor !== undefined);
+  const entries = newestFirst.reverse();
+  if (to !== undefined) return entries;
+  // Unanswered: the run ended at its last entry before the next run's input.
+  const next = entries.findIndex((entry) => entry.kind === "pi.user" && !inputs.has(entry.id));
+  return next === -1 ? entries : entries.slice(0, next);
+}
+
+function answerText(entries: readonly EntryRecord[], answer: EntryId): string | undefined {
+  const message = entries.find((entry) => entry.id === answer)?.model?.find((m) => m.role === "assistant");
+  if (message?.role !== "assistant") return undefined;
+  return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
 }
 
 /**
- * What the run cost: the sum of the usage Pi recorded on the run's own entries, in Pi's numbers
- * (pi-ai prices each response; nothing is priced here). That is every model response, failed
- * attempts before a retry included, every tool result that reports usage, and a compaction or branch
- * summary made inside the run. They are the rows of Pi's usage ledger that point to an entry.
- *
- * Pi 0.99.0 does not tie its other ledger rows to an operation (a hook's own model request, an
- * extension's `recordUsage` without an entry), so a run cannot claim them; the session's totals
- * (`getStats`) still count them. Pi's durable runtime keeps a completed attempt's usage on its entry
- * (features/pi-durable-migration.md), so this reading survives the move. A run that called no
- * model reports zero.
+ * What the run cost: the usage of its model responses (failed attempts included) and of its tool
+ * results that report one. These are the amounts pi-durable adds to the conversation's `pi.usage`;
+ * a compaction's summarization is counted there and has no entry of the run.
  */
-export function runUsage(entries: readonly Entry[]): Usage {
-  let total = ZERO;
-  for (const entry of entries) {
-    const usage = entry.type === "message" ? messageUsage(entry.message) : "usage" in entry ? entry.usage : undefined;
+export function runUsage(messages: readonly DurableMessage[]): DurableUsage {
+  let total: DurableUsage = {
+    input: 0,
+    output: 0,
+    cacheRead: 0,
+    cacheWrite: 0,
+    totalTokens: 0,
+    cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+  };
+  for (const message of messages) {
+    const usage = message.role === "assistant" || message.role === "toolResult" ? message.usage : undefined;
     if (usage !== undefined) total = addUsage(total, usage);
   }
   return total;
 }
 
-function messageUsage(message: AgentMessage): Usage | undefined {
-  return (message.role === "assistant" || message.role === "toolResult") ? message.usage : undefined;
-}
-
-const ZERO: Usage = {
-  input: 0,
-  output: 0,
-  cacheRead: 0,
-  cacheWrite: 0,
-  totalTokens: 0,
-  cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
-};
-
-/**
- * Pi's own `addUsage` (`harness/utils/usage.js`, which 0.99.0 does not export): the optional fields
- * appear only when one side reports them, so "not reported" stays distinct from zero.
- */
-function addUsage(left: Usage, right: Usage): Usage {
+/** pi-durable's `addUsage`: the optional counters appear once either side reports them. */
+function addUsage(left: DurableUsage, right: DurableUsage): DurableUsage {
   return {
     input: left.input + right.input,
     output: left.output + right.output,
@@ -109,9 +120,7 @@ function addUsage(left: Usage, right: Usage): Usage {
     ...((left.cacheWrite1h !== undefined || right.cacheWrite1h !== undefined) && {
       cacheWrite1h: (left.cacheWrite1h ?? 0) + (right.cacheWrite1h ?? 0),
     }),
-    ...((left.reasoning !== undefined || right.reasoning !== undefined) && {
-      reasoning: (left.reasoning ?? 0) + (right.reasoning ?? 0),
-    }),
+    ...((left.reasoning !== undefined || right.reasoning !== undefined) && { reasoning: (left.reasoning ?? 0) + (right.reasoning ?? 0) }),
     totalTokens: left.totalTokens + right.totalTokens,
     cost: {
       input: left.cost.input + right.cost.input,
@@ -121,23 +130,4 @@ function addUsage(left: Usage, right: Usage): Usage {
       total: left.cost.total + right.cost.total,
     },
   };
-}
-
-/**
- * The requests the run took: the inbound messages among its own entries, in transcript order. The
- * starter is always first; it is in the run's entries unless the run began before them.
- */
-function requestsOf(starter: string, messages: readonly AgentMessage[]): string[] {
-  const taken = messages.map(requestIdOf).filter((id): id is string => id !== undefined && id !== starter);
-  return [starter, ...new Set(taken)];
-}
-
-/** The last assistant message that answers rather than calls tools. */
-function finalText(messages: readonly AgentMessage[]): string | undefined {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const message = messages[i];
-    if (message?.role !== "assistant" || message.stopReason === "toolUse") continue;
-    return message.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
-  }
-  return undefined;
 }
