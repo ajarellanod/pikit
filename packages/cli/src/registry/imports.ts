@@ -111,6 +111,8 @@ export const SERVER_ONLY_EXPORTS: readonly string[] = [
   // The JSONL store and the local execution environment; the test fixtures that spawn Pi workers.
   "@pikit/pi-adapter/node",
   "@pikit/pi-adapter/testing",
+  // pi-durable's `NodeExecutionEnv` (`@earendil-works/pi-durable/env/node`: it spawns processes).
+  "@pikit/pi-adapter/durable/node",
 ];
 
 /** Pi's own Node subpath: fine behind a server-only export, never in a neutral one. */

@@ -16,7 +16,12 @@
     "./providers/openrouter": "./src/providers/openrouter.ts",
     "./tools": "./src/tools/index.ts",
     "./durable": "./src/durable/index.ts",
-    "./durable/testing": "./src/durable/testing.ts"
+    "./durable/testing": "./src/durable/testing.ts",
+    "./durable/execution": "./src/durable/execution.ts",
+    "./durable/execution/testing": "./src/durable/execution-testing.ts",
+    "./durable/mcp": "./src/durable/mcp.ts",
+    "./durable/node": "./src/durable/node.ts",
+    "./durable/tools": "./src/durable/tools/index.ts"
   },
   "files": [
     "src"
