@@ -6,7 +6,10 @@
  * platform-cloudflare (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
  * is already OpenRouter's: the Anthropic provider is server-only), runtime-pi, conversations-kv and channel-telegram-webhook (with what they offer)
  * put each half in its App (C1), every add is green, the project installs, typechecks and passes its
- * tests, and `pikit remove` undoes both Apps. wrangler is deployment-cloudflare's dev dependency: removing
+ * tests. Then the agent answers, in workerd: with provider-faux (a fake model for tests only) for its
+ * model and channel-telegram-webhook's fake Telegram as its API, `pikit dev` (wrangler dev, port 8787)
+ * takes a Telegram message at the Worker, the chat's Durable Object runs it, and the answer
+ * (`faux: <the message>`) is sent to the chat. And `pikit remove` undoes both Apps. wrangler is deployment-cloudflare's dev dependency: removing
  * the component takes it out, and adding it back puts it back, bundling again. Nothing reaches a
  * Cloudflare account: `pikit up` is never run.
  *
@@ -17,9 +20,11 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { startFakeTelegram } from "../../../registry/components/channel-telegram-webhook/files/src/pikit/channel-telegram-webhook/fake-telegram.test-support.ts";
+import { setConfigEntry } from "./project/config-file.ts";
 
 const E2E = process.env.PIKIT_E2E === "1";
 const MAIN = join(import.meta.dir, "main.ts");
@@ -27,7 +32,12 @@ const TIMEOUT = 600_000;
 
 const parent = mkdtempSync(join(tmpdir(), "pikit-e2e-cloudflare-"));
 const project = join(parent, "edge-bot");
-afterAll(() => rmSync(parent, { recursive: true, force: true }));
+const telegram = startFakeTelegram();
+afterAll(async () => {
+  await telegram.stop();
+  rmSync(parent, { recursive: true, force: true });
+});
+const OWNER = { id: 1001, first_name: "Ada" };
 
 async function run(command: string[], cwd = project) {
   const child = Bun.spawn(command, { cwd, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
@@ -64,26 +74,35 @@ test.skipIf(!E2E)(
 test.skipIf(!E2E)(
   "pikit dev runs the Worker in workerd, and /health starts the object's App",
   async () => {
-    const dev = Bun.spawn([process.execPath, MAIN, "dev"], { cwd: project, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+    const dev = await pikitDev();
     try {
-      let body: unknown;
-      for (let i = 0; i < 60 && body === undefined; i++) {
-        body = await fetch("http://127.0.0.1:8787/health").then(
-          (response) => response.json(),
-          () => undefined,
-        );
-        if (body === undefined) await Bun.sleep(1_000);
-      }
-      expect(body).toMatchObject({ ok: true, version: expect.any(String) });
+      expect(dev.health).toMatchObject({ ok: true, version: expect.any(String) });
     } finally {
-      // wrangler dev is the CLI's child: stopping the CLI's process group stops both.
-      dev.kill("SIGINT");
-      Bun.spawnSync(["pkill", "-INT", "-f", "wrangler dev --name edge-bot"]);
-      await dev.exited;
+      await dev.stop();
     }
   },
   TIMEOUT,
 );
+
+/** `pikit dev` (wrangler dev on 8787), once `/health` answers; `stop` ends it and wrangler. */
+async function pikitDev() {
+  const dev = Bun.spawn([process.execPath, MAIN, "dev"], { cwd: project, stdin: "ignore", stdout: "pipe", stderr: "pipe" });
+  const stop = async () => {
+    // wrangler dev is the CLI's child: stopping the CLI and wrangler stops both.
+    dev.kill("SIGINT");
+    await run(["pkill", "-INT", "-f", "wrangler dev --name edge-bot"]);
+    await dev.exited;
+  };
+  let health: { ok?: boolean } | undefined;
+  for (let i = 0; i < 90 && health?.ok !== true; i++) {
+    health = await fetch("http://127.0.0.1:8787/health").then(
+      (response) => response.json() as Promise<{ ok?: boolean }>,
+      () => undefined,
+    );
+    if (health?.ok !== true) await Bun.sleep(1_000);
+  }
+  return { health, stop };
+}
 
 /** The project's package.json devDependencies. */
 function devDependencies(): Record<string, string> {
@@ -111,7 +130,7 @@ async function add(name: string) {
 }
 
 test.skipIf(!E2E)(
-  "a Telegram agent on Cloudflare: each add puts each half in its App, with what it offers, and is green; the project installs, typechecks and passes its tests; remove undoes both Apps",
+  "a Telegram agent on Cloudflare: each add puts each half in its App, with what it offers, and is green; the project installs, typechecks and passes its tests; in workerd it answers a message; remove undoes both Apps",
   async () => {
     const configPath = join(project, "pikit.config.ts");
     const agentPath = join(project, "src", "agents", "assistant", "agent.ts");
@@ -168,6 +187,50 @@ test.skipIf(!E2E)(
     expect(tests.err).toContain("platform-cloudflare.test.ts");
     expect(tests.err).toContain("runtime-pi.test.ts");
     expect(tests.code).toBe(0);
+
+    // The agent answers, in workerd. Its model: provider-faux (tests only). Telegram: the fake, as both
+    // halves' API. The Worker's secrets: .env, which `pikit dev` (wrangler dev) reads.
+    await add("provider-faux");
+    // Every message to the starter agent (the Telegram preset installs router-basic; this one did not).
+    // Installed, then configured: its `defaultAgent` has no default, so its add ends asking for it.
+    const routed = await run([process.execPath, MAIN, "add", "router-basic", "--yes"]);
+    expect(routed.err).toContain("defaultAgent");
+    expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components)).toContain("router-basic");
+    writeFileSync(configPath, setConfigEntry(readFileSync(configPath, "utf8"), "router-basic", `{ defaultAgent: "assistant" }`));
+    const withFaux = readFileSync(configPath, "utf8");
+    writeFileSync(agentPath, agentBefore.replace(/model: "[^"]+"/, 'model: "faux/echo"'));
+    let config = withFaux;
+    config = setConfigEntry(config, "channel-telegram-webhook", `{ apiBase: "${telegram.url}" }`);
+    config = setConfigEntry(config, "channel-telegram-webhook-worker", `{ apiBase: "${telegram.url}" }`, "workerConfig");
+    writeFileSync(configPath, config);
+    const secret = "e2e0webhook0secret0".padEnd(48, "0");
+    writeFileSync(join(project, ".env"), `TELEGRAM_BOT_TOKEN=${telegram.token}\nTELEGRAM_ALLOWED_USERS=${OWNER.id}\nTELEGRAM_WEBHOOK_SECRET=${secret}\n`);
+    const dev = await pikitDev();
+    try {
+      expect(dev.health?.ok).toBe(true);
+      // Telegram posts each message to the Worker's /telegram, with the secret (what `pikit up` registers).
+      const set = await fetch(`${telegram.url}/bot${telegram.token}/setWebhook`, {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ url: "http://127.0.0.1:8787/telegram", secret_token: secret, allowed_updates: ["message"] }),
+      });
+      expect(set.status).toBe(200);
+      telegram.sent.length = 0;
+      // 200 once the chat's object holds it; the run is driven by its alarm, and the answer delivered.
+      expect((await telegram.write(OWNER, "hello from workerd")).status).toBe(200);
+      const sent = await telegram.sentCount(1, 60_000);
+      expect(sent).toContainEqual(expect.objectContaining({ chatId: OWNER.id, text: "faux: hello from workerd" }));
+    } finally {
+      await dev.stop();
+      rmSync(join(project, ".env"), { force: true });
+      writeFileSync(agentPath, agentBefore);
+      writeFileSync(configPath, withFaux);
+    }
+    for (const name of ["router-basic", "provider-faux"]) {
+      const removed = await run([process.execPath, MAIN, "remove", name]);
+      expect(removed.err).not.toContain("\u2717");
+      expect(removed.code).toBe(0);
+    }
 
     // remove undoes both Apps, and what came for each; the project is the preset's again, and green.
     for (const name of ["channel-telegram-webhook", "conversations-kv", "runtime-pi", "provider-openrouter", "platform-cloudflare", "secrets-cloudflare"]) {

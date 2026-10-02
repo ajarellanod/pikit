@@ -159,7 +159,32 @@ export function configFile(target = "server"): string {
   return target === "durable" ? CLOUDFLARE_CONFIG : CONFIG;
 }
 
-export function agent(tools: string[], model = starterModel()): string {
+/**
+ * Where people reach the agent, per channel component, for the starter's prompt: the model answers
+ * differently to a program calling an API and to a person in a chat. A channel not listed here is
+ * named by its `component.json` title (the part before `:`).
+ */
+export const CHANNEL_REACH: Readonly<Record<string, string>> = {
+  "channel-http": "reached over an HTTP API, by programs and the people behind them",
+  "channel-telegram": "that people talk to in Telegram chats",
+  "channel-telegram-webhook": "that people talk to in Telegram chats",
+};
+
+/** A channel being installed: its name and its `component.json` title. */
+export interface StarterChannel {
+  name: string;
+  title?: string | undefined;
+}
+
+/** The starter prompt's first sentence: who the agent is, and where it is reached. */
+export function introduction(channels: readonly StarterChannel[]): string {
+  const reach = [
+    ...new Set(channels.map((channel) => CHANNEL_REACH[channel.name] ?? `reached through ${(channel.title ?? channel.name).split(":")[0]?.trim()}`)),
+  ];
+  return reach.length === 0 ? "You are a helpful assistant." : `You are a helpful assistant ${reach.join(", and ")}.`;
+}
+
+export function agent(tools: string[], model = starterModel(), channels: readonly StarterChannel[] = []): string {
   const workspace =
     tools.length > 0
       ? `\n    "You work in a workspace directory: use your tools to read, write and edit files there, and to run commands in it.",`
@@ -176,7 +201,7 @@ export default defineAgent({
   name: "${STARTER_AGENT}",
   model: "${model}",
   systemPrompt: [
-    "You are a helpful assistant reached over an HTTP API. Answer briefly and plainly.",${workspace}
+    ${JSON.stringify(`${introduction(channels)} Answer briefly and plainly.`)},${workspace}
   ].join(" "),
   tools: ${JSON.stringify(tools)},
 });

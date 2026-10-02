@@ -125,7 +125,7 @@ export function createAgentObserveConformance(
       expect([found?.key, found?.agent, found?.busy], [conversation.key, conversation.agent, false], "its key, agent and busy");
       check(typeof found?.lastActivity === "number" && found.lastActivity > 0, `a last activity, got ${JSON.stringify(found?.lastActivity)}`);
       expect(found?.usage, await s.observe.usage(conversation.conversationId, s.ctx), "its usage, as usage() says");
-      if (result.usage !== undefined) expect(found?.usage.totalTokens, result.usage.totalTokens, "its tokens: its one run's");
+      if (result.usage !== undefined) expect(tokensOf(found?.usage), tokensOf(result.usage), "its tokens: its one run's");
       expect(await s.observe.conversation(conversation.conversationId, s.ctx), found, "conversation(id), as the list says");
     }),
 
@@ -134,7 +134,7 @@ export function createAgentObserveConformance(
       const found = await s.observe.conversation(conversation.conversationId, s.ctx);
 
       check(found !== undefined, "the new conversation to be found");
-      expect([found?.key, found?.agent, found?.busy, found?.usage.totalTokens], [undefined, undefined, false, 0], "its key, agent, busy and tokens");
+      expect([found?.key, found?.agent, found?.busy, tokensOf(found?.usage)], [undefined, undefined, false, 0], "its key, agent, busy and tokens");
     }),
 
     observeCase("conversations come a page at a time, each once", async (s) => {
@@ -228,6 +228,11 @@ export function createAgentObserveConformance(
       check(false, "the stream to end once its context is cancelled");
     }),
   ];
+}
+
+/** A usage's tokens. `Usage` is the runtime's type (pi-ai's with runtime-pi), opaque in the contracts. */
+function tokensOf(usage: unknown): number | undefined {
+  return (usage as { totalTokens?: number } | undefined)?.totalTokens;
 }
 
 /** Every listed conversation, page after page. */

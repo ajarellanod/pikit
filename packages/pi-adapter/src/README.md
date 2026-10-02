@@ -15,6 +15,7 @@ gives components Pi's tools, models, MCP client and execution environments by su
 | `./execution` | `execution.ts` | pi-durable's `ExecutionEnv` types and helpers; `harnessEnv`, `atCwd` | every |
 | `./node` | `node.ts` | `createLocalExecution` on pi-durable's `NodeExecutionEnv`: plumbing (a subclass of Pi's class that starts commands from the variables given, never this process's); which variables and which directory is the components' policy (`execution-local`, `workspace-local`) | server |
 | `./providers/anthropic`, `./providers/openrouter` | `providers/*.ts` | pi-ai 1.0's providers by subpath (`openrouterProvider({ apiBase })`) | every |
+| `./providers/faux` | `providers/faux.ts` | pi-ai 1.0's faux provider, for tests only (`provider-faux`) | every |
 | `./credentials` | `credentials.ts` | pi-ai's credential types; `loginInteraction(terminal)`, an `AuthInteraction` that answers every prompt type, `select` included | every |
 | `./wakeups` | `wakeups.ts` | the same as the root's wake-up functions | every |
 | `./testing` | `testing/index.ts` | `./testing/neutral`, plus `createPiRuntimeFixture` (a SQLite file), `sqliteStorage`, `openSqliteDatabase`, `testComponents` with a `storage.sql` in memory | server |

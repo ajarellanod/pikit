@@ -13,6 +13,7 @@
     "./node": "./src/node.ts",
     "./providers/anthropic": "./src/providers/anthropic.ts",
     "./providers/openrouter": "./src/providers/openrouter.ts",
+    "./providers/faux": "./src/providers/faux.ts",
     "./credentials": "./src/credentials.ts",
     "./wakeups": "./src/wakeups.ts",
     "./wakeups/testing": "./src/testing/wakeups.ts",

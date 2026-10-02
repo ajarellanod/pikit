@@ -133,6 +133,15 @@
       ],
       "path": "components/provider-anthropic"
     },
+    "provider-faux": {
+      "version": "0.0.0",
+      "description": "A fake model for tests only: an agent naming `faux/echo` gets `faux: <your message>` at once, with no network, key or cost.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/provider-faux"
+    },
     "provider-openrouter": {
       "version": "0.0.0",
       "description": "The models OpenRouter serves, for your agents. An agent names one as `openrouter/<vendor>/<model>`, for example `openrouter/z-ai/glm-5.3-flash`.",
