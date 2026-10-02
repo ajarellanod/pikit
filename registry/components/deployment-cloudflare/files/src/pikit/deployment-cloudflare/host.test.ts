@@ -9,7 +9,16 @@ import { expect, test } from "bun:test";
 import { type AppContext, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import type { JsonValue } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
-import { createObjectHost, createWorkerHost, HEALTH_OBJECT, type ObjectState } from "./host.ts";
+import { createHttpRouteConformance } from "@pikit/contracts/testing";
+import { createObjectHost, createWorkerHost, createWorkerServer, HEALTH_OBJECT, type ObjectState } from "./host.ts";
+
+// What every handler can rely on (`http.route`): the Worker's server passes the suite, prefixes included.
+for (const c of createHttpRouteConformance(() => {
+  const server = createWorkerServer(silentLogger);
+  return { components: [server.component], fetch: (path, init) => server.serve(new Request(`https://worker.test${path}`, init)) };
+})) {
+  test(`Worker server ${c.group}: ${c.name}`, () => c.run());
+}
 
 /** A DurableObjectState's part the entrypoint uses; counts `blockConcurrencyWhile` calls and whether one is running. */
 function fakeState(id = "object-1") {

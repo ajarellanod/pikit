@@ -19,6 +19,8 @@
 export {
   createObjectHost,
   createWorkerHost,
+  createWorkerServer,
+  type WorkerServer,
   HEALTH_OBJECT,
   OBJECT_BINDING,
   ROLLBACK_DEADLINE_MS,

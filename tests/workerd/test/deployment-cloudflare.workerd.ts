@@ -10,8 +10,17 @@ import { env, evictDurableObject, runDurableObjectAlarm, runInDurableObject } fr
 import type { JsonValue } from "@pikit/contracts";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { expect, it } from "vitest";
-import { createWorkerHost, HEALTH_OBJECT } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
+import { createHttpRouteConformance } from "@pikit/contracts/testing";
+import { createWorkerHost, createWorkerServer, HEALTH_OBJECT } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
 import { entrypoint } from "../src/deployment.ts";
+
+// The Worker's server passes the `http.route` suite in workerd, prefix keys (`GET /admin/*`) included.
+for (const c of createHttpRouteConformance(() => {
+  const server = createWorkerServer(silentLogger);
+  return { components: [server.component], fetch: (path, init) => server.serve(new Request(`https://worker.test${path}`, init)) };
+})) {
+  it(`Worker server ${c.group}: ${c.name}`, () => c.run());
+}
 
 /** The object's RPC, as the Worker (and `actor.mailbox`) calls it. */
 interface ConversationRpc {

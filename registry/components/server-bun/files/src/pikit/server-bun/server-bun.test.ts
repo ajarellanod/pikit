@@ -145,6 +145,19 @@ test("a route cannot take the server's own /health or /ready", async () => {
   expect(String((error as Error).cause)).toContain(`"GET /health" is the server's own route`);
 });
 
+test("a prefix route, even `/*`, never shadows /health or /ready", async () => {
+  const server = listening();
+  const app = await defineApp({ components: [routes({ "GET /*": () => new Response("everything") }), server.component], config: LOCAL, logger: silentLogger }).create();
+  await app.start();
+
+  const health = await (await server.fetch("/health")).json();
+  const other = await (await server.fetch("/admin/app.js")).text();
+
+  expect(health).toEqual({ status: "ok" });
+  expect(other).toBe("everything");
+  await app.stop();
+});
+
 test("a body larger than maxRequestBodyBytes is refused before the route", async () => {
   const server = listening();
   let reached = false;

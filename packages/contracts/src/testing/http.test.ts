@@ -6,24 +6,11 @@
 
 import { test } from "bun:test";
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import type { HttpRoute } from "../http.ts";
+import { compareHttpRoutes, type HttpRoute, type HttpRouteKey, matchesHttpRoute, parseHttpRouteKey } from "../http.ts";
 import { createHttpRouteConformance } from "./http.ts";
 
-const KEY = /^(GET|POST|PUT|PATCH|DELETE) (\/|(\/([A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9]*))+)$/;
-
-interface Route {
-  method: string;
-  segments: string[];
+interface Route extends HttpRouteKey {
   handler: HttpRoute;
-}
-
-function matches(route: Route, method: string, path: string): boolean {
-  const segments = path.split("/").filter(Boolean);
-  return (
-    route.method === method &&
-    route.segments.length === segments.length &&
-    route.segments.every((segment, i) => segment.startsWith(":") || segment === segments[i])
-  );
 }
 
 function memoryServer() {
@@ -37,19 +24,22 @@ function memoryServer() {
       let inFlight = new Set<Promise<Response>>();
       return {
         start(ctx) {
-          const routes: Route[] = provided.keys().map((key) => {
-            if (!KEY.test(key)) throw new Error(`server-memory: cannot serve "${key}"`);
-            const [method = "", path = ""] = key.split(" ");
-            const handler = provided.get(key);
-            if (handler === undefined) throw new Error(`server-memory: no handler for "${key}"`);
-            return { method, segments: path.split("/").filter(Boolean), handler };
-          });
+          const routes: Route[] = provided
+            .keys()
+            .map((key) => {
+              const parsed = parseHttpRouteKey(key);
+              if (parsed === undefined) throw new Error(`server-memory: cannot serve "${key}"`);
+              const handler = provided.get(key);
+              if (handler === undefined) throw new Error(`server-memory: no handler for "${key}"`);
+              return { ...parsed, handler };
+            })
+            .sort(compareHttpRoutes);
           const stopping = new AbortController();
           shutdown = stopping;
           // Requests get a context of their own, never start's.
           const base: AppContext = ctx.derive(() => BACKGROUND_CONTEXT);
           const handle = async (request: Request): Promise<Response> => {
-            const route = routes.find((r) => matches(r, request.method, new URL(request.url).pathname));
+            const route = routes.find((r) => matchesHttpRoute(r, request.method, new URL(request.url).pathname));
             if (route === undefined) return new Response("not found", { status: 404 });
             const signal = AbortSignal.any([request.signal, stopping.signal]);
             try {

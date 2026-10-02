@@ -23,6 +23,7 @@ import {
   type AppContext,
   type AppDefinition,
   BACKGROUND_CONTEXT,
+  type ComponentDefinition,
   type Context,
   consoleLogger,
   defineApp,
@@ -31,7 +32,7 @@ import {
   withAbortSignal,
   withContextValue,
 } from "@pikit/core";
-import type { HttpRoute, JsonValue } from "@pikit/contracts";
+import { compareHttpRoutes, type HttpRoute, type HttpRouteKey, type JsonValue, matchesHttpRoute, parseHttpRouteKey } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 
 /**
@@ -157,30 +158,17 @@ export interface WorkerHost {
  */
 export function createWorkerHost(definition: AppDefinition | undefined, options: HostOptions = {}): WorkerHost {
   const logger = options.logger ?? consoleLogger;
-  let serving: Promise<Router> | undefined;
+  let serving: Promise<WorkerServer> | undefined;
   /** Once per isolate, from its first request (`/health` too); a failed start is retried by the next request. */
-  const boot = (env: WorkersHost["env"], origin: string): Promise<Router> =>
+  const boot = (env: WorkersHost["env"], origin: string): Promise<WorkerServer> =>
     (serving ??= (async () => {
-      let router: Router | undefined;
-      // The Worker's server: the entrypoint's own component, so the routes are the App's `http.route`s as
-      // its capability graph resolves them. It shows in `describe()` as `deployment-cloudflare`.
-      const server = defineComponent({
-        name: "deployment-cloudflare",
-        setup(pikit) {
-          const routes = pikit.useKeyed("http.route");
-          return {
-            start(ctx) {
-              // Requests must not inherit the start's deadline; each derives its own context.
-              router = createRouter(routes, ctx.derive(() => BACKGROUND_CONTEXT));
-            },
-          };
-        },
-      });
-      const app = await compose(definition, [server], logger);
+      const server = createWorkerServer(logger);
+      const app = await compose(definition, [server.component], logger);
       await startWithin(app, withContextValue(WORKERS_HOST, { env, origin }, BACKGROUND_CONTEXT), options, logger);
-      if (router === undefined) throw new Error("deployment-cloudflare: the Worker's App started without its server");
-      logger.info("pikit: Worker started", { routes: router.keys });
-      return router;
+      const keys = server.keys();
+      if (keys === undefined) throw new Error("deployment-cloudflare: the Worker's App started without its server");
+      logger.info("pikit: Worker started", { routes: keys });
+      return server;
     })().catch((error: unknown) => {
       serving = undefined;
       logger.error("pikit: the Worker's App failed to start", { error });
@@ -212,13 +200,13 @@ export function createWorkerHost(definition: AppDefinition | undefined, options:
     async fetch(request, env) {
       const url = new URL(request.url);
       if (request.method === "GET" && url.pathname === "/health") return await health(env, url.origin);
-      let router: Router;
+      let server: WorkerServer;
       try {
-        router = await boot(env, url.origin);
+        server = await boot(env, url.origin);
       } catch {
         return Response.json({ error: "unavailable" }, { status: 503 });
       }
-      return await router.serve(request, url, logger);
+      return await server.serve(request);
     },
   };
 }
@@ -271,41 +259,62 @@ function compose(definition: AppDefinition | undefined, own: AppDefinition["comp
   }).create();
 }
 
-/** `"METHOD /path"` as the `http.route` contract defines it. */
-const ROUTE_KEY = /^(GET|POST|PUT|PATCH|DELETE) (\/|(\/([A-Za-z0-9._~-]+|:[A-Za-z][A-Za-z0-9]*))+)$/;
-
-interface Router {
-  keys: string[];
-  serve(request: Request, url: URL, logger: Logger): Promise<Response>;
+/** The Worker's server: a component of the Worker's App, and how a request reaches it. */
+export interface WorkerServer {
+  /** Serves the App's `http.route`s; it shows in `describe()` as `deployment-cloudflare`. */
+  component: ComponentDefinition;
+  /** A request to the routes: 503 while the App is not running. */
+  serve(request: Request): Promise<Response>;
+  /** The keys it serves, most specific first, while it runs; `undefined` otherwise. */
+  keys(): string[] | undefined;
 }
 
 /**
- * The routes by key, as `server-bun` serves them: a literal path wins over one with parameters, a
- * request no route matches is a 404, and a route that throws is a 500 that does not reveal why.
+ * The Worker's server, which serves the routes by key as `server-bun` does (the `http.route`
+ * contract's grammar and order: a literal path wins over one with parameters, which wins over a
+ * prefix, the longest first; @pikit/contracts' `parseHttpRouteKey`): a request no route matches is a
+ * 404, and a route that throws is a 500 that does not reveal why. `GET /health` is answered before it
+ * (`createWorkerHost`), so no prefix (`GET /*`) shadows it. Each request has a context of its own,
+ * cancelled when the client goes away or the App stops. It passes the `http.route` suite.
  */
-function createRouter(routes: { keys(): string[]; get(key: string): HttpRoute | undefined }, base: AppContext): Router {
-  const table: { method: string; segments: string[]; route: HttpRoute; key: string }[] = [];
-  for (const key of routes.keys()) {
-    if (!ROUTE_KEY.test(key)) throw new Error(`deployment-cloudflare: cannot serve the http.route key "${key}" (expected "METHOD /path")`);
-    if (key === "GET /health") throw new Error(`deployment-cloudflare: "${key}" is the Worker's own route`);
-    const route = routes.get(key);
-    if (route === undefined) continue;
-    const [method = "", path = ""] = key.split(" ");
-    table.push({ method, segments: path.split("/").slice(1), route, key });
-  }
-  const literal = (segments: string[]) => segments.every((s) => !s.startsWith(":"));
-  table.sort((a, b) => Number(literal(b.segments)) - Number(literal(a.segments)));
-
+export function createWorkerServer(logger: Logger = consoleLogger): WorkerServer {
+  type Entry = HttpRouteKey & { route: HttpRoute; key: string };
+  let running: { table: Entry[]; base: AppContext; shutdown: AbortController } | undefined;
+  const component = defineComponent({
+    name: "deployment-cloudflare",
+    setup(pikit) {
+      const routes = pikit.useKeyed("http.route");
+      return {
+        start(ctx) {
+          const table: Entry[] = [];
+          for (const key of routes.keys()) {
+            const parsed = parseHttpRouteKey(key);
+            if (parsed === undefined) throw new Error(`deployment-cloudflare: cannot serve the http.route key "${key}" (expected "METHOD /path" or "METHOD /prefix/*")`);
+            if (key === "GET /health") throw new Error(`deployment-cloudflare: "${key}" is the Worker's own route`);
+            const route = routes.get(key);
+            if (route !== undefined) table.push({ ...parsed, route, key });
+          }
+          // Requests must not inherit the start's deadline; each derives its own context.
+          running = { table: table.sort(compareHttpRoutes), base: ctx.derive(() => BACKGROUND_CONTEXT), shutdown: new AbortController() };
+        },
+        stop() {
+          running?.shutdown.abort(new Error("deployment-cloudflare: stopping"));
+          running = undefined;
+        },
+      };
+    },
+  });
   return {
-    keys: table.map((entry) => entry.key),
-    async serve(request, url, logger) {
-      const segments = url.pathname.split("/").slice(1);
-      const entry = table.find(
-        (e) => e.method === request.method && e.segments.length === segments.length && e.segments.every((s, i) => s.startsWith(":") || s === segments[i]),
-      );
+    component,
+    keys: () => running?.table.map((entry) => entry.key),
+    async serve(request) {
+      const serving = running;
+      if (serving === undefined) return Response.json({ error: "unavailable" }, { status: 503 });
+      const entry = serving.table.find((e) => matchesHttpRoute(e, request.method, new URL(request.url).pathname));
       if (entry === undefined) return Response.json({ error: "not_found" }, { status: 404 });
+      const signal = AbortSignal.any([request.signal, serving.shutdown.signal]);
       try {
-        return await entry.route(request, base.derive(() => withAbortSignal(request.signal, BACKGROUND_CONTEXT)));
+        return await entry.route(request, serving.base.derive(() => withAbortSignal(signal, BACKGROUND_CONTEXT)));
       } catch (error) {
         logger.error("pikit: a route failed", { route: entry.key, error: String(error) });
         return Response.json({ error: "internal" }, { status: 500 });
