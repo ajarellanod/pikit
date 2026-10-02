@@ -5,7 +5,7 @@
 ```sh
 curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh                                 # asks before anything with sudo
 curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --yes --install-docker    # a script's consent
-curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --cloudflare              # a Telegram bot on Cloudflare
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable                 # a Telegram bot on Cloudflare
 ```
 
 It is POSIX sh (`set -eu`), idempotent (running it again updates pikit), and says what it does
@@ -25,7 +25,7 @@ before doing it. The steps and settings are at the top of the script.
   prints the `PATH` line to add; it edits no shell file.
 - Docker: only `pikit up` on a server needs it. On Linux the official script (`get.docker.com`) runs
   only with `--install-docker` / `PIKIT_INSTALL_DOCKER=1` or a "y", and with the same consent adds you
-  to the `docker` group; on macOS it points to Docker Desktop. With `--cloudflare` it is skipped.
+  to the `docker` group; on macOS it points to Docker Desktop. With `--durable` it is skipped.
 - Then, on a terminal, it runs `pikit new`: the guided path asks the agent's name, where it runs (a
   server, or Cloudflare), where to talk to it (Telegram, HTTP…), sets that up, logs in to the model
   and starts it. Ctrl-C stops it; `pikit new` continues later. `PIKIT_NO_WIZARD=1` skips it. It ends
@@ -34,10 +34,10 @@ before doing it. The steps and settings are at the top of the script.
 ## Cloudflare in one line
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --cloudflare
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable
 ```
 
-`--cloudflare` (or `PIKIT_CLOUDFLARE=1`) changes two steps, and nothing else:
+`--durable` (or `PIKIT_DURABLE=1`) changes two steps, and nothing else:
 
 - **No Docker.** Nothing runs on this machine once the bot is deployed, so Docker is neither checked
   nor offered. Instead it checks **Node.js >= 22**, which wrangler (Cloudflare's CLI, a dev dependency
@@ -54,7 +54,7 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
      deploy, wrangler asks for its `workers.dev` subdomain. Then it deploys, waits until the new
      version answers, and sets Telegram's webhook.
 
-Without the flag, answering "On Cloudflare" to `pikit new`'s "Where should it run?" leads to the same
+Without the flag, answering "durable — on Cloudflare" to `pikit new`'s "Where should it run?" leads to the same
 bot (on Linux without Docker, the installer asks about Docker first: answer N). By hand, in a project: `pikit new my-bot --target
 durable --preset telegram-cloudflare`, `cd my-bot`, `pikit configure`, `pikit up`.
 
@@ -70,7 +70,7 @@ checkout into each project.
 
 - `install.test.ts`: always, `sh -n`, shellcheck (when installed), and how Bun is chosen (pin, range,
   `PIKIT_BUN_VERSION`) with stand-ins for `bun`, `curl` and `git`, without network, and the
-  Cloudflare path (`--cloudflare`: no Docker, Node.js checked, the `pikit new` it hands over to) with
+  Cloudflare path (`--durable`: no Docker, Node.js checked, the `pikit new` it hands over to) with
   stand-ins for `bun`, `git` and `node`; with
   `PIKIT_INSTALLER_TEST=1`, a real install of this repository's committed `HEAD` into a temporary
   `HOME`, twice, then `pikit --version`. CI (`.github/workflows/ci.yml`) runs the first part on every

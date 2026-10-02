@@ -23,7 +23,7 @@ objects running the project's two Apps, `wrangler.jsonc`, and the commands
 On a Mac or Linux machine with nothing of pikit yet:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --cloudflare
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable
 ```
 
 The installer puts `pikit` on the machine (git, curl, Bun, as for a server), skips Docker, which
@@ -41,7 +41,7 @@ it if it is missing). Then, at the terminal, it runs
    `<subdomain>.workers.dev` every Worker of the account answers at: choose one. Then it deploys,
    waits for `/health`, and sets the Telegram webhook. Write to the bot: it answers.
 
-Without the installer, the same is `pikit new` (answer "On Cloudflare" to "Where should it run?"), or
+Without the installer, the same is `pikit new` (answer "durable — on Cloudflare" to "Where should it run?"), or
 the three commands below. Ctrl-C stops at any question; `pikit new` again, with the same name,
 continues where you left off.
 
