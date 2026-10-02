@@ -35,8 +35,23 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   every host: its own `http.route` handlers, server-sent events, no host API; deployment is never
   closed to server and Cloudflare (Vercel, E2B, exe.dev, Modal are expected), see
   [deployment targets](deployment-targets.md).
+- **A base UI with shadcn/ui, extensible by components.** Not the largest interface: enough to
+  start, and every other view comes from a component that brings it (SPEC §5). No platform
+  under pikit (Pi Durable, Cloudflare, Rivet) offers an interface that is the user's to extend.
 - **When:** the dashboard is the next piece after the switch-over, in its minimal form:
-  conversations, a live view of one, steer/abort, cost per conversation.
+  conversations, a live view of one (joinable while the user talks in their chat), steer/abort,
+  cost per conversation, health.
+
+## Building on the bases must be the easy path
+- **Why:** pikit gives the bases and the user builds their assistant on them (SPEC P1, MANIFESTO
+  principle 13). That only holds if a person or their AI agent can build a component that comes
+  out right: [building components](building-components.md).
+- **What:** skills for AI agents in every project (write a channel, a tool, a store, a dashboard
+  view, a feature from its design note); a conformance suite for every contract (the execution
+  environment and the tool shape still lack one in `@pikit/contracts`); each ⭐ feature note as a
+  build guide (contract, Pi pieces, guarantees, tests); Git registries to share what users build.
+- **When:** right after the base dashboard; the skills together with it (adding a view is the
+  first one).
 
 ## Upstream contributions (pending the owner's decision)
 - **pi-mcp's `StreamableHttpTransport` on Workers.**

@@ -24,8 +24,9 @@ That gap is what pikit fills.
 
 ## The idea in one sentence
 
-**pikit is to agent infrastructure what shadcn/ui is to UI components: a small, stable core
-plus a registry of components you copy into your project and own.**
+**pikit is to agent assistants what shadcn/ui is to UI components: a small, stable core, a
+registry of components and a base dashboard, all copied into your project and owned, the bases
+on which you build the assistant you need, with your AI, one component at a time.**
 
 ## Two philosophies combined
 
@@ -67,24 +68,42 @@ running service, and *then* lets you reshape it. And every behavior — how mess
 routed, where conversations are stored, how replies are delivered, what gets approved — lives in
 your repository as code you own.
 
-Then, as needs grow:
+Then, as needs grow, add what exists:
 
 ```bash
 pikit add outbound-durable        # reliable delivery with retries
-pikit add scheduler             # cron-style routines
-pikit add approvals             # human-in-the-loop decisions
-pikit add channel-telegram      # a second channel: router and agents unchanged
+pikit add channel-http            # a second channel: router and agents unchanged
+pikit add admin-dashboard         # the base dashboard, yours to extend (planned)
 ```
 
-And when the shape changes entirely:
+and build what does not, with your AI, from the feature's design note and its contract's
+conformance suite ("build `memory` for this project, as `features/memory.md` says"), or install
+it from someone's registry (`pikit add memory-sqlite --registry <path>`; Git registries are
+planned, `features/open-registries.md`).
+
+And when the shape changes entirely, start the same agents on the other runtime model:
 
 ```bash
-pikit add deployment-cloudflare
-pikit add storage-do
-pikit deploy --profile cloudflare
+pikit new my-agent --target durable --preset telegram-cloudflare
+pikit up                          # deploys to Cloudflare
 ```
 
 Same agents, same routing, same channels. Different infrastructure underneath.
+
+**Three parts, kept apart:**
+
+- **What pikit brings: the bases.** The core and contracts, durability through Pi's durable
+  runtime, a few channels, deployment on a server or Cloudflare, the installer and CLI, and a
+  small base dashboard built with shadcn/ui. Enough to run, see and operate an agent.
+- **What you build: your assistant.** Memory, learned skills, routines, approvals, voice, a
+  browser, more channels: the features that make OpenClaw and Hermes attractive (the ⭐ ones
+  in `features/`). Each one is a component you build, or install from someone who
+  did; nobody carries all of them.
+- **How pikit helps you build it.** A conformance suite for every contract, a design note for
+  every feature (which contract, which Pi pieces, which tests), skills that teach your AI
+  agent to write a component or a dashboard view, reference components to copy from, and your
+  own registry to share what you built. Durability comes with the contracts, so what you build
+  survives crashes without you thinking about it.
 
 ## What pikit is
 
@@ -95,20 +114,24 @@ Same agents, same routing, same channels. Different infrastructure underneath.
   from the core, so the vocabulary can grow while the core stays put.
 - **A Pi adapter**: the bridge between pikit's harness lifecycle and Pi's durable runtime
   (`pi-durable`'s `Harness`, its execution environment, its storage over `storage.sql`).
-- **A registry of components**: channels, routers, storage providers, outboxes, schedulers,
-  approval engines, executors, workspaces, deployment targets. Each one is source you copy.
+- **A registry of components**: channels, routers, storage providers, outboxes, executors,
+  workspaces, deployment targets, and a few reference components for each kind. Each one is
+  source you copy, and a model for the ones you write.
+- **A base dashboard** (`admin-dashboard`): built with shadcn/ui, copied into your project like
+  any component, small on purpose (conversations, one conversation live, steer and abort, cost,
+  health) and made to be extended: a component you write can bring its own view.
 - **A CLI**: `new`, `add`, `remove`, `diff`, `upgrade`, `doctor`, `up`, `deploy`. With the
   installer, its goal is zero friction from installing pikit to a running agent.
-- **Two first-class runtimes**: a long-running server (Bun, and Node by 1.0; Docker, systemd) and
-  serverless Cloudflare Workers + Durable Objects (optionally with Containers for shell
-  access).
+- **Two runtime models**: `server`, a long-running process (Docker on a VPS, systemd; later
+  exe.dev, E2B, Modal), and `durable`, one actor per conversation (Cloudflare Workers + Durable
+  Objects). Deployment is never closed to them (`features/deployment-targets.md`).
 
 ## What pikit is not
 
 - Not a coding agent. It does not compete with Pi, Claude Code or Codex; it uses Pi as its
   engine and runs agents as a service.
-- Not a complete assistant. It does not try to match OpenClaw's or Hermes' feature lists —
-  but it does match their *time to first running agent*.
+- Not a complete assistant. It does not try to match OpenClaw's or Hermes' feature lists; it
+  gives the bases to build one, and matches their *time to first running agent*.
 - Not a new agent loop. Pi is the runtime.
 - Not a framework around the agent. Pi's durable runtime (`pi-durable`) owns durability, resume,
   request-id deduplication, the inbox and steering, compaction, subagents and tasks. pikit owns
@@ -137,6 +160,12 @@ Same agents, same routing, same channels. Different infrastructure underneath.
   framework with a workflow engine at its center; OpenClaw and Hermes are products; Flue
   is built on Pi too, but owns the harness and has chosen a "React for agents" model (see
   below).
+- Around Pi 1.0, the pieces below an assistant are arriving, and none of them is the
+  assistant or its interface: Rivet runs Pi sessions as Rivet Actors (a platform: its runtime,
+  its cloud or its control plane); Cloudflare Computer gives an agent a durable filesystem and
+  sandboxes in a Durable Object; Pi Durable is the engine. For pikit they are possible
+  providers (a `durable` host, an `execution` provider, the runtime), not competitors. A base
+  user interface that is yours to extend is not their area, and nobody else offers it.
 
 ## Positioning against Flue
 
@@ -243,15 +272,20 @@ And it is a project, not a company. Being wrong is allowed.
 ## Strategy and kill criteria
 
 The bet is checked with the smallest complete thing: a first preset, Telegram on Cloudflare (a
-"Deploy to Cloudflare" template), with a minimal operator UI, shown to the Pi community. Built with
+"Deploy to Cloudflare" template), with the base dashboard, and one feature built on the bases
+by an AI agent from its design note (the proof that the bases are enough), shown to the Pi
+community. Built with
 AI agents, that is a matter of hours to days, not weeks, so the check comes early and cheap; what
 takes time is people trying it.
 
 pikit stops if:
 
-- Earendil ships official channels and deployment on `pi-durable`;
+- Earendil, or a platform like Rivet, ships the same bases (channels, durable delivery,
+  deployment on your own account, a base UI) as source you own, without a platform to adopt;
 - nobody uses it;
-- what remains above `pi-durable` fits in a template.
+- what remains above `pi-durable` fits in a template;
+- building a feature on the bases, with an AI agent, is not clearly easier than building it
+  from scratch on `pi-durable`.
 
 ## Where the ideas come from
 

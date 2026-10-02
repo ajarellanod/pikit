@@ -1,5 +1,12 @@
 # Features
 
+pikit gives the bases; the assistant is the user's to build (SPEC P1). These files are not a
+roadmap pikit chases: they are design notes for building each feature on the bases, by a person
+or by the AI agent working with them, or for installing it from someone who did. A note says
+which contract the feature uses (and its conformance suite), which pieces of Pi it relies on,
+what it must guarantee, and how to test it; [building components](building-components.md) says
+how any component is made.
+
 Everything `SPEC.md` does not require is a feature (SPEC §7), and each one has a file
 here. Features have no order: one is built when a user needs it, contracts first, as a component
 or a CLI command that stays removable (SPEC P3). A file says what the feature gives, how it fits
@@ -17,7 +24,7 @@ numbers ("the former SPEC §16"), standards (S1–S16) and milestones (M1–M5):
 
 **Legend.** ⭐ marks what makes OpenClaw or Hermes attractive to the public. It says what people
 look for, not what comes first; matching them feature for feature is a non-goal (MANIFESTO.md,
-"What pikit is not").
+"What pikit is not"): a user who wants them builds them on the bases, from these notes.
 
 | Feature | ⭐ | One line | Needed by required work? |
 |---|---|---|---|
@@ -39,6 +46,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [subagents](subagents.md) | ⭐ | Delegation to helpers (Pi's) and to other agents (pikit's) | No |
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
 | [channel-google-chat](channel-google-chat.md) | | Google Chat by webhook, an agent per space | No |
+| [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |
 | [codemode](codemode.md) | | The model writes a script that calls its tools (Pi's `pi-codemode`), server only; what pikit leaves pending until then | No |
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |

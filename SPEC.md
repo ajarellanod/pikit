@@ -16,7 +16,8 @@ Four outcomes are required. Without any one of them, pikit is not what it set ou
 1. **A reliable, source-owned service.** One command from an empty server to an agent that
    answers; every harness piece is source the user owns; nothing is lost or pretended (§2).
 2. **The same project runs on a server and on Cloudflare** (§4).
-3. **The service is visible and operable from a dashboard** built with Beautiful UI (§5).
+3. **The service is visible and operable from a base dashboard** built with shadcn/ui, small on
+   purpose and made to be extended (§5).
 4. **The main agent knows what it is and can improve itself**, internally (its components) and
    visually (its dashboard), through a gated path that nothing it controls can bypass (§6).
 
@@ -27,7 +28,7 @@ A change that breaks one is not done.
 | # | Property |
 |---|---|
 | P1 | **Pi is the agent; pikit is the kit.** A kit, not a framework: Pi's durable runtime (`pi-durable`) owns the agent runtime (durability, resume, request-id deduplication, the inbox and steering, compaction, subagents, tasks). pikit builds only what one Pi process cannot give itself (channels, routing between agents, conversation ownership across processes, durable delivery to platforms, scheduling, approvals, deployment, the CLI and installer, the dashboard, the path by which an agent
-changes its own service). When Pi ships something pikit built, pikit deletes its own. |
+changes its own service). When Pi ships something pikit built, pikit deletes its own. pikit gives the bases; the assistant is the user's to build: the features that make assistants like OpenClaw or Hermes attractive are components a user builds on the bases (with their AI, from a feature's design note and its contract's conformance suite) or installs from someone's registry, not a list pikit chases. |
 | P2 | **Five minutes, then it's yours.** One command sequence from an empty server to a reachable agent, leaving a project the user owns. The CLI and installer exist for this: zero friction from installer to a running agent. |
 | P3 | **Components are source you own.** Copied into the project, readable, editable, removable; removing one leaves a clean, working project. |
 | P4 | **A small, stable kernel; contracts are the only coupling; no magic; absence, not flags.** |
@@ -279,10 +280,18 @@ written here. Status (built or not) is not tracked here, as for the kernel.
 
 ## 5. The dashboard is required
 
-A visual dashboard to see and operate a running pikit service, built from
-[Beautiful UI](https://github.com/slev12397/beautiful-ui) primitives (MIT): copy-paste React
-components for AI products (thinking and streaming states, tool-call status, approval cards,
-records and diff tables, prompt bars, an agent chat harness).
+A base dashboard to see and operate a running pikit service, built with
+[shadcn/ui](https://ui.shadcn.com) (MIT): the most widely known copy-paste React components, which
+every AI coding agent already writes well. It is a base, not the largest interface: what it
+ships is enough to start, and everything else is a view the user (or their AI) adds. No platform
+under pikit (Pi Durable, Cloudflare, Rivet) offers a user interface that is the user's to
+extend; this is pikit's to give. AI-specific pieces (streaming and thinking states, tool-call
+status, approval cards) may come from [Beautiful UI](https://github.com/slev12397/beautiful-ui)
+(MIT, shadcn-compatible) where they fit.
+
+**What the base ships** (the first version): conversations; one conversation live (its
+transcript, the tools running), joinable while the user talks in their chat; steer and abort;
+cost per conversation; health. The rest below comes as the components it needs are installed.
 
 **What it shows and does.**
 - The composition: components, capabilities and their providers, pipelines, the config without
@@ -295,8 +304,14 @@ records and diff tables, prompt bars, an agent chat harness).
 
 **How it fits pikit.**
 - **It is a component** (`admin-dashboard`), not kernel: installed with `pikit add`, removable,
-  absent when not installed (P3, P4). Its source, including the Beautiful UI primitives it uses, is
+  absent when not installed (P3, P4). Its source, including the shadcn/ui primitives it uses, is
   copied into the project like any other component and is the user's to change.
+- **It is made to be extended.** The project is a shadcn/ui project for the dashboard's part, so
+  `shadcn add` works in it. A view is a component: a component the user writes (`memory-sqlite`,
+  `approvals`) may bring its own view and its own admin API routes, and the dashboard shows it
+  when that component is installed, through the same `http.route` and capability mechanism as
+  everything else. The admin API is typed and documented, and the repository carries a skill
+  that teaches an AI agent to add a view.
 - **It reads contracts and feeds, never internals.** Its data comes from an authenticated admin
   HTTP API it registers through `http.route`, backed by the capabilities of the installed
   components. What must not be missed comes from feeds, not from events (K3). A view whose
@@ -304,7 +319,7 @@ records and diff tables, prompt bars, an agent chat harness).
   pi-durable's `watch()` and `taskGraph()`, reached through the adapter, not on a copy of their state.
 - **It runs wherever the app runs, and closes no deployment** (§4,
   `features/deployment-targets.md`). The UI is static assets built by the component (React and
-  Tailwind v4, the stack of Beautiful UI's primitives; no Next.js server runtime). Assets and API are
+  Tailwind v4, shadcn/ui's stack; no Next.js server runtime). Assets and API are
   served by the component's own `http.route` handlers (standard fetch handlers), so any host that
   serves the app serves the dashboard: `server-bun`, a Worker, and later hosts (Vercel, E2B,
   exe.dev, Modal) with no dashboard change. Live updates are server-sent events (a plain streaming
@@ -316,17 +331,18 @@ records and diff tables, prompt bars, an agent chat harness).
   pikit app needs (no magic, principle 9).
 - **It is safe by default.** Authenticated; never shows a secret or a credential. Operational logs stay without message text; the transcript views are an explicit,
   authenticated read of the conversation.
-- **No paid dependencies.** Beautiful UI's `SidebarNav` uses a commercial icon set
-  (`@central-icons-react`); the dashboard replaces it with a free set. Every copied primitive is
+- **No paid dependencies.** Free icon sets only (Beautiful UI's `SidebarNav` uses a commercial
+  one, `@central-icons-react`, which the dashboard does not take). Every copied primitive is
   attributed in `NOTICE`.
 
 The dashboard reads the composition through `APP_DESCRIPTION` (K13).
 
 **Decision still open** `[open]`:
 - **How primitives reach the registry.** Copied into `registry/components/admin-dashboard/` and
-  pinned to a Beautiful UI commit (the pikit way: source owned, reproducible), or fetched with the
-  shadcn CLI from Beautiful UI's registry at install time. The first is the default unless there
-  is a reason against it.
+  pinned (the pikit way: source owned, reproducible), or fetched with the shadcn CLI at install
+  time (`shadcn add`, which works without `components.json` for universal items). The first is
+  the default unless there is a reason against it; either way the installed project can
+  `shadcn add` more.
 
 ## 6. The agent knows and improves itself
 
@@ -384,7 +400,7 @@ own prompt or skills), with automatic rollback, may come later as a policy compo
 bypass the gate for anything else.
 
 **Visually.** The dashboard is source in the project, so the agent improves it the same way: adding
-Beautiful UI or shadcn primitives (`shadcn add <registry URL>`) or new views, through the same
+shadcn/ui primitives (`shadcn add <registry URL>`) or new views, through the same
 branch, preview, approval and deploy. The dashboard also shows the agent to itself: its composition,
 its runs, its proposals and their state.
 

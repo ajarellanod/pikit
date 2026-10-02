@@ -4,9 +4,11 @@
 
 pikit runs your AI agents as a service: reachable from your chats and products, remembering
 conversations, delivering replies reliably, acting on a schedule, asking a human when it
-must. It is the moldable alternative to OpenClaw and Hermes: you get to the same place, a
-running agent on your own infrastructure in minutes, but what you are left with is a project
-you can reshape, not a product you have to configure.
+must. It is the base for assistants like OpenClaw and Hermes, not another one of them: it
+gives you a durable, moldable foundation (the core, the contracts, channels, deployment, the
+installer and a base dashboard) running on your own infrastructure in minutes, and you build
+the assistant you need on it, with your AI, one component at a time. What you are left with is
+a project you can reshape, not a product you have to configure.
 
 **Pi is the agent. pikit is the kit.** As its name says, pikit is a kit for Pi: everything Pi
 needs to run as a robust, multi-agent service in the cloud, and nothing Pi already does.
@@ -105,7 +107,16 @@ running, reachable agent: the CLI and the installer exist so that nothing stands
 installing pikit and an agent that answers. Presets are shortcuts, never modes: everything they install can be
 edited or removed like anything else.
 
-### 13. Boring on purpose.
+### 13. Built to be built on.
+
+pikit gives the bases; the assistant is yours to build. So building on it must be easy for a
+person and for the AI working with them: every contract has a conformance suite that says
+whether a new component is right, every feature has a design note that says how to build it,
+the repository carries skills that teach an agent to write a channel, a tool, a store or a
+dashboard view, and durability comes with the contracts, so a component never has to think
+about crashes. What one user builds, others can install from that user's own registry.
+
+### 14. Boring on purpose.
 
 The model you learn for 1.0 is the model for all of 1.x. The harness is the part of your
 system you least want to rewrite, so pikit will never make you rewrite it. Excitement belongs
@@ -116,8 +127,10 @@ in components, which you upgrade when you decide to.
 ## What pikit is not
 
 - **Not a second agent.** Pi is the agent. pikit is the kit that runs it as a service.
-- **Not a finished product.** It will not match OpenClaw or Hermes feature for feature. It
-  matches their time to a first running agent and then gets out of your way.
+- **Not a finished product.** It does not chase OpenClaw's or Hermes' feature lists: a user
+  who wants an assistant of that size builds or installs the components for the features they
+  need on pikit's bases, and nobody carries all of them. pikit matches their time to a first
+  running agent and then gets out of your way.
 - **Not a framework that owns your application.** Your project owns pikit, not the other way
   around.
 - **Not a plugin marketplace.** Registries distribute source. Nothing is loaded dynamically
@@ -132,4 +145,4 @@ this, and I need that third to behave differently."*
 
 ---
 
-Build your own harness. Install only what you need. Own every behavior.
+We lay the bases. You build your assistant. Install only what you need. Own every behavior.
