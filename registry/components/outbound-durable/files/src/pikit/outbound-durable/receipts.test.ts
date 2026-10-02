@@ -92,39 +92,6 @@ for (const c of createFeedConformance<DeliveryReceipt>(
   test(`outbound-durable receipts ${c.group}: ${c.name}`, () => c.run());
 }
 
-test("a database from before receipts gains them, and its pending pieces are still delivered", async () => {
-  const database = temporaryDatabase();
-  // The table as the first outbound-durable created it, with no schema version, and a piece waiting.
-  const old = new DatabaseSync(database);
-  old.exec(`CREATE TABLE outbound_pieces (
-    seq INTEGER PRIMARY KEY, key TEXT NOT NULL UNIQUE, channel TEXT NOT NULL, conversation_key TEXT NOT NULL,
-    text TEXT NOT NULL, state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, failures INTEGER NOT NULL DEFAULT 0,
-    next_attempt_at INTEGER NOT NULL, possible_duplicate INTEGER NOT NULL DEFAULT 0, platform_message_id TEXT,
-    last_error TEXT, created_at INTEGER NOT NULL, settled_at INTEGER)`);
-  const clock = createManualClock();
-  old.prepare("INSERT INTO outbound_pieces (key, channel, conversation_key, text, state, next_attempt_at, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?)").run(
-    "s1:r1#0",
-    "chat",
-    "chat:1",
-    "waiting since before the upgrade",
-    clock.now(),
-    clock.now(),
-  );
-  old.close();
-
-  const outbox = await openOutbox(database, clock);
-  try {
-    await until(() => outbox.delivered.has("s1:r1#0"), "the old piece delivered");
-    const page = await outbox.queue.receipts.read(undefined, 10);
-    expect(page.items.map((i) => [i.fact.idempotencyKey, i.fact.index, i.fact.outcome.kind])).toEqual([["s1:r1", 0, "delivered"]]);
-  } finally {
-    await outbox.app.stop();
-  }
-  const check = new DatabaseSync(database);
-  expect(check.prepare("SELECT value FROM outbound_meta WHERE name = 'schema_version'").get()).toEqual({ value: SCHEMA_VERSION });
-  check.close();
-});
-
 test("two processes migrating at once: the one that waited for the lock finds the schema done", async () => {
   const database = temporaryDatabase();
   const first = openTestDatabase(database);

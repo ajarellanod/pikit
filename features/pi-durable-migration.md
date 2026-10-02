@@ -37,14 +37,14 @@ now does, pikit's goes.
   `AgentHarness` is gone.
 
 ## Done and doing
-- **Done** (on `feat/pi-durable`, beside the 0.99 code): pi-durable's storage over `storage.sql` on
+- **Done** (on `feat/pi-durable`): pi-durable's storage over `storage.sql` on
   both targets; models, providers and credentials on pi-ai 1.0; tools, MCP and execution on
   pi-durable; wake-ups for hosts that are evicted (a next due time derived from the Harness); a
   runtime implementing `agent.runtime` on pi-durable. Before them, unmodified Pi coding-agent
   extensions stopped running: pi-durable's own extensions are the extension model from now on.
 - **Doing:** the switch-over. The components move to those pieces (`runtime-pi`,
   `deployment-cloudflare` and the Durable Object hosts, the conversation registries, the tools and
-  providers), the contracts follow, and the 0.99 code is deleted.
+  providers), and the contracts follow.
 
 ## What moves to Pi, and what goes
 - **Pi's now:** sessions (pi-durable conversations), resume after a crash or eviction, request-id
@@ -61,8 +61,6 @@ now does, pikit's goes.
 ## Decisions of the switch-over
 - **Messages that arrive during a run are batched into the next run** (`followUpMode: "all"`): the
   next run takes every message queued behind the current one.
-- **Existing conversations are not migrated.** After upgrading, conversations start fresh: pointers
-  that hold 0.99 session ids are not carried over.
 - **`sessionId` is renamed `conversationId`** in the contracts (`ConversationRef` and what carries
   it): it is the pi-durable conversation's id.
 - **`sessions.store`, `sessions-sql` and `sessions-jsonl` are removed** (above).

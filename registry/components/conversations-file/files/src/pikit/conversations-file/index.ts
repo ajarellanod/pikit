@@ -8,11 +8,6 @@
  * pointer, keeping the old conversation and remembering it. No pointer is ever deleted, and nothing
  * here is dropped when a conversation goes idle.
  *
- * A file written before pikit moved to pi-durable (version 1: its pointers name Pi 0.99 sessions,
- * which the runtime no longer has) is read as no pointers: each of its conversations starts a new one
- * at its next message, logged once, and the file is rewritten in the current version at the first
- * change. Nothing is migrated.
- *
  * Dependency direction: the registry uses `agent.conversations`, the runtime never uses the registry.
  * So the runtime starts first, and conversations are created only once it runs.
  *
@@ -50,16 +45,13 @@ const Pointer = Type.Object({
 });
 type Pointer = Static<typeof Pointer>;
 
-/** The file's format: 2 since the runtime is pi-durable (conversation ids). */
-export const VERSION = 2;
+/** The file's format. */
+export const VERSION = 1;
 
 const RegistryFile = Type.Object({
   version: Type.Literal(VERSION),
   conversations: Type.Record(Type.String(), Pointer),
 });
-
-/** A file of Pi 0.99's time: its pointers name sessions. Only recognised, never read. */
-const LegacyFile = Type.Object({ version: Type.Literal(1), conversations: Type.Record(Type.String(), Type.Unknown()) });
 
 export default defineComponent({
   name: "conversations-file",
@@ -70,8 +62,6 @@ export default defineComponent({
     let path: string | undefined;
     /** By key. A `Map`, not an object: keys are opaque and may be `__proto__`. */
     let pointers = new Map<string, Pointer>();
-    /** Keys of a version 1 file, not resolved since: each starts a new conversation, logged once. */
-    let legacy = new Set<string>();
     /** Changes run one at a time: a first resolve and its concurrent twin create one conversation. */
     let line: Promise<unknown> = Promise.resolve();
     const serial = <T>(work: () => Promise<T>): Promise<T> => {
@@ -104,9 +94,6 @@ export default defineComponent({
           const now = ctx.clock.now();
           const pointer: Pointer = { agent, conversationId: await newConversation(ctx), previousConversationIds: [], createdAt: now, updatedAt: now };
           await commit(file, new Map(pointers).set(key, pointer));
-          if (legacy.delete(key)) {
-            ctx.logger.info("conversations-file: a conversation recorded before the move to pi-durable starts a new one", { conversation: key });
-          }
           return ref(key, pointer);
         }),
 
@@ -144,14 +131,7 @@ export default defineComponent({
         const loaded = await load(file);
         // A missing file is written now, so a directory that cannot hold it fails the start.
         if (loaded === undefined) await writeAtomically(file, serialize(new Map()));
-        pointers = loaded?.pointers ?? new Map();
-        legacy = new Set(loaded?.legacy ?? []);
-        if (legacy.size > 0) {
-          pikit.logger.info("conversations-file: the registry predates pi-durable; its conversations start new ones at their next message", {
-            path: file,
-            conversations: legacy.size,
-          });
-        }
+        pointers = loaded ?? new Map();
         path = file;
       },
       async stop(ctx) {
@@ -163,11 +143,8 @@ export default defineComponent({
   },
 });
 
-/**
- * The pointers in `file`, or `undefined` when there is no file; a version 1 file has none, and its keys
- * are `legacy`. A file that is not a registry fails.
- */
-async function load(file: string): Promise<{ pointers: Map<string, Pointer>; legacy: string[] } | undefined> {
+/** The pointers in `file`, or `undefined` when there is no file. A file that is not a registry fails. */
+async function load(file: string): Promise<Map<string, Pointer> | undefined> {
   let text: string;
   try {
     text = await readFile(file, "utf8");
@@ -181,12 +158,11 @@ async function load(file: string): Promise<{ pointers: Map<string, Pointer>; leg
   } catch (error) {
     throw new Error(`conversations-file: ${file} is not valid JSON`, { cause: error });
   }
-  if (Value.Check(LegacyFile, parsed)) return { pointers: new Map(), legacy: Object.keys(parsed.conversations) };
   if (!Value.Check(RegistryFile, parsed)) {
     const [first] = Value.Errors(RegistryFile, parsed);
     throw new Error(`conversations-file: ${file} is not a conversation registry (${first?.instancePath || "/"}: ${first?.message})`);
   }
-  return { pointers: new Map(Object.entries(parsed.conversations)), legacy: [] };
+  return new Map(Object.entries(parsed.conversations));
 }
 
 function serialize(pointers: Map<string, Pointer>): string {

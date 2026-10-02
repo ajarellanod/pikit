@@ -129,11 +129,10 @@ test("new --target: an unknown target, and a preset that does not run on the cho
   const mars = await runCli(["new", "fresh", "--target", "mars"], parent);
   expect(mars.code).toBe(2);
   expect(mars.err).toContain('--target is one of server, durable, not "mars"');
-  // The target that was called after its provider is refused with its new name, never taken as an alias.
-  const renamed = await runCli(["new", "fresh", "--target", "cloudflare", "--preset", "cloudflare-minimal"], parent);
-  expect(renamed.code).toBe(2);
-  expect(renamed.err).toContain('the target "cloudflare" is now "durable"');
-  expect(renamed.err).toContain("Cloudflare is its provider; use --target durable");
+  // A provider is not a target.
+  const provider = await runCli(["new", "fresh", "--target", "cloudflare", "--preset", "cloudflare-minimal"], parent);
+  expect(provider.code).toBe(2);
+  expect(provider.err).toContain('--target is one of server, durable, not "cloudflare"');
 
   const server = await runCli(["new", "fresh", "--target", "durable", "--preset", "http"], parent);
   expect(server.code).toBe(1);
@@ -260,7 +259,7 @@ test("new records the builtin registry, not this machine's path to it", async ()
   // On a server, the starter's model stays Anthropic's.
   expect(readFileSync(join(parent, "fresh", "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "anthropic/claude-sonnet-4-6",');
   const manifest = JSON.parse(readFileSync(join(parent, "fresh", "pikit.json"), "utf8"));
-  expect(manifest.version).toBe(2);
+  expect(manifest.version).toBe(1);
   expect(manifest.registries).toEqual({ default: "builtin" });
   // No component of a server project declares wrangler, so it has none.
   expect(Object.keys(JSON.parse(readFileSync(join(parent, "fresh", "package.json"), "utf8")).devDependencies)).toEqual(["@types/bun", "typescript"]);
@@ -318,8 +317,8 @@ test("the guided path does not continue an unfinished new: it offers to delete i
 }, 30_000);
 
 /**
- * A project made on another machine, cloned here: its `pikit.json` is version 1 and names the
- * registry of that machine's pikit checkout, a path that does not exist here. Its kit is this CLI's
+ * A project made on another machine, cloned here: its `pikit.json` names the builtin registry, and
+ * does not record its kit (made by a CLI not in Git). Its kit is this CLI's
  * (the tarball's name is current), and `@pikit/core` and `@pikit/contracts` are linked as `bun install`
  * would, so `add` runs to the end without the network.
  */
@@ -327,7 +326,7 @@ function clonedProject(): string {
   const made = temp();
   writeFileSync(
     join(made, "pikit.json"),
-    JSON.stringify({ version: 1, targets: ["server"], registries: { default: "/home/someone/.pikit/pikit/registry" }, components: {} }),
+    JSON.stringify({ version: 1, targets: ["server"], registries: { default: "builtin" }, components: {} }),
   );
   const contracts = kitSpecifier("@pikit/contracts");
   mkdirSync(join(made, "vendor"));
@@ -343,14 +342,14 @@ function clonedProject(): string {
   return clone;
 }
 
-test("a project cloned on another machine resolves its registry: a v1 checkout path is builtin, and add works", async () => {
+test("a project cloned on another machine resolves its builtin registry here, and add works", async () => {
   const dir = clonedProject();
   const run = await runCli(["add", "log-events", "--yes"], dir);
   expect(run.err).not.toContain("is not a registry");
   expect(run.out).toContain("log-events installed; `pikit doctor` is green");
   expect(run.code).toBe(0);
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
-  expect(manifest.version).toBe(2);
+  expect(manifest.version).toBe(1);
   expect(manifest.registries).toEqual({ default: "builtin" });
   expect(Object.keys(manifest.components)).toEqual(["log-events"]);
   // The kit it accepts, which a later add checks before it changes the project's kit.
@@ -374,7 +373,7 @@ test("add keeps each installed file's base, named by its hash; remove deletes th
   // Another component installed a file with the same content: its base stays with it.
   const [shared, { hash: sharedHash }] = Object.entries(files)[0] as [string, { hash: string }];
   const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8"));
-  manifest.components["log-copy"] = { registry: "default", version: "0.0.0", files: { "src/copy.ts": { hash: sharedHash } }, dependencies: {}, environment: [] };
+  manifest.components["log-copy"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { "src/copy.ts": { hash: sharedHash } }, dependencies: {}, environment: [] };
   writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
   writeFileSync(join(dir, "src", "copy.ts"), readFileSync(join(dir, shared)));
 
@@ -423,7 +422,7 @@ function agentProject(tools: string[]): string {
   }
   const manifest = emptyManifest();
   const toolFile = "src/pikit/tool-bash/index.ts";
-  manifest.components["tool-bash"] = { registry: "default", version: "0.0.0", files: { [toolFile]: { hash: hashOf(files[toolFile] ?? "") } }, dependencies: {}, environment: [] };
+  manifest.components["tool-bash"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: { [toolFile]: { hash: hashOf(files[toolFile] ?? "") } }, dependencies: {}, environment: [] };
   writeProjectManifest(dir, manifest);
   return dir;
 }

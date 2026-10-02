@@ -3,7 +3,7 @@
  * `ExecutionEnv` (files plus shell) without importing Pi, and the `env` a pi-durable `Harness` takes.
  * Neutral: `execution-do` uses it in a Cloudflare Durable Object; `./node` has the server's.
  *
- * pi-durable's environment differs from Pi 0.99's (what pikit's `execution` was before) in three ways:
+ * What pi-durable's environment asks beyond files and a shell:
  * - `FileSystem` has a `readonly id` (equal ids see the same files at the same paths: `edit` and
  *   `write` serialize changes to one file by `id` and path), and `truncateFile` and `flushFile`;
  * - `Shell.exec` streams every raw chunk to `onOutput(text, context)` and no longer bounds the output

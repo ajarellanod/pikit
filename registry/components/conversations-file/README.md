@@ -36,16 +36,11 @@ not supported: run one server replica.
 
 It refuses to start when the file is not a registry, or when its directory cannot be written.
 
-**A file written before pikit moved to pi-durable** (`"version": 1`: its pointers name Pi 0.99
-sessions, which the runtime no longer has) starts with no pointer: each of its conversations starts a
-new one at its next message, transparently (logged once at start, and once per conversation). The file
-is rewritten in version 2 at the first change. Nothing is migrated.
-
 The file (mode `0600`):
 
 ```json
 {
-  "version": 2,
+  "version": 1,
   "conversations": {
     "http:c1": {
       "agent": "assistant",

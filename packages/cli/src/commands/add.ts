@@ -45,7 +45,6 @@ import { addDependencies, type DependencyField, readPackageJson, removeDependenc
 import {
   hashFile,
   type InstalledComponent,
-  kitRanges,
   modifiedFiles,
   ownedDependencies,
   PIKIT_JSON,
@@ -445,7 +444,7 @@ export function workerWiring(name: string, manifest: Manifest, targets: readonly
  * before any write, when that replaces a newer kit: the components installed with it may need what
  * it has. `--force` replaces it anyway. When the order cannot be told, it is said, and it goes ahead.
  * Refused too, unless `--force`, when an installed component does not accept this CLI's core,
- * contracts or adapter (`requires` in pikit.json, `kitRanges`): the contracts stay 0.x on their own schedule (SPEC
+ * contracts or adapter (`requires` in pikit.json): the contracts stay 0.x on their own schedule (SPEC
  * K8), and nothing else would check the components already vendored against them. The draft records
  * the kit the project will have.
  */
@@ -542,7 +541,7 @@ export function applyPlans(projectDir: string, draft: Draft, plans: readonly Pla
     for (const field of FIELDS) {
       const unneeded = plan.dropped[field].length === 0 ? [] : unneededDependencies(projectDir, draft.project, plan.dropped[field]);
       const removed = removeDependencies(pkg, unneeded, field);
-      const owned = (field === "dependencies" ? record.addedDependencies : record.addedDevDependencies) ?? [];
+      const owned = ownedDependencies(record)[field];
       const moved = updateDependencies(pkg, plan.previous?.[field] ?? {}, record[field] ?? {}, owned, field);
       dependenciesChanged ||= removed.length > 0 || moved.length > 0;
     }
@@ -553,7 +552,7 @@ export function applyPlans(projectDir: string, draft: Draft, plans: readonly Pla
     dependenciesChanged ||= added.length > 0 || dev.added.length > 0;
     // Only what it added is its to take out on `remove`: a package the project had is the project's.
     const others = Object.entries(draft.project.components).flatMap(([name, c]) => (name === plan.name ? [] : [ownedDependencies(c)]));
-    record.addedDependencies = owned(record.addedDependencies ?? [], added, plan.manifest.dependencies, others.flatMap((o) => o.dependencies));
+    record.addedDependencies = owned(record.addedDependencies, added, plan.manifest.dependencies, others.flatMap((o) => o.dependencies));
     const addedDev = owned(record.addedDevDependencies ?? [], dev.added, plan.manifest.devDependencies ?? {}, others.flatMap((o) => o.devDependencies));
     if (addedDev.length > 0) record.addedDevDependencies = addedDev;
   }
@@ -617,7 +616,7 @@ function kitVersions(): { "@pikit/core": string; "@pikit/contracts": string; "@p
 function incompatibleInstalled(project: ProjectManifest): string[] {
   const kit = kitVersions();
   return Object.entries(project.components).flatMap(([name, installed]) => {
-    const { pikit, contracts, adapter } = kitRanges(installed);
+    const { pikit, contracts, adapter } = installed.requires;
     return (
       [
         ["@pikit/core", pikit],

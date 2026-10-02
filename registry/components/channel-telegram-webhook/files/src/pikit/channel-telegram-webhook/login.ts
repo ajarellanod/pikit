@@ -23,13 +23,6 @@
  * - removing the password closes new logins and keeps the chats that logged in;
  * - changing it logs out every chat that logged in with the old one (they `/login` again with the new
  *   one): that is how to log everyone out. Going back to a former password lets its chats back in.
- *
- * Former names, still accepted and never documented to users: this feature was first "claiming the
- * bot", with the secret `TELEGRAM_[<NAME>_]CLAIM_CODE` and the command `/claim`, and a public template
- * shipped with them. `readPassword` falls back to the old secret (the Worker logs a deprecation warning
- * at start), and `commandOf` (`inbox.ts`) reads `/claim` as `/login`. The `storage.kv` keys keep the
- * old name (`claim:…`), so the chats that logged in before the rename stay logged in: the same value
- * under the new name has the same fingerprint.
  */
 
 import type { AppContext } from "@pikit/core";
@@ -50,27 +43,22 @@ export interface Password {
   fingerprint: string;
 }
 
-/** A chat's login, in `storage.kv`; `code` is the password's fingerprint. */
-type Login = { user: number; code: string; at: number };
+/** A chat's login, in `storage.kv`; `fingerprint` is the password's. */
+type Login = { user: number; fingerprint: string; at: number };
 /** A chat's wrong passwords: how many in a row, until when it waits (0: it does not), the last message counted. */
 type Attempts = { failures: number; until: number; last: number };
 
-// The feature's first name: renaming the keys would log out every chat that logged in before.
-export const loginKey = (conversation: string): string => `claim:${conversation}`;
-const attemptsKey = (conversation: string): string => `claim-attempts:${conversation}`;
+export const loginKey = (conversation: string): string => `login:${conversation}`;
+const attemptsKey = (conversation: string): string => `login-attempts:${conversation}`;
 const toldKey = (conversation: string): string => `stranger:${conversation}`;
 
 /**
- * The bot's password as its secrets hold it: `TELEGRAM_[<NAME>_]PASSWORD`, or else the deprecated
- * `TELEGRAM_[<NAME>_]CLAIM_CODE`; spaces around it ignored. `name` is the variable it came from;
- * `undefined` when neither is set.
+ * The bot's password as its secrets hold it, `TELEGRAM_[<NAME>_]PASSWORD`, spaces around it ignored;
+ * `undefined` when it is not set.
  */
-export async function readPassword(account: Account, get: (name: string) => string | undefined | Promise<string | undefined>): Promise<{ name: string; value: string } | undefined> {
-  for (const name of [account.passwordSecret, account.legacyPasswordSecret]) {
-    const value = (await get(name))?.trim();
-    if (value !== undefined && value !== "") return { name, value };
-  }
-  return undefined;
+export async function readPassword(account: Account, get: (name: string) => string | undefined | Promise<string | undefined>): Promise<string | undefined> {
+  const value = (await get(account.passwordSecret))?.trim();
+  return value === undefined || value === "" ? undefined : value;
 }
 
 /** The password `value`, ready to compare; `undefined` when there is none. */
@@ -96,7 +84,7 @@ export interface StrangerDeps extends InboxDeps {
 /** Whether the chat `conversation` was logged in by `user` with `password` (or with any, when none is set). */
 export async function isLoggedIn(deps: Pick<StrangerDeps, "store" | "password">, conversation: string, user: number): Promise<boolean> {
   const login = await deps.store.get<Login>(loginKey(conversation));
-  return login !== undefined && login.user === user && (deps.password === undefined || login.code === deps.password.fingerprint);
+  return login !== undefined && login.user === user && (deps.password === undefined || login.fingerprint === deps.password.fingerprint);
 }
 
 /** A private message from someone the Worker does not list. */
@@ -149,7 +137,7 @@ async function logIn(message: TelegramMessage, text: string, deps: StrangerDeps,
   }
 
   if (await matches(presented, password.digest)) {
-    await store.set(loginKey(conversation), { user, code: password.fingerprint, at: now } satisfies Login);
+    await store.set(loginKey(conversation), { user, fingerprint: password.fingerprint, at: now } satisfies Login);
     await store.delete(attemptsKey(conversation));
     // Handled, as a command is: delivered again, it is not answered twice.
     await store.set(commandSeenKey(conversation), message.message_id);

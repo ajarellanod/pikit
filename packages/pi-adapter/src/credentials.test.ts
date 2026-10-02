@@ -21,7 +21,7 @@ afterAll(() => {
 
 const env = (values: Record<string, string>): AuthContext => ({ env: async (name) => values[name], fileExists: async () => false });
 
-/** A credentials file as credentials-file (on pi-ai 0.99) writes it today, and the started component over it. */
+/** A credentials file as credentials-file writes it, and the started component over it. */
 async function fileStore(contents: Record<string, unknown> | undefined) {
   const dir = mkdtempSync(join(tmpdir(), "pikit-durable-credentials-"));
   directories.push(dir);
@@ -69,7 +69,7 @@ function stubOAuthProvider(refresh: (credential: OAuthCredential) => Promise<OAu
   return Object.assign(provider, { refreshes: () => refreshes });
 }
 
-test("a 0.99 credentials file serves 1.0 as it is: the stored key wins, an expired token is refreshed once and written back", async () => {
+test("a credentials-file store: the stored key wins, an expired token is refreshed once and written back", async () => {
   const before = {
     anthropic: { type: "api_key", key: "sk-stored" },
     [PROVIDER]: { type: "oauth", access: "expired", refresh: "refresh-1", expires: 0 },

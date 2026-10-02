@@ -142,8 +142,6 @@ when only timed work is left (a pending timer keeps a Durable Object from being 
   first asks a `select` prompt (`browser` or `copy_code`): `loginInteraction` answers it.
 - `providers/openrouter.ts`: `openrouterProvider({ apiBase })` moves every model's address, the image
   and classifier models too.
-- The `CredentialStore` contract and the stored shapes did not change from 0.99: credentials-file's
-  file is read as it is, with no migration (`credentials.test.ts`).
 
 ## Tests
 

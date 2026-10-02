@@ -44,10 +44,6 @@ never leaves a pointer to a conversation that does not exist.
 A value in its namespace that is not a pointer fails the call that reads it, and is never
 overwritten.
 
-**A pointer written before pikit moved to pi-durable** (it names a Pi 0.99 session id, which the
-runtime no longer has) counts as none: `get` and `reset` find nothing, and the next message starts
-a new conversation, transparently (logged once), whose pointer replaces it. Nothing is migrated.
-
 The value at `http:c1`:
 
 ```json
@@ -98,8 +94,8 @@ values stay in `storage.kv`: they are your data.
 - the `conversations.registry` conformance suite from `@pikit/contracts/testing`, including the
   conversations it creates;
 - the lifecycle conformance suite;
-- the stored value, a `__proto__` key, a value that is not a pointer, a pointer of Pi 0.99's time,
-  the event only after the pointer is stored, and the races above, in one process and in two.
+- the stored value, a `__proto__` key, a value that is not a pointer, the event only after the
+  pointer is stored, and the races above, in one process and in two.
 
 In this repository, `storage-kv-sql.test.ts` also runs the conformance suite over `storage-kv-sql`
 on a SQLite file, and two processes racing over one database. It is not copied: a component's files

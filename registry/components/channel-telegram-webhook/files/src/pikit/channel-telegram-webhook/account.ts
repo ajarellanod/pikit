@@ -29,8 +29,6 @@ export interface Account {
   webhookSecret: string;
   /** The password a private chat sends with `/login` to be allowed (`login.ts`); optional. */
   passwordSecret: string;
-  /** The password's former name, `TELEGRAM_[<NAME>_]CLAIM_CODE`: read when `passwordSecret` is not set (`readPassword`). */
-  legacyPasswordSecret: string;
   /** Where Telegram posts this bot's updates: `/telegram` or `/telegram/<name>`. */
   path: string;
 }
@@ -49,7 +47,6 @@ export function accountsOf(names: readonly string[]): Account[] {
       allowedSecret: `TELEGRAM_${infix}ALLOWED_USERS`,
       webhookSecret: `TELEGRAM_${infix}WEBHOOK_SECRET`,
       passwordSecret: `TELEGRAM_${infix}PASSWORD`,
-      legacyPasswordSecret: `TELEGRAM_${infix}CLAIM_CODE`,
       path: name === undefined ? `/${KIND}` : `/${KIND}/${name}`,
     };
   });

@@ -66,14 +66,17 @@ const COLUMNS = "seq, key, channel, conversation_key, text, state, attempts, fai
 
 /**
  * The schema, one step per version. `outbound_meta.schema_version` says how many have run; each runs
- * in its own transaction with the version it reaches. `CREATE TABLE IF NOT EXISTS` alone cannot add a
- * table or a column to a database that already exists (the outbox of a deployed bot), and
- * `PRAGMA user_version` is shared by every component of the app's one database.
+ * in its own transaction with the version it reaches. A later version is a new step: `CREATE TABLE IF
+ * NOT EXISTS` alone cannot add a table or a column to a database that already exists (the outbox of a
+ * deployed bot), and `PRAGMA user_version` is shared by every component of the app's one database.
  */
 const MIGRATIONS: readonly ((tx: SqlStatements) => Promise<void>)[] = [
-  // 1. The pieces. `IF NOT EXISTS`: databases from before versioning already have them.
+  // 1. The pieces, and their receipts (`Feed`; outbound.ts). The receipts have a table of their own:
+  // a piece's `seq` is given when it is stored, not when it settles (an older piece may settle later),
+  // and SQLite reuses the highest rowid once that row is pruned. `AUTOINCREMENT` never reuses one, so
+  // a receipt's `seq` follows the order pieces settled.
   async (tx) => {
-    await tx.run(`CREATE TABLE IF NOT EXISTS outbound_pieces (
+    await tx.run(`CREATE TABLE outbound_pieces (
       seq INTEGER PRIMARY KEY,
       key TEXT NOT NULL UNIQUE,
       channel TEXT NOT NULL,
@@ -89,12 +92,7 @@ const MIGRATIONS: readonly ((tx: SqlStatements) => Promise<void>)[] = [
       created_at INTEGER NOT NULL,
       settled_at INTEGER
     )`);
-    await tx.run("CREATE INDEX IF NOT EXISTS outbound_pieces_open ON outbound_pieces (state, conversation_key, seq)");
-  },
-  // 2. The receipts (`Feed`; outbound.ts). A table of their own: a piece's `seq` is given when it is stored,
-  // not when it settles (an older piece may settle later), and SQLite reuses the highest rowid once
-  // that row is pruned. `AUTOINCREMENT` never reuses one, so `seq` follows the order pieces settled.
-  async (tx) => {
+    await tx.run("CREATE INDEX outbound_pieces_open ON outbound_pieces (state, conversation_key, seq)");
     await tx.run(`CREATE TABLE outbound_receipts (
       seq INTEGER PRIMARY KEY AUTOINCREMENT,
       message_key TEXT NOT NULL,

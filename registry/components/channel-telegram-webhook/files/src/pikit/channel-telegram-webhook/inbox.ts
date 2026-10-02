@@ -115,9 +115,6 @@ export async function reply(bot: Bot, chatId: number, text: string, ctx: AppCont
 /**
  * `/new` or `/new@this_bot` → `new`; `/reset` is `new`. A command for another bot, or no command, →
  * `undefined`. The bot's username is asked (`getMe`) only when a command names one.
- *
- * `/claim` is `login`: its former name (`login.ts`), kept for the chats and templates that know it,
- * and never mentioned to users.
  */
 export async function commandOf(text: string, bot: Bot): Promise<string | undefined> {
   const match = /^\/([A-Za-z0-9_]+)(?:@([A-Za-z0-9_]+))?(?:\s|$)/.exec(text.trim());
@@ -125,5 +122,5 @@ export async function commandOf(text: string, bot: Bot): Promise<string | undefi
   const [, name = "", target] = match;
   if (target !== undefined && target.toLowerCase() !== (await bot.me()).username?.toLowerCase()) return undefined;
   const command = name.toLowerCase();
-  return command === "reset" ? "new" : command === "claim" ? "login" : command;
+  return command === "reset" ? "new" : command;
 }

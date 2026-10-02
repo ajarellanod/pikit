@@ -183,7 +183,7 @@ export type KitOrder = { verdict: "upgrade" } | { verdict: "downgrade" } | { ver
  * when both name one commit and the project's had uncommitted changes, which Git cannot order.
  */
 export function compareKits(repo: string, current: string | undefined, next: string | undefined): KitOrder {
-  if (current === undefined) return { verdict: "unknown", why: "pikit.json does not record the project's kit (it predates pikit.json version 2)" };
+  if (current === undefined) return { verdict: "unknown", why: "pikit.json does not record the project's kit (the CLI that made it was not in Git)" };
   if (next === undefined) return { verdict: "unknown", why: `this CLI's checkout (${repo}) is not in Git` };
   const [from, to] = [current.replace(/-dirty$/, ""), next.replace(/-dirty$/, "")];
   if (from === to && current.endsWith("-dirty")) return { verdict: "unknown", why: `the project's kit was packed from uncommitted changes to ${from}` };

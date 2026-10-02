@@ -3,9 +3,9 @@
  * outbound service is the fake MCP servers of `mcp-outbound.ts` (`vitest.config.ts`), so nothing here
  * replaces `globalThis.fetch` and nothing reaches the network.
  *
- * The first case pins what pi-mcp 1.0 fixed upstream: 0.99 called the global `fetch` as a method of its
- * transport, which workerd refuses ("Illegal invocation"); 1.0 calls it without a receiver, so its own
- * transport works here, and `mcpHttpTransport`'s wrapper is only belt and braces.
+ * The first case pins that pi-mcp's own transport calls the global `fetch` without a receiver, as
+ * workerd requires (a method call is refused with "Illegal invocation"), so it works here, and
+ * `mcpHttpTransport`'s wrapper is only belt and braces.
  */
 
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
@@ -26,7 +26,7 @@ async function call(tool: AgentTool | undefined, args: Record<string, unknown>):
   return { text: outcome.text, isError: outcome.isError };
 }
 
-it("pi-mcp 1.0's own transport works on workerd's fetch (0.99's failed with Illegal invocation)", async () => {
+it("pi-mcp's own transport works on workerd's fetch (it calls fetch without a receiver)", async () => {
   const client = new McpClient({ name: "pikit-workerd", version: "0.0.0" });
   await client.connect(new StreamableHttpTransport({ url: urlOf(MCP_HOSTS.json), openGetStream: false }));
   expect((await client.listTools()).map((tool) => tool.name)).toEqual(["ask_question", "open_issue"]);

@@ -9,8 +9,8 @@
  * Git and HTTP registries are a feature (`features/open-registries.md`).
  */
 
-import { existsSync, readFileSync, realpathSync } from "node:fs";
-import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
+import { isAbsolute, relative, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 
 export const BUILTIN_REGISTRY = "builtin";
@@ -34,27 +34,6 @@ export function recordedLocation(projectDir: string, root: string): string {
 /** A location that resolves on another machine: `builtin`, or a path inside the project. */
 export function isPortable(location: string): boolean {
   return location === BUILTIN_REGISTRY || !isAbsolute(location);
-}
-
-/**
- * A `pikit.json` version 1 location (always an absolute path) that names the registry of a
- * pikit checkout, which version 2 records as `builtin`. Version 1 recorded the checkout the CLI ran
- * from, so the path is often of another machine: it is the running CLI's registry, the `registry/` of
- * any pikit checkout that still exists (its `packages/cli` is `@pikit/cli`), or, gone or not, the
- * installer's checkout (`…/.pikit/pikit/registry`).
- */
-export function isCheckoutRegistry(location: string): boolean {
-  if (!isAbsolute(location)) return false;
-  const path = resolve(location);
-  if (samePath(path, DEFAULT_REGISTRY)) return true;
-  if (path.split("\\").join("/").endsWith("/.pikit/pikit/registry")) return true;
-  if (basename(path) !== "registry" || !existsSync(join(path, "registry.json"))) return false;
-  const cli = join(dirname(path), "packages", "cli", "package.json");
-  try {
-    return (JSON.parse(readFileSync(cli, "utf8")) as { name?: unknown }).name === "@pikit/cli";
-  } catch {
-    return false;
-  }
 }
 
 /** The same directory, through symlinks (macOS's `/var` is `/private/var`). */

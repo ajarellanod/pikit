@@ -81,9 +81,11 @@ test("removing dev dependencies takes them out of devDependencies only, and says
 const installed = (dependencies: Record<string, string>, devDependencies?: Record<string, string>): InstalledComponent => ({
   registry: "default",
   version: "0.0.0",
+  requires: { pikit: "0.0.0" },
   files: {},
   dependencies,
   ...(devDependencies !== undefined && { devDependencies }),
+  addedDependencies: [],
   environment: [],
 });
 

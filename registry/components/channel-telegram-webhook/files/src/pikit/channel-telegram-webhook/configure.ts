@@ -86,17 +86,12 @@ async function password(io: ConfigureIO, account: Account): Promise<string[]> {
   const name = account.passwordSecret;
   const given = await readPassword(account, (variable) => io.get(variable));
   if (given !== undefined) {
-    const problem = passwordProblem(given.value);
+    const problem = passwordProblem(given);
     if (problem !== undefined) {
-      io.say(`\u2717 ${given.name} is not usable: ${problem}`);
-      return [`${given.name}: choose a password of at least ${PASSWORD_MIN_LENGTH} characters, or remove it`];
+      io.say(`\u2717 ${name} is not usable: ${problem}`);
+      return [`${name}: choose a password of at least ${PASSWORD_MIN_LENGTH} characters, or remove it`];
     }
-    // Its former name (login.ts) still works: said, not moved, since .env keeps what its owner wrote.
-    if (given.name !== name) {
-      io.say(`  ${given.name} is deprecated: rename it ${name} in .env (the same value keeps the chats that logged in)`);
-      return [];
-    }
-    io.set(name, given.value);
+    io.set(name, given);
     io.say(`  ${name}: set; once deployed, send /login <password> to your bot`);
     return [];
   }

@@ -40,9 +40,9 @@ function project(check: string | undefined, declared = check !== undefined): str
   }
   const manifest = emptyManifest();
   for (const name of ["checked", "deployment-fake"]) {
-    manifest.components[name] = { registry: "default", version: "0.0.0", files: {}, dependencies: {}, environment: [] };
+    manifest.components[name] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
   }
-  if (declared) manifest.components.checked = { registry: "default", version: "0.0.0", files: {}, dependencies: {}, environment: [], hooks: { doctor: "src/pikit/checked/doctor.ts" } };
+  if (declared) manifest.components.checked = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [], hooks: { doctor: "src/pikit/checked/doctor.ts" } };
   writeProjectManifest(dir, manifest);
   return dir;
 }

@@ -71,8 +71,6 @@ interface Endpoint {
   allowed: ReadonlySet<number>;
   /** Whether `TELEGRAM_[<NAME>_]PASSWORD` is set (the object's half compares it). */
   hasPassword: boolean;
-  /** Where the password was read from, when it is the deprecated `TELEGRAM_[<NAME>_]CLAIM_CODE`. */
-  deprecatedPassword: string | undefined;
   /** A password is set, or nobody is listed: strangers go to their chat's actor, which keeps the logins. */
   takesLogins: boolean;
   api: TelegramApi;
@@ -180,12 +178,6 @@ export const worker = defineComponent({
               instance: account.instance,
             });
           }
-          if (endpoint.deprecatedPassword !== undefined) {
-            ctx.logger.warn(
-              `channel-telegram-webhook: ${endpoint.deprecatedPassword} is deprecated: rename it ${account.passwordSecret} (the same value keeps the chats that logged in)`,
-              { instance: account.instance },
-            );
-          }
           ready.set(account.instance, endpoint);
         }
         const host = ctx.value(WORKERS_HOST);
@@ -213,10 +205,9 @@ export const worker = defineComponent({
       if (token === undefined) throw new Error(`channel-telegram-webhook: ${account.tokenSecret} is not set. Create a bot with @BotFather, then run \`pikit configure\``);
       const allowed = parseAllowedUsers(await store.get(account.allowedSecret));
       if (allowed instanceof Error) throw new Error(`channel-telegram-webhook: ${allowed.message.replace("TELEGRAM_ALLOWED_USERS", account.allowedSecret)}`);
-      // Also read under its former name, TELEGRAM_[<NAME>_]CLAIM_CODE (login.ts), with a warning at start.
       const password = await readPassword(account, (name) => store.get(name));
-      const weak = password === undefined ? undefined : passwordProblem(password.value);
-      if (password !== undefined && weak !== undefined) throw new Error(`channel-telegram-webhook: ${password.name} is not usable: ${weak}. Choose a longer password, or remove it`);
+      const weak = password === undefined ? undefined : passwordProblem(password);
+      if (password !== undefined && weak !== undefined) throw new Error(`channel-telegram-webhook: ${account.passwordSecret} is not usable: ${weak}. Choose a longer password, or remove it`);
       const secret = await store.get(account.webhookSecret);
       if (secret === undefined) throw new Error(`channel-telegram-webhook: ${account.webhookSecret} is not set. Run \`pikit configure\`: it generates one`);
       const problem = secretProblem(secret);
@@ -227,7 +218,6 @@ export const worker = defineComponent({
         secretToken: secret,
         allowed,
         hasPassword: password !== undefined,
-        deprecatedPassword: password?.name === account.legacyPasswordSecret ? password.name : undefined,
         // Nobody listed: a login made before the password was removed keeps working (login.ts).
         takesLogins: password !== undefined || allowed.size === 0,
         api: createTelegramApi(token, config.apiBase),

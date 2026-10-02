@@ -1,15 +1,12 @@
 /**
  * `model.credentials` on pi-ai 1.0. See README.md, "pi-ai 1.0".
  *
- * The `CredentialStore` contract did not change from 0.99 to 1.0 (the type declarations are the
- * same, and so is `Models`' use of it): one credential per provider id, `modify` the only, serialized
- * write path, OAuth refresh run by `Models.getAuth()` inside `modify` so the new tokens are written
- * back through the store, a failed refresh leaving the stored credential as it was. The `Credential`
- * shapes are unchanged too, so a 0.99 store (credentials-file) and the file it keeps serve 1.0 as
- * they are: no new store, no migration.
+ * The `CredentialStore` contract is pi-ai's: one credential per provider id, `modify` the only,
+ * serialized write path, OAuth refresh run by `Models.getAuth()` inside `modify` so the new tokens are
+ * written back through the store, a failed refresh leaving the stored credential as it was. A store
+ * (credentials-file) keeps pi-ai's `Credential` shapes as they are.
  *
- * What changed is the login: 1.0's Anthropic OAuth login first asks a `select` prompt (browser or
- * copy-code login). A prompt answered with free text fails it ("Unknown Anthropic login method").
+ * The login: pi-ai's Anthropic OAuth login first asks a `select` prompt (browser or copy-code login). A prompt answered with free text fails it ("Unknown Anthropic login method").
  * `loginInteraction` answers every prompt type over a line-based terminal, for `pikit configure`'s
  * login script and the samples' login scripts.
  *

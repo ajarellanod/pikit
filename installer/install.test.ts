@@ -111,8 +111,8 @@ function install(args: string[], nodeVersion: string, env: Record<string, string
   return { code: run.exitCode, out: run.stdout.toString(), err: run.stderr.toString(), home };
 }
 
-test("--cloudflare skips Docker, checks the Node.js wrangler runs on, and hands over to the Cloudflare bot", () => {
-  const run = install(["--cloudflare"], "v22.11.0");
+test("--durable skips Docker, checks the Node.js wrangler runs on, and hands over to the Cloudflare bot", () => {
+  const run = install(["--durable"], "v22.11.0");
   expect(run.err).toBe("");
   expect(run.code).toBe(0);
   expect(run.out).toContain("Cloudflare: no Docker needed");
@@ -121,14 +121,14 @@ test("--cloudflare skips Docker, checks the Node.js wrangler runs on, and hands 
   expect(run.out).toContain("pikit new --target durable --preset telegram-cloudflare starts another Telegram bot on Cloudflare");
   expect(existsSync(join(run.home, ".pikit", "bin", "pikit"))).toBe(true);
 
-  // PIKIT_CLOUDFLARE=1 is the same; an old Node.js is named, and the install still completes.
-  const old = install([], "v20.9.0", { PIKIT_CLOUDFLARE: "1" });
+  // PIKIT_DURABLE=1 is the same; an old Node.js is named, and the install still completes.
+  const old = install([], "v20.9.0", { PIKIT_DURABLE: "1" });
   expect(old.code).toBe(0);
   expect(old.err).toContain("wrangler needs Node.js >= 22 (found: v20.9.0)");
   expect(old.out).not.toMatch(/Docker is not installed|Docker with Compose found/);
 });
 
-test("without --cloudflare, Docker is checked as before and pikit new asks everything", () => {
+test("without --durable, Docker is checked as before and pikit new asks everything", () => {
   const run = install([], "v22.11.0");
   expect(run.code).toBe(0);
   expect(run.out).toMatch(/Docker is not installed|Docker with Compose found/);

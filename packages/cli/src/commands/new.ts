@@ -32,7 +32,7 @@ import { starterModelProblem } from "../project/starter-model.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
-import { RENAMED_TARGETS, TARGETS } from "../registry/manifest.ts";
+import { TARGETS } from "../registry/manifest.ts";
 import { CliError, log } from "../ui.ts";
 import { checkCompatible, installComponent, notPortable, warnUnchosen } from "./add.ts";
 import { doctor } from "./doctor.ts";
@@ -52,15 +52,8 @@ export interface NewOptions {
   target?: string;
 }
 
-/**
- * Refuses a `--target` that is not one (exit 2). A renamed one (`cloudflare`, now `durable`) says its
- * new name: a script that still uses it is told, not obeyed.
- */
+/** Refuses a `--target` that is not one (exit 2). */
 export function checkTarget(target: string): void {
-  const renamed = RENAMED_TARGETS.get(target);
-  if (renamed !== undefined) {
-    throw new CliError(`the target "${target}" is now "${renamed}": a target names the runtime model, and Cloudflare is its provider; use --target ${renamed}`, 2);
-  }
   if (!(TARGETS as readonly string[]).includes(target)) throw new CliError(`--target is one of ${TARGETS.join(", ")}, not "${target}"`, 2);
 }
 

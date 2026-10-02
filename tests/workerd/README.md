@@ -23,7 +23,7 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | `test/durable-execution.workerd.ts` | `execution-do`'s environment (`env.ts`) under pi-durable's `ExecutionEnv` suite and pi-durable's tools in a Harness turn, on a real object, after an eviction too |
 | `test/platform-cloudflare.workerd.ts` | `wakeups` on `platform-cloudflare` over a real object's SQL (the alarm simulated on the suite's clock); `actor.mailbox` and `actor.inbox` from the Worker's App by real RPC to deployment-cloudflare's `Conversation` class (`PlatformConversation`); on that class, the real alarm (set, fired, after an eviction), the slice (and a handler asking again every 100 ms, on time, while another waits it out), the backoff, a request waiting for its handler, an object's own mailbox |
 | `test/runtime-pi.workerd.ts` | `agent.runtime` on `runtime-pi` over `storage-do` in a real object, a worker that died mid-run included (a runtime closed while its tool runs); `runtime-pi` in a `PlatformConversation` object's App (pi-durable on `storage-do`, `platform-cloudflare`'s `actor.inbox` and `wakeups`, an actor that creates its conversation through `agent.conversations`): a message sent from the Worker's App by RPC answered by a run driven in the object's alarm; a run the object is evicted in the middle of, answered by the next instance; a model error's backoff as the object's alarm, the object evicted meanwhile |
-| `test/tool-mcp.workerd.ts` | `@pikit/pi-adapter/mcp`'s transport on workerd's real `fetch` (JSON and server-sent event answers), and pi-mcp 1.0's own transport, which works there too (0.99's failed with "Illegal invocation"); `tool-mcp` in an App: tools described at start, calls, a reported failure as an error result, a forgotten session, a secret token; a start from the kept listing, and from the bundled seed (`seed.ts`) with nothing kept, with no request |
+| `test/tool-mcp.workerd.ts` | `@pikit/pi-adapter/mcp`'s transport on workerd's real `fetch` (JSON and server-sent event answers), and pi-mcp's own transport, which calls `fetch` without a receiver as workerd requires; `tool-mcp` in an App: tools described at start, calls, a reported failure as an error result, a forgotten session, a secret token; a start from the kept listing, and from the bundled seed (`seed.ts`) with nothing kept, with no request |
 | `test/durable-storage.workerd.ts` | pi-durable 1.0's storage conformance on `openDurableStorage` (`@pikit/pi-adapter`) over `storage-do`; a pi-durable `Harness` over it: answered, reopened, after an eviction, a tool call, an interrupted run resumed, a run continuing across the object's events |
 | `test/durable-wakeups.workerd.ts` | `nextWakeAt` and `driveSlice` (`@pikit/pi-adapter/wakeups`) on a real object: a run evicted during a model error's backoff is completed by the alarm `nextWakeAt` set |
 
@@ -73,20 +73,19 @@ bun run --cwd tests/workerd bundle    # wrangler deploy --dry-run of src/bundle.
 `src/bundle.ts` is what a conversation's object bundles when its agent works in `execution-do`:
 storage-do, runtime-pi (pi-durable), execution-do and pi-durable's four tools. It has its own config,
 `wrangler.bundle.jsonc`, which binds only its `TestObject`: `wrangler.jsonc` binds the suites'
-classes, which it does not export. Measured on September 29, 2026 (wrangler 4.143.0, Pi 0.99.0); the
-last row again with pi-durable 1.0: 4,045 KiB, 980 KiB gzip:
+classes, which it does not export. Measured with wrangler 4.143.0 and pi-durable 1.0:
 
 | Worker | Uncompressed | gzip |
 |---|---|---|
 | The lane's own Worker (`src/worker.ts`: deployment-cloudflare's `Conversation` over the suites' Apps) | 501 KiB | 78 KiB |
-| The conversation's stack without execution-do | 1,195 KiB | 219 KiB |
-| The same with execution-do (`src/bundle.ts`) | 4,188 KiB | 1,005 KiB |
+| The conversation's stack without execution-do (storage-do and runtime-pi) | 996 KiB | 179 KiB |
+| The same with execution-do and the four tools (`src/bundle.ts`) | 4,045 KiB | 980 KiB |
 
-execution-do adds about 786 KiB gzip: just-bash, isomorphic-git and QuickJS's WebAssembly (503 KB,
+execution-do adds about 800 KiB gzip: just-bash, isomorphic-git and QuickJS's WebAssembly (503 KB,
 226 KiB gzip). The budget is 10 MB compressed (SPEC §4). `wrangler.jsonc` carries the rule that
 bundles that WebAssembly as a compiled module (execution-do's README, "On Cloudflare").
 
-`tool-mcp` added to `src/bundle.ts` adds 48 KiB, 11 KiB gzip (measured the same day, then taken out):
+`tool-mcp` added to `src/bundle.ts` adds 48 KiB, 11 KiB gzip (measured on September 29, 2026, then taken out):
 Pi's MCP client and its HTTP transport; its stdio transport and OAuth callback server are tree-shaken
 away, so the bundle gains no Node module.
 

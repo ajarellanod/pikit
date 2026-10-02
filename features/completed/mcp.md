@@ -14,7 +14,7 @@ OAuth and stdio are the open questions below; each would be a new component.
 The tools of remote MCP servers, available to the agents that name them.
 
 ## Pi first
-Pi now ships an MCP client: `@earendil-works/pi-mcp` (0.99), standalone (no other Pi package, no
+Pi ships an MCP client: `@earendil-works/pi-mcp` (1.0), standalone (no other Pi package, no
 official SDK; one dependency, `cross-spawn`, for stdio), `sideEffects: false`. Exports: `.` (the
 client core, Streamable HTTP and stdio transports, `toLlmContent`), `./oauth` (discovery, PKCE flow,
 dynamic registration, refresh, a provider with an injectable state store, and a Node callback
@@ -81,12 +81,12 @@ uses `fetch`.
       a named tool, stops the start (P5): the model could get the tool's schema from nowhere.
   - **When Pi reads a tool.** runtime-pi resolves agents' tool names when a conversation opens, which
     is after every start (tool-mcp provides `agent.tool`, so it starts before runtime-pi); Pi reads
-    `description` and `parameters` from that object at each model call (Pi 0.99 records them in the
-    transcript as a system message's `toolsAdded`), and `replay` when a call runs or a run resumes.
+    `description` and `parameters` from that object at each model call, and `replay` when a call
+    runs or a run resumes.
     Filling the object at start is therefore what the model sees; a test proves it on a real run.
-  - **Replay:** `never`, `safe` when the server marks the tool `annotations.readOnlyHint: true`.
-  - **Failures:** Pi's `AgentHarness` (0.99) takes a tool's failure only from a throw; an `isError`
-    it returns is recorded as a success. So `mcpToolResult` throws with the result's text.
+  - **Replay:** `unsafe`, `safe` when the server marks the tool `annotations.readOnlyHint: true`.
+  - **Failures:** a result with `isError` is an error result (`isError: true`) with the server's
+    content, which pi-durable records as a failure.
   - **Connections:** one client per server, in memory, connected on first use (at start without a
     kept listing). A call whose session the server forgot (404) connects again and is sent once more
     (the server ran nothing); nothing else is retried. A server that cannot be reached fails the call
@@ -98,10 +98,9 @@ uses `fetch`.
 - **Tree-shaking.** The root export re-exports `StdioTransport`, but with `sideEffects: false` a bundle
   keeps only what is imported: tool-mcp adds 48 KiB (11 KiB gzip) to a conversation object's bundle,
   with no Node module (`tests/workerd/README.md`; `mcp.test.ts` bundles the adapter export to hold it).
-- **"Illegal invocation".** pi-mcp 0.99 stores `options.fetch ?? globalThis.fetch` and calls
-  `this.fetch(...)`; Workers refuse the platform `fetch` called on another object.
-  `mcpHttpTransport` passes `(input, init) => fetch(input, init)`. The workerd lane pins the gap (it
-  fails the day Pi fixes it upstream, and the wrapper may go).
+- **"Illegal invocation".** Workers refuse the platform `fetch` called on another object. pi-mcp
+  calls it without a receiver, and `mcpHttpTransport` passes `(input, init) => fetch(input, init)`
+  too; the workerd lane pins that pi-mcp's own transport works there.
 - **No server-to-client stream.** `openGetStream: false` always: a Durable Object does not stay alive
   for an outbound stream (C4), and each held stream takes one of its six outbound connections. A
   request's own response may still stream (SSE).
@@ -140,10 +139,8 @@ uses `fetch`.
 - **stdio** is a process: a separate, server-only `tool-mcp-stdio` component over pi-mcp's
   `StdioTransport` (it may import it from the adapter's `./node` export), ideally through
   [sandboxed execution](../sandboxed-execution.md). Never a flag of `tool-mcp`.
-- **Pi's gaps (upstream issue pending the user's decision).** pi-mcp 0.99 calls `globalThis.fetch` as
-  a method of its transport ("Illegal invocation" on Workers) and measures SSE events with
-  `Buffer.byteLength` (needs `nodejs_compat`). Whether to report them to Pi is the user's call; until
-  Pi fixes them, `mcpHttpTransport`'s wrapper and the workerd case that pins the gap stay.
+- **Pi's gap (upstream issue pending the user's decision).** pi-mcp measures SSE events with
+  `Buffer.byteLength` (needs `nodejs_compat`). Whether to report it to Pi is the user's call.
 - **On Cloudflare the kept listing is per conversation** (`storage-kv-sql` on the object's own
   SQLite). The seed `pikit up` bundles closes the cold start of a new conversation (built, above);
   what stays open:

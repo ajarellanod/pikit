@@ -12,7 +12,7 @@
  * (on Cloudflare it logs in to the account itself). It prints the `pikit new` command that makes the
  * same project without a terminal.
  *
- * `--target`, `--preset` and `--with` answer their questions: the installer's `--cloudflare` runs
+ * `--target`, `--preset` and `--with` answer their questions: the installer's `--durable` runs
  * `pikit new --target durable --preset telegram-cloudflare`, which asks only the name.
  *
  * It offers presets that make an agent you talk to, those with a channel-* component, when a target
@@ -42,15 +42,15 @@ const DEFAULT_TARGET = NEW_PROJECT_TARGETS[0] as string;
 /** What the guided path says of each target, `pikit.json`'s `targets`. */
 const TARGET_TEXT: Record<string, { label: string; hint: string; up: string; upHint: string; running: string }> = {
   server: {
-    label: "On a server or this computer",
-    hint: "Docker runs it: a VPS, or your own machine while it is on",
+    label: "server — a long-lived process (Docker on a VPS)",
+    hint: "or on your own machine while it is on",
     up: "In Docker, in the background (`pikit up`)",
     upHint: "it keeps running after you log out",
     running: "Your agent is running. In its folder (`cd {name}`): `pikit logs --follow` to watch it, `pikit status`, `pikit down` to stop it.",
   },
   durable: {
-    label: "On Cloudflare",
-    hint: "no server to keep: Workers and a Durable Object per chat; the Workers Free plan is enough",
+    label: "durable — on Cloudflare (Workers + Durable Objects)",
+    hint: "no server to keep: a Durable Object per chat; the Workers Free plan is enough",
     up: "On Cloudflare (`pikit up`)",
     upHint: "it deploys the Worker, which runs without this machine",
     running: "Your agent is deployed. In its folder (`cd {name}`): `pikit logs` to watch it, `pikit status`, `pikit down` to delete it.",

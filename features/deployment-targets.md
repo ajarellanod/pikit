@@ -28,9 +28,7 @@ not whose machine it is. Providers are `deployment-*` components on a target:
 `deployment-*` checks it in `pikit doctor`; otherwise it is not `server`. The pieces specific to the
 only `durable` provider keep its name (`deployment-cloudflare`, `platform-cloudflare`,
 `secrets-cloudflare`, `@pikit/contracts/cloudflare`, `WORKERS_HOST`, the presets `telegram-cloudflare`
-and `cloudflare-minimal`); only the target is `durable` (it was `cloudflare` until the rename: a
-`pikit.json` that says `cloudflare` is read as `durable`, and `pikit new --target cloudflare` is refused
-with the new name).
+and `cloudflare-minimal`); only the target is `durable`, the runtime model.
 
 Facts about each provider (persistence, limits, pricing) are checked when its component is built;
 this table records the model, not promises.
@@ -107,8 +105,8 @@ above.
 
 ## Decided
 - Opening `Target`: **closed, by runtime model.** A target names a runtime model, never a provider:
-  `server` (a long-lived process with a persistent disk) and `durable` (renamed from `cloudflare`: an
-  actor per conversation). A provider is a `deployment-*` component on one of them and never needs a
+  `server` (a long-lived process with a persistent disk) and `durable` (an actor per
+  conversation). A provider is a `deployment-*` component on one of them and never needs a
   core change. A third value (`functions`) is added, in `@pikit/core`, the schema's enum and the CLI,
   only when a stateless-functions host is built.
 

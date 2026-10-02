@@ -3,7 +3,7 @@
 #
 #   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh
 #   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --yes --install-docker
-#   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --cloudflare
+#   curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh -s -- --durable
 #
 # What it does, in order, and it says so as it goes:
 #   1. checks git, curl and (Linux) unzip; installs the missing ones with apt-get, after asking;
@@ -14,10 +14,10 @@
 #   4. writes ~/.pikit/bin/pikit and prints the PATH line to add (it edits no shell file);
 #   5. checks Docker, which only `pikit up` on a server needs. On Linux it offers Docker's official
 #      script and the docker group, and does either only with your consent (--install-docker, or "y"
-#      at the prompt); on macOS it points to Docker Desktop. With --cloudflare it skips Docker and
+#      at the prompt); on macOS it points to Docker Desktop. With --durable it skips Docker and
 #      checks Node.js >= 22 instead, which wrangler (Cloudflare's CLI, in each project) runs on;
 #   6. on a terminal, runs `pikit new`, which asks everything and starts your first agent; with
-#      --cloudflare, `pikit new --target durable --preset telegram-cloudflare`, a Telegram bot on
+#      --durable, `pikit new --target durable --preset telegram-cloudflare`, a Telegram bot on
 #      Cloudflare, which asks its name, `pikit configure`'s questions, then deploys it with `pikit up`
 #      (PIKIT_NO_WIZARD=1 skips it; Ctrl-C stops it, and `pikit new` continues later).
 # Running it again updates pikit and changes nothing else. It never runs sudo without saying so
@@ -35,8 +35,8 @@
 #   PIKIT_YES=1           answer yes to installing git, curl, unzip, and to replacing a Bun outside the
 #                         supported range with PIKIT_BUN_VERSION (not Docker)
 #   PIKIT_INSTALL_DOCKER=1  consent to Docker's official install script on Linux
-#   PIKIT_CLOUDFLARE=1    the Cloudflare path, as --cloudflare: no Docker, and `pikit new` makes a
-#                         Telegram bot on Cloudflare
+#   PIKIT_DURABLE=1       the durable target on Cloudflare, as --durable: no Docker, and `pikit new`
+#                         makes a Telegram bot on Cloudflare
 
 set -eu
 
@@ -52,7 +52,7 @@ PIKIT_REPO="${PIKIT_REPO:-https://github.com/ajarellanod/pikit.git}"
 PIKIT_SOURCE="${PIKIT_SOURCE:-}"
 PIKIT_YES="${PIKIT_YES:-}"
 PIKIT_INSTALL_DOCKER="${PIKIT_INSTALL_DOCKER:-}"
-PIKIT_CLOUDFLARE="${PIKIT_CLOUDFLARE:-}"
+PIKIT_DURABLE="${PIKIT_DURABLE:-}"
 if [ -n "$PIKIT_SOURCE" ]; then
   PIKIT_REF="${PIKIT_REF:-HEAD}"
 else
@@ -64,7 +64,7 @@ for arg in "$@"; do
   case "$arg" in
     --yes | -y) PIKIT_YES=1 ;;
     --install-docker) PIKIT_INSTALL_DOCKER=1 ;;
-    --cloudflare) PIKIT_CLOUDFLARE=1 ;;
+    --durable) PIKIT_DURABLE=1 ;;
     *) printf 'pikit install: unknown option %s\n' "$arg" >&2; exit 2 ;;
   esac
 done
@@ -206,7 +206,7 @@ join_docker_group() {
   as_root usermod -aG docker "$(id -un)"
   NEWGRP=1
 }
-if [ -n "$PIKIT_CLOUDFLARE" ]; then
+if [ -n "$PIKIT_DURABLE" ]; then
   say "Cloudflare: no Docker needed. Each project deploys with its own wrangler, which runs on Node.js >= 22."
   NODE_VERSION="$(node --version 2>/dev/null || true)"
   NODE_MAJOR="${NODE_VERSION#v}"
@@ -249,11 +249,11 @@ else
 fi
 
 # 6. The first agent, step by step: `pikit new` with no arguments asks everything (its name, where it
-# runs, where to talk to it, the channel's setup, the model's login) and starts it. With --cloudflare,
+# runs, where to talk to it, the channel's setup, the model's login) and starts it. With --durable,
 # its flags answer where it runs and the preset: a Telegram bot on Cloudflare. Only on a terminal;
 # Ctrl-C stops it, and `pikit new` continues later. With a new docker group, `sg` gives it that group
 # now, since this shell only gets it at the next login.
-if [ -n "$PIKIT_CLOUDFLARE" ]; then
+if [ -n "$PIKIT_DURABLE" ]; then
   set -- new --target durable --preset telegram-cloudflare
 else
   set -- new
@@ -284,7 +284,7 @@ if [ -n "$LINES" ]; then
   say "to use pikit in this shell, paste:"
   printf '\n%s\n\n' "$LINES"
 fi
-if [ -n "$PIKIT_CLOUDFLARE" ]; then
+if [ -n "$PIKIT_DURABLE" ]; then
   say "pikit $* starts another Telegram bot on Cloudflare, step by step; pikit --help lists the rest."
 else
   say "pikit new starts a new agent step by step; pikit --help lists the rest."

@@ -4,10 +4,9 @@
  * lane runs it in a Durable Object.
  *
  * - `createDurableExecutionConformance`: pi-durable's `ExecutionEnv`. pi-durable ships no suite for it
- *   (its `./testing` has only storage's), so this one ports what pikit's 0.99 suite
- *   (`@pikit/pi-adapter/testing`'s `createExecutionConformance`) and pi-durable's own `NodeExecutionEnv`
- *   tests check, on the new interface: `id`, `truncateFile`, `flushFile`, `onOutput`, `spill`. Run it
- *   on pi-durable's `NodeExecutionEnv` too: it is the reference.
+ *   (its `./testing` has only storage's), so this one checks what pi-durable's own `NodeExecutionEnv`
+ *   tests check, and `id`, `truncateFile`, `flushFile`, `onOutput`, `spill`. Run it on pi-durable's
+ *   `NodeExecutionEnv` too: it is the reference.
  * - `callTool`: one direct `execute`, its result built as the Harness builds it (the retained output
  *   when it returns no content, an error result when it throws).
  * - `runToolCalls`: a real `Harness` (memory storage, pi-ai 1.0's faux model) whose model calls the
