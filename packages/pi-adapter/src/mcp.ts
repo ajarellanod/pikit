@@ -3,13 +3,9 @@
  * (`@earendil-works/pi-mcp`), with the two settings every pikit target needs (`mcpHttpTransport`) and
  * pikit's naming (`mcpToolName`: `<server>_<tool>`).
  *
- * pi-mcp 1.0.0 exists; from 0.99.0 it changes only OAuth (new options, fixes), list pagination
- * ending on `""`/`null`, and calls `fetch` without a receiver (pikit's wrapper already does). No API
- * this file uses changed.
- *
- * What changes with pi-durable:
+ * On pi-durable:
  * - **A result with `isError`** is returned as an error result (`isError: true`) with the server's
- *   content, which pi-durable records as a failure. Pi 0.99's harness took a failure only from a throw.
+ *   content, which pi-durable records as a failure.
  * - **`replay`** takes pi-durable's words: `"safe"` (the server marks the tool read-only) or `"unsafe"`.
  * - **No label**: pi-ai 1.0's `Tool` has none.
  *

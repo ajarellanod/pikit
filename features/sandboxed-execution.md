@@ -16,7 +16,7 @@ remote host, with their own user, filesystem and network.
 
 ## How it fits pikit
 - Providers of `execution` and `execution.shell` (Pi's `ExecutionEnv`) that pass
-  `createExecutionConformance` (`@pikit/pi-adapter/testing`). No new contract.
+  `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`). No new contract.
   - `execution-docker` (server): a container per agent, or per conversation.
   - `execution-remote` (both targets): a host speaking an executor protocol over HTTP or WebSocket.
   - Hosted sandboxes (Modal, Daytona, E2B…) as `execution-*` components of their own.

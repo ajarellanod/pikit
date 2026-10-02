@@ -46,7 +46,7 @@ test("the Models answer through the provider that owns the ModelRef (faux, no ne
   expect(message.content).toEqual([{ type: "text", text: "hello from 1.0" }]);
 });
 
-test("Anthropic on 1.0: id anthropic, API-key and subscription OAuth sign-in, the same Claude models as 0.99", async () => {
+test("Anthropic on 1.0: id anthropic, API-key and subscription OAuth sign-in, the Claude models", async () => {
   const provider = anthropicProvider();
 
   expect(provider.id).toBe("anthropic");

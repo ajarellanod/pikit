@@ -10,7 +10,7 @@
  *   what an earlier one wrote;
  * - two agents' workspaces are apart: what one writes at a relative path is not at that path in the
  *   other's.
- * The environment itself is `execution`'s contract: run `createExecutionConformance` on it too.
+ * The environment itself is `execution`'s contract: run `createDurableExecutionConformance` on it too.
  */
 
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";

@@ -1,14 +1,13 @@
 /**
- * @pikit/pi-adapter/providers/openrouter: pi-ai 1.0's OpenRouter provider, the 1.0 twin of
- * `../../providers/openrouter.ts`, by subpath so a bundle carries only the providers it installs
- * (Cloudflare's 10 MB, SPEC §4). Same id (`openrouter`), models (`openrouter/<vendor>/<model>`) and
- * credentials as 0.99: an API key stored in `model.credentials` (or from "Sign in with OpenRouter",
- * an OAuth login that yields a non-expiring key), else `OPENROUTER_API_KEY`. Its module imports
- * nothing node-only; the OAuth flow is loaded only when someone logs in.
+ * @pikit/pi-adapter/providers/openrouter: pi-ai 1.0's OpenRouter provider, by subpath so a bundle
+ * carries only the providers it installs (Cloudflare's 10 MB, SPEC §4). Id `openrouter`, models
+ * `openrouter/<vendor>/<model>`, credentials: an API key stored in `model.credentials` (or from "Sign
+ * in with OpenRouter", an OAuth login that yields a non-expiring key), else `OPENROUTER_API_KEY`. Its
+ * module imports nothing node-only; the OAuth flow is loaded only when someone logs in.
  *
  * `apiBase` moves every model's address from under OpenRouter's API to under another one (a proxy, a
- * test double), as provider-openrouter's config does today; it now lives here, and moves the image
- * and classifier models (`getAllModels`) too.
+ * test double), as provider-openrouter's config asks, and moves the image and classifier models
+ * (`getAllModels`) too.
  */
 
 import type { Provider } from "@earendil-works/pi-ai/models";
