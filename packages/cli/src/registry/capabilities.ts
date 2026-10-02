@@ -2,6 +2,12 @@
  * The capability catalogue: what each capability name means, for `pikit registry capabilities` and
  * for `registry validate`.
  *
+ * The kit's catalogue (`CAPABILITIES`, below) is the default every registry extends: a registry's own
+ * contracts are declared by the components that define them, in their `component.json`
+ * (`declares.capabilities`, with `declares.kinds` for a new name prefix), so a user who builds memory
+ * or approvals on pikit needs no change to the CLI (`registryCatalogue`). Redeclaring the kit's is an
+ * error, and so is declaring one capability two ways.
+ *
  * A capability's contract (its TypeScript type) lives with the package that defines it, by
  * declaration merging on `AppCapabilities` / `AppKeyedCapabilities`. This file adds only what a
  * reader of the registry needs and the types cannot say: one line on what it is for, and where its
@@ -24,7 +30,7 @@
  */
 
 import type { AppCapabilities, AppKeyedCapabilities, CapabilityMode } from "@pikit/core";
-import type { Manifest } from "./manifest.ts";
+import { KINDS, type Manifest } from "./manifest.ts";
 
 /**
  * How settled a contract is. `experimental`: it may still change with any release.
@@ -36,8 +42,12 @@ export type Stability = "experimental" | "stable";
 
 export interface CapabilityEntry<Mode extends CapabilityMode = CapabilityMode> {
   mode: Mode;
-  /** The package whose declaration merging defines the contract. */
-  definedIn: "@pikit/contracts" | "@pikit/pi-adapter";
+  /**
+   * Where the contract is defined: the kit package whose declaration merging defines it
+   * (`@pikit/contracts`, `@pikit/pi-adapter`), or, for one a registry declares, the component that
+   * declares it.
+   */
+  definedIn: string;
   stability: Stability;
   /** Provided by the project itself (its agents), never by a registry component. */
   providedBy?: "project";
@@ -176,6 +186,12 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "One tool per name the model calls it by; an agent gets only the tools it names.",
   },
+  "agent.extension": {
+    mode: "keyed",
+    definedIn: "@pikit/pi-adapter",
+    stability: "experimental",
+    summary: "One Pi extension per name (prompt sections, hooks on model requests and tool calls, wrappers, durable tasks, tools); an agent runs with only the extensions it names.",
+  },
   "http.route": {
     mode: "keyed",
     definedIn: "@pikit/contracts",
@@ -191,8 +207,64 @@ export const CAPABILITIES: Catalogue = {
 };
 
 /** The catalogue entry for `name`, or `undefined` when the name is not a known capability. */
-export function capabilityEntry(name: string): CapabilityEntry | undefined {
-  return Object.hasOwn(CAPABILITIES, name) ? (CAPABILITIES as Record<string, CapabilityEntry>)[name] : undefined;
+export function capabilityEntry(name: string, catalogue: RegistryCatalogue = KIT_CATALOGUE): CapabilityEntry | undefined {
+  return Object.hasOwn(catalogue.capabilities, name) ? catalogue.capabilities[name] : undefined;
+}
+
+/** What a registry's components may be named and may provide or use: the kit's vocabulary and what they declare. */
+export interface RegistryCatalogue {
+  /** Name prefixes (`channel` for `channel-telegram`). */
+  kinds: readonly string[];
+  capabilities: Readonly<Record<string, CapabilityEntry>>;
+}
+
+/** The kit's own vocabulary, which every registry extends. */
+export const KIT_CATALOGUE: RegistryCatalogue = { kinds: KINDS, capabilities: CAPABILITIES as Record<string, CapabilityEntry> };
+
+/** A kind: one lowercase word, the part of a component's name before its first `-`. */
+const KIND = /^[a-z][a-z0-9]*$/;
+/** A capability name: lowercase words joined by `.` or `-` (`memory`, `approvals.queue`). */
+const CAPABILITY = /^[a-z][a-z0-9]*([.-][a-z0-9]+)*$/;
+
+/**
+ * The kit's catalogue extended with what `manifests` declare (`declares`), and the problems of those
+ * declarations, by component (`<component>: <problem>`): a kind or capability the kit already has,
+ * a malformed name, or one capability declared two ways. Two components may declare the same
+ * capability identically (two providers of one contract, each carrying it).
+ */
+export function registryCatalogue(manifests: readonly Manifest[]): { catalogue: RegistryCatalogue; problems: string[] } {
+  const kinds = [...KINDS];
+  const capabilities: Record<string, CapabilityEntry> = { ...(CAPABILITIES as Record<string, CapabilityEntry>) };
+  const declaredBy = new Map<string, string>();
+  const problems: string[] = [];
+  for (const m of [...manifests].sort((a, b) => a.name.localeCompare(b.name))) {
+    const report = (problem: string) => problems.push(`${m.name}: ${problem}`);
+    for (const kind of m.declares?.kinds ?? []) {
+      if (!KIND.test(kind)) report(`declares the kind "${kind}", which is not one lowercase word (a kind is a name's prefix: "${kind}-…")`);
+      else if (KINDS.includes(kind)) report(`declares the kind "${kind}", which the kit has already: declare only new kinds`);
+      else if (!kinds.includes(kind)) kinds.push(kind);
+    }
+    for (const [name, declared] of Object.entries(m.declares?.capabilities ?? {})) {
+      if (!CAPABILITY.test(name)) {
+        report(`declares the capability "${name}", which is not a capability name (lowercase words joined by "." or "-")`);
+        continue;
+      }
+      if (capabilityEntry(name) !== undefined) {
+        report(`declares the capability "${name}", which the kit defines (${capabilityEntry(name)?.definedIn}): use it, or declare a capability of another name`);
+        continue;
+      }
+      const entry: CapabilityEntry = { mode: declared.mode as CapabilityMode, definedIn: m.name, stability: declared.stability as Stability, summary: declared.summary };
+      const first = declaredBy.get(name);
+      const existing = capabilities[name];
+      if (first === undefined || existing === undefined) {
+        declaredBy.set(name, m.name);
+        capabilities[name] = entry;
+      } else if (existing.mode !== entry.mode || existing.stability !== entry.stability || existing.summary !== entry.summary) {
+        report(`declares the capability "${name}" differently from ${first}: one contract has one declaration (copy ${first}'s)`);
+      }
+    }
+  }
+  return { catalogue: { kinds, capabilities }, problems };
 }
 
 /** One capability as the registry sees it: its entry, and which components provide and use it. */
@@ -206,7 +278,8 @@ export interface CapabilityUsage {
 }
 
 /**
- * Every catalogued capability, plus any unknown one the manifests name, sorted by name. The
+ * Every catalogued capability (the kit's and those the manifests declare), plus any unknown one the
+ * manifests name, sorted by name. The
  * manifests' `provides` / `requires` / `optional` are generated from setup, so this is what the
  * components really do.
  */
@@ -215,12 +288,13 @@ export function capabilityUsage(manifests: readonly Manifest[]): CapabilityUsage
   const of = (name: string): CapabilityUsage => {
     let entry = usage.get(name);
     if (entry === undefined) {
-      entry = { name, entry: capabilityEntry(name), providers: [], consumers: [] };
+      entry = { name, entry: capabilityEntry(name, catalogue), providers: [], consumers: [] };
       usage.set(name, entry);
     }
     return entry;
   };
-  for (const name of Object.keys(CAPABILITIES)) of(name);
+  const { catalogue } = registryCatalogue(manifests);
+  for (const name of Object.keys(catalogue.capabilities)) of(name);
   for (const m of [...manifests].sort((a, b) => a.name.localeCompare(b.name))) {
     for (const name of m.provides ?? []) of(name).providers.push(m.name);
     for (const name of m.requires?.capabilities ?? []) of(name).consumers.push({ name: m.name, optional: false });
@@ -245,7 +319,8 @@ export function formatCapabilities(usage: readonly CapabilityUsage[]): string {
   return usage
     .map(({ name, entry, providers, consumers }) => {
       const level = entry?.transitional === undefined ? entry?.stability : `${entry.stability}, transitional`;
-      const head = entry ? `${name}  (${entry.mode}, ${entry.definedIn}, ${level})` : `${name}  (not in the catalogue)`;
+      const where = entry === undefined || entry.definedIn.startsWith("@") ? entry?.definedIn : `declared by ${entry.definedIn}`;
+      const head = entry ? `${name}  (${entry.mode}, ${where}, ${level})` : `${name}  (not in the catalogue)`;
       const users = consumers.map((c) => (c.optional ? `${c.name} (optional)` : c.name));
       return [
         head,

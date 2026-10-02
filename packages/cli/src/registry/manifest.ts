@@ -28,6 +28,21 @@ import Value from "typebox/value";
  */
 export const TARGETS = ["server", "durable"] as const;
 
+/**
+ * The kit's component kinds: the prefix of every component's name. A kind is a naming decision, so
+ * an unknown prefix is refused, not accepted silently; a registry adds its own by declaring them
+ * (`declares.kinds`, `registryCatalogue` in capabilities.ts).
+ */
+export const KINDS: readonly string[] = [
+  "channel", "router", "storage", "workspace", "execution", "scheduler", "deployment",
+  "tool", "policy", "admin", "inbound", "outbound", "log",
+  "conversations", "credentials", "provider", "runtime", "secrets", "server",
+  // SPEC C2 and C3: `mailbox-local`, `wakeups-timers`.
+  "mailbox", "wakeups",
+  // SPEC C2 to C5: a target's platform providers (`platform-cloudflare`).
+  "platform",
+];
+
 /** Where the registry's JSON Schemas live, relative to its root. */
 export const SCHEMA_DIR = "schema";
 export const COMPONENT_SCHEMA_FILE = `${SCHEMA_DIR}/component.schema.json`;
@@ -58,6 +73,15 @@ const HalfSchema = Type.Object(
     provides: Type.Array(Type.String()),
     requires: Type.Array(Type.String()),
     optional: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
+
+const DeclaredCapabilitySchema = Type.Object(
+  {
+    mode: Type.String({ enum: ["single", "keyed"], description: "`single`: one provider (`provide`); `keyed`: one per key (`provideKeyed`)." }),
+    stability: Type.String({ enum: ["experimental", "stable"], description: "How settled the contract is (SPEC K8): `experimental` until two providers pass its suite." }),
+    summary: Type.String({ pattern: TEXT, description: "One line: what a consumer gets from it." }),
   },
   { additionalProperties: false },
 );
@@ -120,6 +144,30 @@ export const ManifestSchema = Type.Object(
       description:
         "Generated from setup's provide() and provideKeyed() calls, with the default config and with each config in the `examples` of the component's config schema (for what it provides only when configured).",
     }),
+    declares: Type.Optional(
+      Type.Object(
+        {
+          kinds: Type.Optional(
+            Type.Array(Type.String({ pattern: "^[a-z][a-z0-9]*$" }), {
+              minItems: 1,
+              uniqueItems: true,
+              description: "New name prefixes for the registry's components (`memory` for `memory-sql`); never one the kit has.",
+            }),
+          ),
+          capabilities: Type.Optional(
+            Type.Record(Type.String(), DeclaredCapabilitySchema, {
+              description:
+                "New capabilities whose contract this component defines (its TypeScript type, by declaration merging on AppCapabilities or AppKeyedCapabilities, is in its files): name → what `pikit registry capabilities` shows. Never one the kit has; another component that declares the same name declares it identically.",
+            }),
+          ),
+        },
+        {
+          additionalProperties: false,
+          description:
+            "Written by hand: the vocabulary this component adds to its registry, which extends the kit's catalogue for every component of the registry (`registry validate`, `pikit registry capabilities`). A feature the kit does not have needs no change to the CLI.",
+        },
+      ),
+    ),
     apps: Type.Optional(
       Type.Object(
         {

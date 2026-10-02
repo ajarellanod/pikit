@@ -75,10 +75,13 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   (`duplicate` if pi-durable has it) and, in the same commit, applies `prepare` and records the
   admission's time (`pikit.admissions`, below); then
   `submit({ type: "input", requestId })`. The status the creating commit published (`queued` in the
-  inbox, or `placed`) gives `queued` or `started`. Every input is a **follow-up**, and follow-ups are
-  placed all at once (`followUpMode: "all"`; `steeringMode: "all"` too, though pikit submits no steer):
-  the messages queued while a run goes start the next run together. Its `agent.started` names the
-  first (the others' placing announces nothing), and its result lists them all in `requestIds`.
+  inbox, or `placed`) gives `queued` or `started`. An input is a **follow-up** unless the request
+  steers (`whenBusy: "steer"`). Follow-ups are placed all at once (`followUpMode: "all"`): the
+  messages queued while a run goes start the next run together. Its `agent.started` names the first
+  (the others' placing announces nothing), and its result lists them all in `requestIds`. **Steers**
+  are placed all at once after the run's current tool round (`steeringMode: "all"`) and join that run
+  (`pi.live.run.inputs`): no `agent.started`, and the run's result lists them after its inputs; a run
+  that answers before another tool round leaves them to the next run, as follow-ups.
 - **Settlement.** Read from pi-durable's commits (`subscribeCommits`): a run's inputs settle in the
   commit that ends it, and are one result (`runsOf`); one an abort withdrew while queued is its own.
   `done` → `agent.settled` `completed` with the answer's text; `unanswered`/`aborted` → `agent.settled`
@@ -92,8 +95,13 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   `abandon` settles the queued ones unanswered (reason `abandoned`, detail the why) in one commit, and
   leaves one a run took to that run.
 - **Agents and state** (`agent.ts`). Tools live in the registry, one extension per agent
-  (`pikit.agent.<name>`); each conversation's `pi.agent` selects only that extension, offers the
-  turn's tools by name, and holds the model and `instructions` (the system prompt). `agent.state` is
+  (`pikit.agent.<name>`). The extensions an agent names (`extensions`, or what `prepare` returns)
+  resolve through `extension(name)` (`agent.extension`) each time the agent is applied, and are
+  installed under their own name as a copy whose tools are wrapped like the agent's; a name nothing
+  provides fails the agent (its dispatch), and `pikit.*` names are reserved. Each conversation's
+  `pi.agent` selects the agent's extension then its named ones, in order, offers the turn's tools and
+  the named extensions' tools by name (a later one of a name wins), and holds the model and
+  `instructions` (the system prompt). `agent.state` is
   the conversation-scoped document `pikit.agent-state`. `prepare(state)` is applied where its inputs
   change: at each admission, in the same commit as every state update, and before a reopened Harness
   resumes a conversation. So the agent pi-durable reads when it prepares a model request is always
@@ -147,10 +155,10 @@ pi-durable is the only record of what became of each message; `agent.submissions
   same way) are never merged, and a run has the inputs, hence the key, it had live: one appended
   before a crash kept its requests in `pikit.admissions` is not appended again, and the runs beside
   it are logged. Inputs abandoned with the same detail are one run; another withdrawn input is its own.
-- **Steers are not submitted**, and the grouping assumes none: pi-durable places a steer at a tool
-  boundary, in a later commit, and adds it to the run going. When pikit submits them (an operator's
-  UI), it will mark their request ids in `pikit.admissions` at admission and assign each to the run
-  in progress at its placement.
+- **A failed run that took a steer**, found settled after a crash, is grouped by placing commit: pi-durable
+  places a steer at a tool boundary, in a later commit, so the steer is logged as a run of its own (one
+  more failure notice). Live and answered runs stay exact. The fix: mark steers in `pikit.admissions`
+  at admission and assign each to the run it joined, or pi-durable's run identity (upstream proposal 13).
 
 ### Gaps bridged (asserted in `pi-facts.test.ts`)
 

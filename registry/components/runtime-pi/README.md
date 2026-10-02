@@ -14,6 +14,8 @@ it into the app.
   - `agent.definition`: the agents, one per name;
   - `model.provider`: the providers the agents name as `provider/modelId`;
   - `agent.tool`: the installed tools (`tool-read`, `tool-bash`…) the agents name in `tools`;
+  - `agent.extension`: the installed agent extensions the agents name in `extensions` ("Agent
+    extensions" below);
   - `execution` and `workspace`, if installed: where tools work. Each tool call gets its
     conversation's workspace when a `workspace` provider is installed (`workspace-local`: a directory
     per agent), otherwise `execution`;
@@ -24,7 +26,7 @@ it into the app.
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes.
 
   It refuses to start without an agent, when an agent names a model no provider has, when an agent
-  names a tool no component provides, and when an agent's provider has no credentials at all. That
+  names a tool or an extension no component provides, and when an agent's provider has no credentials at all. That
   last check makes no network call and refreshes nothing: it only asks whether a credential is stored
   or an environment variable set.
 - **Target:** `server` and `durable`. On Cloudflare it goes in the conversation object's App, with
@@ -40,7 +42,11 @@ with its admission:
 - `queued`: a run is going. The message waits in the conversation's inbox, and every message queued
   while that run goes is taken together by the **next run**, which starts once the run in progress
   ends: its `agent.started` names the first of them, and its one answer (`agent.settled`) lists them
-  all in `requestIds`, so a channel that replies per message replies to each;
+  all in `requestIds`, so a channel that replies per message replies to each. A **steer**
+  (`dispatch({ ..., whenBusy: "steer" })`, a person correcting course, or the dashboard) joins the run
+  in progress instead, after its current tool round, and that run's answer lists it in `requestIds`;
+  if the run answers before another tool round, the steer gets the next run. A steer to an idle
+  conversation starts a run, as any message does;
 - `duplicate`: the conversation already has this request (pi-durable deduplicates by request id, for
   as long as it keeps the conversation). Nothing runs.
 
@@ -198,8 +204,32 @@ run. A tool changes the state of the conversation it runs in through its context
 `await context.value(AGENT_STATE)?.update({ phase: "deploying" }, context)`. The state lives in the
 conversation (a pi-durable document): it survives restarts and starts again from `state` after a reset.
 
-Tool names only `prepare` returns cannot be checked at start. If `prepare` throws, or names a tool or a
-model nothing provides, the conversation gets the static definition and the error is logged.
+Tool names only `prepare` returns cannot be checked at start. If `prepare` throws, or names a tool, an
+extension or a model nothing provides, the conversation gets the static definition and the error is
+logged.
+
+`prepare` is the simple path: pure and synchronous, from the state. Anything that reads a store, waits,
+or must see each model request or tool call is an extension.
+
+## Agent extensions
+
+What an agent does besides its model, prompt and tools is a Pi extension (`defineExtension` from
+`@pikit/pi-adapter/extensions`): system prompt sections (async; they read the conversation's documents),
+hooks on model requests (`beforeRequest`, `afterResponse`, `onYield`, `afterTools`), tool calls
+(`beforeTool` blocks or rewrites, `afterTool`) and compaction (`beforeCompact`), tool wrappers, durable
+tasks, and tools. A component provides one under its name, and an agent runs with the ones it names, in
+that order, after its own tools:
+
+```ts
+pikit.provideKeyed("agent.extension", "memory", defineExtension({ name: "memory", sections: [recall], tools: [remember] }));
+defineAgent({ name: "assistant", model: "anthropic/claude-sonnet-4-6", extensions: ["memory"] });
+```
+
+Only the agents that name an extension run with it, as with tools: installing one changes no agent, and
+agents that share one list it (`const shared = ["memory", "guard"]`). An extension's tools come with
+it, and run with `CONVERSATION` and `AGENT_STATE` like the agent's; one of the same name as an agent's
+tool replaces it. Its state is a document (`defineDoc`, committed with the transcript, surviving
+restarts) or the app's `storage.sql`. Names starting with `pikit.` are the runtime's own.
 
 ## Tests
 
@@ -217,6 +247,10 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
   pi-durable suspended meanwhile; stop cancelling a waiting handler, which asks again;
 - the start failures above, and a stored credential reaching the provider;
 - an agent whose `prepare` gives it a tool once another tool moved its state on.
+
+`extensions.test.ts` takes an agent extension through a real App: an async section reading a
+document its tool wrote, a `beforeTool` hook that blocks, a `beforeRequest` hook, per-agent selection,
+the start failures, and the extension's state across a restart.
 
 `component.json` is generated from `setup` by the CLI (`pikit registry validate`) and is not written
 by hand. Until the CLI exists, the test "what setup declares" pins it.

@@ -15,13 +15,20 @@ be shared, without learning pikit's internals first.
 
 ## How a component is made (today)
 1. **Pick the contract.** A component provides capabilities (`provides`) and uses others
-   (`requires`, `optional`), all named in `@pikit/contracts` (or in `@pikit/pi-adapter` for Pi's
-   own shapes). `pikit registry capabilities` lists them with their stability. A feature's design
-   note in `features/` names the contract it needs; if none fits, the contract is written first,
-   in `@pikit/contracts`, with its suite.
+   (`requires`, `optional`). The kit's shared vocabulary is in `@pikit/contracts` (and in
+   `@pikit/pi-adapter` for Pi's own shapes: `agent.tool`, `agent.extension`, `execution`…);
+   `pikit registry capabilities` lists them with their stability. A feature's design note in
+   `features/` names the contract it needs. If none fits, the contract is yours: its type lives in
+   the component that defines it (declaration merging on `AppCapabilities`, as the kit's do), with a
+   suite next to it, and that component declares it in its `component.json`, with a new name prefix
+   when the feature is a new kind:
+   `"declares": { "kinds": ["memory"], "capabilities": { "memory": { "mode": "single", "stability": "experimental", "summary": "…" } } }`.
+   Nothing in the CLI or `@pikit/contracts` changes; redeclaring one of the kit's is refused.
 2. **Copy a reference component of the same kind.** `router-basic` (a pipeline stage),
    `channel-http` (a channel), `storage-sqlite` (a `storage.sql` provider), `tool-fetch` (a tool),
-   `deployment-docker` (a deployment). A component is a folder in a registry:
+   `deployment-docker` (a deployment); for agent behaviour, runtime-pi's `extensions.test.ts` (an
+   extension with a section, hooks and a tool, provided as `agent.extension`). A component is a
+   folder in a registry:
    `component.json` (name, description, targets, requires, provides, dependencies, files) and
    `files/src/pikit/<name>/index.ts` exporting `defineComponent({ name, config, setup })`.
 3. **Durability comes with the contracts.** Keep state in `storage.sql` / `storage.kv` or a
@@ -33,8 +40,10 @@ be shared, without learning pikit's internals first.
    `createConversationRegistryConformance`, `createFeedConformance`, `createHttpRouteConformance`,
    `createOutboundQueueConformance`, wakeups, mailbox, secrets, storage.kv, agent.runtime…), plus
    its own tests. Durable-target components also run in the workerd lane.
-5. **Check it composes.** `bun run registry validate` (the manifest, its files, its imports per
-   target), then `pikit add <name> --registry <path>` in a project and `pikit doctor`.
+5. **Check it composes.** `pikit registry validate <registry>` (the manifest, its files, its imports
+   per target, and its kind and capabilities against the kit's catalogue plus what the registry's
+   components declare), then `pikit add <name> --registry <path>` in a project and `pikit doctor`
+   (which also checks that every tool and extension an agent names is installed).
 6. **Share it.** A registry is a folder with `registry.json`; anyone can `pikit add` from it
    (`--registry <path>`). Git registries (`github:someone/registry`) are planned
    ([open registries](open-registries.md)); the shadcn registry format is the distribution
@@ -54,9 +63,16 @@ be shared, without learning pikit's internals first.
 - **Git registries**, so what one user builds another installs.
 
 ## Pi first
-Pi's extensions (pi-durable's `defineExtension`: tools, system prompt sections, hooks, tasks) are
-how agent behaviour is built; a pikit component that adds agent behaviour wraps one. What Pi
-cannot give itself (channels, delivery, deployment, the dashboard) is a pikit component.
+Agent behaviour is a Pi extension (pi-durable's `defineExtension`, from
+`@pikit/pi-adapter/extensions`): async system prompt sections that read the conversation's documents,
+hooks on model requests (`beforeRequest`, `afterResponse`, `onYield`, `afterTools`), tool calls
+(`beforeTool`, `afterTool`) and compaction (`beforeCompact`), tool wrappers, durable tasks, tools, and
+its own state as a document (`defineDoc`) or in `storage.sql`. A component provides it under its name
+(`pikit.provideKeyed("agent.extension", "memory", extension)`), and an agent runs with it only by
+naming it (`defineAgent({ …, extensions: ["memory"] })`), as with tools. An agent's `prepare(state)`
+stays for the simple case (switch model, prompt, tools or extensions with the state); anything async,
+or that must see each request or tool call, is an extension. What Pi cannot give itself (channels,
+delivery, deployment, the dashboard) is a pikit component.
 
 ## Open questions
 - Whether a `dashboard.view` contract (a view and its admin API routes, shown when installed) is

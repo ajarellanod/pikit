@@ -4,7 +4,7 @@
  * with a plain transcript and inbox; it exists only to show that the suite asks nothing Pi-specific.
  * It is not an agent runtime: pikit's only runtime is Pi (pi-durable), through the adapter. Like
  * pi-durable with follow-ups taken all at once, a run takes the whole inbox when it starts, and what is
- * queued while it goes waits for the next run.
+ * queued while it goes waits for the next run; steers queued while it goes join it after its tool round.
  */
 
 import { test } from "bun:test";
@@ -16,6 +16,8 @@ interface Entry {
   kind: "in" | "tool" | "out";
   text: string;
   requestId?: string;
+  /** A steer, waiting in the inbox for the run's tool round. */
+  steer?: boolean;
 }
 
 /** The durable records of one conversation, shared by every worker of a fixture. */
@@ -73,6 +75,12 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
                 return { kind: "aborted" };
               }
               record.transcript.push({ kind: "tool", text: "held" });
+              // After the tool round: the steers queued meanwhile join this run.
+              for (const steer of record.inbox.filter((e) => e.steer === true)) {
+                record.inbox.splice(record.inbox.indexOf(steer), 1);
+                record.transcript.push(steer);
+                if (steer.requestId !== undefined) taken.push(steer.requestId);
+              }
               continue;
             }
             try {
@@ -135,7 +143,7 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
             if (seen || record.withdrawn.has(requestId)) {
               admission = { kind: "duplicate", requestId };
             } else {
-              record.inbox.push({ kind: "in", text: request.prompt, requestId });
+              record.inbox.push({ kind: "in", text: request.prompt, requestId, ...(request.whenBusy === "steer" && { steer: true }) });
               if (live.has(conversation.conversationId)) {
                 admission = { kind: "queued", requestId };
               } else {

@@ -16,10 +16,13 @@
  *   shares; any other by its first input's submission id. Both groupings give a run the same inputs
  *   (every input of a run enters and leaves `AdmissionsDoc` with the others), in submission id order,
  *   hence the same first input and key: a run logged live is never logged again by a reconciliation.
- * - **Steers** (`whenBusy: "steer"`) are not submitted: pi-durable places one at a tool boundary, in
- *   a later commit, and adds it to the run going. When pikit submits them (an operator's UI), it marks
- *   their request ids in `AdmissionsDoc` at admission and assigns each to the run in progress at its
- *   placement (the run whose `pi.live.run.inputs` it joins), instead of grouping it by its own commit.
+ * - **Steers** (`whenBusy: "steer"`): pi-durable places one at a tool boundary, in a later commit,
+ *   and adds it to the run going. Live (`runsOf`, by the settling commit) and answered (by the answer)
+ *   runs stay exact. A failed run that took a steer, found settled by a reconciliation, is grouped by
+ *   placing commit, so its steer is logged as a run of its own (one more failure notice). The exact
+ *   fix: mark steers' request ids in `AdmissionsDoc` at admission and assign each to the run whose
+ *   `pi.live.run.inputs` it joined; or pi-durable's run identity on submissions
+ *   (docs/upstream/README.md, proposal 13).
  */
 
 import type { Context as ChordContext } from "@earendil-works/chord";
@@ -71,8 +74,8 @@ export function runsOf(records: readonly SettledInput[]): SettledInput[][] {
  * - Other placed inputs by the commit of their `pi.user` entry (`storage.entry`'s `commitSeq`): a
  *   run's inputs are placed by one boundary in the commit that starts the run, and `endRun` settles
  *   exactly those, so inputs of two runs never share it, even adjacent ones that failed the same way.
- *   **Assumes no steers**: a steer is placed in a later commit and joins the run going (see the
- *   module comment for how they will be grouped).
+ *   A failed run that took a steer is the exception: its steer was placed in a later commit and is
+ *   grouped apart (see the module comment).
  * - Inputs abandoned with the same detail, together (`abandon` settles its inputs in one commit);
  *   each other withdrawn input alone.
  *

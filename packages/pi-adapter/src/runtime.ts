@@ -11,9 +11,12 @@
  *   storage; `"root"`, the root conversation first, as in a per-chat Durable Object).
  * - **`dispatch`** submits the prompt as an `input` with the request id: a request id pi-durable already
  *   holds is `duplicate`; an input it queued in the inbox (a run is going) is `queued`; an input it placed
- *   at once is `started`. Every input is a follow-up, and follow-ups are placed all at once
- *   (`followUpMode: "all"`): the messages queued while a run goes start the next run together, whose
- *   `requestIds` lists them all and whose `agent.started` names the first.
+ *   at once is `started`. An input is a follow-up unless the request steers (`whenBusy: "steer"`).
+ *   Follow-ups are placed all at once (`followUpMode: "all"`): the messages queued while a run goes start
+ *   the next run together, whose `requestIds` lists them all and whose `agent.started` names the first.
+ *   Steers are placed after the run's current tool round, all at once (`steeringMode: "all"`), and join
+ *   that run (`pi.live.run.inputs`), which settles them with its other inputs; a run that answers before
+ *   another tool round places them as the next run's inputs.
  * - **Settlements** are read from pi-durable's commits: the inputs of a run settle in one commit, and
  *   are one `AgentResult`. Settled `done` is `agent.settled` (completed), `unanswered` with `aborted` is
  *   `agent.settled` (aborted), any other reason is `agent.failed` with that reason as its code. One
@@ -21,6 +24,9 @@
  * - **`agent.submissions`** is read from pi-durable, which holds every submission: `get` and `pending`
  *   are its records; `answers` is a log derived from them (`answers.ts`), appended once per run (its
  *   run key) by `settle`, live from the commits or by `reconcile` after a crash (`submissions.ts`).
+ *   The runtime is its only writer: giving up on messages is `abandon`, the runtime's own.
+ * - **Agents** are applied by `AgentConfigs` (`agent.ts`): each conversation's `pi.agent` selects the
+ *   agent's tool extension and the extensions it names (`agent.extension`, resolved through `extension`).
  *
  * Steps that touch one conversation (admissions, aborts, recoveries, settlements) run in that
  * conversation's line, one at a time, so a duplicate check and the submit after it never interleave,
@@ -62,7 +68,7 @@ import {
   type SqlDatabase,
 } from "@pikit/contracts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
+import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
 import { createAnswerLog } from "./answers.ts";
 import { runContext, toChord } from "./context.ts";
 import { harnessEnv } from "./execution.ts";
@@ -84,6 +90,11 @@ export interface DurableRuntimeOptions {
   agent(name: string): AgentDefinition | undefined;
   /** An installed tool by name (`agent.tool`), for the tools agents name. Without it, only tool objects work. */
   tool?(name: string): DurableTool | undefined;
+  /**
+   * An installed agent extension by name (`agent.extension`), for the extensions agents name; read each
+   * time an agent is applied. Without it, an agent that names an extension cannot run.
+   */
+  extension?(name: string): DurableExtension | undefined;
   /** pi-ai 1.0's models: every model the agents may name (`provider/modelId`). */
   models: DurableModels;
   /**
@@ -100,8 +111,9 @@ export interface DurableRuntimeOptions {
   conversations?: "ownerless" | "root";
   /**
    * pi-durable's run policy (stream, retry, compaction, tool execution). The queue modes are the
-   * runtime's (queued messages are taken all at once by the next run) and extensions are selected per
-   * agent.
+   * runtime's (queued follow-ups are taken all at once by the next run, steers all at once by the run
+   * in progress). Extensions are not a host default: each conversation selects exactly its agent's
+   * (`AgentDefinition.extensions`, through `extension`), so a default selection would never apply.
    */
   settings?: Omit<HarnessSettings, "extensions" | "steeringMode" | "followUpMode">;
   /**
@@ -128,8 +140,7 @@ export interface DurableRuntimeOptions {
 export interface DurableRuntime extends AgentRuntime {
   /**
    * `agent.submissions`, read from pi-durable: `get` and `pending` are its records, `answers` the log of
-   * every run's end. `admitted` does nothing (`dispatch` admits), `settled` reconciles the run's
-   * conversation, `abandoned` is `abandon`'s settlement.
+   * every run's end. `dispatch` admits, a run's end settles, `abandon` gives up.
    */
   readonly submissions: AgentSubmissions;
   /**
@@ -283,6 +294,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     models: options.models,
     registry,
     tool: options.tool,
+    extension: options.extension,
     // Each tool runs with its conversation and that conversation's state in its context.
     wrap: (tool) => ({
       ...tool,
@@ -342,9 +354,11 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       {
         models: options.models,
         registry,
-        // Every input is a follow-up; those queued while a run goes start the next run together. No
-        // input is a steer: a steer joins the run going in a later commit, which `storedRunsOf`'s
-        // grouping by placing commit assumes away (submissions.ts says how steers will be grouped).
+        // Follow-ups queued while a run goes start the next run together; steers join the run in
+        // progress together, after its tool round. A steer is placed in a later commit than the run's
+        // other inputs: live and answered runs are still grouped exactly (by the settling commit, by
+        // the answer), but a failed run that took a steer, found after a crash, is grouped by placing
+        // commit and its steer announced apart (submissions.ts says how steers will be grouped).
         settings: { ...options.settings, steeringMode: "all", followUpMode: "all" },
         ...(env !== undefined && { env }),
         now,
@@ -726,15 +740,6 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   };
 
   const submissions: AgentSubmissions = {
-    // `dispatch` admitted it, in pi-durable and in `AdmissionsDoc`.
-    async admitted() {},
-    async settled(run, ctx) {
-      const id = durableId(run.conversation.conversationId);
-      if (id === undefined) return;
-      const harness = await harnessOf(ctx);
-      await inLine(id, () => reconcile(harness, id));
-    },
-    abandoned: (conversation, requestIds, reason, ctx) => abandonQueued(conversation, requestIds, reason, ctx),
     async pending(ctx) {
       const { harness, storage: stored } = await opened(ctx);
       const chord = toChord(ctx);
@@ -840,7 +845,8 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           runs.set(key, { ctx: runContext(ctx), announced: admissionAnnounced });
           admitting.set(key, undefined);
           try {
-            const submission = await conversation.submit({ type: "input", content: request.prompt, requestId }, toChord(ctx));
+            const whenBusy = request.whenBusy === "steer" ? ({ whenBusy: "steer" } as const) : {};
+            const submission = await conversation.submit({ type: "input", content: request.prompt, requestId, ...whenBusy }, toChord(ctx));
             const status = admitting.get(key) ?? (await submission.status(toChord(ctx))).status;
             return { kind: status === "queued" ? "queued" : "started", requestId } as const;
           } catch (error) {

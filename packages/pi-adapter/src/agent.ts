@@ -5,9 +5,14 @@
  *   every tool its turns used so far (its static tools, and whatever `prepare` returned). A tool named
  *   in `tools` resolves through the runtime's `tool(name)`; an object is taken as it is. Each tool is
  *   wrapped once, so it runs with `CONVERSATION` and `AGENT_STATE` in its context, as before.
+ * - **Extensions** an agent names (`extensions`) resolve through the runtime's `extension(name)`
+ *   (`agent.extension`) each time the agent is applied, and are installed in the registry under their
+ *   own name, as a copy whose tools are wrapped like the agent's (the registry is live: pi-durable
+ *   resolves names against it at each use). A name nothing provides fails the agent: no silent skip.
  * - **The agent** of a conversation is its `pi.agent` document: the model, `instructions` (the system
- *   prompt), the agent's extension as the only one selected, and the tools offered by name. pi-durable
- *   reads it when it prepares each model request.
+ *   prompt), the agent's tool extension then its named extensions as the selection, in order, and the
+ *   tools offered by name (the agent's, then each extension's). pi-durable reads it when it prepares
+ *   each model request.
  * - **`agent.state`** is the `pikit.agent-state` document of the conversation: only what was updated,
  *   merged over the agent's initial state when read.
  * - **`prepare(state)`** decides that `pi.agent` document. It runs where its inputs change: when a
@@ -25,6 +30,7 @@ import {
   type ConversationId,
   defineDoc,
   defineExtension,
+  type Extension,
   type HarnessOptions,
   type Registry,
   type ToolRegistration,
@@ -35,6 +41,12 @@ import type { AgentDefinition, ConversationRef, TurnConfig } from "@pikit/contra
 
 /** A tool the durable runtime runs: pi-durable's (`defineTool`). */
 export type DurableTool = ToolRegistration;
+
+/** An agent extension: pi-durable's (`defineExtension`), the `agent.extension` capability. */
+export type DurableExtension = Extension;
+
+/** The prefix of the extensions the runtime names itself (an agent's tools): never a provided one's. */
+export const RESERVED_EXTENSION_PREFIX = "pikit.";
 
 /** pi-ai 1.0's `Models`, as pi-durable takes them. */
 export type DurableModels = HarnessOptions["models"];
@@ -75,6 +87,8 @@ export interface Turn {
   model: { provider: string; modelId: string };
   systemPrompt: string | undefined;
   tools: DurableTool[];
+  /** The agent's named extensions, as provided, in order. */
+  extensions: DurableExtension[];
 }
 
 export interface AgentConfigSource {
@@ -82,6 +96,8 @@ export interface AgentConfigSource {
   registry: Registry;
   /** An installed tool by name (`agent.tool`). */
   tool?: ((name: string) => DurableTool | undefined) | undefined;
+  /** An installed agent extension by name (`agent.extension`). */
+  extension?: ((name: string) => DurableExtension | undefined) | undefined;
   /** The tool as it runs in a conversation: with `CONVERSATION` and `AGENT_STATE` in its context. */
   wrap(tool: DurableTool): DurableTool;
 }
@@ -96,12 +112,14 @@ export class AgentConfigs {
   /** Per agent, the wrapped tools its extension holds, by name. */
   private readonly installed = new Map<string, Map<string, DurableTool>>();
   private readonly wrapped = new WeakMap<object, DurableTool>();
+  /** Per provided extension, the copy installed in the registry (its tools wrapped). */
+  private readonly installedExtensions = new WeakMap<DurableExtension, DurableExtension>();
 
   constructor(private readonly source: AgentConfigSource) {}
 
   /**
-   * The static fields of `agent` with `prepare`'s changes over them. Throws when a model or a tool
-   * name cannot be resolved, or when two tools share a name.
+   * The static fields of `agent` with `prepare`'s changes over them. Throws when a model, a tool or an
+   * extension name cannot be resolved, or when two tools share a name.
    */
   resolve(agent: AgentDefinition, changes: Partial<Record<keyof TurnConfig, unknown>> = {}): Turn {
     const tools = ((changes.tools as TurnConfig["tools"] | undefined) ?? agent.tools ?? []).map((entry) => this.toolOf(agent.name, entry));
@@ -114,7 +132,8 @@ export class AgentConfigs {
     if (model === undefined || this.source.models.getModel(model.provider, model.modelId) === undefined) {
       throw new Error(`agent "${agent.name}": model "${name}" is not provided by any model.provider`);
     }
-    return { model, systemPrompt: (changes.systemPrompt as string | undefined) ?? agent.systemPrompt, tools };
+    const extensions = ((changes.extensions as TurnConfig["extensions"] | undefined) ?? agent.extensions ?? []).map((entry) => this.extensionOf(agent.name, entry));
+    return { model, systemPrompt: (changes.systemPrompt as string | undefined) ?? agent.systemPrompt, tools, extensions };
   }
 
   /**
@@ -155,24 +174,43 @@ export class AgentConfigs {
     if (recorded.agent !== ref.agent) recorded.agent = ref.agent;
 
     const turn = this.turn(agent, ref, state, logger);
-    const tools = this.install(agent.name, turn.tools);
-    const extension = extensionName(agent.name);
+    const own = this.install(agent.name, turn.tools);
+    const selected = turn.extensions.map((extension) => this.installExtension(extension));
+    // Offered by name: the agent's tools, then each extension's; a later one of the same name wins.
+    const tools = [...own, ...selected.flatMap((extension) => extension.tools ?? [])];
+    const names = [...new Set(tools.map((tool) => tool.name))];
+    const extensions = [extensionName(agent.name), ...selected.map((extension) => extension.name)];
     const current = await tx.doc(AgentDoc, conversationId);
     const same =
       current.model?.provider === turn.model.provider &&
       current.model?.modelId === turn.model.modelId &&
       current.instructions === turn.systemPrompt &&
-      JSON.stringify(current.extensions) === JSON.stringify([extension]) &&
-      JSON.stringify(current.tools) === JSON.stringify(tools.map((tool) => tool.name));
+      JSON.stringify(current.extensions) === JSON.stringify(extensions) &&
+      JSON.stringify(current.tools) === JSON.stringify(names);
     if (same) return;
     const change: AgentChange = {
       model: turn.model,
       instructions: turn.systemPrompt ?? null,
-      // Stored by name: the extension object only names it.
-      extensions: [defineExtension({ name: extension })],
-      tools,
+      // Stored by name: the objects only name them.
+      extensions: extensions.map((name) => defineExtension({ name })),
+      tools: names.map((name) => tools.find((tool) => tool.name === name) as DurableTool),
     };
     await configure(tx, conversationId, change);
+  }
+
+  /**
+   * Install `extension` in the registry under its name, as a copy whose tools are wrapped, unless that
+   * copy is installed already; a provider that changed the object installs it again (a reload).
+   * Returns the installed copy.
+   */
+  private installExtension(extension: DurableExtension): DurableExtension {
+    let copy = this.installedExtensions.get(extension);
+    if (copy === undefined) {
+      copy = extension.tools === undefined ? extension : { ...extension, tools: extension.tools.map((tool) => this.wrapOnce(tool)) };
+      this.installedExtensions.set(extension, copy);
+    }
+    if (this.source.registry.snapshot().extension(copy.name) !== copy) this.source.registry.install(copy);
+    return copy;
   }
 
   /**
@@ -205,6 +243,16 @@ export class AgentConfigs {
       this.wrapped.set(tool, runnable);
     }
     return runnable;
+  }
+
+  /** An extension the definition names, resolved through `agent.extension`. */
+  private extensionOf(agent: string, name: unknown): DurableExtension {
+    if (typeof name !== "string") throw new Error(`agent "${agent}": an extension is named by a string, as agent.extension provides it`);
+    const resolved = this.source.extension?.(name);
+    if (resolved === undefined) throw new Error(`agent "${agent}" names the extension "${name}", which no agent.extension provides`);
+    if (resolved.name !== name) throw new Error(`agent "${agent}": the agent.extension "${name}" is an extension named "${resolved.name}"; an extension is provided under its own name`);
+    if (name.startsWith(RESERVED_EXTENSION_PREFIX)) throw new Error(`agent "${agent}": the extension name "${name}" is reserved (${RESERVED_EXTENSION_PREFIX}*: the runtime's own)`);
+    return resolved;
   }
 
   /** A tool of the definition as pi-durable's: a name resolved through `agent.tool`, an object as it is. */

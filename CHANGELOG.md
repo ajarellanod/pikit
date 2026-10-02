@@ -5,6 +5,15 @@ line names its area.
 
 ## Unreleased
 
+- contracts, pi-adapter, runtime-pi, cli: **`agent.extension`**: a component adds agent behaviour as a Pi
+  extension (sections, hooks, wrappers, tasks, tools; `@pikit/pi-adapter/extensions`), and an agent runs
+  with the ones its `extensions` names. Unknown names fail start and `pikit doctor`.
+- contracts, runtime-pi: **steer**: `dispatch({ ..., whenBusy: "steer" })` joins the run in progress
+  after its tool round; to an idle conversation it starts a run.
+- contracts: **breaking.** `agent.submissions` is read-only (`pending`, `get`, `answers`): `admitted`,
+  `settled` and `abandoned` are gone; the memory double keeps them (`RecordingSubmissions`).
+- cli, registry: a component declares new kinds and capabilities in its `component.json` (`declares`),
+  so `registry validate` accepts a registry's own vocabulary; `sessions-`/`submissions-` kinds removed.
 - registry, runtime-pi, pi-adapter: **breaking.** `submissions-sql` is removed: pi-durable is the one
   record of what became of each message, and **runtime-pi provides `agent.submissions`** from it
   (`get` is pi-durable's submission, `pending` its queued and placed inputs). The `answers` feed is a
