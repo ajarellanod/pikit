@@ -1,11 +1,16 @@
 /**
- * runtime-pi: the agent runtime (SPEC P1). Pi runs the agent; this component wires it into the app.
+ * runtime-pi: the agent runtime (SPEC P1). Pi (pi-durable) runs the agent; this component wires it
+ * into the app.
  *
- * It provides `agent.runtime` and uses:
- * - `sessions.store`: where each conversation's Pi session lives;
+ * It provides `agent.runtime`, and `agent.conversations` (where `conversations.registry` creates the
+ * conversation of a new key, or of a reset). It uses:
+ * - `storage.sql`: where pi-durable keeps every conversation (its tables, unprefixed: one runtime per
+ *   database). On a server that is storage-sqlite, in a Cloudflare object storage-do;
  * - `agent.definition`: your agents, one per name (a project component provides them);
  * - `model.provider`: the model providers your agents name as `provider/modelId`;
  * - `agent.tool`: the installed tools (`tool-*` components) that agents name in their `tools`;
+ * - `execution` and `workspace`, if installed: where tools work (each call on its conversation's
+ *   workspace when a provider is installed, otherwise on `execution`);
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
  *   read only their environment variables (`ANTHROPIC_API_KEY`).
  * - `agent.submissions`, if installed (`submissions-sql`): where each admitted message and each run's
@@ -13,25 +18,30 @@
  *   background (`resume.ts`), or by a wakeup with `wakeups`, with no new message needed; channels
  *   deliver answers from its feed.
  *   Messages that can never be answered are abandoned, and their senders told: at once when their
- *   agent or session is gone, and after `abandonPendingAfterHours` when resuming did not answer them.
+ *   agent or conversation is gone, and after `abandonPendingAfterHours` when resuming did not answer them.
  * - `wakeups`, if installed: runs are driven inside wakeups, in slices (SPEC §4.1, C4), for a host
  *   that keeps running only while an event is in progress (a Durable Object). See `createDriver` below.
+ *
+ * In a Cloudflare object's App (`WORKERS_HOST` has an `object`) the object is one chat: its first
+ * conversation is pi-durable's root, and pi-durable's clock is the app's (workerd freezes `Date.now()`).
  *
  * Everything that talks to Pi is in `@pikit/pi-adapter`, an npm dependency pinned with Pi: it
  * changes when Pi changes, and this file does not. What is here is the wiring, which is yours to
  * edit: which capabilities the runtime reads, and what it refuses to start without.
  *
- * Delivery: `dispatch` resolves once the message is durable in the conversation's session, and in
- * `agent.submissions` when installed (the point where a channel may acknowledge it); the answer
- * arrives as `agent.settled`, also for a run resumed after a crash. At-least-once: a crash can repeat
- * an answer, never lose an accepted message. Without `agent.submissions`, a crash leaves a run for the
- * next message to that conversation to resume, and an answer that ends while its channel is stopped
- * reaches nobody but the session.
+ * Delivery: `dispatch` resolves once the message is durable in pi-durable, and in `agent.submissions`
+ * when installed (the point where a channel may acknowledge it); the answer arrives as
+ * `agent.settled`, also for a run resumed after a crash. Messages that arrive while a run goes are
+ * queued and answered together by the next run. At-least-once: a crash can repeat an answer, never
+ * lose an accepted message. Without `agent.submissions`, a crash leaves a run for the next message to
+ * that conversation to resume, and an answer that ends while its channel is stopped reaches nobody but
+ * the transcript.
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import { type AgentRuntime, type AgentSubmissions, type ConversationRef, type Wakeups } from "@pikit/contracts";
-import { createPiRuntime, type HarnessHook, modelsFrom, type PiRuntime } from "@pikit/pi-adapter";
+import type { AgentConversations, AgentRuntime, AgentSubmissions, ConversationRef, Wakeups } from "@pikit/contracts";
+import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
+import { createDurableRuntime, type DurableRuntime, type DurableRuntimeOptions, modelsFrom, nextWakeAtOf, openDurableStorage, parseModelName } from "@pikit/pi-adapter";
 import Type from "typebox";
 import { resumePending, type ResumeOptions } from "./resume.ts";
 
@@ -53,8 +63,8 @@ const Config = Type.Object({
 export const DRIVE = "runtime-pi.drive";
 
 export interface RuntimePiOptions {
-  /** Attach Pi hooks to each conversation's harness when it opens (tests). */
-  onHarness?: HarnessHook;
+  /** pi-durable's run policy (retry, compaction, tools), for tests. Default: pi-durable's. */
+  settings?: DurableRuntimeOptions["settings"];
 }
 
 export function createRuntimePi(options: RuntimePiOptions = {}) {
@@ -62,23 +72,25 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
     name: "runtime-pi",
     config: Config,
     setup(pikit, config) {
-      const sessions = pikit.use("sessions.store");
+      const sql = pikit.use("storage.sql");
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
       const credentials = pikit.useOptional("model.credentials");
       const tools = pikit.useKeyed("agent.tool");
+      const execution = pikit.useOptional("execution");
+      const workspace = pikit.useOptional("workspace");
       // Optional: with it, admitted messages and run ends are recorded, and resumed at start.
       const submissions = pikit.useOptional("agent.submissions");
       // Optional: with it, runs are driven inside wakeups, in slices, instead of in the background.
       const wakeupsHandle = pikit.useOptional("wakeups");
 
       // Created in start, when the capabilities can be read; consumers start after this component.
-      let runtime: PiRuntime | undefined;
+      let runtime: DurableRuntime | undefined;
       /** The resumption started by `start` without `wakeups`, which `stop` cancels and waits for. */
       let resuming: { controller: AbortController; done: Promise<void> } | undefined;
       /** With `wakeups`: the driving of this App's runs, from start to stop. */
       let driver: Driver | undefined;
-      const current = (): PiRuntime => {
+      const current = (): DurableRuntime => {
         if (runtime === undefined) throw new Error("runtime-pi: agent.runtime used while the app is not running");
         return runtime;
       };
@@ -102,6 +114,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         },
       };
       pikit.provide("agent.runtime", agentRuntime);
+      const conversations: AgentConversations = { create: (ctx) => current().createConversation(ctx) };
+      pikit.provide("agent.conversations", conversations);
 
       return {
         async start(ctx) {
@@ -124,15 +138,14 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
               }
             }
             const model = agents.get(name)?.model ?? "";
-            const slash = model.indexOf("/");
-            if (models.getModel(model.slice(0, slash), model.slice(slash + 1)) === undefined) {
+            const ref = parseModelName(model);
+            if (ref === undefined || models.getModel(ref.provider, ref.modelId) === undefined) {
               throw new Error(`runtime-pi: agent "${name}" names model "${model}", which no model.provider provides`);
             }
             // Checked without a network call or an OAuth refresh: is anything configured at all?
-            const provider = model.slice(0, slash);
-            if ((await models.checkAuth(provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) === undefined) {
+            if ((await models.checkAuth(ref.provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) === undefined) {
               throw new Error(
-                `runtime-pi: agent "${name}" uses provider "${provider}", which has no credentials: ` +
+                `runtime-pi: agent "${name}" uses provider "${ref.provider}", which has no credentials: ` +
                   "log in to store one in model.credentials, or set the provider's API key in the environment",
               );
             }
@@ -141,29 +154,41 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           const wakeups = wakeupsHandle.get();
           // Runs outlive the calls that admit them; never keep start's context (its deadline).
           const background = ctx.derive(() => BACKGROUND_CONTEXT);
+          const now = () => background.clock.now();
           const resumeOptions = { abandonAfterMs: config.abandonPendingAfterHours * 60 * 60 * 1_000 };
           const drives = wakeups === undefined ? undefined : createDriver(wakeups, background, resumeOptions, recorded);
-          const created = createPiRuntime({
-            sessions: sessions.get(),
+          const db = sql.get();
+          // A Cloudflare object is one chat: its storage holds that chat's conversations, the root first.
+          const perObject = ctx.value(WORKERS_HOST)?.object !== undefined;
+          const created = createDurableRuntime({
+            storage: () => openDurableStorage(db),
             agent: (name) => agents.get(name),
             tool: (name) => tools.get(name),
             models,
             events: background,
-            ...(options.onHarness !== undefined && { onHarness: options.onHarness }),
+            now,
+            conversations: perObject ? "root" : "ownerless",
+            execution: () => execution.get(),
+            workspace: () => workspace.get(),
+            ...(options.settings !== undefined && { settings: options.settings }),
             ...(recorded !== undefined && { submissions: recorded }),
-            ...(drives !== undefined && { retryAt: drives.retryAt }),
+            ...(drives !== undefined && { onIdleWithPendingWork: (inspection) => drives.later(nextWakeAtOf(inspection, { now })) }),
           });
           runtime = created;
           if (drives !== undefined) {
             drives.attach(created);
             driver = drives;
-            // At start, the conversations agent.submissions holds pending are resumed by a wakeup, not
-            // by a promise left running: it waits for their runs, in slices.
-            if (recorded !== undefined) {
-              await drives.wake(ctx.clock.now(), ctx).catch((error: unknown) => {
-                ctx.logger.error("runtime-pi: could not ask for a wakeup to resume the conversations with unanswered messages; they resume at the next one", {
-                  error: error instanceof Error ? error.message : String(error),
-                });
+            // What a previous instance left (a run an eviction cut, a retry's backoff, a message nobody
+            // answered) is driven by a wakeup, not by a promise left running: asked again here, as the
+            // request may be gone with the object.
+            try {
+              const next = nextWakeAtOf(await created.inspect(ctx), { now });
+              // With agent.submissions, at once: messages nobody answered are resumed by the handler.
+              const at = recorded !== undefined ? now() : next;
+              if (at !== undefined) await drives.wake(at, ctx);
+            } catch (error) {
+              ctx.logger.error("runtime-pi: could not ask for a wakeup to resume what is pending; it resumes at the next one", {
+                error: error instanceof Error ? error.message : String(error),
               });
             }
           } else if (recorded !== undefined) {
@@ -174,7 +199,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           }
         },
         async stop(ctx) {
-          // Runs in progress stay open in their sessions; the next process resumes them.
+          // Runs in progress stay pending in pi-durable; the next process resumes them.
           const stopping = runtime;
           runtime = undefined;
           const resumed = resuming;
@@ -196,10 +221,14 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
 interface Driver {
   /** Asks for the handler at or after `time`, unless a request as soon or sooner is already made. */
   wake(time: number, ctx: AppContext): Promise<void>;
-  /** The adapter's `retryAt`: a run waiting out Pi's backoff is continued by a wakeup. */
-  retryAt(conversation: ConversationRef, notBefore: number, ctx: AppContext): Promise<void>;
+  /**
+   * The runtime's `onIdleWithPendingWork`: nothing is driven, and live work waits for a time (a model
+   * retry's backoff): asks for the handler when it is due (`nextWakeAtOf`), and the handler suspends the
+   * runtime so the host can go meanwhile.
+   */
+  later(time: number | undefined): Promise<void>;
   /** Registers the handler for `runtime`. */
-  attach(runtime: PiRuntime): void;
+  attach(runtime: DurableRuntime): void;
   /** Cancels the handler's run in progress; nothing is registered after. */
   stop(): void;
 }
@@ -207,21 +236,23 @@ interface Driver {
 /**
  * With `wakeups`, every run is driven inside a run of the handler `runtime-pi.drive`, since a promise
  * left running after its event may be killed (SPEC §4.1, C4). Whatever may leave a run going (a
- * dispatch, a resume, start with pending messages, a retry wait) asks for the handler. The handler:
- * 1. resumes the conversations whose retry wait is due;
- * 2. with `agent.submissions`, resumes the ones it holds pending that this worker does not drive
- *    (a run an evicted object left open, a message it never answered: as at start, `resume.ts`);
+ * dispatch, a resume, start with work pending) asks for the handler. The handler:
+ * 1. opens pi-durable if it is not open (a new instance after an eviction): what it finds resumes;
+ * 2. with `agent.submissions`, resumes the conversations it holds pending that this worker does not
+ *    drive (a message nobody answered: as at start, `resume.ts`);
  * 3. waits until this worker drives no run, or its context is cancelled (the provider's slice deadline,
  *    or the App stopping);
- * 4. asks again at once if runs are still going, or for the earliest retry wait left.
- * A request carries nothing: what to do is read from the session and `agent.submissions` each time, so
+ * 4. asks again at once if runs are still going; when what is left only waits for a time (a model
+ *    retry's backoff), the runtime asked for a wakeup at that time (`later`), and the handler closes
+ *    pi-durable (`suspend`, inside the event) so the host can be evicted until then.
+ * A request carries nothing: what to do is read from pi-durable and `agent.submissions` each time, so
  * a handler that runs twice, or late, or after the object was evicted, does the right thing.
  */
 function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: ResumeOptions, submissions: AgentSubmissions | undefined): Driver {
   /** The earliest time asked for and not yet taken by a run of the handler, in this App. */
   let requested: number | undefined;
-  /** Conversations whose run waits for a retry, and when it is due. In memory: after a restart, `agent.submissions` finds them. */
-  const retries = new Map<string, { conversation: ConversationRef; at: number }>();
+  /** Set by `later` during a run of the handler: what is left only waits for a time. */
+  let waiting = false;
   /** Cancels the handler's run in progress when the App stops. */
   const stopping = new AbortController();
   const logger = background.logger;
@@ -237,7 +268,7 @@ function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: R
       throw error;
     }
   };
-  /** Asks from the handler, whose context may be cancelled already: with the App's, and never rejects. */
+  /** Asks from the handler, whose context may be cancelled already: with the App's (start's), and never rejects. */
   const wakeLater = (time: number): Promise<void> =>
     wake(time, background).catch((error: unknown) => {
       logger.error("runtime-pi: could not ask for a wakeup; runs still open resume at the next one, or at the next start", {
@@ -245,46 +276,39 @@ function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: R
       });
     });
 
-  const handler = (runtime: PiRuntime) => async (handlerCtx: AppContext): Promise<void> => {
+  const handler = (runtime: DurableRuntime) => async (handlerCtx: AppContext): Promise<void> => {
     // This run took the request: whatever is asked from now on stands after it.
     requested = undefined;
+    waiting = false;
     const signal = handlerCtx.abortSignal === undefined ? stopping.signal : AbortSignal.any([handlerCtx.abortSignal, stopping.signal]);
     const ctx = handlerCtx.derive((inner) => withAbortSignal(signal, inner));
-    const now = ctx.clock.now();
-    for (const [sessionId, { conversation, at }] of retries) {
-      if (at > now) continue;
-      retries.delete(sessionId);
-      await runtime.resume(conversation, ctx).catch((error: unknown) => {
-        if (signal.aborted) return;
-        logger.error("runtime-pi: a run waiting for a retry could not be resumed; it resumes when its conversation opens again", {
-          conversation: conversation.key,
-          error: error instanceof Error ? error.message : String(error),
-        });
-      });
+    try {
+      // Opened first, so what it finds running counts as held below and is not waited for twice.
+      await runtime.inspect(ctx);
+    } catch (error) {
+      if (signal.aborted) return;
+      throw error;
     }
     if (submissions !== undefined && !signal.aborted) {
-      await resumePending(runtime, submissions, ctx, {
-        ...resumeOptions,
-        // What this worker drives needs no resuming, and a run waiting for its retry is not due yet.
-        skip: (conversation) => runtime.holds(conversation) || (retries.get(conversation.sessionId)?.at ?? now) > now,
-      });
+      // What this worker drives needs no resuming (a run going, or waiting out a retry).
+      await resumePending(runtime, submissions, ctx, { ...resumeOptions, skip: (conversation) => runtime.holds(conversation) });
     }
     const idle = await runtime.whenIdle(ctx);
     if (!idle) {
       // The slice ended (or the App is stopping) with runs going: the next run of the handler, in this
-      // App or the next one, picks them up, from the session if this one is gone.
+      // App or the next one, picks them up, from pi-durable if this one is gone.
       await wakeLater(background.clock.now());
       return;
     }
-    const next = Math.min(...[...retries.values()].map((retry) => retry.at));
-    if (Number.isFinite(next)) await wakeLater(next);
+    // Nothing is driven, and what is left waits for a time: the wakeup at that time reopens pi-durable.
+    if (waiting) await runtime.suspend(ctx);
   };
 
   return {
     wake,
-    async retryAt(conversation, notBefore, ctx) {
-      retries.set(conversation.sessionId, { conversation, at: notBefore });
-      await wake(notBefore, ctx);
+    async later(time) {
+      waiting = true;
+      if (time !== undefined) await wakeLater(time);
     },
     attach(runtime) {
       wakeups.handle(DRIVE, handler(runtime));

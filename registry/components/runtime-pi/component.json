@@ -12,7 +12,7 @@
     "contracts": "0.0.0",
     "adapter": "0.0.0",
     "capabilities": [
-      "sessions.store"
+      "storage.sql"
     ]
   },
   "optional": {
@@ -21,12 +21,15 @@
       "model.provider",
       "model.credentials",
       "agent.tool",
+      "execution",
+      "workspace",
       "agent.submissions",
       "wakeups"
     ]
   },
   "provides": [
-    "agent.runtime"
+    "agent.runtime",
+    "agent.conversations"
   ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",

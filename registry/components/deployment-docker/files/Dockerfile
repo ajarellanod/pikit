@@ -20,7 +20,7 @@ RUN bun install --frozen-lockfile --production
 
 COPY . .
 
-# .pikit/ holds the app's state: sessions, conversations, model credentials, the agent's workspace.
+# .pikit/ holds the app's state: the database (conversations, the registry), model credentials, the agent's workspace.
 # compose.yaml mounts a volume here. The directory is created owned by the unprivileged user, and a
 # new volume takes that ownership, so the app can write to it without running as root.
 RUN mkdir -p .pikit && chown bun:bun .pikit

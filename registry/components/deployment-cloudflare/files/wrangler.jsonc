@@ -17,7 +17,7 @@
   "durable_objects": {
     "bindings": [{ "name": "CONVERSATION", "class_name": "Conversation" }]
   },
-  // SQLite-backed: storage-do, sessions and submissions keep the conversation in the object's SQL.
+  // SQLite-backed: storage-do, the runtime (pi-durable) and submissions keep the conversation in the object's SQL.
   // A migration is forever: add new ones below, never edit or remove this one.
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Conversation"] }],
   // The version /health reports: `pikit up` waits until it is the one it deployed (C8).

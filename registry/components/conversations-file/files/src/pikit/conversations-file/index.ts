@@ -2,16 +2,25 @@
  * conversations-file: the conversation registry in one JSON file (`conversations.registry`,
  * in @pikit/contracts' conversations.ts).
  *
- * It provides `conversations.registry`: which Pi session each conversation key is in now. The first
- * message of a conversation creates its session (through `sessions.store`) and records the pointer;
- * a reset creates a new session and moves the pointer, keeping the old session and remembering it.
- * No pointer is ever deleted, and nothing here is dropped when a conversation goes idle.
+ * It provides `conversations.registry`: which runtime conversation each conversation key is in now.
+ * The first message of a conversation creates its conversation (through `agent.conversations`, which
+ * the agent runtime provides) and records the pointer; a reset creates a new conversation and moves the
+ * pointer, keeping the old conversation and remembering it. No pointer is ever deleted, and nothing
+ * here is dropped when a conversation goes idle.
+ *
+ * A file written before pikit moved to pi-durable (version 1: its pointers name Pi 0.99 sessions,
+ * which the runtime no longer has) is read as no pointers: each of its conversations starts a new one
+ * at its next message, logged once, and the file is rewritten in the current version at the first
+ * change. Nothing is migrated.
+ *
+ * Dependency direction: the registry uses `agent.conversations`, the runtime never uses the registry.
+ * So the runtime starts first, and conversations are created only once it runs.
  *
  * The file is the record; the map in memory is its cache. Every change is written to a temporary
  * file, flushed, and renamed over the old one, so a crash leaves either the old file or the new
- * one, never half of each. The pointer is used only after it is on disk. A crash after a session
- * is created and before its pointer is written leaves an unused session behind, never a pointer to
- * a missing one.
+ * one, never half of each. The pointer is used only after it is on disk. A crash after a conversation
+ * is created and before its pointer is written leaves an unused conversation behind, never a pointer
+ * to a missing one.
  *
  * One process owns the file: changes run one at a time in this process, and two processes on one
  * file are not supported (one server replica).
@@ -22,8 +31,7 @@
 import { mkdir, open, readFile, rename, rm } from "node:fs/promises";
 import { dirname, resolve } from "node:path";
 import { type AppContext, defineComponent } from "@pikit/core";
-import { type ConversationRef, type ConversationRegistry, type ConversationReset } from "@pikit/contracts";
-import type { SessionStore } from "@pikit/pi-adapter";
+import type { ConversationRef, ConversationRegistry, ConversationReset } from "@pikit/contracts";
 import Type, { type Static } from "typebox";
 import Value from "typebox/value";
 
@@ -34,29 +42,37 @@ const Config = Type.Object({
 
 const Pointer = Type.Object({
   agent: Type.String({ minLength: 1 }),
-  sessionId: Type.String({ minLength: 1 }),
-  /** Sessions this conversation was in before, oldest first. Kept, never deleted. */
-  previousSessionIds: Type.Array(Type.String()),
+  conversationId: Type.String({ minLength: 1 }),
+  /** Runtime conversations this key was in before, oldest first. Kept, never deleted. */
+  previousConversationIds: Type.Array(Type.String()),
   createdAt: Type.Number(),
   updatedAt: Type.Number(),
 });
 type Pointer = Static<typeof Pointer>;
 
+/** The file's format: 2 since the runtime is pi-durable (conversation ids). */
+export const VERSION = 2;
+
 const RegistryFile = Type.Object({
-  version: Type.Literal(1),
+  version: Type.Literal(VERSION),
   conversations: Type.Record(Type.String(), Pointer),
 });
+
+/** A file of Pi 0.99's time: its pointers name sessions. Only recognised, never read. */
+const LegacyFile = Type.Object({ version: Type.Literal(1), conversations: Type.Record(Type.String(), Type.Unknown()) });
 
 export default defineComponent({
   name: "conversations-file",
   config: Config,
   setup(pikit, config) {
-    const sessions = pikit.use("sessions.store");
+    const conversations = pikit.use("agent.conversations");
 
     let path: string | undefined;
     /** By key. A `Map`, not an object: keys are opaque and may be `__proto__`. */
     let pointers = new Map<string, Pointer>();
-    /** Changes run one at a time: a first resolve and its concurrent twin create one session. */
+    /** Keys of a version 1 file, not resolved since: each starts a new conversation, logged once. */
+    let legacy = new Set<string>();
+    /** Changes run one at a time: a first resolve and its concurrent twin create one conversation. */
     let line: Promise<unknown> = Promise.resolve();
     const serial = <T>(work: () => Promise<T>): Promise<T> => {
       const next = line.then(work);
@@ -68,14 +84,10 @@ export default defineComponent({
       if (path === undefined) throw new Error("conversations-file: conversations.registry used while the app is not running");
       return path;
     };
-    const ref = (key: string, pointer: Pointer): ConversationRef => ({ key, agent: pointer.agent, sessionId: pointer.sessionId });
+    const ref = (key: string, pointer: Pointer): ConversationRef => ({ key, agent: pointer.agent, conversationId: pointer.conversationId });
 
-    /** A new, empty session. Closed at once: the agent runtime opens it when a message comes. */
-    const newSession = async (store: SessionStore, ctx: AppContext): Promise<string> => {
-      const session = await store.create({}, ctx);
-      await session.close(ctx);
-      return session.metadata.id;
-    };
+    /** A new, empty conversation in the agent runtime. */
+    const newConversation = (ctx: AppContext): Promise<string> => conversations.get().create(ctx);
 
     /** Write `next` to disk, then make it the cache: memory never runs ahead of the file. */
     const commit = async (file: string, next: Map<string, Pointer>): Promise<void> => {
@@ -90,8 +102,11 @@ export default defineComponent({
           const found = pointers.get(key);
           if (found !== undefined) return ref(key, found);
           const now = ctx.clock.now();
-          const pointer: Pointer = { agent, sessionId: await newSession(sessions.get(), ctx), previousSessionIds: [], createdAt: now, updatedAt: now };
+          const pointer: Pointer = { agent, conversationId: await newConversation(ctx), previousConversationIds: [], createdAt: now, updatedAt: now };
           await commit(file, new Map(pointers).set(key, pointer));
+          if (legacy.delete(key)) {
+            ctx.logger.info("conversations-file: a conversation recorded before the move to pi-durable starts a new one", { conversation: key });
+          }
           return ref(key, pointer);
         }),
 
@@ -108,12 +123,12 @@ export default defineComponent({
           if (previous === undefined) return undefined;
           const pointer: Pointer = {
             ...previous,
-            sessionId: await newSession(sessions.get(), ctx),
-            previousSessionIds: [...previous.previousSessionIds, previous.sessionId],
+            conversationId: await newConversation(ctx),
+            previousConversationIds: [...previous.previousConversationIds, previous.conversationId],
             updatedAt: ctx.clock.now(),
           };
           await commit(file, new Map(pointers).set(key, pointer));
-          return { conversation: ref(key, pointer), previousSessionId: previous.sessionId, newSessionId: pointer.sessionId };
+          return { conversation: ref(key, pointer), previousConversationId: previous.conversationId, newConversationId: pointer.conversationId };
         });
         // Outside the line: a listener may call the registry.
         if (reset !== undefined) await ctx.emit("conversation.reset", reset);
@@ -129,7 +144,14 @@ export default defineComponent({
         const loaded = await load(file);
         // A missing file is written now, so a directory that cannot hold it fails the start.
         if (loaded === undefined) await writeAtomically(file, serialize(new Map()));
-        pointers = loaded ?? new Map();
+        pointers = loaded?.pointers ?? new Map();
+        legacy = new Set(loaded?.legacy ?? []);
+        if (legacy.size > 0) {
+          pikit.logger.info("conversations-file: the registry predates pi-durable; its conversations start new ones at their next message", {
+            path: file,
+            conversations: legacy.size,
+          });
+        }
         path = file;
       },
       async stop(ctx) {
@@ -141,8 +163,11 @@ export default defineComponent({
   },
 });
 
-/** The pointers in `file`, or `undefined` when there is no file. A file that is not a registry fails. */
-async function load(file: string): Promise<Map<string, Pointer> | undefined> {
+/**
+ * The pointers in `file`, or `undefined` when there is no file; a version 1 file has none, and its keys
+ * are `legacy`. A file that is not a registry fails.
+ */
+async function load(file: string): Promise<{ pointers: Map<string, Pointer>; legacy: string[] } | undefined> {
   let text: string;
   try {
     text = await readFile(file, "utf8");
@@ -156,16 +181,17 @@ async function load(file: string): Promise<Map<string, Pointer> | undefined> {
   } catch (error) {
     throw new Error(`conversations-file: ${file} is not valid JSON`, { cause: error });
   }
+  if (Value.Check(LegacyFile, parsed)) return { pointers: new Map(), legacy: Object.keys(parsed.conversations) };
   if (!Value.Check(RegistryFile, parsed)) {
     const [first] = Value.Errors(RegistryFile, parsed);
     throw new Error(`conversations-file: ${file} is not a conversation registry (${first?.instancePath || "/"}: ${first?.message})`);
   }
-  return new Map(Object.entries(parsed.conversations));
+  return { pointers: new Map(Object.entries(parsed.conversations)), legacy: [] };
 }
 
 function serialize(pointers: Map<string, Pointer>): string {
   // `Object.fromEntries` defines properties, so a key such as `__proto__` stays a key.
-  return `${JSON.stringify({ version: 1, conversations: Object.fromEntries(pointers) }, null, 2)}\n`;
+  return `${JSON.stringify({ version: VERSION, conversations: Object.fromEntries(pointers) }, null, 2)}\n`;
 }
 
 let temporaries = 0;

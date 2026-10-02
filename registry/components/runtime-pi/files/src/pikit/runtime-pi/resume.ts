@@ -4,13 +4,13 @@
  * again), the process died, and without this the user would wait until they write again.
  *
  * Each conversation is opened as a new message would open it: a run the dead process left open is
- * resumed, a message waiting in Pi's inbox gets a run, and a run that ended without its end recorded is
- * settled from the session (`recover`, in the adapter). A few at a time, in the background: start does
+ * resumed, a message waiting in the inbox gets a run, and a run that ended without its end recorded is
+ * settled from pi-durable (`recover`, in the adapter). A few at a time, in the background: start does
  * not wait for them, and stop aborts what has not started. With `wakeups`, the handler that drives the
  * runs calls this at each run instead, skipping what its App drives already (`index.ts`).
  *
  * A message nothing can answer is abandoned (`runtime.abandon`): its channel tells the user to send it
- * again, and it stops being retried at every start. At once when its agent or session is gone
+ * again, and it stops being retried at every start. At once when its agent or conversation is gone
  * (`recover` does it); and when its conversation's oldest pending message is older than
  * `abandonAfterMs` (runtime-pi's `abandonPendingAfterHours`), for the messages resuming did not
  * answer: no run and no inbox entry holds them, or the conversation fails to resume.
@@ -18,7 +18,7 @@
 
 import type { AppContext } from "@pikit/core";
 import type { AgentSubmissions, ConversationRef } from "@pikit/contracts";
-import type { PiRuntime } from "@pikit/pi-adapter";
+import type { DurableRuntime } from "@pikit/pi-adapter";
 
 /** Conversations resumed at once: each may run the model, and a restart should not flood the provider. */
 export const RESUME_AT_ONCE = 4;
@@ -26,12 +26,12 @@ export const RESUME_AT_ONCE = 4;
 export interface ResumeOptions {
   /** How old a conversation's oldest pending message may be before what resuming leaves is abandoned. */
   abandonAfterMs: number;
-  /** Conversations left alone this time: ones this worker drives already, or whose run waits for a retry. */
+  /** Conversations left alone this time: ones this worker drives already (a run going, or waiting out a retry). */
   skip?(conversation: ConversationRef): boolean;
 }
 
 /** Resumes every pending conversation; `ctx`'s cancellation stops taking new ones. Never rejects. */
-export async function resumePending(runtime: PiRuntime, submissions: AgentSubmissions, ctx: AppContext, options: ResumeOptions): Promise<void> {
+export async function resumePending(runtime: DurableRuntime, submissions: AgentSubmissions, ctx: AppContext, options: ResumeOptions): Promise<void> {
   const logger = ctx.logger;
   let pending: Awaited<ReturnType<AgentSubmissions["pending"]>> | undefined;
   try {

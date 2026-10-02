@@ -1,6 +1,6 @@
 /**
  * conversations-kv's tests. They are copied with the component and keep running in your project.
- * `storage.kv` is the memory storage from `@pikit/contracts/testing`, and sessions come from Pi's
+ * `storage.kv` is the memory storage from `@pikit/contracts/testing`, and conversations come from Pi's
  * in-memory repository through `@pikit/pi-adapter/testing`. Both are shared by every app of a test,
  * so a second app over them is a restart, or a second process when both run at once.
  */
@@ -10,13 +10,13 @@ import { type App, type AppContext, type ComponentDefinition, defineApp, defineC
 import type { ConversationRef, ConversationRegistry, ConversationReset, JsonValue, KeyValueStorage } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createConversationRegistryConformance, createMemoryKeyValueStorage } from "@pikit/contracts/testing";
-import { testComponents } from "@pikit/pi-adapter/testing";
+import { fakeConversations } from "@pikit/pi-adapter/testing";
 import conversationsKv, { NAMESPACE } from "./index.ts";
 
-/** One `storage.kv` and one session store, shared by every app of a test. */
+/** One `storage.kv` and one fake `agent.conversations`, shared by every app of a test. */
 function records() {
-  const { sessions } = testComponents();
-  return { kv: createMemoryKeyValueStorage(), sessions };
+  const fake = fakeConversations();
+  return { kv: createMemoryKeyValueStorage(), conversations: fake.component, ids: fake.ids };
 }
 
 /** A component providing `storage` as `storage.kv`. */
@@ -64,26 +64,6 @@ function gate() {
   };
 }
 
-/** The ids of the sessions in a store, read through a small app of its own. */
-async function sessionIds(sessions: ComponentDefinition): Promise<string[]> {
-  let ids: string[] = [];
-  const probe = defineComponent({
-    name: "sessions-probe",
-    setup(pikit) {
-      const handle = pikit.use("sessions.store");
-      return {
-        async start(ctx) {
-          ids = (await handle.get().list(undefined, ctx)).map((metadata: { id: string }) => metadata.id);
-        },
-      };
-    },
-  });
-  const app = await defineApp({ components: [sessions, probe], logger: silentLogger }).create();
-  await app.start();
-  await app.stop();
-  return ids;
-}
-
 interface Worker {
   app: App;
   registry: ConversationRegistry;
@@ -103,16 +83,16 @@ async function started(r: ReturnType<typeof records>, storage: KeyValueStorage =
       return { start: () => void (registry = handle.get()) };
     },
   });
-  const app = await defineApp({ components: [kvProvider(storage), r.sessions, conversationsKv, reader, ...extra], logger: silentLogger }).create();
+  const app = await defineApp({ components: [kvProvider(storage), r.conversations, conversationsKv, reader, ...extra], logger: silentLogger }).create();
   await app.start();
   if (registry === undefined) throw new Error("conversations.registry was not resolved");
   return { app, registry, ctx: app.context(), resets };
 }
 
-// The conversations.registry contract, including the sessions it creates in the store.
+// The conversations.registry contract, including the conversations it creates in the store.
 for (const c of createConversationRegistryConformance(() => {
   const r = records();
-  return { components: [kvProvider(r.kv), r.sessions, conversationsKv], sessionIds: () => sessionIds(r.sessions) };
+  return { components: [kvProvider(r.kv), r.conversations, conversationsKv], conversationIds: async () => [...r.ids] };
 })) {
   test(`conversations-kv ${c.group}: ${c.name}`, () => c.run());
 }
@@ -120,23 +100,23 @@ for (const c of createConversationRegistryConformance(() => {
 // Start and stop honour their deadline.
 for (const c of createLifecycleConformance(() => {
   const r = records();
-  return { component: conversationsKv, providers: [kvProvider(r.kv), r.sessions] };
+  return { component: conversationsKv, providers: [kvProvider(r.kv), r.conversations] };
 })) {
   test(`conversations-kv ${c.group}: ${c.name}`, () => c.run());
 }
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const r = records();
-  const app = await defineApp({ components: [kvProvider(r.kv), r.sessions, conversationsKv], logger: silentLogger }).create();
+  const app = await defineApp({ components: [kvProvider(r.kv), r.conversations, conversationsKv], logger: silentLogger }).create();
 
   expect(app.describe().components.find((component) => component.name === "conversations-kv")).toMatchObject({
     provides: ["conversations.registry"],
-    requires: ["storage.kv", "sessions.store"],
+    requires: ["storage.kv", "agent.conversations"],
     optional: [],
   });
 });
 
-test("each pointer is a value at its key in the conversations-kv namespace, with the sessions it was in before", async () => {
+test("each pointer is a value at its key in the conversations-kv namespace, with the conversations it was in before", async () => {
   const r = records();
   const w = await started(r);
   const first = await w.registry.resolve("http:c1", "assistant", w.ctx);
@@ -144,8 +124,8 @@ test("each pointer is a value at its key in the conversations-kv namespace, with
 
   expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({
     agent: "assistant",
-    sessionId: reset?.newSessionId,
-    previousSessionIds: [first.sessionId],
+    conversationId: reset?.newConversationId,
+    previousConversationIds: [first.conversationId],
   });
   await w.app.stop();
 });
@@ -190,7 +170,7 @@ test("conversation.reset is emitted once the new pointer is stored, never when i
     name: "reset-listener",
     setup(pikit) {
       const handle = pikit.use("conversations.registry");
-      pikit.on("conversation.reset", async (payload, ctx) => void (seen = (await handle.get().get(payload.conversation.key, ctx))?.sessionId));
+      pikit.on("conversation.reset", async (payload, ctx) => void (seen = (await handle.get().get(payload.conversation.key, ctx))?.conversationId));
     },
   });
   let failing = false;
@@ -201,14 +181,14 @@ test("conversation.reset is emitted once the new pointer is stored, never when i
   const created = await w.registry.resolve("http:c1", "assistant", w.ctx);
 
   const reset = await w.registry.reset("http:c1", w.ctx);
-  // A listener that reads the registry finds the new session: it was stored before the event.
-  expect(seen).toBe(reset?.newSessionId);
+  // A listener that reads the registry finds the new conversation: it was stored before the event.
+  expect(seen).toBe(reset?.newConversationId);
 
   failing = true;
   await expect(w.registry.reset("http:c1", w.ctx)).rejects.toThrow("the store is down");
   expect(w.resets).toEqual([reset as ConversationReset]);
   expect(await w.registry.get("http:c1", w.ctx)).toEqual(reset?.conversation);
-  expect(created.sessionId).not.toBe(reset?.newSessionId);
+  expect(created.conversationId).not.toBe(reset?.newConversationId);
   await w.app.stop();
 });
 
@@ -221,16 +201,16 @@ test("in one process, a reset and a resolve sent together run in order, and two 
   expect(after).toEqual(reset?.conversation as ConversationRef);
 
   const [one, two] = await Promise.all([w.registry.reset("http:c1", w.ctx), w.registry.reset("http:c1", w.ctx)]);
-  expect(two?.previousSessionId).toBe(one?.newSessionId);
+  expect(two?.previousConversationId).toBe(one?.newConversationId);
   expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({
-    sessionId: two?.newSessionId,
-    previousSessionIds: [created.sessionId, reset?.newSessionId, one?.newSessionId],
+    conversationId: two?.newConversationId,
+    previousConversationIds: [created.conversationId, reset?.newConversationId, one?.newConversationId],
   });
   expect(w.resets).toHaveLength(3);
   await w.app.stop();
 });
 
-test("two processes racing a first resolve get one conversation; the loser leaves one unused session", async () => {
+test("two processes racing a first resolve get one conversation; the loser leaves one unused conversation", async () => {
   const r = records();
   const both = gate();
   const storage = beforeWrites(r.kv, async (write) => {
@@ -240,14 +220,14 @@ test("two processes racing a first resolve get one conversation; the loser leave
   const b = await started(r, storage);
 
   const racing = Promise.all([a.registry.resolve("http:c1", "assistant", a.ctx), b.registry.resolve("http:c1", "assistant", b.ctx)]);
-  await both.arrived(2); // Both read no pointer and created a session.
+  await both.arrived(2); // Both read no pointer and created a conversation.
   both.release();
   const [one, two] = await racing;
 
   expect(one).toEqual(two);
-  const ids = await sessionIds(r.sessions);
+  const ids = await [...r.ids];
   expect(ids).toHaveLength(2);
-  expect(ids).toContain(one.sessionId);
+  expect(ids).toContain(one.conversationId);
   expect(await a.registry.get("http:c1", a.ctx)).toEqual(one);
   await a.app.stop();
   await b.app.stop();
@@ -265,15 +245,15 @@ test("a first resolve that loses to another process's resolve and reset returns 
   const b = await started(r);
 
   const late = a.registry.resolve("http:c1", "assistant", a.ctx);
-  await held.arrived(1); // A read no pointer and created a session; its write waits.
+  await held.arrived(1); // A read no pointer and created a conversation; its write waits.
   const created = await b.registry.resolve("http:c1", "assistant", b.ctx);
   const reset = await b.registry.reset("http:c1", b.ctx);
   held.release();
 
   expect(await late).toEqual(reset?.conversation as ConversationRef);
   expect(await b.registry.get("http:c1", b.ctx)).toEqual(reset?.conversation);
-  expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({ previousSessionIds: [created.sessionId] });
-  expect(await sessionIds(r.sessions)).toHaveLength(3); // B's two, and A's unused one.
+  expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({ previousConversationIds: [created.conversationId] });
+  expect(await [...r.ids]).toHaveLength(3); // B's two, and A's unused one.
   await a.app.stop();
   await b.app.stop();
 });
@@ -289,19 +269,49 @@ test("two processes resetting one key at once: both succeed, the last write wins
   const created = await a.registry.resolve("http:c1", "assistant", a.ctx);
 
   const racing = Promise.all([a.registry.reset("http:c1", a.ctx), b.registry.reset("http:c1", b.ctx)]);
-  await both.arrived(2); // Both read the same pointer and created a session.
+  await both.arrived(2); // Both read the same pointer and created a conversation.
   both.release();
   const [one, two] = await racing;
 
-  // What the README says: each reset reports its own move from the same previous session…
-  expect([one?.previousSessionId, two?.previousSessionId]).toEqual([created.sessionId, created.sessionId]);
+  // What the README says: each reset reports its own move from the same previous conversation…
+  expect([one?.previousConversationId, two?.previousConversationId]).toEqual([created.conversationId, created.conversationId]);
   expect([a.resets.length, b.resets.length]).toEqual([1, 1]);
-  // …the pointer names one of the two new sessions, and remembers only the first…
+  // …the pointer names one of the two new conversations, and remembers only the first…
   const now = await a.registry.get("http:c1", a.ctx);
-  expect([one?.newSessionId, two?.newSessionId]).toContain(now?.sessionId);
-  expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({ previousSessionIds: [created.sessionId] });
-  // …and every session is still in the store.
-  expect((await sessionIds(r.sessions)).sort()).toEqual([created.sessionId, one?.newSessionId, two?.newSessionId].sort() as string[]);
+  expect([one?.newConversationId, two?.newConversationId]).toContain(now?.conversationId);
+  expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({ previousConversationIds: [created.conversationId] });
+  // …and every conversation is still in the store.
+  expect((await [...r.ids]).sort()).toEqual([created.conversationId, one?.newConversationId, two?.newConversationId].sort() as string[]);
   await a.app.stop();
   await b.app.stop();
+});
+
+test("a pointer written before the move to pi-durable is none: its conversation starts anew, transparently, logged once", async () => {
+  const r = records();
+  // A Pi 0.99 pointer: it names a session, which the runtime no longer has.
+  await r.kv.namespace(NAMESPACE).set("http:c1", { agent: "assistant", sessionId: "0199-legacy", previousSessionIds: [], createdAt: 1, updatedAt: 1 });
+  const logged: string[] = [];
+  const logger = { ...silentLogger, info: (message: string) => void logged.push(message) };
+  let registry: ConversationRegistry | undefined;
+  const reader = defineComponent({
+    name: "registry-reader",
+    setup(pikit) {
+      const handle = pikit.use("conversations.registry");
+      return { start: () => void (registry = handle.get()) };
+    },
+  });
+  const app = await defineApp({ components: [kvProvider(r.kv), r.conversations, conversationsKv, reader], logger }).create();
+  await app.start();
+  if (registry === undefined) throw new Error("conversations.registry was not resolved");
+  const ctx = app.context();
+
+  expect(await registry.get("http:c1", ctx)).toBeUndefined();
+  expect(await registry.reset("http:c1", ctx)).toBeUndefined();
+  const fresh = await registry.resolve("http:c1", "assistant", ctx);
+  expect(await registry.resolve("http:c1", "assistant", ctx)).toEqual(fresh);
+
+  expect(fresh).toEqual({ key: "http:c1", agent: "assistant", conversationId: "c1" });
+  expect(logged.filter((message) => message.includes("starts a new one"))).toHaveLength(1);
+  expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({ conversationId: "c1", previousConversationIds: [] });
+  await app.stop();
 });

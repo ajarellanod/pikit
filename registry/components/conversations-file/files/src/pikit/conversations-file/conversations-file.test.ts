@@ -1,6 +1,6 @@
 /**
  * conversations-file's tests. They are copied with the component and keep running in your project.
- * Sessions come from Pi's in-memory repository through `@pikit/pi-adapter/testing`, shared by
+ * conversations come from a fake `agent.conversations` (`@pikit/pi-adapter/testing`), shared by
  * every app of a test, so a second app over the same file and store is a restart.
  */
 
@@ -12,7 +12,7 @@ import { type App, type ComponentDefinition, defineApp, defineComponent, silentL
 import { type ConversationRegistry } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createConversationRegistryConformance } from "@pikit/contracts/testing";
-import { testComponents } from "@pikit/pi-adapter/testing";
+import { fakeConversations } from "@pikit/pi-adapter/testing";
 import conversationsFile from "./index.ts";
 
 const directories: string[] = [];
@@ -20,32 +20,12 @@ afterAll(() => {
   for (const dir of directories) rmSync(dir, { recursive: true, force: true });
 });
 
-/** A registry file in a new directory, and one session store shared by every app over it. */
+/** A registry file in a new directory, and one fake `agent.conversations` shared by every app over it. */
 function records() {
   const dir = mkdtempSync(join(tmpdir(), "pikit-conversations-file-"));
   directories.push(dir);
-  const { sessions } = testComponents();
-  return { path: join(dir, "state", "conversations.json"), sessions };
-}
-
-/** The ids of the sessions in a store, read through a small app of its own. */
-async function sessionIds(sessions: ComponentDefinition): Promise<string[]> {
-  let ids: string[] = [];
-  const probe = defineComponent({
-    name: "sessions-probe",
-    setup(pikit) {
-      const handle = pikit.use("sessions.store");
-      return {
-        async start(ctx) {
-          ids = (await handle.get().list(undefined, ctx)).map((metadata: { id: string }) => metadata.id);
-        },
-      };
-    },
-  });
-  const app = await defineApp({ components: [sessions, probe], logger: silentLogger }).create();
-  await app.start();
-  await app.stop();
-  return ids;
+  const fake = fakeConversations();
+  return { path: join(dir, "state", "conversations.json"), conversations: fake.component, ids: fake.ids };
 }
 
 /** A started app over `records`, and the registry it provides. */
@@ -59,7 +39,7 @@ async function started(r: ReturnType<typeof records>): Promise<{ app: App; regis
     },
   });
   const app = await defineApp({
-    components: [r.sessions, conversationsFile, reader],
+    components: [r.conversations, conversationsFile, reader],
     config: { "conversations-file": { path: r.path } },
     logger: silentLogger,
   }).create();
@@ -68,13 +48,13 @@ async function started(r: ReturnType<typeof records>): Promise<{ app: App; regis
   return { app, registry };
 }
 
-// The conversations.registry contract, including the sessions it creates in the store.
+// The conversations.registry contract, including the conversations it creates in the store.
 for (const c of createConversationRegistryConformance(() => {
   const r = records();
   return {
-    components: [r.sessions, conversationsFile],
+    components: [r.conversations, conversationsFile],
     config: { "conversations-file": { path: r.path } },
-    sessionIds: () => sessionIds(r.sessions),
+    conversationIds: async () => [...r.ids],
   };
 })) {
   test(`conversations-file ${c.group}: ${c.name}`, () => c.run());
@@ -83,23 +63,23 @@ for (const c of createConversationRegistryConformance(() => {
 // Start and stop honour their deadline.
 for (const c of createLifecycleConformance(() => {
   const r = records();
-  return { component: conversationsFile, providers: [r.sessions], config: { "conversations-file": { path: r.path } } };
+  return { component: conversationsFile, providers: [r.conversations], config: { "conversations-file": { path: r.path } } };
 })) {
   test(`conversations-file ${c.group}: ${c.name}`, () => c.run());
 }
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const r = records();
-  const app = await defineApp({ components: [r.sessions, conversationsFile], logger: silentLogger }).create();
+  const app = await defineApp({ components: [r.conversations, conversationsFile], logger: silentLogger }).create();
 
   expect(app.describe().components.find((component) => component.name === "conversations-file")).toMatchObject({
     provides: ["conversations.registry"],
-    requires: ["sessions.store"],
+    requires: ["agent.conversations"],
     optional: [],
   });
 });
 
-test("the file records each pointer and the sessions a conversation was in before", async () => {
+test("the file records each pointer and the conversations a conversation was in before", async () => {
   const r = records();
   const { app, registry } = await started(r);
   const ctx = app.context();
@@ -108,11 +88,11 @@ test("the file records each pointer and the sessions a conversation was in befor
 
   const file = JSON.parse(readFileSync(r.path, "utf8"));
 
-  expect(file.version).toBe(1);
+  expect(file.version).toBe(2);
   expect(file.conversations["http:c1"]).toMatchObject({
     agent: "assistant",
-    sessionId: reset?.newSessionId,
-    previousSessionIds: [first.sessionId],
+    conversationId: reset?.newConversationId,
+    previousConversationIds: [first.conversationId],
   });
   expect(statSync(r.path).mode & 0o777).toBe(0o600);
   await app.stop();
@@ -132,10 +112,10 @@ test("a key named __proto__ is a key like any other, also after a restart", asyn
 });
 
 test("it refuses to start over a file that is not a registry", async () => {
-  for (const content of ["{ not json", JSON.stringify({ version: 2, conversations: {} }), JSON.stringify({ version: 1, conversations: { k: { agent: "a" } } })]) {
+  for (const content of ["{ not json", JSON.stringify({ version: 3, conversations: {} }), JSON.stringify({ version: 2, conversations: { k: { agent: "a" } } })]) {
     const r = records();
     const app = await defineApp({
-      components: [r.sessions, conversationsFile],
+      components: [r.conversations, conversationsFile],
       config: { "conversations-file": { path: r.path } },
       logger: silentLogger,
     }).create();
@@ -155,9 +135,10 @@ test("it refuses to start where the file cannot be written", async () => {
   const dir = mkdtempSync(join(tmpdir(), "pikit-conversations-file-"));
   directories.push(dir);
   writeFileSync(join(dir, "blocked"), "a file where the directory should be");
-  const { sessions } = testComponents();
+  const fake = fakeConversations();
+  const conversations = fake.component;
   const app = await defineApp({
-    components: [sessions, conversationsFile],
+    components: [conversations, conversationsFile],
     config: { "conversations-file": { path: join(dir, "blocked", "conversations.json") } },
     logger: silentLogger,
   }).create();
@@ -177,4 +158,35 @@ test("the registry is refused while the app is not running", async () => {
 
   await expect(registry.get("http:c1", app.context())).rejects.toThrow("while the app is not running");
   await expect(registry.resolve("http:c1", "assistant", app.context())).rejects.toThrow("while the app is not running");
+});
+
+test("a registry written before the move to pi-durable starts each conversation anew, transparently, logged once", async () => {
+  const r = records();
+  // Version 1: its pointers name Pi 0.99 sessions, which the runtime no longer has.
+  const old = { agent: "assistant", sessionId: "0199-legacy", previousSessionIds: [], createdAt: 1, updatedAt: 1 };
+  await Bun.write(r.path, JSON.stringify({ version: 1, conversations: { "http:c1": old } }));
+  const logged: string[] = [];
+  const logger = { ...silentLogger, info: (message: string) => void logged.push(message) };
+  let registry: ConversationRegistry | undefined;
+  const reader = defineComponent({
+    name: "registry-reader",
+    setup(pikit) {
+      const handle = pikit.use("conversations.registry");
+      return { start: () => void (registry = handle.get()) };
+    },
+  });
+  const app = await defineApp({ components: [r.conversations, conversationsFile, reader], config: { "conversations-file": { path: r.path } }, logger }).create();
+  await app.start();
+  if (registry === undefined) throw new Error("conversations.registry was not resolved");
+  const ctx = app.context();
+
+  expect(await registry.get("http:c1", ctx)).toBeUndefined();
+  const fresh = await registry.resolve("http:c1", "assistant", ctx);
+  expect(await registry.resolve("http:c1", "assistant", ctx)).toEqual(fresh);
+
+  expect(fresh).toEqual({ key: "http:c1", agent: "assistant", conversationId: "c1" });
+  expect(logged.filter((message) => message.includes("starts a new one"))).toHaveLength(1);
+  const file = JSON.parse(readFileSync(r.path, "utf8"));
+  expect(file).toEqual({ version: 2, conversations: { "http:c1": expect.objectContaining({ conversationId: "c1", previousConversationIds: [] }) } });
+  await app.stop();
 });

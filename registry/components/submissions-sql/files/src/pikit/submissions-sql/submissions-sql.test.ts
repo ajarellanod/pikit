@@ -87,7 +87,7 @@ for (const c of createLifecycleConformance(() => ({ component: submissionsSql, p
 test("a running process prunes settlements past keepSettledDays at most hourly, and keeps what is pending", async () => {
   const clock = createManualClock();
   const { app, submissions: s, ctx } = await open(temporaryDatabase(), clock, { "submissions-sql": { keepSettledDays: 1 } });
-  const conversation = { key: "test:c1", agent: "support", sessionId: "s1" };
+  const conversation = { key: "test:c1", agent: "support", conversationId: "s1" };
   const admittedAt = clock.now();
   try {
     await s.admitted(conversation, "waiting", ctx);
