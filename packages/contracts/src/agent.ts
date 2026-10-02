@@ -10,6 +10,11 @@
  * `dispatch` returns an admission, not an answer: a run's answer is the `agent.settled` event,
  * which the runtime emits when the run ends whether or not anyone is waiting. A run resumed by
  * a new worker after a crash has no caller, so a return value could not carry its answer.
+ *
+ * What an agent does besides its model, prompt and tools (a system prompt section that recalls,
+ * a hook that checks a tool call or rewrites a model request, a durable task) is an agent
+ * extension: Pi's own (`defineExtension`), provided by a component under `agent.extension` and
+ * named by the agents that run with it (`AgentDefinition.extensions`).
  */
 
 import type { AppContext } from "@pikit/core";
@@ -55,7 +60,7 @@ export interface ConversationRef {
 }
 
 /**
- * What the agent has for one run: model, instructions and tools. The static fields of an
+ * What the agent has for one run: model, instructions, tools and extensions. The static fields of an
  * `AgentDefinition` are its defaults; `prepare(state)` returns the fields it changes.
  */
 export interface TurnConfig {
@@ -64,6 +69,8 @@ export interface TurnConfig {
   systemPrompt?: string;
   /** As in `AgentDefinition.tools`: names of installed tools, or tool objects. */
   tools: readonly (AgentTool | string)[];
+  /** As in `AgentDefinition.extensions`: names of installed agent extensions. */
+  extensions: readonly string[];
 }
 
 /**
@@ -100,16 +107,30 @@ export interface AgentDefinition<S extends object = object> {
    */
   tools?: readonly (AgentTool | string)[];
   /**
+   * The agent extensions it runs with, by name, in order: each one a Pi extension that a component
+   * provides under the keyed capability `agent.extension` (system prompt sections, which may be
+   * async and read the conversation's documents; hooks on model requests, tool calls and
+   * compaction; tool wrappers; durable tasks; and tools, which the agent gets with the extension).
+   * As with `tools`, only an agent that names an extension runs with it, so what an agent does is
+   * written where it is defined; agents that share extensions share a list
+   * (`extensions: [...shared, "plan-mode"]`). A later extension's tool replaces an earlier one, or
+   * one of `tools`, of the same name. The runtime refuses to start when a name has no provider.
+   */
+  extensions?: readonly string[];
+  /**
    * The initial state of each conversation: a JSON object. Tools update it through `AGENT_STATE`;
    * it is stored in the runtime's conversation and starts again from here after a reset. Absent,
    * it is `{}`.
    */
   state?: S;
   /**
-   * Runs before every run of a conversation, with the conversation's current state, and returns what
-   * changes for that run: model, system prompt, tools. It must be pure: it returns a value and
-   * registers nothing, so it is also a plain function in tests (`agent.prepare?.(state, ctx)`).
-   * Without it, every run has the static fields above.
+   * Runs before every run of a conversation, and again whenever a tool updates its state, with the
+   * conversation's current state, and returns what changes from then on: model, system prompt, tools,
+   * extensions. It is the simple path, for an agent that switches with its state (a phase, a mode).
+   * It must be pure and synchronous: it returns a value and registers nothing, so it is also a plain
+   * function in tests (`agent.prepare?.(state, ctx)`). Anything that reads a store, waits, or must
+   * see each model request or tool call is an extension (`extensions`), not `prepare`. Without it,
+   * every run has the static fields above.
    */
   prepare?(state: Readonly<S>, ctx: PrepareContext): TurnChanges;
 }
@@ -119,6 +140,8 @@ const AGENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 const TOOL_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
 /** `provider/modelId`; the model id may contain slashes of its own (`openrouter/anthropic/x`). */
 const MODEL = /^[^/\s]+\/\S+$/;
+/** The name an agent extension is provided under (`agent.extension`). */
+const EXTENSION_NAME = /^\S+$/;
 
 /** Check an agent definition's shape and return it unchanged. */
 export function defineAgent<S extends object = object>(definition: AgentDefinition<S>): AgentDefinition<S> {
@@ -132,6 +155,13 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
   for (const [index, name] of named.entries()) {
     if (!TOOL_NAME.test(name)) throw new Error(`agent "${definition.name}": tool name "${name}" is not a tool name`);
     if (named.indexOf(name) !== index) throw new Error(`agent "${definition.name}": tool "${name}" is named twice`);
+  }
+  const extensions = definition.extensions ?? [];
+  for (const [index, name] of extensions.entries()) {
+    if (typeof name !== "string" || !EXTENSION_NAME.test(name)) {
+      throw new Error(`agent "${definition.name}": extension name ${JSON.stringify(name)} must be a non-empty name without spaces`);
+    }
+    if (extensions.indexOf(name) !== index) throw new Error(`agent "${definition.name}": extension "${name}" is named twice`);
   }
   // Checked here, not at the first update: the state is stored in the conversation as JSON.
   if (definition.state !== undefined && !isJsonObject(definition.state)) {

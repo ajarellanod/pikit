@@ -16,6 +16,10 @@
  * - `agent.definition`: your agents, one per name (a project component provides them);
  * - `model.provider`: the model providers your agents name as `provider/modelId`;
  * - `agent.tool`: the installed tools (`tool-*` components) that agents name in their `tools`;
+ * - `agent.extension`: the installed agent extensions (Pi's `defineExtension`: prompt sections, hooks,
+ *   wrappers, durable tasks, tools) that agents name in their `extensions`, each run with the agents
+ *   that name it, in that order, after the agent's own tools. Only the agents name them: no extension
+ *   applies to every agent by being installed, so a project's agents share one by listing it;
  * - `execution` and `workspace`, if installed: where tools work (each call on its conversation's
  *   workspace when a provider is installed, otherwise on `execution`);
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
@@ -86,6 +90,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const providers = pikit.useKeyed("model.provider");
       const credentials = pikit.useOptional("model.credentials");
       const tools = pikit.useKeyed("agent.tool");
+      const extensions = pikit.useKeyed("agent.extension");
       const execution = pikit.useOptional("execution");
       const workspace = pikit.useOptional("workspace");
       // Optional: with it, runs are driven inside wakeups, in slices, instead of in the background.
@@ -144,10 +149,22 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
               throw new Error(`runtime-pi: the agent.tool "${key}" is a tool named "${tool.name}"; a tool is provided under its own name`);
             }
           }
+          for (const key of extensions.keys()) {
+            const extension = extensions.get(key);
+            if (extension !== undefined && extension.name !== key) {
+              throw new Error(`runtime-pi: the agent.extension "${key}" is an extension named "${extension.name}"; an extension is provided under its own name`);
+            }
+            if (key.startsWith("pikit.")) throw new Error(`runtime-pi: the agent.extension "${key}" has a reserved name (pikit.*: the runtime's own)`);
+          }
           for (const name of agents.keys()) {
             for (const tool of agents.get(name)?.tools ?? []) {
               if (typeof tool === "string" && tools.get(tool) === undefined) {
                 throw new Error(`runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides (install tool-${tool}?)`);
+              }
+            }
+            for (const extension of agents.get(name)?.extensions ?? []) {
+              if (extensions.get(extension) === undefined) {
+                throw new Error(`runtime-pi: agent "${name}" names the extension "${extension}", which no agent.extension provides`);
               }
             }
             const model = agents.get(name)?.model ?? "";
@@ -177,6 +194,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             keepSettledDays: config.keepSettledDays,
             agent: (name) => agents.get(name),
             tool: (name) => tools.get(name),
+            extension: (name) => extensions.get(name),
             models,
             events: background,
             now,

@@ -5,7 +5,7 @@ import { brokenReferences } from "./references.ts";
 type Composed = Extract<ProbeResult, { ok: true }>;
 
 /** An app with a runtime that uses the two keyed capabilities, and the given keys and agents. */
-function app(keys: Record<string, Record<string, string>>, agents: AgentReferences[], runtimeUses = ["agent.tool", "model.provider"]): Composed {
+function app(keys: Record<string, Record<string, string>>, agents: AgentReferences[], runtimeUses = ["agent.tool", "agent.extension", "model.provider"]): Composed {
   return {
     ok: true,
     listed: [],
@@ -19,9 +19,10 @@ function app(keys: Record<string, Record<string, string>>, agents: AgentReferenc
   };
 }
 
-const soporte: AgentReferences = { agent: "soporte", component: "agents", model: "anthropic/claude-x", tools: ["read", "bash"] };
+const soporte: AgentReferences = { agent: "soporte", component: "agents", model: "anthropic/claude-x", tools: ["read", "bash"], extensions: ["memory"] };
 const complete = {
   "agent.tool": { read: "tool-read", bash: "tool-bash" },
+  "agent.extension": { memory: "memory-sql" },
   "model.provider": { anthropic: "provider-anthropic" },
 };
 
@@ -32,6 +33,7 @@ test("every name an agent gives is an installed key: nothing is broken", () => {
 test("a tool or a model provider with no installed key is broken", () => {
   expect(brokenReferences(app({ "agent.tool": { read: "tool-read" } }, [soporte]))).toEqual([
     'agent "soporte" names the tool "bash", which no installed component provides (agent.tool)',
+    'agent "soporte" names the extension "memory", which no installed component provides (agent.extension)',
     'agent "soporte" names the model "anthropic/claude-x", whose provider "anthropic" no installed component provides (model.provider)',
   ]);
 });
@@ -41,6 +43,7 @@ test("removing the only provider of a named key breaks it; agents it provides go
   expect(brokenReferences(app(complete, [soporte]), "provider-anthropic")).toEqual([
     'agent "soporte" names the model "anthropic/claude-x", whose provider "anthropic" only provider-anthropic provides',
   ]);
+  expect(brokenReferences(app(complete, [soporte]), "memory-sql")).toEqual(['agent "soporte" names the extension "memory", which only memory-sql provides']);
   expect(brokenReferences(app(complete, [soporte]), "tool-write")).toEqual([]);
   expect(brokenReferences(app(complete, [soporte]), "agents")).toEqual([]);
 });

@@ -15,10 +15,13 @@ import {
   defineExtension,
   defineTool,
   Harness,
+  hook,
   InboxDoc,
   LiveDoc,
   MemoryStorage,
+  section,
   type SubmissionRecord,
+  ToolTask,
 } from "@earendil-works/pi-durable";
 import { Type } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -262,6 +265,99 @@ describe("pi-durable facts (1.0.0)", () => {
 
     expect(offered).toEqual([["write"]]);
     expect(await harness.snapshot(AgentDoc, conversation.id, ctx)).toMatchObject({ extensions: ["pikit.agent.a"], tools: ["write"], instructions: "be brief" });
+    await harness.close(ctx);
+  });
+
+  test("pi.agent's tools filter the selected extensions' tools by name; a later extension's tool of a name wins (agent.ts: the offered tools)", async () => {
+    const calls: string[] = [];
+    const tool = (name: string, by: string) =>
+      defineTool({ name, description: name, parameters: Type.Object({}), execute: async () => (calls.push(`${name} by ${by}`), {}) });
+    const registry = createRegistry();
+    const own = defineExtension({ name: "pikit.agent.a", tools: [tool("read", "agent")] });
+    const added = defineExtension({ name: "notes", tools: [tool("read", "notes"), tool("note", "notes")] });
+    registry.install(own);
+    registry.install(added);
+    const offered: string[][] = [];
+    const record: FauxResponseStep = (context) => {
+      offered.push(context.messages.flatMap((message) => (message.role === "system" ? (message.toolsAdded ?? []).map((t) => t.name) : [])));
+      return offered.length === 1 ? fauxAssistantMessage(fauxToolCall("read", {}), { stopReason: "toolUse" }) : fauxAssistantMessage("ok");
+    };
+    const { harness, conversation } = await open([record, record], { registry });
+    await conversation.commit((tx) => configure(tx, conversation.id, { extensions: [own, added], tools: [tool("read", "agent")] }), ctx);
+
+    await (await conversation.submit({ type: "input", content: "hello" }, ctx)).wait(ctx);
+
+    expect(offered[0]).toEqual(["read"]);
+    expect(calls).toEqual(["read by notes"]);
+    await harness.close(ctx);
+  });
+
+  test("a beforeTool block never runs the tool: the model gets an error result with the reason; a section renders from a committed document (agent.extension)", async () => {
+    const Doc = defineDoc<{ text: string }>({ kind: "pikit.fact-note", version: 1, scope: "conversation", history: "latest", fork: "current", initial: () => ({ text: "" }) });
+    let ran = false;
+    const registry = createRegistry();
+    registry.install(
+      defineExtension({
+        name: "guard",
+        tools: [defineTool({ name: "bash", description: "bash", parameters: Type.Object({}), execute: async () => ((ran = true), {}) })],
+        sections: [section("note", async (input, context) => (await input.read.snapshot(Doc, input.conversationId, context))?.text || undefined)],
+        hooks: [hook(ToolTask, { beforeTool: (call) => (call.name === "bash" ? { block: "not here" } : undefined) })],
+      }),
+    );
+    const seen: { result?: string; note?: string }[] = [];
+    const record: FauxResponseStep = (context) => {
+      const result = [...context.messages].reverse().find((message) => message.role === "toolResult");
+      const note = context.messages.flatMap((message) => (message.role === "system" && message.sections?.note !== undefined ? [message.sections.note] : [])).at(-1);
+      seen.push({ ...(result?.role === "toolResult" && { result: JSON.stringify(result.content) }), ...(typeof note === "string" && { note }) });
+      return seen.length === 1 ? fauxAssistantMessage(fauxToolCall("bash", {}), { stopReason: "toolUse" }) : fauxAssistantMessage("ok");
+    };
+    const { harness, conversation } = await open([record, record], { registry });
+    await conversation.commit(async (tx) => void ((await tx.doc(Doc, conversation.id)).text = "remember this"), ctx);
+
+    await (await conversation.submit({ type: "input", content: "hello" }, ctx)).wait(ctx);
+
+    expect(ran).toBe(false);
+    expect(seen[0]?.note).toBe("<note>\nremember this\n</note>");
+    expect(seen[1]?.result).toContain("not here");
+    await harness.close(ctx);
+  });
+
+  test("a steer queued during a tool round joins the run after it, settling with its answer; queued as the run answers, it starts the next run (runtime.ts: steer)", async () => {
+    const registry = createRegistry();
+    let release!: () => void;
+    const released = new Promise<void>((resolve) => (release = resolve));
+    let held!: () => void;
+    const holding = new Promise<void>((resolve) => (held = resolve));
+    registry.install(
+      defineExtension({
+        name: "hold",
+        tools: [defineTool({ name: "hold", description: "hold", parameters: Type.Object({}), execute: async () => (held(), await released, {}) })],
+      }),
+    );
+    const gate = gated("first answer");
+    const { harness, conversation, changes } = await open(
+      [fauxAssistantMessage(fauxToolCall("hold", {}), { stopReason: "toolUse" }), fauxAssistantMessage("joined"), gate.step, fauxAssistantMessage("next run")],
+      { registry },
+    );
+    const first = await conversation.submit({ type: "input", content: "one", requestId: "r1" }, ctx);
+    await holding;
+    const steer = await conversation.submit({ type: "input", content: "change course", requestId: "r2", whenBusy: "steer" }, ctx);
+    expect((await steer.status(ctx)).status).toBe("queued");
+    release();
+    const [one, two] = [await first.wait(ctx), await steer.wait(ctx)];
+    expect([one.status, two.status]).toEqual(["done", "done"]);
+    expect(one.status === "done" && two.status === "done" && one.answer === two.answer).toBe(true);
+    // Placed in the commit that adds it to the run's inputs: `observe` sees it led by the first input.
+    const placing = changes.find((commit) => commit.some((change) => change.type === "submission" && change.value.id === steer.id && change.value.status === "placed"));
+    const run = placing?.find((change) => change.type === "document" && change.record.kind === "pi.live");
+    expect(run?.type === "document" ? (run.value as { run?: { inputs: number[] } }).run?.inputs : undefined).toEqual([first.id, steer.id]);
+
+    const third = await conversation.submit({ type: "input", content: "three", requestId: "r3" }, ctx);
+    await gate.reached;
+    const late = await conversation.submit({ type: "input", content: "four", requestId: "r4", whenBusy: "steer" }, ctx);
+    gate.release();
+    const [three, four] = [await third.wait(ctx), await late.wait(ctx)];
+    expect(three.status === "done" && four.status === "done" && three.answer !== four.answer).toBe(true);
     await harness.close(ctx);
   });
 

@@ -27,6 +27,13 @@ test("an agent names installed tools by name, next to tools of its own", () => {
   expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: [""] })).toThrow("is not a tool name");
 });
 
+test("an agent names the extensions it runs with, once each", () => {
+  expect(defineAgent({ name: "a", model: "x/y", extensions: ["memory", "acme.guard"] }).extensions).toEqual(["memory", "acme.guard"]);
+  expect(() => defineAgent({ name: "a", model: "x/y", extensions: ["memory", "memory"] })).toThrow('extension "memory" is named twice');
+  expect(() => defineAgent({ name: "a", model: "x/y", extensions: [""] })).toThrow("must be a non-empty name without spaces");
+  expect(() => defineAgent({ name: "a", model: "x/y", extensions: ["plan mode"] })).toThrow("must be a non-empty name without spaces");
+});
+
 test("prepare is a plain function from state to what changes for the run", () => {
   const deploy = { name: "deploy" } as unknown as AgentTool;
   const release = defineAgent({

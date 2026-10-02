@@ -1,5 +1,5 @@
 /**
- * The names agents give by key: tools (`agent.tool`) and the model's provider (`model.provider`, the part of `provider/modelId` before the first slash). The runtime
+ * The names agents give by key: tools (`agent.tool`), extensions (`agent.extension`) and the model's provider (`model.provider`, the part of `provider/modelId` before the first slash). The runtime
  * resolves them only at start, so a name with no installed key is a project that composes and does
  * not start. `doctor` reports them; `remove` refuses to break one.
  *
@@ -26,6 +26,7 @@ interface Kind {
 
 const KINDS: Kind[] = [
   { capability: "agent.tool", describe: (_, key, who) => `the tool "${key}", which ${who} provides`, keys: (agent) => agent.tools },
+  { capability: "agent.extension", describe: (_, key, who) => `the extension "${key}", which ${who} provides`, keys: (agent) => agent.extensions },
   {
     capability: "model.provider",
     describe: (agent, key, who) => `the model "${agent.model}", whose provider "${key}" ${who} provides`,

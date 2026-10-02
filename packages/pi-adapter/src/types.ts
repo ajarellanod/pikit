@@ -4,11 +4,11 @@
  * a project makes them precise everywhere, by declaration merging, as `AppEvents` is extended.
  *
  * Pi is pi-durable 1.0 and pi-ai 1.0: an agent's tool is pi-durable's `ToolRegistration`
- * (`defineTool`), the environment its tools work on is pi-durable's `ExecutionEnv`, and messages and
- * usage are pi-ai's.
+ * (`defineTool`), an agent extension is pi-durable's `Extension` (`defineExtension`), the environment
+ * its tools work on is pi-durable's `ExecutionEnv`, and messages and usage are pi-ai's.
  */
 
-import type { ToolRegistration } from "@earendil-works/pi-durable";
+import type { Extension, ToolRegistration } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import type { CredentialStore } from "@earendil-works/pi-ai";
 import type { Provider } from "@earendil-works/pi-ai/models";
@@ -73,5 +73,12 @@ declare module "@pikit/core" {
   interface AppKeyedCapabilities {
     /** One pi-ai model provider per key (its id): `anthropic`, `openrouter`, `faux` in tests. */
     "model.provider": Provider;
+    /**
+     * One agent extension per key, its name: pi-durable's `Extension` (`defineExtension` from
+     * `@pikit/pi-adapter/extensions`), with system prompt sections, hooks, wrappers, durable tasks and
+     * tools. An agent runs with the ones it names (`AgentDefinition.extensions`), in that order, after
+     * its own tools. Names starting with `pikit.` are the runtime's own.
+     */
+    "agent.extension": Extension;
   }
 }

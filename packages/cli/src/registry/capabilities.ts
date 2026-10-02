@@ -176,6 +176,12 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "One tool per name the model calls it by; an agent gets only the tools it names.",
   },
+  "agent.extension": {
+    mode: "keyed",
+    definedIn: "@pikit/pi-adapter",
+    stability: "experimental",
+    summary: "One Pi extension per name (prompt sections, hooks on model requests and tool calls, wrappers, durable tasks, tools); an agent runs with only the extensions it names.",
+  },
   "http.route": {
     mode: "keyed",
     definedIn: "@pikit/contracts",

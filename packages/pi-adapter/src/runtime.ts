@@ -24,6 +24,9 @@
  * - **`agent.submissions`** is read from pi-durable, which holds every submission: `get` and `pending`
  *   are its records; `answers` is a log derived from them (`answers.ts`), appended once per run (its
  *   run key) by `settle`, live from the commits or by `reconcile` after a crash (`submissions.ts`).
+ *   The runtime is its only writer: giving up on messages is `abandon`, the runtime's own.
+ * - **Agents** are applied by `AgentConfigs` (`agent.ts`): each conversation's `pi.agent` selects the
+ *   agent's tool extension and the extensions it names (`agent.extension`, resolved through `extension`).
  *
  * Steps that touch one conversation (admissions, aborts, recoveries, settlements) run in that
  * conversation's line, one at a time, so a duplicate check and the submit after it never interleave,
@@ -65,7 +68,7 @@ import {
   type SqlDatabase,
 } from "@pikit/contracts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
+import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
 import { createAnswerLog } from "./answers.ts";
 import { runContext, toChord } from "./context.ts";
 import { harnessEnv } from "./execution.ts";
@@ -87,6 +90,11 @@ export interface DurableRuntimeOptions {
   agent(name: string): AgentDefinition | undefined;
   /** An installed tool by name (`agent.tool`), for the tools agents name. Without it, only tool objects work. */
   tool?(name: string): DurableTool | undefined;
+  /**
+   * An installed agent extension by name (`agent.extension`), for the extensions agents name; read each
+   * time an agent is applied. Without it, an agent that names an extension cannot run.
+   */
+  extension?(name: string): DurableExtension | undefined;
   /** pi-ai 1.0's models: every model the agents may name (`provider/modelId`). */
   models: DurableModels;
   /**
@@ -103,8 +111,9 @@ export interface DurableRuntimeOptions {
   conversations?: "ownerless" | "root";
   /**
    * pi-durable's run policy (stream, retry, compaction, tool execution). The queue modes are the
-   * runtime's (queued messages are taken all at once by the next run) and extensions are selected per
-   * agent.
+   * runtime's (queued follow-ups are taken all at once by the next run, steers all at once by the run
+   * in progress). Extensions are not a host default: each conversation selects exactly its agent's
+   * (`AgentDefinition.extensions`, through `extension`), so a default selection would never apply.
    */
   settings?: Omit<HarnessSettings, "extensions" | "steeringMode" | "followUpMode">;
   /**
@@ -285,6 +294,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     models: options.models,
     registry,
     tool: options.tool,
+    extension: options.extension,
     // Each tool runs with its conversation and that conversation's state in its context.
     wrap: (tool) => ({
       ...tool,

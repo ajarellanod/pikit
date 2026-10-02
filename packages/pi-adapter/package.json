@@ -6,6 +6,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./tools": "./src/tools/index.ts",
+    "./extensions": "./src/extensions.ts",
     "./mcp": "./src/mcp.ts",
     "./mcp/testing": "./src/testing/mcp.ts",
     "./execution": "./src/execution.ts",

@@ -12,7 +12,7 @@
  * Worker that does not compose fails here and not at deploy. `description` is the default export's,
  * `worker` the Worker's; `listed` names the components of both.
  *
- * It also reports what each agent names by key (tools, model), read from the
+ * It also reports what each agent names by key (tools, extensions, model), read from the
  * `agent.definition`s provided during setup: the names the runtime resolves only at start, which
  * `doctor` and `remove` check against the installed keys (`references.ts`).
  */
@@ -53,6 +53,8 @@ export interface AgentReferences {
   model: string;
   /** Tools named by string; a tool object of the project's own is no reference. */
   tools: string[];
+  /** The agent extensions it names (`agent.extension`). */
+  extensions: string[];
 }
 
 interface ComponentLike {
@@ -83,9 +85,9 @@ function recordAgents(components: ComponentLike[]): AgentReferences[] {
 }
 
 function referencesOf(agent: string, component: string, definition: unknown): AgentReferences {
-  const { model, tools } = (definition ?? {}) as { model?: unknown; tools?: unknown };
+  const { model, tools, extensions } = (definition ?? {}) as { model?: unknown; tools?: unknown; extensions?: unknown };
   const names = (list: unknown): string[] => (Array.isArray(list) ? list.filter((item): item is string => typeof item === "string") : []);
-  return { agent, component, model: typeof model === "string" ? model : "", tools: names(tools) };
+  return { agent, component, model: typeof model === "string" ? model : "", tools: names(tools), extensions: names(extensions) };
 }
 
 if (import.meta.main) {
