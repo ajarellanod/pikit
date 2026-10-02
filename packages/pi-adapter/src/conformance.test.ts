@@ -11,7 +11,6 @@ import type { AgentRuntime } from "@pikit/contracts";
 import { createAgentRuntimeConformance } from "@pikit/contracts/testing";
 import { modelsFrom } from "./models.ts";
 import { createDurableRuntime, type DurableRuntime } from "./runtime.ts";
-import { openDurableStorage } from "./sql.ts";
 import { createPiRuntimeFixture } from "./testing/index.ts";
 
 const runtimeDurable = defineComponent({
@@ -36,7 +35,7 @@ const runtimeDurable = defineComponent({
       start(ctx) {
         const db = sql.get();
         opened = createDurableRuntime({
-          storage: () => openDurableStorage(db),
+          db,
           agent: (name) => agents.get(name),
           models: modelsFrom(providers.keys().flatMap((key) => providers.get(key) ?? [])),
           events: ctx.derive(() => BACKGROUND_CONTEXT),

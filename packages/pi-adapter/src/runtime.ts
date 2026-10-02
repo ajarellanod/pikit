@@ -1,6 +1,6 @@
 /**
- * `agent.runtime` on pi-durable (@pikit/contracts' agent.ts). README.md, "The runtime", has the
- * mapping; in short:
+ * `agent.runtime` and `agent.submissions` on pi-durable (@pikit/contracts' agent.ts, submissions.ts).
+ * README.md, "The runtime" and "Submissions", has the mapping; in short:
  *
  * - **One `Harness` per storage**, opened at first use and owned by the runtime from then on; pi-durable
  *   allows one per storage and one process per storage. Opening it reconfigures the conversations that
@@ -17,14 +17,17 @@
  * - **Settlements** are read from pi-durable's commits: the inputs of a run settle in one commit, and
  *   are one `AgentResult`. Settled `done` is `agent.settled` (completed), `unanswered` with `aborted` is
  *   `agent.settled` (aborted), any other reason is `agent.failed` with that reason as its code. One
- *   withdrawn while queued (an abort) is recorded in `agent.submissions`, unannounced, as before.
+ *   withdrawn while queued (an abort) is logged in `answers`, unannounced.
+ * - **`agent.submissions`** is read from pi-durable, which holds every submission: `get` and `pending`
+ *   are its records; `answers` is a log derived from them (`answers.ts`), appended once per run (its
+ *   run key) by `settle`, live from the commits or by `reconcile` after a crash (`submissions.ts`).
  *
  * Steps that touch one conversation (admissions, aborts, recoveries, settlements) run in that
- * conversation's line, one at a time, so a duplicate check and the submit after it never interleave.
+ * conversation's line, one at a time, so a duplicate check and the submit after it never interleave,
+ * and a run is logged and announced by one step only.
  */
 
-import type { Context as ChordContext, JsonValue } from "@earendil-works/chord";
-import { copyJson } from "@earendil-works/chord";
+import { copyJson, type JsonValue } from "@earendil-works/chord";
 import {
   type CommitChange,
   type Conversation,
@@ -54,21 +57,29 @@ import {
   CONVERSATION,
   type ConversationRef,
   isJsonObject,
+  type PendingConversation,
   type RunSettlement,
+  type SqlDatabase,
 } from "@pikit/contracts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
+import { createAnswerLog } from "./answers.ts";
 import { runContext, toChord } from "./context.ts";
 import { harnessEnv } from "./execution.ts";
 import type { WorkspaceProvider } from "./types.ts";
 import { isSettledInput, type SettledInput, settlementOf, toResult } from "./result.ts";
+import { openDurableStorage } from "./sql.ts";
+import { ABANDONED, AdmissionsDoc, announced, durableId, runKey, runsOf, storedRunsOf } from "./submissions.ts";
 
 export interface DurableRuntimeOptions {
   /**
-   * The pi-durable storage (`openDurableStorage(db)` over `storage.sql`), or how to open it. Opened
-   * once, at first use; the runtime's Harness owns it from then on and closes it in `close`.
+   * The app's `storage.sql` (SQLite: storage-sqlite, storage-do). pi-durable's storage is opened over it
+   * (`openDurableStorage`) at first use, and the runtime's Harness owns it from then on; the answers log
+   * is kept there too (`runtime_pi_answers`), so both live and go with one database.
    */
-  storage: Storage | (() => Promise<Storage>);
+  db: SqlDatabase;
+  /** Days a run stays in `answers` (and `get` reads it from there). Default 7, at least 1. */
+  keepSettledDays?: number;
   /** The definition of an agent by name (`agent.definition`), or `undefined` if none has it. */
   agent(name: string): AgentDefinition | undefined;
   /** An installed tool by name (`agent.tool`), for the tools agents name. Without it, only tool objects work. */
@@ -81,13 +92,6 @@ export interface DurableRuntimeOptions {
    * are the Harness's: every task, tool calls included, runs in it.
    */
   events: AppContext;
-  /**
-   * Where admissions and run ends are recorded (`agent.submissions`), when it is installed: a message
-   * once pi-durable holds it and before `dispatch` resolves, every run's end before its event, a request
-   * an abort withdrew as aborted. Transitional (submissions.ts): pi-durable keeps submissions itself, and
-   * this bridge feeds the channels' `answers` and `pending` until they read pi-durable directly.
-   */
-  submissions?: AgentSubmissions;
   /**
    * What `createConversation` makes: `ownerless` (default) a new ownerless conversation each time, for a
    * storage that holds many (a server); `root` the storage's root conversation the first time, then
@@ -109,7 +113,7 @@ export interface DurableRuntimeOptions {
   execution?(): ExecutionEnv | undefined;
   /** The `workspace` capability, read at each tool call: the conversation's own environment, when installed. */
   workspace?(): WorkspaceProvider | undefined;
-  /** The clock pi-durable uses (epoch ms); workerd freezes `Date.now()` between I/O. */
+  /** The clock pi-durable and the answers log use (epoch ms); workerd freezes `Date.now()` between I/O. */
   now?: () => number;
   /**
    * For a host that keeps running only while an event is in progress (a Durable Object): called by
@@ -122,6 +126,12 @@ export interface DurableRuntimeOptions {
 }
 
 export interface DurableRuntime extends AgentRuntime {
+  /**
+   * `agent.submissions`, read from pi-durable: `get` and `pending` are its records, `answers` the log of
+   * every run's end. `admitted` does nothing (`dispatch` admits), `settled` reconciles the run's
+   * conversation, `abandoned` is `abandon`'s settlement.
+   */
+  readonly submissions: AgentSubmissions;
   /**
    * A new conversation, for `conversations.registry` (a first message, a reset): its id, which is the
    * `ConversationRef.conversationId` of every message to it.
@@ -136,19 +146,18 @@ export interface DurableRuntime extends AgentRuntime {
    */
   suspend(ctx: AppContext): Promise<void>;
   /**
-   * Bring back a conversation with requests admitted and never settled (`agent.submissions`' pending),
-   * as a host does at start: it is reconfigured and its work resumed, and a request whose run ended but
-   * whose end was never recorded is settled from what pi-durable stored, with its event (one
-   * `agent.submissions` holds settled already is skipped). Resolves once those of `requestIds`
-   * pi-durable still runs or queues have settled, or when `ctx` is cancelled. A conversation that can
-   * never run (its agent is no longer defined: `agent_removed`; it is not in the storage:
-   * `conversation_missing`) has its requests abandoned.
+   * Bring back a conversation with requests pending (`submissions.pending`), as a host does at start:
+   * it is reconfigured, its work resumed, and what pi-durable settled without the run being logged is
+   * logged and announced (`reconcile`). Resolves once those of `requestIds` pi-durable still runs or
+   * queues have settled, or when `ctx` is cancelled. A conversation that can never run (its agent is no
+   * longer defined: `agent_removed`; it is not in the storage: `conversation_missing`) has its queued
+   * requests abandoned.
    */
   recover(conversation: ConversationRef, requestIds: readonly string[], ctx: AppContext): Promise<void>;
   /**
-   * Give up on requests nothing can answer: those of `requestIds` still pending in `agent.submissions`
-   * are settled unanswered with `reason`, announced as `agent.failed` (code `abandoned`). Skipped,
-   * logged, while pi-durable still queues or runs one of them. Without `agent.submissions`, nothing.
+   * Give up on requests nothing can answer: those of `requestIds` pi-durable still queues are settled
+   * unanswered (reason `abandoned`, detail `reason`) in one commit, logged as one run and announced as
+   * `agent.failed` (code `abandoned`, message `reason`). One a run took (`placed`) is left to it, logged.
    */
   abandon(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<void>;
   /** Whether this worker drives the conversation now: a run going, or a step or an announcement under way. */
@@ -183,8 +192,11 @@ const LIVE = "pi.live";
 /** The kind of the write that starts a run for inputs a failed run left queued (README.md, "Gaps"). */
 export const INBOX_KICK = "pikit.inbox-kick";
 
-/** How long to wait before recording a run's end again, after `agent.submissions` failed to. */
-const SETTLED_RETRY_MS = [1_000, 5_000, 30_000, 120_000] as const;
+const DAY = 24 * 60 * 60 * 1_000;
+/** The answers log is pruned when the Harness opens, and at most this often after, when a run is logged. */
+const PRUNE_EVERY_MS = 60 * 60 * 1_000;
+/** Page size of submission scans. */
+const SCAN = 500;
 
 /** A run's announcement: the context its events go to, and what its end waits for (its `agent.started`). */
 interface RunAnnouncement {
@@ -197,8 +209,20 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   const logger = events.logger;
   const registry = createRegistry();
   const now = options.now ?? Date.now;
+  const keepMs = Math.max(1, options.keepSettledDays ?? 7) * DAY;
+  const log = createAnswerLog(options.db);
+  /** The log's tables, created once (reading `answers` does not need the Harness). */
+  let logReady: Promise<void> | undefined;
+  const ready = (): Promise<void> =>
+    (logReady ??= log.ensure().catch((error: unknown) => {
+      logReady = undefined;
+      throw error;
+    }));
+  let prunedAt = 0;
   let closed = false;
   let opening: Promise<Harness> | undefined;
+  /** The storage under the open Harness (read directly: scans and entry commit sequences). */
+  let storage: Storage | undefined;
   /** A `suspend` closing the Harness: the next open waits for it (one Harness per storage). */
   let suspending: Promise<void> | undefined;
   let unsubscribe: (() => void) | undefined;
@@ -219,7 +243,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   const admitting = new Map<string, SubmissionRecord["status"] | undefined>();
   /** Per request key, its run's announcement. */
   const runs = new Map<string, RunAnnouncement>();
-  /** Per submission id, who waits for its settlement to be handled (`recover`). */
+  /** Per submission id, who waits for its settlement to be handled (`recover`, `abandon`). */
   const handled = new Map<number, (() => void)[]>();
   /** Known `ConversationRef`s by conversation id. */
   const refs = new Map<ConversationId, ConversationRef>();
@@ -227,7 +251,6 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   let commitWaiters: (() => void)[] = [];
   let resolveClosed!: () => void;
   const closedSignal = new Promise<void>((resolve) => (resolveClosed = resolve));
-  const retries = new Set<ReturnType<typeof setTimeout>>();
 
   const track = <T>(work: Promise<T>): Promise<T> => {
     inflight.add(work);
@@ -298,15 +321,24 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     return opening;
   };
 
+  /** The open Harness and its storage. */
+  const opened = async (ctx: AppContext): Promise<{ harness: Harness; storage: Storage }> => {
+    const harness = await harnessOf(ctx);
+    if (storage === undefined) throw new Error("agent.runtime: the Harness is open without its storage");
+    return { harness, storage };
+  };
+
   /**
    * Open the Harness, reconfigure the conversations with live work (their agents may have changed with
    * a deploy, and their tools must be installed before anything runs), resume the scheduler, announce
-   * the runs it resumes, and start runs for messages a failed run left queued.
+   * the runs it resumes, start runs for messages a failed run left queued, and reconcile the
+   * conversations that may hold a settlement a crash left unlogged.
    */
   const openHarness = async (ctx: AppContext): Promise<Harness> => {
-    const storage = typeof options.storage === "function" ? await options.storage() : options.storage;
+    await ready();
+    const store = await openDurableStorage(options.db);
     const harness = await Harness.open(
-      storage,
+      store,
       {
         models: options.models,
         registry,
@@ -324,15 +356,18 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       await harness.close(toChord(ctx)).catch(() => {});
       throw new Error("agent.runtime is closed");
     }
+    storage = store;
     unsubscribe = harness.subscribeCommits((publication) => observe(publication.changes));
     try {
       await prepareOpened(harness, ctx);
     } catch (error) {
       // Never leave a second Harness over the storage for the next attempt to race.
       unsubscribe();
+      storage = undefined;
       await harness.close(toChord(ctx)).catch(() => {});
       throw error;
     }
+    void track(prune(now()));
     return harness;
   };
 
@@ -380,11 +415,18 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     for (const id of waiting) {
       if (!busy.has(id)) void inLine(id, () => reconcileInbox(harness, id)).catch(logFailure("starting a run for queued messages failed"));
     }
+    // A run may have ended with its log never written (a crash between the two): logged and announced now.
+    const admissions = await harness.snapshot(AdmissionsDoc, toChord(ctx));
+    for (const key of Object.keys(admissions?.conversations ?? {})) {
+      const id = durableId(key);
+      if (id !== undefined) void inLine(id, () => reconcile(harness, id)).catch(logFailure("reconciling a conversation's answers failed"));
+    }
   };
 
   /**
-   * Every commit: inputs queued, placed (a queued one's run starts: `agent.started`), settled (handled
-   * in their conversation's line); conversations' runs starting and ending. Must not call the Harness.
+   * Every commit: inputs queued, placed (a queued one's run starts: `agent.started`), settled (logged
+   * and announced in their conversation's line); conversations' runs starting and ending. Must not call
+   * the Harness.
    */
   const observe = (changes: readonly CommitChange[]) => {
     // The runs that start in this commit, first: a run's inputs are placed in the commit that starts it.
@@ -415,9 +457,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       }
     }
     for (const [id, records] of settled) {
-      for (const group of runsOf(records)) {
-        void inLine(id, () => handleSettled(group, false)).catch(logFailure("a run ended but its result could not be read"));
-      }
+      void inLine(id, async () => settle(await harnessOf(events), id, runsOf(records), [])).catch(logFailure("a run ended but it could not be logged"));
     }
     const waiters = commitWaiters;
     commitWaiters = [];
@@ -454,71 +494,89 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     }
   };
 
-  /**
-   * Record a run's end in `agent.submissions`, and retry a few times in the background when that fails:
-   * until it is recorded, a channel reading the answers does not see it. Given up, it stays pending and
-   * the next start settles it from pi-durable (`recover`). Never rejects.
-   */
-  const recordSettled = async (run: RunSettlement, ctx: AppContext, attempt = 0): Promise<void> => {
-    const submissions = options.submissions;
-    if (submissions === undefined) return;
-    try {
-      await submissions.settled(run, ctx);
-    } catch (error) {
-      const wait = SETTLED_RETRY_MS[attempt];
-      const fields = { conversation: run.conversation.key, run: run.requestId, error: error instanceof Error ? error.message : String(error) };
-      if (closed || wait === undefined) {
-        logger.error("a run's end could not be recorded in agent.submissions; the next start settles it from pi-durable", fields);
-        return;
-      }
-      logger.warn("recording a run's end in agent.submissions failed; trying again", { ...fields, inMs: wait });
-      const timer = setTimeout(() => {
-        retries.delete(timer);
-        void recordSettled(run, ctx, attempt + 1);
-      }, wait);
-      retries.add(timer);
-    }
+  /** Prunes the answers log past its retention; a failure only delays it. */
+  const prune = async (at: number): Promise<void> => {
+    prunedAt = at;
+    await log.prune(at - keepMs).catch((error: unknown) => logger.warn("pruning the answers log failed", { error: String(error) }));
   };
 
   /**
-   * Handle a run's settled inputs (`runsOf`: the inputs a run took, or one input withdrawn while
-   * queued), in their conversation's line: record them, then announce them as one result (once the
-   * announcements of their admissions are out) unless withdrawn before a run took them; then, if the run
-   * ended unanswered, start a run for what it left queued. `unrecorded`: only if `agent.submissions` does
-   * not hold the first settled (a settlement found after a restart, or on a redelivery).
+   * Log and announce runs of one conversation (`groups`: each a run's settled inputs, oldest first, in
+   * the order to log them), in its line. The one path for a run's end, live or reconciled:
+   * 1. only runs whose requests are still in `AdmissionsDoc` count (not logged yet; another step of
+   *    the line may have logged them);
+   * 2. they are appended to the answers log, idempotently by run key, in one transaction;
+   * 3. their requests (and `gone`, requests pi-durable never held) leave `AdmissionsDoc`, in one commit;
+   * 4. each is announced, once the announcements of its admission are out (not inputs an abort withdrew
+   *    while queued), and a run that ended unanswered gets what it left queued started.
+   * A crash between 2 and 3 appends the same keys again: nothing changes.
    */
-  const handleSettled = async (records: readonly SettledInput[], unrecorded: boolean): Promise<void> => {
-    const [first] = records;
+  const settle = async (harness: Harness, id: ConversationId, groups: readonly SettledInput[][], gone: readonly string[]): Promise<void> => {
     try {
-      if (first === undefined) return;
-      const harness = await harnessOf(events);
-      const ref = await refOf(first.conversationId, harness);
-      if (ref === undefined || first.requestId === undefined) return;
-      if (unrecorded && options.submissions !== undefined) {
-        if ((await options.submissions.get(ref, first.requestId, events))?.kind === "settled") return;
+      const chord = toChord(events);
+      const unlogged = (await harness.snapshot(AdmissionsDoc, chord))?.conversations[String(id)] ?? {};
+      const pending = groups.filter((group) => group.some((record) => record.requestId !== undefined && Object.hasOwn(unlogged, record.requestId)));
+      if (pending.length === 0 && gone.length === 0) return;
+      const ref = await refOf(id, harness);
+      const conversation = await harness.conversation(id, chord);
+      if (ref === undefined || conversation === undefined) return;
+      const results: AgentResult[] = [];
+      for (const group of pending) results.push(await toResult(conversation, ref, group, chord));
+      const at = now();
+      await log.append(
+        pending.map((group, index) => ({ key: runKey(group), run: settlementOf(results[index] as AgentResult) })),
+        at,
+      );
+      await harness.commit(async (tx) => {
+        const admissions = await tx.doc(AdmissionsDoc);
+        const mine = admissions.conversations[String(id)];
+        if (mine === undefined) return;
+        for (const requestId of [...pending.flat().map((record) => record.requestId ?? ""), ...gone]) delete mine[requestId];
+        if (Object.keys(mine).length === 0) delete admissions.conversations[String(id)];
+      }, chord);
+      if (at - prunedAt >= PRUNE_EVERY_MS) void track(prune(at));
+      for (const [index, group] of pending.entries()) {
+        const announcements = group.flatMap((record) => {
+          const key = keyOf(record.conversationId, record.requestId ?? "");
+          const announcement = runs.get(key);
+          runs.delete(key);
+          return announcement === undefined ? [] : [announcement];
+        });
+        for (const record of group) leadOf.delete(record.id);
+        if (announced(group)) countAnnouncing(id, announce(results[index] as AgentResult, announcements[0]?.ctx ?? events, announcements));
       }
-      const conversation = await harness.conversation(first.conversationId, toChord(events));
-      if (conversation === undefined) return;
-      const result = await toResult(conversation, ref, records, toChord(events));
-      const announcements = records.flatMap((record) => {
-        const key = keyOf(record.conversationId, record.requestId ?? "");
-        const announcement = runs.get(key);
-        runs.delete(key);
-        return announcement === undefined ? [] : [announcement];
-      });
-      for (const record of records) leadOf.delete(record.id);
-      const ctx = announcements[0]?.ctx ?? events;
-      await recordSettled(settlementOf(result), ctx);
-      // Withdrawn while queued: recorded aborted, never announced: no run took it.
-      if (first.entry !== undefined) countAnnouncing(first.conversationId, announce(result, ctx, announcements));
-      if (first.status === "unanswered" && first.entry !== undefined) await reconcileInbox(harness, first.conversationId);
+      if (pending.some((group) => group[0]?.status === "unanswered" && group[0].entry !== undefined)) await reconcileInbox(harness, id);
     } finally {
-      for (const record of records) {
+      for (const record of groups.flat()) {
         const waiters = handled.get(record.id);
         handled.delete(record.id);
         for (const wake of waiters ?? []) wake();
       }
     }
+  };
+
+  /**
+   * Log and announce, at once, every run of the conversation that pi-durable settled and that is not
+   * logged yet: the requests in `AdmissionsDoc` it holds settled, grouped by run (`storedRunsOf`), so a
+   * run is never split. The same path as a live settlement (`settle`); after a crash, on a redelivery,
+   * at start and in `recover`. In the conversation's line.
+   */
+  const reconcile = async (harness: Harness, id: ConversationId): Promise<void> => {
+    const chord = toChord(events);
+    const unlogged = (await harness.snapshot(AdmissionsDoc, chord))?.conversations[String(id)];
+    if (unlogged === undefined || storage === undefined) return;
+    const stored = storage;
+    const settled: SettledInput[] = [];
+    const gone: string[] = [];
+    for (const requestId of Object.keys(unlogged)) {
+      const record = await stored.submissionByRequest(id, requestId, chord);
+      // Never held: its submit failed after the admission was written (`dispatch` runs in this line).
+      if (record === undefined) gone.push(requestId);
+      else if (isSettledInput(record)) settled.push(record);
+    }
+    const conversation = await harness.conversation(id, chord);
+    if (conversation === undefined) return;
+    await settle(harness, id, await storedRunsOf(conversation, stored, settled, chord), gone);
   };
 
   /** Announce a run's result in `ctx`, once the announcements before it (admissions, `agent.started`) are out. */
@@ -568,10 +626,9 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   };
 
   const conversationIdOf = (ref: Pick<ConversationRef, "conversationId" | "key">): ConversationId => {
-    if (!isConversationId(ref.conversationId)) {
-      throw new Unopenable("conversation_missing", `conversation ${ref.key}: "${ref.conversationId}" is not a pi-durable conversation id`);
-    }
-    return Number(ref.conversationId) as ConversationId;
+    const id = durableId(ref.conversationId);
+    if (id === undefined) throw new Unopenable("conversation_missing", `conversation ${ref.key}: "${ref.conversationId}" is not a pi-durable conversation id`);
+    return id;
   };
 
   const conversationOf = async (harness: Harness, ref: ConversationRef, ctx: AppContext): Promise<Conversation> => {
@@ -626,7 +683,115 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       handled.set(id, waiters);
     });
 
+  /**
+   * `abandon`: settles those of `requestIds` pi-durable still queues unanswered, in one commit (a run
+   * that took one keeps it), and waits until that settlement is logged and announced (`settle`, from
+   * the commit). The settlement, or `undefined` when none was queued.
+   */
+  const abandonQueued = async (conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<RunSettlement | undefined> => {
+    const id = durableId(conversation.conversationId);
+    if (id === undefined) return undefined;
+    const harness = await harnessOf(ctx);
+    const step = await inLine(id, async () => {
+      if ((await harness.conversation(id, toChord(ctx))) === undefined) return undefined;
+      const outcome = await harness.commit(async (tx) => {
+        const taken: string[] = [];
+        const withdrawn: SubmissionRecord[] = [];
+        for (const requestId of new Set(requestIds)) {
+          const record = await tx.submissionByRequest(id, requestId);
+          if (record?.type !== "input") continue;
+          if (record.status === "placed") taken.push(requestId);
+          else if (record.status === "queued") withdrawn.push(record);
+        }
+        withdrawn.sort((a, b) => a.id - b.id);
+        const inbox = withdrawn.length === 0 ? undefined : await tx.doc(InboxDoc, id);
+        for (const record of withdrawn) {
+          tx.settleSubmission(record.id, { status: "unanswered", reason: ABANDONED, detail: reason });
+          const index = inbox?.items.findIndex((item) => item.id === record.id) ?? -1;
+          if (index >= 0) inbox?.items.splice(index, 1);
+        }
+        return { taken, withdrawn };
+      }, toChord(ctx));
+      if (outcome.taken.length > 0) {
+        ctx.logger.warn("pending requests a run took are not abandoned: the run settles them", { conversation: conversation.key, requests: outcome.taken, reason });
+      }
+      const [first] = outcome.withdrawn;
+      // Registered in the step: the settlement's own step comes after it in the line.
+      return first === undefined ? undefined : { withdrawn: outcome.withdrawn.map((record) => record.requestId ?? ""), logged: whenHandled(first.id) };
+    });
+    if (step === undefined) return undefined;
+    await untilAborted(step.logged, ctx.abortSignal, closedSignal);
+    const [first] = step.withdrawn;
+    return { conversation, requestId: first as string, requestIds: step.withdrawn, kind: "failed", error: { code: ABANDONED, message: reason } };
+  };
+
+  const submissions: AgentSubmissions = {
+    // `dispatch` admitted it, in pi-durable and in `AdmissionsDoc`.
+    async admitted() {},
+    async settled(run, ctx) {
+      const id = durableId(run.conversation.conversationId);
+      if (id === undefined) return;
+      const harness = await harnessOf(ctx);
+      await inLine(id, () => reconcile(harness, id));
+    },
+    abandoned: (conversation, requestIds, reason, ctx) => abandonQueued(conversation, requestIds, reason, ctx),
+    async pending(ctx) {
+      const { harness, storage: stored } = await opened(ctx);
+      const chord = toChord(ctx);
+      const live: SubmissionRecord[] = [];
+      for (const status of ["queued", "placed"] as const) {
+        let cursor: Parameters<Storage["scanSubmissions"]>[2];
+        do {
+          const page = await stored.scanSubmissions({ status }, SCAN, cursor, chord);
+          live.push(...page.items);
+          cursor = page.next;
+        } while (cursor !== undefined);
+      }
+      const admissions = (await harness.snapshot(AdmissionsDoc, chord))?.conversations ?? {};
+      const byConversation = new Map<ConversationId, PendingConversation>();
+      // By submission id, which is admission order: conversations come by their oldest pending request.
+      for (const record of live.sort((a, b) => a.id - b.id)) {
+        if (record.type !== "input" || record.requestId === undefined) continue;
+        const ref = await refOf(record.conversationId, harness);
+        if (ref === undefined) continue;
+        // An admission time is written before the submit; none only if `AdmissionsDoc` lost it: now.
+        const mine = admissions[String(record.conversationId)];
+        const admittedAt = mine !== undefined && Object.hasOwn(mine, record.requestId) ? (mine[record.requestId] as number) : now();
+        const entry = byConversation.get(record.conversationId) ?? { conversation: ref, requestIds: [], oldestAdmittedAt: admittedAt };
+        entry.requestIds.push(record.requestId);
+        entry.oldestAdmittedAt = Math.min(entry.oldestAdmittedAt, admittedAt);
+        byConversation.set(record.conversationId, entry);
+      }
+      return [...byConversation.values()];
+    },
+    async get(conversation, requestId, ctx) {
+      const id = durableId(conversation.conversationId);
+      if (id === undefined) return undefined;
+      const { harness, storage: stored } = await opened(ctx);
+      const chord = toChord(ctx);
+      const record = await stored.submissionByRequest(id, requestId, chord);
+      const ref = record?.type === "input" ? await refOf(id, harness) : undefined;
+      if (record === undefined || ref === undefined) return undefined;
+      if (!isSettledInput(record)) return { kind: "pending", conversation: ref, requestId };
+      // Its run as logged; past the log's retention (or not logged yet), its own settlement in pi-durable.
+      await ready();
+      const logged = await log.find(String(id), requestId);
+      if (logged !== undefined) return { kind: "settled", conversation: ref, requestId, run: logged };
+      const handle = await harness.conversation(id, chord);
+      if (handle === undefined) return undefined;
+      return { kind: "settled", conversation: ref, requestId, run: settlementOf(await toResult(handle, ref, [record], chord)) };
+    },
+    answers: {
+      async read(after, limit) {
+        await ready();
+        return log.read(after, limit);
+      },
+    },
+  };
+
   const runtime: DurableRuntime = {
+    submissions,
+
     async createConversation(ctx) {
       const harness = await harnessOf(ctx);
       const chord = toChord(ctx);
@@ -649,19 +814,23 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       try {
         admission = await inLine(id, async () => {
           const conversation = await conversationOf(harness, ref, ctx);
+          // One commit: the duplicate check, the agent `prepare` gives, and the admission's time.
           const existing = await conversation.commit(async (tx) => {
             const found = await tx.submissionByRequest(id, requestId);
             if (found !== undefined) return found;
             const stored = copyJson(await tx.doc(AgentStateDoc, id)) as { [key: string]: JsonValue };
             await config.apply(tx, id, ref, agent, effectiveState(agent, stored), logger);
+            const admissions = await tx.doc(AdmissionsDoc);
+            if (admissions.conversations[String(id)] === undefined) admissions.conversations[String(id)] = {};
+            (admissions.conversations[String(id)] as { [requestId: string]: number })[requestId] = now();
             return undefined;
           }, toChord(ctx));
           refs.set(id, ref);
           if (existing !== undefined) {
-            // A redelivery. Settled: its end may never have been recorded (two crashes); still live: make
-            // sure something drives it.
+            // A redelivery. Settled: its run (and every run of the conversation) may never have been
+            // logged (a crash); still live: make sure something drives it.
             if (isSettledInput(existing)) {
-              if (options.submissions !== undefined) await handleSettled([existing], true);
+              await reconcile(harness, id);
             } else {
               harness.resume();
               await reconcileInbox(harness, id);
@@ -687,22 +856,12 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       }
       // The run may be going already; its end is announced only after `announced()`, so
       // `agent.dispatched`, `agent.started` and its result arrive in that order.
-      let unrecorded: unknown;
       try {
-        // Recorded before `dispatch` resolves, so a channel acknowledges its platform only once
-        // pi-durable and `agent.submissions` both hold the message. A failure fails the dispatch (the
-        // platform delivers it again: a duplicate); the message is in pi-durable, and its run goes on.
-        if (admission.kind !== "duplicate" && options.submissions !== undefined) {
-          await options.submissions.admitted(ref, requestId, ctx).catch((error: unknown) => {
-            unrecorded = error;
-          });
-        }
         await ctx.emit("agent.dispatched", { conversation: ref, admission });
         if (admission.kind === "started") await emit(runContext(ctx), "agent.started", { conversation: ref, requestId, resumed: false });
       } finally {
         announced();
       }
-      if (unrecorded !== undefined) throw unrecorded;
       return admission;
     },
 
@@ -724,45 +883,22 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     },
 
     async recover(conversation: ConversationRef, requestIds: readonly string[], ctx: AppContext): Promise<void> {
-      if (!isConversationId(conversation.conversationId)) {
-        // Admitted before the move to pi-durable (a Pi 0.99 session id): nothing can run it, and its chat
-        // starts a new conversation (`conversations.registry`). Settled aborted, which no channel tells
-        // the user about, rather than abandoned: an upgrade is not the user's error.
-        const [first] = requestIds;
-        if (first === undefined) return;
-        ctx.logger.info("messages admitted before the move to pi-durable are dropped; their chat starts a new conversation", {
-          conversation: conversation.key,
-          requests: requestIds,
-        });
-        await recordSettled({ conversation, requestId: first, requestIds: [...requestIds], kind: "aborted" }, ctx);
-        return;
-      }
       let waits: Promise<void>[];
       try {
         definitionOf(conversation);
-        const harness = await harnessOf(ctx);
+        const { harness, storage: stored } = await opened(ctx);
         const id = conversationIdOf(conversation);
         waits = await inLine(id, async () => {
-          const handle = await conversationOf(harness, conversation, ctx);
+          await conversationOf(harness, conversation, ctx);
           await reconfigure(harness, id, ctx, conversation);
           harness.resume();
           await reconcileInbox(harness, id);
+          await reconcile(harness, id);
           const pending: Promise<void>[] = [];
-          const stuck: string[] = [];
-          const settled: SettledInput[] = [];
           for (const requestId of requestIds) {
-            const record = await handle.commit((tx) => tx.submissionByRequest(id, requestId), toChord(ctx));
-            if (record === undefined) stuck.push(requestId);
-            else if (isSettledInput(record)) settled.push(record);
+            const record = await stored.submissionByRequest(id, requestId, toChord(ctx));
             // Live: its settlement is handled in this line, after this step.
-            else pending.push(whenHandled(record.id));
-          }
-          for (const run of await storedRunsOf(handle, settled, toChord(ctx))) await handleSettled(run, true);
-          if (stuck.length > 0) {
-            ctx.logger.warn("pending requests are unknown to pi-durable: lost before it held them; they stay pending", {
-              conversation: conversation.key,
-              requests: stuck,
-            });
+            if (record !== undefined && !isSettledInput(record)) pending.push(whenHandled(record.id));
           }
           return pending;
         });
@@ -775,25 +911,9 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     },
 
     async abandon(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<void> {
-      const submissions = options.submissions;
-      if (submissions === undefined) return;
-      const harness = await harnessOf(ctx);
-      const id = Number(conversation.conversationId) as ConversationId;
-      const step = async () => {
-        const handle = Number.isSafeInteger(id) && id > 0 ? await harness.conversation(id, toChord(ctx)) : undefined;
-        for (const requestId of handle === undefined ? [] : requestIds) {
-          const record = await handle?.commit((tx) => tx.submissionByRequest(id, requestId), toChord(ctx));
-          if (record?.status === "queued" || record?.status === "placed") {
-            ctx.logger.warn("pending requests are not abandoned: pi-durable still holds one of them", { conversation: conversation.key, requests: requestIds, reason });
-            return undefined;
-          }
-        }
-        return submissions.abandoned(conversation, requestIds, reason, ctx);
-      };
-      const run = Number.isSafeInteger(id) && id > 0 ? await inLine(id, step) : await step();
+      const run = await abandonQueued(conversation, requestIds, reason, ctx);
       if (run === undefined) return;
       ctx.logger.warn("pending requests were abandoned unanswered; their channel tells the user", { conversation: conversation.key, requests: run.requestIds, reason });
-      await emit(runContext(ctx), "agent.failed", { ...run, kind: "failed", messages: [] });
     },
 
     holds(conversation: Pick<ConversationRef, "conversationId">): boolean {
@@ -841,6 +961,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         const harness = await open.catch(() => undefined);
         unsubscribe?.();
         unsubscribe = undefined;
+        storage = undefined;
         // Runs waiting for a time stay pending in the storage; the next open continues them.
         if (harness !== undefined) await harness.close(toChord(ctx));
         busy.clear();
@@ -859,8 +980,6 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       if (closed) return;
       closed = true;
       resolveClosed();
-      for (const timer of retries) clearTimeout(timer);
-      retries.clear();
       for (const waiters of handled.values()) for (const wake of waiters) wake();
       handled.clear();
       await suspending;
@@ -872,47 +991,11 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         if (harness !== undefined) await untilAborted(harness.close(toChord(ctx)), ctx.abortSignal);
       }
       await untilAborted(Promise.allSettled([...inflight]), ctx.abortSignal);
+      storage = undefined;
       runs.clear();
     },
   };
   return runtime;
-}
-
-/**
- * The inputs one commit settled in a conversation, by run: the inputs a run took settle together in
- * the commit that ends it (one run per conversation and commit), and each input an abort withdrew while
- * queued (no entry) is one of its own. Oldest first.
- */
-function runsOf(records: readonly SettledInput[]): SettledInput[][] {
-  const sorted = [...records].sort((a, b) => a.id - b.id);
-  const placed = sorted.filter((record) => record.entry !== undefined);
-  const withdrawn = sorted.filter((record) => record.entry === undefined).map((record) => [record]);
-  return placed.length === 0 ? withdrawn : [placed, ...withdrawn];
-}
-
-/**
- * Settled inputs found later (`recover`), by run: answered ones by their answer; unanswered ones whose
- * `pi.user` entries follow each other with nothing else between (placed together by one boundary) and
- * that ended the same way; each withdrawn one alone.
- */
-async function storedRunsOf(conversation: Conversation, records: readonly SettledInput[], ctx: ChordContext): Promise<SettledInput[][]> {
-  const runs: SettledInput[][] = [];
-  const sorted = [...records].sort((a, b) => (a.entry ?? 0) - (b.entry ?? 0) || a.id - b.id);
-  for (const record of sorted) {
-    const previous = record.entry === undefined ? undefined : [...runs].reverse().find((run) => run[0]?.entry !== undefined);
-    const last = previous?.at(-1);
-    if (previous !== undefined && last !== undefined && (await sameRun(conversation, last, record, ctx))) previous.push(record);
-    else runs.push([record]);
-  }
-  return runs.sort((a, b) => (a[0] as SettledInput).id - (b[0] as SettledInput).id);
-}
-
-async function sameRun(conversation: Conversation, earlier: SettledInput, later: SettledInput, ctx: ChordContext): Promise<boolean> {
-  if (earlier.status !== later.status || earlier.entry === undefined || later.entry === undefined) return false;
-  if (earlier.status === "done" && later.status === "done") return earlier.answer === later.answer;
-  if (earlier.reason !== later.reason || earlier.detail !== later.detail) return false;
-  const between = await conversation.entries({ minEntryId: earlier.entry, maxEntryId: later.entry }, 100, undefined, ctx);
-  return between.next === undefined && between.items.every((entry) => entry.kind === "pi.user");
 }
 
 type Checkpoint = { phase?: string; until?: number; pollAt?: number } | undefined;
@@ -931,12 +1014,6 @@ function timed(task: TaskInspection, at: number): boolean {
 /** Live work this process drives now: a task running or about to, unless it only sleeps (`timed`). */
 function driven(task: TaskInspection, at: number): boolean {
   return (task.state.kind === "running" || task.state.kind === "ready") && !timed(task, at);
-}
-
-/** Whether `id` is a pi-durable conversation id (a positive integer, as a string), not a Pi 0.99 session id. */
-function isConversationId(id: string): boolean {
-  const number = Number(id);
-  return Number.isSafeInteger(number) && number > 0 && String(number) === id;
 }
 
 /** Resolves when `work` settles, `signal` aborts, or `stop` resolves, whichever comes first. */

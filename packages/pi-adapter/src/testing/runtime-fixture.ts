@@ -20,7 +20,6 @@ import type { AgentConversations, AgentDefinition, ConversationRef, SqlDatabase 
 import type { AgentRuntimeFixture } from "@pikit/contracts/testing";
 import { modelsFrom } from "../models.ts";
 import { createDurableRuntime } from "../runtime.ts";
-import { openDurableStorage } from "../sql.ts";
 import { holdTool, scriptedAgent, scriptedProvider, type ScriptedProviderOptions } from "./script.ts";
 
 /** Where a runtime fixture keeps what outlives a worker. */
@@ -166,7 +165,7 @@ async function overRecords<T>(
   const { database, close } = await open();
   const ctx = (await defineApp({ components: [], logger: silentLogger }).create()).context();
   const opened = createDurableRuntime({
-    storage: () => openDurableStorage(database),
+    db: database,
     agent: (name) => (name === agent.name ? agent : undefined),
     models: modelsFrom([scriptedProvider()]),
     events: ctx.derive(() => BACKGROUND_CONTEXT),

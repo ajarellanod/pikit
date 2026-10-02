@@ -8,7 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { type App, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import { type AgentTool, defineAgent, type KeyValueStorage, type SqlDatabase } from "@pikit/contracts";
 import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
-import { createDurableRuntime, modelsFrom, openDurableStorage } from "@pikit/pi-adapter";
+import { createDurableRuntime, modelsFrom } from "@pikit/pi-adapter";
 import { BACKGROUND_CONTEXT, withAbortSignal } from "@pikit/pi-adapter/execution";
 import { callTool } from "@pikit/pi-adapter/execution/testing";
 import { createFakeMcpServer, type FakeMcpServer, type FakeMcpTool } from "@pikit/pi-adapter/mcp/testing";
@@ -531,7 +531,7 @@ test("in a real run, the model sees what the server described at start, its call
 
   const requests: ModelRequest[] = [];
   const runtime = createDurableRuntime({
-    storage: () => openDurableStorage(sql),
+    db: sql,
     agent: (name) => agents.find((agent) => agent.name === name),
     tool: (name) => tools.get(name),
     models: modelsFrom([scriptedProvider({ onRequest: (request) => void requests.push(structuredClone(request)) })]),
