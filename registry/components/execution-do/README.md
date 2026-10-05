@@ -38,7 +38,9 @@ context, and refuses to start without it, or on an object without SQLite.
   pull request through GitHub's API: `git pr pikit/self/<topic> <title> [-b <body>]`).
 - **pi-durable's output rules.** A command's output streams to pi-durable's `bash` tool, which keeps
   what it shows within its limits; past them, the whole output is also written to a file under `/tmp`
-  (`spillPath`).
+  (`spillPath`). A host's argv (`exec(["git", "status"])`) reaches the program unparsed.
+- **No file watching.** `watch` answers `not_supported`: only the object changes its files. pi-durable's
+  `ExecutionEnv` suite passes on everything else, in workerd too.
 
 ## The fences
 
