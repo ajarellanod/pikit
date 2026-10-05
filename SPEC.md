@@ -230,7 +230,9 @@ What it requires:
   workspace and execution providers for Cloudflare, the dashboard (§5), and `deployment-cloudflare`.
 - **The actor model holds there.** One conversation is owned by one Durable Object (C1). An
   evicted object loses nothing: the next request or alarm resumes the run (`resume()`), per K6.
-- **The budgets hold.** Bundle ≤ 10 MB compressed, cold start ≤ 1 s, ≤ 128 MB per isolate,
+- **The budgets hold.** Bundle ≤ 64 MiB uncompressed (wrangler's `Total Upload`: Cloudflare's limit on
+  every plan, with no compressed limit since September 2026, developers.cloudflare.com/workers/platform/limits),
+  cold start ≤ 1 s, ≤ 128 MB per isolate,
   ≤ 6 concurrent outbound connections, measured, not estimated.
 - **The proof runs.** The required set deploys and answers; a run killed by eviction mid-drive
   completes after `resume()`; pi-durable's storage on the object's SQL passes pi-durable's storage
