@@ -1,6 +1,7 @@
 # The control of ROADMAP S12 and S15: every pull request and every push to main runs the tests,
-# the typecheck and the registry's checks. Slow and live suites are opt-in (see nightly.yml and
-# installer/README.md, samples/http/README.md): a plain `bun test` never reaches a paid API.
+# the typecheck and the registry's checks, and the two end-to-end suites that need neither Docker nor a
+# credential. The other slow suites run nightly (nightly.yml); the live ones are manual (installer/README.md,
+# samples/http/README.md): nothing here reaches a paid API.
 name: CI
 
 on:
@@ -31,6 +32,27 @@ jobs:
       - run: bun run typecheck
       - run: bun run registry validate
 
+  # `pikit new` / `configure` / `dev` as a user runs them, for the http and Telegram presets. They need
+  # the network (`bun install`), not Docker (`pikit up` runs only with PIKIT_E2E_DOCKER=1, nightly) and
+  # not a secret: the model is provider-faux or a dummy key, Telegram is the channel's local fake Bot API.
+  e2e:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      PIKIT_E2E: "1"
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - run: bun install --frozen-lockfile
+      - name: pikit new / configure / doctor / add / remove / dev (http)
+        if: ${{ !cancelled() }}
+        run: bun test packages/cli/src/e2e.test.ts
+      - name: Telegram preset against the fake Bot API
+        if: ${{ !cancelled() }}
+        run: bun test packages/cli/src/e2e-telegram.test.ts
+
   # The Cloudflare lane (tests/workerd/README.md): the Cloudflare components' suites in workerd, on a
   # real SQLite-backed Durable Object. Local and offline: no account, no secret.
   workerd:
@@ -49,3 +71,8 @@ jobs:
       - run: bun run test:workerd
         env:
           WRANGLER_SEND_METRICS: "false"
+      # The telegram-cloudflare preset's Worker, bundled with `wrangler deploy --dry-run`: fails over
+      # Cloudflare's size limit or the kit's gzip budget (the limits are named in the script).
+      - name: Bundle size (telegram-cloudflare)
+        if: ${{ !cancelled() }}
+        run: bun scripts/bundle-size.ts
