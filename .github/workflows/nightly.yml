@@ -1,7 +1,9 @@
 # The slow end-to-end suites, as a new user meets pikit: the installer into a fresh HOME, and
 # `pikit new` / `configure` / `dev` / `up` against generated projects. They need the network (npm,
 # Docker images) and Docker, not secrets: every model key is a dummy and Telegram is the channel's
-# local fake Bot API. The wizard suite drives `pikit new` through Bun's own pseudo-terminal
+# local fake Bot API (the http and Telegram suites also run, without Docker, on every pull request:
+# ci.yml). The Cloudflare suites run the projects in workerd (`wrangler dev`, on Node) with the
+# components' fake Telegram and OpenRouter; nothing reaches a Cloudflare account. The wizard suite drives `pikit new` through Bun's own pseudo-terminal
 # (`Bun.spawn({ terminal })`), so it needs no TTY from the runner.
 #
 # Manual, never here: the live Anthropic test (PIKIT_LIVE=1, samples/http/README.md), because it
@@ -36,6 +38,10 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.2
+      # wrangler (the Cloudflare suites) runs on Node >= 22.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
       - run: bun install --frozen-lockfile
       - name: Docker is available (pikit up needs it)
         run: docker version && docker compose version
@@ -52,3 +58,13 @@ jobs:
       - name: Telegram preset against the fake Bot API
         if: ${{ !cancelled() }}
         run: bun test packages/cli/src/e2e-telegram.test.ts
+      - name: Cloudflare minimal preset, then a Telegram agent added to it (workerd)
+        if: ${{ !cancelled() }}
+        run: bun test packages/cli/src/e2e-cloudflare.test.ts
+        env:
+          WRANGLER_SEND_METRICS: "false"
+      - name: telegram-cloudflare preset against the fake Bot API and OpenRouter (workerd)
+        if: ${{ !cancelled() }}
+        run: bun test packages/cli/src/e2e-telegram-cloudflare.test.ts
+        env:
+          WRANGLER_SEND_METRICS: "false"

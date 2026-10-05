@@ -437,14 +437,14 @@ test("doctor fails when an agent names a tool no installed component provides", 
   expect(broken.err).toContain('agent "soporte" names the tool "shell", which no installed component provides (agent.tool)');
 });
 
-test("doctor fails when the project's own code imports Pi: only @pikit/pi-adapter does (S1)", async () => {
+test("doctor fails when the project's own code imports Pi: only @pikit/pi-adapter does", async () => {
   const dir = agentProject(["bash"]);
   // Built, so this file does not import Pi itself in the boundaries' eyes.
   const pi = '"@earendil-works/pi-ai"';
   writeFileSync(join(dir, "src/extensions/pi.ts"), `import type { Models } from ${pi};\n\nexport type M = Models;\n`);
   const broken = await runCli(["doctor"], dir);
   expect(broken.code).toBe(1);
-  expect(broken.err).toContain('src/extensions/pi.ts imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi (S1)');
+  expect(broken.err).toContain('src/extensions/pi.ts imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi');
 });
 
 test("remove refuses to take a tool an agent names; with --force it removes it, and doctor reports the name", async () => {

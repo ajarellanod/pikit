@@ -4,11 +4,13 @@
  * not send the message again), the process died, and without this the user would wait until they
  * write again.
  *
- * Each conversation is opened as a new message would open it: a run the dead process left open is
- * resumed, a message waiting in the inbox gets a run, and a run that ended without its end logged is
- * logged and announced (`recover`, in the adapter). A few at a time, in the background: start does not
- * wait for them, and stop aborts what has not started. With `wakeups`, the handler that drives the
- * runs calls this at each run instead, skipping what its App drives already (`index.ts`).
+ * The runs themselves do not wait for this: opening pi-durable (`submissions.pending` opens it) resumes
+ * every run the dead process left open and gives a run to every message waiting in an inbox, all at
+ * once. What this adds, per conversation, is `recover` (in the adapter): a run that ended without its
+ * end logged is logged and announced, a conversation whose agent is gone or that is missing has its
+ * messages abandoned, and the call waits until the listed messages are settled. In the background:
+ * start does not wait for it, and stop aborts what has not started. With `wakeups`, the handler that
+ * drives the runs calls this at each run instead, skipping what its App drives already (`index.ts`).
  *
  * A message nothing can answer is abandoned (`runtime.abandon`): its channel tells the user to send it
  * again, and it stops being retried at every start. At once when its agent is gone (`recover` does it);
@@ -21,7 +23,10 @@ import type { AppContext } from "@pikit/core";
 import type { AgentSubmissions, ConversationRef } from "@pikit/contracts";
 import type { DurableRuntime } from "@pikit/pi-adapter";
 
-/** Conversations resumed at once: each may run the model, and a restart should not flood the provider. */
+/**
+ * `recover` calls in flight at once; each holds its place until its conversation's listed messages are
+ * settled. It does not bound the runs: pi-durable resumed them all when it opened, before the first call.
+ */
 export const RESUME_AT_ONCE = 4;
 
 export interface ResumeOptions {

@@ -101,12 +101,13 @@ export async function handleMessage(message: TelegramMessage, deps: InboxDeps, c
 
 /** Sends the channel's own short reply once; a failure is logged, not thrown. */
 export async function reply(bot: Bot, chatId: number, text: string, ctx: AppContext): Promise<void> {
-  const signal = within(TELEGRAM_TIMEOUT_MS, ctx.abortSignal);
   const conversationKey = conversationKeyOf(bot.account.instance, chatId);
   try {
-    for (const [index, piece] of bot.transport.split(text).entries()) {
-      await bot.transport.send({ key: `reply:${chatId}:${index}`, conversationKey, text: piece, possibleDuplicate: false }, signal);
-    }
+    await within(TELEGRAM_TIMEOUT_MS, ctx.abortSignal, async (signal) => {
+      for (const [index, piece] of bot.transport.split(text).entries()) {
+        await bot.transport.send({ key: `reply:${chatId}:${index}`, conversationKey, text: piece, possibleDuplicate: false }, signal);
+      }
+    });
   } catch (error) {
     ctx.logger.error("channel-telegram-webhook: a reply could not be sent", { chat: chatId, error: String(error) });
   }

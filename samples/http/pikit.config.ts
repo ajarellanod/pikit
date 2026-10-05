@@ -3,8 +3,8 @@
  * `test/scenario-1.test.ts`).
  *
  * A fixture of this repository, not a generated project. It imports the components straight from
- * `registry/` because there is no CLI yet; `pikit add` will copy them to `src/pikit/` and write
- * these same imports.
+ * `registry/`, so its tests run the registry's own code; in a project, `pikit add` copies them to
+ * `src/pikit/` and writes the same imports from there.
  */
 
 import { fileURLToPath } from "node:url";

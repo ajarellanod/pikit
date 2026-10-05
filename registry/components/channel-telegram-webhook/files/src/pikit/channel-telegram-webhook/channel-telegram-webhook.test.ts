@@ -39,6 +39,7 @@ import {
 } from "@pikit/contracts/testing";
 import { accountsOf } from "./account.ts";
 import { registerInbox } from "./actor-inbox.ts";
+import { within } from "./bot.ts";
 import { LOGIN_COOL_DOWN_MS } from "./login.ts";
 import { afterDeploy } from "./deploy.ts";
 import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.test-support.ts";
@@ -1054,4 +1055,19 @@ test("without a password, /login logs in nothing: with users listed, the Worker 
 
   expect(s.telegram.sent).toEqual([{ chatId: STRANGER.id, text: privateBot(STRANGER.id), html: false }]);
   expect(s.runtime.dispatched).toEqual([]);
+});
+
+test("a request to Telegram times out with a timer cleared once it settles, so no timer holds the object afterwards", async () => {
+  let given: AbortSignal | undefined;
+  expect(await within(20, undefined, async (signal) => ((given = signal), "sent"))).toBe("sent");
+  await Bun.sleep(40);
+  expect(given?.aborted).toBe(false);
+
+  const slow = within(20, undefined, (signal) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason))));
+  expect(await slow.catch((error: unknown) => (error as Error).name)).toBe("TimeoutError");
+
+  const stop = new AbortController();
+  const stopped = within(60_000, stop.signal, (signal) => new Promise((_, reject) => signal.addEventListener("abort", () => reject(signal.reason))));
+  stop.abort(new Error("stopping"));
+  expect(await stopped.catch((error: unknown) => (error as Error).message)).toBe("stopping");
 });

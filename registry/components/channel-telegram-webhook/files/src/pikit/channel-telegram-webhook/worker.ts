@@ -120,7 +120,7 @@ export const worker = defineComponent({
 
     /** Tells a chat something, once, best effort: the update is acknowledged whatever happens. */
     const tell = async (endpoint: Endpoint, chatId: number, text: string, ctx: AppContext): Promise<void> => {
-      await endpoint.api.sendMessage(chatId, text, {}, within(TELEGRAM_TIMEOUT_MS, ctx.abortSignal)).catch((error: unknown) =>
+      await within(TELEGRAM_TIMEOUT_MS, ctx.abortSignal, (signal) => endpoint.api.sendMessage(chatId, text, {}, signal)).catch((error: unknown) =>
         ctx.logger.warn("channel-telegram-webhook: a reply could not be sent", { chat: chatId, error: String(error) }),
       );
     };

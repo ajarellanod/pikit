@@ -66,5 +66,5 @@ credential and reaches no network: a model answers through `apiBase` from
 answers `answer: <your message>` and records what it was asked. Only tests import it. pikit's
 end-to-end test of a Telegram bot on Cloudflare uses it as the bot's model.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

@@ -3,7 +3,7 @@
  *
  * pikit does not reimplement it (SPEC P1). This component adds only what the kit owns:
  * - its replay, `"unsafe"`: a command can do anything, so after a crash the call is not run again: the model gets an `interrupted` result with the output so far, and decides whether to run it again (`codingTool` in @pikit/pi-adapter/tools);
- * - what it needs installed: `execution.shell`, a real shell, so an environment with `execution` only cannot install it, and `pikit doctor` says so. A `workspace` without a shell fails every call: do not install one with `bash`, and `workspace` if one is.
+ * - what it needs installed: `execution.shell`, a real shell, so a project whose environment provides `execution` only cannot install it, and `pikit doctor` says so. The runtime gives a call the conversation's `workspace` when one is installed, and nothing checks that it has a shell: a `workspace` without one fails every `bash` call. Install `bash` only with a `workspace` that has a shell (`workspace-local` has).
  *
  * The environment a call works on is not the tool's business: the runtime (runtime-pi) builds it for
  * each call, the conversation's own `workspace` when one is installed (`workspace-local`: a directory

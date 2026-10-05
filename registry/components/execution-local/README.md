@@ -15,9 +15,16 @@ start there. `tool-read`, `tool-write`, `tool-edit` and `tool-bash` work through
 
 Commands do not inherit the server's environment. They start from an allowlist of variables
 (`HOME`, `LANG`, `LC_ALL`, `PATH`, `SHELL`, `TERM`, `TMPDIR`, `TZ`, `USER`). Without that, a
-command such as `env` would print the server's secrets (`PIKIT_HTTP_TOKEN`, `ANTHROPIC_API_KEY`).
-Pi's own default passes every variable. Add a variable to `variables` only when a command needs it
-(a `GITHUB_TOKEN` for `gh`), and remember that the agent can then read it.
+command such as `env` would print the server's secrets (`PIKIT_HTTP_TOKEN`, `ANTHROPIC_API_KEY`),
+and every program a command runs would inherit them. Pi's own default passes every variable. A
+variable added to `variables` (a `GITHUB_TOKEN` for `gh`) is in every command's environment.
+
+The allowlist is not a secret store: it hides nothing from a command that looks. On Linux,
+`cat /proc/$PPID/environ` prints the server's whole environment, which the same OS user may read,
+and the project's `.env` is a file like any other ("It is not a sandbox", below).
+
+With `workspace-local` installed, the tools work in its per-agent directories, with its own
+`variables`: this component's `root` and `variables` then have no effect on them.
 
 Stopping the app kills the commands still running. It refuses to start when `root` cannot be
 created or written.
@@ -54,5 +61,5 @@ directories. It covers:
 - the allowlist (the server's variables unseen, allowed ones seen);
 - commands killed at stop, and the start failure.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

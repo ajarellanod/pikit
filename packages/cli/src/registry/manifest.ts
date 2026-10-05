@@ -115,7 +115,7 @@ export const ManifestSchema = Type.Object(
     targets: Type.Array(Type.String({ enum: [...TARGETS] }), {
       minItems: 1,
       uniqueItems: true,
-      description: "Where it runs. node:* and bun:* imports need exactly [\"server\"] (S5).",
+      description: "Where it runs. node:* and bun:* imports need exactly [\"server\"].",
     }),
     requires: Type.Object(
       {
@@ -240,7 +240,7 @@ export const ManifestSchema = Type.Object(
         {
           tools: Type.Record(Type.String(), Type.String(), {
             description:
-              "Generated: each agent.tool's replay (S10), with the default config; not the tools only the config schema's `examples` name. Each is `safe` (an interrupted call runs again on recovery) or `unsafe` (the model gets an interrupted result instead): pi-durable's replay.",
+              "Generated: each agent.tool's replay, with the default config; not the tools only the config schema's `examples` name. Each is `safe` (an interrupted call runs again on recovery) or `unsafe` (the model gets an interrupted result instead): pi-durable's replay.",
           }),
         },
         { additionalProperties: false },
@@ -306,7 +306,7 @@ export interface Generated {
   /** Tool name → its replay; absent when the component provides no tool with its default config. */
   tools?: Record<string, string>;
   /**
-   * The tools only its config schema's `examples` provide → their replay: checked (S10), never
+   * The tools only its config schema's `examples` provide → their replay: checked, never
    * written, since their names are the example's.
    */
   exampleTools?: Record<string, string>;
@@ -319,7 +319,7 @@ export interface Generated {
 /** Top-level key order: every field of the schema, `$schema` first. */
 const KEY_ORDER = Object.keys(ManifestSchema.properties);
 
-/** A component's kind: its name's prefix (`channel` for `channel-telegram`), AGENTS.md "Naming". */
+/** A component's kind: its name's prefix (`channel` for `channel-telegram`). */
 export function kindOf(name: string): string {
   return name.split("-")[0] ?? "";
 }

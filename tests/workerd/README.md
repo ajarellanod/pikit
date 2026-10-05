@@ -84,7 +84,10 @@ classes, which it does not export. Measured with wrangler 4.143.0 and pi-durable
 | The same with execution-do and the four tools (`src/bundle.ts`) | 4,045 KiB | 980 KiB |
 
 execution-do adds about 800 KiB gzip: just-bash, isomorphic-git and QuickJS's WebAssembly (503 KB,
-226 KiB gzip). The budget is 10 MB compressed (SPEC §4). `wrangler.jsonc` carries the rule that
+226 KiB gzip). CI's workerd job measures a whole project's Worker, the telegram-cloudflare preset's
+(`bun scripts/bundle-size.ts`: 6,086 KiB, 1,318 KiB gzip on October 5, 2026), and fails it over
+Cloudflare's limit, 64 MiB uncompressed (there is no compressed limit). What a larger bundle meets
+first is the Worker's 1 s startup limit, which no step measures. `wrangler.jsonc` carries the rule that
 bundles that WebAssembly as a compiled module (execution-do's README, "On Cloudflare").
 
 `tool-mcp` added to `src/bundle.ts` adds 48 KiB, 11 KiB gzip (measured on September 29, 2026, then taken out):
