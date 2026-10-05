@@ -4,6 +4,16 @@
 # .dockerignore keeps .env out of the build context. State is never in the image either: .pikit/
 # is a volume.
 
+# The dashboard (SPEC §5), when the project has a UI (`pikit ui on`): built in a stage of its own,
+# with its own packages, so the app's image gets only its static files (src/dashboard/dist), which
+# admin-api serves at /admin/. A project without src/dashboard/ builds nothing here.
+FROM oven/bun:1.4-slim AS dashboard
+WORKDIR /build
+COPY src/ ./src/
+RUN if [ -f src/dashboard/package.json ]; then \
+      cd src/dashboard && bun install --frozen-lockfile && bun --bun run build; \
+    else mkdir -p src/dashboard/dist; fi
+
 # Bun >= 1.4: older Bun never fires an `AbortSignal.timeout()` whose last listener was removed
 # (oven-sh/bun#37666), so a stop deadline would hang instead of firing.
 FROM oven/bun:1.4-slim
@@ -20,6 +30,7 @@ COPY vendor/ ./vendor/
 RUN bun install --frozen-lockfile --production
 
 COPY . .
+COPY --from=dashboard /build/src/dashboard/dist ./src/dashboard/dist
 
 # .pikit/ holds the app's state: the database (conversations, the registry), model credentials, the agent's workspace.
 # compose.yaml mounts a volume here. The directory is created owned by the unprivileged user, and a

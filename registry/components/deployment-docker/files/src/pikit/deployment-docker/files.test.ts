@@ -76,6 +76,22 @@ test(".dockerignore keeps secrets, state and node_modules out of the build", () 
   expect(ignored).toContain(".env");
   expect(ignored).toContain(".pikit");
   expect(ignored).toContain("node_modules");
+  // The dashboard's too (src/dashboard/node_modules), and its local build: the image makes its own.
+  expect(ignored).toContain("**/node_modules");
+  expect(ignored).toContain("src/dashboard/dist");
+});
+
+test("Dockerfile: the dashboard, when the project has one, is built in its own stage and only its static files reach the app", () => {
+  const dockerfile = lines("Dockerfile");
+  const stage = dockerfile.findIndex((line) => /^FROM\s.*\sAS dashboard$/.test(line));
+  const app = dockerfile.findLastIndex((line) => line.startsWith("FROM "));
+
+  expect(stage).toBeGreaterThan(-1);
+  expect(stage).toBeLessThan(app);
+  const build = dockerfile.slice(stage, app).join("\n");
+  expect(build).toContain("if [ -f src/dashboard/package.json ]");
+  expect(build).toContain("bun install --frozen-lockfile");
+  expect(dockerfile.slice(app)).toContain("COPY --from=dashboard /build/src/dashboard/dist ./src/dashboard/dist");
 });
 
 test("compose.yaml: a stop grace period longer than the entrypoint's stop deadline", () => {

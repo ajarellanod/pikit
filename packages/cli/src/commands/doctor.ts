@@ -39,6 +39,7 @@ import { incompleteOperation, incompleteOperationMessage } from "../project/oper
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
 import { log } from "../ui.ts";
 import { confinedPath } from "../project/paths.ts";
+import { DASHBOARD_DIR } from "../project/dashboard.ts";
 
 export interface DoctorReport {
   problems: string[];
@@ -183,12 +184,16 @@ export function checkPiImports(projectDir: string, sources: readonly string[] = 
 
 const SKIPPED = new Set(["node_modules", "vendor", ".pikit", ".git", "dist"]);
 
-/** The project's own source files, relative, without dependencies or state. */
+/**
+ * The project's own source files, relative, without dependencies or state. Not the dashboard's
+ * (`src/dashboard/`): a project of its own, whose packages are its own `package.json`'s.
+ */
 export function projectSources(projectDir: string, dir = ""): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(dir === "" ? projectDir : confinedPath(projectDir, dir))) {
     if (SKIPPED.has(entry)) continue;
     const relative = dir === "" ? entry : `${dir}/${entry}`;
+    if (relative === DASHBOARD_DIR) continue;
     const stats = statSync(confinedPath(projectDir, relative));
     if (stats.isDirectory()) files.push(...projectSources(projectDir, relative));
     else if (stats.isFile() && /\.[cm]?[jt]sx?$/.test(entry)) files.push(relative);

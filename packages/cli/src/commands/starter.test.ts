@@ -4,13 +4,15 @@ import { join } from "node:path";
 import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
 import { agent, BUNFIG, introduction, PROJECT_REGISTRY, SKILLS_DIR, skillFiles, tsconfig, withKitLocation } from "./starter.ts";
 
-test("a project is ready for a registry of its own: tsc and bun test leave registry/ out, and its lib has ES2023", () => {
+test("a project is ready for a registry of its own and a dashboard: tsc and bun test leave registry/ and src/dashboard/ out, and its lib has ES2023", () => {
   const config = JSON.parse(tsconfig()) as { compilerOptions: { lib: string[] }; exclude: string[] };
   expect(config.exclude).toContain(PROJECT_REGISTRY);
+  // The dashboard is a project of its own (DOM, JSX, its own packages): the project's tsc never reads it.
+  expect(config.exclude).toContain("src/dashboard");
   // `Array.prototype.findLast` and `toSorted`, which Bun and workerd have.
   expect(config.compilerOptions.lib).toEqual(["ES2023"]);
   expect(BUNFIG).toContain(`[test]\n`);
-  expect(BUNFIG).toContain(`pathIgnorePatterns = ["registry/**"]`);
+  expect(BUNFIG).toContain(`pathIgnorePatterns = ["registry/**", "src/dashboard/**"]`);
 });
 
 test("the starter prompt says where the agent is reached: by the channels being installed", () => {
