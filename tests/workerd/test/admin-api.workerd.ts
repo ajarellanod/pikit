@@ -5,8 +5,9 @@
  * and admin-api's default export), and the Worker's App serves admin-api's Worker half through
  * deployment-cloudflare's own server. Messages reach two chats; then the Worker lists them from the
  * index object (`admin-api:index`), reads one and its transcript, follows it live (a polled snapshot),
- * resets one and is refused an action on the one left behind. The index object, which runs the same
- * App, holds no conversation.
+ * resets one and is refused an action on the one left behind; the operator starts a conversation of the
+ * dashboard's own, listed first as soon as its message is dispatched, and its agent answers there. The
+ * index object, which runs the same App, holds no conversation.
  */
 
 import { BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
@@ -14,6 +15,7 @@ import type { ActorMailbox, AdminAuth } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { afterEach, expect, it, vi } from "vitest";
+import { OPERATOR_NOTE } from "../../../registry/components/admin-api/files/src/pikit/admin-api/api.ts";
 import adminApi, { worker as adminApiWorker } from "../../../registry/components/admin-api/files/src/pikit/admin-api/index.ts";
 import { INDEX_KEY } from "../../../registry/components/admin-api/files/src/pikit/admin-api/conversation-index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
@@ -144,17 +146,28 @@ it("the Worker lists the objects' conversations from the index, reads and follow
     expect(refused.status).toBe(409);
     expect(await refused.json()).toMatchObject({ error: "not_current" });
     const after = (await (await worker.fetch("/admin/api/conversations")).json()) as Listed;
-    // The new one has no key until a message reaches it, as on a server: its id says whose object it is in.
+    // Listed at once, the newest activity; it has no key until a message reaches it, as on a server: its id says whose object it is in.
     expect(after.items.filter((each) => each.conversationId.startsWith(`${a}~`)).map(({ conversationId, key, current }) => ({ conversationId, key, current }))).toEqual([
-      { conversationId: `${a}~1`, key: a, current: false },
       { conversationId: reset.conversationId, key: undefined, current: undefined },
+      { conversationId: `${a}~1`, key: a, current: false },
     ]);
+
+    // A conversation of the dashboard's own: its key's object, listed first once its message is dispatched; the agent answers there.
+    const started = (await (
+      await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "scripted", text: "status?" }) })
+    ).json()) as { key: string; conversationId: string; admission: string };
+    expect(started).toMatchObject({ key: expect.stringMatching(/^dashboard:/), conversationId: expect.stringMatching(/^dashboard:.+~1$/), admission: "started" });
+    const newest = (await (await worker.fetch("/admin/api/conversations?limit=1")).json()) as Listed;
+    expect(newest.items.map((each) => each.conversationId)).toEqual([started.conversationId]);
+    await vi.waitFor(() => expect(answers).toContain(`${started.key}: answer: ${OPERATOR_NOTE}.]\nstatus?`), { timeout: 10_000 });
+    const unknown = await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "nobody", text: "hi" }) });
+    expect(unknown.status).toBe(400);
 
     // The composition is the objects' App; the index object, which runs it too, holds no conversation.
     const app = (await (await worker.fetch("/admin/api/app")).json()) as { target: string; components: { name: string }[] };
     expect(app.target).toBe("durable");
     expect(app.components.map((c) => c.name)).toEqual(expect.arrayContaining(["runtime-pi", "admin-api"]));
-    expect(await worker.mailbox().call(INDEX_KEY, "admin-api.conversations", null, worker.app.context())).toEqual([]);
+    await expect(worker.mailbox().call(INDEX_KEY, "admin-api.conversation", { conversationId: "1" }, worker.app.context())).rejects.toMatchObject({ code: "not_found" });
   } finally {
     await worker.stop();
   }

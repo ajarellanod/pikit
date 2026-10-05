@@ -121,7 +121,8 @@ export default defineComponent({
   },
 });
 
-const encode = (text: string): Uint8Array<ArrayBuffer> => new TextEncoder().encode(text);
+// Copied: Workers' types say `encode` may answer a view of a shared buffer, which `crypto.subtle` does not take.
+const encode = (text: string): Uint8Array<ArrayBuffer> => new Uint8Array(new TextEncoder().encode(text));
 
 /** What a session's signature covers. */
 const signed = (operator: string, expires: number): string => `${operator}\n${expires}`;
