@@ -41,7 +41,8 @@ test("--version, help, unknown commands and commands not built yet", async () =>
   expect((await runCli(["add", "--bogus"], cwd)).code).toBe(2);
   const later = await runCli(["diff"], cwd);
   expect(later.code).toBe(1);
-  expect(later.out).toContain("pikit diff: not built yet (see SPEC P6)");
+  // A path the user can open: the kit's own SPEC.md.
+  expect(later.out).toContain(`pikit diff: not built yet (see ${join(PIKIT_ROOT, "SPEC.md")}, P6)`);
   expect((await runCli(["upgrade"], cwd)).err).toContain("is not a pikit project");
 });
 

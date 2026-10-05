@@ -300,6 +300,40 @@ test("files: only files/src maps as a directory; a file outside src is listed on
   expect(await problems(f)).toBe("");
 });
 
+test("K13: only admin-* components read APP_DESCRIPTION; comments and tests may name it", async () => {
+  const reader = 'import { APP_DESCRIPTION, type AppContext } from "@pikit/core";\n\nexport const composition = (ctx: AppContext) => ctx.value(APP_DESCRIPTION);\n';
+  const f = await fixture();
+  f.append("index.ts", "// Not APP_DESCRIPTION: that is the dashboard's.");
+  f.append("sample.test.ts", 'import { APP_DESCRIPTION } from "@pikit/core";');
+  expect(await problems(f)).toBe("");
+
+  writeFileSync(join(f.own, "composition.ts"), reader);
+  expect(await problems(f)).toBe(
+    "conversations-sample: files/src/pikit/conversations-sample/composition.ts reads APP_DESCRIPTION, which only admin-* components may (SPEC K13): " +
+      "a component never changes what it does by what else is installed; use useOptional for that",
+  );
+
+  const admin = await fixture({ name: "admin-sample" });
+  writeFileSync(join(admin.own, "composition.ts"), reader);
+  expect(await problems(admin)).toBe("");
+});
+
+test("K1: setup declares the same on every target its manifest declares, and is described on each", async () => {
+  const branches = await fixture({ setup: `\n    if (pikit.target === "durable") pikit.provide("conversations.registry", {});` });
+  expect(await problems(branches)).toBe("");
+  branches.writeManifest({ ...branches.manifest(), targets: ["server", "durable"] });
+  await generate(branches.root);
+  expect(await problems(branches)).toBe(
+    'conversations-sample: setup declares provides [] on server but ["conversations.registry"] on durable: setup never branches on pikit.target (SPEC K1); ' +
+      "what differs per target comes through a capability, or is a component per target",
+  );
+
+  const refuses = await fixture({ setup: `${SETUP}\n    if (pikit.target === "durable") throw new Error("no durable here");` });
+  refuses.writeManifest({ ...refuses.manifest(), targets: ["server", "durable"] });
+  await generate(refuses.root);
+  expect(await problems(refuses)).toBe("conversations-sample: setup could not be described on durable, one of its targets (SPEC K1): no durable here");
+});
+
 test("a component with no default export is not an app component: it provides and uses nothing", async () => {
   // Module imports are cached per path, so the file is written before the first generate.
   const f = await fixture({ name: "deployment-sample", index: DEPLOYMENT_INDEX });

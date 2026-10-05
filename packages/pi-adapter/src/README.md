@@ -108,7 +108,10 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   resumes a conversation. So the agent pi-durable reads when it prepares a model request is always
   `prepare` of the state at that moment: **a tool's state update applies from the run's next model
   request**, not from the next run. Tools run wrapped so their context carries `CONVERSATION` and
-  `AGENT_STATE`.
+  `AGENT_STATE`. **The definition owns `pi.agent`** (SPEC §6): each of those applies
+  rebuilds it from `prepare` and writes it when it differs, so a `configure()` made on the
+  conversation directly is undone at the next one; a live change goes through `agent.state` or the
+  data `prepare` reads.
 - **Tools, models and environments.** `tool(name)` returns a pi-durable tool; a tool object in a
   definition must be one too. `models` is pi-ai 1.0's `Models`. Each tool call's environment is
   `harnessEnv` over `workspace()` (the call's conversation's) and `execution()`, unless `env` is given.

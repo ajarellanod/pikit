@@ -16,6 +16,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PIKIT_ROOT } from "./paths.ts";
 import { setConfigEntry } from "./project/config-file.ts";
 
 const E2E = process.env.PIKIT_E2E === "1";
@@ -78,9 +79,12 @@ test.skipIf(!E2E)(
     expect(manifest.components["storage-sqlite"].installedFor).toBeUndefined();
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
-    // The skills for the user's AI agent come with every project.
+    // The skills for the user's AI agent come with every project, saying where the kit is.
     for (const skill of ["pikit-component", "pikit-extension"]) {
-      expect(readFileSync(join(project, ".agents", "skills", skill, "SKILL.md"), "utf8")).toContain(`name: ${skill}`);
+      const text = readFileSync(join(project, ".agents", "skills", skill, "SKILL.md"), "utf8");
+      expect(text).toContain(`name: ${skill}`);
+      expect(text).toContain(`${PIKIT_ROOT}/features/memory.md`);
+      expect(text).not.toContain("{{PIKIT_");
     }
   },
   TIMEOUT,

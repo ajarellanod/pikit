@@ -11,7 +11,8 @@
  *   `src/pikit/` is the one checked (two copies of one contract file that differ fail `tsc`, TS2717,
  *   and every test would run twice);
  * - the kit's skills for AI agents, `.agents/skills/` (`skillFiles`): how to write a component and an
- *   agent extension.
+ *   agent extension, with where the kit is (this CLI's checkout, and online at the project's
+ *   `kit.commit`) written in, since they cite its design notes and SPEC.
  *   They are the kit's, not a component's: no capability, nothing that runs, and every project gets
  *   them; a newer CLI's `pikit new` brings newer ones (an existing project copies them by hand).
  *
@@ -27,7 +28,7 @@
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PIKIT_ROOT } from "../paths.ts";
+import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
 import { starterModel } from "../project/starter-model.ts";
 
@@ -47,15 +48,28 @@ export const STARTER_CONFIG: Record<string, string> = {
 /** Where the skills for AI agents are, in the kit and in a project (the `.agents/skills/` convention). */
 export const SKILLS_DIR = ".agents/skills";
 
-/** The kit's skills, each file by its path in a project, sorted: what `pikit new` copies. */
-export function skillFiles(root = PIKIT_ROOT): { path: string; text: string }[] {
+/**
+ * The kit's skills, each file by its path in a project, sorted: what `pikit new` copies. Where the kit
+ * is gets written in (`withKitLocation`): `root` on this machine, online at `commit`.
+ */
+export function skillFiles(root = PIKIT_ROOT, commit?: string): { path: string; text: string }[] {
   const dir = join(root, SKILLS_DIR);
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name).slice(dir.length + 1))
     .sort()
-    .map((file) => ({ path: `${SKILLS_DIR}/${file}`, text: readFileSync(join(dir, file), "utf8") }));
+    .map((file) => ({ path: `${SKILLS_DIR}/${file}`, text: withKitLocation(readFileSync(join(dir, file), "utf8"), root, commit) }));
+}
+
+/**
+ * `text` with the kit's location in place of the skills' placeholders: `{{PIKIT_ROOT}}`, the checkout
+ * at `root`; `{{PIKIT_URL}}`, the repository online at `commit` (`pikit.json`'s `kit.commit`, its
+ * `-dirty` set aside), or its default branch when there is none.
+ */
+export function withKitLocation(text: string, root: string, commit: string | undefined): string {
+  const url = commit === undefined ? KIT_REPOSITORY : `${KIT_REPOSITORY}/tree/${commit.replace(/-dirty$/, "")}`;
+  return text.replaceAll("{{PIKIT_ROOT}}", root).replaceAll("{{PIKIT_URL}}", url);
 }
 
 export function packageJson(name: string, kit: Record<string, string>): string {

@@ -12,6 +12,12 @@ owns. A component that follows the steps below composes, survives crashes and ev
 shared. Agent behaviour (prompt sections, hooks on requests and tool calls) is a component too, of a
 special shape: read `.agents/skills/pikit-extension/SKILL.md` for it.
 
+**Where the kit is.** `{{PIKIT_ROOT}}` is the pikit repository (the kit) this project was made with,
+on this machine; online, {{PIKIT_URL}}. Its design notes are in `features/`, its decisions (the
+K, C and P names READMEs cite) in `SPEC.md`, its components in `registry/components/`. (`pikit new`
+writes both when it copies this skill into a project; in the pikit repository itself, they are its
+root.)
+
 ## 0. Know the project before you write
 
 ```sh
@@ -22,9 +28,9 @@ pikit registry capabilities     # every capability: what it is for, its stabilit
 Read `pikit.config.ts` (everything that runs is listed there) and `pikit.json` (what was installed,
 and the target: `server` is a long-lived process, `durable` an actor per conversation on Cloudflare).
 Installed components are in `src/pikit/<name>/`, each with a README and its tests; the project's own
-are in `src/extensions/`. If the feature has a design note (`features/<feature>.md` in the pikit
-repository), read it first: it names the contract, what must be guaranteed and the tests that prove
-it (`features/memory.md` is a complete build guide).
+are in `src/extensions/`. If the feature has a design note (`{{PIKIT_ROOT}}/features/<feature>.md`),
+read it first: it names the contract, what must be guaranteed and the tests that prove it
+(`{{PIKIT_ROOT}}/features/memory.md` is a complete build guide).
 
 ## 1. Pick the contract
 
@@ -38,7 +44,7 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | Durable data | `storage.sql` (tables prefixed with your name) or `storage.kv` (a namespace named after you) |
 | Routing a message to an agent | a stage of the `route.resolve` pipeline |
 | An HTTP endpoint | `http.route` (`"POST /v1/x"`, `"GET /items/:id"`, a prefix `"GET /admin/*"`) |
-| An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; name the App with `APP_DESCRIPTION` |
+| An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; the composition is `APP_DESCRIPTION`, which only a component named `admin-*` may read (SPEC K13, checked by `registry validate`) |
 | Reach another conversation or an actor of yours | `actor.mailbox`: `send` (a message, held durably) or `call` (ask for an answer), handled with `actor.inbox`'s `handle` / `answer` |
 | Run later, at least once | `wakeups` (`handle(name, handler)` in `start`, `at(name, time)`) |
 | Deliver to a platform, retried | `outbound.queue` (through `startAnswerDelivery` for a channel) |
@@ -85,7 +91,7 @@ between two components: what one needs from another is a capability.
 | Admin route / auth | `admin-auth-token` | `admin.auth`, a secret read at start, constant-time compare |
 | Model provider | `provider-openrouter`, `provider-faux` | a pi-ai provider as `model.provider`, `modelProviders` |
 | Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2) |
-| A feature of your own kind | `features/memory.md` | `declares`, a contract file, an actor per owner with `call` |
+| A feature of your own kind | `{{PIKIT_ROOT}}/features/memory.md` | `declares`, a contract file, an actor per owner with `call` |
 
 Installed ones are in `src/pikit/`, each with its README; the rest are in the registry the CLI uses
 (`pikit add <name> --yes` to read one in place, `pikit remove <name>` after).
@@ -175,7 +181,7 @@ Also a test named "what setup declares" that pins `app.describe().components` fo
 tests: a local `Bun.serve` stands in for any API; `sqliteStorage(path)` (`@pikit/pi-adapter/testing`)
 is a `storage.sql` on a file. A test that needs another component (runtime-pi) is the project's own
 (`test/*.test.ts`, importing `src/pikit/*`), never the component's. A `durable` component also runs in
-the workerd lane of the pikit repository (`tests/workerd`).
+the workerd lane of the pikit repository (`{{PIKIT_ROOT}}/tests/workerd`).
 
 **The model** for a tool or an extension end to end (a project test, or a trial in `pikit dev`) is
 provider-faux's `faux/scripted` (`pikit add provider-faux --yes`, an agent on `model: "faux/scripted"`):

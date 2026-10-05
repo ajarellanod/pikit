@@ -14,3 +14,6 @@ export const DEFAULT_REGISTRY = join(PIKIT_ROOT, "registry");
 
 /** The kit packages a project depends on, vendored until they are published (`project/vendor.ts`). */
 export const PACKAGES_DIR = join(PIKIT_ROOT, "packages");
+
+/** The kit's repository online, which the installer clones (`installer/install.sh`, `PIKIT_REPO`). */
+export const KIT_REPOSITORY = "https://github.com/ajarellanod/pikit";
