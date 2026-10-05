@@ -33,7 +33,10 @@ be shared, without learning pikit's internals first.
    `beforeTool` hook, provided as `agent.extension`; runtime-pi's `extensions.test.ts` adds a
    document and a tool). A component is a folder in a registry:
    `component.json` (name, description, targets, requires, provides, dependencies, files) and
-   `files/src/pikit/<name>/index.ts` exporting `defineComponent({ name, config, setup })`.
+   `files/src/pikit/<name>/index.ts` exporting `defineComponent({ name, config, setup })`. What the
+   component decides (a tool's `replay`, a policy, a default) is written in that source, never in the
+   kit: `tool-read` spreads Pi's `createReadTool()` and sets `replay: "safe"`. A tool that works on
+   `api.env` uses `execution` (`execution.shell` for a shell), which `registry validate` checks.
 3. **Durability comes with the contracts.** Keep state in `storage.sql` / `storage.kv` or a
    pi-durable document, wake with `wakeups`, read what must not be missed from a feed with a cursor
    (SPEC K3), deliver a channel's answers through `startAnswerDelivery` (which uses `outbound.queue`

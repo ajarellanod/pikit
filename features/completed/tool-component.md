@@ -45,7 +45,7 @@ export default defineComponent({
 - **`tool-websearch-brave`**: a tool that needs a secret (read through `secrets` at each call, never
   in the tool), config values (`apiBase`), and a step of `pikit configure` (`configure.ts`).
 - **`tool-read`, `tool-write`, `tool-edit`, `tool-bash`**: Pi's own coding tools, provided as they are
-  with pikit's replay (`codingTool(name)` in the adapter); they work on `api.env`, which the runtime
+  with the replay each component sets in its own source; they work on `api.env`, which the runtime
   builds per call from `workspace` or `execution`.
 
 ## How it fits pikit
@@ -69,6 +69,6 @@ pi-durable's `defineTool` and `ToolRegistration` are the tool: pikit adds no sha
 that is not shared by name can also go straight into an agent's `tools` as an object.
 
 ## Where it is
-- `packages/pi-adapter/src/tools/index.ts`: `defineTool` and its types, `codingTool`.
+- `packages/pi-adapter/src/tools/index.ts`: `defineTool` and its types, Pi's coding tool factories.
 - `registry/components/tool-fetch`, `registry/components/tool-websearch-brave`: the references.
 - `packages/pi-adapter/src/testing/execution.ts`: `callTool`, `runToolCalls`.
