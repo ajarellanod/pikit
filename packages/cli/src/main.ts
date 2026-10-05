@@ -39,14 +39,14 @@ Usage:
 Project commands run in the current directory.`;
 
 /**
- * Commands the former SPEC (§11) planned and pikit does not have yet: where each is specified now,
- * or `""` when nothing current specifies it.
+ * Commands the former SPEC (§11) planned and pikit does not have yet: where each is specified now (a
+ * file of the kit, and what to read there), or `""` when nothing current specifies it.
  */
 const LATER: Record<string, string> = {
   init: "",
   create: "",
-  outdated: "SPEC P6",
-  diff: "SPEC P6",
+  outdated: "SPEC.md, P6",
+  diff: "SPEC.md, P6",
   config: "features/config-files.md",
   expose: "",
   deploy: "",
@@ -161,7 +161,7 @@ async function main(argv: string[]): Promise<number> {
   }
   const later = LATER[command];
   if (later !== undefined) {
-    log.info(`pikit ${command}: not built yet${later === "" ? "" : ` (see ${later})`}`);
+    log.info(`pikit ${command}: not built yet${later === "" ? "" : ` (see ${join(PIKIT_ROOT, later)})`}`);
     return 1;
   }
   throw new CliError(`unknown command "${command}"\n\n${USAGE}`, 2);
