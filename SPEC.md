@@ -56,7 +56,8 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   model an App runs on (§4), never a provider, and the CLI, the component schema's `targets` enum and
   `defineApp({ target })` share that one closed list. A component's targets are declared in its
   `component.json`; a component that needs something different per target gets it through a
-  capability (or `WORKERS_HOST`, C5), never by branching on `pikit.target` in `setup`. *Why:* a target
+  capability (or `WORKERS_HOST`, C5), never by branching on `pikit.target` in `setup` (`registry
+  validate` describes `setup` on every target its manifest declares and refuses a difference). *Why:* a target
   is part of the composition (a deployment recomposes the App on its own), so the kernel carries it;
   `setup` that branches on it would make the generated manifest depend on the target it was generated
   for. A third value (`functions`) is a kernel change recorded here, made only when a host of that
@@ -119,7 +120,8 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   components in start order, what each provides and requires, the selected providers and keys, the
   resolved pipelines and the config. `AppDescription` carries a `version` and changes additively.
   Only `admin-*` components (the dashboard, §5) and the self-knowledge component (§6) may read it,
-  and `registry validate` rejects any other component that does: a component never changes its
+  and `registry validate` rejects any other component whose shipped files name it (the self-knowledge
+  component gets its exemption there when it is built): a component never changes its
   behavior by looking at what else is installed (that is `useOptional`'s job). What the app does not
   know (installed versions, modified files, bases) stays in `pikit.json`, read from the project.
   *Why:* it is the truth of what runs, on both targets and for each App (K7), with no build step and

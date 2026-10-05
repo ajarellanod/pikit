@@ -38,7 +38,7 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | Durable data | `storage.sql` (tables prefixed with your name) or `storage.kv` (a namespace named after you) |
 | Routing a message to an agent | a stage of the `route.resolve` pipeline |
 | An HTTP endpoint | `http.route` (`"POST /v1/x"`, `"GET /items/:id"`, a prefix `"GET /admin/*"`) |
-| An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; name the App with `APP_DESCRIPTION` |
+| An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; the composition is `APP_DESCRIPTION`, which only a component named `admin-*` may read (SPEC K13, checked by `registry validate`) |
 | Reach another conversation or an actor of yours | `actor.mailbox`: `send` (a message, held durably) or `call` (ask for an answer), handled with `actor.inbox`'s `handle` / `answer` |
 | Run later, at least once | `wakeups` (`handle(name, handler)` in `start`, `at(name, time)`) |
 | Deliver to a platform, retried | `outbound.queue` (through `startAnswerDelivery` for a channel) |

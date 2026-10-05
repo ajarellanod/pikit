@@ -7,7 +7,7 @@ import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { capabilityEntry, KIT_CATALOGUE, type RegistryCatalogue } from "./capabilities.ts";
-import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports } from "./imports.ts";
+import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports, stripComments } from "./imports.ts";
 import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 import { confinedPath } from "../project/paths.ts";
@@ -218,6 +218,23 @@ export function checkImports(componentDir: string, name: string, targets: readon
   }
   for (const pkg of packages) testPackages.delete(pkg);
   return { problems, packages, testPackages };
+}
+
+/**
+ * Only a component named `admin-*` reads `APP_DESCRIPTION` (SPEC K13): no other one's shipped files
+ * name it, outside comments. Its tests may, as they may import anything.
+ */
+export function checkDescriptionReaders(componentDir: string, name: string): string[] {
+  if (name.startsWith("admin-")) return [];
+  const filesDir = join(componentDir, "files");
+  return listFiles(filesDir)
+    .filter((file) => SOURCE.test(file) && !forTests(file))
+    .filter((file) => /\bAPP_DESCRIPTION\b/.test(stripComments(readFileSync(join(filesDir, file), "utf8"))))
+    .map(
+      (file) =>
+        `files/${file} reads APP_DESCRIPTION, which only admin-* components may (SPEC K13): ` +
+        "a component never changes what it does by what else is installed; use useOptional for that",
+    );
 }
 
 /**
