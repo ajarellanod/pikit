@@ -40,7 +40,8 @@ there.
 - The channel suite checks any channel end to end, durability included (an answer settled while the
   channel was stopped, a lost event, retries in order, a cut send resent at most once, independent
   lanes, a transient admission failure never dropped, a redelivered reset command run once); the
-  convergence suite checks crash recovery.
+  convergence suite checks crash recovery, of the outbox and of direct delivery over storage-kv-sql.
+  The `agent.submissions` suite runs on runtime-pi, on SQLite and in a Durable Object.
   Contracts still without a suite are listed in `features/building-components.md`.
 
 ### Pi adapter (`@pikit/pi-adapter`, the only package that imports Pi)
@@ -118,7 +119,8 @@ there.
   it is reached, and its model is one the preset installs; on a server it does not name `bash`.
 
 ### CLI (`pikit`)
-- `new` (guided in a terminal: target, preset, channel), `add`, `remove`, `upgrade` (three-way merge
+- `new` (guided in a terminal: target, preset, channel), `add` (one or several names, one
+  transaction), `remove`, `upgrade` (three-way merge
   of your edits from `pikit-bases/`; a kit behind the CLI is a plan of its own, shown in `--dry-run`,
   and `doctor` notes it), `configure` (secrets, generated tokens, model logins), `doctor`,
   `dev`, `up | down | restart | status | logs` (delegated to the installed `deployment-*`),
