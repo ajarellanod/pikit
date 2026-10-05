@@ -8,7 +8,8 @@
  *    owner can add it, and nothing reaches the agent.
  * 3. Commands the channel answers itself: `/start` and `/help` explain, `/new` starts the
  *    conversation over (a reset: a new session, the old one kept: `conversations.registry`'s `reset`). Other commands go to
- *    the agent as text.
+ *    the agent as text. A command Telegram delivers again (a crash before its offset was confirmed)
+ *    is recognised by its message id, kept in `storage.kv`, and not run twice.
  * 4. Everything else takes the inbound path every channel takes (`admitInbound`: `inbound.normalize`,
  *    `route.resolve`, the conversation `<instance>:<chat id>`, `dispatch`), and the sender is told what
  *    happened when the agent will not answer. The request id is `<instance>:<chat id>:<message id>`: a
@@ -20,7 +21,7 @@
  */
 
 import { type AppContext } from "@pikit/core";
-import { admitInbound, type AgentRuntime, type ConversationRegistry, type InboundMessage } from "@pikit/contracts";
+import { admitInbound, type AgentRuntime, type ConversationRegistry, type InboundMessage, type KeyValueStore } from "@pikit/contracts";
 import type { TelegramMessage, TelegramUpdate, TelegramUser } from "./api.ts";
 import { conversationKeyOf } from "./account.ts";
 import type { Replies } from "./replies.ts";
@@ -33,6 +34,8 @@ export interface InboundDeps {
   delivery: Replies;
   conversations: ConversationRegistry;
   runtime: AgentRuntime;
+  /** The channel's namespace of `storage.kv`: the last command handled in each chat. */
+  store: KeyValueStore;
   /** A context of the channel's own, never `start`'s. */
   ctx: AppContext;
   /** Users already told they are not allowed, so a stranger's spam gets one answer. */
@@ -48,6 +51,9 @@ const HELP = [
 
 /** What the sender of a message that kept failing is told before it is skipped (`poller.ts`). */
 export const NOT_TAKEN = "Sorry, I could not take your message. Please send it again in a few minutes.";
+
+/** Where the last command handled in a chat is kept: its message id. */
+export const commandSeenKey = (conversation: string): string => `command:${conversation}`;
 
 export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): Promise<void> {
   const message = update.message;
@@ -76,13 +82,18 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
   }
 
   const command = commandOf(text, deps.bot);
-  if (command === "start" || command === "help") {
-    await delivery.send(chatId, command === "start" ? `Hi${from.first_name ? ` ${from.first_name}` : ""}! ${HELP}` : HELP);
-    return;
-  }
-  if (command === "new") {
-    const reset = await deps.conversations.reset(conversationKeyOf(deps.instance, chatId), ctx);
-    await delivery.send(chatId, reset === undefined ? "This is already a new conversation." : "Started a new conversation.");
+  if (command === "start" || command === "help" || command === "new") {
+    const key = conversationKeyOf(deps.instance, chatId);
+    const seenKey = commandSeenKey(key);
+    const last = await deps.store.get<number>(seenKey);
+    if (last !== undefined && message.message_id <= last) return;
+    if (command === "new") {
+      const reset = await deps.conversations.reset(key, ctx);
+      await delivery.send(chatId, reset === undefined ? "This is already a new conversation." : "Started a new conversation.");
+    } else {
+      await delivery.send(chatId, command === "start" ? `Hi${from.first_name ? ` ${from.first_name}` : ""}! ${HELP}` : HELP);
+    }
+    await deps.store.set(seenKey, message.message_id);
     return;
   }
 

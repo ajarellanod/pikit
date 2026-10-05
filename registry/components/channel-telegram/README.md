@@ -47,7 +47,9 @@ You never look up a user id, set a webhook, open a port or buy a domain.
 - **Messages sent while the agent is working** wait, and its next run answers them together, in one
   reply.
 - **Commands:** `/new` starts a new conversation; the old one is kept. `/start` and
-  `/help` explain. Any other command goes to the agent as text.
+  `/help` explain. Any other command goes to the agent as text. A command Telegram delivers again
+  after a crash is recognised by its message id (kept in `storage.kv`, `command:<conversation>`)
+  and runs once.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`: your stages in
   `inbound.normalize`, the router, the conversation). When the agent will not answer, the chat is
   told: "I can't take that message." when a stage stops it (a policy, a routing rule), "Sorry, I

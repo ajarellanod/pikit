@@ -11,8 +11,9 @@
  *   own allowed users and conversations. A router can send each bot to its own agent
  *   (`router-rules`).
  * - Ingress (`poller.ts`, `inbound.ts`): a message is acknowledged to Telegram only once its
- *   conversation durably accepted it; a redelivery is a duplicate request, answered once. One whose
- *   admission keeps failing is tried again for 15 minutes, then its sender is told and it is skipped.
+ *   conversation durably accepted it; a redelivery is a duplicate request, answered once, and a
+ *   redelivered command runs once. One whose admission keeps failing is tried again for 15 minutes,
+ *   then its sender is told and it is skipped.
  * - Answers: one per run, whichever messages the run took, delivered by `startAnswerDelivery`
  *   (`@pikit/contracts`) from `agent.submissions`' feed (runtime-pi provides it), with a cursor and
  *   marks in this channel's namespace of `storage.kv` (`storage-kv-sql`). `agent.settled` /
@@ -181,6 +182,7 @@ export default defineComponent({
         delivery: replies,
         conversations: conversations.get(),
         runtime: runtime.get(),
+        store: storage.get().namespace("channel-telegram"),
         ctx: background,
         refused: new Set(),
       };
