@@ -24,6 +24,7 @@ import {
   sqliteStorage,
   testComponents,
 } from "@pikit/pi-adapter/testing";
+import { createLocalExecution } from "@pikit/pi-adapter/node";
 import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
 import runtimePi, { createRuntimePi, DRIVE } from "./index.ts";
@@ -449,10 +450,13 @@ function bashComponent(ran: string[], key = "bash") {
   return defineComponent({ name: "tool-test", setup: (pikit) => pikit.provideKeyed("agent.tool", key, recordingBash(ran)) });
 }
 
+/** An `execution`, as execution-local provides it: an agent naming `bash` needs one to start. Never touched. */
+const execution = defineComponent({ name: "execution-test", setup: (pikit) => pikit.provide("execution", createLocalExecution({ cwd: tmpdir(), env: {} })) });
+
 test("an agent's named tools are the installed agent.tool ones", async () => {
   const ran: string[] = [];
   const { storage, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
-  const { app, ask } = await talk([storage, agents, provider, bashComponent(ran)]);
+  const { app, ask } = await talk([storage, agents, provider, execution, bashComponent(ran)]);
 
   expect(await ask("r1", "bash: ls")).toBe("tool said: ran");
   expect(ran).toEqual(["ls"]);
@@ -463,7 +467,14 @@ test("it refuses to start when an agent names a tool no agent.tool provides", as
   const { storage, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
   const app = await defineApp({ components: [storage, agents, provider, runtimePi], logger: silentLogger }).create();
 
-  expect(await startFailure(app)).toContain('agent "scripted" names the tool "bash", which no agent.tool provides');
+  expect(await startFailure(app)).toContain('agent "scripted" names the tool "bash", which no agent.tool provides: install the component that provides it');
+});
+
+test("it refuses to start when an agent names a coding tool and no execution or workspace is installed", async () => {
+  const { storage, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", tools: ["bash"] })] });
+  const app = await defineApp({ components: [storage, agents, provider, bashComponent([]), runtimePi], logger: silentLogger }).create();
+
+  expect(await startFailure(app)).toContain('agent "scripted" names the tool "bash", which works on files and commands, and no execution is installed: install one');
 });
 
 test("it refuses to start when a tool is provided under another name", async () => {

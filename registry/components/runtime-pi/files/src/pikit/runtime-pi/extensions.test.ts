@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type AgentDefinition, type AgentRuntime, type AgentTool, CONVERSATION, type ConversationRef, defineAgent } from "@pikit/contracts";
 import { defineDoc, defineExtension, defineTool, GenerationTask, hook, section, ToolTask } from "@pikit/pi-adapter/extensions";
+import { createLocalExecution } from "@pikit/pi-adapter/node";
 import { type ModelRequest, recordingBash, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import Type from "typebox";
 import runtimePi from "./index.ts";
@@ -149,7 +150,15 @@ async function start(path: string, components: Parameters<typeof defineApp>[0]["
   };
 }
 
-const bash = (ran: string[]) => defineComponent({ name: "tool-test", setup: (pikit) => pikit.provideKeyed("agent.tool", "bash", recordingBash(ran) as AgentTool) });
+/** A `bash` stand-in that records commands, and an `execution` (never touched): the runtime refuses `bash` without one. */
+const bash = (ran: string[]) =>
+  defineComponent({
+    name: "tool-test",
+    setup(pikit) {
+      pikit.provideKeyed("agent.tool", "bash", recordingBash(ran) as AgentTool);
+      pikit.provide("execution", createLocalExecution({ cwd: tmpdir(), env: {} }));
+    },
+  });
 
 test("an extension's async section reads a conversation document its tool wrote, and its tool runs with the conversation", async () => {
   const provider = recordedProvider();
