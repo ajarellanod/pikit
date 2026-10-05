@@ -88,7 +88,7 @@ const DeclaredCapabilitySchema = Type.Object(
   { additionalProperties: false },
 );
 
-const EnvironmentVariableSchema = Type.Object(
+export const EnvironmentVariableSchema = Type.Object(
   {
     name: Type.String({ pattern: ENV_NAME, description: "UPPER_SNAKE_CASE." }),
     secret: Type.Boolean({ description: "Asked without echo by `pikit configure`, never printed." }),

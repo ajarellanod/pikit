@@ -9,98 +9,129 @@
  * kit. Whether a file is modified is not stored: it is computed by comparing its hash,
  * so it can never go stale. Registries are recorded by what resolves on any machine
  * (`registry-location.ts`).
+ *
+ * Its shape is one typebox schema, `ProjectManifestSchema`, the types derived from it: every read is
+ * checked against it, and a field that does not conform is named by its path in `pikit.json`.
  */
 
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import Type, { type Static } from "typebox";
 import { confinedPath } from "./paths.ts";
-import { type EnvironmentVariable, type Hook } from "../registry/manifest.ts";
+import { EnvironmentVariableSchema, schemaProblems } from "../registry/manifest.ts";
 import { BUILTIN_REGISTRY } from "./registry-location.ts";
 
 export const PIKIT_JSON = "pikit.json";
 
-export interface InstalledComponent {
-  /** A key of `registries`. */
-  registry: string;
-  version: string;
-  /** The registry's Git commit when it was installed; `-dirty` when it had uncommitted changes. */
-  commit?: string;
-  /** Project-relative path → its hash as installed. */
-  files: Record<string, { hash: string }>;
-  /** The npm packages its manifest declared (package → version). */
-  dependencies: Record<string, string>;
-  /** The npm dev dependencies its manifest declared (package → version); absent when it declared none. */
-  devDependencies?: Record<string, string>;
-  /**
-   * The packages of `dependencies` that `add` put in package.json for it: those the project did not
-   * have, and those another installed component had put there (the last of them to go takes them
-   * out). `remove` takes out only these, when nothing else needs them (`ownedDependencies`).
-   */
-  addedDependencies: string[];
-  /** The same for `devDependencies`; absent when it added none. */
-  addedDevDependencies?: string[];
-  /**
-   * Its manifest's `requires.pikit`, `requires.contracts` and `requires.adapter`: the @pikit/core,
-   * @pikit/contracts and @pikit/pi-adapter versions it works with; `contracts` and `adapter` absent
-   * when it does not depend on them.
-   */
-  requires: { pikit: string; contracts?: string; adapter?: string };
-  /** Its manifest's `environment`. */
-  environment: EnvironmentVariable[];
-  /**
-   * Its manifest's `hooks`, by project path: `doctor` is the file whose `doctor` `pikit doctor` calls,
-   * `beforeDeploy` and `afterDeploy` those the deployment's `up` calls before it builds and once the
-   * new version answers (SPEC C8).
-   */
-  hooks?: Partial<Record<Hook, string>>;
-  /**
-   * Its manifest's `generated`, by project path: files a hook rewrites (tool-mcp's `seed.ts`), which are
-   * never the user's edits. Absent when it declared none.
-   */
-  generated?: string[];
-  /**
-   * Its manifest's `apps`: where it went in a project on Cloudflare (SPEC C1). `pikit upgrade` changes
-   * the Worker's App only when a new version says otherwise. Absent when it declared none.
-   */
-  apps?: { worker: string };
-  /**
-   * The components it was installed for, when it was offered rather than asked for (`offers.ts`):
-   * it leaves with the last of them, when nothing else uses it.
-   */
-  installedFor?: string[];
-}
+/** Project-relative path → its hash as installed. */
+const FilesSchema = Type.Record(Type.String(), Type.Object({ hash: Type.String() }, { additionalProperties: false }));
+/** npm package → version. */
+const PackagesSchema = Type.Record(Type.String(), Type.String());
+
+export const InstalledComponentSchema = Type.Object(
+  {
+    /**
+     * The components it was installed for, when it was offered rather than asked for (`offers.ts`):
+     * it leaves with the last of them, when nothing else uses it.
+     */
+    installedFor: Type.Optional(Type.Array(Type.String())),
+    /** A key of `registries`. */
+    registry: Type.String(),
+    version: Type.String(),
+    /** The registry's Git commit when it was installed; `-dirty` when it had uncommitted changes. */
+    commit: Type.Optional(Type.String()),
+    /**
+     * Its manifest's `requires.pikit`, `requires.contracts` and `requires.adapter`: the @pikit/core,
+     * @pikit/contracts and @pikit/pi-adapter versions it works with; `contracts` and `adapter` absent
+     * when it does not depend on them.
+     */
+    requires: Type.Object(
+      { pikit: Type.String(), contracts: Type.Optional(Type.String()), adapter: Type.Optional(Type.String()) },
+      { additionalProperties: false },
+    ),
+    files: FilesSchema,
+    /** The npm packages its manifest declared. */
+    dependencies: PackagesSchema,
+    /** The npm dev dependencies its manifest declared; absent when it declared none. */
+    devDependencies: Type.Optional(PackagesSchema),
+    /**
+     * The packages of `dependencies` that `add` put in package.json for it: those the project did not
+     * have, and those another installed component had put there (the last of them to go takes them
+     * out). `remove` takes out only these, when nothing else needs them (`ownedDependencies`).
+     */
+    addedDependencies: Type.Array(Type.String()),
+    /** The same for `devDependencies`; absent when it added none. */
+    addedDevDependencies: Type.Optional(Type.Array(Type.String())),
+    /** Its manifest's `environment`. */
+    environment: Type.Array(EnvironmentVariableSchema),
+    /**
+     * Its manifest's `hooks`, by project path: `doctor` is the file whose `doctor` `pikit doctor` calls,
+     * `beforeDeploy` and `afterDeploy` those the deployment's `up` calls before it builds and once the
+     * new version answers (SPEC C8).
+     */
+    hooks: Type.Optional(
+      Type.Object(
+        { doctor: Type.Optional(Type.String()), beforeDeploy: Type.Optional(Type.String()), afterDeploy: Type.Optional(Type.String()) },
+        { additionalProperties: false },
+      ),
+    ),
+    /**
+     * Its manifest's `generated`, by project path: files a hook rewrites (tool-mcp's `seed.ts`), which are
+     * never the user's edits. Absent when it declared none.
+     */
+    generated: Type.Optional(Type.Array(Type.String())),
+    /**
+     * Its manifest's `apps`: where it went in a project on Cloudflare (SPEC C1). `pikit upgrade` changes
+     * the Worker's App only when a new version says otherwise. Absent when it declared none.
+     */
+    apps: Type.Optional(Type.Object({ worker: Type.String() }, { additionalProperties: false })),
+  },
+  { additionalProperties: false },
+);
+
+export type InstalledComponent = Static<typeof InstalledComponentSchema>;
 
 /**
  * The dashboard (SPEC §5), when the project has a UI (`pikit new --ui`, `pikit ui on`): the files the
  * registry's `dashboard/files/` wrote in `src/dashboard/`, recorded and kept as bases like a component's,
  * so `pikit upgrade` merges the registry's changes with the user's edits (P6).
  */
-export interface InstalledDashboard {
-  /** A key of `registries`. */
-  registry: string;
-  /** The registry's Git commit when it was written; `-dirty` when it had uncommitted changes. */
-  commit?: string;
-  /** Project-relative path → its hash as written. */
-  files: Record<string, { hash: string }>;
-  /** The components `pikit ui on` installed for it (`admin-api`, …): `pikit ui off` removes them. */
-  components: string[];
-}
+export const InstalledDashboardSchema = Type.Object(
+  {
+    /** A key of `registries`. */
+    registry: Type.String(),
+    /** The registry's Git commit when it was written; `-dirty` when it had uncommitted changes. */
+    commit: Type.Optional(Type.String()),
+    files: FilesSchema,
+    /** The components `pikit ui on` installed for it (`admin-api`, …): `pikit ui off` removes them. */
+    components: Type.Array(Type.String()),
+  },
+  { additionalProperties: false },
+);
 
-export interface ProjectManifest {
-  /** Schema version of `pikit.json`. */
-  version: 1;
-  /**
-   * The kit in `vendor/`: the commit of the pikit checkout it was packed from (`vendor.ts`, `kitCommit`),
-   * `-dirty` when its packages had uncommitted changes. Absent when unknown: made by a CLI not in Git.
-   */
-  kit?: { commit: string };
-  targets: string[];
-  /** Name → location: `builtin`, a path inside the project (`./…`), or an absolute path (`registry-location.ts`). */
-  registries: Record<string, string>;
-  components: Record<string, InstalledComponent>;
-  /** The dashboard's files; absent in a project without a UI. */
-  dashboard?: InstalledDashboard;
-}
+export type InstalledDashboard = Static<typeof InstalledDashboardSchema>;
+
+/** `pikit.json`: what `readProjectManifest` checks every read against, naming each field that does not conform. */
+export const ProjectManifestSchema = Type.Object(
+  {
+    /** Schema version of `pikit.json`. */
+    version: Type.Literal(1),
+    /**
+     * The kit in `vendor/`: the commit of the pikit checkout it was packed from (`vendor.ts`, `kitCommit`),
+     * `-dirty` when its packages had uncommitted changes. Absent when unknown: made by a CLI not in Git.
+     */
+    kit: Type.Optional(Type.Object({ commit: Type.String() }, { additionalProperties: false })),
+    targets: Type.Array(Type.String()),
+    /** Name → location: `builtin`, a path inside the project (`./…`), or an absolute path (`registry-location.ts`). */
+    registries: Type.Record(Type.String(), Type.String()),
+    components: Type.Record(Type.String(), InstalledComponentSchema),
+    /** The dashboard's files; absent in a project without a UI. */
+    dashboard: Type.Optional(InstalledDashboardSchema),
+  },
+  { additionalProperties: false },
+);
+
+export type ProjectManifest = Static<typeof ProjectManifestSchema>;
 
 /** A new project's targets unless `pikit new --target` says otherwise. */
 export const NEW_PROJECT_TARGETS: readonly string[] = ["server"];
@@ -118,9 +149,17 @@ export function readProjectManifest(projectDir: string): ProjectManifest {
   if (!existsSync(path)) {
     throw new Error(`${projectDir} is not a pikit project: there is no ${PIKIT_JSON} (create one with \`pikit new\`)`);
   }
-  const read = JSON.parse(readFileSync(path, "utf8")) as ProjectManifest;
-  if (read.version !== 1) throw new Error(`${PIKIT_JSON} has version ${String((read as { version: unknown }).version)}; this CLI reads version 1`);
-  return read;
+  let read: unknown;
+  try {
+    read = JSON.parse(readFileSync(path, "utf8"));
+  } catch (error) {
+    throw new Error(`${PIKIT_JSON} is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const version = (read as { version?: unknown } | null)?.version;
+  if (version !== 1) throw new Error(`${PIKIT_JSON} has version ${String(version)}; this CLI reads version 1`);
+  const problems = schemaProblems(ProjectManifestSchema, read);
+  if (problems.length > 0) throw new Error(`${PIKIT_JSON} does not have the shape this CLI reads:\n  ${problems.join("\n  ")}`);
+  return read as ProjectManifest;
 }
 
 /** Stable text: components and files sorted, so the file's diff shows only what changed. */
