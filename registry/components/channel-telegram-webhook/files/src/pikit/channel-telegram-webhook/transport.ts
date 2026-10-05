@@ -1,8 +1,7 @@
 /**
- * How this channel sends one piece of an answer (`ChannelTransport`, @pikit/contracts' outbound.ts):
- * what `outbound.queue` calls when it is installed, and what the delivery in `delivery.ts` sends
- * through when it is not. Copied from channel-telegram's `transport.ts` (components never import each
- * other, C6); only the error's prefix changed.
+ * How a Telegram bot sends one piece of a message (`ChannelTransport`, @pikit/contracts'
+ * outbound.ts): what `outbound.queue` calls when it is installed, and what `startAnswerDelivery`
+ * (`index.ts`) sends through when it is not. The channel's own short replies go through it too.
  *
  * - A piece is sent as Telegram HTML (Markdown converted), or as plain text when Telegram cannot
  *   parse the HTML.
@@ -11,6 +10,9 @@
  * - Failures are classified for the queue: a 429 waits Telegram's `retry_after`; no answer (the
  *   network) and a 5xx are transient, and a timeout may have reached Telegram; any other refusal (the
  *   user blocked the bot, the chat is gone, a bad request) is permanent.
+ *
+ * The same file in channel-telegram and channel-telegram-webhook (components never import each
+ * other, C6); the registry's `channel-telegram-webhook/twins.test.ts` keeps the two identical.
  */
 
 import { type ChannelTransport, DeliveryError } from "@pikit/contracts";
@@ -31,7 +33,7 @@ export function createTelegramTransport(api: TelegramApi, instance: string): Cha
     split: (text) => splitMessage(text),
     async send(piece, signal) {
       const chatId = chatIn(instance, piece.conversationKey);
-      if (chatId === undefined) throw new DeliveryError("permanent", `channel-telegram-webhook: "${piece.conversationKey}" is not a conversation of ${instance}`);
+      if (chatId === undefined) throw new DeliveryError("permanent", `"${piece.conversationKey}" is not a conversation of the bot ${instance}`);
       const text = piece.possibleDuplicate ? `${POSSIBLE_DUPLICATE_MARK}${piece.text}` : piece.text;
       try {
         const sent = await sendHtmlOrPlain(api, chatId, text, signal);

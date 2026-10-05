@@ -349,9 +349,11 @@ An update for a bot the object's half does not run is refused (`500`, and an err
 
 ## Where its code comes from
 
-`api.ts`, `format.ts`, `transport.ts` and `account.ts` are copies of `channel-telegram`'s, since
-components never import each other: `api.ts` adds `setWebhook`, `deleteWebhook` and the rest of
-`getWebhookInfo`; `account.ts` adds each bot's webhook secret, password and path. `configure.ts` is
+Components never import each other, so what both Telegram channels need is copied. `format.ts`,
+`format.test.ts` and `transport.ts` are the same files as `channel-telegram`'s, and a repository
+test (`twins.test.ts`, beside `files/`) keeps them identical. `api.ts` and `account.ts` are copies
+extended: `api.ts` adds `setWebhook`, `deleteWebhook` and the rest of `getWebhookInfo`;
+`account.ts` adds each bot's webhook secret, password and path. `configure.ts` is
 `channel-telegram`'s step with the webhook's secret and an existing webhook added. The delivery follows
 the Cloudflare spike that ran in production (September 2026).
 
@@ -384,7 +386,7 @@ secret: no bot, token or network needed. Only tests import it.
   messages the bot, a bot that already has a webhook, the same without a terminal, and the password:
   offered on a first setup, checked and saved.
 - `deploy.test.ts` covers `afterDeploy`: every bot's webhook set and checked, and what it reports.
-- `format.test.ts` is `channel-telegram`'s, for the copied `format.ts`.
+- `format.test.ts` is `channel-telegram`'s, for the shared `format.ts`.
 
 `component.json` is generated from `setup` by `pikit registry generate`, from both halves; "what
 setup declares" pins them in the tests.
