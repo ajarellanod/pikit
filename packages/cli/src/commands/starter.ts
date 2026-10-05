@@ -259,12 +259,12 @@ export function readme(name: string, components: string[], target = "server"): s
   const run =
     target === "durable"
       ? `pikit configure   # the variables in .env.example (they go up as the Worker's secrets), and a model API key
-pikit doctor      # the component graph; green when everything is provided and configured
-pikit dev         # run it here in workerd (wrangler dev), reloading on change
+pikit doctor      # the component graph; green when everything is provided and its variables are set
+pikit dev         # run it here in workerd (wrangler dev), reloading on change, once the model's API key is in .env
 pikit up          # or deploy it to Cloudflare (deployment-cloudflare): then pikit status, logs`
       : `pikit configure   # the variables in .env.example, and a model login or API key
-pikit doctor      # the component graph; green when everything is provided and configured
-pikit dev         # run it here, reloading on change
+pikit doctor      # the component graph; green when everything is provided and its variables are set
+pikit dev         # run it here, reloading on change; its model login is this machine's: pikit configure --login <provider> --local
 pikit up          # or run it in Docker (deployment-docker): then pikit status, logs, down`;
   const composition =
     target === "durable"
