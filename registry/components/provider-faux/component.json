@@ -2,7 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "provider-faux",
   "version": "0.0.0",
-  "description": "A fake model for tests only: an agent naming `faux/echo` gets `faux: <your message>` at once, with no network, key or cost.",
+  "description": "Fake models for tests only, with no network, key or cost: `faux/echo` answers `faux: <your message>`; `faux/scripted` calls a tool when told `call: <tool> <json>` and shows the system prompt it got (`echo-system`).",
   "targets": [
     "server",
     "durable"

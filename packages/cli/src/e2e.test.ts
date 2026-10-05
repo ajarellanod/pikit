@@ -13,7 +13,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { setConfigEntry } from "./project/config-file.ts";
@@ -95,9 +95,19 @@ test.skipIf(!E2E)(
     expect(doctor.err).toContain("PIKIT_HTTP_TOKEN is not set");
     expect(doctor.err).not.toContain("✗");
 
+    // A registry of the project's own is left out of `bun test` and `tsc` from the start: there, a
+    // failing test and a type error change nothing.
+    const local = join(project, "registry", "components", "tool-mine", "files", "src", "pikit", "tool-mine");
+    mkdirSync(local, { recursive: true });
+    writeFileSync(join(local, "tool-mine.test.ts"), 'import { test } from "bun:test";\ntest("never runs", () => { throw new Error("ran"); });\n');
+    writeFileSync(join(local, "index.ts"), "export const wrong: number = 'a string';\n");
     const tests = await sh([process.execPath, "test"]);
     expect(tests.code).toBe(0);
+    expect(tests.err).not.toContain("never runs");
+    // The installed components come with their READMEs.
+    expect(readFileSync(join(project, "src", "pikit", "channel-http", "README.md"), "utf8")).toStartWith("# channel-http");
     expect((await sh([process.execPath, "run", "typecheck"])).code).toBe(0);
+    rmSync(join(project, "registry"), { recursive: true });
   },
   TIMEOUT,
 );

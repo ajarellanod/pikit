@@ -212,10 +212,22 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
 });
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {
-  for (const target of ["package.json", "./Package.JSON", "pikit.json", "pikit.config.ts", "bun.lock", ".env", ".env.example", ".git", ".git/config", "vendor/x.tgz", "pikit-bases/0a1b", "node_modules/a/index.js", ".pikit/sessions/a.jsonl", "tsconfig.json", "README.md", "readme.md", "src/agents", "src/agents/assistant/agent.ts", "src/extensions", "src/extensions/permission-gate.ts"]) {
+  for (const target of ["package.json", "./Package.JSON", "pikit.json", "pikit.config.ts", "bun.lock", ".env", ".env.example", ".git", ".git/config", "vendor/x.tgz", "pikit-bases/0a1b", "node_modules/a/index.js", ".pikit/sessions/a.jsonl", "tsconfig.json", "bunfig.toml", "README.md", "readme.md", "src/agents", "src/agents/assistant/agent.ts", "src/extensions", "src/extensions/permission-gate.ts"]) {
     expect(isProtected(target)).toBe(true);
   }
   for (const target of ["Dockerfile", "compose.yaml", ".dockerignore", ".gitignore", "src/pikit/x/package.json", "src/vendor/x.ts", "vendored.txt", ".env.production", "src/agents.ts", "src/agents-old/x.ts", "docs/README.md"]) {
     expect(isProtected(target)).toBe(false);
   }
+});
+
+test("a component installs its README beside its code, as src/pikit/<name>/README.md", () => {
+  const files = openRegistry(DEFAULT_REGISTRY).files("tool-read");
+  expect(files.get("src/pikit/tool-read/README.md")).toBe(join(DEFAULT_REGISTRY, "components", "tool-read", "README.md"));
+  expect(files.get("src/pikit/tool-read/index.ts")).toBeDefined();
+  // A component without a README installs none.
+  const root = registry({ "tool-bare": undefined }, {});
+  const own = join(root, "components", "tool-bare", "files", "src", "pikit", "tool-bare");
+  mkdirSync(own, { recursive: true });
+  writeFileSync(join(own, "index.ts"), "export default {};\n");
+  expect([...openRegistry(root).files("tool-bare").keys()]).toEqual(["src/pikit/tool-bare/index.ts"]);
 });

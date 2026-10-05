@@ -8,6 +8,7 @@
 - workerd lane: `evictDurableObject` hangs while an alarm event is still driving a run, and `abortAllDurableObjects()` during an in-flight event crashes the Vitest pool. To evict mid-run, fake `Date` a day ahead (alarms then do not fire on their own), fire each alarm with `runDurableObjectAlarm`, and evict between two alarms.
 - The docs and comments write `"typing…"` with U+2026 inside the quotes: an edit's oldText that crosses such a line must copy it exactly (it never ends at `"typing`); for a long header with one, replace by indices in `js_exec` instead.
 - In an edit's oldText/newText, write non-ASCII characters literally (`§`, `⭐`, `…`), never as `\u00a7`-style escapes: an escape matches nothing (or lands literally in the file), and a garbled oldText can still match a nearby span loosely and replace it. After any surprising "replaced", reread the block.
+- In edit-tool text, write non-ASCII characters (`…`, `→`) literally, never as a doubly escaped `\\u2026`: that lands in the file as the six characters `\u2026`. After editing docs, `rg 'u20[0-9a-f]{2}'` the files.
 - pikit is unreleased: never add backward compatibility (aliases, old-format readers, migrations from earlier schemas, "start fresh" handling for old data). Rename and change freely; only provider names (Cloudflare, Docker…) stay as they are, because that is where it deploys.
 
 # Downloaded references

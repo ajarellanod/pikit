@@ -253,12 +253,12 @@ export const ManifestSchema = Type.Object(
       }),
     ),
     dependencies: Type.Record(Type.String(), Type.String({ minLength: 1 }), {
-      description: "Exactly the npm packages its files import, pinned (package → version).",
+      description: "Exactly the npm packages its shipped files import (its tests aside), pinned (package → version).",
     }),
     devDependencies: Type.Optional(
       Type.Record(Type.String(), Type.String({ pattern: SEMVER }), {
         description:
-          "The npm packages the project needs to develop and deploy with it, which its files do not import (a tool it runs: deployment-cloudflare's `wrangler`), pinned to an exact version (package → version). `pikit add` puts them in the project's package.json devDependencies; `pikit remove` takes out those no other installed component declares. Never a package of `dependencies`, nor a kit package (`@pikit/*`).",
+          "The npm packages only its tests import (`@pikit/pi-adapter` for `@pikit/pi-adapter/testing`), and the tools the project needs to develop and deploy with it (deployment-cloudflare's `wrangler`), pinned to an exact version (package → version). `pikit add` puts them in the project's package.json devDependencies (a kit package in dependencies, with the kit); `pikit remove` takes out those no other installed component declares. Never a package of `dependencies`, nor `@pikit/core`; a kit package here needs no range in `requires`.",
       }),
     ),
     files: Type.Array(

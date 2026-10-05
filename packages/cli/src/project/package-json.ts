@@ -28,6 +28,20 @@ export function writePackageJson(projectDir: string, pkg: PackageJson): void {
 }
 
 /**
+ * Where a component's npm packages go in the project's `package.json`: its `dependencies` in
+ * `dependencies`, its `devDependencies` (what only its tests import, the tools it runs) in
+ * `devDependencies`, except a kit package its tests import, which goes with the kit in `dependencies`
+ * (where `refreshKit` repoints every kit package).
+ */
+export function projectDependencies(manifest: { dependencies: Record<string, string>; devDependencies?: Record<string, string> | undefined }): Record<DependencyField, Record<string, string>> {
+  const dev = Object.entries(manifest.devDependencies ?? {});
+  return {
+    dependencies: { ...manifest.dependencies, ...Object.fromEntries(dev.filter(([name]) => isKitPackage(name))) },
+    devDependencies: Object.fromEntries(dev.filter(([name]) => !isKitPackage(name))),
+  };
+}
+
+/**
  * Adds the component's dependencies (or dev dependencies) that the project lacks, sorted like `bun
  * add` sorts them. A package the project already depends on keeps its version, and a different one
  * is reported: the project's pin wins, and the user decides. A dev dependency the project has as a

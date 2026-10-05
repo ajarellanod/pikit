@@ -10,7 +10,8 @@
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies
  *      and dev dependencies, environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
- *   6. write its files; refuse to overwrite a file that differs without `--force`. A reinstall
+ *   6. write its files, and its README as `src/pikit/<name>/README.md` (`registry.files`); refuse to
+ *      overwrite a file that differs without `--force`. A reinstall
  *      (`--force`) overwrites the user's edits (`pikit upgrade` merges them instead), and deletes the
  *      files the installed version wrote that this one no longer ships, unless the user modified one:
  *      that one is kept, named, and stays recorded as the component's, so `pikit remove` asks for
@@ -41,7 +42,15 @@ import { APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../proje
 import { BASES_DIR, basePath, unreferencedBases } from "../project/bases.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
 import { ENV_EXAMPLE, exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
-import { addDependencies, type DependencyField, readPackageJson, removeDependencies, updateDependencies, writePackageJson } from "../project/package-json.ts";
+import {
+  addDependencies,
+  type DependencyField,
+  projectDependencies,
+  readPackageJson,
+  removeDependencies,
+  updateDependencies,
+  writePackageJson,
+} from "../project/package-json.ts";
 import {
   hashFile,
   type InstalledComponent,
@@ -545,9 +554,10 @@ export function applyPlans(projectDir: string, draft: Draft, plans: readonly Pla
       const moved = updateDependencies(pkg, plan.previous?.[field] ?? {}, record[field] ?? {}, owned, field);
       dependenciesChanged ||= removed.length > 0 || moved.length > 0;
     }
-    const { added, conflicts } = addDependencies(projectDir, pkg, plan.manifest.dependencies);
+    const wanted = projectDependencies(plan.manifest);
+    const { added, conflicts } = addDependencies(projectDir, pkg, wanted.dependencies);
     for (const conflict of conflicts) log.warn(`dependency kept as the project has it: ${conflict}`);
-    const dev = addDependencies(projectDir, pkg, plan.manifest.devDependencies ?? {}, "devDependencies");
+    const dev = addDependencies(projectDir, pkg, wanted.devDependencies, "devDependencies");
     for (const conflict of dev.conflicts) log.warn(`dev dependency kept as the project has it: ${conflict}`);
     dependenciesChanged ||= added.length > 0 || dev.added.length > 0;
     // Only what it added is its to take out on `remove`: a package the project had is the project's.

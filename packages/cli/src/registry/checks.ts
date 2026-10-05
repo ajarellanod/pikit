@@ -57,9 +57,11 @@ function meaningful(range: string | undefined): range is string {
 
 /**
  * The kit ranges of `manifest` against `versions`, the same for `registry validate` and `pikit add`:
- * `missing`, a range it must state and does not (it depends on @pikit/contracts or @pikit/pi-adapter,
- * in `dependencies` or `devDependencies`, without a meaningful `requires.contracts` or
- * `requires.adapter`), which nothing may skip; `refused`, a stated range the version is outside of.
+ * `missing`, a range it must state and does not (its `dependencies` list @pikit/contracts or
+ * @pikit/pi-adapter without a meaningful `requires.contracts` or `requires.adapter`), which nothing
+ * may skip; `refused`, a stated range the version is outside of. A kit package only its tests import
+ * (`devDependencies`) needs no range: the component runs without it, and its tests run on the
+ * project's kit.
  */
 export function kitRangeProblems(
   manifest: Manifest,
@@ -70,10 +72,9 @@ export function kitRangeProblems(
   const requires = manifest.requires as Record<string, unknown>;
   for (const [field, pkg] of KIT_RANGES) {
     const range = typeof requires[field] === "string" ? (requires[field] as string) : undefined;
-    const listedIn = (["dependencies", "devDependencies"] as const).find((deps) => pkg in (manifest[deps] ?? {}));
-    if (field !== "pikit" && listedIn !== undefined && !meaningful(range)) {
+    if (field !== "pikit" && pkg in manifest.dependencies && !meaningful(range)) {
       const what = range === undefined ? "does not say" : `("${range}") does not say`;
-      missing.push(`${listedIn} lists ${pkg}, but requires.${field} ${what} which versions it works with (a semver range, as requires.pikit)`);
+      missing.push(`dependencies lists ${pkg}, but requires.${field} ${what} which versions it works with (a semver range, as requires.pikit)`);
     } else if (range !== undefined && !Bun.semver.satisfies(versions[pkg], range)) {
       refused.push({ field, pkg, range, version: versions[pkg] });
     }
@@ -153,8 +154,10 @@ export function checkLayout(componentDir: string, name: string): string[] {
 
 export interface ImportScan {
   problems: string[];
-  /** npm packages the files import, excluding the kit itself. */
+  /** npm packages the shipped files import (tests aside), excluding the kit itself: its `dependencies`. */
   packages: Set<string>;
+  /** npm packages only its tests and test support import: its `dependencies` or `devDependencies`. */
+  testPackages: Set<string>;
 }
 
 /**
@@ -164,6 +167,7 @@ export interface ImportScan {
 export function checkImports(componentDir: string, name: string, targets: readonly string[]): ImportScan {
   const problems: string[] = [];
   const packages = new Set<string>();
+  const testPackages = new Set<string>();
   const filesDir = join(componentDir, "files");
   const serverOnly = targets.length === 1 && targets[0] === "server";
   const durableOnly = targets.length === 1 && targets[0] === "durable";
@@ -209,10 +213,11 @@ export function checkImports(componentDir: string, name: string, targets: readon
         problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: a server-only kit export needs targets ["server"] (SPEC §4)`);
       }
       const pkg = packageName(specifier);
-      if (!KIT_PACKAGES.has(pkg)) packages.add(pkg);
+      if (!KIT_PACKAGES.has(pkg)) (forTests(file) ? testPackages : packages).add(pkg);
     }
   }
-  return { problems, packages };
+  for (const pkg of packages) testPackages.delete(pkg);
+  return { problems, packages, testPackages };
 }
 
 /**
@@ -230,28 +235,39 @@ export function checkCapabilities(manifest: Manifest, catalogue: RegistryCatalog
     );
 }
 
-/** `dependencies` lists exactly the npm packages the files import. */
-export function checkDependencies(declared: Record<string, string>, imported: Set<string>): string[] {
+/**
+ * `dependencies` lists exactly the npm packages its shipped files import, and `devDependencies` every
+ * package only its tests import (`scan.testPackages`): a test's import never makes a runtime
+ * dependency, nor a range in `requires`.
+ */
+export function checkDependencies(manifest: Manifest, scan: Pick<ImportScan, "packages" | "testPackages">): string[] {
   const problems: string[] = [];
-  for (const pkg of [...imported].sort()) {
+  const declared = manifest.dependencies;
+  const dev = manifest.devDependencies ?? {};
+  for (const pkg of [...scan.packages].sort()) {
     if (!(pkg in declared)) problems.push(`files import "${pkg}", which dependencies does not list`);
   }
+  for (const pkg of [...scan.testPackages].sort()) {
+    if (!(pkg in dev)) problems.push(`only its tests import "${pkg}": list it in devDependencies${pkg in declared ? ", not dependencies" : ""}`);
+  }
   for (const pkg of Object.keys(declared).sort()) {
-    if (!imported.has(pkg)) problems.push(`dependencies lists "${pkg}", which no file imports`);
+    if (!scan.packages.has(pkg) && !scan.testPackages.has(pkg)) problems.push(`dependencies lists "${pkg}", which no file imports`);
   }
   return problems;
 }
 
 /**
- * `devDependencies` are the tools a component needs besides what its files import: a package its files
- * import is a dependency (`checkDependencies`), so none is in both; and the kit is never one, it comes
- * with `requires.pikit` and `dependencies`.
+ * `devDependencies` are what only its tests import, and the tools it runs (deployment-cloudflare's
+ * `wrangler`): never a package its shipped files import (a dependency, `checkDependencies`), so none is
+ * in both; and never `@pikit/core`, which comes with `requires.pikit`.
  */
 export function checkDevDependencies(manifest: Manifest): string[] {
   const problems: string[] = [];
   for (const pkg of Object.keys(manifest.devDependencies ?? {}).sort()) {
-    if (pkg in manifest.dependencies) problems.push(`"${pkg}" is in both dependencies and devDependencies: a package its files import is a dependency`);
-    if (pkg.startsWith("@pikit/")) problems.push(`devDependencies lists the kit package "${pkg}": the kit comes with requires.pikit and dependencies`);
+    if (pkg in manifest.dependencies) problems.push(`"${pkg}" is in both dependencies and devDependencies: a package its shipped files import is a dependency`);
+    if (pkg.startsWith("@pikit/") && !KIT_RANGES.some(([field, kit]) => field !== "pikit" && kit === pkg)) {
+      problems.push(`devDependencies lists the kit package "${pkg}": the core comes with requires.pikit`);
+    }
   }
   return problems;
 }

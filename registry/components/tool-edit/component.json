@@ -9,7 +9,6 @@
   ],
   "requires": {
     "pikit": "0.0.0",
-    "contracts": "0.0.0",
     "adapter": "0.0.0",
     "capabilities": [
       "execution"
@@ -29,8 +28,10 @@
     }
   },
   "dependencies": {
-    "@pikit/contracts": "0.0.0",
     "@pikit/pi-adapter": "0.0.0"
+  },
+  "devDependencies": {
+    "@pikit/contracts": "0.0.0"
   },
   "files": [
     {

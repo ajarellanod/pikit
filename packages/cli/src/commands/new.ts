@@ -118,6 +118,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     const kit = vendorKit(projectDir);
     write("package.json", starter.packageJson(name, kit));
     write("tsconfig.json", starter.tsconfig());
+    write("bunfig.toml", starter.BUNFIG);
     write(".gitignore", starter.gitignore(target));
     write("README.md", starter.readme(name, components, target));
     write(CONFIG_FILE, starter.configFile(target));

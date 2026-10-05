@@ -9,7 +9,7 @@ import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { unneededDependencies } from "../commands/remove.ts";
-import { addDependencies, type PackageJson, removeDependencies } from "./package-json.ts";
+import { addDependencies, type PackageJson, projectDependencies, removeDependencies } from "./package-json.ts";
 import { emptyManifest, type InstalledComponent } from "./pikit-json.ts";
 
 const dirs: string[] = [];
@@ -24,6 +24,15 @@ const starter = (): PackageJson => ({
   name: "p",
   dependencies: { "@pikit/core": "file:vendor/pikit-core.tgz" },
   devDependencies: { "@types/bun": "1.4.2", typescript: "7.0.2" },
+});
+
+test("a kit package only a component's tests import goes with the kit, in dependencies; other dev dependencies stay dev", () => {
+  const manifest = { dependencies: { typebox: "1.3.27" }, devDependencies: { "@pikit/pi-adapter": "0.0.0", wrangler: "4.143.0" } };
+  expect(projectDependencies(manifest)).toEqual({
+    dependencies: { typebox: "1.3.27", "@pikit/pi-adapter": "0.0.0" },
+    devDependencies: { wrangler: "4.143.0" },
+  });
+  expect(projectDependencies({ dependencies: {} })).toEqual({ dependencies: {}, devDependencies: {} });
 });
 
 test("dev dependencies are added to devDependencies, sorted, and dependencies are left alone", () => {

@@ -6,7 +6,9 @@
  * 2. The other variables the installed components declare (`environment` in their manifests),
  *    written to `.env` with mode 0600. A secret is asked without echo; a required `*_TOKEN` can be
  *    generated.
- * 3. Model credentials, for each installed model provider that has none: a login through pi-ai's
+ * 3. Model credentials, for each model provider an agent names in its `model` that has none (an
+ *    installed provider no agent uses is skipped, and so is the deployment when nothing is missing
+ *    here): a login through pi-ai's
  *    own flow, stored by the project's `model.credentials` component (`credentials-file`), or an
  *    API key in `.env`. The login runs where the app will run: through the deployment's `exec` for
  *    `pikit up` (in Docker, its volume), or on this machine for `pikit dev`. Each place keeps its
@@ -23,7 +25,7 @@ import { type ComponentConfigureResult, componentsWithSteps } from "../project/c
 import { type AppExec, deploymentExec } from "../project/deployment-module.ts";
 import { ENV_FILE, readEnv, writeEnv } from "../project/env-file.ts";
 import type { CredentialsResult } from "../project/credentials.ts";
-import { apiKeyName, checkModelCredentials } from "../project/model-credentials.ts";
+import { apiKeyName, checkModelCredentials, providersInUse } from "../project/model-credentials.ts";
 import { readProjectManifest } from "../project/pikit-json.ts";
 import { runScript, runScriptInApp } from "../project/run.ts";
 import { ask, askSecret, beginGuided, Cancelled, CliError, choose, isInteractive, log } from "../ui.ts";
@@ -137,12 +139,14 @@ async function configureModels(
   interactive: boolean,
   variables: EnvironmentVariable[],
 ): Promise<string[]> {
-  const here = await checkModelCredentials(projectDir);
+  const used = await providersInUse(projectDir);
+  const here = await checkModelCredentials(projectDir, undefined, used);
   const ids = Object.keys(here.providers);
+  for (const id of here.unused) log.info(`  model provider ${id}: no agent uses it, so it needs no credentials`);
   const exec = options.local === true ? undefined : await deploymentExec(projectDir);
 
   if (options.login !== undefined) {
-    if (!ids.includes(options.login)) throw new CliError(`no installed component provides the model provider "${options.login}"`);
+    if (!ids.includes(options.login) && !here.unused.includes(options.login)) throw new CliError(`no installed component provides the model provider "${options.login}"`);
     await login(projectDir, options.login, here.store, exec, options.loginMethod);
     return ids.filter((id) => here.providers[id] !== true && id !== options.login);
   }
@@ -153,12 +157,11 @@ async function configureModels(
   if (lacking.length > 0 && exec !== undefined) {
     log.step("checking the model credentials where the app runs (`pikit up`); the first time, its image is built (about a minute)");
     try {
-      there = (await checkModelCredentials(projectDir, exec)).providers;
+      there = (await checkModelCredentials(projectDir, exec, used)).providers;
     } catch (error) {
-      // Docker's own message (not running, no permission) is already on the terminal, above.
-      log.warn(
-        `could not run a command where the app runs (${error instanceof Error ? error.message : String(error)}). A login now would be for \`pikit dev\` only; to log in for \`pikit up\`, fix what the deployment reported above and run \`pikit configure\` again`,
-      );
+      // The deployment's own message (Docker not running, no permission) is on the terminal, above: one line here.
+      const why = (error instanceof Error ? error.message : String(error)).split("\n")[0];
+      log.warn(`the deployment could not run a command where the app runs (${why}): a login now is for \`pikit dev\` only; run \`pikit configure\` again once it can`);
     }
   }
   for (const id of ids) {

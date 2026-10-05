@@ -1,16 +1,18 @@
 import { afterAll, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { checkManifest, kitRangeProblems } from "./checks.ts";
-import { checkSchemaFiles } from "./commands.ts";
+import { checkSchemaFiles, generateCommand } from "./commands.ts";
 import { COMPONENT_SCHEMA_FILE, ManifestSchema, readManifest, schemaProblems } from "./manifest.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 const toolBash = () => readManifest(join(DEFAULT_REGISTRY, "components", "tool-bash")) as Record<string, unknown>;
+/** A component whose shipped files import both the contracts and the adapter. */
+const toolMcp = () => readManifest(join(DEFAULT_REGISTRY, "components", "tool-mcp")) as { requires: Record<string, unknown>; dependencies: Record<string, string> };
 
 test("every component.json of the repository conforms to the schema and names it", () => {
   const manifest = toolBash();
@@ -32,38 +34,52 @@ test("validate knows when the registry's JSON Schemas are missing or stale", () 
   expect(checkSchemaFiles(root)).toEqual([]);
   const file = join(root, COMPONENT_SCHEMA_FILE);
   writeFileSync(file, readFileSync(file, "utf8").replace('"pikit component.json"', '"edited by hand"'));
-  expect(checkSchemaFiles(root)).toEqual([`${COMPONENT_SCHEMA_FILE} is missing or out of date: run \`bun run registry generate\``]);
+  // Not this repository's registry: the command is the CLI's, with the registry's path.
+  expect(checkSchemaFiles(root)).toEqual([`${COMPONENT_SCHEMA_FILE} is missing or out of date: run \`pikit registry generate ${relative(process.cwd(), root)}\``]);
   rmSync(join(root, "schema"), { recursive: true });
   expect(checkSchemaFiles(root)).toHaveLength(2);
 });
 
+test("what validate says to run: this repository's script for its registry, the CLI with the path for a project's", () => {
+  expect(generateCommand(DEFAULT_REGISTRY)).toBe("bun run registry generate");
+  expect(generateCommand(join(process.cwd(), "registry", "..", "my-project", "registry"))).toBe(`pikit registry generate ${join("my-project", "registry")}`);
+  expect(generateCommand(process.cwd())).toBe("pikit registry generate .");
+});
+
 test("requires.contracts must accept this repository's @pikit/contracts, and a component that depends on them says which", () => {
-  const manifest = toolBash() as { requires: Record<string, unknown>; dependencies: Record<string, string> };
-  const dir = join(DEFAULT_REGISTRY, "components", "tool-bash");
+  const manifest = toolMcp();
+  const dir = join(DEFAULT_REGISTRY, "components", "tool-mcp");
   expect(manifest.dependencies["@pikit/contracts"]).toBeDefined();
-  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([]);
-  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.1.0", "0.0.0")).toEqual([
+  expect(checkManifest(manifest, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([]);
+  expect(checkManifest(manifest, dir, "tool-mcp", "0.0.0", "0.1.0", "0.0.0")).toEqual([
     `requires.contracts "${String(manifest.requires.contracts)}" does not accept this repository's @pikit/contracts 0.1.0`,
   ]);
   const { contracts: _, ...requires } = manifest.requires;
-  expect(checkManifest({ ...manifest, requires }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
+  expect(checkManifest({ ...manifest, requires }, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([
     "dependencies lists @pikit/contracts, but requires.contracts does not say which versions it works with (a semver range, as requires.pikit)",
+  ]);
+  // Only its tests import it (devDependencies): no range is needed; one stated is still checked.
+  const { "@pikit/contracts": contracts, ...dependencies } = manifest.dependencies;
+  const forTests = { ...manifest, requires, dependencies, devDependencies: { "@pikit/contracts": contracts } };
+  expect(checkManifest(forTests, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([]);
+  expect(checkManifest({ ...forTests, requires: { ...requires, contracts: "0.0.0" } }, dir, "tool-mcp", "0.0.0", "0.1.0", "0.0.0")).toEqual([
+    `requires.contracts "0.0.0" does not accept this repository's @pikit/contracts 0.1.0`,
   ]);
 });
 
 test("requires.adapter must accept this repository's @pikit/pi-adapter, and a component that depends on it states a meaningful range", () => {
-  const manifest = toolBash() as { requires: Record<string, unknown>; dependencies: Record<string, string> };
-  const dir = join(DEFAULT_REGISTRY, "components", "tool-bash");
+  const manifest = toolMcp();
+  const dir = join(DEFAULT_REGISTRY, "components", "tool-mcp");
   expect(manifest.dependencies["@pikit/pi-adapter"]).toBeDefined();
-  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.0.0", "0.1.0")).toEqual([
+  expect(checkManifest(manifest, dir, "tool-mcp", "0.0.0", "0.0.0", "0.1.0")).toEqual([
     `requires.adapter "${String(manifest.requires.adapter)}" does not accept this repository's @pikit/pi-adapter 0.1.0`,
   ]);
   const { adapter: _, ...requires } = manifest.requires;
-  expect(checkManifest({ ...manifest, requires }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
+  expect(checkManifest({ ...manifest, requires }, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([
     "dependencies lists @pikit/pi-adapter, but requires.adapter does not say which versions it works with (a semver range, as requires.pikit)",
   ]);
   // A wildcard says nothing either.
-  expect(checkManifest({ ...manifest, requires: { ...requires, adapter: "*" } }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
+  expect(checkManifest({ ...manifest, requires: { ...requires, adapter: "*" } }, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([
     'dependencies lists @pikit/pi-adapter, but requires.adapter ("*") does not say which versions it works with (a semver range, as requires.pikit)',
   ]);
 });

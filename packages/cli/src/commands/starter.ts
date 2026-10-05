@@ -5,7 +5,11 @@
  *
  * - `pikit.config.ts`, the composition root, listing the project's agents;
  * - one agent, `assistant` (`src/agents/assistant/agent.ts`), provided by `src/extensions/agents.ts`;
- * - `package.json`, `tsconfig.json`, `.gitignore`, a README;
+ * - `package.json`, `tsconfig.json`, `bunfig.toml`, `.gitignore`, a README. A project may keep a
+ *   registry of its own components in `registry/` (`pikit add <name> --registry registry` installs
+ *   from it): `tsc` and `bun test` leave that folder out from the start, since the installed copy in
+ *   `src/pikit/` is the one checked (two copies of one contract file that differ fail `tsc`, TS2717,
+ *   and every test would run twice);
  * - the kit's skills for AI agents, `.agents/skills/` (`skillFiles`): how to write a component and an
  *   agent extension.
  *   They are the kit's, not a component's: no capability, nothing that runs, and every project gets
@@ -80,10 +84,19 @@ export function packageJson(name: string, kit: Record<string, string>): string {
   return `${JSON.stringify(pkg, null, 2)}\n`;
 }
 
+/** Where a project keeps a registry of its own components; `tsc` and `bun test` leave it out. */
+export const PROJECT_REGISTRY = "registry";
+
+/** The kit's compiler options (the same `lib` the components are checked with). */
 export function tsconfig(): string {
   const base = JSON.parse(readFileSync(join(PIKIT_ROOT, "tsconfig.base.json"), "utf8")) as { compilerOptions: unknown };
-  return `${JSON.stringify({ compilerOptions: base.compilerOptions, exclude: ["node_modules", "vendor", ".pikit"] }, null, 2)}\n`;
+  return `${JSON.stringify({ compilerOptions: base.compilerOptions, exclude: ["node_modules", "vendor", ".pikit", PROJECT_REGISTRY] }, null, 2)}\n`;
 }
+
+export const BUNFIG = `[test]
+# ${PROJECT_REGISTRY}/ holds the source of your own components; their installed copies in src/pikit/ are the ones tested.
+pathIgnorePatterns = ["${PROJECT_REGISTRY}/**"]
+`;
 
 export const GITIGNORE = `node_modules/
 # Secrets: pikit configure writes them here (mode 0600). Never committed, never in an image.
@@ -267,7 +280,8 @@ read, edit and remove.
 | \`pikit.config.ts\` | ${composition} |
 | \`src/agents/\` | your agents (\`assistant\`) |
 | \`src/extensions/\` | your own components (\`agents.ts\`) |
-| \`src/pikit/<component>/\` | installed components, with their tests and a README |
+| \`src/pikit/<component>/\` | installed components, each with its README and its tests |
+| \`registry/\` | if you make one: your own components, to \`pikit add <name> --registry registry\` (\`tsc\` and \`bun test\` skip it and check the installed copy) |
 | \`pikit.json\` | what \`pikit add\` installed: registry, version, commit, and each file's hash |
 | \`.agents/skills/\` | skills for your AI agent: how to write a component (\`pikit-component\`) and an agent extension (\`pikit-extension\`) for this project |
 | \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\` and \`@pikit/pi-adapter\`, until they are on npm |

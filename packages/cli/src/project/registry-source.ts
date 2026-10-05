@@ -52,7 +52,10 @@ export interface Registry {
    * With `targets`, only the components that run on all of them are answers.
    */
   slots(name: string, targets?: readonly string[]): PresetSlot[];
-  /** Every file a component installs: project-relative target → absolute source. */
+  /**
+   * Every file a component installs: project-relative target → absolute source. Its README
+   * (`README.md` at its root) goes beside its code, as `src/pikit/<name>/README.md`.
+   */
   files(name: string): Map<string, string>;
 }
 
@@ -161,6 +164,10 @@ export function openRegistry(path: string): Registry {
           files.set(posix.normalize(target.replaceAll("\\", "/")), from);
         }
       }
+      // Its README, beside its code: what the project's AI agent reads to use it, or to write the next one.
+      const readme = confinedPath(componentDir, "README.md");
+      const installed = `src/pikit/${name}/README.md`;
+      if (existsSync(readme) && statSync(readme).isFile() && !files.has(installed)) files.set(installed, readme);
       return files;
     },
   };
@@ -170,10 +177,11 @@ export function openRegistry(path: string): Registry {
  * The project's own records, which no component may write, whatever `--force` says: what the CLI and
  * Bun keep (`pikit.json`, `package.json`, the lockfile, `pikit.config.ts`, `.env.example`, `vendor/`,
  * `pikit-bases/`, `node_modules/`), the app's secrets and state (`.env`, `.pikit/`) and Git's (`.git`);
- * and the project's own part, which no registry has (starter.ts): its `tsconfig.json`, its README,
+ * and the project's own part, which no registry has (starter.ts): its `tsconfig.json` and
+ * `bunfig.toml`, its README,
  * its agents (`src/agents/`) and its own components (`src/extensions/`).
  */
-const PROTECTED_FILES = [PIKIT_JSON, "package.json", "bun.lock", "bun.lockb", CONFIG_FILE, ENV_FILE, ENV_EXAMPLE, "tsconfig.json", "README.md", ".pikit-operation-unfinished", ".pikit-new-unfinished"];
+const PROTECTED_FILES = [PIKIT_JSON, "package.json", "bun.lock", "bun.lockb", CONFIG_FILE, ENV_FILE, ENV_EXAMPLE, "tsconfig.json", "bunfig.toml", "README.md", ".pikit-operation-unfinished", ".pikit-new-unfinished"];
 const PROTECTED_DIRS = [".git", VENDOR_DIR, BASES_DIR, "node_modules", ".pikit", "src/agents", "src/extensions"];
 const PROTECTED = [...PROTECTED_FILES, ...PROTECTED_DIRS.map((dir) => `${dir}/`)].join(", ");
 

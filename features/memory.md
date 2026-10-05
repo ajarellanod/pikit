@@ -72,13 +72,15 @@ through runtime-pi in a real App, the shape of your project test); `src/pikit/ma
 
 ### 0. Prepare the project
 ```sh
-pikit add mailbox-local          # server only: actor.mailbox and actor.inbox (on Cloudflare, platform-cloudflare has them)
+pikit add mailbox-local --yes    # server only: actor.mailbox and actor.inbox (on Cloudflare, platform-cloudflare has them)
+pikit add provider-faux --yes    # tests and trials only: the model faux/scripted (below)
 mkdir -p registry/components
 ```
-Add `"registry"` to `exclude` in `tsconfig.json`: you edit the registry's copy and `pikit upgrade`
-copies it into `src/pikit/`, where `tsc` and `bun test` check it. Two copies of one contract file
-that differ fail `tsc` (TS2717), so the registry's copy must not be type-checked beside an older
-installed one.
+`pikit add` asks before it writes; without a terminal (an AI agent's shell) pass `--yes`. A project
+made by `pikit new` leaves `registry/` out of `tsc` (`tsconfig.json`'s `exclude`) and `bun test`
+(`bunfig.toml`'s `pathIgnorePatterns`) already: you edit the registry's copy and `pikit upgrade`
+copies it into `src/pikit/`, where both check it. Two copies of one contract file that differ fail
+`tsc` (TS2717), and every test would run twice.
 
 ### 1. The contract: `contract.ts`, the same file in both components
 A component never imports another's files (SPEC P4), so each component that uses `memory` carries an
@@ -122,7 +124,9 @@ declare module "@pikit/core" {
 `registry/components/memory-sql/component.json`: write by hand `name`, `version`, `description`,
 `targets`, `files` and `declares`; `pikit registry generate registry` fills `provides`, `requires`
 and `optional` from `setup`; `pikit registry validate registry` says what else is missing (a
-`dependencies` entry or a `requires.contracts` range for each kit package the files import).
+`dependencies` entry and a `requires.contracts` range for each kit package the shipped files import,
+a `devDependencies` entry for what only the tests import: memory-sql's test takes `sqliteStorage`
+from `@pikit/pi-adapter/testing`, which the component never needs to run).
 
 ```json
 {
@@ -141,9 +145,13 @@ and `optional` from `setup`; `pikit registry validate registry` says what else i
     }
   },
   "dependencies": { "@pikit/contracts": "0.0.0" },
+  "devDependencies": { "@pikit/pi-adapter": "0.0.0" },
   "files": [{ "source": "files/src", "target": "src" }]
 }
 ```
+
+`requires.capabilities` lists them in the order `setup` calls `use()`: write them so, or let
+`generate` write them.
 
 `files/src/pikit/memory-sql/index.ts` (skeleton: `remember` and `list` written out, `forget` and
 `search` are the same pattern):
@@ -308,12 +316,25 @@ context; sections and hooks read `ConversationDoc` instead.
 ### 4. Install, name, run
 ```sh
 pikit registry generate registry && pikit registry validate registry
-pikit add memory-sql --registry registry
-pikit add memory-recall --registry registry
+pikit add memory-sql --registry registry --yes
+pikit add memory-recall --registry registry --yes
 pikit doctor                       # memory: memory-sql · agent.extension: memory → memory-recall
 ```
 Name it in the agent (`src/agents/assistant/agent.ts`): `extensions: ["memory"]`. After each edit in
 `registry/`: `pikit registry generate registry && pikit upgrade memory-sql memory-recall --yes`.
+
+Try it with no model account: put the agent on `model: "faux/scripted"` (provider-faux), `pikit
+configure --yes --generate PIKIT_HTTP_TOKEN` (it asks no key for a provider no agent uses), `pikit
+dev`, and send `call: remember {"fact":"Ana prefers tea"}`, then reset the conversation, then
+`echo-system memory`: the answer is the section, with the fact.
+
+**A reset** (a new conversation under the same key; the memory stays) is per channel: `/new` in
+Telegram, `POST /v1/conversations/:id/reset` over HTTP (channel-http).
+
+**Taking it out.** `pikit remove memory-recall` refuses while an agent names `memory` (the runtime
+would refuse to start): take `memory` out of the agent's `extensions` first, then remove it. With
+`--force` it removes it anyway, and `pikit doctor` (which `remove` runs at its end) reports `agent
+"assistant" names the extension "memory", which no installed component provides` until you do.
 
 ## Durability
 - **What survives a crash.** Every memory is a committed row in the person's `storage.sql`
@@ -342,11 +363,16 @@ Name it in the agent (`src/agents/assistant/agent.ts`): `extensions: ["memory"]`
 - **The person can see and remove it**: the section shows ids, and `forget` removes one.
 
 ## Tests you write
-The model in every test is the scripted faux provider (`scriptedProvider` from
-`@pikit/pi-adapter/testing`, model `faux/scripted`): a message `call: remember {"fact":"Ana prefers tea"}`
-makes the model call `remember` with those arguments, and the turn after the result answers
-`answer: <that message>` (`bash: <command>` calls `bash`). `provider-faux`
-(`faux/echo`) is for an end-to-end check through a real channel.
+The model of the project test and of a trial in `pikit dev` is provider-faux's `faux/scripted`
+(`src/pikit/provider-faux/README.md`), no model of your own to write:
+- `call: remember {"fact":"Ana prefers tea"}` makes the model call `remember` with those arguments,
+  and the turn after answers with its result, `remember: Remembered (id …).`, or its error,
+  `remember failed: …`;
+- `echo-system memory` answers with the `memory` section the request carried, or
+  `(no section memory)`; `echo-system` with the whole system prompt;
+- `echo-tools` answers with the tools the agent was offered (`forget, recall, remember`), or
+  `(no tools)`;
+- anything else answers `faux: <that message>`.
 
 1. **The `memory` suite**, in memory-sql (`files/src/pikit/memory-sql/conformance.ts`, a function
    `createMemoryConformance(factory)` returning `ConformanceCase[]` from `@pikit/core/testing`, run
@@ -360,13 +386,20 @@ makes the model call `remember` with those arguments, and the turn after the res
 2. **memory-recall's own tests**: "what setup declares" (`provides: ["agent.extension"]`, key
    `memory`), `scopeOf`, the secret refusal, the section's text for a fake `memory`.
 3. **The project test** (`test/memory.test.ts`, the project's own, so it may import `src/pikit/*`):
-   runtime-pi, mailbox-local, memory-sql, memory-recall, `sqliteStorage(path)` and the scripted model
-   in a real App, shaped like `src/pikit/runtime-pi/extensions.test.ts`. Cases:
-   - a fact remembered in conversation A (key `telegram:1`) is in the `memory` section of the first
-     request of a new conversation with the same key, after the App was stopped and started again;
-   - a conversation with another key (`telegram:2`) has no `memory` section;
-   - an agent that does not name `memory` gets neither the section nor the tools;
-   - the section is sent once while memory does not change (count the system messages carrying it).
+   runtime-pi, mailbox-local, memory-sql, memory-recall, provider-faux, `sqliteStorage(path)` and
+   your agents on `faux/scripted` in a real App, shaped like `src/pikit/runtime-pi/extensions.test.ts`;
+   each run's answer is its `agent.settled` event's `text`. Cases:
+   - a fact remembered in conversation A (key `telegram:1`) is what `echo-system memory` answers in
+     a new conversation with the same key, after the App was stopped and started again;
+   - in a conversation with another key (`telegram:2`), `echo-system memory` answers
+     `(no section memory)`;
+   - an agent that does not name `memory` gets neither the section nor the tools (`echo-tools`:
+     `(no tools)`);
+   - `remember` of a secret answers `remember failed: …`, and keeps nothing;
+   - the section is sent once while memory does not change: this one counts the system messages
+     carrying it, so it records the requests, with `scriptedProvider({ onRequest })` from
+     `@pikit/pi-adapter/testing` (the same `call:` rule, model `faux/scripted`) in place of
+     provider-faux.
 4. **Cloudflare** (only if you deploy there): the same project test on the durable target needs the
    workerd lane, which lives in the pikit repository (`tests/workerd`), not in projects; until then,
    deploy to a test Worker and check two chats by hand.
@@ -374,10 +407,12 @@ makes the model call `remember` with those arguments, and the turn after the res
 ## Done when
 - `pikit registry validate registry` is clean; `pikit add` of both, then `pikit doctor`, is green.
 - `bun test` and `bun run typecheck` pass in the project, with the tests above.
-- In `pikit dev`, telling the agent "I prefer tea" in one chat, then `/new`, then "what do I drink?"
-  gets tea; another chat does not know it; it survives `kill -9` and a restart.
-- `pikit remove memory-recall` leaves agents without the section and tools (and `pikit doctor` says
-  an agent names a missing extension until you take `memory` out of `extensions`).
+- In `pikit dev`, telling the agent "I prefer tea" in one chat, then a reset (`/new` in Telegram,
+  `POST /v1/conversations/:id/reset` over HTTP), then "what do I drink?" gets tea; another chat does
+  not know it; it survives `kill -9` and a restart. (On `faux/scripted`: `call: remember …`, reset,
+  `echo-system memory`.)
+- After taking `memory` out of the agents' `extensions`, `pikit remove memory-recall` leaves them
+  without the section and tools (step 4, "Taking it out").
 - Both READMEs say what they provide, need, guarantee (idempotency, isolation, no secrets) and how
   they are tested.
 
