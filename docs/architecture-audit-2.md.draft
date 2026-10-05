@@ -1,0 +1,368 @@
+# Architecture audit, second pass
+
+**Commit audited:** `be4124b`. This is the merge of `chore/pi-1.0.3`; the brief named `0b01aab`, but HEAD moved during the audit. Some items the brief lists as in progress have already landed: the 1.0.3 pins, the new FileSystem in execution-do, pi-durable's env conformance, and the provider-session-id upstream doc. They are not reported here.
+
+**Inputs:** ten audit dimensions (A–J), each finding or recommendation with an adversarial verdict. Severities and titles below are the verdicts' corrected ones. Before writing, I re-checked these in the code:
+- outbound-durable's targets
+- `ATTEMPTS_PER_UPDATE = 3`
+- `checkStability`
+- `Bundle ≤ 10 MB` in SPEC
+- core's exact `typebox` pin
+- that no `APP_DESCRIPTION` reader rule exists in `packages/cli`
+
+## 1. Verdict
+
+**Is pikit well adapted to what it sets out to do? Yes.** More of its stated intent is enforced by code than in most projects that publish principles:
+- Import boundaries and kernel layering are tested.
+- Manifests are generated from `setup` and drift-checked.
+- Every preset is composed per target in `registry validate`.
+- `add`, `remove` and `upgrade` run as transactions with Undo, and `upgrade` does a three-way merge.
+- The K2 rollback is bounded and tested on both hosts.
+- 15 pi-facts tripwires pin the Pi behaviour pikit relies on.
+- A real workerd lane runs in CI.
+
+The five-minute path held in a real trial: `new` took 1.6 s, the project's own tests passed (281), and `pikit dev` answered in under five minutes. Nine of the previous audit's ten findings are fixed.
+
+**Is the architecture sound? Yes, at its core.** The kernel is about 960 lines of code. Contracts are Pi's own types where Pi has them. Durability rests on one-commit admission, an answers log written exactly once, and alarm-sliced runs that survive eviction. The weaknesses are at the edges, where a component or a platform limit quietly weakens what the core guarantees. The checks judge imports, not the runtime model. And the kit packages hold policy that no rule scopes.
+
+**Top 5 risks**
+1. **The default Cloudflare preset installs `outbound-durable` into the Durable Object.** Its retries run in a 1 s loop that no event holds (C4). Retries and interrupted sends wait for the user's next message, and are abandoned after 24 h.
+2. **Silent loss on the server Telegram path.** The poller acknowledges and drops a message after 3 failed admissions in about 3 s, and the sender is never told. The outbox abandons answers after about 12.6 minutes of transient failure, while direct delivery would have kept retrying.
+3. **Stalls on Cloudflare after a bad deploy.** Cloudflare retries a rejected alarm 6 times, about 2 minutes in all. After that, pending runs and answers stay stuck until each chat's user writes again.
+4. **pikit gates the model choice behind its own releases.** Pi ships about 42 providers; pikit exposes 2, plus faux. The rule that only the adapter imports Pi means a user cannot add one, not even an OpenAI-compatible endpoint, without a kit release. This goes against P1 and M13.
+5. **"Composes" is not "works".** Removing the router or the HTTP server leaves a project that doctor calls green but that answers nobody. Meanwhile the kit packages (`pi-adapter`, the helpers in `@pikit/contracts`) keep gaining policy that MANIFESTO 3/4 says should not exist outside core or owned source.
+
+## 2. Principle scorecard
+
+Legend:
+- **enforced**: a test, check or type fails when the principle is broken.
+- **partial**: some of it is enforced, some is convention.
+- **prose**: no mechanism.
+- **violated**: the code contradicts the principle somewhere today.
+
+| # | Principle | Mechanism | Status | Open items |
+|---|---|---|---|---|
+| 1 | Pi is the agent | `boundaries.ts`, `checkImports`, pi-facts tripwires | partial | Providers closed (#5). The tracking in docs/upstream has drifted (#10325, #9225). |
+| 2 | Conversations are actors | `idFromName`, eviction tests, convergence suite | partial | On a server, one process per storage is only a convention. |
+| 3 | A firm core | `boundaries.ts`, `exports.test.ts`, registration sealed after setup | enforced | MANIFESTO's "nothing else" does not match SPEC §3's list (minor). |
+| 4 | Everything else is source you own | registry layout, add/remove/upgrade | partial | Kit packages hold policy with no rule for it (#7). Replay values live in the adapter (low). |
+| 5 | If you don't need it, it doesn't exist | offers, `installedFor`, no flags | partial | Every pi-ai SDK is installed (upstream declined to change this). |
+| 6 | Contracts are the only coupling | `checkImports`, drift checks | partial | Model keys bypass `secrets` (low). No K13 reader guard (low). |
+| 7 | Add, edit, remove are first-class | remove tests, upgrade merge | partial | `remove` sees only the capability graph (#6). The kit cannot be upgraded on its own (#9). |
+| 8 | Values in config, behaviour in code | none | prose | No counter-example found. |
+| 9 | No magic | sealed registration, no side-effect imports | enforced | — |
+| 10 | Fail loudly, recover honestly | K2 tests, start refusals, convergence suite | **violated** | #1, #2, #3, #4. `dev` starts without credentials (#10). |
+| 11 | Run where you want | target checks, workerd lane, `checkPresets` | **violated** | #1. provider-anthropic is server-only without reason (low). |
+| 12 | Five minutes | installer test, nightly E2E | partial | E2E is nightly only. No root README (low). |
+| 13 | Built to be built on | 17 suites, skills, gap list | partial | Design notes unreachable from a project (#12). agent.submissions missing from the gap list. Channel notes predate `startAnswerDelivery`. |
+| 14 | Boring on purpose | `exports.test.ts`, stability tags | partial | K10, K12 and the K11 range are not done; they are a 1.0 gate (planned). |
+| P5 | At-least-once, nothing pretended | — | **violated** | #1–#4 |
+| P8 | Runs where you want | — | **violated** | #1 |
+| K1 / K13 | Target never branched on; only admin-* reads APP_DESCRIPTION | — | prose | `registry validate` does not check either (low). |
+
+## 3. Findings (verified, by severity)
+
+| # | Finding | Sev | Dim | Evidence | Minimal fix | Cost |
+|---|---|---|---|---|---|---|
+| 1 | outbound-durable declares `durable`, but sends and retries from a 1 s polling loop that no event holds. telegram-cloudflare installs it into the object, so retries and cut sends wait for the next event, or are abandoned after 24 h. | high | A, F | `component.json:6-9` targets server+durable. `queue.ts:185-203` is a `while(running)…clock.sleep`; there is no `wakeups`. `delivery.ts:147-154` marks an answer done once enqueued. `offers.test.ts:66-70` and `cli.test.ts:186-205` install it on durable. No workerd test covers it. | Set `targets: ["server"]`; channel-telegram-webhook then falls back to its wakeup-sliced direct delivery. Update the tests and the preset comment. Later, add a wakeups mode plus a workerd eviction test (M). | S |
+| 2 | The server Telegram poller drops an update after 3 failed admissions (about 3 s) and never tells the sender. The webhook twin answers 500 so Telegram redelivers. | medium | F | `poller.ts:18,63-77`: `offset = update_id + 1` after the third failure. No test covers it. | Use a capped, time-bounded backoff (minutes), and keep a cutoff for poison messages. Before skipping, tell the sender. Add a channel conformance case for transient admission failure. | S |
+| 3 | When an App start keeps failing, Cloudflare's 6 alarm retries (about 2 min) run out and no alarm remains. Pending runs and answers stall until that chat gets another message. | medium | F | `host.ts:113-139`: `alarm()` awaits `start()` and rethrows. `alarmInfo.retryCount` is unused. Nothing in the platform-cloudflare README or SPEC §4 mentions the retry limit. | Set a guard alarm before `start()`, with backoff from `retryCount`. Document the limit. Add a host test for repeated start failures. | M |
+| 4 | outbound-durable abandons an answer after about 12.6 min of transient failures and only logs a warning, while the direct path it replaces retries forever. The contract and README describe it as the stronger option. | medium | F | `queue.ts:20-23,139-155` (`MAX_FAILURES = 5`, `warn`); `delivery.ts:140,248-256`; `outbound.ts:12-15`; outbound-durable README:4,14. It is offered by default. | Stop counting transient failures; keep only `MAX_AGE_MS`. Log at error level. Correct the docs. State direct vs queued delivery in one place in the `delivery.ts` header. | S |
+| 5 | Only 3 of pi-ai's ~42 providers are reachable, and users cannot add another (direct OpenAI/Google, Bedrock/Vertex/Azure, Workers AI, OpenAI-compatible) without a kit release. GPT and Gemini are reachable today through OpenRouter. | medium | J | `pi-adapter/package.json:15-17` has 3 subpaths. `index.ts:27-28` exports types only (no `createProvider`, no API wrappers). Pi imports are refused by `checks.ts:208` and `doctor.ts:168-176`. SKILL.md:86 promises "a pi-ai provider". | Section 6, providers. | M |
+| 6 | Removal and doctor see only the capability graph. Removing the router or server-bun leaves a green project that answers nobody. Removing outbound-durable orphans queued answers with only a README warning. | medium | E | `router-basic` has `provides: []`. `checkNoDependents` (`remove.ts:212-235`) ignores pipelines. `admitInbound` returns `no_route` (`inbound.ts:112-115`). `unusedProviders` is only a note, and `remove`/`add` run doctor quietly. | `remove` refuses to leave `route.resolve` empty while a channel exists, and refuses to drop `http.route` with no server (the Worker App is exempt), unless `--force`. Doctor reports both. Print notes in add and remove. | S |
+| 7 | The kit packages hold delivery and runtime policy, but neither MANIFESTO 3/4 nor SPEC §3 has a layer for them or a rule for what they may hold. | medium | A, B, C | `pi-adapter` is about 3.2k non-test LOC. `runtime.ts:1-35` holds run grouping, abandon and reconcile. `answers.ts` creates `runtime_pi_answers`. `submissions-sql` was deleted into the adapter (54c6f89) with no decision recorded. The contracts carry `startAnswerDelivery` and `admitInbound`, but SPEC §3.2 still says delivery is "a capability and a component". | Add SPEC §3.3 for the kit layer: the adapter maps Pi and absorbs its churn; contracts helpers are protocol every provider must agree on, with policy passed in. Record the answers log as an exception (it must commit with pi-durable). Amend M4. Do not move commit-reading code into owned source. | S (doc) |
+| 8 | `apply()` rebuilds `pi.agent` from the definition on every admission, state update and reopen. So the live `configure()` that SPEC §6 promises is silently undone. | medium | B | `agent.ts:164-199`; `runtime.ts:633-641,675-683,824-829`; SPEC.md:383. Neither the skill nor the README mentions it. | Record who owns `pi.agent`. Either (a) the definition does: amend §6 and document it, or (b) re-apply only when the definition's hash changes. Keep `prepare`, which is decided in `building-components.md:92`. | S (a) / M (b) |
+| 9 | `pikit upgrade` cannot refresh only the vendored kit, and therefore Pi. Its `--dry-run` and confirmation hide the kit refresh the real run does. | medium | H | `upgrade.ts:150-153` returns before `refreshKit` (:191). The dry run (:162-170) never calls `staleKit`. Reproduced: Pi stayed at 1.0.0 until an unrelated component changed. | Treat a stale kit as a plan of its own, both with no names given and in dry run and confirm. Doctor notes a kit behind the CLI. Add a rollback test. | S |
+| 10 | `pikit dev` starts without checking this machine's model credentials (only `up` checks). A missing login shows up as one buried JSON start error, while doctor says green. | medium | H | `deployment.ts:39-44` (`checkReady`) vs :46-61 (`checkAppCredentials`, `up` only); starter README:262. | Check local credentials in `checkReady` for `dev` only, and refuse with the `pikit configure --login X --local` hint. Do not add this to doctor's `unconfigured`: that would block `up` for logins stored in the container. | S |
+| 11 | workspace-local duplicates execution-local instead of building on `execution`. execution-local's `variables` and `root` then silently stop affecting runs, and it stays installed only to satisfy a requirement. | medium | I | `workspace-local/index.ts:31-60,100-107` is a word-for-word copy. `harnessEnv` is `workspace ?? execution` (`execution.ts:85-91`). execution-local's own header suggests adding `GITHUB_TOKEN` there, which does nothing once workspace-local is installed. | Use `execution`; return `atCwd(execution, join(root, agent))`; drop the duplicated allowlist and the `stop` cleanup. Server first. | S |
+| 12 | Skills, component READMEs and CLI messages send the project's agent to `features/` and SPEC without saying where the kit is. | medium | G, H | `starter.ts:47-59` copies only the skills. SKILL.md:25-27,88 and pikit-extension SKILL.md:89 point to the notes. 12 installed READMEs cite K/C decisions. `main.ts:44-52` cites "SPEC P6". The checkout is at `~/.pikit/pikit`, but nothing says so. | State the kit path (PIKIT_ROOT, substituted by `pikit new`) and a GitHub URL pinned at `kit.commit`. Do not copy `features/` into projects. | S |
+
+Lower-severity verified findings are in the appendix.
+
+## 4. Status of the previous audit's 10 findings
+
+| # | Finding | Status | Evidence / remainder |
+|---|---|---|---|
+| 1 | Presets rely on a unique storage provider | **fixed** | `http.yaml` names storage-sqlite; `checkPresets` composes each preset and each `choose` answer per target. |
+| 2 | K2 not bounded in deployment-docker | **fixed** | `entrypoint.ts:111-135`; `entrypoint.test.ts:86-92`. |
+| 3 | No contracts range | **fixed** | `requires.contracts/adapter`, `kitRangeProblems`, `checkKit` on installed components. Still missing (low): no rule says a Pi pin change that alters a Pi-typed capability is an adapter break. |
+| 4 | `add --force` orphans | **fixed** | `remove.test.ts:166`; `pikit upgrade` exists. |
+| 5 | storage.sql suite uses SQLite DDL | **fixed** | `testing/storage-sql.ts:55` uses BIGINT/BYTEA. |
+| 6 | Key grammar | **doc fixed, design open** | `agent.ts:42-49`. Answers no channel claims are still passed over silently (tracked in `conversation-routing.md`; low). `conversations.ts:4` still describes the old grammar. |
+| 7 | No shared outbound helper | **fixed** | `startAnswerDelivery`. Its queue mode exposed findings #1 and #4. |
+| 8 | remove not transactional | **fixed** | Undo plus the operation marker; leftovers are cleaned before doctor. |
+| 9 | Server-only subpaths escape the target check | **fixed** | `SERVER_ONLY_EXPORTS` is shared by `checks.ts:212` and `boundaries.ts:97`. |
+| 10 | `AppContext.config`; testing exports not held | **fixed** | Removed; `/testing` is held. The validate half of K13, which the same plan required (`architecture-audit.md:398`), is still unbuilt, and `APP_DESCRIPTION` now carries the whole config (low). |
+| — | Appendix items | mostly fixed | printStatus, `new` atomicity, closed kinds and the STARTER_MODEL trap are fixed. Hosts recomposing the App is still open by design. The CLI-owned model-credential step is still open and blocked by SPEC §3.2 ("never in the app"). |
+
+The audit document itself has no status header, CHANGELOG no longer points to it, and its line references are stale. Fix: add a dated header with the audited commit.
+
+## 5. Pi boundary
+
+The boundary holds: only the adapter imports Pi. The pi-durable files the adapter reaches into did not change between 1.0.0 and 1.0.3 except for the session id and the progress interval.
+
+**Delete from pikit once Pi ships the feature**
+
+| pikit workaround | Pi gap | Action now |
+|---|---|---|
+| `wakeups.ts` `checkpointedDue`, and `runtime.ts` `timed()` (duplicated, low) | next due time (proposal 1) | Comment on **#10325** (open, reopened and assigned by a maintainer) endorsing its `inspect()`-sleeping shape. Do not push `nextDueAt()`. Unify the two readers now. |
+| `reconcileInbox` kick after a failed run | proposal 2 | Keep. |
+| `RESUME_AT_ONCE` (a bound that does not hold: 8 of 8 runs resume before `recover`) | `maxConcurrentRuns` (proposal 5) | Remove the claim from `resume.ts:9,24` and README:88. Keep `recover`'s abandonment for removed agents and missing conversations. |
+| `abandon` repeats `abortSubmission` with its own reason (`runtime.ts:715-728`) | `abortSubmission(id, {reason, detail})` | Add a low-priority docs/upstream entry. Keep the single-commit implementation, which `recovery.test.ts:497` already covers. |
+| `pikit.admissions` timestamps | no time on a submission | Add a low-priority docs/upstream entry. |
+| openrouter `apiBase` wrapper | `baseUrl` on provider factories | Low-priority note. |
+| configure's `<ID>_API_KEY` guess | env-key names not exposed as data | Fix it in pikit from the manifests first; an upstream note is optional. |
+
+**Upstream records to correct**
+- Proposal 6 shipped in 1.0.2; this is already fixed at HEAD.
+- Proposal 9: record #9225 (closed no-action; do not resend).
+- The pi-ai provider SDKs being hard dependencies was already declined (#2297, #5053, closed no-action). Record it as declined and do not draft a new proposal.
+- `kit-follow-ups.md` still lists the Chord `abortSignal` fix as pending, but it was declined (#10189).
+- `pi-durable-migration.md` still says "Doing: switch-over"; it is done.
+- Add a line to the pin-bump checklist: `gh search issues` for each open proposal.
+
+**Delete or move now (no Pi dependency)**
+- Move `codingTool` and `CODING_TOOL_REPLAY` replay values into each tool component's source (low; principle 4). Update the adapter's tests and the workerd lane, which call them.
+- Replace the hand-written provider subpaths with generated per-id subpaths (section 6).
+- Document runtime-pi's `settings` (retry, compaction, the new `progress` intervals) instead of labelling it "for tests". Keep the Pi-shaped schema in the adapter.
+
+**Chord decision: confirmed, unchanged.** Chord stays out of the kernel. It did not change between 1.0.0 and 1.0.3 (only the version line). PLANNING.md still disclaims a stable API, esbuild is still a hard dependency, the abort ask was declined, and every other reason in `kit-follow-ups.md` still applies: no typed events, pipelines, optional dependencies, selection, `describe()` or config validation. Two changes to the note:
+- Re-date it to 1.0.3 and cite #9225.
+- Drop the "health via Chord availability" candidate, since pikit does not use Chord services.
+
+For the dashboard, follow SPEC §5 as written: `watch()` and `taskGraph()` mapped through an extended `observe` contract. Do not ship raw `pi.*` docs or a Chord delta wire. All of pi-durable is experimental, so `watchEvents` is not a special reason to avoid it.
+
+## 6. Component granularity
+
+**The rule.** A component is the smallest unit whose removal takes away something an agent's own `tools` or `model` list does not already control:
+- an import or registration
+- an npm dependency
+- a secret or environment variable
+- a config block
+- a table or timer
+- a target constraint
+- a risk class: replay safe vs unsafe, needs a shell, reaches the network
+
+How to apply it:
+- **Merge** only parts that are identical on all of these and must share one resource, such as one alarm.
+- **Split** when target, risk or a heavy dependency differs.
+- A component built on another capability **uses** that capability rather than copying its provider.
+- Decisions (replay, policy, defaults) are written in the component's source.
+- The kit holds only what changes when Pi changes and must be the same in every project.
+- Components never depend on components. Bundles are presets, and later a multi-name `pikit add`.
+
+Write the rule into `features/building-components.md` and the pikit-component skill.
+
+**Tools: keep one component per tool.**
+
+The two lenses disagreed:
+- The minimalism lens proposed one config-free `tool-coding` with all four tools.
+- The architecture lens proposed `tool-files` (read, write, edit) plus a separate `tool-bash`.
+
+The verifiers rejected both merges under the rule above:
+- `read` is replay `safe`, while `write` and `edit` are `unsafe`.
+- `bash` alone needs `execution.shell`.
+- A merged component would register `write` and `edit` in read-only projects, which goes against M5 ("nothing loaded but idle").
+- The saving is about three 10-line index files.
+
+So the split stays. Fix what is actually wrong around it:
+- Write replay into each component's source.
+- Cut each test file to the pikit-specific assertions (keys, replay, requirements).
+- Make tool requirements honest: `useOptional("execution")`, and runtime-pi refuses at start when an agent names a coding tool and no environment exists (I2).
+- Rebuild workspace-local on `execution` (#11).
+- Starter agents on the server preset do not name `bash` by default (low; `tool-bash`'s own README already advises this).
+- Fix runtime-pi's `install tool-${tool}?` hint, which is wrong for `websearch` and for MCP tools.
+
+**Providers: keep one component per provider, and make writing one cheap.**
+
+The two lenses disagreed:
+- The minimalism lens wanted per-provider components, with the adapter exposing every pi-ai factory.
+- The architecture lens wanted one `provider-pi-ai` component holding a user-owned static list.
+
+Per-provider components win under the rule:
+- Each provider differs in targets (Bedrock and Vertex are server-only; Anthropic's OAuth refresh too) and in environment variables (`GEMINI_API_KEY`, `HF_TOKEN`, …).
+- A manifest can state those honestly, which M11 requires and which `pikit configure` needs. One list component would need a hand-kept table of which provider runs on which target.
+- The barrel the architecture lens relied on tree-shakes in a Worker bundle, but unbundled under Bun (Docker, `pikit dev`) it loads about 130 provider modules for one import. That also goes against M5.
+
+What both lenses and both verifiers agree on, and what fixes #5:
+1. The adapter generates one re-export file per pi-ai factory at each pin bump: per-id subpaths, no barrel. A parity test checks them against `getBuiltinProviders()` plus radius.
+2. The adapter exports `createProvider`, `envApiKeyAuth` and the lazy `api/*` wrappers from pi-ai's lean entries.
+3. Add a `provider-openai-compatible` component (config: `id`, `baseUrl`, key variable, models; both targets).
+4. Other provider components are added as people ask, each about 10 lines plus a manifest. A user can write one in their own project.
+5. provider-anthropic gets `targets: [server, durable]`, with API keys only on durable, plus a workerd smoke test.
+6. `configure` reads a provider's key variable from its component's manifest.
+
+If the registry grows past about 10 providers, generate the components from a `{id, targets, env}` table instead of switching to a list component.
+
+**All 37 components**
+
+| Component | Decision | Reason |
+|---|---|---|
+| admin-auth-token | keep | Own secret; one strategy for `admin.auth`. |
+| channel-http | keep | Own route and secret. |
+| channel-telegram | keep | C6 polling twin. Fix the poller (#2); add `/new` deduplication (low). |
+| channel-telegram-webhook | keep | C6 webhook twin. Add a test that keeps the shared files identical. |
+| conversations-file | keep, not the default | Second independent provider, which `checkStability` needs before `conversations.registry` can become stable. The verdicts conflicted (delete vs keep); this rule decides. |
+| conversations-kv | keep, the default | Neutral and named in C5. The http preset switches to it plus storage-kv-sql. |
+| credentials-file | keep | Own 0600 store; the OAuth write-back target. |
+| deployment-cloudflare | keep | Deployment for its target. Add the alarm guard (#3). |
+| deployment-docker | keep | Deployment for its target. |
+| execution-do | keep | C7; heavy dependencies; fenced. |
+| execution-local | keep | Server twin. Correct its claim about variables (`/proc`). |
+| extension-house-rules | keep | Reference extension with its own config. |
+| log-events | keep | Observer; removable. |
+| mailbox-local | keep | Server half of C2. |
+| outbound-durable | keep, **server only** until it is driven by wakeups | #1, #4. |
+| platform-cloudflare | keep | One alarm and RPC force wakeups, inbox and mailbox together. |
+| provider-anthropic | keep; targets both | Own environment variables and OAuth. |
+| provider-faux | keep | Trials and tests without an account. |
+| provider-openrouter | keep | Own key; both targets. |
+| router-basic | keep | Fallback stage. |
+| router-rules | keep | Rule stage. |
+| runtime-pi | keep | Owned wiring of the runtime. |
+| secrets-cloudflare | keep | Target twin. |
+| secrets-env | keep | Target twin. |
+| server-bun | keep | Own dependency; server host. |
+| storage-do | keep | Target twin. |
+| storage-kv-sql | keep | `storage.kv` on `storage.sql`, both targets. |
+| storage-sqlite | keep | Server storage. |
+| tool-bash | keep | Shell requirement; its own risk class. |
+| tool-edit | keep | Unsafe write class; absence matters. Replay moves into its source. |
+| tool-read | keep | Safe class. Replay moves into its source. |
+| tool-write | keep | Unsafe write class. Replay moves into its source. |
+| tool-fetch | keep | Network class; real owned code. Its target difference is already documented. |
+| tool-mcp | keep | Many keyed tools from one client and its config. |
+| tool-websearch-brave | keep | Own secret; the provider is named in the component. |
+| wakeups-timers | keep | Server twin of the platform's wakeups. |
+| workspace-local | keep, **rebuilt on `execution`** | #11. |
+
+Net result: no merges and no splits. One component moves to server-only for now. Replay values move from the kit into components. Nothing moves into the kit. One component is planned: `provider-openai-compatible`.
+
+## 7. Ordered action plan
+
+**Phase 0: Pi 1.0.3 (landed at be4124b).** Still pending elsewhere: deleting the untracked `pi-extension-shim`. These items depend on 1.0.3 and are now unblocked: the generated provider subpaths (Phase 3), the docs/upstream refresh, and documenting the `progress` settings.
+
+**Phase 1: loss and stall windows (each item independent)**
+
+| Item | Cost |
+|---|---|
+| outbound-durable `targets: ["server"]`; update tests, preset comment and e2e (#1) | S |
+| Poller: time-bounded backoff, tell the sender, conformance case (#2) | S |
+| outbound-durable: stop counting transient failures; error log; honest docs (#4) | S |
+| Alarm guard set before `start()`, with a host test (#3) | M |
+| `remove` and doctor refuse a project with no router or no server (#6) | S |
+| `dev` checks local credentials (#10) | S |
+
+**Phase 2: honest guarantees and docs**
+
+| Item | Cost |
+|---|---|
+| K13 reader check in `registry validate` (names starting `admin-`); K1 as describe-on-every-target; fix SKILL.md:41 | S |
+| SPEC §4 bundle budget to 3 MB (Free plan); a gzip-size step in ci.yml's workerd job | S |
+| Run `e2e.test.ts` and `e2e-telegram.test.ts` (no Docker) on every PR; add the Cloudflare e2e suites to nightly | S |
+| Root README; fix IDEA's install URL and CLI list | S |
+| Status cleanup: outbound-delivery.md and pi-durable-migration.md to `completed/`; prune kit-follow-ups; fix storage-kv.md; dated header on architecture-audit.md | S |
+| docs/upstream: comment on #10325; record #9225 and #2297/#5053; abandon-with-reason and admission time entries | S |
+| Correct the RESUME_AT_ONCE claims, the execution-local variables claim, and the stale "no CLI yet" text | S |
+| Kit path in skills and READMEs (#12); `startAnswerDelivery` line in the ⭐ channel notes | S |
+| SPEC §3.3 kit-layer decision (#7) and `pi.agent` ownership decision (#8a) | S |
+| Add agent.submissions to the list of contracts without a suite | S |
+
+**Phase 3: structure**
+
+| Item | Cost |
+|---|---|
+| Adapter per-id provider subpaths plus `createProvider` and API wrappers; `provider-openai-compatible`; skill update (#5) | M |
+| provider-anthropic on both targets with a workerd smoke test | S |
+| `configure` reads key variables from manifests; OAuth offered only where `provider.auth.oauth` exists | S |
+| runtime-pi uses `secrets` as an `authContext` overlay that falls back to the default `fileExists` | S |
+| `pikit upgrade` refreshes the kit on its own; doctor notes a stale kit (#9) | S |
+| workspace-local on `execution` (#11); tools `useOptional("execution")` with a start check | S |
+| Replay values into tool sources; delete `codingTool` and its table | S |
+| http preset uses conversations-kv plus storage-kv-sql | S |
+| Share the add/upgrade apply transaction; pikit.json schema with errors naming the file | S |
+
+**Phase 4: later, or when the dependent feature lands**
+
+| Item | Cost |
+|---|---|
+| outbound-durable wakeups mode, then restore the durable target, with a workerd eviction test | M |
+| workerd test: answer delivery across an eviction, with and without the outbox | M |
+| Convergence suite run over `startAnswerDelivery` through storage-kv-sql | S–M |
+| `/new` deduplication in channel-telegram; a channel conformance case for a redelivered command | S |
+| `registered()` listings for `actor.inbox` and `wakeups`, built with the dashboard | S |
+| Multi-name `pikit add a b c` | S |
+| At publish: core as a peer dependency, a TypeBox range in core, an adapter version bump on Pi-typed changes | S |
+| `apply()` that writes only when the definition hash changes (#8b), if users need `configure()` | M |
+| Model credentials step out of the CLI, once SPEC §3.2 gains an in-app execution mode | M–L |
+
+## 8. Do not change (strengths to protect)
+
+- **Kernel discipline:** under 1k LOC, typebox as the only dependency, sealed registration, no registries or side-effect imports, surfaces held by `exports.test.ts`.
+- **Manifests cannot lie:** provides, requires, halves, replay and `modelProviders` are generated from `setup` and drift-checked; registry.json and the schemas are compared byte for byte.
+- **Presets are checked to compose** per target and per `choose` answer, including the starter model.
+- **Transactional CLI:** every refusal happens before the first write, Undo plus an on-disk marker, three-way `upgrade` from content-addressed bases, confined writes, protected files.
+- **The durability core:** duplicate check and admission in one commit, an answers log written exactly once with reconcile (17 crash scenarios), runs sliced by alarms and surviving real evictions, the convergence harness, delivery's written crash table.
+- **The Pi boundary as code:** only the adapter imports Pi, pi-facts tripwires, and Pi's own types used as contracts (`Provider`, `CredentialStore`, `ToolRegistration`, `ExecutionEnv`) with no pikit wrappers.
+- **Capabilities, never component-to-component dependencies.** Keep rejecting `registryDependencies`.
+- **Installing is not granting:** an agent's `tools` and `model` decide what it gets; runtime-pi refuses unknown names at start; `remove` refuses while an agent still names a tool.
+- **execution-do's fences:** no token in the shell, `.git` changed only through git, limits on pushes.
+- **Precise refusals** that name the fix, and loud start failures.
+- **docs/upstream's sending rules,** and deleting pikit code when Pi ships the feature (sessions-*, submissions-sql, the extension shim, the MCP fetch wrapper).
+
+## Appendix
+
+**Refuted items**
+- I-tools-architecture/I5 (tool-fetch's network reach differs by target): it is documented in tool-fetch README:61-64.
+
+Sub-claims refuted inside items that were otherwise confirmed:
+- that outbound-durable's loop keeps the object resident forever (it is evicted 70-140 s after going idle);
+- RESUME_AT_ONCE described as a two-layer duplicate (`recover` does more work than that);
+- agent.submissions described as untested on runtime-pi (`recovery.test.ts` covers it);
+- the answers feed suite running only in workerd (`answers.test.ts`);
+- merging the tools into `tool-coding` or `tool-files`;
+- deleting conversations-file outright;
+- a local `beforeRemove` hook as the outbox guard (it only sees the dev database);
+- `pikit add --preset`;
+- bumping the contracts minor only for stable entries;
+- a new upstream proposal for optional pi-ai SDKs (already declined);
+- copying `features/` into projects;
+- the "silently" wording about model keys (it is documented, though inconsistent);
+- the `memory-sqlite` naming drift (it is a hypothetical name);
+- the provider barrel as M5-safe (it is not, unbundled under Bun).
+
+**Minor items (verified low)**
+- **K13 / K1:** guards not built (A, D, E, G). The CHANGELOG lists K13 as delivered. Scheduled in Phase 2.
+- **Model keys bypass `secrets`** (A, J). Scheduled in Phase 3.
+- **conversations-file is the server default** while kv is neutral (E, I).
+- **Telegram twins:** no check keeps the shared files in sync; stale `delivery.ts`/`answers.ts` references.
+- **`/new` redelivery** after a crash mid-batch is answered twice (F5).
+- **Agent ownership:** `prepare` has no shipped user (B2 residue).
+- **C-F3:** actor and wakeup handler names are invisible to observation, by decision; a contract-level listing comes with the dashboard.
+- **C-F6:** `withoutAbortSignal` is hand-built in five places; it belongs in contracts, not the kernel.
+- **C-F7:** answers no channel claims are not logged; add a channel-side hook.
+- **C-F9:** a `logger`, `clock` or `target` passed to `defineApp` is replaced by the host. Add JSDoc.
+- **C-F4, C-F5, G8:** core pinned as a regular dependency, exact TypeBox pin vs K11. Do these at publish.
+- **D1:** a few fixed-count `spawnSync` calls; write down the trade-off.
+- **D4:** the add/upgrade transaction is copied.
+- **D3:** pikit.json is read without a schema; errors do not name the file.
+- **D5, D6:** key-name guess; starter text says "Docker" for every server project.
+- **D7:** configure's planner is untested.
+- **G4, G5:** ⭐ channel notes and some "Pi first" sections predate pi-durable or `startAnswerDelivery`; `pico-v5.md` is renamed to `docs/spec.md`.
+- **G9:** dead `(S1)`, `(S5)`, `(S10)` tags in doctor and the schema; Dockerfile and manifest.ts cite AGENTS.md sections that do not exist.
+- **H4:** the generated project does not say where `pikit` comes from.
+- **H5:** the skill's "what setup declares" test wording is ambiguous.
+- **H6:** samples/http and two READMEs still say "no CLI yet".
+- **I-2:** replay values live in the kit.
+- **I2:** `execution.shell` is never read; `workspace` has no shell flag (wait for the first shell-less provider).
+- **I4:** nothing checks that a tool using `api.env` declares `use("execution")`.
+- **I1:** the http starter names `bash`; execution-local's variables claim is false on Linux.
+- **B5:** checkpoint rules written twice; inline `parseModelName`.
+- **B3:** abandon has no upstream entry.
+- **B4:** upstream links missing.
+- **E minor:** fake-telegram ships without the `*.test-support` suffix; the storage-kv-sql README says channel-telegram's dependency is optional when it is required; the tool-bash header is garbled.
+- **G7:** SPEC's 10 MB budget vs the 3 MB Free plan (in Phase 2).
+- **H3/G2 root README:** rated medium by H and low by G; it is the cheapest high-leverage fix, so it is in Phase 2.
+- **J2 provider-anthropic server-only:** rated medium by one verifier and low by the other; it is in Phase 3.
+
+**Missing dimensions:** []

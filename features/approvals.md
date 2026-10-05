@@ -34,8 +34,8 @@ it stalls, and expiry.
 Pi's durable runtime has durable tasks with phases, waits (`sleep(until)`), memos and an abort
 protocol (`pico-v5.md` §5): a run can wait days for a decision with no task engine in pikit. pikit
 builds only the surface (where the question goes, how the answer comes back) and the record of
-decisions across conversations. `pi-durable` 1.0 ships these tasks, and the kit is moving onto it
-(`features/pi-durable-migration.md`); until the switch-over lands, a wait is `state.phase` plus tools.
+decisions across conversations. `pi-durable` 1.0 ships these tasks, and the kit runs on it
+(`features/pi-durable-migration.md`, which leaves open how its tasks map onto approvals).
 
 ## Open questions
 - Is the approval of a self-change (SPEC §6) an `approvals` decision, or the git host's

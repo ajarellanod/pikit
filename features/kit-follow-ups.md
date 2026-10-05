@@ -23,15 +23,26 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **Size:** medium: package publishing, `pikit new`/`upgrade` resolving versions instead of commits.
 
 ## Dashboard and deployment stay open
-- **Decided:** the operator dashboard is a component (`admin-dashboard`, SPEC §5), designed for
-  every host: its own `http.route` handlers, server-sent events, no host API; deployment is never
+- **Decided:** the operator dashboard is a project's choice (`pikit new --ui`, `pikit ui on|off`), a
+  shadcn/ui project of its own in `src/dashboard/` over a component, `admin-api` (SPEC §5), designed
+  for every host: `admin-api`'s `http.route` handlers, server-sent events, no host API; deployment is never
   closed to server and Cloudflare (Vercel, E2B, exe.dev, Modal are expected), see
   [deployment targets](deployment-targets.md).
 - **A base UI with shadcn/ui, extensible by components.** Not the largest interface: enough to
   start, and every other view comes from a component that brings it (SPEC §5). No platform
   under pikit (Pi Durable, Cloudflare, Rivet) offers an interface that is the user's to extend.
-- **When:** next, in its minimal form: conversations, a live view of one (joinable while the user
-  talks in their chat), steer/abort, cost per conversation, health. What it reads is built:
+- **When:** next, in phases, each one usable:
+  1. `admin-api`, `src/dashboard/` and `pikit new --ui` / `pikit ui on|off`, on a server: the
+     conversations, one live (joinable while the user talks in their chat), steer, abort and reset,
+     cost per conversation, the composition; `shadcn add` and hot reload work from the start.
+  2. pikit's UI pieces and views as shadcn registry items (`@pikit`), components with a view through
+     `pikit add`, the "add a view" skill, and the health and delivery views (with `health-registry`,
+     [health](health.md)).
+  3. Cloudflare: a conversation's object read and watched from the Worker, and
+     [the index](cloudflare-conversation-index.md) to list them all.
+  4. The agent changing its own UI, through SPEC §6's gate.
+
+  What phase 1 reads is built:
   `APP_DESCRIPTION` (K13), `agent.observe` (conversations, transcript, live events, usage),
   `admin.auth` (`admin-auth-token`) and prefix routes (`GET /admin/*`). Listing every conversation on
   Cloudflare still needs [an index](cloudflare-conversation-index.md).

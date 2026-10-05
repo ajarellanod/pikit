@@ -131,7 +131,8 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 ### 3.2 What never enters the kernel
 
 Scheduling, approvals, health and degradation policy, deduplication, routing, storage, channels,
-delivery, the dashboard, self-knowledge and self-change. Each is a capability in `@pikit/contracts` and a component. A new kernel
+delivery, the dashboard, self-knowledge and self-change. Each is a capability in `@pikit/contracts` and a component (the dashboard's UI
+is a project's choice over its component, `admin-api`, §5). A new kernel
 export is a decision recorded here.
 
 **What a component asks of the CLI** stays out of the kernel and out of the CLI too: the component
@@ -311,7 +312,8 @@ status, approval cards) may come from [Beautiful UI](https://github.com/slev1239
 
 **What the base ships** (the first version): conversations; one conversation live (its
 transcript, the tools running), joinable while the user talks in their chat; steer and abort;
-cost per conversation; health. The rest below comes as the components it needs are installed.
+cost per conversation; health, once a `health` provider is installed (`features/health.md`). The
+rest below comes as the components it needs are installed.
 
 **What it shows and does.**
 - The composition: components, capabilities and their providers, pipelines, the config without
@@ -323,53 +325,63 @@ cost per conversation; health. The rest below comes as the components it needs a
   conversation, answer an approval (when `approvals` exists), talk to an agent.
 
 **How it fits pikit.**
-- **It is a component** (`admin-dashboard`), not kernel: installed with `pikit add`, removable,
-  absent when not installed (P3, P4). Its source, including the shadcn/ui primitives it uses, is
-  copied into the project like any other component and is the user's to change.
-- **It is made to be extended.** The project is a shadcn/ui project for the dashboard's part, so
-  `shadcn add` works in it. A view is a component: a component the user writes (`memory-sqlite`,
-  `approvals`) may bring its own view and its own admin API routes, and the dashboard shows it
-  when that component is installed, through the same `http.route` and capability mechanism as
-  everything else. The admin API is typed and documented, and the repository carries a skill
-  that teaches an AI agent to add a view.
-- **It reads contracts and feeds, never internals.** Its data comes from an authenticated admin
-  HTTP API it registers through `http.route`, backed by the capabilities of the installed
-  components. What must not be missed comes from feeds, not from events (K3). A view whose
-  capability is not installed does not appear. Live views of conversations and tasks build on
-  pi-durable's `watch()` and `taskGraph()`, reached through the adapter, not on a copy of their state.
+- **It is a project's choice, not a component.** A project is made with a UI or without one
+  (`pikit new --ui`, or the wizard's question), and `pikit ui on` / `pikit ui off` changes it later.
+  With a UI the project has `src/dashboard/`, and that folder is all that says so (P4: absence, not
+  flags): without it nothing is built or served. The UI is a frontend project with its own toolchain,
+  not code that runs in the App, so a project that does not want it does not carry that toolchain. Its
+  source, the shadcn/ui primitives included, is the user's to change; `pikit upgrade` merges the kit's
+  fixes into it from the base kept when it was made, as for a component (P6), and `pikit ui off`
+  removes it and leaves a clean, working project (P3).
+- **It is a shadcn/ui project of its own.** `src/dashboard/` has its own `package.json` (Vite, React
+  and Tailwind v4: shadcn/ui's stack, no Next.js server runtime) and `components.json`, with pikit's
+  registry under the `@pikit` namespace, so `shadcn add button` and `shadcn add @pikit/<item>` work in
+  it. The project's `tsconfig` and tests leave it out, as they leave out `registry/`. Its primitives are
+  copied from pikit's registry and pinned (the pikit way: source owned, reproducible).
+- **Its data comes from a component, `admin-api`.** The admin API (`/admin/api/*`, typed and
+  documented) is a pikit component that `--ui` installs and that also stands without a UI (a script
+  or an agent may read it). It registers its routes through `http.route`, asks `admin.auth` before
+  every answer, and serves the dashboard's built assets under `GET /admin/*` when there are some.
+- **It is made to be extended.** A view is a folder, `src/dashboard/src/views/<view>/`, found when the
+  dashboard is built (nothing is loaded at run time) and shown only when the capability it declares is
+  in `APP_DESCRIPTION`: a view whose capability is not installed does not appear. A component with a
+  view (`memory-sqlite`, `approvals`) has two halves: its backend in `src/pikit/<name>/`, with its own
+  admin API routes through `http.route`, and its view, a shadcn registry item that `pikit add` installs
+  into `src/dashboard/` (through shadcn's installer) when the project has a UI. The same item installs
+  alone with `shadcn add @pikit/<view>`. pikit's registry publishes its UI pieces (a transcript, a tool
+  call, a cost, later an approval card) and its views as shadcn registry items. The repository carries
+  a skill that teaches an AI agent to add a view.
+- **It reads contracts and feeds, never internals.** The admin API is backed by the capabilities of
+  the installed components. What must not be missed comes from feeds, not from events (K3). Live views
+  of conversations and tasks build on pi-durable's `watch()` and `taskGraph()`, reached through the
+  adapter, not on a copy of their state.
 - **It runs wherever the app runs, and closes no deployment** (§4,
-  `features/deployment-targets.md`). The UI is static assets built by the component (React and
-  Tailwind v4, shadcn/ui's stack; no Next.js server runtime). Assets and API are
-  served by the component's own `http.route` handlers (standard fetch handlers), so any host that
-  serves the app serves the dashboard: `server-bun`, a Worker, and later hosts (Vercel, E2B,
-  exe.dev, Modal) with no dashboard change. Live updates are server-sent events (a plain streaming
-  response every such host offers); commands are plain `POST`s. Host-specific shortcuts (Workers
-  static assets, a Durable Object's hibernating WebSocket) are optional optimizations behind the
-  same API, never requirements. Reading a conversation is location-transparent: on Cloudflare the
-  Worker lists conversations from an index and streams one from its Durable Object.
-- **Its build is its own.** Building the dashboard's assets does not become a build step every
-  pikit app needs (no magic, principle 9).
-- **It is safe by default.** Authenticated; never shows a secret or a credential. Operational logs stay without message text; the transcript views are an explicit,
-  authenticated read of the conversation.
+  `features/deployment-targets.md`). The built UI is static files and the API is standard fetch
+  handlers, so any host that serves the app serves the dashboard: `server-bun`, a Worker, and later
+  hosts (Vercel, E2B, exe.dev, Modal) with no dashboard change; the files may also be hosted apart,
+  against the same API. Live updates are server-sent events (a plain streaming response every such
+  host offers); commands are plain `POST`s. Host-specific shortcuts (Workers static assets, a Durable
+  Object's hibernating WebSocket) are optional optimizations behind the same API, never requirements.
+  Reading a conversation is location-transparent: on Cloudflare the Worker lists conversations from an
+  index and streams one from its Durable Object.
+- **Its build is its own.** `src/dashboard/`'s own `build` script makes the static files; `pikit up`
+  and the deployment run it only in a project with a UI, so a project without one builds nothing more
+  (no magic, principle 9). In development it runs with hot reload against a running app's API.
+- **It is safe by default.** Authenticated; never shows a secret or a credential. Operational logs
+  stay without message text; the transcript views are an explicit, authenticated read of the
+  conversation.
 - **No paid dependencies.** Free icon sets only (Beautiful UI's `SidebarNav` uses a commercial
   one, `@central-icons-react`, which the dashboard does not take). Every copied primitive is
   attributed in `NOTICE`.
 
-The dashboard reads the composition through `APP_DESCRIPTION` (K13), the runtime through
+The admin API reads the composition through `APP_DESCRIPTION` (K13), the runtime through
 `agent.observe` (`packages/contracts/src/observe.ts`: conversations with their agent, busy state and
 cost, a transcript, a live event stream, usage; runtime-pi provides it from pi-durable's records), and
 asks `admin.auth` (`packages/contracts/src/admin.ts`; `admin-auth-token`, a bearer token from
-`secrets`, on both targets) before every answer. Its assets and API are prefix routes
+`secrets`, on both targets) before every answer. Its routes and the UI's files are prefix routes
 (`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves. On
 Cloudflare `agent.observe` sees one object's conversations: the list across objects is
 `features/cloudflare-conversation-index.md`.
-
-**Decision still open** `[open]`:
-- **How primitives reach the registry.** Copied into `registry/components/admin-dashboard/` and
-  pinned (the pikit way: source owned, reproducible), or fetched with the shadcn CLI at install
-  time (`shadcn add`, which works without `components.json` for universal items). The first is
-  the default unless there is a reason against it; either way the installed project can
-  `shadcn add` more.
 
 ## 6. The agent knows and improves itself
 
@@ -426,8 +438,8 @@ Human approval is required for every change at first. Levels of autonomy for low
 own prompt or skills), with automatic rollback, may come later as a policy component; they never
 bypass the gate for anything else.
 
-**Visually.** The dashboard is source in the project, so the agent improves it the same way: adding
-shadcn/ui primitives (`shadcn add <registry URL>`) or new views, through the same
+**Visually.** The dashboard is source in the project (`src/dashboard/`), so the agent improves it the
+same way: adding shadcn/ui primitives (`shadcn add`) or new views, through the same
 branch, preview, approval and deploy. The dashboard also shows the agent to itself: its composition,
 its runs, its proposals and their state.
 
