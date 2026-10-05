@@ -3,7 +3,7 @@
 The HTTP server of the server target: Hono on `Bun.serve`.
 
 - **Provides:** nothing. It serves every `http.route` other components provide.
-- **Uses:** `http.route` (keyed by `"METHOD /path"`).
+- **Uses:** `http.route` (keyed by `"METHOD /path"`); `health` when installed (`health-registry`).
 - **Target:** `server` (it uses `Bun.serve`).
 - **Installs to:** `src/pikit/server-bun/`.
 - **npm dependencies:** `hono` (exact version, `4.13.9`), `typebox`.
@@ -18,8 +18,12 @@ and everything under it (a dashboard's assets and API). The most specific key se
 literal path, then one with parameters, then the longest prefix. `/health` and `/ready` come first.
 
 Two routes are the server's own:
-- `GET /health` answers `200` as long as the process can answer at all. A supervisor restarts the
-  process when it stops answering.
+- `GET /health` answers `{ "status": "up" }` with `200` as long as the process can answer at all. A
+  supervisor restarts the process when it stops answering. With a `health` provider installed
+  (`health-registry`), it answers that provider's status instead: `200` with `up` or `degraded`, and
+  `503` with `down` once an essential component has stayed down past its grace period, so the
+  supervisor restarts the process then too. It says only the status: which component and why are
+  for operators, through the admin API.
 - `GET /ready` answers `200` only after every component has started (`runtime.ready`). Before that,
   and from the moment the app starts stopping, it answers `503`. A load balancer sends traffic only
   while it is `200`.
@@ -57,6 +61,7 @@ port. It covers:
 - the `http.route` conformance suite from `@pikit/contracts/testing`;
 - the lifecycle conformance suite, including a stopped server that no longer answers;
 - `/health` and `/ready` while starting, running and stopping;
+- `/health` with a `health` provider: `200` up or degraded, `503` down, the status only;
 - the start failures above, and the body limit.
 
 `component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI

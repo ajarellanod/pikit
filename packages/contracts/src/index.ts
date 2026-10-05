@@ -37,6 +37,7 @@ export { compareHttpRoutes, HTTP_ROUTE_KEY, matchesHttpRoute, parseHttpRouteKey 
 export type { SecretStore } from "./secrets.ts";
 export type { AgentObserver, ObservedConversation, ObservedEvent, ObservedPage, PageRequest, TranscriptEntry } from "./observe.ts";
 export type { AdminAuth, Operator } from "./admin.ts";
+export type { ComponentHealth, HealthRegistry, HealthReporter, HealthSnapshot, HealthStatus } from "./health.ts";
 export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
 export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";

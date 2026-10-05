@@ -28,6 +28,9 @@
  * It refuses to start when a bot has no valid token, no allowed user, or a webhook (Telegram
  * delivers to the webhook or by polling, never both).
  *
+ * With a `health` provider (`health-registry`), each bot reports whether it receives messages: the
+ * default one as `channel-telegram`, a named one as `channel-telegram:<name>` (`poller.ts`).
+ *
  * Target: `server`: long polling needs a process that keeps running.
  */
 
@@ -83,6 +86,8 @@ export default defineComponent({
     const storage = pikit.use("storage.kv");
     // Optional: with it, answers are stored before they are sent (@pikit/contracts' outbound.ts).
     const outbound = pikit.useOptional("outbound.queue");
+    // Optional: with it, each bot reports whether it receives messages (@pikit/contracts' health.ts).
+    const health = pikit.useOptional("health");
 
     let running: { bots: RunningBot[]; answers: AnswerDelivery } | undefined;
 
@@ -183,7 +188,16 @@ export default defineComponent({
         ctx: background,
         refused: new Set(),
       };
-      const poller = startPolling({ api, timeoutSeconds: config.pollTimeoutSeconds, handle: (update) => handleUpdate(update, deps), logger: background.logger });
+      // It answered getMe and getWebhookInfo: up until a poll says otherwise.
+      const reporter = health.get()?.reporter(account.name === undefined ? "channel-telegram" : `channel-telegram:${account.name}`);
+      reporter?.up();
+      const poller = startPolling({
+        api,
+        timeoutSeconds: config.pollTimeoutSeconds,
+        handle: (update) => handleUpdate(update, deps),
+        logger: background.logger,
+        ...(reporter !== undefined && { health: reporter }),
+      });
       background.logger.info("channel-telegram: receiving messages", {
         instance: account.instance,
         bot: `@${me.username ?? me.first_name}`,

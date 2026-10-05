@@ -108,6 +108,15 @@
       ],
       "path": "components/extension-house-rules"
     },
+    "health-registry": {
+      "version": "0.0.0",
+      "description": "What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/health-registry"
+    },
     "log-events": {
       "version": "0.0.0",
       "description": "One structured log line per operational event: what reached which agent, how each run ended, how long it took and what it cost.",

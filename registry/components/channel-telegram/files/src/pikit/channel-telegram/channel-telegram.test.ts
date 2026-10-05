@@ -29,6 +29,7 @@ import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
 import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";
 import channelTelegram from "./index.ts";
+import { DOWN_AFTER_FAILURES, startPolling } from "./poller.ts";
 import { createTelegramTransport, POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
 
 const OWNER = { id: 1001, first_name: "Ada", username: "ada" };
@@ -220,7 +221,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "channel-telegram")).toMatchObject({
     provides: [],
     requires: ["secrets", "conversations.registry", "agent.runtime", "agent.submissions", "storage.kv"],
-    optional: ["outbound.queue"],
+    optional: ["outbound.queue", "health"],
   });
 });
 
@@ -456,14 +457,14 @@ const OPS_BOT = { id: 5353, is_bot: true, first_name: "Ops Bot", username: "acme
 const OPS_TOKEN = "555555:ops-token-for-tests";
 const OPERATOR = { id: 3003, first_name: "Olga" };
 
-async function twoBots(secrets: Record<string, string>) {
+async function twoBots(secrets: Record<string, string>, extra: ComponentDefinition[] = []) {
   const telegram = startFakeTelegram();
   fakes.push(telegram);
   const ops = telegram.addBot(OPS_TOKEN, OPS_BOT);
   const { submissions } = createMemorySubmissions();
   const runtime = scriptedRuntime(new Set(), submissions);
   const app = await defineApp({
-    components: [secretsWith(secrets), memoryRegistry([]), router, runtime.component, ...durable(submissions), channelTelegram],
+    components: [secretsWith(secrets), memoryRegistry([]), router, runtime.component, ...durable(submissions), ...extra, channelTelegram],
     config: { "channel-telegram": { apiBase: telegram.url, pollTimeoutSeconds: 1, accounts: ["ops"] } },
     logger: silentLogger,
   }).create();
@@ -708,4 +709,118 @@ test("with agent.submissions, a run that ends before the channel starts is deliv
 
   expect(await telegram.sentCount(1)).toEqual([{ chatId: OWNER.id, text: "resumed", html: true }]);
   expect(logger.warnings).toEqual([]);
+});
+
+// ---------------------------------------------------------------------------------------------
+// Health: with a `health` provider, each bot reports whether it receives messages.
+
+type Report = [name: string, status: "up" | "degraded" | "down", reason?: string];
+
+/** A `health` that records every report, in order. */
+function recordingHealth() {
+  const reports: Report[] = [];
+  const component = defineComponent({
+    name: "health-test",
+    setup: (pikit) =>
+      pikit.provide("health", {
+        reporter: (name) => ({
+          up: () => void reports.push([name, "up"]),
+          degraded: (reason) => void reports.push([name, "degraded", reason]),
+          down: (reason) => void reports.push([name, "down", reason]),
+        }),
+        snapshot: () => ({ status: "up", components: [] }),
+      }),
+  });
+  return { component, reports };
+}
+
+/** Resolves once `reports` holds one that `matches`. */
+async function reported(reports: Report[], matches: (report: Report, index: number) => boolean, timeoutMs = 5_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!reports.some((report, index) => matches(report, index))) {
+    if (Date.now() > deadline) throw new Error(`no such report in ${JSON.stringify(reports)}`);
+    await Bun.sleep(10);
+  }
+}
+
+test("health: each bot reports up once it starts, by its name; a failed poll makes it degraded, the next good one up again", async () => {
+  const health = recordingHealth();
+  const { telegram, ops, app } = await twoBots(
+    {
+      TELEGRAM_BOT_TOKEN: "123456789:fake-token-for-tests",
+      TELEGRAM_ALLOWED_USERS: String(OWNER.id),
+      TELEGRAM_OPS_BOT_TOKEN: OPS_TOKEN,
+      TELEGRAM_OPS_ALLOWED_USERS: String(OPERATOR.id),
+    },
+    [health.component],
+  );
+  await app.start();
+  expect(health.reports.slice(0, 2)).toEqual([
+    ["channel-telegram", "up"],
+    ["channel-telegram:ops", "up"],
+  ]);
+
+  // A webhook set behind the bot's back: Telegram refuses getUpdates with a 409.
+  ops.webhookUrl = "https://example.com/hook";
+  await reported(health.reports, ([name, status]) => name === "channel-telegram:ops" && status === "degraded");
+  const failed = health.reports.findIndex(([name, status]) => name === "channel-telegram:ops" && status === "degraded");
+  expect(health.reports[failed]).toEqual(["channel-telegram:ops", "degraded", "getUpdates failed: 409"]);
+  ops.webhookUrl = "";
+  await reported(health.reports, ([name, status], index) => index > failed && name === "channel-telegram:ops" && status === "up");
+
+  // The default bot polled on, unaffected.
+  expect(health.reports.filter(([name]) => name === "channel-telegram").every(([, status]) => status === "up")).toBe(true);
+  expect(telegram.offsets.length).toBeGreaterThan(0);
+});
+
+test("health: the poller is down after DOWN_AFTER_FAILURES failed polls in a row, naming the code and never the token", async () => {
+  const telegram = startFakeTelegram();
+  fakes.push(telegram);
+  telegram.webhookUrl = "https://example.com/hook";
+  const reports: Report[] = [];
+  const poller = startPolling({
+    api: createTelegramApi(telegram.token, telegram.url),
+    timeoutSeconds: 1,
+    handle: async () => {},
+    logger: silentLogger,
+    health: {
+      up: () => void reports.push(["bot", "up"]),
+      degraded: (reason) => void reports.push(["bot", "degraded", reason]),
+      down: (reason) => void reports.push(["bot", "down", reason]),
+    },
+    firstRetryMs: 1,
+  });
+  await reported(reports, ([, status]) => status === "down");
+  telegram.webhookUrl = "";
+  await reported(reports, ([, status]) => status === "up");
+  await poller.stop();
+
+  expect(DOWN_AFTER_FAILURES).toBe(5);
+  expect(reports.slice(0, 6)).toEqual([
+    ["bot", "degraded", "getUpdates failed: 409"],
+    ["bot", "degraded", "getUpdates failed 2 times: 409"],
+    ["bot", "degraded", "getUpdates failed 3 times: 409"],
+    ["bot", "degraded", "getUpdates failed 4 times: 409"],
+    ["bot", "down", "getUpdates failed 5 times: 409"],
+    ["bot", "up"],
+  ]);
+  expect(JSON.stringify(reports)).not.toContain(telegram.token.split(":")[1]);
+});
+
+test("health: Telegram unreachable is reported as such", async () => {
+  const telegram = startFakeTelegram();
+  const url = telegram.url;
+  await telegram.stop();
+  const reports: Report[] = [];
+  const poller = startPolling({
+    api: createTelegramApi(telegram.token, url),
+    timeoutSeconds: 1,
+    handle: async () => {},
+    logger: silentLogger,
+    health: { up() {}, degraded: (reason) => void reports.push(["bot", "degraded", reason]), down() {} },
+  });
+  await reported(reports, () => true);
+  await poller.stop();
+
+  expect(reports[0]).toEqual(["bot", "degraded", "getUpdates failed: unreachable"]);
 });

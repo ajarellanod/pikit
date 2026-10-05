@@ -5,7 +5,7 @@
 
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type HttpRoute } from "@pikit/contracts";
+import type { HealthSnapshot, HttpRoute } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createHttpRouteConformance } from "@pikit/contracts/testing";
 import serverBun, { createServerBun } from "./index.ts";
@@ -61,7 +61,7 @@ for (const c of createLifecycleConformance(() => {
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [serverBun], logger: silentLogger }).create();
 
-  expect(app.describe().components).toEqual([{ name: "server-bun", provides: [], requires: [], optional: ["http.route"] }]);
+  expect(app.describe().components).toEqual([{ name: "server-bun", provides: [], requires: [], optional: ["http.route", "health"] }]);
 });
 
 test("/health answers while the process lives; /ready only between runtime.ready and the stop", async () => {
@@ -111,6 +111,35 @@ test("/health answers while the process lives; /ready only between runtime.ready
   expect(await server.openResources()).toBe(0);
 });
 
+test("with a health provider, /health answers its status: 200 up or degraded, 503 down", async () => {
+  const server = listening();
+  let snapshot: HealthSnapshot = { status: "up", components: [] };
+  const health = defineComponent({
+    name: "health-test",
+    setup: (pikit) => pikit.provide("health", { reporter: () => ({ up() {}, degraded() {}, down() {} }), snapshot: () => snapshot }),
+  });
+  const app = await defineApp({ components: [health, server.component], config: LOCAL, logger: silentLogger }).create();
+  await app.start();
+  const answer = async () => {
+    const response = await server.fetch("/health");
+    return [response.status, await response.json()];
+  };
+
+  const answers = [];
+  for (const status of ["up", "degraded", "down"] as const) {
+    snapshot = { status, components: [{ name: "channel-telegram", status, reason: "getUpdates failed 5 times: 401", since: 0, essential: true }] };
+    answers.push(await answer());
+  }
+
+  // The status only: which component and why are the admin API's, behind admin.auth.
+  expect(answers).toEqual([
+    [200, { status: "up" }],
+    [200, { status: "degraded" }],
+    [503, { status: "down" }],
+  ]);
+  await app.stop();
+});
+
 test("it refuses to start when its port is taken", async () => {
   const taken = Bun.serve({ port: 0, hostname: "127.0.0.1", fetch: () => new Response("someone else") });
   const app = await defineApp({
@@ -153,7 +182,7 @@ test("a prefix route, even `/*`, never shadows /health or /ready", async () => {
   const health = await (await server.fetch("/health")).json();
   const other = await (await server.fetch("/admin/app.js")).text();
 
-  expect(health).toEqual({ status: "ok" });
+  expect(health).toEqual({ status: "up" });
   expect(other).toBe("everything");
   await app.stop();
 });
