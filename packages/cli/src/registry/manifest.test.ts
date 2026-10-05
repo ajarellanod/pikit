@@ -11,6 +11,8 @@ const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
 
 const toolBash = () => readManifest(join(DEFAULT_REGISTRY, "components", "tool-bash")) as Record<string, unknown>;
+/** A component whose shipped files import both the contracts and the adapter. */
+const toolMcp = () => readManifest(join(DEFAULT_REGISTRY, "components", "tool-mcp")) as { requires: Record<string, unknown>; dependencies: Record<string, string> };
 
 test("every component.json of the repository conforms to the schema and names it", () => {
   const manifest = toolBash();
@@ -38,32 +40,39 @@ test("validate knows when the registry's JSON Schemas are missing or stale", () 
 });
 
 test("requires.contracts must accept this repository's @pikit/contracts, and a component that depends on them says which", () => {
-  const manifest = toolBash() as { requires: Record<string, unknown>; dependencies: Record<string, string> };
-  const dir = join(DEFAULT_REGISTRY, "components", "tool-bash");
+  const manifest = toolMcp();
+  const dir = join(DEFAULT_REGISTRY, "components", "tool-mcp");
   expect(manifest.dependencies["@pikit/contracts"]).toBeDefined();
-  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([]);
-  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.1.0", "0.0.0")).toEqual([
+  expect(checkManifest(manifest, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([]);
+  expect(checkManifest(manifest, dir, "tool-mcp", "0.0.0", "0.1.0", "0.0.0")).toEqual([
     `requires.contracts "${String(manifest.requires.contracts)}" does not accept this repository's @pikit/contracts 0.1.0`,
   ]);
   const { contracts: _, ...requires } = manifest.requires;
-  expect(checkManifest({ ...manifest, requires }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
+  expect(checkManifest({ ...manifest, requires }, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([
     "dependencies lists @pikit/contracts, but requires.contracts does not say which versions it works with (a semver range, as requires.pikit)",
+  ]);
+  // Only its tests import it (devDependencies): no range is needed; one stated is still checked.
+  const { "@pikit/contracts": contracts, ...dependencies } = manifest.dependencies;
+  const forTests = { ...manifest, requires, dependencies, devDependencies: { "@pikit/contracts": contracts } };
+  expect(checkManifest(forTests, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([]);
+  expect(checkManifest({ ...forTests, requires: { ...requires, contracts: "0.0.0" } }, dir, "tool-mcp", "0.0.0", "0.1.0", "0.0.0")).toEqual([
+    `requires.contracts "0.0.0" does not accept this repository's @pikit/contracts 0.1.0`,
   ]);
 });
 
 test("requires.adapter must accept this repository's @pikit/pi-adapter, and a component that depends on it states a meaningful range", () => {
-  const manifest = toolBash() as { requires: Record<string, unknown>; dependencies: Record<string, string> };
-  const dir = join(DEFAULT_REGISTRY, "components", "tool-bash");
+  const manifest = toolMcp();
+  const dir = join(DEFAULT_REGISTRY, "components", "tool-mcp");
   expect(manifest.dependencies["@pikit/pi-adapter"]).toBeDefined();
-  expect(checkManifest(manifest, dir, "tool-bash", "0.0.0", "0.0.0", "0.1.0")).toEqual([
+  expect(checkManifest(manifest, dir, "tool-mcp", "0.0.0", "0.0.0", "0.1.0")).toEqual([
     `requires.adapter "${String(manifest.requires.adapter)}" does not accept this repository's @pikit/pi-adapter 0.1.0`,
   ]);
   const { adapter: _, ...requires } = manifest.requires;
-  expect(checkManifest({ ...manifest, requires }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
+  expect(checkManifest({ ...manifest, requires }, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([
     "dependencies lists @pikit/pi-adapter, but requires.adapter does not say which versions it works with (a semver range, as requires.pikit)",
   ]);
   // A wildcard says nothing either.
-  expect(checkManifest({ ...manifest, requires: { ...requires, adapter: "*" } }, dir, "tool-bash", "0.0.0", "0.0.0", "0.0.0")).toEqual([
+  expect(checkManifest({ ...manifest, requires: { ...requires, adapter: "*" } }, dir, "tool-mcp", "0.0.0", "0.0.0", "0.0.0")).toEqual([
     'dependencies lists @pikit/pi-adapter, but requires.adapter ("*") does not say which versions it works with (a semver range, as requires.pikit)',
   ]);
 });

@@ -247,7 +247,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
 
     const scan = checkImports(dir, name, manifest.targets);
     scan.problems.forEach(report);
-    checkDependencies(manifest.dependencies, scan.packages).forEach(report);
+    checkDependencies(manifest, scan).forEach(report);
     checkDevDependencies(manifest).forEach(report);
 
     try {
@@ -426,8 +426,9 @@ function checkFormat(componentDir: string, manifest: Manifest): string[] {
 /** A new component's starting manifest: what can be read from its README and its imports. */
 function skeleton(dir: string, name: string): Manifest {
   const targets: string[] = [];
-  const imported = checkImports(dir, name, targets).packages;
+  const { packages: imported, testPackages } = checkImports(dir, name, targets);
   const versions = knownVersions();
+  const pinned = (packages: Set<string>) => Object.fromEntries([...packages].sort().map((pkg) => [pkg, versions[pkg] ?? ""]));
   return {
     name,
     version: "0.0.0",
@@ -441,7 +442,8 @@ function skeleton(dir: string, name: string): Manifest {
     },
     optional: { capabilities: [] },
     provides: [],
-    dependencies: Object.fromEntries([...imported].sort().map((pkg) => [pkg, versions[pkg] ?? ""])),
+    dependencies: pinned(imported),
+    ...(testPackages.size > 0 && { devDependencies: pinned(testPackages) }),
     files: [{ source: "files/src", target: "src" }],
   };
 }

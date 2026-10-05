@@ -41,7 +41,15 @@ import { APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../proje
 import { BASES_DIR, basePath, unreferencedBases } from "../project/bases.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
 import { ENV_EXAMPLE, exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
-import { addDependencies, type DependencyField, readPackageJson, removeDependencies, updateDependencies, writePackageJson } from "../project/package-json.ts";
+import {
+  addDependencies,
+  type DependencyField,
+  projectDependencies,
+  readPackageJson,
+  removeDependencies,
+  updateDependencies,
+  writePackageJson,
+} from "../project/package-json.ts";
 import {
   hashFile,
   type InstalledComponent,
@@ -545,9 +553,10 @@ export function applyPlans(projectDir: string, draft: Draft, plans: readonly Pla
       const moved = updateDependencies(pkg, plan.previous?.[field] ?? {}, record[field] ?? {}, owned, field);
       dependenciesChanged ||= removed.length > 0 || moved.length > 0;
     }
-    const { added, conflicts } = addDependencies(projectDir, pkg, plan.manifest.dependencies);
+    const wanted = projectDependencies(plan.manifest);
+    const { added, conflicts } = addDependencies(projectDir, pkg, wanted.dependencies);
     for (const conflict of conflicts) log.warn(`dependency kept as the project has it: ${conflict}`);
-    const dev = addDependencies(projectDir, pkg, plan.manifest.devDependencies ?? {}, "devDependencies");
+    const dev = addDependencies(projectDir, pkg, wanted.devDependencies, "devDependencies");
     for (const conflict of dev.conflicts) log.warn(`dev dependency kept as the project has it: ${conflict}`);
     dependenciesChanged ||= added.length > 0 || dev.added.length > 0;
     // Only what it added is its to take out on `remove`: a package the project had is the project's.

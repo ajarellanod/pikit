@@ -235,7 +235,28 @@ test("dependencies: exactly the npm packages the files import", async () => {
   expect(found).toContain(`dependencies lists "left-pad", which no file imports`);
 });
 
-test("devDependencies: exact versions, none of its dependencies, never the kit; what the files import is a dependency", async () => {
+test("devDependencies: what only its tests import, never a dependency, nor a range in requires", async () => {
+  const f = await fixture();
+  f.append("sample.test.ts", `import { sqliteStorage } from "@pikit/pi-adapter/testing";\nimport type { Hono } from "hono";`);
+  await generate(f.root);
+  const found = await problems(f);
+  expect(found).toContain(`only its tests import "@pikit/pi-adapter": list it in devDependencies`);
+  expect(found).toContain(`only its tests import "hono": list it in devDependencies`);
+
+  f.writeManifest({ ...f.manifest(), dependencies: { hono: "4.13.9" } });
+  expect(await problems(f)).toContain(`only its tests import "hono": list it in devDependencies, not dependencies`);
+
+  // No requires.adapter: the component runs without it.
+  f.writeManifest({ ...f.manifest(), dependencies: {}, devDependencies: { "@pikit/pi-adapter": "0.0.0", hono: "4.13.9" } });
+  await generate(f.root);
+  expect(await problems(f)).toBe("");
+
+  // A shipped file importing it makes it a dependency again.
+  f.append("index.ts", `import type { Hono } from "hono";`);
+  expect(await problems(f)).toContain(`files import "hono", which dependencies does not list`);
+});
+
+test("devDependencies: exact versions, none of its dependencies, never the core; what the files import is a dependency", async () => {
   const f = await fixture();
   f.writeManifest({ ...f.manifest(), devDependencies: { wrangler: "4.143.0" } });
   await generate(f.root);
@@ -245,11 +266,11 @@ test("devDependencies: exact versions, none of its dependencies, never the kit; 
   expect(await problems(f)).toContain("component.json /devDependencies/wrangler: must match pattern");
 
   f.append("index.ts", `import type { Hono } from "hono";`);
-  f.writeManifest({ ...f.manifest(), dependencies: { hono: "4.13.9" }, devDependencies: { hono: "4.13.9", "@pikit/contracts": "0.0.0" } });
+  f.writeManifest({ ...f.manifest(), dependencies: { hono: "4.13.9" }, devDependencies: { hono: "4.13.9", "@pikit/core": "0.0.0" } });
   await generate(f.root);
   const found = await problems(f);
-  expect(found).toContain(`"hono" is in both dependencies and devDependencies: a package its files import is a dependency`);
-  expect(found).toContain(`devDependencies lists the kit package "@pikit/contracts"`);
+  expect(found).toContain(`"hono" is in both dependencies and devDependencies: a package its shipped files import is a dependency`);
+  expect(found).toContain(`devDependencies lists the kit package "@pikit/core": the core comes with requires.pikit`);
   // Imported only as a dev dependency: it is still one of its dependencies.
   f.writeManifest({ ...f.manifest(), dependencies: {}, devDependencies: { hono: "4.13.9" } });
   await generate(f.root);
