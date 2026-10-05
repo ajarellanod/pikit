@@ -132,6 +132,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write("tsconfig.json", starter.tsconfig());
     write("bunfig.toml", starter.BUNFIG);
     write(".gitignore", starter.gitignore(target));
+    write(".gitattributes", starter.GITATTRIBUTES);
     write("README.md", starter.readme(name, components, target, dashboard !== undefined));
     write(CONFIG_FILE, starter.configFile(target));
     // Its prompt says where people reach it: the channels being installed.

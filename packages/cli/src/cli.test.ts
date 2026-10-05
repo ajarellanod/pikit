@@ -177,6 +177,8 @@ test("new --target durable records the target, and writes two Apps, wrangler and
   // The version this repository checks deployment-cloudflare with (its bundle test, the workerd lane).
   expect(JSON.parse(readFileSync(join(PIKIT_ROOT, "package.json"), "utf8")).devDependencies.wrangler).toBe("4.143.0");
   expect(readFileSync(join(project, ".gitignore"), "utf8")).toContain(".wrangler/\n");
+  // The dashboard's built module is generated: collapsed in a diff, built again by every deploy.
+  expect(readFileSync(join(project, ".gitattributes"), "utf8")).toContain("src/pikit/admin-api/dashboard-files.ts linguist-generated=true -diff\n");
   expect(existsSync(join(project, "wrangler.jsonc"))).toBe(true);
   // The starter's model is one whose provider runs on Cloudflare: provider-anthropic is server-only.
   expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "openrouter/z-ai/glm-5.3-flash",');

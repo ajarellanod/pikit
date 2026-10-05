@@ -5,7 +5,7 @@
  *
  * - `pikit.config.ts`, the composition root, listing the project's agents;
  * - one agent, `assistant` (`src/agents/assistant/agent.ts`), provided by `src/extensions/agents.ts`;
- * - `package.json`, `tsconfig.json`, `bunfig.toml`, `.gitignore`, a README. A project may keep a
+ * - `package.json`, `tsconfig.json`, `bunfig.toml`, `.gitignore`, `.gitattributes`, a README. A project may keep a
  *   registry of its own components in `registry/` (`pikit add <name> --registry registry` installs
  *   from it): `tsc` and `bun test` leave that folder out from the start, since the installed copy in
  *   `src/pikit/` is the one checked (two copies of one contract file that differ fail `tsc`, TS2717,
@@ -107,6 +107,16 @@ export const GITIGNORE = `node_modules/
 !.env.example
 # State: the database (conversations, the registry), model credentials, the agents' workspace.
 .pikit/
+`;
+
+/**
+ * `.gitattributes`: the dashboard's built files, a module of ~1 MB that its build writes into admin-api
+ * (when the project has a UI), are generated: GitHub collapses them in a diff, and `git diff` says
+ * only that they changed. Committed, so a clone runs and type-checks as it is; every deploy builds
+ * them again (deployment-cloudflare's wrangler `build.command`, deployment-docker's image).
+ */
+export const GITATTRIBUTES = `# The dashboard's build writes this (src/dashboard/: bun run build); every deploy builds it again.
+src/pikit/admin-api/dashboard-files.ts linguist-generated=true -diff
 `;
 
 /** `.gitignore` for a project on `target`. */

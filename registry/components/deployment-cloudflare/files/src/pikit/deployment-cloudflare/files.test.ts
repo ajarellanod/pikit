@@ -20,6 +20,7 @@ interface WranglerConfig {
   migrations: { tag: string; new_sqlite_classes?: string[]; new_classes?: string[] }[];
   version_metadata?: { binding: string };
   rules?: { type: string; globs: string[] }[];
+  build?: { command: string; watch_dir?: string };
 }
 
 const config = Bun.JSONC.parse(readFileSync(join(ROOT, "wrangler.jsonc"), "utf8")) as WranglerConfig;
@@ -46,6 +47,11 @@ test("/health can report the version, nodejs_compat is on, and .md and .wasm are
     // execution-do imports QuickJS by a package export without `.wasm`: a rule matches the import as written.
     ["CompiledWasm", ["**/*.wasm", "@jitl/quickjs-wasmfile-release-sync/wasm"]],
   ]);
+});
+
+test("whoever runs wrangler builds the dashboard of a project with a UI first (bundle.test.ts runs it)", () => {
+  expect(config.build?.command).toBe("if [ -f src/dashboard/package.json ]; then cd src/dashboard && bun install --frozen-lockfile && bun run build; fi");
+  expect(config.build?.watch_dir).toBe("src/dashboard/src");
 });
 
 test("a name in the file (a Deploy to Cloudflare template's, for Workers Builds) is one Cloudflare accepts; pikit's has none", () => {
