@@ -19,6 +19,9 @@
  *   once the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
  *   network; a project without one runs none.
  * Installed files that differ from what was installed are listed as information: they are yours.
+ * A config value that looks like a secret (`secretLikePaths`: under a key such as `token` or
+ * `apiKey`, or shaped like a credential) is a warning, never printed: config is committed and shown
+ * (here, the dashboard). A secret goes in `.env` and is read through `secrets`.
  *
  * `problems` fail the command. `unconfigured` fail it too, but `pikit new` expects them: a new
  * project is configured next, by `pikit configure`.
@@ -26,6 +29,7 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
+import { redactSecrets, secretLikePaths } from "@pikit/contracts";
 import { packageName, scanImports } from "../registry/imports.ts";
 import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from "../project/component-doctor.ts";
 import { projectEnv, probe, runScript } from "../project/run.ts";
@@ -44,6 +48,8 @@ export interface DoctorReport {
   unconfigured: string[];
   /** Information: modified files, installed components that are not listed. */
   notes: string[];
+  /** What looks wrong but fails nothing: a config value that looks like a secret. */
+  warnings: string[];
   probe: ProbeResult;
 }
 
@@ -63,6 +69,7 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
   const problems: string[] = [];
   const unconfigured: string[] = [];
   const notes: string[] = [];
+  const warnings: string[] = [];
 
   const operation = incompleteOperation(projectDir);
   if (operation !== undefined) problems.push(incompleteOperationMessage(operation));
@@ -86,6 +93,8 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
       if (listable && !result.listed.includes(name)) notes.push(`${name} is installed but not listed in pikit.config.ts`);
     }
     notes.push(...unusedProviders(result.description.components));
+    warnings.push(...secretsInConfig(result.description.config, "config"));
+    if (result.worker !== undefined) warnings.push(...secretsInConfig(result.worker.config, "workerConfig"));
     problems.push(...brokenReferences(result));
     if (options.componentChecks !== false) {
       const checked = await componentChecks(projectDir, options.componentChecks === "unless-before-deploy");
@@ -127,11 +136,21 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
 
   if (options.quiet !== true) {
     for (const note of notes) log.info(`  ${note}`);
+    for (const warning of warnings) log.warn(warning);
     for (const missing of unconfigured) log.warn(missing);
     for (const problem of problems) log.problem(problem);
     if (problems.length === 0 && unconfigured.length === 0) log.ok("pikit doctor: green");
   }
-  return { problems, unconfigured, notes, probe: result };
+  return { problems, unconfigured, notes, warnings, probe: result };
+}
+
+/** A warning per value of `config` (pikit.config.ts's `name`) that looks like a secret: its path, never its value. */
+export function secretsInConfig(config: Record<string, unknown>, name: string): string[] {
+  return secretLikePaths(config).map(
+    (path) =>
+      `pikit.config.ts's ${name} ${path} looks like a secret: config is committed and shown (pikit doctor, the dashboard). ` +
+      "Put the secret in .env (`pikit configure`) and name it in config instead (as `tokenSecret: \"MY_TOKEN\"`): components read it through `secrets`",
+  );
 }
 
 /** What the installed components' own checks find; nothing, and no process, without a check to run. */
@@ -172,7 +191,8 @@ function printGraph(description: AppDescription, indent = ""): void {
   for (const [name, stages] of Object.entries(pipelines)) {
     log.info(`${indent}  ${name}: ${stages.map((s) => `${s.id} (${s.priority})`).join(" → ")}`);
   }
-  log.info(`${indent}Config:\n${JSON.stringify(config, null, 2).replace(/^/gm, `${indent}  `)}`);
+  // A secret put there by mistake is never printed (the warnings name its path).
+  log.info(`${indent}Config:\n${JSON.stringify(redactSecrets(config), null, 2).replace(/^/gm, `${indent}  `)}`);
 }
 
 /** S1 in the project: `@earendil-works/*` is imported only by the adapter. */

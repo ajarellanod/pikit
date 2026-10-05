@@ -102,6 +102,24 @@ test("a check may also give notes: they are printed and fail nothing", async () 
   expect(bad.err).toContain("checked: its doctor check failed: doctor did not resolve with a list of problems, nor with { problems, notes }");
 });
 
+test("a config value that looks like a secret is a warning naming its path, pointing to secrets; it fails nothing and is never printed", async () => {
+  const dir = project(undefined);
+  writeFileSync(
+    join(dir, "pikit.config.ts"),
+    'import { defineApp } from "@pikit/core";\nimport checked from "./src/pikit/checked/index.ts";\n\nexport default defineApp({ components: [checked], config: { checked: { fail: "sk-ant-api03-abcdefghijklmnopqrstuvwxyz0123" } } });\n',
+  );
+  const run = await runCli(["doctor"], dir);
+  expect(run.code).toBe(0);
+  expect(run.err).toContain("pikit.config.ts's config checked.fail looks like a secret");
+  expect(run.err).toContain("through `secrets`");
+  expect(run.out).toContain('"fail": "[redacted]"');
+  expect(`${run.out}${run.err}`).not.toContain("abcdefghijklmnopqrstuvwxyz0123");
+
+  // A secret's name is what config holds: no warning.
+  const plain = await runCli(["doctor"], project(undefined));
+  expect(plain.err).not.toContain("looks like a secret");
+});
+
 test("pikit up leaves a component with a beforeDeploy hook to that hook (one check per deploy); pikit doctor still runs its check", async () => {
   const dir = project(REPORTS);
   const manifest = readProjectManifest(dir);
