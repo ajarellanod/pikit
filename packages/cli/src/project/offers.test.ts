@@ -120,12 +120,12 @@ test("a provider is offered in the App that misses it: one that goes only in the
   ]);
 });
 
-test("with a second provider, nothing is offered for it (the user's choice); the presets named their storage, and bring the rest over it", () => {
+test("with a second provider, nothing is offered for it (the user's choice); the presets named their storage and key-value store, and bring the rest over them", () => {
   const sqlite = registry.manifest("storage-sqlite");
   const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
   expect(offeredProviders(two, ["conversations-kv"]).map((o) => o.component)).toEqual(["storage-kv-sql"]);
   const telegram = registry.preset("telegram");
-  expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["storage-kv-sql", "wakeups-timers", "outbound-durable"]);
+  expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["wakeups-timers", "outbound-durable"]);
 });
 
 test("an optional capability with two providers is not offered, and is named as the user's choice instead of left out in silence", () => {
@@ -197,23 +197,28 @@ test("what a composed project provides, per App, without the components about to
 });
 
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {
-  // The preset names its storage (`presets/http.yaml`), and the runtime provides the record of submissions: nothing is brought.
+  // The preset names its storage and key-value store (`presets/http.yaml`), and the runtime provides
+  // the record of submissions: nothing is brought.
   const http = registry.preset("http", []);
   expect(http).toContain("storage-sqlite");
+  expect(http).toContain("storage-kv-sql");
+  // The neutral conversation registry (SPEC C5), after the runtime that creates its conversations.
+  expect(http).toContain("conversations-kv");
+  expect(http).not.toContain("conversations-file");
+  expect(http.indexOf("runtime-pi")).toBeLessThan(http.indexOf("conversations-kv"));
   const withHttp = withOffers(registry, http);
   expect(withHttp.order).toEqual(http);
   expect(Object.fromEntries(withHttp.installedFor)).toEqual({});
 
-  // The preset's storage serves the outbox and the key-value store too: the chat channel brings only
-  // those two, and the outbox's timers.
+  // The preset's storage serves the outbox too, and its key-value store the cursor: the chat channel
+  // brings only the outbox and its timers.
   const telegram = registry.preset("http", ["channel-telegram"]);
   const { order, installedFor } = withOffers(registry, telegram);
   const at = order.indexOf("channel-telegram");
-  expect(order.slice(at - 3, at + 1)).toEqual(["storage-kv-sql", "wakeups-timers", "outbound-durable", "channel-telegram"]);
-  expect(order.filter((c) => !telegram.includes(c))).toEqual(["storage-kv-sql", "wakeups-timers", "outbound-durable"]);
+  expect(order.slice(at - 2, at + 1)).toEqual(["wakeups-timers", "outbound-durable", "channel-telegram"]);
+  expect(order.filter((c) => !telegram.includes(c))).toEqual(["wakeups-timers", "outbound-durable"]);
   expect(Object.fromEntries(installedFor)).toEqual({
     "outbound-durable": "channel-telegram",
-    "storage-kv-sql": "channel-telegram",
     "wakeups-timers": "outbound-durable",
   });
 });

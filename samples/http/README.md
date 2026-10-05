@@ -6,7 +6,9 @@ writes and edits files and runs commands in its workspace.
 
 This is a fixture of the repository, not a generated project. `pikit.config.ts` imports the
 components straight from `registry/`, so its tests run the registry's own code. `pikit new --preset
-http` copies them to `src/pikit/` instead.
+http` copies them to `src/pikit/` instead, with one swap: its conversation registry is the neutral
+one, `conversations-kv` over `storage-kv-sql` (pointers in `.pikit/pikit.db`), where this sample
+keeps `conversations-file`, the registry's other provider, so that both run end to end.
 
 | Component | Does |
 |---|---|

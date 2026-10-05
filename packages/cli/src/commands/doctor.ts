@@ -20,7 +20,9 @@
  * - each installed component's own check, the file its `hooks.doctor` names (`component-doctor.ts`),
  *   once the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
  *   network; a project without one runs none.
- * Installed files that differ from what was installed are listed as information: they are yours.
+ * Installed files that differ from what was installed are listed as information: they are yours. So
+ * is a kit in `vendor/` that is not this CLI's (`staleKit`): behind it, `pikit upgrade` refreshes it;
+ * from a checkout this CLI's does not include, updating pikit does.
  *
  * `problems` fail the command. `unconfigured` fail it too, but `pikit new` expects them: a new
  * project is configured next, by `pikit configure`.
@@ -40,6 +42,7 @@ import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pik
 import { log } from "../ui.ts";
 import { confinedPath } from "../project/paths.ts";
 import { DASHBOARD_DIR } from "../project/dashboard.ts";
+import { kitCommit, kitOrder, staleKit } from "../project/vendor.ts";
 
 export interface DoctorReport {
   problems: string[];
@@ -73,6 +76,8 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
   const lockfile = checkLockfile(projectDir);
   problems.push(...lockfile.problems);
   notes.push(...lockfile.notes);
+  const kit = kitNote(projectDir, project.kit?.commit);
+  if (kit !== undefined) notes.push(kit);
 
   const result = await probe(projectDir);
   if (!result.ok) problems.push(`pikit.config.ts does not compose: ${result.error}`);
@@ -127,6 +132,18 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
     if (problems.length === 0 && unconfigured.length === 0) log.ok("pikit doctor: green");
   }
   return { problems, unconfigured, notes, probe: result };
+}
+
+/** What to say of a kit in `vendor/` that is not this CLI's; nothing when it is, or when there is none. */
+function kitNote(projectDir: string, commit: string | undefined): string | undefined {
+  if (!existsSync(join(projectDir, "package.json"))) return undefined;
+  const { stale } = staleKit(projectDir);
+  if (stale.length === 0) return undefined;
+  const cli = kitCommit() ?? "not in Git";
+  if (kitOrder(commit).verdict === "downgrade") {
+    return `the project's kit (vendor/) comes from pikit ${commit}, which this CLI's checkout (${cli}) does not include: update pikit before \`pikit add\` or \`pikit upgrade\``;
+  }
+  return `the project's kit (vendor/) is ${commit === undefined ? "another" : `pikit ${commit}`}, not this CLI's (${cli}): \`pikit upgrade\` refreshes it (${stale.join(", ")})`;
 }
 
 /** What the installed components' own checks find; nothing, and no process, without a check to run. */

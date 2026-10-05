@@ -4,7 +4,9 @@
  * less the provider `runtime-pi` brings itself (offered providers), which `pikit new`
  * installs with it. The storage is the preset's own: it names it rather than rely on the registry
  * having one server provider of `storage.sql`. A chat channel chosen instead of `channel-http`
- * brings its durable delivery the same way.
+ * brings its durable delivery the same way. One swap: the preset's conversation registry is the
+ * neutral one, `conversations-kv` over `storage-kv-sql` (SPEC C5), where this sample keeps
+ * `conversations-file`, the registry's other provider, so that both run end to end.
  */
 
 import { expect, test } from "bun:test";
@@ -19,11 +21,18 @@ function preset(): string[] {
 
 /** Components this sample defines itself, which a project keeps in `src/extensions/`. */
 const PROJECT_LOCAL = new Set(["agents"]);
-test("the http preset lists exactly the sample's registry components, and deployment-docker", () => {
+/** The sample's conversation registry, and the preset's in its place. */
+const SAMPLE_REGISTRY = "conversations-file";
+const PRESET_REGISTRY = ["storage-kv-sql", "conversations-kv"];
+
+test("the http preset lists exactly the sample's registry components, and deployment-docker, with the neutral conversation registry", () => {
   const listed = preset();
   const sample = definition.components.map((component) => component.name).filter((name) => !PROJECT_LOCAL.has(name));
 
-  expect([...listed].sort()).toEqual([...sample, "deployment-docker"].sort());
+  expect(sample).toContain(SAMPLE_REGISTRY);
+  expect(listed).not.toContain(SAMPLE_REGISTRY);
+  const swapped = [...sample.filter((name) => name !== SAMPLE_REGISTRY), ...PRESET_REGISTRY, "deployment-docker"];
+  expect([...listed].sort()).toEqual(swapped.sort());
   expect(new Set(listed).size).toBe(listed.length);
 });
 

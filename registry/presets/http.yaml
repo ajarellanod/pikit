@@ -1,7 +1,9 @@
 # yaml-language-server: $schema=../schema/preset.schema.json
 # An agent over HTTP, run in Docker: `pikit new my-agent --preset http`.
 # A preset is only the list of `pikit add` calls, in order. Nothing branches on which preset a
-# project came from. Its composition is samples/http's, plus the deployment and the log lines.
+# project came from. Its composition is samples/http's, plus the deployment and the log lines, with
+# the neutral conversation registry (conversations-kv over storage-kv-sql, SPEC C5) where the sample
+# keeps conversations-file, the registry's other provider, so both stay run end to end.
 # The agents (src/agents/, src/extensions/agents.ts) belong to the project, not to the registry.
 # `title` is what `pikit new` shows if it asks which preset to start from (only with several bases).
 title: "An agent, run in Docker"
@@ -10,19 +12,24 @@ components:
   # Named, not left to `pikit add` to offer: an offer needs the registry's only server provider of
   # `storage.sql`, and a second one (storage-postgres) would leave every project of this preset with
   # none. The runtime keeps its conversations here (pi-durable's tables) and its answers log; a chat
-  # channel's outbox and key-value store keep theirs too, and stay offered, as each has one provider,
-  # on top of whichever storage.
+  # channel's outbox keeps its own too, and stays offered, as it has one provider, on top of whichever
+  # storage.
   - storage-sqlite
+  # Named for the same reason: `storage.kv` over the storage above. The conversation registry keeps
+  # its pointers there, and a chat channel its cursor.
+  - storage-kv-sql
   - credentials-file
   - provider-anthropic
   - execution-local
   - tool-read
   - tool-write
   - tool-edit
+  # Installed, but the starter agent does not name it on a server: a shell runs as the server's user
+  # (its README). Add "bash" to an agent's `tools` to give it one.
   - tool-bash
   - runtime-pi
   # After the runtime: the registry creates conversations through its `agent.conversations`.
-  - conversations-file
+  - conversations-kv
   - router-basic
   # A chat channel chosen instead brings durable delivery with it (`outbound.queue` is offered by
   # `pikit add`, with wakeups-timers to wake its retries): channel-http answers in the HTTP response

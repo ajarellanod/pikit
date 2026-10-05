@@ -40,6 +40,21 @@ test("a written file reads back as it was: keys in one order, files sorted; anot
   expect(() => readProjectManifest(project)).toThrow("pikit.json has version 2; this CLI reads version 1");
 });
 
+test("a pikit.json that does not have the schema's shape is refused, naming the file and the path of each bad field", () => {
+  const project = temp();
+  const component = { registry: "default", version: 1, requires: { pikit: "0.0.0" }, files: {}, dependencies: {}, addedDependencies: [], environment: [], note: "mine" };
+  writeFileSync(join(project, PIKIT_JSON), JSON.stringify({ ...emptyManifest(), components: { "tool-fake": component } }));
+  expect(() => readProjectManifest(project)).toThrow(
+    "pikit.json does not have the shape this CLI reads:\n  /components/tool-fake/note: is not a known field\n  /components/tool-fake/version: must be string",
+  );
+
+  writeFileSync(join(project, PIKIT_JSON), JSON.stringify({ version: 1, targets: ["server"], registries: {} }));
+  expect(() => readProjectManifest(project)).toThrow("pikit.json does not have the shape this CLI reads:\n  /: must have required properties components");
+
+  writeFileSync(join(project, PIKIT_JSON), "{ \"version\": 1,");
+  expect(() => readProjectManifest(project)).toThrow("pikit.json is not valid JSON: ");
+});
+
 test("a registry is recorded as builtin, relative inside the project, else as given; each resolves back", () => {
   const project = temp();
   expect(emptyManifest().registries).toEqual({ default: BUILTIN_REGISTRY });

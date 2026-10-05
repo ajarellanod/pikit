@@ -77,6 +77,15 @@ test.skipIf(!E2E)(
     expect(Object.keys(manifest.components)).not.toContain("outbound-durable");
     expect(Object.values(manifest.components as Record<string, { installedFor?: string[] }>).filter((c) => c.installedFor !== undefined)).toEqual([]);
     expect(manifest.components["storage-sqlite"].installedFor).toBeUndefined();
+    // The neutral conversation registry, over the key-value store the preset names (SPEC C5).
+    expect(manifest.components["conversations-kv"].installedFor).toBeUndefined();
+    expect(manifest.components["storage-kv-sql"].installedFor).toBeUndefined();
+    expect(Object.keys(manifest.components)).not.toContain("conversations-file");
+    // tool-bash is installed, but on a server the starter agent does not name it.
+    expect(Object.keys(manifest.components)).toContain("tool-bash");
+    expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('tools: ["read","write","edit"],');
+    // The README says where pikit is.
+    expect(readFileSync(join(project, "README.md"), "utf8")).toContain(`It runs from the kit's checkout at \`${PIKIT_ROOT}\``);
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
     // The skills for the user's AI agent come with every project, saying where the kit is.
