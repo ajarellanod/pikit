@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { modelsFrom, type Provider } from "@pikit/pi-adapter";
 import { startFakeOpenRouter } from "./fake-openrouter.test-support.ts";
-import providerOpenRouter from "./index.ts";
+import providerOpenRouter, { API_BASE } from "./index.ts";
 
 /** The provider the component provides under `openrouter`, with `config` as its config. */
 async function providerWith(config?: Record<string, unknown>): Promise<{ provider: Provider | undefined; stop(): Promise<void> }> {
@@ -52,6 +52,24 @@ test("it provides pi-ai's OpenRouter provider under the key openrouter, with API
   // An agent's `openrouter/z-ai/glm-5.3-flash`: the provider before the first slash, the model id after.
   expect(modelsFrom(provider === undefined ? [] : [provider]).getModel("openrouter", "z-ai/glm-5.3-flash")?.id).toBe("z-ai/glm-5.3-flash");
   await app.stop();
+});
+
+test("apiBase moves the provider's address and its image and classifier models too; a trailing slash on the default changes nothing", async () => {
+  const slash = await providerWith({ apiBase: `${API_BASE}/` });
+  const plain = await providerWith();
+  const proxy = await providerWith({ apiBase: "http://127.0.0.1:9999/proxy/" });
+  try {
+    const provider = proxy.provider as Provider;
+    expect(provider.baseUrl).toBe("http://127.0.0.1:9999/proxy/v1");
+    expect(slash.provider?.getModels()).toEqual(plain.provider?.getModels() ?? []);
+    const all = provider.getAllModels?.() ?? [];
+    expect(all.length).toBeGreaterThan(provider.getModels().length);
+    expect(all.every((model) => !model.baseUrl.startsWith(API_BASE))).toBe(true);
+  } finally {
+    await slash.stop();
+    await plain.stop();
+    await proxy.stop();
+  }
 });
 
 test("by default every model is OpenRouter's; apiBase moves them all under it, and a model answers from there with the key", async () => {

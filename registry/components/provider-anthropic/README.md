@@ -6,8 +6,8 @@ Anthropic's Claude models for your agents. An agent names one as `anthropic/<mod
 - **Provides:** `model.provider`, under the key `anthropic`.
 - **Requires:** nothing. The agent runtime reads credentials from `model.credentials` when it is
   installed.
-- **Target:** `server`. On Cloudflare an API key would work, but an OAuth refresh loads its flow
-  with a dynamic import, which Workers do not allow.
+- **Targets:** `server` and `durable`. On `durable` (Cloudflare), API keys only ("Cloudflare"
+  below).
 - **Installs to:** `src/pikit/provider-anthropic/`.
 - **npm dependencies:** `@pikit/pi-adapter` (pinned with Pi).
 
@@ -28,7 +28,8 @@ pi-ai looks for them in this order:
    `ANTHROPIC_FEDERATION_RULE_ID`, `ANTHROPIC_ORGANIZATION_ID` and `ANTHROPIC_IDENTITY_TOKEN_FILE` are
    all set.
 
-The agent runtime refuses to start when none of them exists.
+The agent runtime refuses to start when none of them exists. With `secrets` installed, it reads
+these variables there first, then the environment.
 
 The OAuth login (pi-ai 1.0) first asks how to log in: `browser` (a callback on localhost) or
 `copy_code` (Anthropic's page shows a code to paste: for a login where the app runs, in Docker).
@@ -39,10 +40,21 @@ To log in with a Claude subscription, run pi-ai's OAuth flow and store the resul
 `pikit configure` does it too, when it sets up the model. Never reuse Pi's own `~/.pi/agent/auth.json`: a
 refresh would rotate the token the Pi CLI holds.
 
+## Cloudflare
+
+On `durable`, the provider has no OAuth: a Claude subscription login stays a server's. pi-ai loads
+its OAuth flow, the login and each token refresh, with an import no bundler follows (it keeps the
+flow's Node code out of bundles), so a Worker could not refresh a subscription's tokens. An API key
+needs nothing of it: set `ANTHROPIC_API_KEY` as a Worker secret (`wrangler secret put
+ANTHROPIC_API_KEY`), which `secrets-cloudflare` reads. Workload identity federation reads a token
+file, so it is a server's too.
+
 ## Tests
 
 `provider-anthropic.test.ts` is copied with the component and runs in your project. It makes no
-request and reads no credential.
+request and reads no credential: it checks the provider on each target. In the pikit repository,
+the workerd lane (`tests/workerd/test/provider-anthropic.workerd.ts`) composes it with runtime-pi in
+a real Durable Object, where an agent answers from a fake Anthropic API with a key from `secrets`.
 
 `component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
 the test "what setup declares" pins it.

@@ -40,6 +40,12 @@ else is to be sent now.
 
 ## At each Pi pin bump
 When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
+0. `bun install`, then `bun scripts/pi-providers.ts`: it rewrites the adapter's per-id provider
+   subpaths (`@pikit/pi-adapter/providers/<id>`) and lazy API subpaths (`api/<name>`) from the new
+   pi-ai, and their `package.json` exports (`scripts/pi-providers.test.ts` fails until it runs). For
+   each provider or API it added, read its module in pi-ai: one that needs Node (an SDK loaded through
+   a specifier no bundler follows, credentials from files) goes in `SERVER_ONLY_EXPORTS`
+   (`packages/cli/src/registry/imports.ts`), and the script runs again.
 1. `bun test packages/pi-adapter` (`pi-facts.test.ts` fails first when a fact pikit relies on
    changed), then the whole suite and `bun run test:workerd`.
 2. For each proposal still open above, `gh search issues --repo earendil-works/pi "<its subject>"`

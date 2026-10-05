@@ -24,6 +24,8 @@ it into the app.
   - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth tokens).
     pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read only their
     environment variables (`ANTHROPIC_API_KEY`);
+  - `secrets`, if installed: where those variables are read first, then the environment. On
+    Cloudflare, `secrets-cloudflare` reads them from the Worker's secrets, with no `process.env`;
   - `wakeups`, if installed: runs are driven inside wakeups, in slices, instead of by promises left
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes.
 

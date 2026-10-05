@@ -9,7 +9,7 @@
 # and cloudflare-minimal asks none. `pikit add` puts each half in its App (C1): secrets-cloudflare and
 # platform-cloudflare in both, channel-telegram-webhook's Worker half in the Worker's, everything else
 # in each conversation's Durable Object. Offered along the way (`pikit add` offers a provider for what is missing): outbound-durable, for the
-# channel's answers, its retries woken by the object's alarm (platform-cloudflare's `wakeups`). The starter agent's model is OpenRouter's (provider-anthropic is server-only),
+# channel's answers, its retries woken by the object's alarm (platform-cloudflare's `wakeups`). The starter agent's model is OpenRouter's (provider-anthropic takes only API keys on Cloudflare),
 # and it names every tool below.
 title: "Telegram on Cloudflare: a Worker, and a Durable Object per chat"
 components:

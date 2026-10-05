@@ -25,6 +25,7 @@ import {
   testComponents,
 } from "@pikit/pi-adapter/testing";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
+import { envApiKeyAuth } from "@pikit/pi-adapter/provider";
 import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
 import runtimePi, { createRuntimePi, DRIVE } from "./index.ts";
@@ -122,7 +123,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(described).toMatchObject({
     provides: ["agent.runtime", "agent.conversations", "agent.submissions", "agent.observe"],
     requires: ["storage.sql"],
-    optional: ["agent.definition", "model.provider", "model.credentials", "agent.tool", "agent.extension", "execution", "workspace", "wakeups"],
+    optional: ["agent.definition", "model.provider", "model.credentials", "secrets", "agent.tool", "agent.extension", "execution", "workspace", "wakeups"],
   });
 });
 
@@ -442,6 +443,28 @@ test("it builds the models with model.credentials: a stored key lets the agent a
   const { app, ask } = await talk([storage, agents, keyedProvider, credentials]);
 
   expect(await ask("r1", "hello")).toBe("answer: hello");
+  await app.stop();
+});
+
+/** A provider whose key is the variable `TEST_MODEL_KEY`, as pi-ai's built-in providers read theirs. */
+const envKeyedProvider = defineComponent({
+  name: "provider-env-keyed",
+  setup: (pikit) => pikit.provideKeyed("model.provider", "faux", { ...scriptedProvider(), auth: { apiKey: envApiKeyAuth("Test key", ["TEST_MODEL_KEY"]) } }),
+});
+
+test("a provider's variable is read through secrets first: a key there lets the agent answer, with nothing in the environment", async () => {
+  const { storage, agents } = testComponents();
+  const refused = await defineApp({ components: [storage, agents, envKeyedProvider, runtimePi], logger: silentLogger }).create();
+  expect(await startFailure(refused)).toContain('provider "faux", which has no credentials');
+
+  const asked: string[] = [];
+  const secrets = defineComponent({
+    name: "secrets-test",
+    setup: (pikit) => pikit.provide("secrets", { get: async (name) => (asked.push(name), name === "TEST_MODEL_KEY" ? "made-up-key" : undefined) }),
+  });
+  const { app, ask } = await talk([testComponents().storage, agents, envKeyedProvider, secrets]);
+  expect(await ask("r1", "hello")).toBe("answer: hello");
+  expect(asked).toContain("TEST_MODEL_KEY");
   await app.stop();
 });
 

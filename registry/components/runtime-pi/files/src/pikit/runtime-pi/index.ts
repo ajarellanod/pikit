@@ -24,6 +24,8 @@
  *   workspace when a provider is installed, otherwise on `execution`);
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
  *   read only their environment variables (`ANTHROPIC_API_KEY`).
+ * - `secrets`, if installed: where those variables are read first, before the environment (on
+ *   Cloudflare, the Worker's secrets, with no `process.env`);
  * - `wakeups`, if installed: runs are driven inside wakeups, in slices (SPEC §4.1, C4), for a host
  *   that keeps running only while an event is in progress (a Durable Object). See `createDriver` below.
  *
@@ -96,6 +98,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
       const credentials = pikit.useOptional("model.credentials");
+      const secrets = pikit.useOptional("secrets");
       const tools = pikit.useKeyed("agent.tool");
       const extensions = pikit.useKeyed("agent.extension");
       const execution = pikit.useOptional("execution");
@@ -148,7 +151,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         async start(ctx) {
           const models = modelsFrom(
             providers.keys().flatMap((key) => providers.get(key) ?? []),
-            { credentials: credentials.get() },
+            { credentials: credentials.get(), secrets: secrets.get() },
           );
           // Fail at start, not at the first message: an agent that cannot run is a broken deployment.
           if (agents.keys().length === 0) throw new Error("runtime-pi: no agent.definition is provided");

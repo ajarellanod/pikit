@@ -1,0 +1,34 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "provider-openai-compatible",
+  "version": "0.0.0",
+  "description": "The models of any endpoint that speaks OpenAI's chat completions (vLLM, Ollama, LM Studio, a gateway), for your agents. An agent names one as `<id>/<model>`, for example `ollama/llama3.1:8b`.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "model.provider"
+  ],
+  "modelProviders": [
+    "openai-compatible"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}
