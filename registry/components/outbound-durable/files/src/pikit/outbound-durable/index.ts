@@ -12,6 +12,7 @@
  * - Abandoned pieces stay in `outbound_pieces` for 30 days, with their reason; delivered ones for 7.
  * - Every piece that settles gets one receipt, in the same transaction (`outbound_receipts`), read as a
  *   feed through `receipts` (`Feed`, SPEC K3): what a component that must not miss a delivery reads.
+ * - `pending` lists the pieces not settled yet, oldest first, without their text: what an operator sees waiting.
  * - Its tables carry a schema version (`outbound_meta`), so an existing database gains new tables.
  *
  * It follows Hermes' delivery ledger, with what NanoClaw and OpenClaw lack: backoff, order per
@@ -53,6 +54,7 @@ export default defineComponent({
       attach: (channel, transport) => running().attach(channel, transport),
       detach: (channel, signal) => (queue === undefined ? Promise.resolve() : queue.api.detach(channel, signal)),
       receipts: { read: (after, limit) => running().receipts.read(after, limit) },
+      pending: (page) => running().pending(page),
     });
 
     return {

@@ -266,6 +266,7 @@ test("with outbound.queue: enqueued under the answer's key, the transports attac
     attach: (channel) => void attached.push(`attach ${channel}`),
     detach: async (channel) => void attached.push(`detach ${channel}`),
     receipts: createMemoryFeed<never>().feed,
+    pending: async () => ({ items: [] }),
   };
   const h = await harness({ queue });
   expect(attached).toEqual(["attach chat"]);

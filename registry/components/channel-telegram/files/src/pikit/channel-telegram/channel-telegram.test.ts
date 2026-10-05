@@ -152,6 +152,8 @@ function recordingQueue(options: { failures?: number } = {}) {
     },
     // The channel never reads receipts; an empty feed stands in for them.
     receipts: createMemoryFeed<DeliveryReceipt>().feed,
+    // Every piece is sent within enqueue: none is ever pending.
+    pending: async () => ({ items: [] }),
   };
   const component = defineComponent({ name: "queue-test", setup: (pikit) => pikit.provide("outbound.queue", queue) });
   return { component, enqueued, attached, detached };

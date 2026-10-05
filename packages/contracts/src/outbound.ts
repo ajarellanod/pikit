@@ -18,10 +18,16 @@
  * died during it, a timeout) is sent again as a possible duplicate: an idempotent transport passes the
  * same key and the platform drops the copy; another marks it visibly. Losing an answer is worse
  * than receiving it twice.
+ *
+ * What an operator sees of it (the dashboard's Delivery, SPEC §5): `pending` lists the pieces not
+ * settled yet (queued, being sent, waiting for a retry), and `receipts` the ones that settled. Where it
+ * runs: in the App that holds the queue's records. On a server that is the one App and every piece; on
+ * Cloudflare it is each conversation's Durable Object, which sees only its own.
  */
 
 import type { ConversationRef } from "./agent.ts";
 import type { Feed } from "./feed.ts";
+import type { ObservedPage, PageRequest } from "./observe.ts";
 
 /**
  * The key of a run's answer: `${conversationId}:${requestId}`, where `requestId` is the request that started
@@ -79,7 +85,10 @@ export type DeliveryErrorKind =
   /** It will never work: the chat blocked the bot, the chat is gone, the request is invalid. */
   | "permanent";
 
-/** What a transport throws when a send fails. */
+/**
+ * What a transport throws when a send fails. Its message is shown to an operator (`PendingPiece.lastError`,
+ * an abandoned receipt's `reason`) and logged: the platform's words, never the piece's text or a credential.
+ */
 export class DeliveryError extends Error {
   readonly kind: DeliveryErrorKind;
   /** `rate_limited`: how long the platform asked to wait. */
@@ -118,6 +127,42 @@ export interface OutboundQueue {
    * must not miss a delivery reads; `outbound.delivered` and `outbound.abandoned` are only notices.
    */
   readonly receipts: Feed<DeliveryReceipt>;
+  /**
+   * The pieces not settled yet, oldest stored first, a page at a time (`next` absent on the last page):
+   * what an operator sees waiting. A view of now, not a feed: a piece that settles between two pages is
+   * in neither, and is in `receipts` instead. Rejects a cursor this queue did not give.
+   */
+  pending(page: PageRequest): Promise<ObservedPage<PendingPiece>>;
+}
+
+/** One piece not settled yet. Never its text. */
+export interface PendingPiece {
+  /** The message's `idempotencyKey`: `answerKey(...)` for a run's answer. */
+  idempotencyKey: string;
+  /** Which of the message's pieces: 0 is the first. */
+  index: number;
+  channel: string;
+  conversationKey: string;
+  state:
+    /** Stored, never tried yet. */
+    | "queued"
+    /** A send is in flight now. */
+    | "sending"
+    /** Tried before (it failed, was rate limited, or was cut short by a stop): waits to be sent again. */
+    | "retrying";
+  /** Sends tried, whatever came of them. */
+  attempts: number;
+  /**
+   * Not tried before this time, on the app's clock: a retry's wait, a rate limit's. It may wait longer,
+   * behind an earlier piece of its conversation or for its channel to attach a transport. Absent while sending.
+   */
+  nextAttemptAt?: number;
+  /** Why its last try did not deliver it, short (`DeliveryError`'s kind and message); absent when none did. */
+  lastError?: string;
+  /** Its next send may repeat one that reached the platform: it goes out marked as a possible duplicate. */
+  possibleDuplicate: boolean;
+  /** When it was stored, on the app's clock. */
+  storedAt: number;
 }
 
 /** What became of one piece. The answer it belongs to is `idempotencyKey`; its thread is in `conversationKey`. */

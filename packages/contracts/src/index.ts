@@ -52,6 +52,7 @@ export type {
   OutboundMessage,
   OutboundPiece,
   OutboundQueue,
+  PendingPiece,
 } from "./outbound.ts";
 export { answerKey, DeliveryError } from "./outbound.ts";
 export type { AnswerDelivery, AnswerDeliveryOptions, DeliveryPolicy } from "./delivery.ts";

@@ -61,6 +61,28 @@ if (page.gap) {
 
 Receipts are kept as long as their pieces (7 days delivered, 30 abandoned).
 
+## Pending: what has not settled yet
+
+`outbound.queue`'s `pending` lists the pieces still open, oldest stored first, a page at a time
+(50 by default, at most 500): what the dashboard shows waiting. Each says its answer and piece, its
+channel and conversation, its state, its attempts, when it is next due, why its last try failed,
+whether it goes out as a possible duplicate, and when it was stored. Never its text.
+
+```ts
+let cursor: string | undefined;
+do {
+  const page = await queue.pending({ limit: 100, ...(cursor !== undefined && { cursor }) });
+  for (const piece of page.items) {
+    // piece.state: "queued" (never tried), "sending" (in flight), "retrying" (tried, waits to go again);
+    // piece.nextAttemptAt, piece.lastError ("transient: 503 …", cut to 200 characters).
+  }
+  cursor = page.next;
+} while (cursor !== undefined);
+```
+
+It reads `outbound_pieces` as it is now: a piece that settles while you page is in `receipts` instead.
+On Cloudflare each conversation's Durable Object holds its own outbox, and lists only its own pieces.
+
 ## Schema versions
 
 The tables carry a schema version (`outbound_meta`), so a later version of this component can add
@@ -69,7 +91,8 @@ start.
 
 ## Seeing what happened
 
-Everything is in the table `outbound_pieces` of the database (`.pikit/pikit.db`):
+`pending` and `receipts` are the way in for code. By hand, everything is in the table
+`outbound_pieces` of the database (`.pikit/pikit.db`):
 
 ```sh
 sqlite3 .pikit/pikit.db "SELECT key, state, attempts, last_error FROM outbound_pieces WHERE state != 'delivered'"
@@ -97,7 +120,8 @@ not sent by anyone; empty the table first if that matters.
 
 Copied with the component, they run in your project: the `outbound.queue` conformance suite (order,
 each retry to the millisecond, rate limits, abandonment, restarts, detach, receipts), the lifecycle
-suite, the feed suite over the receipts with their pruning, a database from before receipts, the
+suite, the feed suite over the receipts with their pruning, a database from before receipts, what
+`pending` shows of an interrupted send and a long failure, its page sizes, the
 convergence suite (the process killed after each of its commits in turn: every piece still delivered,
 in order, with one receipt, and every repeated send marked a possible duplicate), and a test that kills
 a process with SIGKILL during a send and checks the next process delivers it.

@@ -200,6 +200,8 @@ function recordingQueue() {
       transports.delete(channel);
     },
     receipts: createMemoryFeed<DeliveryReceipt>().feed,
+    // Every piece is sent within enqueue: none is ever pending.
+    pending: async () => ({ items: [] }),
   };
   const component = defineComponent({ name: "queue-test", setup: (pikit) => pikit.provide("outbound.queue", queue) });
   return { component, enqueued, attached, detached };

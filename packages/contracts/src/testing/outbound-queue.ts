@@ -15,7 +15,8 @@
  * hangs until aborted. It observes only the capability and the `outbound.*` events.
  *
  * The queue's `receipts` are checked here too (SPEC K3): what they record, and the feed suite
- * (`createFeedConformance`) over them, restarts included.
+ * (`createFeedConformance`) over them, restarts included. So is `pending`: what is not settled yet,
+ * its states, and its pages.
  */
 
 import {
@@ -35,6 +36,7 @@ import {
   type OutboundMessage,
   type OutboundPiece,
   type OutboundQueue,
+  type PendingPiece,
 } from "../outbound.ts";
 import { checker, expecter } from "./assert.ts";
 import { createFeedConformance } from "./feed.ts";
@@ -366,6 +368,102 @@ export function createOutboundQueueConformance(
       expect(after.items, before.items, "the receipts, read by the next process");
       expect((await second.queue.receipts.read(before.items.at(-1)?.cursor, 100)).items, [], "nothing after the last cursor");
     }),
+
+    queueCase("pending: the piece being sent and the ones behind it, oldest first, without their text", async (s) => {
+      const w = await s.open();
+      const hanging = scripted({ "m1#0": ["hang"] });
+      w.queue.attach("chat", hanging);
+      await w.queue.enqueue(message("m1", "chat:1", "one|two"));
+      await eventually(() => hanging.calls.length === 1, "the send in flight");
+      const page = await w.queue.pending({});
+      expect(
+        page.items.map(shown),
+        [
+          { idempotencyKey: "m1", index: 0, channel: "chat", conversationKey: "chat:1", state: "sending", attempts: 1, possibleDuplicate: false, storedAt: s.clock.now() },
+          { idempotencyKey: "m1", index: 1, channel: "chat", conversationKey: "chat:1", state: "queued", attempts: 0, possibleDuplicate: false, storedAt: s.clock.now() },
+        ],
+        "the pending pieces",
+      );
+      expect(page.items[0]?.nextAttemptAt, undefined, "nextAttemptAt of a piece being sent");
+      expect(page.items[1]?.nextAttemptAt, s.clock.now(), "nextAttemptAt of a piece never tried");
+      expect(page.items.map((p) => p.lastError), [undefined, undefined], "lastError before any failure");
+      check(page.items.every((p) => !("text" in p)), "a pending piece to carry no text");
+      expect(page.next, undefined, "next on the only page");
+      await s.stopAll();
+    }),
+
+    queueCase("pending: a failed piece shows its attempts and why until its retry delivers it; then it is in receipts", async (s) => {
+      const w = await s.open();
+      const transport = scripted({ "m1#0": [transient()] });
+      w.queue.attach("chat", transport);
+      await w.queue.enqueue(message("m1", "chat:1", "hello"));
+      let piece: PendingPiece | undefined;
+      await eventually(async () => {
+        [piece] = (await w.queue.pending({})).items;
+        return piece?.state === "retrying";
+      }, "the failed piece waiting for its retry");
+      expect(piece?.attempts, 1, "attempts of the failed piece");
+      expect(piece?.nextAttemptAt, s.clock.now() + firstWait, "nextAttemptAt: the declared wait after a transient failure");
+      check(piece?.lastError?.includes("503 from the platform") === true, `lastError to give the failure, got ${JSON.stringify(piece?.lastError)}`);
+      expect(piece?.possibleDuplicate, false, "possibleDuplicate of a failure that never reached the platform");
+      expect((await w.queue.receipts.read(undefined, 100)).items, [], "receipts while it waits");
+
+      await s.clock.advance(firstWait);
+      await eventually(() => w.delivered.length === 1, "the retry delivered");
+      expect((await w.queue.pending({})).items, [], "pending once it settled");
+      const [receipt] = (await w.queue.receipts.read(undefined, 100)).items;
+      expect([receipt?.fact.idempotencyKey, receipt?.fact.index, receipt?.fact.attempts, receipt?.fact.outcome.kind], ["m1", 0, 2, "delivered"], "its receipt");
+    }),
+
+    queueCase("pending: with no transport attached, a stored piece waits, and one cut short by a stop waits as a possible duplicate", async (s) => {
+      const first = await s.open();
+      const hanging = scripted({ "m1#0": ["hang"] });
+      first.queue.attach("chat", hanging);
+      await first.queue.enqueue(message("m1", "chat:1", "in flight|behind it"));
+      await eventually(() => hanging.calls.length === 1, "the send in flight");
+      await s.stopAll();
+
+      const second = await s.open();
+      const page = await second.queue.pending({});
+      expect(
+        page.items.map((p) => [p.idempotencyKey, p.index, p.state, p.attempts, p.possibleDuplicate]),
+        [
+          ["m1", 0, "retrying", 1, true],
+          ["m1", 1, "queued", 0, false],
+        ],
+        "the pieces the next process holds, before a transport is attached",
+      );
+      check(typeof page.items[0]?.lastError === "string" && page.items[0].lastError !== "", "the interrupted piece's lastError to say why it is sent again");
+
+      second.queue.attach("chat", scripted());
+      await eventually(() => second.delivered.length === 2, "both pieces delivered once a transport is attached");
+      expect((await second.queue.pending({})).items, [], "pending once they settled");
+    }),
+
+    queueCase("pending: pages, oldest stored first across conversations, with a cursor; no next on the last page", async (s) => {
+      const w = await s.open();
+      const hanging = scripted({ "a#0": ["hang"], "b#0": ["hang"] });
+      w.queue.attach("chat", hanging);
+      await w.queue.enqueue(message("a", "chat:a", "1|2|3"));
+      await w.queue.enqueue(message("b", "chat:b", "4|5"));
+      await eventually(() => hanging.calls.length === 2, "both conversations' heads in flight");
+      const pages: string[][] = [];
+      let cursor: string | undefined;
+      do {
+        const page = await w.queue.pending({ limit: 2, ...(cursor !== undefined && { cursor }) });
+        pages.push(page.items.map((p) => `${p.idempotencyKey}#${p.index}`));
+        check(pages.length <= 3, "at most three pages of two for five pieces");
+        cursor = page.next;
+      } while (cursor !== undefined);
+      expect(pages, [["a#0", "a#1"], ["a#2", "b#0"], ["b#1"]], "the pages");
+      expect((await w.queue.pending({ limit: 5 })).next, undefined, "next when the page holds every piece");
+      const rejected = await w.queue.pending({ cursor: "not a cursor" }).then(
+        () => false,
+        () => true,
+      );
+      check(rejected, "pending to reject a cursor it did not give");
+      await s.stopAll();
+    }),
   ];
 
   // The receipts are a feed: the feed suite holds them to `Feed`'s rules, across restarts of the queue.
@@ -450,10 +548,15 @@ function message(key: string, conversationKey: string, text: string, channel = "
   return { idempotencyKey: key, channel, conversationKey, text };
 }
 
+/** What a pending piece shows, but when it is due and why it last failed (checked on their own). */
+function shown({ nextAttemptAt: _due, lastError: _error, ...rest }: PendingPiece): Omit<PendingPiece, "nextAttemptAt" | "lastError"> {
+  return rest;
+}
+
 /** Polls `condition` in real time: the queue's work is asynchronous even when the clock stands still. */
-async function eventually(condition: () => boolean, what: string, timeoutMs = 3_000): Promise<void> {
+async function eventually(condition: () => boolean | Promise<boolean>, what: string, timeoutMs = 3_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
-  while (!condition()) {
+  while (!(await condition())) {
     if (Date.now() > deadline) throw new Error(`${GROUP}: expected ${what}`);
     await new Promise((resolve) => setTimeout(resolve, 2));
   }
@@ -504,6 +607,7 @@ function createSubject(fixture: OutboundQueueFixture, clock: ManualClock, apps: 
       const original = queue;
       const tracked: OutboundQueue = {
         receipts: original.receipts,
+        pending: (page) => original.pending(page),
         enqueue: (m) => original.enqueue(m),
         attach(channel, transport) {
           attached.push(transport as Scripted);
