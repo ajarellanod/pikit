@@ -62,10 +62,10 @@ be shared, without learning pikit's internals first.
    `pikit add` installs into `src/dashboard/` when the project has a UI (SPEC §5).
 
 ## What is missing (to make this the easy path)
-- **More skills for AI agents** (`.agents/skills/`). `pikit-component` (the steps above) and
-  `pikit-extension` (agent behaviour) ship with every project; "add a dashboard view" comes with
-  the dashboard (`src/dashboard/`, SPEC §5), and a focused "write a channel" when the next channel
-  shows what the general skill leaves out.
+- **More skills for AI agents** (`.agents/skills/`). `pikit-component` (the steps above),
+  `pikit-extension` (agent behaviour) and `pikit-view` (a dashboard view and the routes it reads)
+  ship with every project; a focused "write a channel" comes when the next channel shows what the
+  general skill leaves out.
 - **A helper to run an extension in a Harness turn** without runtime-pi (as `runToolCalls` does for a
   tool): today a component's own tests check its extension's parts, and the real App test is the
   project's own, because it imports `src/pikit/runtime-pi/`.
@@ -125,6 +125,6 @@ The skills for AI agents live in the kit repository, `.agents/skills/<skill>/SKI
 `pikit new` copies them into every project's `.agents/skills/` (`skillFiles` in
 `packages/cli/src/commands/starter.ts`). Not a component: a skill provides no capability and runs
 nothing, and every project needs it from the first minute. A project made by an older CLI copies a
-newer skill by hand. There are two: `pikit-component` (the steps above, executable by an agent) and
-`pikit-extension` (agent behaviour as an `agent.extension`); "add a dashboard view" comes with
-the dashboard (SPEC §5).
+newer skill by hand. There are three: `pikit-component` (the steps above, executable by an agent),
+`pikit-extension` (agent behaviour as an `agent.extension`) and `pikit-view` (a view of the
+dashboard, SPEC §5, and its admin API routes; a component ships one as its `view` folder).

@@ -7,6 +7,7 @@
 import { expect, test } from "bun:test";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
+import { generated, OUTPUT } from "./ui-registry.ts";
 
 const REPO = join(import.meta.dir, "..");
 const DASHBOARD = join(REPO, "registry/dashboard/files");
@@ -39,4 +40,12 @@ test("it is served under /admin/ and its primitives are attributed", () => {
   expect(read("vite.config.ts")).toContain('base: "/admin/"');
   expect(read("NOTICE")).toContain("shadcn/ui");
   expect(read("NOTICE")).toContain("MIT");
+});
+
+test("the @pikit shadcn registry (registry/ui/r/) is what scripts/ui-registry.ts generates from the sources", () => {
+  const files = generated();
+
+  for (const [name, text] of files) expect({ name, text: readFileSync(join(OUTPUT, name), "utf8") }).toEqual({ name, text });
+  expect(readdirSync(OUTPUT).sort()).toEqual([...files.keys()].sort());
+  expect((JSON.parse(read("components.json")) as { registries: Record<string, string> }).registries["@pikit"]).toContain("registry/ui/r/{name}.json");
 });

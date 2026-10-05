@@ -1,0 +1,37 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry.json",
+  "name": "pikit",
+  "homepage": "https://github.com/ajarellanod/pikit",
+  "items": [
+    {
+      "name": "lib",
+      "type": "registry:file",
+      "title": "pikit dashboard lib",
+      "description": "The dashboard's client of pikit's admin API (the token, useApi, live events), its views and its router."
+    },
+    {
+      "name": "error-note",
+      "type": "registry:file",
+      "title": "error-note",
+      "description": "pikit's error-note piece of the dashboard."
+    },
+    {
+      "name": "message",
+      "type": "registry:file",
+      "title": "message",
+      "description": "pikit's message piece of the dashboard."
+    },
+    {
+      "name": "composition",
+      "type": "registry:file",
+      "title": "composition",
+      "description": "The dashboard's composition view."
+    },
+    {
+      "name": "conversations",
+      "type": "registry:file",
+      "title": "conversations",
+      "description": "The dashboard's conversations view."
+    }
+  ]
+}

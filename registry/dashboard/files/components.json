@@ -21,5 +21,7 @@
   },
   "menuColor": "default",
   "menuAccent": "subtle",
-  "registries": {}
+  "registries": {
+    "@pikit": "https://raw.githubusercontent.com/ajarellanod/pikit/main/registry/ui/r/{name}.json"
+  }
 }

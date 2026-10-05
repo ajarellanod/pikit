@@ -56,8 +56,10 @@ Its data comes from admin routes its component registers through `http.route` (`
 /admin/api/memory/…`, asking `admin.auth`), read with `useApi` / `api` from `@/lib/api`. A view
 never reads anything else: no internals, no other origin.
 
-More primitives: `bunx shadcn@latest add dialog` (from this folder). pikit's own pieces and views
-come from its registry (`@pikit`, in `components.json`) as they are published.
+More primitives: `bunx shadcn@latest add dialog` (from this folder). pikit's own pieces and views are
+shadcn items too: `bunx shadcn@latest add @pikit/<item>` (`components.json` names the registry; its
+list is `registry/ui/r/registry.json` in the pikit repository). A component with a view installs it
+here itself (`pikit add`). The skill `pikit-view` (`.agents/skills/`) teaches an AI agent all of this.
 
 ## Notices
 
