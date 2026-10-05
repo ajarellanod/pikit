@@ -14,7 +14,8 @@ import { fakeDurableObjectStorage } from "./durable-object.test-support.ts";
 
 const ctx = BACKGROUND_CONTEXT;
 
-for (const c of createDurableExecutionConformance(() => ({ env: objectExecution(fakeDurableObjectStorage(), { id: "execution-do:test" }).env, shell: true }))) {
+// Its files cannot be watched: pi-durable's watch cases are left out.
+for (const c of createDurableExecutionConformance(() => ({ env: objectExecution(fakeDurableObjectStorage(), { id: "execution-do:test" }).env }), { expect, watch: false })) {
   test(`execution-do on pi-durable ${c.group}: ${c.name}`, () => c.run());
 }
 

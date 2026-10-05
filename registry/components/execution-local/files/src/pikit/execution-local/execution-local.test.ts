@@ -44,9 +44,9 @@ async function started(config: Record<string, unknown>): Promise<{ app: App; fil
 // pi-durable's ExecutionEnv contract, with a shell.
 for (const c of createDurableExecutionConformance(async () => {
   const { app, shell } = await started({ root: temporaryRoot() });
-  return { env: shell, shell: true, dispose: () => app.stop() };
-})) {
-  test(`execution-local ${c.group}: ${c.name}`, () => c.run());
+  return { env: shell, dispose: () => app.stop() };
+}, { expect })) {
+  test(`execution-local ${c.group}: ${c.name}`, () => c.run(), c.timeoutMs);
 }
 
 // Start and stop honour their deadline.

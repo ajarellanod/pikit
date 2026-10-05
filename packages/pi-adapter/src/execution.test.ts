@@ -24,9 +24,9 @@ function temporary() {
 
 for (const c of createDurableExecutionConformance(() => {
   const { dir, dispose } = temporary();
-  return { env: new NodeExecutionEnv({ cwd: dir }), shell: true, dispose };
-})) {
-  test(`pi-durable NodeExecutionEnv ${c.group}: ${c.name}`, () => c.run());
+  return { env: new NodeExecutionEnv({ cwd: dir }), dispose };
+}, { expect })) {
+  test(`pi-durable NodeExecutionEnv ${c.group}: ${c.name}`, () => c.run(), c.timeoutMs);
 }
 
 /** pi-durable's filesystem with no shell: what an edge environment provides as `execution` only. */
@@ -38,16 +38,16 @@ class NoShell extends NodeExecutionEnv {
 
 for (const c of createDurableExecutionConformance(() => {
   const { dir, dispose } = temporary();
-  return { env: new NoShell({ cwd: dir }), shell: false, dispose };
-})) {
-  test(`without a shell ${c.group}: ${c.name}`, () => c.run());
+  return { env: new NoShell({ cwd: dir }), dispose };
+}, { expect, shell: false })) {
+  test(`without a shell ${c.group}: ${c.name}`, () => c.run(), c.timeoutMs);
 }
 
 for (const c of createDurableExecutionConformance(() => {
   const { dir, dispose } = temporary();
-  return { env: createLocalExecution({ cwd: dir, env: { PATH: process.env.PATH ?? "" } }), shell: true, dispose };
-})) {
-  test(`local ${c.group}: ${c.name}`, () => c.run());
+  return { env: createLocalExecution({ cwd: dir, env: { PATH: process.env.PATH ?? "" } }), dispose };
+}, { expect })) {
+  test(`local ${c.group}: ${c.name}`, () => c.run(), c.timeoutMs);
 }
 
 test("a local command sees the variables given, not this process's environment", async () => {

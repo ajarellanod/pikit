@@ -25,7 +25,7 @@ function inThe(host: WorkersHost) {
   return objectExecution(object.storage as DurableObjectFilesStorage, { id: `execution-do:${object.id}` });
 }
 
-for (const c of createDurableExecutionConformance(() => ({ env: inThe(objectHost()).env, shell: true }))) {
+for (const c of createDurableExecutionConformance(() => ({ env: inThe(objectHost()).env }), { expect, watch: false })) {
   it(`execution-do on pi-durable ${c.group}: ${c.name}`, () => inObject(c));
 }
 
