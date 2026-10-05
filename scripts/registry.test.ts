@@ -318,6 +318,23 @@ test("K13: only admin-* components read APP_DESCRIPTION; comments and tests may 
   expect(await problems(admin)).toBe("");
 });
 
+test("a component working on a tool call's environment declares execution (I4)", async () => {
+  const tool = 'export const read = { name: "read", async execute(_args: unknown, api: { env?: unknown }) { return api.env; } };\n';
+  const f = await fixture({ name: "tool-sample", setup: `\n    pikit.provideKeyed("agent.tool", "sample", { name: "sample", replay: "safe" });` });
+  f.append("sample.test.ts", "// api.env in a test is not checked");
+  expect(await problems(f)).toBe("");
+
+  writeFileSync(join(f.own, "read.ts"), tool);
+  expect(await problems(f)).toBe(
+    "tool-sample: files/src/pikit/tool-sample/read.ts works on a tool call's environment (api.env, or Pi's coding tools), but setup uses neither execution nor execution.shell: " +
+      'add pikit.use("execution") (pikit.use("execution.shell") for a shell) to setup',
+  );
+
+  const declared = await fixture({ name: "tool-sample", setup: `\n    pikit.useOptional("execution");\n    pikit.provideKeyed("agent.tool", "sample", { name: "sample", replay: "safe" });` });
+  writeFileSync(join(declared.own, "read.ts"), tool);
+  expect(await problems(declared)).toBe("");
+});
+
 test("K1: setup declares the same on every target its manifest declares, and is described on each", async () => {
   const branches = await fixture({ setup: `\n    if (pikit.target === "durable") pikit.provide("conversations.registry", {});` });
   expect(await problems(branches)).toBe("");

@@ -19,6 +19,7 @@ import {
   checkCapabilities,
   checkDependencies,
   checkDescriptionReaders,
+  checkEnvironmentUsers,
   checkDevDependencies,
   checkImports,
   checkLayout,
@@ -298,6 +299,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
         checkFormat(dir, manifest, regenerate).forEach(report);
         // Only on an up-to-date manifest: a drifted one would report names setup no longer uses.
         checkCapabilities(manifest, catalogue).forEach(report);
+        checkEnvironmentUsers(dir, manifest).forEach(report);
       }
       (await checkTargets(dir, name, manifest, described)).forEach(report);
     } catch (error) {

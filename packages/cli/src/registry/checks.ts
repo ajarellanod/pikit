@@ -237,6 +237,29 @@ export function checkDescriptionReaders(componentDir: string, name: string): str
     );
 }
 
+/** What works on the environment the runtime builds for each tool call: `api.env`, or Pi's coding tools. */
+const WORKS_ON_ENV = /\bapi\.env\b|\bcreate(?:Read|Write|Edit|Bash)Tool\b/;
+
+/**
+ * A component whose shipped files work on a tool call's environment (`api.env`, or Pi's coding tools
+ * from `@pikit/pi-adapter/tools`) declares `execution` or `execution.shell` (`use`, or `useOptional`):
+ * its requirement is then in its manifest, where `pikit add` and `doctor` see it. Read from the source,
+ * outside comments: a tool that names its argument otherwise is not seen.
+ */
+export function checkEnvironmentUsers(componentDir: string, manifest: Manifest): string[] {
+  const declared = [...(manifest.requires?.capabilities ?? []), ...(manifest.optional?.capabilities ?? [])];
+  if (declared.includes("execution") || declared.includes("execution.shell")) return [];
+  const filesDir = join(componentDir, "files");
+  return listFiles(filesDir)
+    .filter((file) => SOURCE.test(file) && !forTests(file))
+    .filter((file) => WORKS_ON_ENV.test(stripComments(readFileSync(join(filesDir, file), "utf8"))))
+    .map(
+      (file) =>
+        `files/${file} works on a tool call's environment (api.env, or Pi's coding tools), but setup uses neither execution nor execution.shell: ` +
+        'add pikit.use("execution") (pikit.use("execution.shell") for a shell) to setup',
+    );
+}
+
 /**
  * Every capability the component provides or uses is in `catalogue`: the kit's (`capabilities.ts`), or
  * one a component of the registry declares.
