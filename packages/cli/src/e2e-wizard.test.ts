@@ -5,7 +5,7 @@
  * On Cloudflare, chosen in the menu or with the installer's `--target durable --preset
  * telegram-cloudflare`, it asks only the name before writing the bot.
  *
- * Telegram is channel-telegram's `fake-telegram.ts`. Ctrl-C stops the wizard with nothing written;
+ * Telegram is channel-telegram's `fake-telegram.test-support.ts`. Ctrl-C stops the wizard with nothing written;
  * `pikit new` with the same name continues with the project already there. The model key is a
  * dummy exported in the environment, so the model step asks nothing and no Docker is needed.
  * Slow (`bun install`), so it runs only with `PIKIT_E2E=1`.
@@ -17,7 +17,7 @@ import { afterAll, expect, test } from "bun:test";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.ts";
+import { startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.test-support.ts";
 import { DEFAULT_REGISTRY } from "./paths.ts";
 import { setConfigEntry } from "./project/config-file.ts";
 import { openRegistry } from "./project/registry-source.ts";

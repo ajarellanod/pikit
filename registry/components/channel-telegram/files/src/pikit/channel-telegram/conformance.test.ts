@@ -2,16 +2,18 @@
  * channel-telegram against the channel conformance suite (`@pikit/contracts/testing`): what every
  * channel does with a message, and how its answers survive what happens to the process. The suite
  * brings the runtime, the conversation registry, `agent.submissions`, `storage.kv`, a router and
- * stages that halt, deny or move messages; this fixture speaks Telegram through `fake-telegram.ts`.
+ * stages that halt, deny or move messages; this fixture speaks Telegram through `fake-telegram.test-support.ts`.
  * Each of the suite's conversations is an allowed user's private chat; delivering an id again is
- * Telegram redelivering the update, as after a crash. The platform fails a chat's sends with a 502,
- * or takes one and never answers; a piece sent again as a possible duplicate starts with `↻ `.
+ * Telegram redelivering the update, as after a crash. An update whose admission failed is tried again
+ * by the poller itself, its offset unconfirmed, after 0.5 s, 1 s, 2 s… (hence the longer timeout).
+ * The platform fails a chat's sends with a 502, or takes one and never answers; a piece sent again
+ * as a possible duplicate starts with `↻ `.
  */
 
 import { test } from "bun:test";
 import { defineComponent } from "@pikit/core";
 import { createChannelConformance } from "@pikit/contracts/testing";
-import { startFakeTelegram } from "./fake-telegram.ts";
+import { startFakeTelegram } from "./fake-telegram.test-support.ts";
 import channelTelegram from "./index.ts";
 import { POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
 
@@ -51,6 +53,6 @@ for (const c of createChannelConformance(({ conversations }) => {
     },
     dispose: () => telegram.stop(),
   };
-})) {
+}, { resetCommand: "/new", timeoutMs: 10_000 })) {
   test(`${c.group}: ${c.name}`, () => c.run(), 15_000);
 }

@@ -17,7 +17,7 @@
  *
  * It resolves once the message is durable in its conversation (`admitted` or `duplicate`), which is
  * when the Worker answers Telegram 200; the run and its answer come after, from the delivery wakeup
- * (`delivery.ts`). The channel's own short replies are sent here, once, best effort: a reply lost is
+ * (`startAnswerDelivery`, `index.ts`). The channel's own short replies are sent here, once, best effort: a reply lost is
  * logged, never a reason for Telegram to deliver the update again.
  */
 

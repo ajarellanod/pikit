@@ -5,7 +5,7 @@
  * a router and stages that halt, deny or move messages; this fixture speaks Telegram by webhook
  * through `fake-telegram.test-support.ts`, with both halves in one App (and the in-memory mailbox).
  * Each of the suite's conversations is an allowed user's private chat; delivering an id again is
- * Telegram posting the same update again. The platform fails a chat's sends with a 502, or takes one
+ * Telegram posting the same update again, as it does by itself while the webhook answers 5xx. The platform fails a chat's sends with a 502, or takes one
  * and never answers; a piece sent again as a possible duplicate starts with `↻ `.
  */
 
@@ -54,6 +54,15 @@ for (const c of createChannelConformance(({ conversations }) => {
     },
   });
   const posted = new Map<string, TelegramUpdate>();
+  let disposed = false;
+  /** Posts `update` as Telegram does: again, a moment later, while the webhook answers 5xx (or does not answer). */
+  const postUntilTaken = async (update: TelegramUpdate): Promise<void> => {
+    while (!disposed) {
+      await Bun.sleep(100);
+      const status = await telegram.post(update).catch(() => 0);
+      if (status > 0 && status < 500) return;
+    }
+  };
   const told = (conversation: string) => telegram.sent.filter((m) => m.chatId === user(conversation).id).map((m) => m.text);
   return {
     components: [
@@ -72,7 +81,8 @@ for (const c of createChannelConformance(({ conversations }) => {
       }
       const update = posted.get(id) ?? telegram.message(user(conversation), text);
       posted.set(id, update);
-      await telegram.post(update);
+      const status = await telegram.post(update);
+      if (status >= 500) void postUntilTaken(update);
     },
     told,
     platform: {
@@ -80,8 +90,11 @@ for (const c of createChannelConformance(({ conversations }) => {
       hang: (conversation) => void telegram.hangChat.add(user(conversation).id),
       received: (conversation) => told(conversation).map((text) => ({ text, possibleDuplicate: text.startsWith(POSSIBLE_DUPLICATE_MARK) })),
     },
-    dispose: () => telegram.stop(),
+    dispose: async () => {
+      disposed = true;
+      await telegram.stop();
+    },
   };
-})) {
+}, { resetCommand: "/new" })) {
   test(`${c.group}: ${c.name}`, () => c.run(), 15_000);
 }

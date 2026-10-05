@@ -1,7 +1,7 @@
 /**
  * The sample with `channel-telegram` instead of `channel-http`, as `pikit new --preset telegram` makes
  * it: the same runtime and registry, the storage (pi-durable's tables and runtime-pi's answers log), and
- * the outbox and the key-value store (for its cursor) the channel brings. Telegram is the channel's own fake Bot API (`fake-telegram.ts`), and
+ * the outbox and the key-value store (for its cursor) the channel brings. Telegram is the channel's own fake Bot API (`fake-telegram.test-support.ts`), and
  * the model Pi's faux provider, scripted.
  *
  * For `answers.test.ts`, in the test's process and in `telegram-worker.ts`, a process it kills.
