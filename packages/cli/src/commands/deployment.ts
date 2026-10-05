@@ -25,7 +25,7 @@ import {
   deploymentExec,
   loadDeployment,
 } from "../project/deployment-module.ts";
-import { apiKeyName, checkModelCredentials, providersNamed } from "../project/model-credentials.ts";
+import { apiKeyHint, checkModelCredentials, providersNamed } from "../project/model-credentials.ts";
 import type { ProbeResult } from "../project/probe.ts";
 import { projectEnv } from "../project/run.ts";
 import { CliError, log } from "../ui.ts";
@@ -64,9 +64,10 @@ async function checkLocalCredentials(projectDir: string, probed: ProbeResult): P
     .filter(([, ok]) => !ok)
     .map(([id]) => id);
   for (const id of missing) {
-    // A login is kept by `model.credentials`: without one (on Cloudflare), the key is the only way.
-    const login = checked.store === undefined ? "" : `run \`pikit configure --login ${id} --local\`, or `;
-    log.problem(`the model provider "${id}" has no credentials on this machine, for \`pikit dev\`: ${login}set its API key in .env (e.g. ${apiKeyName(id)})`);
+    // A login is kept by `model.credentials`: without one (on Cloudflare), or for a provider with no
+    // OAuth login, the key is the only way.
+    const login = checked.store === undefined || !checked.oauth.includes(id) ? "" : `run \`pikit configure --login ${id} --local\`, or `;
+    log.problem(`the model provider "${id}" has no credentials on this machine, for \`pikit dev\`: ${login}${apiKeyHint(projectDir, checked, id)}`);
   }
   if (missing.length > 0) throw new CliError("the app would start without model credentials");
 }

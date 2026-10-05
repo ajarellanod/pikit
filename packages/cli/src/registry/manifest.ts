@@ -268,7 +268,12 @@ export const ManifestSchema = Type.Object(
       ),
       { minItems: 1, description: "Component-relative source → project-relative target. Only files/src → src maps a directory." },
     ),
-    environment: Type.Optional(Type.Array(EnvironmentVariableSchema, { description: "Variables `pikit configure` sets in .env." })),
+    environment: Type.Optional(
+      Type.Array(EnvironmentVariableSchema, {
+        description:
+          "Variables `pikit configure` sets in .env. A `provider-*` component lists its API key's variable first among its secret ones: `pikit configure` offers to set that one when its provider has no credentials.",
+      }),
+    ),
     config: Type.Optional(Type.String({ description: "A component-relative path." })),
     migrations: Type.Optional(Type.String({ description: "A component-relative path." })),
   },

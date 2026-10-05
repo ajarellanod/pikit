@@ -9,8 +9,9 @@
  * 3. Model credentials, for each model provider an agent names in its `model` that has none (an
  *    installed provider no agent uses is skipped, and so is the deployment when nothing is missing
  *    here): a login through pi-ai's
- *    own flow, stored by the project's `model.credentials` component (`credentials-file`), or an
- *    API key in `.env`. The login runs where the app will run: through the deployment's `exec` for
+ *    own flow, stored by the project's `model.credentials` component (`credentials-file`), offered
+ *    only for a provider that has one (pi-ai's `provider.auth.oauth`), or an API key in `.env`, in the
+ *    variable the provider's component declares (its manifest's first secret `environment` entry). The login runs where the app will run: through the deployment's `exec` for
  *    `pikit up` (in Docker, its volume), or on this machine for `pikit dev`. Each place keeps its
  *    own copy; nothing is copied between them. A project with no `model.credentials`
  *    component (on Cloudflare) has nowhere to keep a login: it is offered the API key only.
@@ -25,7 +26,7 @@ import { type ComponentConfigureResult, componentsWithSteps } from "../project/c
 import { type AppExec, deploymentExec } from "../project/deployment-module.ts";
 import { ENV_FILE, readEnv, writeEnv } from "../project/env-file.ts";
 import type { CredentialsResult } from "../project/credentials.ts";
-import { apiKeyName, checkModelCredentials, providersInUse } from "../project/model-credentials.ts";
+import { apiKeyHint, apiKeyVariable, type CheckedCredentials, checkModelCredentials, providersInUse } from "../project/model-credentials.ts";
 import { readProjectManifest } from "../project/pikit-json.ts";
 import { runScript, runScriptInApp } from "../project/run.ts";
 import { ask, askSecret, beginGuided, Cancelled, CliError, choose, isInteractive, log } from "../ui.ts";
@@ -84,12 +85,15 @@ export async function configure(projectDir: string, options: ConfigureOptions = 
     log.ok(`${ENV_FILE} (mode 0600): set ${[...updates.keys()].join(", ")}`);
   }
 
-  const unconfigured = await configureModels(projectDir, options, interactive, variables);
+  const models = await configureModels(projectDir, options, interactive);
 
   const problems = [
     ...stepMissing,
     ...missing.map((name) => `${name} is required and not set: export it, pass --generate ${name}, or run \`pikit configure\` in a terminal`),
-    ...unconfigured.map((id) => `the model provider "${id}" has no credentials: run \`pikit configure --login ${id}\` in a terminal, or set its API key (e.g. ${apiKeyName(id)})`),
+    ...models.left.map((id) => {
+      const login = models.checked.oauth.includes(id) ? `run \`pikit configure --login ${id}\` in a terminal, or ` : "";
+      return `the model provider "${id}" has no credentials: ${login}${apiKeyHint(projectDir, models.checked, id)}`;
+    }),
   ];
   for (const problem of problems) log.problem(problem);
   if (problems.length > 0) throw new CliError(`pikit configure: ${problems.length} thing(s) left to configure`);
@@ -132,13 +136,8 @@ async function valueFor(v: EnvironmentVariable, options: ConfigureOptions, inter
   return answer === "" && generable ? randomToken() : answer;
 }
 
-/** Returns the providers still without credentials. */
-async function configureModels(
-  projectDir: string,
-  options: ConfigureOptions,
-  interactive: boolean,
-  variables: EnvironmentVariable[],
-): Promise<string[]> {
+/** Returns the providers still without credentials, and what was checked on this machine. */
+async function configureModels(projectDir: string, options: ConfigureOptions, interactive: boolean): Promise<{ left: string[]; checked: CheckedCredentials }> {
   const used = await providersInUse(projectDir);
   const here = await checkModelCredentials(projectDir, undefined, used);
   const ids = Object.keys(here.providers);
@@ -147,8 +146,9 @@ async function configureModels(
 
   if (options.login !== undefined) {
     if (!ids.includes(options.login) && !here.unused.includes(options.login)) throw new CliError(`no installed component provides the model provider "${options.login}"`);
+    if (!here.oauth.includes(options.login)) throw new CliError(`the model provider "${options.login}" has no login: it takes an API key (${apiKeyHint(projectDir, here, options.login)})`);
     await login(projectDir, options.login, here.store, exec, options.loginMethod);
-    return ids.filter((id) => here.providers[id] !== true && id !== options.login);
+    return { left: ids.filter((id) => here.providers[id] !== true && id !== options.login), checked: here };
   }
 
   // What this machine lacks may be where the app runs: `pikit up` reads the deployment's copy.
@@ -169,14 +169,15 @@ async function configureModels(
     else if (there?.[id] === true) log.info(`  model provider ${id}: has credentials for \`pikit up\` (for \`pikit dev\` too: \`pikit configure --login ${id} --local\`)`);
   }
   const unconfigured = lacking.filter((id) => there?.[id] !== true);
-  if (!interactive) return unconfigured;
+  if (!interactive) return { left: unconfigured, checked: here };
 
   const left: string[] = [];
-  // A login is stored by `model.credentials`: without one (a Cloudflare project) it has nowhere to go.
-  const canLogIn = here.store !== undefined;
   for (const id of unconfigured) {
-    const keyName = apiKeyName(id);
-    const hasKeyVariable = variables.some((v) => v.name === keyName);
+    // A login is stored by `model.credentials`: without one (a Cloudflare project) it has nowhere to
+    // go. And only a provider with an OAuth login has one (pi-ai's `provider.auth.oauth`).
+    const canLogIn = here.store !== undefined && here.oauth.includes(id);
+    const keyName = apiKeyVariable(projectDir, here, id);
+    const hasKeyVariable = keyName !== undefined;
     const inApp = there !== undefined;
     if (!canLogIn && !hasKeyVariable) {
       left.push(id);
@@ -194,7 +195,7 @@ async function configureModels(
     ]);
     if (choice === "up") await login(projectDir, id, here.store, exec);
     else if (choice === "dev") await login(projectDir, id, here.store, undefined);
-    else if (choice === "key") {
+    else if (choice === "key" && keyName !== undefined) {
       const key = await askSecret(keyName);
       if (key === "") left.push(id);
       else {
@@ -203,7 +204,7 @@ async function configureModels(
       }
     } else left.push(id);
   }
-  return left;
+  return { left, checked: here };
 }
 
 const LOGIN_HERE = "OAuth: browser login (it comes back by itself) or code login (paste the code the page shows)";
