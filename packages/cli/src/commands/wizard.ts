@@ -91,8 +91,9 @@ export async function newWizard(parentDir: string, options: WizardOptions = {}):
       target = options.target ?? (await chooseTarget(registry, options.preset));
       const preset = options.preset ?? (await choosePreset(registry, target));
       const choices = await answerSlots(registry, preset, target, options.with ?? []);
-      // The dashboard runs on a server for now (`ui.ts`): on Cloudflare the question is not asked.
-      const ui = target === "durable" ? false : (options.ui ?? (await confirm("Add a dashboard? (a web UI at /admin/ to follow, steer and stop conversations)", false)));
+      // On Cloudflare the question is not asked, so the installer's `--durable` asks only the name:
+      // `--ui`, or `pikit ui on` later, gives it a dashboard (`ui.ts`).
+      const ui = options.ui ?? (target === "durable" ? false : await confirm("Add a dashboard? (a web UI at /admin/ to follow, steer and stop conversations)", false));
       const creating = spinner(`Creating ${name}: its components, then \`bun install\``);
       try {
         await newProject(project.dir, { preset, with: choices, registry: registryPath, target, next: false, quiet: true, ui });

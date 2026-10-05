@@ -82,7 +82,11 @@ test("each half declares in its own App; a component in both Apps declares its w
     ["worker", { provides: ["secrets"], requires: [], optional: [] }],
   ]);
   expect(declaredByApp(registry.manifest("storage-do"), ["durable"]).map(([app]) => app)).toEqual(["default"]);
-  expect(declaredByApp(webhook, ["server"])).toEqual([["default", { provides: webhook.provides, requires: webhook.requires.capabilities, optional: webhook.optional.capabilities }]]);
+  // On a server only the default export is listed: its own half, not the Worker's needs (admin-api's actor.mailbox).
+  const admin = registry.manifest("admin-api");
+  expect(declaredByApp(admin, ["server"])).toEqual([["default", admin.halves?.default as NonNullable<typeof admin.halves>["default"]]]);
+  expect(declaredByApp(admin, ["server"])[0]?.[1].requires).not.toContain("actor.mailbox");
+  expect(declaredByApp(registry.manifest("secrets-cloudflare"), ["server"])).toEqual([["default", { provides: ["secrets"], requires: [], optional: [] }]]);
 });
 
 /** A registry of these manifests only (targets durable), for what the repository's cannot show yet. */

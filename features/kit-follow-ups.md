@@ -41,8 +41,9 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   the conversations, one live, steer, abort and reset, cost and the composition. Next:
   2. Landed too: pikit's UI pieces and views as shadcn items (`@pikit`), components with a view
      through `pikit add`, the `pikit-view` skill, and the Health (`health-registry`) and Delivery views.
-  3. Cloudflare: a conversation's object read and watched from the Worker, and
-     [the index](cloudflare-conversation-index.md) to list them all.
+  3. Landed too: Cloudflare, a conversation's object read, acted on and followed (polled) from the
+     Worker by `actor.mailbox.call`, and [the index](cloudflare-conversation-index.md), an actor, to
+     list them all; the dashboard's files bundled as a module on every host.
   4. The agent changing its own UI, through SPEC §6's gate.
 
 ## Building on the bases must be the easy path

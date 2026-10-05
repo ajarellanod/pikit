@@ -365,7 +365,7 @@ rest below comes as the components it needs are installed.
   host offers); commands are plain `POST`s. Host-specific shortcuts (Workers static assets, a Durable
   Object's hibernating WebSocket) are optional optimizations behind the same API, never requirements.
   Reading a conversation is location-transparent: on Cloudflare the Worker lists conversations from an
-  index and streams one from its Durable Object.
+  index and follows one in its Durable Object (by polling its snapshot: a call does not stream).
 - **Its build is its own.** `src/dashboard/`'s own `build` script makes the static files; `pikit up`
   and the deployment run it only in a project with a UI, so a project without one builds nothing more
   (no magic, principle 9). In development it runs with hot reload against a running app's API.

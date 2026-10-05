@@ -3,9 +3,10 @@
   "name": "admin-api",
   "version": "0.0.0",
   "title": "Admin API: what the dashboard reads and does (/admin/api/*), and its built files (/admin/)",
-  "description": "The operator's HTTP API: the composition, conversations, transcripts, live events, messages, abort and reset; serves the dashboard's built files.",
+  "description": "The operator's HTTP API: the composition, conversations, transcripts, live events, messages, abort and reset; serves the dashboard's built files. On Cloudflare the Worker serves it, reaching each conversation's Durable Object and listing them from an index.",
   "targets": [
-    "server"
+    "server",
+    "durable"
   ],
   "requires": {
     "pikit": "0.0.0",
@@ -14,20 +15,64 @@
       "admin.auth",
       "agent.observe",
       "agent.runtime",
-      "conversations.registry"
+      "conversations.registry",
+      "actor.mailbox"
     ]
   },
   "optional": {
     "capabilities": [
-      "outbound.queue"
+      "outbound.queue",
+      "actor.inbox",
+      "storage.sql"
     ]
   },
   "provides": [
     "http.route"
   ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "admin.auth",
+        "agent.observe",
+        "agent.runtime",
+        "conversations.registry"
+      ],
+      "optional": [
+        "outbound.queue",
+        "actor.inbox",
+        "actor.mailbox",
+        "storage.sql"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "admin.auth",
+        "actor.mailbox"
+      ],
+      "optional": []
+    }
+  },
+  "hooks": {
+    "beforeDeploy": "deploy.ts"
+  },
+  "generated": [
+    "dashboard-files.ts"
+  ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@pikit/pi-adapter": "0.0.0"
   },
   "files": [
     {
