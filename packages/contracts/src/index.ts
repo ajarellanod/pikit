@@ -35,8 +35,10 @@ export type { ConversationRegistry, ConversationReset } from "./conversations.ts
 export type { HttpRoute, HttpRouteKey } from "./http.ts";
 export { compareHttpRoutes, HTTP_ROUTE_KEY, matchesHttpRoute, parseHttpRouteKey } from "./http.ts";
 export type { SecretStore } from "./secrets.ts";
+export { REDACTED, redactSecrets, secretLikePaths } from "./secrets.ts";
 export type { AgentObserver, ObservedConversation, ObservedEvent, ObservedPage, PageRequest, TranscriptEntry } from "./observe.ts";
-export type { AdminAuth, Operator } from "./admin.ts";
+export type { AdminAuth, AdminSessions, Operator } from "./admin.ts";
+export { ADMIN_CLIENT_HEADER } from "./admin.ts";
 export type { ComponentHealth, HealthRegistry, HealthReporter, HealthSnapshot, HealthStatus } from "./health.ts";
 export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
@@ -57,4 +59,4 @@ export type {
 } from "./outbound.ts";
 export { answerKey, DeliveryError } from "./outbound.ts";
 export type { AnswerDelivery, AnswerDeliveryOptions, DeliveryPolicy } from "./delivery.ts";
-export { startAnswerDelivery } from "./delivery.ts";
+export { answersOnlyTheDashboard, DASHBOARD_REQUEST_PREFIX, isDashboardRequest, startAnswerDelivery } from "./delivery.ts";

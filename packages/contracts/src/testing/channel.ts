@@ -19,6 +19,9 @@
  * The rules under test:
  * - a message reaches the agent only through the whole path, and a sender whose message does not
  *   reach it is told, never left without an answer;
+ * - the dashboard's answers stay in the dashboard: a run that only an operator's messages from the
+ *   dashboard started (request ids `DASHBOARD_REQUEST_PREFIX`) is never sent to the conversation's
+ *   chat, and one that also answers a user's message is;
  * - durability comes with the contracts: an answer that ends while the channel is stopped, or whose
  *   event is lost, reaches its sender once the channel runs again, once; a send the platform failed
  *   is tried again, and its conversation's later answers wait for it; a send cut after it left goes
@@ -32,9 +35,10 @@
  * writes must pass.
  */
 
-import type { AgentRequest, AgentResult, AgentRuntime, ConversationRef } from "../agent.ts";
+import type { Admission, AgentRequest, AgentResult, AgentRuntime, ConversationRef } from "../agent.ts";
 import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, halt, type Logger, silentLogger } from "@pikit/core";
 import type { ConversationRegistry } from "../conversations.ts";
+import { DASHBOARD_REQUEST_PREFIX } from "../delivery.ts";
 import type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "../submissions.ts";
 import { checker } from "./assert.ts";
 import { createMemoryFeed, type MemoryFeed } from "./feed.ts";
@@ -218,6 +222,30 @@ export function createChannelConformance(
       false,
     ),
 
+    // ---- The dashboard: an operator's message joins the conversation, its answer stays in the dashboard.
+
+    channelCase("a run only an operator's messages from the dashboard started is never sent to the conversation's sender", async (s) => {
+      await s.fixture.deliver({ id: "m1", conversation: "alpha", text: "hello" });
+      await toldExactly(s, "alpha", 1, "the user's answer");
+      const conversation = s.dispatched[0]?.conversation;
+      if (conversation === undefined) throw new Error(`${GROUP}: the user's message was not dispatched`);
+      // What admin-api dispatches for an operator: a follow-up, its request id the dashboard's.
+      await s.dispatch({ requestId: `${DASHBOARD_REQUEST_PREFIX}operator-1`, conversation, prompt: "[From the operator] how is it going?", whenBusy: "followUp" });
+      await s.eventually(() => (s.settled >= 2 ? true : undefined), "the operator's run to end");
+      await toldExactly(s, "alpha", 1, "the user's answer only");
+      if (pushed) {
+        const sent = (await platformOf(s).received("alpha")).filter((piece) => piece.text.includes(CONFORMANCE_ANSWER));
+        check(sent.length === 1, `one answer sent to the platform, got ${JSON.stringify(sent)}`);
+      }
+    }),
+
+    channelCase("a run that answers a user's message together with an operator's (queued together) is sent to the user", async (s) => {
+      // The operator's follow-up was queued first: the run starts with it and takes the user's message too.
+      s.joinNextRun(`${DASHBOARD_REQUEST_PREFIX}operator-1`);
+      await s.fixture.deliver({ id: "m1", conversation: "alpha", text: "hello" });
+      await toldExactly(s, "alpha", 1, "the run's answer, which the user is owed");
+    }),
+
     channelCase("a stage that moves a message to another conversation does not get it dispatched", async (s) => {
       await s.fixture.deliver({ id: "m1", conversation: "alpha", text: `hijack ${MOVE}` });
       await s.quiet();
@@ -304,6 +332,13 @@ interface Subject {
   errors: string[];
   /** From now on a run does not end until `settleHeld`. */
   holdRuns(): void;
+  /** Dispatches `request` to the suite's runtime, as another producer (admin-api, a scheduler) would. */
+  dispatch(request: AgentRequest): Promise<Admission>;
+  /**
+   * The next run starts with `requestId` (a message queued before the next one dispatched) and takes the
+   * dispatched message with it: its `requestId` is `requestId`, its `requestIds` both.
+   */
+  joinNextRun(requestId: string): void;
   /** Ends the held runs: recorded in `agent.submissions`, and announced if an App runs. */
   settleHeld(): Promise<void>;
   /** From now on a run's end is recorded, and its events are lost. */
@@ -331,6 +366,8 @@ interface Durable {
   statuses: Map<string, SubmissionStatus>;
   answers: MemoryFeed<RunSettlement>;
   conversations: Map<string, ConversationRef>;
+  /** The request the next run starts with, before the one dispatched (`joinNextRun`). */
+  joinNext: string | undefined;
 }
 
 async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeoutMs: number, quietMs: number): Promise<Subject> {
@@ -346,6 +383,7 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
     statuses: new Map(),
     answers: createMemoryFeed<RunSettlement>(),
     conversations: new Map(),
+    joinNext: undefined,
   };
   const kv = createMemoryKeyValueStorage();
   const definition = defineApp({
@@ -381,6 +419,10 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
     errors,
     holdRuns() {
       durable.hold = true;
+    },
+    dispatch: (request) => dispatchFake(durable, request),
+    joinNextRun(requestId) {
+      durable.joinNext = requestId;
     },
     async settleHeld() {
       durable.hold = false;
@@ -421,7 +463,10 @@ async function settle(durable: Durable, result: AgentResult): Promise<void> {
     ...(result.text !== undefined && { text: result.text }),
     ...(result.error !== undefined && { error: result.error }),
   };
-  durable.statuses.set(key, { kind: "settled", conversation: result.conversation, requestId: result.requestId, run });
+  // Every request the run took is settled by it.
+  for (const requestId of result.requestIds) {
+    durable.statuses.set(`${result.conversation.conversationId}\u0000${requestId}`, { kind: "settled", conversation: result.conversation, requestId, run });
+  }
   durable.answers.append(run);
   if (!durable.loseEvents) await durable.events?.emit(result.kind === "failed" ? "agent.failed" : "agent.settled", result);
 }
@@ -481,29 +526,7 @@ function fakeRuntime(durable: Durable): ComponentDefinition {
     name: "conformance-runtime",
     setup(pikit) {
       const runtime: AgentRuntime = {
-        async dispatch(request) {
-          const duplicate = durable.dispatched.some((d) => d.requestId === request.requestId && d.conversation.key === request.conversation.key);
-          durable.dispatched.push(request);
-          if (duplicate) return { kind: "duplicate", requestId: request.requestId };
-          const number = ++durable.started;
-          const key = `${request.conversation.conversationId}\u0000${request.requestId}`;
-          durable.statuses.set(key, { kind: "pending", conversation: request.conversation, requestId: request.requestId });
-          const result: AgentResult & { kind: "completed" } = {
-            conversation: request.conversation,
-            requestId: request.requestId,
-            requestIds: [request.requestId],
-            kind: "completed",
-            text: `${CONFORMANCE_ANSWER} (${number})`,
-            messages: [],
-          };
-          // After dispatch returns, as a run starts and ends after its admission.
-          setTimeout(() => {
-            void durable.events?.emit("agent.started", { conversation: request.conversation, requestId: request.requestId, resumed: false });
-            if (durable.hold) durable.held.push(result);
-            else void settle(durable, result);
-          }, 10);
-          return { kind: "started", requestId: request.requestId };
-        },
+        dispatch: (request) => dispatchFake(durable, request),
         abort: async () => {},
         resume: async () => {},
       };
@@ -559,4 +582,33 @@ function router(): ComponentDefinition {
       });
     },
   });
+}
+
+/** The suite's runtime taking `request`: recorded, and its run answers soon after (or is held). */
+async function dispatchFake(durable: Durable, request: AgentRequest): Promise<Admission> {
+  const duplicate = durable.dispatched.some((d) => d.requestId === request.requestId && d.conversation.key === request.conversation.key);
+  durable.dispatched.push(request);
+  if (duplicate) return { kind: "duplicate", requestId: request.requestId };
+  const number = ++durable.started;
+  const joined = durable.joinNext;
+  durable.joinNext = undefined;
+  const requestIds = joined === undefined ? [request.requestId] : [joined, request.requestId];
+  for (const requestId of requestIds) {
+    durable.statuses.set(`${request.conversation.conversationId}\u0000${requestId}`, { kind: "pending", conversation: request.conversation, requestId });
+  }
+  const result: AgentResult & { kind: "completed" } = {
+    conversation: request.conversation,
+    requestId: requestIds[0] as string,
+    requestIds,
+    kind: "completed",
+    text: `${CONFORMANCE_ANSWER} (${number})`,
+    messages: [],
+  };
+  // After dispatch returns, as a run starts and ends after its admission.
+  setTimeout(() => {
+    void durable.events?.emit("agent.started", { conversation: request.conversation, requestId: result.requestId, resumed: false });
+    if (durable.hold) durable.held.push(result);
+    else void settle(durable, result);
+  }, 10);
+  return { kind: "started", requestId: request.requestId };
 }

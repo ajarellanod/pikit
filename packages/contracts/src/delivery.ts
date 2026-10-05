@@ -24,6 +24,10 @@
  *   failures in a row. A `permanent` refusal is logged and given up: retrying would fail the same way.
  * - **Idempotency keys.** An answer's key is `answerKey(conversation, requestId)`; its pieces are
  *   `${key}#${index}`, the same on every retry and after any restart.
+ * - **The dashboard's answers stay in the dashboard.** A run every request of which is an operator's
+ *   from the dashboard (`isDashboardRequest`) is passed over: the operator reads its answer there, and
+ *   the conversation's chat is sent nothing. A run that took a user's message too (they were queued
+ *   together) is delivered: the user is owed an answer, though the operator's text is never sent.
  * - **Both runtime models.** With `wakeups` (a Durable Object: nothing runs between events), every
  *   run is a wakeup: it stops at its context's slice deadline or after `policy.piecesPerRun` sends, and
  *   asks for the next one. Without (a server: a process that stays up), the same runs are driven by a
@@ -56,6 +60,26 @@ import { answerKey, type ChannelTransport, DeliveryError, type OutboundQueue } f
 import type { KeyValueStore } from "./storage.ts";
 import type { RunSettlement } from "./submissions.ts";
 import type { Wakeups } from "./wakeups.ts";
+
+/**
+ * The prefix of the request id of every message an operator sends from the dashboard (admin-api):
+ * `dashboard:<uuid>`. Such a message enters its conversation (the agent has it in its context) as a
+ * follow-up, and its answer is the dashboard's: `startAnswerDelivery` never delivers a run whose every
+ * request is one (`isDashboardRequest`), and a channel that answers its senders by request id
+ * (channel-http) never has one waiting. A channel's own request ids never start with it.
+ */
+export const DASHBOARD_REQUEST_PREFIX = "dashboard:";
+
+/** Whether `requestId` is an operator's message from the dashboard (`DASHBOARD_REQUEST_PREFIX`). */
+export function isDashboardRequest(requestId: string): boolean {
+  return requestId.startsWith(DASHBOARD_REQUEST_PREFIX);
+}
+
+/** Whether the run `answer` settled answers nobody but the dashboard: every request it took is an operator's. */
+export function answersOnlyTheDashboard(answer: Pick<RunSettlement, "requestId" | "requestIds">): boolean {
+  const requests = answer.requestIds.length > 0 ? answer.requestIds : [answer.requestId];
+  return requests.every(isDashboardRequest);
+}
 
 /** The channel's waits and budgets: its policy, kept in its own source. */
 export interface DeliveryPolicy {
@@ -217,10 +241,10 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
     const byConversation = new Map<string, number[]>();
     const routed = new Map<number, { instance: string; text: string; transport: ChannelTransport }>();
     for (const [index, { fact }] of items.entries()) {
-      const instance = options.route(fact.conversation.key);
+      const instance = answersOnlyTheDashboard(fact) ? undefined : options.route(fact.conversation.key);
       const transport = instance === undefined ? undefined : transports.get(instance);
       const text = transport === undefined ? undefined : options.text(fact);
-      // Another channel's conversation, a bot that does not run, or nothing to tell: passed over.
+      // The dashboard's run, another channel's conversation, a bot that does not run, or nothing to tell: passed over.
       if (instance === undefined || transport === undefined || text === undefined) {
         settled[index] = true;
         continue;

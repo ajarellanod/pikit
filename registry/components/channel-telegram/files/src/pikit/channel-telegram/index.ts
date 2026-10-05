@@ -35,7 +35,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type AgentResult, type AnswerDelivery, type ChannelTransport, type DeliveryPolicy, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
+import { type AgentResult, type AnswerDelivery, type ChannelTransport, type DeliveryPolicy, isDashboardRequest, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, chatIn } from "./account.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, TelegramError } from "./api.ts";
@@ -100,7 +100,9 @@ export default defineComponent({
       return undefined;
     };
 
-    pikit.on("agent.started", ({ conversation }) => {
+    pikit.on("agent.started", ({ conversation, requestId }) => {
+      // A run an operator's message from the dashboard started shows nothing in the chat: its answer stays there.
+      if (isDashboardRequest(requestId)) return;
       const found = find(running?.bots ?? [], conversation.key);
       found?.bot.replies.typingStarted(found.chatId);
     });
