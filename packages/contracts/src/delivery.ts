@@ -161,10 +161,14 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
       if (signal.aborted || budget.left <= 0) return { kind: "cut" };
       budget.left--;
       await store.set(mark, SENDING);
+      // A timer cleared once the send settles, not `AbortSignal.timeout`: a pending timer is work in
+      // flight, and a Durable Object waits for it before it can be evicted.
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(new DOMException(`the send took longer than ${policy.sendTimeoutMs} ms`, "TimeoutError")), policy.sendTimeoutMs);
       try {
         await transport.send(
           { key: `${key}#${index}`, conversationKey: fact.conversation.key, text: piece, possibleDuplicate: state === SENDING },
-          AbortSignal.any([signal, AbortSignal.timeout(policy.sendTimeoutMs)]),
+          AbortSignal.any([signal, timeout.signal]),
         );
       } catch (error) {
         // Cut (a stop, the slice's deadline): it may have reached the platform, and stays `sending`.
@@ -176,6 +180,8 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
           break;
         }
         return { kind: "failed", error };
+      } finally {
+        clearTimeout(timer);
       }
       await store.set(mark, SENT);
     }
