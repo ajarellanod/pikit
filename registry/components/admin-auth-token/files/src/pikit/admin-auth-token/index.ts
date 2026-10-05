@@ -1,6 +1,6 @@
 /**
  * admin-auth-token: who is an operator, by a bearer token (`admin.auth`, @pikit/contracts' admin.ts).
- * An admin route (the dashboard's API and assets) asks `verify(request)`; a request that carries
+ * An admin API route (admin-api's, a component's own) asks `verify(request)`; a request that carries
  * `Authorization: Bearer <PIKIT_ADMIN_TOKEN>` is the operator `operator`, any other is not.
  *
  * - **The token is a secret**, read through `secrets` at start: an environment variable on a server

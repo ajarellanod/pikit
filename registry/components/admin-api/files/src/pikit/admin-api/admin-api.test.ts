@@ -1,0 +1,532 @@
+/**
+ * admin-api's tests. They are copied with the component and keep running in your project.
+ *
+ * Every contract it uses is a double here; the routes are picked the way a server picks them
+ * (`compareHttpRoutes`), so the most specific key serves each request.
+ */
+
+import { afterEach, expect, test } from "bun:test";
+import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { type App, type AppContext, BACKGROUND_CONTEXT, defineApp, defineComponent, type Logger, silentLogger, withAbortSignal } from "@pikit/core";
+import {
+  type AdminAuth,
+  type AgentObserver,
+  type AgentRequest,
+  type AgentRuntime,
+  compareHttpRoutes,
+  type ConversationRef,
+  type ConversationRegistry,
+  type HttpRoute,
+  matchesHttpRoute,
+  type ObservedConversation,
+  type ObservedEvent,
+  type PageRequest,
+  parseHttpRouteKey,
+  type TranscriptEntry,
+  type Usage,
+} from "@pikit/contracts";
+import adminApi from "./index.ts";
+
+const AUTH = { authorization: "Bearer operator-token" };
+const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as unknown as Usage;
+
+const auth = defineComponent({
+  name: "auth-test",
+  setup(pikit) {
+    const provider: AdminAuth = { verify: async (request) => (request.headers.get("authorization") === AUTH.authorization ? { id: "ops" } : undefined) };
+    pikit.provide("admin.auth", provider);
+  },
+});
+
+/** The runtime's conversations, their transcripts and live events, as a test sets them. */
+class Runtime {
+  conversations = new Map<string, ObservedConversation>();
+  transcripts = new Map<string, TranscriptEntry[]>();
+  /** Keys → the conversation each points to. */
+  pointers = new Map<string, ConversationRef>();
+  dispatched: AgentRequest[] = [];
+  aborted: ConversationRef[] = [];
+  pages: PageRequest[] = [];
+  /** Live events a test pushes to the watchers. */
+  private listeners = new Set<(event: ObservedEvent) => void>();
+  watching = 0;
+  released = 0;
+  private next = 100;
+
+  add(conversation: Omit<ObservedConversation, "busy" | "usage"> & { busy?: boolean }, current = true): void {
+    this.conversations.set(conversation.conversationId, { busy: false, usage: ZERO, ...conversation });
+    if (current && conversation.key !== undefined && conversation.agent !== undefined) {
+      this.pointers.set(conversation.key, { key: conversation.key, agent: conversation.agent, conversationId: conversation.conversationId });
+    }
+  }
+
+  push(event: ObservedEvent): void {
+    for (const listener of this.listeners) listener(event);
+  }
+
+  readonly observer: AgentObserver = {
+    conversations: async (page) => {
+      this.pages.push(page);
+      if (page.cursor !== undefined && page.cursor !== "page-2") throw new Error("agent.observe: the cursor is not one this observer gave");
+      const all = [...this.conversations.values()];
+      return page.cursor === undefined ? { items: all.slice(0, page.limit ?? 50), next: "page-2" } : { items: [] };
+    },
+    conversation: async (id) => this.conversations.get(id),
+    transcript: async (id, page) => {
+      this.pages.push(page);
+      const entries = this.transcripts.get(id);
+      return entries === undefined ? undefined : { items: entries.slice(0, page.limit ?? 50) };
+    },
+    watch: (id, ctx) => this.follow(id, ctx),
+    usage: async (id) => this.conversations.get(id)?.usage,
+  };
+
+  private async *follow(id: string, ctx: AppContext): AsyncGenerator<ObservedEvent> {
+    const queue: ObservedEvent[] = [];
+    let wake: (() => void) | undefined;
+    const listener = (event: ObservedEvent) => {
+      queue.push(event);
+      wake?.();
+    };
+    this.listeners.add(listener);
+    this.watching++;
+    const onAbort = () => wake?.();
+    ctx.abortSignal?.addEventListener("abort", onAbort);
+    try {
+      yield { type: "snapshot", conversationId: id };
+      for (;;) {
+        if (ctx.abortSignal?.aborted === true) return;
+        const event = queue.shift();
+        if (event !== undefined) {
+          yield event;
+          continue;
+        }
+        await new Promise<void>((resolve) => (wake = resolve));
+      }
+    } finally {
+      ctx.abortSignal?.removeEventListener("abort", onAbort);
+      this.listeners.delete(listener);
+      this.released++;
+    }
+  }
+
+  readonly runtime: AgentRuntime = {
+    dispatch: async (request) => {
+      this.dispatched.push(request);
+      const busy = this.conversations.get(request.conversation.conversationId)?.busy === true;
+      return { kind: busy ? "queued" : "started", requestId: request.requestId };
+    },
+    abort: async (conversation) => void this.aborted.push(conversation),
+    resume: async () => {},
+  };
+
+  readonly registry: ConversationRegistry = {
+    resolve: async () => {
+      throw new Error("not used by admin-api");
+    },
+    get: async (key) => this.pointers.get(key),
+    reset: async (key) => {
+      const previous = this.pointers.get(key);
+      if (previous === undefined) return undefined;
+      const conversation = { ...previous, conversationId: `c${this.next++}` };
+      this.pointers.set(key, conversation);
+      return { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
+    },
+  };
+
+  component() {
+    return defineComponent({
+      name: "runtime-test",
+      setup: (pikit) => {
+        pikit.provide("agent.observe", this.observer);
+        pikit.provide("agent.runtime", this.runtime);
+        pikit.provide("conversations.registry", this.registry);
+      },
+    });
+  }
+}
+
+interface Logged {
+  message: string;
+  fields: Record<string, unknown> | undefined;
+}
+
+interface Subject {
+  app: App;
+  runtime: Runtime;
+  logged: Logged[];
+  /** A request served the way a server serves it: the most specific matching key. */
+  fetch(path: string, init?: RequestInit): Promise<Response>;
+  keys(): string[];
+}
+
+const running: App[] = [];
+const folders: string[] = [];
+afterEach(async () => {
+  for (const app of running.splice(0)) await app.stop().catch(() => {});
+  for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
+});
+
+async function started(config: Record<string, unknown> = {}): Promise<Subject> {
+  const runtime = new Runtime();
+  const logged: Logged[] = [];
+  const logger: Logger = {
+    ...silentLogger,
+    info: (message, fields) => void logged.push({ message, fields }),
+    warn: (message, fields) => void logged.push({ message, fields }),
+  };
+  let routes: { get(key: string): HttpRoute | undefined; keys(): string[] } | undefined;
+  const server = defineComponent({
+    name: "server-test",
+    setup(pikit) {
+      const handle = pikit.useKeyed("http.route");
+      return { start: () => void (routes = handle) };
+    },
+  });
+  const app = await defineApp({
+    components: [auth, runtime.component(), adminApi, server],
+    config: { "admin-api": { assets: join(tmpdir(), "pikit-admin-api-none"), ...config } },
+    logger,
+  }).create();
+  await app.start();
+  running.push(app);
+  return {
+    app,
+    runtime,
+    logged,
+    keys: () => routes?.keys() ?? [],
+    async fetch(path, init = {}) {
+      const request = new Request(`http://pikit.test${path}`, init);
+      const { pathname } = new URL(request.url);
+      const key = (routes?.keys() ?? [])
+        .map((each) => ({ each, parsed: parseHttpRouteKey(each) }))
+        .filter((r) => r.parsed !== undefined && matchesHttpRoute(r.parsed, request.method, pathname))
+        .sort((a, b) => compareHttpRoutes(a.parsed!, b.parsed!))[0]?.each;
+      if (key === undefined) return new Response("not found", { status: 404 });
+      const ctx = app.context(init.signal ? withAbortSignal(init.signal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT);
+      return routes!.get(key)!(request, ctx);
+    },
+  };
+}
+
+const post = (body?: unknown): RequestInit => ({
+  method: "POST",
+  headers: { ...AUTH, "content-type": "application/json" },
+  ...(body !== undefined && { body: JSON.stringify(body) }),
+});
+
+test("what setup declares: component.json's provides / requires / optional come from it", async () => {
+  const runtime = new Runtime();
+  const app = await defineApp({ components: [auth, runtime.component(), adminApi], logger: silentLogger }).create();
+
+  expect(app.describe().components.find((c) => c.name === "admin-api")).toEqual({
+    name: "admin-api",
+    provides: ["http.route"],
+    requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry"],
+    optional: [],
+  });
+});
+
+test("every API route answers 401 without an operator, and reads nothing", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  const api = s.keys().filter((key) => key.includes("/admin/api"));
+  expect(api.length).toBeGreaterThan(8);
+
+  for (const key of api) {
+    const [method = "GET", pattern = "/"] = key.split(" ");
+    const path = pattern.replace(":id", "c1").replace("*", "anything");
+    for (const headers of [{}, { authorization: "Bearer wrong" }]) {
+      const response = await s.fetch(path, { method, headers, ...(method === "POST" && { body: JSON.stringify({ text: "hi" }) }) });
+      expect({ key, status: response.status }).toEqual({ key, status: 401 });
+      expect(response.headers.get("www-authenticate")).toContain("Bearer");
+    }
+  }
+  expect(s.runtime.dispatched).toEqual([]);
+  expect(s.runtime.aborted).toEqual([]);
+  expect(s.runtime.pages).toEqual([]);
+});
+
+test("GET /admin/api/app: the composition the App describes, admin-api in it", async () => {
+  const s = await started();
+
+  const response = await s.fetch("/admin/api/app", { headers: AUTH });
+  const body = (await response.json()) as { version: number; components: { name: string }[]; config: Record<string, unknown> };
+
+  expect(response.status).toBe(200);
+  expect(response.headers.get("cache-control")).toBe("no-store");
+  expect(body.version).toBe(1);
+  expect(body.components.map((c) => c.name)).toContain("admin-api");
+  expect(body.config["admin-api"]).toMatchObject({ heartbeatMs: 15_000 });
+});
+
+test("GET /admin/api/conversations: a page, each saying whether its key points to it now", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c0", key: "telegram:1", agent: "assistant" }, false);
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true, lastActivity: 5 });
+  s.runtime.add({ conversationId: "c2" });
+
+  const response = await s.fetch("/admin/api/conversations?limit=10", { headers: AUTH });
+  const body = (await response.json()) as { items: Record<string, unknown>[]; next?: string };
+
+  expect(response.status).toBe(200);
+  expect(s.runtime.pages).toEqual([{ limit: 10 }]);
+  expect(body.next).toBe("page-2");
+  expect(body.items).toEqual([
+    { conversationId: "c0", key: "telegram:1", agent: "assistant", busy: false, usage: ZERO, current: false },
+    { conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true, lastActivity: 5, usage: ZERO, current: true },
+    { conversationId: "c2", busy: false, usage: ZERO },
+  ]);
+
+  const last = await s.fetch(`/admin/api/conversations?cursor=${body.next}`, { headers: AUTH });
+  expect(await last.json()).toEqual({ items: [] });
+});
+
+test("a page's limit and cursor are checked: 400, never a 500", async () => {
+  const s = await started();
+
+  for (const limit of ["0", "501", "-1", "1.5", "ten"]) {
+    const response = await s.fetch(`/admin/api/conversations?limit=${limit}`, { headers: AUTH });
+    expect({ limit, status: response.status }).toEqual({ limit, status: 400 });
+    expect(((await response.json()) as { error: string }).error).toBe("invalid_request");
+  }
+  const forged = await s.fetch("/admin/api/conversations?cursor=forged", { headers: AUTH });
+  expect(forged.status).toBe(400);
+  expect(await forged.json()).toMatchObject({ error: "invalid_cursor" });
+});
+
+test("GET one conversation and its transcript; an unknown one is 404", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  s.runtime.transcripts.set("c1", [
+    { id: "e2", kind: "message", messages: [{ role: "assistant", content: "hello" }] },
+    { id: "e1", kind: "message", messages: [{ role: "user", content: "hi" }] },
+  ]);
+
+  const one = await s.fetch("/admin/api/conversations/c1", { headers: AUTH });
+  expect(await one.json()).toMatchObject({ conversationId: "c1", current: true });
+
+  const transcript = await s.fetch("/admin/api/conversations/c1/transcript?limit=1", { headers: AUTH });
+  expect(await transcript.json()).toEqual({ items: [{ id: "e2", kind: "message", messages: [{ role: "assistant", content: "hello" }] }] });
+
+  for (const path of ["/admin/api/conversations/nope", "/admin/api/conversations/nope/transcript", "/admin/api/conversations/%E0/transcript", "/admin/api/conversations/nope/events"]) {
+    const response = await s.fetch(path, { headers: AUTH });
+    expect({ path, status: response.status }).toEqual({ path, status: 404 });
+  }
+});
+
+/** A client of a server-sent event stream: `take(n)` waits for the next `n` `data:` lines. */
+function sse(response: Response) {
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+  let buffer = "";
+  return {
+    reader,
+    async take(count: number): Promise<unknown[]> {
+      const data: unknown[] = [];
+      while (data.length < count) {
+        let end = buffer.indexOf("\n\n");
+        while (end !== -1 && data.length < count) {
+          const frame = buffer.slice(0, end);
+          buffer = buffer.slice(end + 2);
+          for (const line of frame.split("\n")) if (line.startsWith("data: ")) data.push(JSON.parse(line.slice(6)));
+          end = buffer.indexOf("\n\n");
+        }
+        if (data.length >= count) break;
+        const { value, done } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+      }
+      return data;
+    },
+  };
+}
+
+test("GET …/events: a snapshot, then each change, as server-sent events; the client leaving releases the watch", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  const client = new AbortController();
+
+  const response = await s.fetch("/admin/api/conversations/c1/events", { headers: AUTH, signal: client.signal });
+  expect(response.status).toBe(200);
+  expect(response.headers.get("content-type")).toContain("text/event-stream");
+
+  const stream = sse(response);
+  expect(await stream.take(1)).toEqual([{ type: "snapshot", conversationId: "c1" }]);
+  s.runtime.push({ type: "message_update", text: "hel" });
+  s.runtime.push({ type: "agent_end" });
+  expect(await stream.take(2)).toEqual([{ type: "message_update", text: "hel" }, { type: "agent_end" }]);
+
+  client.abort();
+  await stream.reader.cancel();
+  await Bun.sleep(10);
+  expect(s.runtime.released).toBe(1);
+});
+
+test("GET …/events: a quiet stream gets a heartbeat comment", async () => {
+  const s = await started({ heartbeatMs: 1000 });
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  const client = new AbortController();
+  const response = await s.fetch("/admin/api/conversations/c1/events", { headers: AUTH, signal: client.signal });
+  const reader = response.body!.getReader();
+  const decoder = new TextDecoder();
+
+  let text = "";
+  const deadline = Date.now() + 3000;
+  while (!text.includes(": heartbeat") && Date.now() < deadline) text += decoder.decode((await reader.read()).value);
+
+  expect(text).toContain(": heartbeat\n\n");
+  client.abort();
+  await reader.cancel();
+});
+
+test("POST …/messages: a steer through agent.runtime, logged without its text", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true });
+
+  const response = await s.fetch("/admin/api/conversations/c1/messages", post({ text: "stop and summarise" }));
+  const body = (await response.json()) as { requestId: string; admission: string };
+
+  expect(response.status).toBe(202);
+  expect(body.admission).toBe("queued");
+  expect(body.requestId).toMatch(/^admin:[0-9a-f-]{36}$/);
+  expect(s.runtime.dispatched).toEqual([
+    { requestId: body.requestId, conversation: { key: "telegram:1", agent: "assistant", conversationId: "c1" }, prompt: "stop and summarise", whenBusy: "steer" },
+  ]);
+  const log = s.logged.find((each) => each.message.includes("sent a message"));
+  expect(log?.fields).toMatchObject({ operator: "ops", conversation: "telegram:1" });
+  expect(JSON.stringify(s.logged)).not.toContain("summarise");
+});
+
+test("POST …/messages: the client's request id and followUp are kept", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+
+  const response = await s.fetch("/admin/api/conversations/c1/messages", post({ text: "hi", requestId: "ui:42", whenBusy: "followUp" }));
+
+  expect(await response.json()).toEqual({ requestId: "ui:42", admission: "started" });
+  expect(s.runtime.dispatched[0]).toMatchObject({ requestId: "ui:42", whenBusy: "followUp" });
+});
+
+test("POST …/messages: a bad body is 400 and dispatches nothing", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+
+  for (const body of [{}, { text: "" }, { text: "hi", whenBusy: "now" }, { text: "hi", requestId: "a b" }, { text: "hi", extra: 1 }, "x".repeat(10)]) {
+    const response = await s.fetch("/admin/api/conversations/c1/messages", post(body));
+    expect({ body, status: response.status }).toEqual({ body, status: 400 });
+  }
+  const notJson = await s.fetch("/admin/api/conversations/c1/messages", { method: "POST", headers: AUTH, body: "{" });
+  expect(notJson.status).toBe(400);
+  expect(s.runtime.dispatched).toEqual([]);
+});
+
+test("actions reach only a conversation's current one: 409 when a reset left it behind or no message reached it", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c0", key: "telegram:1", agent: "assistant" }, false);
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  s.runtime.add({ conversationId: "c2" });
+
+  for (const action of ["messages", "abort", "reset"]) {
+    const behind = await s.fetch(`/admin/api/conversations/c0/${action}`, post({ text: "hi" }));
+    expect(await behind.json()).toMatchObject({ error: "not_current" });
+    expect(behind.status).toBe(409);
+    const empty = await s.fetch(`/admin/api/conversations/c2/${action}`, post({ text: "hi" }));
+    expect(await empty.json()).toMatchObject({ error: "no_agent" });
+    const unknown = await s.fetch(`/admin/api/conversations/c9/${action}`, post({ text: "hi" }));
+    expect(unknown.status).toBe(404);
+  }
+  expect(s.runtime.dispatched).toEqual([]);
+  expect(s.runtime.aborted).toEqual([]);
+  expect(s.runtime.pointers.get("telegram:1")?.conversationId).toBe("c1");
+});
+
+test("POST …/abort stops the run through agent.runtime", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true });
+
+  const response = await s.fetch("/admin/api/conversations/c1/abort", post());
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ conversationId: "c1" });
+  expect(s.runtime.aborted).toEqual([{ key: "telegram:1", agent: "assistant", conversationId: "c1" }]);
+});
+
+test("POST …/reset points the key to a new conversation through conversations.registry", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+
+  const response = await s.fetch("/admin/api/conversations/c1/reset", post());
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({ key: "telegram:1", previousConversationId: "c1", conversationId: "c100" });
+  expect(s.runtime.pointers.get("telegram:1")?.conversationId).toBe("c100");
+});
+
+test("a path under /admin/api/ that no route serves is the API's 404, never the dashboard's page", async () => {
+  const s = await started();
+
+  const response = await s.fetch("/admin/api/nothing/here", { headers: AUTH });
+
+  expect(response.status).toBe(404);
+  expect(await response.json()).toEqual({ error: "not_found" });
+  expect((await s.fetch("/admin/api/nothing", { method: "DELETE", headers: AUTH })).status).toBe(404);
+});
+
+function dashboard(): string {
+  const folder = mkdtempSync(join(tmpdir(), "pikit-admin-api-"));
+  folders.push(folder);
+  mkdirSync(join(folder, "assets"));
+  writeFileSync(join(folder, "index.html"), "<!doctype html><div id=root></div>");
+  writeFileSync(join(folder, "assets", "index-abc123.js"), "console.log(1)");
+  writeFileSync(join(folder, "favicon.svg"), "<svg/>");
+  const outside = join(folder, "..", "pikit-admin-api-outside.txt");
+  writeFileSync(outside, "outside");
+  folders.push(outside);
+  return folder;
+}
+
+test("the dashboard's files: served under /admin/ to anyone, pages fall back to index.html", async () => {
+  const s = await started({ assets: dashboard() });
+
+  const root = await s.fetch("/admin");
+  expect(root.status).toBe(308);
+  expect(root.headers.get("location")).toBe("/admin/");
+
+  const index = await s.fetch("/admin/");
+  expect(index.status).toBe(200);
+  expect(index.headers.get("content-type")).toBe("text/html; charset=utf-8");
+  expect(index.headers.get("cache-control")).toBe("no-cache");
+  expect(index.headers.get("x-content-type-options")).toBe("nosniff");
+  expect(await index.text()).toContain("id=root");
+
+  const script = await s.fetch("/admin/assets/index-abc123.js");
+  expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
+  expect(script.headers.get("cache-control")).toContain("immutable");
+
+  expect((await s.fetch("/admin/favicon.svg")).headers.get("content-type")).toBe("image/svg+xml");
+  expect(await (await s.fetch("/admin/conversations/c1")).text()).toContain("id=root");
+  expect((await s.fetch("/admin/assets/missing.js")).status).toBe(404);
+});
+
+test("the dashboard's files: a path never leaves the folder", async () => {
+  const s = await started({ assets: dashboard() });
+
+  for (const path of ["/admin/..%2Fpikit-admin-api-outside.txt", "/admin/%2e%2e/pikit-admin-api-outside.txt", "/admin/assets/..%2F..%2Fpikit-admin-api-outside.txt", "/admin/%E0", "/admin/a%00b.js", "/admin/..%5Cx.txt"]) {
+    const response = await s.fetch(path);
+    expect({ path, status: response.status }).toEqual({ path, status: 404 });
+    expect(await response.text()).not.toContain("outside");
+  }
+});
+
+test("without a built dashboard the API still answers, and /admin/ says why there is no page", async () => {
+  const s = await started();
+
+  const page = await s.fetch("/admin/");
+  expect(page.status).toBe(404);
+  expect(await page.text()).toContain("no dashboard is built");
+  expect((await s.fetch("/admin/api/app", { headers: AUTH })).status).toBe(200);
+  expect(s.logged.some((each) => each.message.includes("no dashboard is built"))).toBe(true);
+});

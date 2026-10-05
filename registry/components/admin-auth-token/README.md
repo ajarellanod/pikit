@@ -1,7 +1,8 @@
 # admin-auth-token
 
 Who is an operator: a request that carries `Authorization: Bearer <PIKIT_ADMIN_TOKEN>`. Every admin
-route (the dashboard's API and assets, a component's own view) asks it before answering.
+API route (admin-api's, a component's own) asks it before answering; the dashboard's built files hold
+no data and are served without it, and the page asks the operator for the token.
 
 - **Provides:** `admin.auth` (`@pikit/contracts`' `admin.ts`).
 - **Requires:** `secrets` (the token is read at start, never from config).

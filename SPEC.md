@@ -341,7 +341,9 @@ rest below comes as the components it needs are installed.
 - **Its data comes from a component, `admin-api`.** The admin API (`/admin/api/*`, typed and
   documented) is a pikit component that `--ui` installs and that also stands without a UI (a script
   or an agent may read it). It registers its routes through `http.route`, asks `admin.auth` before
-  every answer, and serves the dashboard's built assets under `GET /admin/*` when there are some.
+  every answer, and serves the dashboard's built files under `GET /admin/*` when there are some. The
+  files hold no data and need no credential (a browser's navigation sends no header): the page asks
+  the operator for it and sends it with every API call.
 - **It is made to be extended.** A view is a folder, `src/dashboard/src/views/<view>/`, found when the
   dashboard is built (nothing is loaded at run time) and shown only when the capability it declares is
   in `APP_DESCRIPTION`: a view whose capability is not installed does not appear. A component with a
