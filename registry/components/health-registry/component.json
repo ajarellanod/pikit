@@ -14,6 +14,7 @@
   },
   "optional": {
     "capabilities": [
+      "storage.kv",
       "admin.auth"
     ]
   },
