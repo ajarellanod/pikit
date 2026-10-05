@@ -4,11 +4,14 @@
  *
  *   for (const c of createAdminAuthConformance(() => myProviderFixture()))
  *     test(`${c.group}: ${c.name}`, () => c.run());
+ *
+ * The cases of browser sessions run when the provider has them (`AdminAuth.sessions`), and pass
+ * trivially when it does not.
  */
 
 import { type AppContext, type ComponentDefinition, defineApp, defineComponent, type Handle, silentLogger } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
-import type { AdminAuth } from "../admin.ts";
+import { ADMIN_CLIENT_HEADER, type AdminAuth, type AdminSessions } from "../admin.ts";
 import { checker, expecter } from "./assert.ts";
 
 /** A provider under test, built for one case. */
@@ -51,6 +54,27 @@ export function createAdminAuthConformance(factory: () => AdminAuthFixture | Pro
   const request = (headers: Record<string, string> = {}, body?: string) =>
     new Request("https://pikit.test/admin/api/conversations", { method: body === undefined ? "GET" : "POST", headers, ...(body !== undefined && { body }) });
 
+  /** A case of browser sessions: skipped (passing) when the provider has none. */
+  const sessionCase = (name: string, run: (sessions: AdminSessions, auth: AdminAuth, fixture: AdminAuthFixture, ctx: AppContext) => Promise<void>): ConformanceCase =>
+    authCase(`sessions: ${name}`, async (auth, fixture, ctx) => {
+      if (auth.sessions === undefined) return;
+      await run(auth.sessions, auth, fixture, ctx);
+    });
+  /** A request carrying only the session cookie of `setCookie` (`name=value; …`), and the client's header when `client`. */
+  const withCookie = (setCookie: string, method = "GET", client = true) => {
+    const pair = setCookie.split(";")[0] ?? "";
+    return new Request("https://pikit.test/admin/api/conversations/x/abort", {
+      method,
+      headers: { cookie: `other=1; ${pair}`, ...(client && { [ADMIN_CLIENT_HEADER]: "1" }) },
+    });
+  };
+  const attributes = (setCookie: string) => setCookie.split(";").slice(1).map((part) => part.trim().toLowerCase());
+  const opened = async (sessions: AdminSessions, fixture: AdminAuthFixture, ctx: AppContext) => {
+    const session = await sessions.open(request(fixture.operator, "{}"), ctx);
+    if (session === undefined) throw new Error(`${GROUP}: sessions.open() of the operator's request opened none`);
+    return session;
+  };
+
   return [
     authCase("a request with the operator's credential is an operator, named without the credential", async (auth, fixture, ctx) => {
       const operator = await auth.verify(request(fixture.operator), ctx);
@@ -82,6 +106,46 @@ export function createAdminAuthConformance(factory: () => AdminAuthFixture | Pro
 
       expect(posted.bodyUsed, false, "the request's bodyUsed after verify()");
       expect(await posted.text(), '{"text":"still here"}', "the body the route reads");
+    }),
+
+    sessionCase("the operator's credential opens one; its cookie is that operator, holds no credential, and is HttpOnly, SameSite=Strict and Secure over https", async (sessions, auth, fixture, ctx) => {
+      const session = await opened(sessions, fixture, ctx);
+      const operator = await auth.verify(request(fixture.operator), ctx);
+
+      check(session.operator.id === operator?.id, `the session's operator to be the credential's, got ${JSON.stringify(session.operator)}`);
+      check(!session.cookie.includes(fixture.credential), "the credential not to appear in the cookie");
+      for (const attribute of ["httponly", "samesite=strict", "secure"]) check(attributes(session.cookie).includes(attribute), `the cookie to be ${attribute}, got ${session.cookie}`);
+      check(attributes(session.cookie).some((each) => each.startsWith("max-age=") || each.startsWith("expires=")), `the cookie to expire, got ${session.cookie}`);
+      expect((await auth.verify(withCookie(session.cookie), ctx))?.id, operator?.id, "verify() of a GET with the session's cookie");
+      expect((await auth.verify(withCookie(session.cookie, "POST"), ctx))?.id, operator?.id, `verify() of a POST with the session's cookie and ${ADMIN_CLIENT_HEADER}`);
+    }),
+
+    sessionCase(`a session's cookie on a request that changes something, without ${ADMIN_CLIENT_HEADER}, is not an operator (CSRF)`, async (sessions, auth, fixture, ctx) => {
+      const session = await opened(sessions, fixture, ctx);
+
+      for (const method of ["POST", "PUT", "PATCH", "DELETE"]) expect(await auth.verify(withCookie(session.cookie, method, false), ctx), undefined, `verify() of a ${method} with the cookie alone`);
+    }),
+
+    sessionCase("no credential, a wrong one, or a session's cookie opens none", async (sessions, _auth, fixture, ctx) => {
+      expect(await sessions.open(request({}, "{}"), ctx), undefined, "sessions.open() of a request with no credential");
+      for (const headers of fixture.intruders) expect(await sessions.open(request(headers, "{}"), ctx), undefined, `sessions.open() of ${JSON.stringify(headers)}`);
+      const session = await opened(sessions, fixture, ctx);
+      expect(await sessions.open(withCookie(session.cookie, "POST"), ctx), undefined, "sessions.open() of a request with a session's cookie only");
+    }),
+
+    sessionCase("a cookie changed by a byte is not an operator; close() expires it", async (sessions, auth, fixture, ctx) => {
+      const session = await opened(sessions, fixture, ctx);
+      const pair = session.cookie.split(";")[0] ?? "";
+      const name = pair.slice(0, pair.indexOf("=") + 1);
+      const value = pair.slice(name.length);
+      /** `value` with its character at `at` replaced by another. */
+      const changed = (at: number) => `${name}${value.slice(0, at)}${value[at] === "A" ? "B" : "A"}${value.slice(at + 1)}`;
+
+      for (const at of [0, Math.floor(value.length / 2)]) expect(await auth.verify(withCookie(changed(at)), ctx), undefined, `verify() of the cookie changed at ${at}`);
+      expect(await auth.verify(withCookie(`${pair.split("=")[0]}=`), ctx), undefined, "verify() of an empty cookie");
+      const closed = sessions.close(withCookie(session.cookie));
+      check(closed.split("=")[0] === pair.split("=")[0], `close() to name the session's cookie, got ${closed}`);
+      check(attributes(closed).includes("max-age=0") || attributes(closed).some((each) => each.startsWith("expires=thu, 01 jan 1970")), `close() to expire it, got ${closed}`);
     }),
 
     {
