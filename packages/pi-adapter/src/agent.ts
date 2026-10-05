@@ -159,7 +159,8 @@ export class AgentConfigs {
   /**
    * In `tx`: record the conversation's key and agent, and make its `pi.agent` what `prepare` gives
    * for `state` (installing the tools it names). Writes `pi.agent` only when it differs, so an
-   * unchanged agent adds nothing to the transcript.
+   * unchanged agent adds nothing to the transcript. The definition owns `pi.agent` (SPEC §6): a
+   * `configure()` made on the conversation directly is undone here.
    */
   async apply(
     tx: Tx,

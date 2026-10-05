@@ -22,7 +22,7 @@ state across a restart).
 | You want | Write |
 |---|---|
 | One more thing the model can call | a tool component (`pikit-component`, reference `tool-fetch`) |
-| Switch model, prompt, tools or extensions with the conversation's state (a mode, a phase) | the agent's `prepare(state)` in `src/agents/<agent>/agent.ts`: pure and synchronous |
+| Switch model, prompt, tools or extensions with the conversation's state (a mode, a phase) | the agent's `prepare(state)` in `src/agents/<agent>/agent.ts`: pure and synchronous. The definition owns the conversation's agent (SPEC §6): the runtime rebuilds it from `prepare` at each admission and state update, so nothing else changes it live |
 | Text in every request (rules, a persona, recalled memories), possibly read from a store | an extension's **section** |
 | See or change each model request or answer, each tool call or result, a compaction | an extension's **hook** |
 | Decorate a tool or a section someone else provides | an extension's **wrap** |

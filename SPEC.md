@@ -424,9 +424,18 @@ takes the same idea from one Pi process to the whole service: what Pi cannot do 
 which pikit it runs in, and change, test, approve, deploy and roll back that service.
 
 pikit has no code hot reload: a reload is a restart, and since pi-durable checkpoints every step, a
-restart loses nothing (K6). What changes live is data: a conversation's agent (`configure()`),
-settings read when used, skills and memory kept as documents or files. Code changes only through
-the path below (`features/kit-follow-ups.md`, "No code hot reload").
+restart loses nothing (K6). What changes live is data: the conversation state its agent's `prepare`
+reads (a mode, a phase), settings read when used, skills and memory kept as documents or files. Code
+changes only through the path below (`features/kit-follow-ups.md`, "No code hot reload").
+
+**The definition owns the agent.** A conversation's `pi.agent` (model, instructions, tools,
+extensions) is what its agent's definition (`defineAgent`, through `prepare(state)`) gives: the
+runtime rebuilds it at each admission, in the commit of each state update, and before a reopened
+Harness resumes, so a `configure()` made on the conversation directly is undone at the next of these.
+A live change goes through the state or data the definition reads. *Why:* one source for what a
+conversation runs, so a restart, a reopened Harness and an evicted object build the same agent.
+Writing only when the definition itself changed (so a direct `configure()` lasts) is a later change,
+made if users need it.
 
 **Who.** One agent per project is the steward: the main agent, declared so in its `defineAgent`.
 Only it gets the self-knowledge and the self-change tools. Only senders trusted as its operators may
