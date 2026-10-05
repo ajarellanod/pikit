@@ -235,6 +235,13 @@ export const ManifestSchema = Type.Object(
           "Files of src/pikit/<name>/ that a hook rewrites (tool-mcp's seed.ts): shipped as a starting point, then the CLI's or the deployment's, never the user's edits. `pikit doctor` does not list them as modified, and `pikit remove` deletes them without --force.",
       }),
     ),
+    view: Type.Optional(
+      Type.String({
+        pattern: "^[a-z0-9][a-z0-9-]*$",
+        description:
+          "A folder of the component holding its dashboard view (SPEC §5): its index.tsx default-exports defineView({ id: <component name>, … }). `pikit add` copies it to src/dashboard/src/views/<name>/ when the project has a UI (`pikit ui on`), recorded as the component's files.",
+      }),
+    ),
     replay: Type.Optional(
       Type.Object(
         {

@@ -152,6 +152,21 @@ export function checkLayout(componentDir: string, name: string): string[] {
   return problems;
 }
 
+/**
+ * A component's view (its manifest's `view`, SPEC §5): a folder of the component whose `index.tsx`
+ * default-exports `defineView({ id: "<name>", … })`, the dashboard's way to find it under its name.
+ * Its files are the dashboard's (React, its `@/` imports), checked by the dashboard's own build, not here.
+ */
+export function checkView(componentDir: string, name: string, manifest: Manifest): string[] {
+  if (manifest.view === undefined) return [];
+  const dir = join(componentDir, manifest.view);
+  if (!isDirectory(dir)) return [`its view folder "${manifest.view}/" is missing`];
+  const index = join(dir, "index.tsx");
+  if (!existsSync(index)) return [`${manifest.view}/index.tsx is missing: a view default-exports defineView({ id: "${name}", … })`];
+  if (!readFileSync(index, "utf8").includes(`id: "${name}"`)) return [`${manifest.view}/index.tsx must define its view under the component's name: defineView({ id: "${name}", … })`];
+  return [];
+}
+
 export interface ImportScan {
   problems: string[];
   /** npm packages the shipped files import (tests aside), excluding the kit itself: its `dependencies`. */

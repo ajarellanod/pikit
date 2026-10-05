@@ -25,7 +25,7 @@
 
 import { copyFileSync, existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basePath, unreferencedBases } from "../project/bases.ts";
-import { DASHBOARD_DIR, DASHBOARD_GENERATED, dashboardFiles, dashboardRecord, recordDashboard, unrecordedDashboardFiles } from "../project/dashboard.ts";
+import { DASHBOARD_DIR, DASHBOARD_GENERATED, dashboardFiles, dashboardRecord, recordDashboard, unrecordedDashboardFiles, viewFiles } from "../project/dashboard.ts";
 import { assertNoIncompleteOperation, beginOperation, finishOperation } from "../project/operation.ts";
 import { confinedPath } from "../project/paths.ts";
 import { hashFile, type InstalledDashboard, modifiedFiles, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
@@ -92,6 +92,25 @@ export function writeDashboard(projectDir: string, project: ProjectManifest, reg
     copyFileSync(source, undo.mkdirFor(base));
   }
   project.dashboard = recordDashboard(registry, registryName, files, components);
+  // The views of the components already installed (their manifest's `view`), recorded as theirs.
+  const registries = new Map<string, Registry>();
+  for (const [name, component] of Object.entries(project.components)) {
+    const location = project.registries[component.registry];
+    if (location === undefined) continue;
+    const from = registries.get(component.registry) ?? (component.registry === registryName ? registry : openRegistry(registryPath(projectDir, location)));
+    registries.set(component.registry, from);
+    if (!from.names().includes(name)) continue;
+    for (const [target, source] of viewFiles(from, name)) {
+      undo.keep(target);
+      copyFileSync(source, undo.mkdirFor(target));
+      const hash = hashFile(source);
+      component.files[target] = { hash };
+      const base = basePath(hash);
+      if (existsSync(confinedPath(projectDir, base))) continue;
+      undo.keep(base);
+      copyFileSync(source, undo.mkdirFor(base));
+    }
+  }
 }
 
 /**
@@ -182,8 +201,13 @@ export async function uiOff(projectDir: string, options: UiOptions = {}): Promis
     return;
   }
   const force = options.force === true;
-  const modified = modifiedFiles(projectDir, dashboardRecord(dashboard));
-  const own = unrecordedDashboardFiles(projectDir, dashboard);
+  // The components' views go with it: they are in src/dashboard/.
+  const views = (files: Record<string, { hash: string }>) => Object.fromEntries(Object.entries(files).filter(([file]) => file.startsWith(`${DASHBOARD_DIR}/`)));
+  const modified = [
+    ...modifiedFiles(projectDir, dashboardRecord(dashboard)),
+    ...Object.values(project.components).flatMap((component) => modifiedFiles(projectDir, { files: views(component.files) })),
+  ];
+  const own = unrecordedDashboardFiles(projectDir, project);
   if ((modified.length > 0 || own.length > 0) && !force) {
     const lines = [...modified.map((file) => `${file} (modified)`), ...own.map((file) => `${file} (yours)`)];
     throw new CliError(`these files of the dashboard would be lost; pass --force to delete them anyway:\n  ${lines.join("\n  ")}`);
@@ -195,8 +219,12 @@ export async function uiOff(projectDir: string, options: UiOptions = {}): Promis
   const undo = new Undo(projectDir);
   beginOperation(projectDir, `pikit ui off${force ? " --force" : ""}`);
   try {
-    for (const file of [...Object.keys(dashboard.files), ...own]) {
+    const componentViews = Object.values(project.components).flatMap((component) => Object.keys(views(component.files)));
+    for (const file of [...Object.keys(dashboard.files), ...componentViews, ...own]) {
       if (existsSync(confinedPath(projectDir, file))) undo.delete(file);
+    }
+    for (const component of Object.values(project.components)) {
+      for (const file of Object.keys(views(component.files))) delete component.files[file];
     }
     delete project.dashboard;
     undo.keep(PIKIT_JSON);

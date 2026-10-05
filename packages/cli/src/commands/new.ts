@@ -148,6 +148,12 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     const location = recordedLocation(projectDir, registry.root);
     if (!isPortable(location)) log.warn(notPortable(location));
     writeProjectManifest(projectDir, emptyManifest(location, kitCommit(), targets));
+    // The dashboard before the components: those with a view install it in src/dashboard/.
+    if (dashboard !== undefined) {
+      const project = readProjectManifest(projectDir);
+      writeDashboard(projectDir, project, registry, "default", dashboard, UI_COMPONENTS, new Undo(projectDir));
+      writeProjectManifest(projectDir, project);
+    }
 
     for (const component of components) {
       const wiring = starter.STARTER_WIRING[component];
@@ -166,11 +172,6 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
       if (installed.includes(component)) config = setConfigEntry(config, component, value);
     }
     write(CONFIG_FILE, config);
-    if (dashboard !== undefined) {
-      const project = readProjectManifest(projectDir);
-      writeDashboard(projectDir, project, registry, "default", dashboard, UI_COMPONENTS, new Undo(projectDir));
-      writeProjectManifest(projectDir, project);
-    }
 
     await bunInstall(projectDir, { quiet: options.quiet === true });
     if (dashboard !== undefined) {

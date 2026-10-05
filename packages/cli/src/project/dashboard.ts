@@ -10,7 +10,7 @@
  */
 
 import { existsSync, readdirSync } from "node:fs";
-import { hashFile, type InstalledDashboard } from "./pikit-json.ts";
+import { hashFile, type InstalledDashboard, type ProjectManifest } from "./pikit-json.ts";
 import { confinedPath } from "./paths.ts";
 import type { Registry } from "./registry-source.ts";
 
@@ -22,6 +22,23 @@ export const DASHBOARD_SOURCE = "dashboard/files";
 export const DASHBOARD_DIST = `${DASHBOARD_DIR}/dist`;
 /** Made by its toolchain, never the dashboard's source. */
 const BUILT = new Set(["node_modules", "dist"]);
+
+/** Where a component's view goes: `src/dashboard/src/views/<component>/`. */
+export function viewDir(component: string): string {
+  return `${DASHBOARD_DIR}/src/views/${component}/`;
+}
+
+/**
+ * The view a component ships (its manifest's `view`, a folder of the component), project-relative
+ * target → absolute source; empty when it has none.
+ */
+export function viewFiles(registry: Registry, component: string): Map<string, string> {
+  const folder = registry.manifest(component).view;
+  if (folder === undefined) return new Map();
+  const root = confinedPath(registry.dir(component), folder);
+  if (!existsSync(root)) throw new Error(`${component}: its view folder "${folder}" is missing`);
+  return new Map(listSource(root).map((file) => [`${viewDir(component)}${file}`, confinedPath(root, file)]));
+}
 
 /** What the registry ships: project-relative target → absolute source; `undefined` when it has no dashboard. */
 export function dashboardFiles(registry: Registry): Map<string, string> | undefined {
@@ -62,11 +79,14 @@ export function dashboardRecord(dashboard: InstalledDashboard): { files: Install
   return { files: dashboard.files, generated: DASHBOARD_GENERATED };
 }
 
-/** Files in `src/dashboard/` the record does not name, but what its toolchain makes: the user's own. */
-export function unrecordedDashboardFiles(projectDir: string, dashboard: InstalledDashboard | undefined): string[] {
+/**
+ * Files in `src/dashboard/` that neither the dashboard's record nor a component's (its view) names, but
+ * what its toolchain makes: the user's own.
+ */
+export function unrecordedDashboardFiles(projectDir: string, project: ProjectManifest): string[] {
   const dir = confinedPath(projectDir, DASHBOARD_DIR);
   if (!existsSync(dir)) return [];
-  const recorded = new Set(Object.keys(dashboard?.files ?? {}));
+  const recorded = new Set([...Object.keys(project.dashboard?.files ?? {}), ...Object.values(project.components).flatMap((c) => Object.keys(c.files))]);
   return listSource(dir, false)
     .map((file) => `${DASHBOARD_DIR}/${file}`)
     .filter((file) => !recorded.has(file));

@@ -40,6 +40,7 @@ import { adapterVersion, contractsVersion, coreVersion } from "../registry/comma
 import { BOTH_APPS, HOOKS, type Manifest } from "../registry/manifest.ts";
 import { APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { BASES_DIR, basePath, unreferencedBases } from "../project/bases.ts";
+import { viewDir, viewFiles } from "../project/dashboard.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
 import { ENV_EXAMPLE, exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
 import {
@@ -337,7 +338,7 @@ export function planInstall(
   warnUnprovided(project, manifest, draft.provided);
   if (draft.provided !== undefined) draft.provided = mergeProvided(draft.provided, providedByManifests([manifest], project.targets));
 
-  const files = registry.files(name);
+  const files = componentFiles(registry, name, project);
   checkConflicts(projectDir, project, name, files, options.force === true);
 
   // An app component has a default export; a `deployment-*` does not, and is not listed.
@@ -500,6 +501,16 @@ async function confirmPlan(plan: Plan, options: AddOptions): Promise<void> {
   if (!(await confirm(`Install ${plan.name}?${alsoWrites(plan.name, plan.files)}`))) throw new CliError("cancelled", 1);
 }
 
+/**
+ * Every file the component installs in this project: its files, and its view when the project has a
+ * UI (`viewFiles`, `src/dashboard/src/views/<name>/`).
+ */
+export function componentFiles(registry: Registry, name: string, project: ProjectManifest): Map<string, string> {
+  const files = registry.files(name);
+  if (project.dashboard !== undefined) for (const [target, source] of viewFiles(registry, name)) files.set(target, source);
+  return files;
+}
+
 /** Where a component's own files go; the plan names every file it writes anywhere else. */
 /** A manifest's `hooks` (files of the component's own directory) by project path, in the order they run. */
 function projectHooks(name: string, hooks: NonNullable<Manifest["hooks"]>): NonNullable<InstalledComponent["hooks"]> {
@@ -512,7 +523,7 @@ export function ownDir(name: string): string {
 
 /** The targets outside the component's own directory, sorted (so grouped by directory). */
 function outside(name: string, files: Map<string, unknown>): string[] {
-  return [...files.keys()].filter((target) => !target.startsWith(ownDir(name))).sort();
+  return [...files.keys()].filter((target) => !target.startsWith(ownDir(name)) && !target.startsWith(viewDir(name))).sort();
 }
 
 /** What a confirmation adds when the component writes outside its directory: the files, by name. */

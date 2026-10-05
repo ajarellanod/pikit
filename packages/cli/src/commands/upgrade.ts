@@ -44,6 +44,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { hasWorkerApp } from "../project/apps.ts";
 import { basePath } from "../project/bases.ts";
+import { viewDir } from "../project/dashboard.ts";
 import { setWorkerWiring } from "../project/config-file.ts";
 import { exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
 import { mergeFile } from "../project/merge.ts";
@@ -64,6 +65,7 @@ import {
   checkCompatible,
   checkConflicts,
   checkKit,
+  componentFiles,
   composedProvides,
   describePlan,
   type Draft,
@@ -246,7 +248,7 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
   const { project } = draft;
   const previous = project.components[name] as InstalledComponent;
   const manifest = registry.manifest(name);
-  const files = registry.files(name);
+  const files = componentFiles(registry, name, project);
   const { record, obsolete, kept, dropped } = recordInstall(projectDir, previous, registry, registryName, manifest, files, previous.installedFor);
   if (sameInstall(previous, record)) return undefined;
 
@@ -349,7 +351,7 @@ function describeUpgrade({ name, registry, manifest, previous, changes, notes, d
   list("merged with your edits", changes.merged);
   list("conflicts with your edits", changes.conflicted);
   // A registry may be anyone's: a new file outside the component's directory is marked.
-  list("added", changes.added.map((file) => (file.startsWith(ownDir(name)) ? file : `! ${file}`)));
+  list("added", changes.added.map((file) => (file.startsWith(ownDir(name)) || file.startsWith(viewDir(name)) ? file : `! ${file}`)));
   list("deleted, no longer shipped", changes.removed);
   list("kept, no longer shipped but modified by you", changes.kept);
   list("not restored, deleted by you (`pikit add --force` restores it)", changes.notRestored);

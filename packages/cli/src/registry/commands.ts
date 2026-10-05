@@ -15,7 +15,7 @@ import { withOffers } from "../project/offers.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, type Registry, readPreset } from "../project/registry-source.ts";
 import { starterModel, starterModelProblem } from "../project/starter-model.ts";
 import { capabilityEntry, type RegistryCatalogue, registryCatalogue } from "./capabilities.ts";
-import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming } from "./checks.ts";
+import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming, checkView } from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
   BOTH_APPS,
@@ -250,6 +250,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     scan.problems.forEach(report);
     checkDependencies(manifest, scan).forEach(report);
     checkDevDependencies(manifest).forEach(report);
+    checkView(dir, name, manifest).forEach(report);
 
     try {
       const drift = checkDrift(manifest, await generatedFor(dir, name, manifest), regenerate);

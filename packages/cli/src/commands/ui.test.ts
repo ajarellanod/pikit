@@ -24,19 +24,30 @@ const INDEX = (name: string) => `import { defineComponent } from "@pikit/core";\
 const LINES = Array.from({ length: 10 }, (_, i) => `export const line${i + 1} = ${i + 1};`);
 const lines = (edits: Record<number, string> = {}) => `${LINES.map((line, i) => edits[i + 1] ?? line).join("\n")}\n`;
 
-/** A registry with stand-ins for admin-auth-token and admin-api, and a dashboard of `files`. */
+/** The view `log-viewer` ships (its manifest's `view`). */
+const VIEW = 'import { defineView } from "@/lib/views";\n\nexport default defineView({ id: "log-viewer", title: "Logs", pages: [] });\n';
+
+/**
+ * A registry with stand-ins for admin-auth-token and admin-api, `log-viewer` (a component with a
+ * view), and a dashboard of `files`.
+ */
 function registry(files: Record<string, string>): string {
   const root = temp();
   const index: { version: 1; components: Record<string, unknown> } = { version: 1, components: {} };
-  for (const name of ["admin-auth-token", "admin-api"]) {
+  for (const name of ["admin-auth-token", "admin-api", "log-viewer"]) {
     const dir = join(root, "components", name);
     mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
     writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), INDEX(name));
+    const view = name === "log-viewer" ? { view: "view" } : {};
+    if (name === "log-viewer") {
+      mkdirSync(join(dir, "view"));
+      writeFileSync(join(dir, "view", "index.tsx"), VIEW);
+    }
     writeFileSync(
       join(dir, "component.json"),
       JSON.stringify({
         name, version: "0.1.0", description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
-        optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }],
+        optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...view,
       }),
     );
     index.components[name] = { version: "0.1.0", description: name, targets: ["server"], path: `components/${name}` };
@@ -220,4 +231,37 @@ test("pikit doctor names the dashboard's edited and deleted files; a lockfile it
   const off = await runCli(["ui", "off", "--yes"], dir);
   expect(off.err).toContain("src/dashboard/src/app.tsx (modified)");
   expect(off.err).not.toContain("bun.lock");
+});
+
+test("a component's view goes to src/dashboard/src/views/<name>/ when the project has a UI, recorded as its own, and leaves with it", async () => {
+  const { dir } = await withUi();
+  const view = "src/dashboard/src/views/log-viewer/index.tsx";
+
+  const add = await runCli(["add", "log-viewer", "--yes"], dir);
+  expect(add.code).toBe(0);
+  expect(add.out).not.toContain("It also writes");
+  expect(read(dir, view)).toBe(VIEW);
+  expect(manifest(dir).components["log-viewer"].files[view]).toEqual({ hash: hashOf(VIEW) });
+
+  const remove = await runCli(["remove", "log-viewer"], dir);
+  expect(remove.code).toBe(0);
+  expect(existsSync(join(dir, view))).toBe(false);
+});
+
+test("without a UI a component's view is not installed; ui on adds it, ui off takes it back out", async () => {
+  const root = registry(DASHBOARD);
+  const dir = project(root);
+  const view = "src/dashboard/src/views/log-viewer/index.tsx";
+  expect((await runCli(["add", "log-viewer", "--yes"], dir)).code).toBe(0);
+  expect(existsSync(join(dir, "src/dashboard"))).toBe(false);
+  const before = snapshot(dir);
+
+  expect((await runCli(["ui", "on", "--yes"], dir)).code).toBe(0);
+  expect(read(dir, view)).toBe(VIEW);
+  expect(manifest(dir).components["log-viewer"].files[view]).toEqual({ hash: hashOf(VIEW) });
+  // Its view is the component's, not yours: `ui off` is not held up by it.
+  const off = await runCli(["ui", "off", "--yes"], dir);
+  expect(off.code).toBe(0);
+  expect(manifest(dir).components["log-viewer"].files[view]).toBeUndefined();
+  expect(snapshot(dir)).toEqual(before);
 });
