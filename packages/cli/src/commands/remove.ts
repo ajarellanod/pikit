@@ -191,8 +191,9 @@ async function removeOne(projectDir: string, name: string, force: boolean, begin
 
 /**
  * The components installed for `name` (after it is gone) that nothing uses: the ones to remove. Each
- * candidate's `installedFor` loses `name`: another that something still uses stays, installed for its
- * users now; one an agent names a key of, or any when the app does not compose (what uses it is
+ * candidate's `installedFor` loses `name`: another that something still requires stays, installed for
+ * its users now. A component that only uses it if present does not keep it: it was brought for `name`,
+ * and the project goes back to what it was before `name` came (P3). One an agent names a key of, or any when the app does not compose (what uses it is
  * unknown), stays on its own. A returned one is on its own too, in case its removal is refused.
  */
 async function installedOnlyFor(projectDir: string, name: string): Promise<string[]> {
@@ -201,12 +202,12 @@ async function installedOnlyFor(projectDir: string, name: string): Promise<strin
   if (candidates.length === 0) return [];
   const result = await probe(projectDir);
   const apps = result.ok ? appsOf(result) : [];
-  // In each App: what uses what the component provides there, by installed component.
+  // In each App: what requires what the component provides there, by installed component.
   const usersOf = (component: string): string[] => {
     const users = apps.flatMap(({ components }) => {
       const provides = new Set(components.filter((c) => installedName(project, c.name) === component).flatMap((c) => c.provides));
       return components
-        .filter((c) => installedName(project, c.name) !== component && [...c.requires, ...c.optional].some((cap) => provides.has(cap)))
+        .filter((c) => installedName(project, c.name) !== component && c.requires.some((cap) => provides.has(cap)))
         .map((c) => installedName(project, c.name));
     });
     return [...new Set(users)];

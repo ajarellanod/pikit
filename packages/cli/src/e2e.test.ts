@@ -254,9 +254,8 @@ test.skipIf(!E2E)(
     const removedWith = await pikit(["remove", "channel-telegram"]);
     expect(removedWith.code).toBe(0);
     expect(removedWith.out).toContain("outbound-durable was installed for channel-telegram, and nothing uses it now");
-    // The runtime can use wakeups too: the timers stay, installed for it now, until removed by name.
-    expect(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components["wakeups-timers"].installedFor).toEqual(["runtime-pi"]);
-    expect((await pikit(["remove", "wakeups-timers"])).code).toBe(0);
+    // The runtime only uses wakeups if present: that does not keep the timers brought for the outbox.
+    expect(removedWith.out).toContain("wakeups-timers was installed for outbound-durable, and nothing uses it now");
     expect((await git("status", "--porcelain")).out).toBe("");
   },
   TIMEOUT,
