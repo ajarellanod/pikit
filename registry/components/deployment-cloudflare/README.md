@@ -166,6 +166,13 @@ the Worker after `package.json`'s `name`. Running wrangler by hand, pass `--name
 Cloudflare template adds a `name` (Workers Builds runs wrangler without `--name`); the commands then
 use that one, so `pikit up` and the builds deploy the same Worker.
 
+Its `build.command` builds the dashboard of a project with a UI (`src/dashboard/`: `bun install
+--frozen-lockfile`, then `bun run build`, which writes `src/pikit/admin-api/dashboard-files.ts`)
+before wrangler bundles; without `src/dashboard/` it does nothing. Wrangler runs it whoever runs
+wrangler: `pikit up`, `pikit dev` (again when `src/dashboard/src/` changes), a `wrangler deploy` by
+hand, Workers Builds from Git. So no deploy ships an old or empty dashboard, and a build that fails
+stops the deploy (`Running custom build … failed`). It needs Bun where wrangler runs.
+
 This file is yours: add bindings, routes, a custom domain. Keep the migration: a migration is
 forever; add new ones after it. `files.test.ts` checks what the entrypoint relies on.
 

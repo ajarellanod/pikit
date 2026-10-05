@@ -7,8 +7,8 @@ description: Add a view to a pikit project's dashboard (src/dashboard/, a shadcn
 
 The dashboard (SPEC §5) is a project's choice: `src/dashboard/` exists when the project has a UI
 (`pikit ui on`). It is a shadcn/ui project of its own (Vite, React, Tailwind v4), served at
-`/admin/` by the `admin-api` component, and it reads only the admin API (`/admin/api/*`), every call
-with the operator's token. A view is a folder of `src/dashboard/src/views/`, found when the dashboard
+`/admin/` by the `admin-api` component, and it reads only the admin API (`/admin/api/*`), with the
+operator's browser session (`src/lib/api.ts`). A view is a folder of `src/dashboard/src/views/`, found when the dashboard
 is built, and shown only while the capabilities it declares are installed.
 
 ## 0. Know what is there
@@ -21,7 +21,16 @@ pikit doctor                         # what the App provides: what a view may re
 
 The base views are the references: `conversations` (a list, a live page over server-sent events,
 actions) and `composition` (one read, tabs). Read `src/dashboard/src/lib/api.ts` (`api`, `post`,
-`useApi`, `follow`), `views.ts` (`defineView`) and `router.tsx` (`Link`, `navigate`).
+`useApi`, `follow`), `activity.ts` (`usePolling`, `every`), `views.ts` (`defineView`) and
+`router.tsx` (`Link`, `navigate`, `pagePath`).
+
+**Add a view; do not edit a base one.** `pikit upgrade` merges the kit's changes into the base views
+(`conversations`, `composition`, `delivery`) and the files of `src/lib/` and `src/components/`; every
+file you edit is a file that can conflict. To show more about conversations, write a new view that
+imports what the base views export (`Status`, `DashboardBadge`, `agentsOf` from
+`@/views/conversations/list`, `useLive` from `@/views/conversations/live`, `MessageView`,
+`ErrorNote`) rather than changing theirs. Edit a base file only for what a new view cannot do, keep
+the change small, and say so to the user.
 
 ## 1. Decide where it lives
 
@@ -78,7 +87,14 @@ export default defineView({
 
 - Pages live under `/<id>`; `:name` segments are parameters (`/memory/:person`).
 - Read with `useApi<T>("/<component>/<what>", everyMs?)`; act with `post(...)`; follow live data
-  with `follow(path, onEvent, signal)` (server-sent events read with `fetch`, so the token goes too).
+  with `follow(path, onEvent, signal)` (server-sent events read with `fetch`, so the session and its
+  header go too). Poll through `useApi` or `usePolling` (`@/lib/activity`), never a bare
+  `setInterval`: they pause while the tab is hidden or the operator is away. On Cloudflare every read
+  is a request of the day's budget, shared with the bot: poll with `every(ms)`, slower there.
+- Put an id in a path with `pagePath(base, id)` or `encodeURIComponent` (ids may hold `:`, `.`, `@`,
+  `/`); `match` decodes it.
+- The page runs under a Content-Security-Policy (`default-src 'self'`): no inline script, nothing
+  from another origin (fonts, images and styles come from the build).
 - Build it from the primitives in `src/components/ui/` and the pieces in `src/components/pikit/`
   (`ErrorNote`, `MessageView`). Need another primitive: `bunx shadcn@latest add <name>` in
   `src/dashboard/`. A component's view may use only primitives the base dashboard ships, or say in its

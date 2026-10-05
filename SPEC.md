@@ -310,10 +310,18 @@ extend; this is pikit's to give. AI-specific pieces (streaming and thinking stat
 status, approval cards) may come from [Beautiful UI](https://github.com/slev12397/beautiful-ui)
 (MIT, shadcn-compatible) where they fit.
 
-**What the base ships** (the first version): conversations; one conversation live (its
-transcript, the tools running), joinable while the user talks in their chat; steer and abort;
-cost per conversation; health, once a `health` provider is installed (`features/health.md`). The
-rest below comes as the components it needs are installed.
+**What the base ships** (the first version): conversations, the most recently active first; one
+conversation live (its transcript, the tools running); abort and reset; cost per conversation;
+health, once a `health` provider is installed (`features/health.md`). The rest below comes as the
+components it needs are installed.
+
+**The dashboard is a channel of its own.** The operator starts conversations of the dashboard's own
+(key `dashboard:<uuid>`, with one of the App's agents), whose answers appear only there and which no
+other channel can continue. In another channel's conversation the operator's message is a follow-up
+(never a steer), marked for the agent (it comes from the operator, and the user sees neither it nor
+its answer), with a request id that starts with `dashboard:`: a run only such messages started is
+never delivered to that channel (`startAnswerDelivery`), and nothing the operator says is sent
+anywhere. A run that also answers a user's message is delivered to the user, as any run is.
 
 **What it shows and does.**
 - The composition: components, capabilities and their providers, pipelines, the config without
@@ -343,7 +351,8 @@ rest below comes as the components it needs are installed.
   or an agent may read it). It registers its routes through `http.route`, asks `admin.auth` before
   every answer, and serves the dashboard's built files under `GET /admin/*` when there are some. The
   files hold no data and need no credential (a browser's navigation sends no header): the page asks
-  the operator for it and sends it with every API call.
+  the operator for it once, for a browser session (an HttpOnly, SameSite=Strict, expiring cookie,
+  with a header of the dashboard's own on every call), and keeps no credential itself.
 - **It is made to be extended.** A view is a folder, `src/dashboard/src/views/<view>/`, found when the
   dashboard is built (nothing is loaded at run time) and shown only when the capability it declares is
   in `APP_DESCRIPTION`: a view whose capability is not installed does not appear. A component with a
@@ -366,9 +375,11 @@ rest below comes as the components it needs are installed.
   Object's hibernating WebSocket) are optional optimizations behind the same API, never requirements.
   Reading a conversation is location-transparent: on Cloudflare the Worker lists conversations from an
   index and follows one in its Durable Object (by polling its snapshot: a call does not stream).
-- **Its build is its own.** `src/dashboard/`'s own `build` script makes the static files; `pikit up`
-  and the deployment run it only in a project with a UI, so a project without one builds nothing more
-  (no magic, principle 9). In development it runs with hot reload against a running app's API.
+- **Its build is its own.** `src/dashboard/`'s own `build` script makes the static files; every
+  deploy runs it in a project with a UI (Cloudflare: wrangler's `build.command`, whoever runs
+  wrangler; a server: the image's build), so a deploy never ships an old or empty dashboard, and a
+  project without one builds nothing more (no magic, principle 9). In development it runs with hot
+  reload against a running app's API.
 - **It is safe by default.** Authenticated; never shows a secret or a credential. Operational logs
   stay without message text; the transcript views are an explicit, authenticated read of the
   conversation.
@@ -381,9 +392,10 @@ The admin API reads the composition through `APP_DESCRIPTION` (K13), the runtime
 cost, a transcript, a live event stream, usage; runtime-pi provides it from pi-durable's records), and
 asks `admin.auth` (`packages/contracts/src/admin.ts`; `admin-auth-token`, a bearer token from
 `secrets`, on both targets) before every answer. Its routes and the UI's files are prefix routes
-(`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves. On
-Cloudflare `agent.observe` sees one object's conversations: the list across objects is
-`features/cloudflare-conversation-index.md`.
+(`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves. The
+list of conversations, on every host, comes from admin-api's conversation index, paged newest
+activity first (`agent.observe` lists in creation order, and on Cloudflare sees one object's
+conversations: `features/cloudflare-conversation-index.md`).
 
 ## 6. The agent knows and improves itself
 

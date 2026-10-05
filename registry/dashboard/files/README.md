@@ -1,12 +1,44 @@
 # The dashboard
 
-The operator's view of this pikit service (SPEC §5): its conversations, one of them live (the
-transcript, the answer being written, the tools running), steer, abort and reset, the cost, and what
-the App is made of. It is yours: a shadcn/ui project (Vite, React, Tailwind v4) whose source you
-change like any other file of the project.
+The operator's view of this pikit service (SPEC §5): its conversations, the most recently active
+first, one of them live (the transcript, the answer being written, the tools running), abort and
+reset, the cost, and what the App is made of. It is yours: a shadcn/ui project (Vite, React, Tailwind
+v4) whose source you change like any other file of the project.
 
-It talks only to the admin API that `admin-api` serves (`/admin/api/*`, every call with the
-operator's token), and admin-api serves its built files under `/admin/`.
+It talks only to the admin API that `admin-api` serves (`/admin/api/*`), and admin-api serves its
+built files under `/admin/`.
+
+## A channel of its own
+
+- **New conversation** (on Conversations): pick one of the App's agents and write the first message.
+  It is a conversation of the dashboard's own (`dashboard:<uuid>`, labeled `dashboard`): its answers
+  appear only here, and no other channel can continue it.
+- **Another channel's conversation** (a Telegram chat, an HTTP client's): what you write is a
+  follow-up (with a run going, it waits for it) whose answer stays here. Nothing you say, nor its
+  answer, is sent to that chat; the agent reads that the message is the operator's and that the user
+  does not see it. A run that also answers the user's own message is delivered to the user, as always.
+- **Abort** and **reset** work on every conversation.
+
+## Signing in
+
+The page asks for the operator's token (`PIKIT_ADMIN_TOKEN`; `pikit configure --generate
+PIKIT_ADMIN_TOKEN` writes one) once, and posts it to `POST /admin/api/session`: the browser gets a
+session cookie (HttpOnly, SameSite=Strict, sent to `/admin/api/` only, 12 h), never keeps the token,
+and no script can read the session. Every call also sends `x-pikit-admin: 1`, which a page of
+another site cannot. **Sign out** clears the cookie. The files are served with a Content-Security-Policy
+(`default-src 'self'`, no inline script): keep scripts in modules, and fonts, images and styles in
+the build (`src/`, `public/`), never from another origin.
+
+## Requests
+
+The dashboard asks the API only while its tab is visible and you were there in the last 5 minutes (a
+key, the pointer, a scroll): polling and live streams pause otherwise, and resume at your next touch
+(`src/lib/activity.ts`). On Cloudflare that is the budget: every Worker request and Durable Object
+request counts in the day's (Workers Free: 100,000 Worker requests and 100,000 Durable Object requests
+a day), shared with the bot. There the list is read every 30 s (1 Worker request and up to 21 object
+requests), and an open conversation's live stream asks its object for a snapshot every 2 s (about 30
+object requests a minute, one Worker request each 80 s). An hour of watching one conversation costs
+about 2,000 requests; a tab left open costs none after 5 minutes.
 
 ## Run it
 
@@ -19,11 +51,13 @@ bun run typecheck
 
 The build's last step (`scripts/embed.ts`) writes `dist/` as a module, `src/pikit/admin-api/dashboard-files.ts`
 (each file in base64), which admin-api bundles and serves at `/admin/`: the same on a server and on a
-Cloudflare Worker, with no disk. Without admin-api next to it the build makes `dist/` only. Rebuild
-after a change: `pikit dev` serves what was built last. On Cloudflare `pikit up` builds it before it
-deploys; Docker's image builds it in a stage of its own. The ids in the API are opaque (on Cloudflare
-`<key>~<id>`): always `encodeURIComponent` one in a path. The token it asks for is `PIKIT_ADMIN_TOKEN` (`pikit configure
---generate PIKIT_ADMIN_TOKEN` writes one); it stays in the browser's localStorage.
+Cloudflare Worker, with no disk. Without admin-api next to it the build makes `dist/` only. Every
+deploy builds it again: on Cloudflare wrangler's `build.command` (`pikit up`, `pikit dev`, a hand
+`wrangler deploy`, Workers Builds; a failed build stops the deploy), Docker's image in a stage of its
+own. On a server's `pikit dev`, rebuild after a change: it serves what was built last. The module is
+committed, marked generated in `.gitattributes` (a diff shows only that it changed). The ids in the API
+are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): always
+`encodeURIComponent` one in a path (`pagePath` in `router.tsx`); any page reloads.
 
 ## What is where
 
@@ -32,7 +66,8 @@ deploys; Docker's image builds it in a stage of its own. The ids in the API are 
 | `src/views/<view>/index.tsx` | one view each: its pages and when it shows (below) |
 | `src/components/ui/` | shadcn/ui primitives, copied and yours (`shadcn add` puts more here) |
 | `src/components/pikit/` | pieces the views share: a transcript message, an error, the sign-in |
-| `src/lib/api.ts` | calls to the admin API with the token, `useApi`, live events (`follow`) |
+| `src/lib/api.ts` | calls to the admin API (the session), `signIn` / `signOut`, `useApi`, live events (`follow`) |
+| `src/lib/activity.ts` | whether you are there: `useActive`, `usePolling`, `every` (slower on Cloudflare) |
 | `src/lib/admin-api.ts` | the API's JSON, typed: an identical copy of `src/pikit/admin-api/api.ts` |
 | `src/lib/views.ts` | how views are found and when they show |
 | `src/lib/router.tsx` | the pages under `/admin` |
@@ -40,7 +75,13 @@ deploys; Docker's image builds it in a stage of its own. The ids in the API are 
 
 ## Add a view
 
-A view is a folder of `src/views/`, found when the dashboard is built:
+A view is a folder of `src/views/`, found when the dashboard is built. **Prefer a new view to
+editing a base one** (`conversations`, `composition`, `delivery`): `pikit upgrade` merges the kit's
+changes into the base views, and a file you did not touch never conflicts. To show something more
+about conversations, add a view of your own (`src/views/my-conversations/`) that reuses the base
+pieces they export (`Status`, `DashboardBadge`, `agentsOf` from `views/conversations/list.tsx`,
+`useLive` from `views/conversations/live.ts`, `MessageView`, `ErrorNote`) and the client in `src/lib/`;
+change a base view only for what a view of your own cannot do, and keep that change small.
 
 ```tsx
 // src/views/memory/index.tsx
@@ -58,8 +99,9 @@ export default defineView({
 ```
 
 Its data comes from admin routes its component registers through `http.route` (`GET
-/admin/api/memory/…`, asking `admin.auth`), read with `useApi` / `api` from `@/lib/api`. A view
-never reads anything else: no internals, no other origin.
+/admin/api/memory/…`, asking `admin.auth`), read with `useApi` / `api` from `@/lib/api` (they send
+the session and pause while you are away; poll with `useApi(path, every(ms))`). A view never reads
+anything else: no internals, no other origin.
 
 More primitives: `bunx shadcn@latest add dialog` (from this folder). pikit's own pieces and views are
 shadcn items too: `bunx shadcn@latest add @pikit/<item>` (`components.json` names the registry; its

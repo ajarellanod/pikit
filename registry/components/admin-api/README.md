@@ -6,8 +6,9 @@ installed; it also stands on its own, for a script or an agent that reads the se
 
 - **Provides:** `http.route`: the routes below, and `GET /admin/*` for the dashboard's files.
 - **Requires:** `admin.auth` (who is an operator; `admin-auth-token`), `agent.observe` (runtime-pi),
-  `agent.runtime`, `conversations.registry`. A server (such as `server-bun`) serves the routes. On
-  Cloudflare, also `actor.inbox`, `actor.mailbox` (platform-cloudflare) and `storage.sql` (storage-do).
+  `agent.runtime`, `conversations.registry`, `storage.sql` (the conversation index). A server (such
+  as `server-bun`) serves the routes. On Cloudflare, also `actor.inbox` and `actor.mailbox`
+  (platform-cloudflare).
 - **Targets:** `server` and `durable` (Cloudflare): below, how it works on each.
 - **Installs to:** `src/pikit/admin-api/`. `dashboard-files.ts` there is the dashboard's build's, never
   yours (`generated`).
@@ -15,48 +16,93 @@ installed; it also stands on its own, for a script or an agent that reads the se
 
 ## The API
 
-Every route under `/admin/api/` asks `admin.auth` first: without an operator's credential
-(`Authorization: Bearer <PIKIT_ADMIN_TOKEN>` with admin-auth-token) the answer is `401`. The JSON of
-every answer is typed in `api.ts`, of which the dashboard keeps an identical copy
-(`src/dashboard/src/lib/admin-api.ts`); an error is `{ error, message? }`.
+Every route under `/admin/api/` asks `admin.auth` first: without an operator's credential the answer
+is `401`. The credential is `Authorization: Bearer <PIKIT_ADMIN_TOKEN>` with admin-auth-token, or a
+browser's session cookie (below). The JSON of every answer is typed in `api.ts`, of which the
+dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an error is
+`{ error, message? }`.
 
 | Route | Answer |
 |---|---|
-| `GET /admin/api/app` | the composition: components, capabilities and providers, pipelines, config (`APP_DESCRIPTION`, no secrets) |
-| `GET /admin/api/conversations?limit&cursor` | a page of conversations: key, agent, busy, last activity, cost, and `current` (whether its key points to it now) |
+| `GET /admin/api/app` | the composition: components, capabilities and providers, pipelines, config (`APP_DESCRIPTION`; a value that looks like a secret is `[redacted]`) |
+| `POST /admin/api/session` | the credential once → `200 { operator }` and a session cookie |
+| `DELETE /admin/api/session` | `204`, the session cookie cleared |
+| `GET /admin/api/conversations?limit&cursor` | a page of conversations, the most recently active first: key, agent, busy, last activity, cost, and `current` (whether its key points to it now) |
+| `POST /admin/api/conversations` | `{ agent, text, requestId? }`: a conversation of the dashboard's own → `201 { conversationId, key, requestId, admission }` |
 | `GET /admin/api/conversations/:id` | one conversation |
 | `GET /admin/api/conversations/:id/transcript?limit&cursor` | its history, newest first, a page at a time |
 | `GET /admin/api/conversations/:id/events` | its live events as server-sent events: a `snapshot`, then each change |
-| `POST /admin/api/conversations/:id/messages` | `{ text, requestId?, whenBusy? }`: a message to it, a steer by default → `202 { requestId, admission }` |
+| `POST /admin/api/conversations/:id/messages` | `{ text, requestId? }`: the operator's follow-up → `202 { requestId, admission }` |
 | `POST /admin/api/conversations/:id/abort` | stops its run → `200` |
 | `POST /admin/api/conversations/:id/reset` | points its key to a new, empty conversation; the old one is kept → `200 { key, previousConversationId, conversationId }` |
 | `GET /admin/api/delivery/pending?limit&cursor` | what is not delivered yet (with an `outbound.queue`, on a server) |
 | `GET /admin/api/delivery/receipts?after&limit` | what settled (with an `outbound.queue`, on a server) |
 
-- `limit` is 1 to 500 (the runtime's default when absent); `cursor` is the `next` of the previous
-  page. Either one wrong is `400`.
-- An id is opaque: put it in a path encoded (`encodeURIComponent`).
+- `limit` is 1 to 500 (50 when absent); `cursor` is the `next` of the previous page. Either one wrong
+  is `400`.
+- An id is opaque: put it in a path encoded (`encodeURIComponent`). An id with `:`, `@`, `.`, `~` or
+  an encoded `/` (`email:ana@empresa.com~1`) is one segment like any other.
 - A message, an abort or a reset reaches only a conversation's current one: to one a reset left
   behind it is `409 not_current`, to one no message has reached yet `409 no_agent`.
-- A message from the dashboard is part of the conversation: its run's answer goes to the
-  conversation's chat, as any message's does. The same `requestId` sent again does not run again.
 - Live events: one JSON object per `data:` line, each with its `type`, in the runtime's own words. A
   client that falls behind gets a new `snapshot`: rebuild the view from it. A comment line every
-  `heartbeatMs` keeps an idle stream open. A browser's `EventSource` cannot send the token: read the
+  `heartbeatMs` keeps an idle stream open. A browser's `EventSource` cannot send a header: read the
   stream with `fetch`, and connect again when it ends.
 
 ```sh
 curl -N -H "Authorization: Bearer $PIKIT_ADMIN_TOKEN" http://localhost:3000/admin/api/conversations
 ```
 
-The routes are written once (`routes.ts`) over a backend (`backend.ts`): what each target reads them
-from.
+### The dashboard is a channel of its own
+
+- **Its own conversations.** `POST /admin/api/conversations` makes a key `dashboard:<uuid>` and
+  resolves it with one of the App's agents (the keys of `agent.definition`; another is
+  `400 unknown_agent`), then dispatches the first message. Its answers appear only in the dashboard:
+  no channel delivers a `dashboard:` key, and none makes one, so no other channel can continue it.
+- **Another channel's conversation.** The operator's message is a follow-up, never a steer (with a run
+  going, it waits for it), and its request id starts with `dashboard:` (`DASHBOARD_REQUEST_PREFIX`; a
+  client's own must too, or it is `400`). A run every request of which is the dashboard's is never
+  delivered to that channel (`startAnswerDelivery`, @pikit/contracts): its answer stays in the
+  dashboard, and nothing the operator says is sent anywhere. A run that answers both a user's message
+  and the operator's (the follow-up joined the user's turn) is delivered to the user, as any run is.
+- **The agent knows.** The message it reads starts with a line saying it comes from the operator in
+  the dashboard, and, in another channel's conversation, that the user does not see it or its answer
+  (`operatorPrompt`).
+- **Abort and reset** stay on every conversation.
+- Each action is logged with the operator's id and the conversation's key, never the message's text.
+
+### Browser sessions
+
+`POST /admin/api/session` with the credential (and the header `x-pikit-admin: 1`) answers with a
+session cookie from `admin.auth`'s `sessions` (admin-auth-token: signed, HttpOnly, SameSite=Strict,
+`Path=/admin/api`, 12 h). The API then takes the cookie instead of the credential, but a `POST`
+also needs `x-pikit-admin`, which a page of another site cannot send. `DELETE` clears it. An
+`admin.auth` without sessions answers `404 not_installed`: send the credential with every call.
+
+## The conversation index
+
+The list is newest activity first, a page at a time, on every host: `agent.observe` lists in
+creation order, and on Cloudflare sees one object's conversations. So admin-api keeps an index,
+`admin_api_conversations` in `storage.sql`: one row per conversation (its key, its id, its agent, the
+time of its newest activity), written
+
+- when a message is dispatched (`agent.dispatched`, in the caller's context once it is durable; a
+  duplicate is no activity), when a run settles or fails, when a reset points a key to a new
+  conversation (listed at once), and when a resumed run starts;
+- when the App starts, from every conversation `agent.observe` holds (on a server in the background,
+  a page at a time; on Cloudflare the object's own): a conversation made before admin-api was
+  installed, or whose events were missed (SPEC K3), is listed once its App starts again.
+
+A write is an upsert that keeps the newest time: told twice, or late, it changes nothing. A row whose
+conversation the runtime no longer has is left out of the page. Any conversation can always be read
+by its id.
 
 ## On a server
 
 One App, and this component's default export is the whole API over its contracts
-(`createLocalBackend`): every conversation of the runtime, ids the runtime's, live events from
-`agent.observe`'s `watch`, delivery from the `outbound.queue` when one is installed.
+(`createLocalBackend`): the list from the index (the App's own `storage.sql`), each conversation from
+the runtime, ids the runtime's, live events from `agent.observe`'s `watch`, delivery from the
+`outbound.queue` when one is installed.
 
 ## On Cloudflare
 
@@ -68,31 +114,30 @@ by `actor.mailbox.call` (JSON in, JSON out). So admin-api has two halves, which 
   routes over the remote backend (`remote.ts`): each read and action is a call to the conversation's
   object. It needs only `admin.auth` and `actor.mailbox`.
 - **The object's half** (the default export, in each object's App) answers those calls about its own
-  conversations, through the same contracts as on a server (`calls.ts`), and tells the index when a run
-  starts and when it settles.
+  conversations, through the same contracts as on a server (`calls.ts`), and tells the index of their
+  activity (`admin-api.seen`, a message to the index object).
 - **Ids** name the object: `<conversation key>~<the object's id>` (`telegram:12345~1`), split on the last
   `~`. Every object numbers its own conversations, so its own id alone names nothing.
-- **The list comes from an index**, the object `admin-api:index` (an object of the same class, which
-  runs the same App and holds no conversation). Each conversation's object sends it
-  `admin-api.seen` `{ key, agent, at }` when a run starts and settles; it keeps them in its
-  `storage.sql` (`admin_api_index`). The list asks it for a page of keys, the most recently active
-  first, then each key's object for its conversations (its current one and those a reset left behind).
-  A page is at most 20 keys whatever `limit` says (each key is a subrequest), so it may hold more
-  conversations than keys. An object that does not answer is left out of the page, and logged.
-- **What the index may miss.** `seen` is sent from the runtime's events, which can be missed (SPEC K3):
-  an object evicted at the wrong moment, or an index that did not answer, leaves a conversation out of
-  the list, or its time old, until its next run sends again. A conversation whose runs all happened
-  before admin-api was installed is not listed until it runs again. It can always be read by its id.
-- **Live events are polled.** No call streams, so `…/events` asks the object for its `snapshot` about
-  once a second and sends it only when it changed, then ends after 40 of them (the subrequests of a
-  request are bounded); the dashboard connects again. Text does not stream word by word: the view shows
-  where the run is, each second.
+- **The index** is the object `admin-api:index` (an object of the same class, which runs the same App
+  and holds no conversation), its rows in that object's `storage.sql`. The list asks it for a page,
+  then each conversation's object for it: a page is at most 20 conversations whatever `limit` says
+  (each is a subrequest). An object that does not answer is left out of the page, and logged.
+- **A new conversation** of the dashboard's own is one call to the object of its new key.
+- **Live events are polled.** No call streams, so `…/events` asks the object for its `snapshot` every
+  2 s and sends it only when it changed, then ends after 40 of them (the subrequests of a request are
+  bounded); the dashboard connects again. Text does not stream word by word: the view shows where the
+  run is, every 2 s.
 - **The composition** (`/admin/api/app`) is the objects' App, where the agents run (the index's).
 - **Delivery** is not listed: each conversation's outbound queue is in its own object
   (`404 not_installed`).
 - An object that cannot be reached is `503 unavailable`.
 - An id naming a key nobody used starts an empty object for it (Durable Objects exist by name), which
   then answers `404`. Only an operator can ask.
+- **What it costs.** Every Worker request and every Durable Object call counts in the day's requests
+  (the Free plan: 100,000 Worker requests and 100,000 Durable Object requests a day), shared with the
+  bot. A list page is 1 Worker request and up to 21 object requests; an open conversation about 30
+  object requests a minute. The dashboard asks only while its tab is visible and the operator is there
+  (its README, "Requests").
 
 ## The dashboard's files
 
@@ -100,17 +145,25 @@ by `actor.mailbox.call` (JSON in, JSON out). So admin-api has two halves, which 
 (`src/dashboard/`: `bun run build`, whose last step is `scripts/embed.ts`): every file of its `dist/`,
 in base64. It is bundled with the app, so a server and a Worker serve it the same way, with no disk and
 no binding. As installed it is empty, and `/admin/` is a `404` that says no dashboard is built; the API
-still answers. Rebuild the dashboard and the module follows; commit it or not, as you like: a build
-with the CLI makes it again.
+still answers.
 
 - The files hold no data, so they are served without a credential: a browser's navigation sends no
-  header, and the page asks the operator for the token.
-- A path with no file and no extension gets `index.html` (the app's own pages); a path never leaves
-  the files.
-- **Builds before a deploy.** On Cloudflare, `pikit up` runs admin-api's `beforeDeploy` (`deploy.ts`):
-  in a project with `src/dashboard/`, `bun install --frozen-lockfile` and `bun run build` there, and the
-  deploy stops if either fails. On a server it builds nothing: deployment-docker's image builds the
-  dashboard in a stage of its own, so it is built once.
+  header, and the page asks the operator for the token, once.
+- Only `/admin/assets/…` and the built files are files: a missing asset is a `404`. Any other path is
+  a page of the app and gets `index.html`, whatever it holds (an id with `.`, `@` or `%2F`): a reload
+  of any page works. A path never leaves the files.
+- Every answer has a Content-Security-Policy (`CSP` in `assets.ts`): `default-src 'self'`, scripts
+  only from the dashboard's own files (no inline script, no `eval`), styles from its files and inline
+  (the dialogs set some), fonts and images from its files, no framing. Vite's build, its fonts and
+  styles work under it.
+- **Every deploy builds it.** On Cloudflare, deployment-cloudflare's `wrangler.jsonc` has a
+  `build.command` that, in a project with `src/dashboard/`, runs `bun install --frozen-lockfile` and
+  `bun run build` there before wrangler bundles: `pikit up`, `pikit dev`, a `wrangler deploy` by hand
+  and Workers Builds from Git all ship the dashboard as its source is, and a build that fails stops the
+  deploy. On a server, deployment-docker's image builds it in a stage of its own.
+- **In git** the module is committed (a clone runs and type-checks as it is), and `pikit new` writes
+  a `.gitattributes` that marks it generated (`linguist-generated=true -diff`): GitHub collapses it,
+  and `git diff` says only that it changed.
 
 ## Config
 
@@ -127,7 +180,10 @@ with the CLI makes it again.
   says yes.
 - It reads contracts only (`APP_DESCRIPTION`, `agent.observe`, `conversations.registry`) and acts only
   through the contracts that own each action (`agent.runtime`'s `dispatch` and `abort`,
-  `conversations.registry`'s `reset`), on Cloudflare inside the conversation's own object.
+  `conversations.registry`'s `resolve` and `reset`), on Cloudflare inside the conversation's own object.
+- What the operator says never reaches another channel's chat; the agent reads that it is the
+  operator's.
+- No config value that looks like a secret leaves it (`redactSecrets`), on either host.
 - Each action is logged with the operator's id and the conversation's key, never the message's text.
 - Live events end when the client goes away or the server stops (on Cloudflare also after their
   polls): nothing keeps watching.
@@ -135,12 +191,17 @@ with the CLI makes it again.
 ## Tests
 
 - `admin-api.test.ts`, with a double for every contract (`runtime.test-support.ts`), routes picked the
-  way a server picks them: what setup declares; `401` on every API route before anything is read; each
-  route's answer and its `400` / `404` / `409`; server-sent events; messages logged without their text.
+  way a server picks them: what setup declares; `401` on every API route before anything is read;
+  sessions; each route's answer and its `400` / `404` / `409`; the list from the index (filled at
+  start, moved by activity, paged through thousands); the dashboard's own conversations and the
+  operator's follow-ups (marked, never steer); ids with `.` and `/`; redacted config; server-sent
+  events; messages logged without their text.
 - `remote.test.ts`: the Worker's half over a fake platform whose every key is an App running the
   default export on `durable`: ids, the list from the index (order, pages, an object that does not
-  answer), reads, actions and their refusals across the call, the polled snapshot, `401` before any
-  call, and the index told when a run starts or settles.
-- `conversation-index.test.ts`: the index on SQLite (an upsert a late `seen` does not move back, order,
-  pages, cursors). `assets.test.ts`: the files served from the module. `deploy.test.ts`: the hook.
+  answer), the index told at an object's start and on dispatch (once per conversation), a dashboard
+  conversation in its own object, reads, actions and their refusals across the call, the polled
+  snapshot, `401` before any call.
+- `conversation-index.test.ts`: the index on SQLite (an upsert a late `seen` does not move back, one
+  row per conversation, order, pages, cursors). `assets.test.ts`: the files served from the module,
+  pages for any other path, the CSP.
 - The kit's workerd lane runs both halves in real Durable Objects (`tests/workerd/test/admin-api.workerd.ts`).
