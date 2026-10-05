@@ -130,11 +130,15 @@ MANIFESTO principle 13 promises a conformance suite for every contract. These do
   (`createDurableExecutionConformance`, `@pikit/pi-adapter/execution/testing`), since the contract is
   pi-durable's `ExecutionEnv`. Likewise `workspace` (`createWorkspaceConformance`) and
   `model.credentials` (`createCredentialStoreConformance`), in `@pikit/pi-adapter/testing/neutral`.
-- **`agent.submissions`.** Its suite exists (`createSubmissionsConformance`), but runs only on the
-  in-memory double (`createMemorySubmissions`): it writes through `SubmissionsRecorder`, and
-  runtime-pi, the one real provider, records from pi-durable's own commits instead. runtime-pi runs
-  the feed suite on its `answers` (`packages/pi-adapter/src/answers.test.ts`) and proves the rest with
-  its own tests (`recovery.test.ts`, `submissions.test.ts`).
+- **`agent.submissions`: now runs on its real provider.** Its suite (`createSubmissionsConformance`)
+  runs on the in-memory double and on runtime-pi's runtime over pi-durable: on storage-sqlite
+  (`packages/pi-adapter/src/submissions-conformance.test.ts`) and on storage-do in the workerd lane
+  (`runtime-answers.workerd.ts`). runtime-pi records only from pi-durable's commits, so its fixture
+  (`createPiSubmissionsFixture`, `@pikit/pi-adapter/testing/neutral`) makes the runtime record each of
+  the suite's `SubmissionsRecorder` writes through messages, runs and `abandon`; the suite settles
+  runs as a runtime groups them. Only `prunes` is left out: past the log's retention, runtime-pi's
+  `get` reads pi-durable. The log's pruning runs under the feed suite (`answers.test.ts`), and crash
+  recovery has its own tests (`recovery.test.ts`, `submissions.test.ts`).
 - **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openrouter,
   provider-openai-compatible and provider-faux each test their own.
 - **`agent.conversations`.** Only exercised through the `agent.runtime` and `conversations.registry`

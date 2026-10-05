@@ -6,6 +6,8 @@
 export { createRuntimeFixture, fakeConversations, interruptRun, testComponents } from "./runtime-fixture.ts";
 export type { RuntimeFixtureRecords, TestComponents } from "./runtime-fixture.ts";
 export { holdTool, recordingBash, scriptedAgent, scriptedProvider } from "./script.ts";
+export { createPiSubmissionsFixture } from "./submissions.ts";
+export type { SubmissionsFixtureRecords } from "./submissions.ts";
 export type { ModelRequest, ScriptedProviderOptions } from "./script.ts";
 export { createWorkspaceConformance } from "./workspace.ts";
 export type { WorkspaceFixture } from "./workspace.ts";
