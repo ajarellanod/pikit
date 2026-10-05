@@ -15,7 +15,7 @@
  *   server, but in the Worker's App, whose host serves them (`serving.ts`);
  * - every variable a component marks required is set in the environment or in `.env` (names
  *   only, never a value);
- * - the Pi import rule (S1): only `@pikit/pi-adapter` imports Pi. Neither components nor project
+ * - the Pi import rule: only `@pikit/pi-adapter` imports Pi. Neither components nor project
  *   code import `@earendil-works/*`;
  * - each installed component's own check, the file its `hooks.doctor` names (`component-doctor.ts`),
  *   once the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
@@ -169,13 +169,13 @@ function printGraph(description: AppDescription, indent = ""): void {
   log.info(`${indent}Config:\n${JSON.stringify(config, null, 2).replace(/^/gm, `${indent}  `)}`);
 }
 
-/** S1 in the project: `@earendil-works/*` is imported only by the adapter. */
+/** The Pi import rule in the project: `@earendil-works/*` is imported only by the adapter. */
 export function checkPiImports(projectDir: string, sources: readonly string[] = projectSources(projectDir)): string[] {
   const problems: string[] = [];
   for (const file of sources) {
     for (const specifier of scanImports(readFileSync(join(projectDir, file), "utf8"))) {
       if (!specifier.startsWith("@earendil-works/")) continue;
-      problems.push(`${file} imports "${specifier}": only @pikit/pi-adapter imports Pi (S1)`);
+      problems.push(`${file} imports "${specifier}": only @pikit/pi-adapter imports Pi`);
     }
   }
   return problems;
