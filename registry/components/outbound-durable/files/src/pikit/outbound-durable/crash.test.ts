@@ -9,6 +9,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type OutboundPiece, type OutboundQueue } from "@pikit/contracts";
+import { createMemoryWakeups } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
 import { testStorage } from "./storage.test-support.ts";
 
@@ -39,7 +40,7 @@ test("an answer whose process was killed during its send is delivered by the nex
       return { start: () => void (queue = handle.get()) };
     },
   });
-  const app = await defineApp({ components: [testStorage(database), outboundDurable, channel], logger: silentLogger }).create();
+  const app = await defineApp({ components: [testStorage(database), createMemoryWakeups(), outboundDurable, channel], logger: silentLogger }).create();
   await app.start();
   try {
     queue?.attach("chat", {

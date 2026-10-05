@@ -243,11 +243,16 @@ test.skipIf(!E2E)(
     expect(brought.code).toBe(0);
     const components = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components;
     expect(components["outbound-durable"].installedFor).toEqual(["channel-telegram"]);
+    // The outbox's retries are wakeups: their server provider comes for it.
+    expect(components["wakeups-timers"].installedFor).toEqual(["outbound-durable"]);
     // The preset's storage serves the outbox too: nothing brings another.
     expect(components["storage-sqlite"].installedFor).toBeUndefined();
     const removedWith = await pikit(["remove", "channel-telegram"]);
     expect(removedWith.code).toBe(0);
     expect(removedWith.out).toContain("outbound-durable was installed for channel-telegram, and nothing uses it now");
+    // The runtime can use wakeups too: the timers stay, installed for it now, until removed by name.
+    expect(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components["wakeups-timers"].installedFor).toEqual(["runtime-pi"]);
+    expect((await pikit(["remove", "wakeups-timers"])).code).toBe(0);
     expect((await git("status", "--porcelain")).out).toBe("");
   },
   TIMEOUT,
