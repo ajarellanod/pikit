@@ -1,6 +1,6 @@
 /**
  * A fake Telegram Bot API for this channel's tests, served on a free local port: no bot, token or
- * network needed. Copied from channel-telegram's `fake-telegram.ts` and extended with the webhook:
+ * network needed. Copied from channel-telegram's `fake-telegram.test-support.ts` and extended with the webhook:
  *
  * - `setWebhook`, `getWebhookInfo` and `deleteWebhook`, with Telegram's rules: a secret of `A-Z a-z
  *   0-9 _ -` only, and `getUpdates` refused (409) while a webhook is set;

@@ -17,7 +17,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, defineComponent } from "@pikit/core";
 import { holdTool, scriptedAgent } from "@pikit/pi-adapter/testing";
-import { type FakeTelegram, startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.ts";
+import { type FakeTelegram, startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.test-support.ts";
 import { createSample, type Sample } from "./sample.ts";
 import { OWNER, telegramApp } from "./telegram.ts";
 

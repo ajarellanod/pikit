@@ -2,7 +2,7 @@
  * The Telegram path, end to end, as a user runs it: `pikit new my-bot --preset telegram`,
  * `pikit configure`, `pikit dev`, then a person writes to the bot and the answer arrives in the chat.
  *
- * Telegram is channel-telegram's own `fake-telegram.ts`, a local stand-in of the Bot API, set as the
+ * Telegram is channel-telegram's own `fake-telegram.test-support.ts`, a local stand-in of the Bot API, set as the
  * channel's `apiBase`. The model key is a dummy, so the agent's run fails at the provider, and the
  * chat receives the channel's "something went wrong" answer: the whole path runs, no model is
  * called. Slow (`bun install`, the project's own tests), so it runs only with `PIKIT_E2E=1`.
@@ -15,7 +15,7 @@ import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.ts";
+import { startFakeTelegram } from "../../../registry/components/channel-telegram/files/src/pikit/channel-telegram/fake-telegram.test-support.ts";
 import { setConfigEntry } from "./project/config-file.ts";
 
 const E2E = process.env.PIKIT_E2E === "1";

@@ -1,7 +1,7 @@
 /**
  * channel-telegram's tests. They are copied with the component and keep running in your project.
  *
- * Telegram is `fake-telegram.ts`, a local stand-in of the Bot API. What the channel uses is played by
+ * Telegram is `fake-telegram.test-support.ts`, a local stand-in of the Bot API. What the channel uses is played by
  * small doubles defined here: secrets, a conversation registry, a router stage and an agent runtime
  * whose runs answer `answer: <newest message>` (`hold` waits to be released, `fail` fails, `long`
  * answers 9000 characters). The samples run the same channel with Pi.
@@ -25,7 +25,7 @@ import {
 } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createMemoryFeed, createMemoryKeyValueStorage, createMemorySubmissions, type RecordingSubmissions } from "@pikit/contracts/testing";
-import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
+import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.test-support.ts";
 import { accountsOf, chatIn, conversationKeyOf } from "./account.ts";
 import { createTelegramApi } from "./api.ts";
 import channelTelegram from "./index.ts";

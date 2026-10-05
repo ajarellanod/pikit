@@ -122,8 +122,9 @@ polling.
 
 ## Tests
 
-The tests are copied with the component and run in your project against `fake-telegram.ts`, a
-local stand-in of the Bot API: no bot, token or network needed.
+The tests are copied with the component and run in your project against
+`fake-telegram.test-support.ts`, a local stand-in of the Bot API: no bot, token or network needed.
+Only tests import it.
 - `channel-telegram.test.ts` covers the whole conversation: allowed and refused users, commands,
   "typing…", formatting and splitting, retries, a redelivered message answered once, the
   acknowledgement at stop, the lifecycle conformance suite and the start failures; answers from

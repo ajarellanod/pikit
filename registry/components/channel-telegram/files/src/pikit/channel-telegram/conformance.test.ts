@@ -2,7 +2,7 @@
  * channel-telegram against the channel conformance suite (`@pikit/contracts/testing`): what every
  * channel does with a message, and how its answers survive what happens to the process. The suite
  * brings the runtime, the conversation registry, `agent.submissions`, `storage.kv`, a router and
- * stages that halt, deny or move messages; this fixture speaks Telegram through `fake-telegram.ts`.
+ * stages that halt, deny or move messages; this fixture speaks Telegram through `fake-telegram.test-support.ts`.
  * Each of the suite's conversations is an allowed user's private chat; delivering an id again is
  * Telegram redelivering the update, as after a crash. The platform fails a chat's sends with a 502,
  * or takes one and never answers; a piece sent again as a possible duplicate starts with `↻ `.
@@ -11,7 +11,7 @@
 import { test } from "bun:test";
 import { defineComponent } from "@pikit/core";
 import { createChannelConformance } from "@pikit/contracts/testing";
-import { startFakeTelegram } from "./fake-telegram.ts";
+import { startFakeTelegram } from "./fake-telegram.test-support.ts";
 import channelTelegram from "./index.ts";
 import { POSSIBLE_DUPLICATE_MARK } from "./transport.ts";
 
