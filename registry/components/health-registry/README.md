@@ -4,13 +4,23 @@ What is up, degraded or down in the App. Components report their own state (a ch
 keeps failing, a lost connection); the dashboard shows it, and server-bun's `GET /health` answers
 `503` when an essential component stays down, so the supervisor restarts the process.
 
-- **Provides:** `health` (`@pikit/contracts`' `health.ts`).
-- **Requires:** nothing.
+- **Provides:** `health` (`@pikit/contracts`' `health.ts`), and `http.route`: `GET /admin/api/health-registry`,
+  its view's data.
+- **Requires:** nothing. **Uses, if installed:** `admin.auth` (without it, its route answers nobody).
+- **View:** `view/`, the dashboard's Health page (SPEC §5): installed to
+  `src/dashboard/src/views/health-registry/` when the project has a UI. It is the reference for a
+  component with a view (the `pikit-view` skill).
 - **Targets:** `server` and `durable`: plain code. On Cloudflare each object's App has its own.
 - **Installs to:** `src/pikit/health-registry/`.
 
 Without it nothing changes: components report through `useOptional("health")`, and `/health`
 answers `200` while the process can answer at all.
+
+## Its view
+
+`GET /admin/api/health-registry` answers an operator (`admin.auth`, else `401`) the snapshot, the
+`essential` names and `graceMs` it follows, and `now` (the App's clock): `HealthView` in `index.ts`.
+The view shows the App's status, each component's status, reason and since when, polled every 5 s.
 
 ## Configure
 

@@ -38,6 +38,12 @@
       "type": "registry:file",
       "title": "delivery",
       "description": "The dashboard's delivery view."
+    },
+    {
+      "name": "health-registry",
+      "type": "registry:file",
+      "title": "health-registry",
+      "description": "health-registry's view: What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process. Its admin API routes come with the component (pikit add health-registry)."
     }
   ]
 }

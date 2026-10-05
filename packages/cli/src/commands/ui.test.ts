@@ -25,7 +25,7 @@ const LINES = Array.from({ length: 10 }, (_, i) => `export const line${i + 1} = 
 const lines = (edits: Record<number, string> = {}) => `${LINES.map((line, i) => edits[i + 1] ?? line).join("\n")}\n`;
 
 /** The view `log-viewer` ships (its manifest's `view`). */
-const VIEW = 'import { defineView } from "@/lib/views";\n\nexport default defineView({ id: "log-viewer", title: "Logs", pages: [] });\n';
+const VIEW = 'export default { id: "log-viewer", title: "Logs", pages: [] };\n';
 
 /**
  * A registry with stand-ins for admin-auth-token and admin-api, `log-viewer` (a component with a

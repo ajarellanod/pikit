@@ -13,11 +13,15 @@
     "capabilities": []
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "admin.auth"
+    ]
   },
   "provides": [
-    "health"
+    "health",
+    "http.route"
   ],
+  "view": "view",
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "typebox": "1.3.27"

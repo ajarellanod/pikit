@@ -11,6 +11,9 @@
  *   component reports again). Time is the App's clock.
  * - **Reports never throw or wait**; a reason is cut at `MAX_REASON` characters.
  *
+ * - **Its view** (`view/`, the reference component with a view): `GET /admin/api/health-registry`
+ *   answers the snapshot and the policy to an operator (`admin.auth`; without a provider, nobody).
+ *
  * Targets: `server` and `durable`: plain code. On Cloudflare each object's App has its own.
  */
 
@@ -69,5 +72,19 @@ export default defineComponent({
       },
     };
     pikit.provide("health", registry);
+
+    // Its view (`view/`, SPEC §5) reads this: the snapshot and the policy, an operator's only.
+    const auth = pikit.useOptional("admin.auth");
+    pikit.provideKeyed("http.route", "GET /admin/api/health-registry", async (request, ctx) => {
+      const verifier = auth.get();
+      if (verifier === undefined || (await verifier.verify(request, ctx)) === undefined) {
+        return Response.json({ error: "unauthorized" }, { status: 401, headers: { "www-authenticate": 'Bearer realm="pikit"', "cache-control": "no-store" } });
+      }
+      const view: HealthView = { ...registry.snapshot(), essential: [...essential].sort(), graceMs: config.graceMs, now: clock.now() };
+      return Response.json(view, { headers: { "cache-control": "no-store" } });
+    });
   },
 });
+
+/** What `GET /admin/api/health-registry` answers: the snapshot, the policy it follows, and the time it was taken. */
+export type HealthView = { status: HealthStatus; components: ComponentHealth[]; essential: string[]; graceMs: number; now: number };

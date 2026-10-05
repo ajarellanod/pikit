@@ -14,6 +14,14 @@ bun run dev        # http://localhost:5173/admin/, the API of an app on PIKIT_UR
 bun run build      # tsc and the static files in dist/ (not committed)
 ```
 
+The components' views (`view` in a `component.json`) live in their components; they compile with
+the template's packages:
+
+```sh
+bun scripts/dashboard-build.ts    # builds a copy of the template with every component's view in it
+bun scripts/ui-registry.ts generate   # publishes the template's pieces and views, and the components' views, as @pikit items
+```
+
 An app to run it against: any project with `admin-api` and `admin-auth-token`, or the sample's
 composition (`samples/http/test/sample.ts`) with both added.
 

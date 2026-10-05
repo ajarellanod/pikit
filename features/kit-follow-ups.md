@@ -36,12 +36,11 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   API's live part. When it reaches a browser (an HTTP or WebSocket transport) with authentication,
   admin-api's events and actions move onto it and pikit's own transport goes. The coding agent's RPC
   mode is for one process over stdio; its event vocabulary is the one `agent.observe` forwards.
-- **When:** in phases, each one usable. The first has landed (CHANGELOG): `admin-api`,
+- **When:** in phases, each one usable. The first two have landed (CHANGELOG): `admin-api`,
   `src/dashboard/` (`registry/dashboard/`) and `pikit new --ui` / `pikit ui on|off` on a server, with
   the conversations, one live, steer, abort and reset, cost and the composition. Next:
-  2. pikit's UI pieces and views as shadcn registry items (`@pikit`), components with a view through
-     `pikit add`, the "add a view" skill, and the health and delivery views (with `health-registry`,
-     [health](health.md)).
+  2. Landed too: pikit's UI pieces and views as shadcn items (`@pikit`), components with a view
+     through `pikit add`, the `pikit-view` skill, and the Health (`health-registry`) and Delivery views.
   3. Cloudflare: a conversation's object read and watched from the Worker, and
      [the index](cloudflare-conversation-index.md) to list them all.
   4. The agent changing its own UI, through SPEC §6's gate.
