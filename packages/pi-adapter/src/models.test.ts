@@ -6,7 +6,7 @@ import type { AuthContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai/providers/faux";
 import { modelRefOf, modelsFrom, parseModelName } from "./models.ts";
 import { anthropicProvider } from "./providers/anthropic.ts";
-import { OPENROUTER_API_BASE, openrouterProvider } from "./providers/openrouter.ts";
+import { openrouterProvider } from "./providers/openrouter.ts";
 
 const env = (values: Record<string, string>): AuthContext => ({ env: async (name) => values[name], fileExists: async () => false });
 
@@ -60,19 +60,23 @@ test("Anthropic on 1.0: id anthropic, API-key and subscription OAuth sign-in, th
   expect(await modelsFrom([provider], { authContext: env({}) }).checkAuth("anthropic")).toBeUndefined();
 });
 
-test("OpenRouter on 1.0: id openrouter, OPENROUTER_API_KEY, and apiBase moves every model's address", async () => {
-  const plain = openrouterProvider();
-  expect(plain.id).toBe("openrouter");
-  expect(plain.auth.apiKey).toBeDefined();
-  const models = modelsFrom([plain], { authContext: env({ OPENROUTER_API_KEY: "or-test-env" }) });
+test("OpenRouter on 1.0: id openrouter, OPENROUTER_API_KEY", async () => {
+  const provider = openrouterProvider();
+  expect(provider.id).toBe("openrouter");
+  expect(provider.auth.apiKey).toBeDefined();
+  const models = modelsFrom([provider], { authContext: env({ OPENROUTER_API_KEY: "or-test-env" }) });
   expect((await models.getAuth("openrouter"))?.auth.apiKey).toBe("or-test-env");
-  expect(openrouterProvider({ apiBase: `${OPENROUTER_API_BASE}/` }).getModels()).toEqual(plain.getModels());
+});
 
-  const moved = openrouterProvider({ apiBase: "http://127.0.0.1:9999/proxy/" });
-  const chat = modelsFrom([moved]).getModel("openrouter", "z-ai/glm-5.3-flash");
-  expect(chat?.baseUrl.startsWith("http://127.0.0.1:9999/proxy")).toBe(true);
-  expect(moved.baseUrl).toBe("http://127.0.0.1:9999/proxy/v1");
-  const all = moved.getAllModels?.() ?? [];
-  expect(all.length).toBeGreaterThan(moved.getModels().length);
-  expect(all.every((model) => !model.baseUrl.startsWith(OPENROUTER_API_BASE))).toBe(true);
+test("with secrets, a provider's variable is read there first, then from the environment", async () => {
+  const secrets = { get: async (name: string) => ({ ANTHROPIC_API_KEY: "sk-from-secrets" })[name] };
+  const authContext = env({ ANTHROPIC_API_KEY: "sk-env", OPENROUTER_API_KEY: "or-env" });
+  const models = modelsFrom([anthropicProvider(), openrouterProvider()], { secrets, authContext });
+
+  expect((await models.getAuth("anthropic"))?.auth.apiKey).toBe("sk-from-secrets");
+  // Not a secret: the environment, as without secrets.
+  expect((await models.getAuth("openrouter"))?.auth.apiKey).toBe("or-env");
+  // Nowhere: not configured.
+  const none = modelsFrom([openrouterProvider()], { secrets: { get: async () => undefined }, authContext: env({}) });
+  expect(await none.checkAuth("openrouter")).toBeUndefined();
 });

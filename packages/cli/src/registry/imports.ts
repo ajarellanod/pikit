@@ -112,6 +112,15 @@ export const SERVER_ONLY_EXPORTS: readonly string[] = [
   "@pikit/pi-adapter/node",
   // The test fixtures on SQLite files.
   "@pikit/pi-adapter/testing",
+  // pi-ai's Bedrock: its API loads the AWS SDK and its Node HTTP handler through a specifier no
+  // bundler follows (`bedrock-converse-stream.lazy`), so a Worker cannot load it.
+  "@pikit/pi-adapter/providers/amazon-bedrock",
+  "@pikit/pi-adapter/api/bedrock-converse-stream",
+  // pi-ai's Vertex: its credentials are Application Default Credentials or a service-account file
+  // (`ctx.fileExists`, then google-auth-library in @google/genai's Node build); @google/genai's
+  // browser build, which a Worker gets, refuses project-based authentication.
+  "@pikit/pi-adapter/providers/google-vertex",
+  "@pikit/pi-adapter/api/google-vertex",
 ];
 
 /** Pi's own Node subpath: fine behind a server-only export, never in a neutral one. */
