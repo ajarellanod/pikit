@@ -23,8 +23,8 @@ The allowlist is not a secret store: it hides nothing from a command that looks.
 `cat /proc/$PPID/environ` prints the server's whole environment, which the same OS user may read,
 and the project's `.env` is a file like any other ("It is not a sandbox", below).
 
-With `workspace-local` installed, the tools work in its per-agent directories, with its own
-`variables`: this component's `root` and `variables` then have no effect on them.
+`workspace-local` builds on this environment: each agent's directory is inside `root`
+(`<root>/agents/<agent>/` by default), and its commands start with these `variables`.
 
 Stopping the app kills the commands still running. It refuses to start when `root` cannot be
 created or written.
