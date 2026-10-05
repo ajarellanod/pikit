@@ -71,8 +71,8 @@ jobs:
       - run: bun run test:workerd
         env:
           WRANGLER_SEND_METRICS: "false"
-      # The telegram-cloudflare preset's Worker, bundled with `wrangler deploy --dry-run`: fails over
-      # Cloudflare's size limit or the kit's gzip budget (the limits are named in the script).
+      # The telegram-cloudflare preset's Worker, bundled with `wrangler deploy --dry-run`: fails when its
+      # uncompressed size is over Cloudflare's 64 MiB limit (named in the script); gzip is printed only.
       - name: Bundle size (telegram-cloudflare)
         if: ${{ !cancelled() }}
         run: bun scripts/bundle-size.ts
