@@ -204,11 +204,15 @@ test.skipIf(!E2E)(
     expect((await git("add", "-A")).code).toBe(0);
     expect((await git("commit", "-qm", "new")).code).toBe(0);
 
-    // server-bun brings an npm dependency only it uses (hono); channel-http brings a variable.
-    for (const name of ["server-bun", "channel-http"]) {
-      expect((await pikit(["remove", name])).code).toBe(0);
-      await git("add", "-A");
-      await git("commit", "-qm", `without ${name}`);
+    // server-bun brings an npm dependency only it uses (hono); channel-http brings a variable. server-bun
+    // goes with channel-http out first: remove refuses to leave its route with no server.
+    for (const names of [["channel-http"], ["channel-http", "server-bun"]]) {
+      for (const name of names) {
+        expect((await pikit(["remove", name])).code).toBe(0);
+        await git("add", "-A");
+        await git("commit", "-qm", `without ${name}`);
+      }
+      const name = names.at(-1) as string;
 
       const added = await pikit(["add", name, "--yes"]);
       expect(added.code).toBe(0);
@@ -219,7 +223,7 @@ test.skipIf(!E2E)(
       expect(removed.code).toBe(0);
       expect((await git("status", "--porcelain")).out).toBe("");
       expect((await pikit(["doctor"])).code).toBe(0);
-      await git("reset", "-q", "--hard", "HEAD~1");
+      await git("reset", "-q", "--hard", `HEAD~${names.length}`);
       await sh([process.execPath, "install"]);
     }
 

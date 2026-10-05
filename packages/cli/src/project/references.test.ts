@@ -14,6 +14,7 @@ function app(keys: Record<string, Record<string, string>>, agents: AgentReferenc
       capabilities: Object.fromEntries(Object.entries(keys).map(([name, owners]) => [name, { providers: [...new Set(Object.values(owners))], keys: owners }])),
       pipelines: {},
       config: {},
+      stagesBy: {},
     },
     agents,
   };

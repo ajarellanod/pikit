@@ -5,7 +5,8 @@
  * It refuses when another component requires (`use`) a capability this one is the only provider
  * of; losing the provider of an optional capability is allowed and `doctor` reports it. Without
  * `--force`, it also refuses to take a key an agent names (a tool, a model's provider):
- * the app would compose and the runtime refuse to start. The answer
+ * the app would compose and the runtime refuse to start; and to leave the app answering nobody, a
+ * channel without a router or `http.route`s without a server (`serving.ts`). The answer
  * comes from the app itself (`describe()`), not from manifests, so project components count too.
  * It never deletes a file the user modified without `--force`. The bases of its files (`bases.ts`) go
  * with it, unless another component installed the same content.
@@ -23,8 +24,8 @@
  * `package.json` and `bun.lock`. The marker of an unfinished operation (`operation.ts`) is there from
  * the first write until the component and what goes with it are all gone; it stays when a step fails
  * after `bun install` ran (node_modules is not put back) or after the component itself was removed.
- * `pikit doctor` runs once, at the end, after what was installed for it went too: it reports, and
- * never keeps that cleanup from running.
+ * `pikit doctor` runs once, at the end, after what was installed for it went too: it reports (its
+ * notes too), and never keeps that cleanup from running.
  *
  * On Cloudflare it undoes both Apps (SPEC C1): its entries leave every `components` list, its config
  * keys leave `config` and `workerConfig` (its Worker half's is `<name>-worker`), and what depends on
@@ -44,6 +45,7 @@ import { PIKIT_JSON, type ProjectManifest, modifiedFiles, ownedDependencies, rea
 import { assertNoIncompleteOperation, beginOperation, finishOperation, OPERATION_MARKER } from "../project/operation.ts";
 import { brokenReferences } from "../project/references.ts";
 import { probe } from "../project/run.ts";
+import { servingGaps } from "../project/serving.ts";
 import { Undo } from "../project/undo.ts";
 import { CliError, log } from "../ui.ts";
 import { doctor, projectSources } from "./doctor.ts";
@@ -73,6 +75,7 @@ export async function remove(projectDir: string, name: string, options: RemoveOp
   // Before doctor: what it reports is the project's state, not an unfinished removal.
   finishOperation(projectDir);
   const report = await doctor(projectDir, { quiet: true, componentChecks: false });
+  for (const note of report.notes) log.info(`  ${note}`);
   for (const problem of report.problems) log.problem(problem);
   if (report.problems.length > 0) throw new CliError(`\`pikit doctor\` found ${report.problems.length} problem(s) after removing ${name}`);
 }
@@ -228,7 +231,8 @@ async function installedOnlyFor(projectDir: string, name: string): Promise<strin
 
 /**
  * Refuses when a remaining component requires a capability only this component provides, and,
- * unless forced, when an agent names a key only it provides.
+ * unless forced, when an agent names a key only it provides, or when the app would answer nobody
+ * where it did (`serving.ts`): a gap the project has already is `doctor`'s to report, not this removal's.
  */
 async function checkNoDependents(projectDir: string, project: ProjectManifest, name: string, force: boolean): Promise<void> {
   const result = await probe(projectDir);
@@ -254,6 +258,11 @@ async function checkNoDependents(projectDir: string, project: ProjectManifest, n
   const references = brokenReferences(result, name);
   if (references.length > 0 && !force) {
     throw new Refused(`${name} cannot be removed; agents name what only it provides, and the app would not start:\n  ${references.join("\n  ")}\nChange those agents first, or pass --force.`);
+  }
+  const before = servingGaps(result);
+  const gaps = servingGaps(result, own).filter((gap) => !before.some((had) => had.kind === gap.kind && had.where === gap.where));
+  if (gaps.length > 0 && !force) {
+    throw new Refused(`${name} cannot be removed; the app would answer nobody:\n  ${gaps.map((gap) => gap.message).join("\n  ")}\nDo so first, or pass --force.`);
   }
 }
 
