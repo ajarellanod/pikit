@@ -26,7 +26,7 @@ const USAGE = `pikit: a kit for Pi.
 Usage:
   pikit new [--target <t>] [--preset <p>]   a new agent, step by step (in a terminal); flags answer its questions
   pikit new <dir> [--target server|durable] [--preset <name> [--with <component>]...] [--ui] [--registry <path>]   a new project (--ui: with the dashboard)
-  pikit add <component> [--registry <path>] [--force] [--yes]
+  pikit add <component>... [--registry <path>] [--force] [--yes]   several at once: one transaction, one install
   pikit remove <component> [--force]
   pikit upgrade [<component>...] [--dry-run] [--force] [--yes]   take the registry's version, merging your edits (without names, the dashboard too)
   pikit ui on | off [--force] [--yes]  the dashboard: src/dashboard/ and the admin API, or neither
@@ -122,7 +122,8 @@ async function main(argv: string[]): Promise<number> {
       });
       return 0;
     case "add":
-      await add(cwd, one("component"), {
+      if (rest.length === 0) throw new CliError("usage: pikit add <component>...", 2);
+      await add(cwd, rest, {
         ...(values.registry !== undefined && { registry: values.registry }),
         force: values.force === true,
         yes: values.yes === true,

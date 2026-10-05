@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import type { Manifest } from "../registry/manifest.ts";
 import { declaredByApp } from "./apps.ts";
-import { offeredProviders, type ProvidedCapabilities, providedByApp, providedByManifests, unchosenProviders, withOffers } from "./offers.ts";
+import { dependencyOrder, offeredProviders, type ProvidedCapabilities, providedByApp, providedByManifests, unchosenProviders, withOffers } from "./offers.ts";
 import type { ProbeResult } from "./probe.ts";
 import { openRegistry, type Registry } from "./registry-source.ts";
 
@@ -221,4 +221,11 @@ test("pikit new places what a component brings right before it; a provider alrea
     "outbound-durable": "channel-telegram",
     "wakeups-timers": "outbound-durable",
   });
+});
+
+test("several names install providers first, by what each declares; otherwise in the order named", () => {
+  const order = (names: string[]) => dependencyOrder(names.map((name) => registry.manifest(name)), ["server"]);
+  expect(order(["channel-telegram", "storage-kv-sql", "storage-sqlite"])).toEqual(["storage-sqlite", "storage-kv-sql", "channel-telegram"]);
+  expect(order(["conversations-kv", "storage-sqlite", "storage-kv-sql"])).toEqual(["storage-sqlite", "storage-kv-sql", "conversations-kv"]);
+  expect(order(["tool-read", "log-events", "tool-bash"])).toEqual(["tool-read", "log-events", "tool-bash"]);
 });

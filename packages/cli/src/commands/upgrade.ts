@@ -201,7 +201,7 @@ async function upgradeComponents(projectDir: string, names: readonly string[], o
   for (const plan of plans) {
     // Each planned provider joins `draft.provided` (`planInstall`): one two components need comes once.
     if (draft.provided === undefined) break;
-    for (const offer of await acceptedOffers(plan.registry, plan.name, installed, draft.project.targets, draft.provided, options)) {
+    for (const offer of await acceptedOffers(plan.registry, [plan.name], installed, draft.project.targets, draft.provided, options)) {
       // Two upgraded components may need the same provider: it comes once.
       if (offer.component in draft.project.components) continue;
       const offered = planInstall(projectDir, draft, plan.registry, plan.registryName, offer.component, { force, yes: options.yes === true, installedFor: offer.for });

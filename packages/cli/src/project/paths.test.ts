@@ -164,7 +164,7 @@ test("add rejects a symlinked destination during preflight without modifying the
   const before = readFileSync(join(root, "pikit.json"), "utf8");
   const files = openRegistry(f.root).files(f.name);
   expect(() => checkConflicts(root, emptyManifest(f.root), f.name, files, true)).toThrow(/symlink/);
-  await expect(add(root, f.name, { yes: true, force: true, quiet: true })).rejects.toThrow(/symlink/);
+  await expect(add(root, [f.name], { yes: true, force: true, quiet: true })).rejects.toThrow(/symlink/);
   expect(readFileSync(join(root, "pikit.json"), "utf8")).toBe(before);
   expect(readFileSync(join(root, "package.json"), "utf8")).toBe("{}");
   expect(existsSync(join(outside, "pikit", f.name, "index.ts"))).toBe(false);

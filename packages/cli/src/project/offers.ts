@@ -188,6 +188,31 @@ function resolveOffers(
 }
 
 /**
+ * `manifests` (the components one `pikit add` names) in install order: one that provides, in an App,
+ * what another requires or can use there comes before it (so it is listed before it in
+ * `pikit.config.ts`, as `pikit new` lists them, and the other's plan sees it provided); otherwise the
+ * order they were named in. A cycle keeps that order.
+ */
+export function dependencyOrder(manifests: readonly Manifest[], targets: readonly string[]): string[] {
+  const provides = (manifest: Manifest, app: AppName, capability: string) =>
+    declaredByApp(manifest, targets).some(([where, half]) => where === app && half.provides.includes(capability));
+  const order: string[] = [];
+  const visiting = new Set<string>();
+  const visit = (manifest: Manifest): void => {
+    if (order.includes(manifest.name) || visiting.has(manifest.name)) return;
+    visiting.add(manifest.name);
+    for (const [app, half] of declaredByApp(manifest, targets)) {
+      for (const capability of [...half.requires, ...half.optional]) {
+        for (const other of manifests) if (other !== manifest && provides(other, app, capability)) visit(other);
+      }
+    }
+    order.push(manifest.name);
+  };
+  for (const manifest of manifests) visit(manifest);
+  return order;
+}
+
+/**
  * `components` with what they bring, each provider placed right before the component it came for
  * (the order `pikit new` installs them in), and what each was installed for.
  */

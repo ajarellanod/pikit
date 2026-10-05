@@ -139,9 +139,9 @@ export async function uiOn(projectDir: string, options: UiOptions = {}): Promise
     if (!(await confirm(`Add a UI? It installs ${writes.join(", ")}.`, true))) throw new CliError("cancelled", 1);
   }
 
-  for (const component of missing) {
-    log.step(`${component}, for the dashboard`);
-    await add(projectDir, component, { yes: true });
+  if (missing.length > 0) {
+    log.step(`${missing.join(", ")}, for the dashboard`);
+    await add(projectDir, missing, { yes: true });
   }
 
   if (files !== undefined) {

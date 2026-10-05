@@ -24,7 +24,7 @@ pikit new my-agent --preset telegram         # or http; --target durable --prese
 cd my-agent
 pikit configure                              # secrets and the model login
 pikit dev                                    # run it here; `pikit up` deploys (Docker or Cloudflare)
-pikit add <component>                        # and remove, upgrade, doctor, logs: `pikit --help`
+pikit add <component>...                     # and remove, upgrade, doctor, logs: `pikit --help`
 ```
 
 ## The repository

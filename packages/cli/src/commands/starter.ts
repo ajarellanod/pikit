@@ -367,7 +367,7 @@ ${run}
 ## Change it
 
 \`\`\`sh
-pikit add <component>      # copy a component in and list it in pikit.config.ts
+pikit add <component>...   # copy components in and list them in pikit.config.ts
 pikit remove <component>   # and take it out again, leaving the rest as it was
 bun test                   # the installed components' own tests, and yours
 \`\`\`
