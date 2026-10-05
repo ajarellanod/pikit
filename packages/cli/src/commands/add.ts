@@ -132,13 +132,32 @@ export async function add(projectDir: string, name: string, options: AddOptions 
     plans.push(offered);
   }
 
-  // Steps 6–10 and `bun install`. What they write is put back if one fails, so the project is never
-  // left half-added: a package.json that bun.lock does not match fails the next frozen install.
+  // Steps 6–10 and `bun install`, as one transaction.
+  await applyInstall(projectDir, `pikit add ${name}${options.force === true ? " --force" : ""}`, draft, plans, "nothing was added");
+  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
+  for (const note of report.notes) log.info(`  ${note}`);
+  if (report.problems.length > 0) {
+    for (const problem of report.problems) log.problem(problem);
+    throw new CliError(`${name} is installed, but \`pikit doctor\` found ${report.problems.length} problem(s)`);
+  }
+  for (const missing of report.unconfigured) log.warn(missing);
+  log.ok(`${name} installed; \`pikit doctor\` is green${report.unconfigured.length > 0 ? " (run \`pikit configure\` for the variables above)" : ""}`);
+}
+
+/**
+ * The writes of `add` and `upgrade`, as one transaction: the operation marker (`operation.ts`), the
+ * kit refreshed to this CLI's (the components come from its registry, so the core they need is its
+ * kit, `vendor.ts`), the confirmed `plans` and the draft (`applyPlans`), then `bun install` when a
+ * dependency or the kit changed. When a step fails, `undo` puts back what was written, so the project
+ * is never left half-changed (a package.json that bun.lock does not match fails the next frozen
+ * install), `notDone` is said, and the error is thrown again. The marker stays only when `bun install`
+ * ran: node_modules is not put back. Returns the kit packages refreshed.
+ */
+export async function applyInstall(projectDir: string, command: string, draft: Draft, plans: readonly Plan[], notDone: string): Promise<string[]> {
   const undo = new Undo(projectDir);
-  beginOperation(projectDir, `pikit add ${name}${options.force === true ? " --force" : ""}`);
+  beginOperation(projectDir, command);
   let refreshed: string[] = [];
   try {
-    // The component comes from this CLI's registry: the core it needs is this CLI's kit (vendor.ts).
     undo.keep(PACKAGE_JSON);
     refreshed = refreshKit(projectDir);
     if (refreshed.length > 0) log.step(`the project's kit packages (${refreshed.join(", ")}) are refreshed to this CLI's, in vendor/`);
@@ -152,20 +171,13 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   } catch (error) {
     undo.restore();
     if (!undo.installed) finishOperation(projectDir);
-    log.warn(`nothing was added: the project's files are back as they were${undo.installed ? ` (node_modules may not be: run \`bun install\`, then delete ${OPERATION_MARKER})` : ""}`);
+    log.warn(`${notDone}: the project's files are back as they were${undo.installed ? ` (node_modules may not be: run \`bun install\`, then delete ${OPERATION_MARKER})` : ""}`);
     throw error;
   }
   // Only now: until the install rewrote bun.lock, it named the old tarballs.
   if (refreshed.length > 0) pruneVendor(projectDir);
   finishOperation(projectDir);
-  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
-  for (const note of report.notes) log.info(`  ${note}`);
-  if (report.problems.length > 0) {
-    for (const problem of report.problems) log.problem(problem);
-    throw new CliError(`${name} is installed, but \`pikit doctor\` found ${report.problems.length} problem(s)`);
-  }
-  for (const missing of report.unconfigured) log.warn(missing);
-  log.ok(`${name} installed; \`pikit doctor\` is green${report.unconfigured.length > 0 ? " (run \`pikit configure\` for the variables above)" : ""}`);
+  return refreshed;
 }
 
 /**
@@ -456,9 +468,10 @@ export function workerWiring(name: string, manifest: Manifest, targets: readonly
  * Refused too, unless `--force`, when an installed component does not accept this CLI's core,
  * contracts or adapter (`requires` in pikit.json): the contracts stay 0.x on their own schedule (SPEC
  * K8), and nothing else would check the components already vendored against them. The draft records
- * the kit the project will have.
+ * the kit the project will have. `action` is what replaces it, in the messages.
  */
-export function checkKit(projectDir: string, project: ProjectManifest, force: boolean): void {
+export function checkKit(projectDir: string, project: ProjectManifest, force: boolean, action = "adding a component"): void {
+  const Action = `${action.charAt(0).toUpperCase()}${action.slice(1)}`;
   const { vendored, stale } = staleKit(projectDir);
   const cli = kitCommit();
   if (stale.length === 0) {
@@ -472,7 +485,7 @@ export function checkKit(projectDir: string, project: ProjectManifest, force: bo
     const what = `this project's kit (vendor/) comes from pikit ${current}, which this CLI's checkout (${cli}) does not include: this CLI is older, or on another branch`;
     if (!force) {
       throw new CliError(
-        `${what}. Adding a component replaces the project's kit with this CLI's, and the components installed with the newer kit may need what only it has.\n` +
+        `${what}. ${Action} replaces the project's kit with this CLI's, and the components installed with the newer kit may need what only it has.\n` +
           "Update pikit (run the installer again, or `git pull` in its checkout), or pass --force to replace the kit anyway (then check with `pikit doctor`).",
       );
     }
@@ -482,7 +495,7 @@ export function checkKit(projectDir: string, project: ProjectManifest, force: bo
   }
   const refused = incompatibleInstalled(project);
   if (refused.length > 0) {
-    const what = `adding a component replaces the project's kit with this CLI's (@pikit/core ${coreVersion()}, @pikit/contracts ${contractsVersion()}, @pikit/pi-adapter ${adapterVersion()}), which these installed components do not accept:\n  ${refused.join("\n  ")}`;
+    const what = `${action} replaces the project's kit with this CLI's (@pikit/core ${coreVersion()}, @pikit/contracts ${contractsVersion()}, @pikit/pi-adapter ${adapterVersion()}), which these installed components do not accept:\n  ${refused.join("\n  ")}`;
     if (!force) {
       throw new CliError(
         `${what}\nUse a pikit whose kit they accept, or pass --force to replace the kit anyway (then check them with \`pikit doctor\` and a type-check).`,

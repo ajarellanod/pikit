@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { emptyManifest, hashOf, writeProjectManifest } from "../project/pikit-json.ts";
 import { runCli } from "../testing/cli.ts";
 import { OPERATION_MARKER } from "../project/operation.ts";
+import { KIT_PACKAGES } from "../project/vendor.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -340,3 +341,61 @@ test("named components are the only ones upgraded; an unknown name is refused", 
   expect(record(dir, "tool-fake").version).toBe("0.1.0");
   expect(read(dir, own("index.ts"))).toBe(INDEX("tool-fake"));
 }, 60_000);
+
+/** A project whose vendored kit is another checkout's (`vendor/`, package.json's overrides), with nothing installed. */
+function otherKitProject(): string {
+  const dir = temp();
+  writeProjectManifest(dir, emptyManifest());
+  mkdirSync(join(dir, "vendor"));
+  const overrides: Record<string, string> = {};
+  for (const [name, packageDir] of Object.entries(KIT_PACKAGES)) {
+    overrides[name] = `file:vendor/pikit-${packageDir}-0.0.0-0000000000.tgz`;
+    writeFileSync(join(dir, "vendor", `pikit-${packageDir}-0.0.0-0000000000.tgz`), "another kit");
+  }
+  writeFileSync(join(dir, "package.json"), `${JSON.stringify({ name: "other-kit", dependencies: { "@pikit/core": overrides["@pikit/core"] }, overrides }, null, 2)}\n`);
+  writeFileSync(join(dir, "bun.lock"), "the lockfile of the other kit\n");
+  writeFileSync(join(dir, "pikit.config.ts"), 'import { defineApp } from "@pikit/core";\n\nexport default defineApp({\n  components: [\n  ],\n  config: {},\n});\n');
+  return dir;
+}
+
+test("a kit that is not this CLI's is a plan of its own: doctor notes it, --dry-run and the confirmation show it, and nothing is written", async () => {
+  const dir = otherKitProject();
+  const before = snapshot(dir);
+  const doctor = await runCli(["doctor"], dir);
+  expect(doctor.out).toContain("the project's kit (vendor/) is another, not this CLI's");
+  expect(doctor.out).toContain("`pikit upgrade` refreshes it");
+
+  const dry = await runCli(["upgrade", "--dry-run"], dir);
+  expect(dry.out).toContain("the kit (vendor/): an unrecorded kit → this CLI's");
+  expect(dry.out).toContain("refreshed: @pikit/core, @pikit/contracts, @pikit/pi-adapter");
+  expect(dry.out).toContain("Pi (@earendil-works/pi-durable): not installed → ");
+  expect(dry.out).toContain("--dry-run: nothing was written");
+  expect(dry.out).not.toContain("every component is up to date");
+  expect(dry.code).toBe(0);
+  expect(snapshot(dir)).toEqual(before);
+
+  const asked = await runCli(["upgrade"], dir);
+  expect(asked.code).toBe(1);
+  expect(asked.err).toContain("pass --yes");
+  expect(snapshot(dir)).toEqual(before);
+  // A name that is not installed is refused before the kit is touched.
+  const named = await runCli(["upgrade", "nothing-installed", "--yes"], dir);
+  expect(named.code).toBe(1);
+  expect(snapshot(dir)).toEqual(before);
+}, 60_000);
+
+test("a kit refresh that fails mid-way leaves the project as it was: package.json, vendor/, bun.lock, pikit.json", async () => {
+  const dir = otherKitProject();
+  // Nothing resolves: `bun install` fails at once, after the new tarballs and package.json are written.
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const before = snapshot(dir);
+  const run = await runCli(["upgrade", "--yes"], dir);
+  expect(run.out).toContain("refreshed to this CLI's, in vendor/");
+  expect(run.err).toContain("`bun install` failed");
+  expect(run.err).toContain("nothing was upgraded");
+  expect(run.code).toBe(1);
+  const after = snapshot(dir);
+  expect(after[OPERATION_MARKER]).toBeDefined();
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
+}, 120_000);

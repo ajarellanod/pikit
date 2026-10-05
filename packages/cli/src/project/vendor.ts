@@ -197,6 +197,17 @@ export function kitOrder(current: string | undefined): KitOrder {
   return compareKits(PIKIT_ROOT, current, kitCommit());
 }
 
+/**
+ * The Pi a kit pins: the version of `@earendil-works/pi-durable` its adapter depends on. This CLI's
+ * without `projectDir`; with it, the project's as installed in `node_modules` (undefined when it is not).
+ */
+export function kitPi(projectDir?: string): string | undefined {
+  const path = projectDir === undefined ? join(PACKAGES_DIR, KIT_PACKAGES["@pikit/pi-adapter"] as string, "package.json") : join(projectDir, "node_modules", "@pikit", "pi-adapter", "package.json");
+  if (!existsSync(path)) return undefined;
+  const { dependencies } = JSON.parse(readFileSync(path, "utf8")) as { dependencies?: Record<string, string> };
+  return dependencies?.["@earendil-works/pi-durable"];
+}
+
 /** Deletes the tarballs in `vendor/` that `package.json` no longer names (after a refresh and its install). */
 export function pruneVendor(projectDir: string): string[] {
   const pkg = readPackageJson(projectDir);
