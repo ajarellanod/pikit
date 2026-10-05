@@ -46,6 +46,9 @@ const HELP = [
   "/help: this message",
 ].join("\n");
 
+/** What the sender of a message that kept failing is told before it is skipped (`poller.ts`). */
+export const NOT_TAKEN = "Sorry, I could not take your message. Please send it again in a few minutes.";
+
 export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): Promise<void> {
   const message = update.message;
   if (message === undefined || message.chat.type !== "private") return;
@@ -110,6 +113,13 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
       await delivery.send(chatId, "This bot is not set up to answer yet.");
       return;
   }
+}
+
+/** Tells the sender of an update that kept failing that it was not taken: only an allowed user's private message. */
+export async function tellNotTaken(update: TelegramUpdate, deps: InboundDeps): Promise<void> {
+  const message = update.message;
+  if (message === undefined || message.chat.type !== "private" || message.from === undefined || !deps.allowed.has(message.from.id)) return;
+  await deps.delivery.send(message.chat.id, NOT_TAKEN);
 }
 
 /** `/new` or `/new@this_bot` → `new`; a command for another bot, or no command, → `undefined`. */

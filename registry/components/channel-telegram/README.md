@@ -61,7 +61,12 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   - A failed run says so in the chat, with its error code. A message the runtime abandoned (code
     `abandoned`) gets "Sorry, we could not answer your message. Please send it again."
 - **A message is acknowledged to Telegram only once its conversation has it.** A message delivered
-  again after a crash is recognised by its id (`telegram:<chat>:<message>`) and answered once.
+  again after a crash is recognised by its id (`telegram:<chat>:<message>`) and answered once. A
+  message its conversation cannot take (the runtime or its storage down for a while) is tried again
+  after 0.5 s, 1 s, 2 s… up to a minute apart, and the bot does not move past it meanwhile: its later
+  messages wait, in order. One that still fails after 15 minutes (`GIVE_UP_AFTER_MS` in `poller.ts`)
+  is taken for a message that can never be handled: its sender is told "Sorry, I could not take your
+  message. Please send it again in a few minutes.", and it is skipped, so it cannot stop the bot.
 - **Sending** is `startAnswerDelivery`'s (`@pikit/contracts`), the one delivery every chat
   channel shares; this channel gives it only what is Telegram's: its bots' transports, which bot a
   conversation is, its words, and its waits (`DELIVERY` in `index.ts`, yours to edit).
@@ -131,6 +136,8 @@ Only tests import it.
   the feed, one that ended while the channel was stopped delivered at the next start (and only
   then), a failed enqueue or send tried again, a send the stop aborted sent at the next start,
   answers of other channels skipped.
+- `poller.test.ts` covers the poller: a failing update tried again without moving past it, and one
+  still failing past the time budget skipped, its sender told first.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
   channel does with a message (routed, deduplicated, stopped, denied, no router), and what comes with
   durability (an answer that ended while stopped or whose event was lost, delivered once; a failed
