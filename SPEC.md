@@ -132,8 +132,9 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 
 Scheduling, approvals, health and degradation policy, deduplication, routing, storage, channels,
 delivery, the dashboard, self-knowledge and self-change. Each is a capability in `@pikit/contracts` and a component (the dashboard's UI
-is a project's choice over its component, `admin-api`, §5). A new kernel
-export is a decision recorded here.
+is a project's choice over its component, `admin-api`, §5); what every component of one must do alike (admitting a
+message, delivering answers) is a contracts helper, its policy passed in by the component (§3.3). A
+new kernel export is a decision recorded here.
 
 **What a component asks of the CLI** stays out of the kernel and out of the CLI too: the component
 ships it as a file of its own directory, and the CLI (or the deployment component) calls it with a
@@ -159,6 +160,32 @@ the app:
 Where no CLI deploys (a "Deploy to Cloudflare" button, Workers Builds), no hook runs: what
 `beforeDeploy` writes is committed with the project, and what `afterDeploy` registers the app also
 registers itself (C8).
+
+### 3.3 The kit layer
+
+Besides the core, two kit packages are vendored into every project and versioned apart (K8,
+`requires.contracts`, `requires.adapter`): `@pikit/contracts` and `@pikit/pi-adapter`. They are not
+components and are not copied as source, so what each may hold is decided here; anything else is a
+component.
+
+- **The adapter maps Pi and absorbs its churn.** `@pikit/pi-adapter` is the only package that imports
+  Pi (`scripts/boundaries.test.ts`, `registry validate`). It implements the contracts on pi-durable,
+  gives components Pi's types, tools, models and environments, and bridges what Pi lacks until Pi ships
+  it (P1). It holds what changes when Pi changes and must be the same in every project, nothing else.
+  *Why:* Pi changes weekly; one package that follows it leaves every component and project as it was.
+- **A contracts helper is protocol, with the policy passed in.** `admitInbound` and
+  `startAnswerDelivery` are what every provider must do alike for a guarantee to hold (one admission
+  per message, a cursor per channel, a lane per conversation, idempotency keys). What may differ (the
+  route, the text, how to send, the backoff) is the calling component's, passed in. *Why:* a guarantee
+  each component writes again is one each can break; a choice made inside the helper would be policy
+  the user cannot edit (P3).
+- **The answers log is the adapter's, by exception.** `agent.submissions` and its `answers` log
+  (`runtime_pi_answers`, `packages/pi-adapter/src/answers.ts`) stay in the adapter, not in
+  runtime-pi: what has been logged is recorded in pi-durable's own commit (`pikit.admissions`, written
+  with each admission), and runs are read and grouped from pi-durable's commits and entries, which only
+  Pi's types describe. *Why:* moving the commit-reading code into owned source would put pi-durable's
+  commit format in a component, breaking it at each Pi release, and an edit there could log an answer
+  twice or never; exactly once is the kit's to keep, under the adapter's crash tests.
 
 ## 4. Cloudflare is required
 
