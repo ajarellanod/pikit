@@ -43,7 +43,7 @@ import { Undo } from "../project/undo.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
 import * as starter from "./starter.ts";
-import { checkUiTarget, installDashboardPackages, UI_COMPONENTS, uiNext, writeDashboard } from "./ui.ts";
+import { installDashboardPackages, UI_COMPONENTS, uiNext, writeDashboard } from "./ui.ts";
 
 export interface NewOptions {
   preset?: string;
@@ -99,7 +99,6 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   // storage: an offer needs the registry's only provider, which a second one would take away
   // (`registry validate` checks that each preset composes, `checkPresets`).
   // A UI is the dashboard's files and what they need, added like the preset's own.
-  if (options.ui === true) checkUiTarget(targets);
   const dashboard = options.ui === true ? dashboardFiles(registry) : undefined;
   if (options.ui === true && dashboard === undefined) throw new CliError(`the registry ${registry.root} has no dashboard (dashboard/files/)`);
   const asked = options.ui === true ? [...chosen, ...UI_COMPONENTS.filter((c) => !chosen.includes(c))] : chosen;

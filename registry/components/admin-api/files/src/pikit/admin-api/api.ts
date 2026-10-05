@@ -32,7 +32,10 @@ export interface ApiUsage {
 
 /** One conversation of the runtime. */
 export interface ApiConversation {
-  /** The runtime's id: what `:id` is in the routes. */
+  /**
+   * What `:id` is in the routes, opaque (encode it in a path): the runtime's id on a server,
+   * `<key>~<the object's id>` on Cloudflare, where each conversation's object numbers its own.
+   */
   conversationId: string;
   /** Its conversation key (`telegram:12345`) and agent, once a message reached it. */
   key?: string;
@@ -154,7 +157,10 @@ export interface ApiApp {
 }
 
 export interface ApiError {
-  /** `unauthorized`, `not_found`, `not_installed`, `invalid_request`, `invalid_cursor`, `no_agent`, `not_current`. */
+  /**
+   * `unauthorized`, `not_found`, `not_installed`, `invalid_request`, `invalid_cursor`, `no_agent`,
+   * `not_current`; `unavailable` (503) when, on Cloudflare, a conversation's object did not answer.
+   */
   error: string;
   message?: string;
 }

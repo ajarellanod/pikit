@@ -30,7 +30,9 @@ export function hasWorkerApp(targets: readonly string[]): boolean {
 export function declaredByApp(manifest: Manifest, targets: readonly string[]): [AppName, Half][] {
   const whole: Half = { provides: manifest.provides, requires: manifest.requires.capabilities, optional: manifest.optional.capabilities };
   const worker = manifest.apps?.worker;
-  if (worker === undefined || !hasWorkerApp(targets)) return [["default", whole]];
+  if (worker === undefined) return [["default", whole]];
+  // On a server only the default export is listed: what its own half declares, when the manifest says.
+  if (!hasWorkerApp(targets)) return [["default", manifest.halves?.default ?? whole]];
   // A registry that does not say what each half declares: the whole, in each (doctor has the truth).
   if (worker === BOTH_APPS || manifest.halves === undefined) return [["default", whole], ["worker", whole]];
   return [["default", manifest.halves.default], ["worker", manifest.halves.worker]];

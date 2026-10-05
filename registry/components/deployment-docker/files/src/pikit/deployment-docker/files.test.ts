@@ -81,7 +81,7 @@ test(".dockerignore keeps secrets, state and node_modules out of the build", () 
   expect(ignored).toContain("src/dashboard/dist");
 });
 
-test("Dockerfile: the dashboard, when the project has one, is built in its own stage and only its static files reach the app", () => {
+test("Dockerfile: the dashboard, when the project has one, is built in its own stage and only its module in admin-api reaches the app", () => {
   const dockerfile = lines("Dockerfile");
   const stage = dockerfile.findIndex((line) => /^FROM\s.*\sAS dashboard$/.test(line));
   const app = dockerfile.findLastIndex((line) => line.startsWith("FROM "));
@@ -91,7 +91,11 @@ test("Dockerfile: the dashboard, when the project has one, is built in its own s
   const build = dockerfile.slice(stage, app).join("\n");
   expect(build).toContain("if [ -f src/dashboard/package.json ]");
   expect(build).toContain("bun install --frozen-lockfile");
-  expect(dockerfile.slice(app)).toContain("COPY --from=dashboard /build/src/dashboard/dist ./src/dashboard/dist");
+  // Without a UI (or without admin-api) out/ is empty, and the copy still succeeds.
+  expect(build).toContain("mkdir -p out");
+  expect(build).toContain("cp src/pikit/admin-api/dashboard-files.ts out/src/pikit/admin-api/");
+  const copy = dockerfile.slice(app).indexOf("COPY --from=dashboard /build/out/ ./");
+  expect(copy).toBeGreaterThan(dockerfile.slice(app).indexOf("COPY . ."));
 });
 
 test("compose.yaml: a 503 from /health (the app is down) stops PID 1, so Docker restarts the process; nothing else does", () => {

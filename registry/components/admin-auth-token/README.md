@@ -6,7 +6,10 @@ no data and are served without it, and the page asks the operator for the token.
 
 - **Provides:** `admin.auth` (`@pikit/contracts`' `admin.ts`).
 - **Requires:** `secrets` (the token is read at start, never from config).
-- **Targets:** `server` and `durable`: it uses only `secrets` and Web Crypto.
+- **Targets:** `server` and `durable`: it uses only `secrets` and Web Crypto. On Cloudflare it goes in
+  both Apps (`apps.worker: "default"`): the Worker's, where admin-api's routes ask it, and each
+  conversation object's, where admin-api's object half is. Like on a server, without the token the
+  App does not start: on Cloudflare that is the objects' App too.
 - **Installs to:** `src/pikit/admin-auth-token/`.
 
 ## Configure

@@ -13,11 +13,16 @@ operator's token), and admin-api serves its built files under `/admin/`.
 ```sh
 bun install
 bun run dev        # hot reload on http://localhost:5173/admin/, the API from PIKIT_URL (default http://localhost:3000)
-bun run build      # the static files in dist/, which admin-api serves at /admin/
+bun run build      # dist/, then scripts/embed.ts writes it into ../pikit/admin-api/dashboard-files.ts
 bun run typecheck
 ```
 
-`pikit up` builds it before it deploys. The token it asks for is `PIKIT_ADMIN_TOKEN` (`pikit configure
+The build's last step (`scripts/embed.ts`) writes `dist/` as a module, `src/pikit/admin-api/dashboard-files.ts`
+(each file in base64), which admin-api bundles and serves at `/admin/`: the same on a server and on a
+Cloudflare Worker, with no disk. Without admin-api next to it the build makes `dist/` only. Rebuild
+after a change: `pikit dev` serves what was built last. On Cloudflare `pikit up` builds it before it
+deploys; Docker's image builds it in a stage of its own. The ids in the API are opaque (on Cloudflare
+`<key>~<id>`): always `encodeURIComponent` one in a path. The token it asks for is `PIKIT_ADMIN_TOKEN` (`pikit configure
 --generate PIKIT_ADMIN_TOKEN` writes one); it stays in the browser's localStorage.
 
 ## What is where

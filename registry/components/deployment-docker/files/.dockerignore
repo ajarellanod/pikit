@@ -13,7 +13,9 @@
 node_modules
 **/node_modules
 
-# The dashboard's build: made in the image (Dockerfile's `dashboard` stage), never this machine's.
+# The dashboard's build: made in the image (Dockerfile's `dashboard` stage), never this machine's. Its
+# module in admin-api (src/pikit/admin-api/dashboard-files.ts) stays in the context, since admin-api
+# imports it: the stage writes it over with the image's own build.
 src/dashboard/dist
 
 .git

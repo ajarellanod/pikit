@@ -6,212 +6,23 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger, withAbortSignal } from "@pikit/core";
-import {
-  type AdminAuth,
-  type AgentObserver,
-  type AgentRequest,
-  type AgentRuntime,
-  compareHttpRoutes,
-  type ConversationRef,
-  type ConversationRegistry,
-  type DeliveryReceipt,
-  type HttpRoute,
-  type OutboundQueue,
-  type PendingPiece,
-  matchesHttpRoute,
-  type ObservedConversation,
-  type ObservedEvent,
-  type PageRequest,
-  parseHttpRouteKey,
-  type TranscriptEntry,
-  type Usage,
-} from "@pikit/contracts";
+import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import type { DeliveryReceipt, OutboundQueue, PendingPiece } from "@pikit/contracts";
 import adminApi from "./index.ts";
+import { AUTH, auth, Runtime, type Served, serve, sse, ZERO } from "./runtime.test-support.ts";
 
-const AUTH = { authorization: "Bearer operator-token" };
-const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as unknown as Usage;
-
-const auth = defineComponent({
-  name: "auth-test",
-  setup(pikit) {
-    const provider: AdminAuth = { verify: async (request) => (request.headers.get("authorization") === AUTH.authorization ? { id: "ops" } : undefined) };
-    pikit.provide("admin.auth", provider);
-  },
-});
-
-/** The runtime's conversations, their transcripts and live events, as a test sets them. */
-class Runtime {
-  conversations = new Map<string, ObservedConversation>();
-  transcripts = new Map<string, TranscriptEntry[]>();
-  /** Keys → the conversation each points to. */
-  pointers = new Map<string, ConversationRef>();
-  dispatched: AgentRequest[] = [];
-  aborted: ConversationRef[] = [];
-  pages: PageRequest[] = [];
-  /** Live events a test pushes to the watchers. */
-  private listeners = new Set<(event: ObservedEvent) => void>();
-  watching = 0;
-  released = 0;
-  private next = 100;
-
-  add(conversation: Omit<ObservedConversation, "busy" | "usage"> & { busy?: boolean }, current = true): void {
-    this.conversations.set(conversation.conversationId, { busy: false, usage: ZERO, ...conversation });
-    if (current && conversation.key !== undefined && conversation.agent !== undefined) {
-      this.pointers.set(conversation.key, { key: conversation.key, agent: conversation.agent, conversationId: conversation.conversationId });
-    }
-  }
-
-  push(event: ObservedEvent): void {
-    for (const listener of this.listeners) listener(event);
-  }
-
-  readonly observer: AgentObserver = {
-    conversations: async (page) => {
-      this.pages.push(page);
-      if (page.cursor !== undefined && page.cursor !== "page-2") throw new Error("agent.observe: the cursor is not one this observer gave");
-      const all = [...this.conversations.values()];
-      return page.cursor === undefined ? { items: all.slice(0, page.limit ?? 50), next: "page-2" } : { items: [] };
-    },
-    conversation: async (id) => this.conversations.get(id),
-    transcript: async (id, page) => {
-      this.pages.push(page);
-      const entries = this.transcripts.get(id);
-      return entries === undefined ? undefined : { items: entries.slice(0, page.limit ?? 50) };
-    },
-    watch: (id, ctx) => this.follow(id, ctx),
-    usage: async (id) => this.conversations.get(id)?.usage,
-  };
-
-  private async *follow(id: string, ctx: AppContext): AsyncGenerator<ObservedEvent> {
-    const queue: ObservedEvent[] = [];
-    let wake: (() => void) | undefined;
-    const listener = (event: ObservedEvent) => {
-      queue.push(event);
-      wake?.();
-    };
-    this.listeners.add(listener);
-    this.watching++;
-    const onAbort = () => wake?.();
-    ctx.abortSignal?.addEventListener("abort", onAbort);
-    try {
-      yield { type: "snapshot", conversationId: id };
-      for (;;) {
-        if (ctx.abortSignal?.aborted === true) return;
-        const event = queue.shift();
-        if (event !== undefined) {
-          yield event;
-          continue;
-        }
-        await new Promise<void>((resolve) => (wake = resolve));
-      }
-    } finally {
-      ctx.abortSignal?.removeEventListener("abort", onAbort);
-      this.listeners.delete(listener);
-      this.released++;
-    }
-  }
-
-  readonly runtime: AgentRuntime = {
-    dispatch: async (request) => {
-      this.dispatched.push(request);
-      const busy = this.conversations.get(request.conversation.conversationId)?.busy === true;
-      return { kind: busy ? "queued" : "started", requestId: request.requestId };
-    },
-    abort: async (conversation) => void this.aborted.push(conversation),
-    resume: async () => {},
-  };
-
-  readonly registry: ConversationRegistry = {
-    resolve: async () => {
-      throw new Error("not used by admin-api");
-    },
-    get: async (key) => this.pointers.get(key),
-    reset: async (key) => {
-      const previous = this.pointers.get(key);
-      if (previous === undefined) return undefined;
-      const conversation = { ...previous, conversationId: `c${this.next++}` };
-      this.pointers.set(key, conversation);
-      return { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
-    },
-  };
-
-  component() {
-    return defineComponent({
-      name: "runtime-test",
-      setup: (pikit) => {
-        pikit.provide("agent.observe", this.observer);
-        pikit.provide("agent.runtime", this.runtime);
-        pikit.provide("conversations.registry", this.registry);
-      },
-    });
-  }
-}
-
-interface Logged {
-  message: string;
-  fields: Record<string, unknown> | undefined;
-}
-
-interface Subject {
-  app: App;
-  runtime: Runtime;
-  logged: Logged[];
-  /** A request served the way a server serves it: the most specific matching key. */
-  fetch(path: string, init?: RequestInit): Promise<Response>;
-  keys(): string[];
-}
+type Subject = Served & { runtime: Runtime };
 
 const running: App[] = [];
-const folders: string[] = [];
 afterEach(async () => {
   for (const app of running.splice(0)) await app.stop().catch(() => {});
-  for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
 
 async function started(config: Record<string, unknown> = {}, extra: ComponentDefinition[] = []): Promise<Subject> {
   const runtime = new Runtime();
-  const logged: Logged[] = [];
-  const logger: Logger = {
-    ...silentLogger,
-    info: (message, fields) => void logged.push({ message, fields }),
-    warn: (message, fields) => void logged.push({ message, fields }),
-  };
-  let routes: { get(key: string): HttpRoute | undefined; keys(): string[] } | undefined;
-  const server = defineComponent({
-    name: "server-test",
-    setup(pikit) {
-      const handle = pikit.useKeyed("http.route");
-      return { start: () => void (routes = handle) };
-    },
-  });
-  const app = await defineApp({
-    components: [auth, runtime.component(), adminApi, server, ...extra],
-    config: { "admin-api": { assets: join(tmpdir(), "pikit-admin-api-none"), ...config } },
-    logger,
-  }).create();
-  await app.start();
-  running.push(app);
-  return {
-    app,
-    runtime,
-    logged,
-    keys: () => routes?.keys() ?? [],
-    async fetch(path, init = {}) {
-      const request = new Request(`http://pikit.test${path}`, init);
-      const { pathname } = new URL(request.url);
-      const key = (routes?.keys() ?? [])
-        .map((each) => ({ each, parsed: parseHttpRouteKey(each) }))
-        .filter((r) => r.parsed !== undefined && matchesHttpRoute(r.parsed, request.method, pathname))
-        .sort((a, b) => compareHttpRoutes(a.parsed!, b.parsed!))[0]?.each;
-      if (key === undefined) return new Response("not found", { status: 404 });
-      const ctx = app.context(init.signal ? withAbortSignal(init.signal, BACKGROUND_CONTEXT) : BACKGROUND_CONTEXT);
-      return routes!.get(key)!(request, ctx);
-    },
-  };
+  const served = await serve([auth, runtime.component(), adminApi, ...extra], { "admin-api": config });
+  running.push(served.app);
+  return { ...served, runtime };
 }
 
 const post = (body?: unknown): RequestInit => ({
@@ -228,7 +39,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     name: "admin-api",
     provides: ["http.route"],
     requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry"],
-    optional: ["outbound.queue"],
+    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "storage.sql"],
   });
 });
 
@@ -319,33 +130,6 @@ test("GET one conversation and its transcript; an unknown one is 404", async () 
     expect({ path, status: response.status }).toEqual({ path, status: 404 });
   }
 });
-
-/** A client of a server-sent event stream: `take(n)` waits for the next `n` `data:` lines. */
-function sse(response: Response) {
-  const reader = response.body!.getReader();
-  const decoder = new TextDecoder();
-  let buffer = "";
-  return {
-    reader,
-    async take(count: number): Promise<unknown[]> {
-      const data: unknown[] = [];
-      while (data.length < count) {
-        let end = buffer.indexOf("\n\n");
-        while (end !== -1 && data.length < count) {
-          const frame = buffer.slice(0, end);
-          buffer = buffer.slice(end + 2);
-          for (const line of frame.split("\n")) if (line.startsWith("data: ")) data.push(JSON.parse(line.slice(6)));
-          end = buffer.indexOf("\n\n");
-        }
-        if (data.length >= count) break;
-        const { value, done } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-      }
-      return data;
-    },
-  };
-}
 
 test("GET …/events: a snapshot, then each change, as server-sent events; the client leaving releases the watch", async () => {
   const s = await started();
@@ -476,52 +260,6 @@ test("a path under /admin/api/ that no route serves is the API's 404, never the 
   expect(response.status).toBe(404);
   expect(await response.json()).toEqual({ error: "not_found" });
   expect((await s.fetch("/admin/api/nothing", { method: "DELETE", headers: AUTH })).status).toBe(404);
-});
-
-function dashboard(): string {
-  const folder = mkdtempSync(join(tmpdir(), "pikit-admin-api-"));
-  folders.push(folder);
-  mkdirSync(join(folder, "assets"));
-  writeFileSync(join(folder, "index.html"), "<!doctype html><div id=root></div>");
-  writeFileSync(join(folder, "assets", "index-abc123.js"), "console.log(1)");
-  writeFileSync(join(folder, "favicon.svg"), "<svg/>");
-  const outside = join(folder, "..", "pikit-admin-api-outside.txt");
-  writeFileSync(outside, "outside");
-  folders.push(outside);
-  return folder;
-}
-
-test("the dashboard's files: served under /admin/ to anyone, pages fall back to index.html", async () => {
-  const s = await started({ assets: dashboard() });
-
-  const root = await s.fetch("/admin");
-  expect(root.status).toBe(308);
-  expect(root.headers.get("location")).toBe("/admin/");
-
-  const index = await s.fetch("/admin/");
-  expect(index.status).toBe(200);
-  expect(index.headers.get("content-type")).toBe("text/html; charset=utf-8");
-  expect(index.headers.get("cache-control")).toBe("no-cache");
-  expect(index.headers.get("x-content-type-options")).toBe("nosniff");
-  expect(await index.text()).toContain("id=root");
-
-  const script = await s.fetch("/admin/assets/index-abc123.js");
-  expect(script.headers.get("content-type")).toBe("text/javascript; charset=utf-8");
-  expect(script.headers.get("cache-control")).toContain("immutable");
-
-  expect((await s.fetch("/admin/favicon.svg")).headers.get("content-type")).toBe("image/svg+xml");
-  expect(await (await s.fetch("/admin/conversations/c1")).text()).toContain("id=root");
-  expect((await s.fetch("/admin/assets/missing.js")).status).toBe(404);
-});
-
-test("the dashboard's files: a path never leaves the folder", async () => {
-  const s = await started({ assets: dashboard() });
-
-  for (const path of ["/admin/..%2Fpikit-admin-api-outside.txt", "/admin/%2e%2e/pikit-admin-api-outside.txt", "/admin/assets/..%2F..%2Fpikit-admin-api-outside.txt", "/admin/%E0", "/admin/a%00b.js", "/admin/..%5Cx.txt"]) {
-    const response = await s.fetch(path);
-    expect({ path, status: response.status }).toEqual({ path, status: 404 });
-    expect(await response.text()).not.toContain("outside");
-  }
 });
 
 test("without a built dashboard the API still answers, and /admin/ says why there is no page", async () => {

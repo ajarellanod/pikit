@@ -4,14 +4,13 @@
  * `dashboard/files/`), over the admin API of a component, `admin-api`.
  *
  * `on`:
- *   1. refuses on Cloudflare (`durable`): the Worker cannot list conversations yet
- *      (features/cloudflare-conversation-index.md), and admin-api runs on a server;
- *   2. installs what it needs and the project lacks, `admin-auth-token` then `admin-api`, each as
- *      `pikit add` does (its own operation, its own doctor);
- *   3. writes `src/dashboard/`, keeps each file's base in `pikit-bases/` and records them in
+ *   1. installs what it needs and the project lacks, `admin-auth-token` then `admin-api`, each as
+ *      `pikit add` does (its own operation, its own doctor). On Cloudflare (`durable`) `add` puts each
+ *      in both Apps: admin-api's Worker half serves the API and reaches the conversations' objects;
+ *   2. writes `src/dashboard/`, keeps each file's base in `pikit-bases/` and records them in
  *      `pikit.json`'s `dashboard`, with the components step 2 installed; a failure puts back what it
  *      wrote;
- *   4. `bun install` in `src/dashboard/`. Its own packages: a failure (no network) is said, with the
+ *   3. `bun install` in `src/dashboard/`. Its own packages: a failure (no network) is said, with the
  *      command to run, and leaves the project as it is.
  *   Run again, it does what is missing: a project with a dashboard and both components is left as it is.
  *
@@ -46,15 +45,6 @@ export interface UiOptions {
   yes?: boolean;
   /** `on`: write over a `src/dashboard/` that is not pikit's. `off`: delete your edits and your own files too. */
   force?: boolean;
-}
-
-/** Refuses a target the dashboard does not run on yet. */
-export function checkUiTarget(targets: readonly string[]): void {
-  if (targets.includes("durable")) {
-    throw new CliError(
-      "the dashboard runs on a server for now: on Cloudflare the Worker cannot list the conversations of its Durable Objects yet (features/cloudflare-conversation-index.md)",
-    );
-  }
 }
 
 function defaultRegistry(projectDir: string, project: ProjectManifest): { registry: Registry; name: string } {
@@ -134,7 +124,7 @@ export function uiNext(): string {
   return [
     "The dashboard:",
     "  pikit configure --generate PIKIT_ADMIN_TOKEN   # the operator's token, which the dashboard asks for",
-    `  cd ${DASHBOARD_DIR} && bun run build             # then \`pikit dev\` serves it at /admin/`,
+    `  cd ${DASHBOARD_DIR} && bun run build             # then \`pikit dev\` serves it at /admin/ (\`pikit up\` builds it on Cloudflare)`,
     `  cd ${DASHBOARD_DIR} && bun run dev               # or hot reload on :5173, against a running app`,
   ].join("\n");
 }
@@ -142,7 +132,6 @@ export function uiNext(): string {
 export async function uiOn(projectDir: string, options: UiOptions = {}): Promise<void> {
   assertNoIncompleteOperation(projectDir);
   const project = readProjectManifest(projectDir);
-  checkUiTarget(project.targets);
   const { registry, name: registryName } = defaultRegistry(projectDir, project);
   const files = project.dashboard === undefined ? shippedBy(registry) : undefined;
   if (files !== undefined) checkDashboardFree(projectDir, project, options.force === true);

@@ -27,17 +27,27 @@ const lines = (edits: Record<number, string> = {}) => `${LINES.map((line, i) => 
 /** The view `log-viewer` ships (its manifest's `view`). */
 const VIEW = 'export default { id: "log-viewer", title: "Logs", pages: [] };\n';
 
+/** admin-api's stand-in has a Worker half, as the real one: on Cloudflare `add` puts it in `export const worker`. */
+const WORKER_HALF = 'export const worker = defineComponent({\n  name: "admin-api-worker",\n  setup() {},\n});\n';
+const NOTHING = { provides: [], requires: [], optional: [] };
+/** How each stand-in goes in a Cloudflare project's Apps, as the real ones' manifests say. */
+const APPS: Record<string, Record<string, unknown>> = {
+  "admin-auth-token": { apps: { worker: "default" } },
+  "admin-api": { apps: { worker: "worker" }, halves: { default: NOTHING, worker: NOTHING } },
+};
+
 /**
- * A registry with stand-ins for admin-auth-token and admin-api, `log-viewer` (a component with a
- * view), and a dashboard of `files`.
+ * A registry with stand-ins for admin-auth-token and admin-api (on both targets, each in its Apps on
+ * Cloudflare), `log-viewer` (a component with a view), and a dashboard of `files`.
  */
 function registry(files: Record<string, string>): string {
   const root = temp();
   const index: { version: 1; components: Record<string, unknown> } = { version: 1, components: {} };
+  const targets = ["server", "durable"];
   for (const name of ["admin-auth-token", "admin-api", "log-viewer"]) {
     const dir = join(root, "components", name);
     mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
-    writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), INDEX(name));
+    writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), `${INDEX(name)}${name === "admin-api" ? `\n${WORKER_HALF}` : ""}`);
     const view = name === "log-viewer" ? { view: "view" } : {};
     if (name === "log-viewer") {
       mkdirSync(join(dir, "view"));
@@ -46,11 +56,11 @@ function registry(files: Record<string, string>): string {
     writeFileSync(
       join(dir, "component.json"),
       JSON.stringify({
-        name, version: "0.1.0", description: name, targets: ["server"], requires: { pikit: "0.0.0", capabilities: [] },
-        optional: { capabilities: [] }, provides: [], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...view,
+        name, version: "0.1.0", description: name, targets, requires: { pikit: "0.0.0", capabilities: [] },
+        optional: { capabilities: [] }, provides: [], ...APPS[name], dependencies: {}, files: [{ source: "files/src", target: "src" }], ...view,
       }),
     );
-    index.components[name] = { version: "0.1.0", description: name, targets: ["server"], path: `components/${name}` };
+    index.components[name] = { version: "0.1.0", description: name, targets, path: `components/${name}` };
   }
   writeFileSync(join(root, "registry.json"), JSON.stringify(index));
   ship(root, files);
@@ -72,9 +82,10 @@ function project(registryRoot: string, targets = ["server"]): string {
   writeProjectManifest(dir, emptyManifest(registryRoot, undefined, targets));
   writeFileSync(join(dir, "package.json"), '{ "name": "with-ui", "dependencies": {} }\n');
   writeFileSync(join(dir, ".env.example"), "# the project's own\n");
+  const worker = '\nexport const workerConfig = {};\n\nexport const worker = defineApp({\n  components: [\n  ],\n  config: workerConfig,\n});\n';
   writeFileSync(
     join(dir, "pikit.config.ts"),
-    'import { defineApp } from "@pikit/core";\n\nexport const config = {};\n\nexport default defineApp({\n  components: [\n  ],\n  config,\n});\n',
+    `import { defineApp } from "@pikit/core";\n\nexport const config = {};\n\nexport default defineApp({\n  components: [\n  ],\n  config,\n});\n${targets.includes("durable") ? worker : ""}`,
   );
   mkdirSync(join(dir, "node_modules", "@pikit"), { recursive: true });
   symlinkSync(join(import.meta.dir, "..", "..", "..", "core"), join(dir, "node_modules", "@pikit", "core"));
@@ -161,7 +172,7 @@ test("ui off keeps your edits and your own views unless --force", async () => {
   expect(manifest(dir).components).toEqual({});
 });
 
-test("ui on refuses a src/dashboard/ that is not pikit's (unless --force), and a project on Cloudflare", async () => {
+test("ui on refuses a src/dashboard/ that is not pikit's (unless --force)", async () => {
   const root = registry(DASHBOARD);
   const dir = project(root);
   mkdirSync(join(dir, "src/dashboard"), { recursive: true });
@@ -171,10 +182,19 @@ test("ui on refuses a src/dashboard/ that is not pikit's (unless --force), and a
   expect(refused.err).toContain("src/dashboard/ exists and is not pikit's dashboard");
   expect(refused.code).toBe(1);
   expect(manifest(dir).components).toEqual({});
+});
 
-  const durable = await runCli(["ui", "on", "--yes"], project(root, ["durable"]));
-  expect(durable.err).toContain("the dashboard runs on a server for now");
-  expect(durable.code).toBe(1);
+test("ui on, on Cloudflare: admin-auth-token in both Apps, admin-api's object half in the default App and its Worker half in the Worker's", async () => {
+  const dir = project(registry(DASHBOARD), ["durable"]);
+
+  const on = await runCli(["ui", "on", "--yes"], dir);
+
+  expect(on.code).toBe(0);
+  expect(manifest(dir).dashboard.components).toEqual(["admin-auth-token", "admin-api"]);
+  const config = read(dir, "pikit.config.ts");
+  expect(config).toContain('import adminApi, { worker as adminApiWorker } from "./src/pikit/admin-api/index.ts";');
+  expect(config).toContain("export default defineApp({\n  components: [\n    adminAuthToken,\n    adminApi,\n  ],");
+  expect(config).toContain("export const worker = defineApp({\n  components: [\n    adminAuthToken,\n    adminApiWorker,\n  ],");
 });
 
 test("pikit upgrade merges the dashboard's new version with your edits, adds new files, deletes those no longer shipped", async () => {
