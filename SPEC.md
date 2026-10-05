@@ -256,8 +256,11 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   cancelled) to be woken again at once. Each invocation has its own budget; measured on the Free plan:
   30 s of CPU (waiting on the network does not count), 50 subrequests, about 200 MB of memory before
   the object is reset, 15 minutes of wall clock for an alarm (a cut alarm is retried), and a deploy
-  cuts every alarm in progress (it is retried). Slices keep every one of these far away. *Why:* K6
-  already makes a reset lose nothing; slices make a long conversation a sequence of short events.
+  cuts every alarm in progress (it is retried). Slices keep every one of these far away. An alarm that
+  throws is retried 6 times, about 2 minutes in all, then dropped: while an object's App cannot start,
+  `deployment-cloudflare` sets a guard alarm before each start, up to an hour ahead, so the object is
+  never left without one. *Why:* K6 already makes a reset lose nothing; slices make a long
+  conversation a sequence of short events.
 - **C5. State through neutral contracts; the platform through one context key.** The runtime's
   state (pi-durable's storage on `storage.sql`) and conversations (`conversations-kv`, on
   `storage.kv`) have neutral providers that run on both targets; the only Cloudflare-specific storage
