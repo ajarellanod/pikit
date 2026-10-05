@@ -1,5 +1,5 @@
 /**
- * Facts about @earendil-works/pi-durable 1.0.0 that the durable runtime (`runtime.ts`) relies on,
+ * Facts about @earendil-works/pi-durable 1.0.3 that the durable runtime (`runtime.ts`) relies on,
  * asserted on pi-durable directly (a `MemoryStorage`, pi-ai 1.0's faux provider), so a Pi bump that
  * changes one fails here before it breaks the runtime. Each names what depends on it.
  */
@@ -20,6 +20,7 @@ import {
   InboxDoc,
   LiveDoc,
   MemoryStorage,
+  ProviderDoc,
   section,
   type SubmissionRecord,
   ToolTask,
@@ -84,7 +85,7 @@ async function open(
   return { harness, conversation, faux, changes, submissions, commitOf };
 }
 
-describe("pi-durable facts (1.0.0)", () => {
+describe("pi-durable facts (1.0.3)", () => {
   test("a known requestId returns its submission and commits nothing; another type under it throws (duplicate admission)", async () => {
     const { harness, conversation, changes } = await open([fauxAssistantMessage("one")]);
     const first = await conversation.submit({ type: "input", content: "hello", requestId: "r1" }, ctx);
@@ -436,16 +437,24 @@ describe("pi-durable facts (1.0.0)", () => {
     await harness.close(ctx);
   });
 
-  test("pi-durable sends the provider no session id: a provider's prompt-cache key gets none", async () => {
-    const options: unknown[] = [];
-    const { harness, conversation } = await open([
-      (_context, streamOptions) => {
-        options.push(streamOptions?.sessionId);
-        return fauxAssistantMessage("ok");
-      },
-    ]);
-    await (await conversation.submit({ type: "input", content: "hello" }, ctx)).wait(ctx);
-    expect(options).toEqual([undefined]);
+  test("pi-durable sends the provider a session id per conversation, the same on every turn (prompt-cache affinity)", async () => {
+    const sent: unknown[] = [];
+    const answer: FauxResponseStep = (_context, streamOptions) => {
+      sent.push(streamOptions?.sessionId);
+      return fauxAssistantMessage("ok");
+    };
+    const { harness, conversation } = await open([answer, answer, answer]);
+    await (await conversation.submit({ type: "input", content: "one" }, ctx)).wait(ctx);
+    await (await conversation.submit({ type: "input", content: "two" }, ctx)).wait(ctx);
+    const other = await harness.createConversation({ ownership: { kind: "ownerless" }, agent: { model: MODEL } }, ctx);
+    await (await other.submit({ type: "input", content: "three" }, ctx)).wait(ctx);
+
+    const [first, second, third] = sent;
+    expect(typeof first).toBe("string");
+    expect(second).toBe(first);
+    expect(third).not.toBe(first);
+    // Persisted in the conversation's pi.provider document, so a reopened Harness sends the same one.
+    expect((await harness.snapshot(ProviderDoc, conversation.id, ctx))?.sessionId).toBe(first as string);
     await harness.close(ctx);
   });
 });
