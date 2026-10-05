@@ -1,5 +1,14 @@
 import { expect, test } from "bun:test";
-import { agent, introduction, SKILLS_DIR, skillFiles } from "./starter.ts";
+import { agent, BUNFIG, introduction, PROJECT_REGISTRY, SKILLS_DIR, skillFiles, tsconfig } from "./starter.ts";
+
+test("a project is ready for a registry of its own: tsc and bun test leave registry/ out, and its lib has ES2023", () => {
+  const config = JSON.parse(tsconfig()) as { compilerOptions: { lib: string[] }; exclude: string[] };
+  expect(config.exclude).toContain(PROJECT_REGISTRY);
+  // `Array.prototype.findLast` and `toSorted`, which Bun and workerd have.
+  expect(config.compilerOptions.lib).toEqual(["ES2023"]);
+  expect(BUNFIG).toContain(`[test]\n`);
+  expect(BUNFIG).toContain(`pathIgnorePatterns = ["registry/**"]`);
+});
 
 test("the starter prompt says where the agent is reached: by the channels being installed", () => {
   expect(introduction([{ name: "channel-http" }])).toBe("You are a helpful assistant reached over an HTTP API, by programs and the people behind them.");
