@@ -5,11 +5,12 @@
  */
 
 import { Send } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ErrorNote } from "@/components/pikit/error-note";
+import { usePolling } from "@/lib/activity";
 import { api, type ApiPage, type ApiPendingPiece, type ApiReceipt, type ApiReceiptsPage, useApi } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
 import { defineView } from "@/lib/views";
@@ -17,33 +18,42 @@ import { defineView } from "@/lib/views";
 /** Receipts kept in the page: the most recent ones. */
 const KEPT = 500;
 
-/** Every receipt from the oldest the queue keeps, then each new one, every `everyMs`. */
+/** Every receipt from the oldest the queue keeps, then each new one, every `everyMs` while the dashboard is active. */
 function useReceipts(everyMs: number) {
   const [receipts, setReceipts] = useState<ApiReceipt[]>([]);
   const [gap, setGap] = useState(false);
   const [error, setError] = useState<Error>();
+  const after = useRef<string>(undefined);
+  const live = useRef(true);
+  const reading = useRef(false);
 
-  useEffect(() => {
-    let live = true;
-    let after: string | undefined;
+  const tick = useCallback(() => {
+    if (reading.current) return;
+    reading.current = true;
     const readOn = async () => {
       for (let pages = 0; pages < 20; pages++) {
-        const page = await api<ApiReceiptsPage>(`/delivery/receipts?limit=200${after === undefined ? "" : `&after=${encodeURIComponent(after)}`}`);
-        if (!live) return;
+        const page = await api<ApiReceiptsPage>(`/delivery/receipts?limit=200${after.current === undefined ? "" : `&after=${encodeURIComponent(after.current)}`}`);
+        if (!live.current) return;
         if (page.gap) setGap(true);
         if (page.items.length > 0) setReceipts((kept) => [...kept, ...page.items].slice(-KEPT));
-        after = page.next ?? after;
+        after.current = page.next ?? after.current;
         if (page.items.length < 200) return;
       }
     };
-    const tick = () => readOn().then(() => live && setError(undefined)).catch((thrown: unknown) => live && setError(thrown instanceof Error ? thrown : new Error(String(thrown))));
-    void tick();
-    const timer = setInterval(() => void tick(), everyMs);
+    readOn()
+      .then(() => live.current && setError(undefined))
+      .catch((thrown: unknown) => live.current && setError(thrown instanceof Error ? thrown : new Error(String(thrown))))
+      .finally(() => (reading.current = false));
+  }, []);
+
+  useEffect(() => {
+    live.current = true;
+    tick();
     return () => {
-      live = false;
-      clearInterval(timer);
+      live.current = false;
     };
-  }, [everyMs]);
+  }, [tick]);
+  usePolling(tick, everyMs);
 
   return { receipts, gap, error };
 }

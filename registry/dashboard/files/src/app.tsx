@@ -1,10 +1,11 @@
 /**
- * The dashboard's shell: the operator signs in with the token, then the sidebar lists the views the
- * App's composition allows (src/views/, `visibleViews`) and the page the path names is shown.
+ * The dashboard's shell: the operator signs in with the token once (a session cookie, `lib/api.ts`),
+ * then the sidebar lists the views the App's composition allows (src/views/, `visibleViews`) and the
+ * page the path names is shown. A page that loads with a session still open goes straight in.
  */
 
 import { LogOut } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Separator } from "@/components/ui/separator";
 import {
   Sidebar,
@@ -23,7 +24,8 @@ import {
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { SignIn } from "@/components/pikit/sign-in";
-import { type ApiApp, onUnauthorized, token, useApi } from "@/lib/api";
+import { setTarget } from "@/lib/activity";
+import { api, type ApiApp, ApiFailure, onUnauthorized, signOut } from "@/lib/api";
 import { Link, match, navigate, usePath } from "@/lib/router";
 import { type View, visibleViews } from "@/lib/views";
 
@@ -92,36 +94,38 @@ function Shell({ app, onSignOut }: { app: ApiApp; onSignOut: () => void }) {
   );
 }
 
-function SignedIn({ onSignOut }: { onSignOut: () => void }) {
-  const { data: app, error } = useApi<ApiApp>("/app");
-  if (error !== undefined) return <div className="p-6"><ErrorNote error={error} title="The admin API cannot be read" /></div>;
-  if (app === undefined) return <div className="p-6 text-muted-foreground">Loading…</div>;
-  return <Shell app={app} onSignOut={onSignOut} />;
-}
+type State = { kind: "checking" } | { kind: "signed-out"; refused: boolean } | { kind: "signed-in"; app: ApiApp } | { kind: "failed"; error: Error };
 
 export function App() {
-  const [signedIn, setSignedIn] = useState(token.get() !== null);
-  const [refused, setRefused] = useState(false);
+  const [state, setState] = useState<State>({ kind: "checking" });
 
-  useEffect(
-    () =>
-      onUnauthorized(() => {
-        token.clear();
-        setRefused(true);
-        setSignedIn(false);
-      }),
-    [],
-  );
+  // The composition: with a session still open the page goes straight in; a `401` asks for the token.
+  const enter = useCallback((refused: boolean) => {
+    api<ApiApp>("/app")
+      .then((app) => {
+        setTarget(app.target);
+        setState({ kind: "signed-in", app });
+      })
+      .catch((error: unknown) =>
+        setState(error instanceof ApiFailure && error.status === 401 ? { kind: "signed-out", refused } : { kind: "failed", error: error instanceof Error ? error : new Error(String(error)) }),
+      );
+  }, []);
 
-  const signOut = () => {
-    token.clear();
-    setRefused(false);
-    setSignedIn(false);
-  };
+  useEffect(() => enter(false), [enter]);
+  useEffect(() => onUnauthorized(() => setState({ kind: "signed-out", refused: true })), []);
+
+  const leave = () => void signOut().then(() => setState({ kind: "signed-out", refused: false }));
 
   return (
     <TooltipProvider>
-      {signedIn ? <SignedIn onSignOut={signOut} /> : <SignIn refused={refused} onSignedIn={() => (setRefused(false), setSignedIn(true))} />}
+      {state.kind === "checking" && <div className="p-6 text-muted-foreground">Loading…</div>}
+      {state.kind === "failed" && (
+        <div className="p-6">
+          <ErrorNote error={state.error} title="The admin API cannot be read" />
+        </div>
+      )}
+      {state.kind === "signed-out" && <SignIn refused={state.refused} onSignedIn={() => enter(false)} />}
+      {state.kind === "signed-in" && <Shell app={state.app} onSignOut={leave} />}
     </TooltipProvider>
   );
 }

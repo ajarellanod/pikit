@@ -2,23 +2,28 @@
  * The admin API (admin-api, `/admin/api/*`), from the browser. Its JSON is typed in `admin-api.ts`, an
  * identical copy of admin-api's own `api.ts` (`src/pikit/admin-api/api.ts`): change both together.
  *
- * The operator's token is kept in this browser's localStorage and sent as a bearer token with every
- * call. A browser's `EventSource` cannot send it, so live events are read with `fetch`.
+ * **Signing in** (`signIn`) posts the operator's token once, to `POST /admin/api/session`, which
+ * answers with a session cookie (HttpOnly, SameSite=Strict, sent to `/admin/api/` only, expiring):
+ * the token is kept nowhere, and no script can read the session. `signOut` clears it. Every call
+ * carries the header `x-pikit-admin: 1`, which a page of another site cannot send, so the cookie
+ * alone changes nothing. An `admin.auth` without browser sessions (`404 not_installed`): the token is
+ * kept in this page's memory only, and asked again after a reload.
+ *
+ * A browser's `EventSource` cannot send the header, so live events are read with `fetch`.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePolling } from "./activity.ts";
 import type { ApiError, ApiEvent } from "./admin-api.ts";
 
 export type * from "./admin-api.ts";
 
-const TOKEN_KEY = "pikit.admin-token";
 const API = "/admin/api";
+/** `ADMIN_CLIENT_HEADER` (@pikit/contracts): what makes a call the dashboard's own. */
+const CLIENT_HEADER = "x-pikit-admin";
 
-export const token = {
-  get: (): string | null => localStorage.getItem(TOKEN_KEY),
-  set: (value: string): void => localStorage.setItem(TOKEN_KEY, value),
-  clear: (): void => localStorage.removeItem(TOKEN_KEY),
-};
+/** The token, when the API has no browser sessions: this page's memory only. */
+let memoryToken: string | undefined;
 
 /** An answer that is not a success: its status and the API's error. */
 export class ApiFailure extends Error {
@@ -40,9 +45,37 @@ export function onUnauthorized(listener: () => void): () => void {
 
 function headers(extra?: HeadersInit): Headers {
   const all = new Headers(extra);
-  const value = token.get();
-  if (value !== null) all.set("authorization", `Bearer ${value}`);
+  all.set(CLIENT_HEADER, "1");
+  if (memoryToken !== undefined) all.set("authorization", `Bearer ${memoryToken}`);
   return all;
+}
+
+/**
+ * Signs in with the operator's `token` (PIKIT_ADMIN_TOKEN with admin-auth-token): a session cookie,
+ * or, without browser sessions, the token in memory. Throws an `ApiFailure` (`401`: not the token).
+ */
+export async function signIn(token: string): Promise<void> {
+  const response = await fetch(`${API}/session`, { method: "POST", headers: { [CLIENT_HEADER]: "1", authorization: `Bearer ${token}` } });
+  if (response.ok) {
+    memoryToken = undefined;
+    return;
+  }
+  const body = (await response.json().catch(() => ({ error: `http_${response.status}` }))) as ApiError;
+  if (response.status !== 404 || body.error !== "not_installed") throw new ApiFailure(response.status, body);
+  // No sessions: the token goes with every call, from memory, if the API takes it.
+  memoryToken = token;
+  try {
+    await api("/app");
+  } catch (error) {
+    memoryToken = undefined;
+    throw error;
+  }
+}
+
+/** Signs out: the session cookie cleared (and the token forgotten). */
+export async function signOut(): Promise<void> {
+  memoryToken = undefined;
+  await fetch(`${API}/session`, { method: "DELETE", headers: { [CLIENT_HEADER]: "1" } }).catch(() => undefined);
 }
 
 async function failure(response: Response): Promise<ApiFailure> {
@@ -109,7 +142,7 @@ export interface Loaded<T> {
   reload(): void;
 }
 
-/** `GET path`, again on `reload()`, and every `everyMs` when given. `null` loads nothing. */
+/** `GET path`, again on `reload()`, and every `everyMs` when given while the dashboard is active. `null` loads nothing. */
 export function useApi<T>(path: string | null, everyMs?: number): Loaded<T> {
   const [data, setData] = useState<T>();
   const [error, setError] = useState<Error>();
@@ -131,12 +164,8 @@ export function useApi<T>(path: string | null, everyMs?: number): Loaded<T> {
     };
   }, [path, round]);
 
-  useEffect(() => {
-    if (path === null || everyMs === undefined) return;
-    const timer = setInterval(() => setRound((n) => n + 1), everyMs);
-    return () => clearInterval(timer);
-  }, [path, everyMs]);
-
   const reload = useCallback(() => setRound((n) => n + 1), []);
+  // Only while the operator is here (`activity.ts`).
+  usePolling(reload, path === null ? undefined : everyMs);
   return { data, error, loading, reload };
 }

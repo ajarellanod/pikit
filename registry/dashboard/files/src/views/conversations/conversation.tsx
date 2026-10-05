@@ -1,6 +1,11 @@
 /**
  * One conversation, live: its transcript, the answer being written and the tools running, its cost;
- * and what an operator does to it (SPEC §5): a message that steers the run, an abort, a reset.
+ * and what an operator does to it (SPEC §5): a message, an abort, a reset.
+ *
+ * The dashboard is a channel of its own: a message from here is a follow-up (it waits for a run
+ * going) whose answer stays here. In another channel's conversation nothing said here reaches that
+ * channel's chat (the agent reads that the message is the operator's, and that the user sees neither
+ * it nor the answer); a run that also answers a user's message is delivered to the user, as always.
  */
 
 import { ArrowLeft, Loader2, RotateCcw, Send, Square, Wrench } from "lucide-react";
@@ -22,11 +27,12 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Textarea } from "@/components/ui/textarea";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { type Message, MessageView } from "@/components/pikit/message";
+import { isDashboardKey } from "@/lib/admin-api";
 import { api, type ApiConversation, type ApiPage, type ApiResetResponse, type ApiSendResponse, type ApiTranscriptEntry, post, useApi } from "@/lib/api";
 import { formatCost, formatTokens } from "@/lib/format";
-import { Link, navigate } from "@/lib/router";
+import { Link, navigate, pagePath } from "@/lib/router";
 import { useLive } from "./live";
-import { Status } from "./list";
+import { DashboardBadge, Status } from "./list";
 
 const PAGE = 50;
 
@@ -100,7 +106,7 @@ function Actions({ conversation, busy }: { conversation: ApiConversation; busy: 
                 onClick={() =>
                   void run(async () => {
                     const reset = await post<ApiResetResponse>(`${path}/reset`);
-                    navigate(`/conversations/${encodeURIComponent(reset.conversationId)}`, { replace: true });
+                    navigate(pagePath("/conversations", reset.conversationId), { replace: true });
                   })
                 }
               >
@@ -134,13 +140,9 @@ function Composer({ conversation, busy }: { conversation: ApiConversation; busy:
     setSending(true);
     setError(undefined);
     try {
-      const sent = await post<ApiSendResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/messages`, {
-        text,
-        requestId: `ui:${crypto.randomUUID()}`,
-        whenBusy: "steer",
-      });
+      const sent = await post<ApiSendResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/messages`, { text });
       setText("");
-      setNote(sent.admission === "queued" ? "Sent: it joins the run going at its next step." : "Sent: a run started.");
+      setNote(sent.admission === "queued" ? "Sent: it runs once the run going ends." : "Sent: a run started.");
     } catch (thrown) {
       setError(thrown instanceof Error ? thrown : new Error(String(thrown)));
     } finally {
@@ -153,7 +155,7 @@ function Composer({ conversation, busy }: { conversation: ApiConversation; busy:
       <div className="flex items-end gap-2">
         <Textarea
           value={text}
-          placeholder={busy ? "Steer the run going…" : "Talk to the agent…"}
+          placeholder={busy ? "A follow-up, after the run going…" : "Talk to the agent…"}
           className="min-h-11"
           onChange={(event) => setText(event.target.value)}
           onKeyDown={(event) => {
@@ -165,7 +167,7 @@ function Composer({ conversation, busy }: { conversation: ApiConversation; busy:
         </Button>
       </div>
       <p className="text-xs text-muted-foreground">
-        {note ?? `Your message joins the conversation: its answer also goes to ${conversation.key}'s chat. ⌘/Ctrl+Enter sends.`}
+        {note ?? (isDashboardKey(conversation.key) ? "⌘/Ctrl+Enter sends." : `The answer stays in this dashboard: nothing you say here, nor its answer, is sent to ${conversation.key}'s chat. ⌘/Ctrl+Enter sends.`)}
       </p>
       {error !== undefined && <ErrorNote error={error} title="Not sent" />}
     </div>
@@ -205,13 +207,14 @@ export function ConversationPage({ params }: { params: Record<string, string> })
           <h1 className="text-xl font-semibold">{conversation.key ?? conversation.conversationId}</h1>
           <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             {conversation.agent !== undefined && <Badge variant="outline">{conversation.agent}</Badge>}
+            <DashboardBadge conversation={conversation} />
             <Status conversation={{ ...conversation, busy: live.busy }} />
             <span className="tabular-nums">
               {formatCost(conversation.usage)} · {formatTokens(conversation.usage.totalTokens)} tokens
             </span>
             <span className="flex items-center gap-1">
               <span className={`size-2 rounded-full ${live.connected ? "bg-emerald-500" : "bg-muted-foreground/40"}`} />
-              {live.connected ? "live" : "reconnecting"}
+              {live.paused ? "paused while you are away" : live.connected ? "live" : "reconnecting"}
             </span>
           </div>
         </div>

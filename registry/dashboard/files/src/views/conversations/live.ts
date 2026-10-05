@@ -4,9 +4,14 @@
  * and a client that fell behind gets a new one, so the state is rebuilt from each snapshot, never from
  * a count of events. What is written for good (entries) is read from the transcript again: `changes`
  * counts the times it changed.
+ *
+ * The stream is open only while the dashboard is active (`useActive`: the tab visible, the operator
+ * there in the last minutes); it reconnects when it ends (on Cloudflare after a bounded number of
+ * polled snapshots) and when the operator comes back.
  */
 
 import { useEffect, useReducer } from "react";
+import { useActive } from "@/lib/activity";
 import { type ApiEvent, follow } from "@/lib/api";
 import type { Message } from "@/components/pikit/message";
 
@@ -113,11 +118,13 @@ function reduce(state: LiveState, action: Action): LiveState {
   }
 }
 
-/** Follows conversation `id` live while mounted, reconnecting after a dropped stream. */
-export function useLive(id: string): LiveState {
+/** Follows conversation `id` live while mounted and active, reconnecting after a dropped stream. */
+export function useLive(id: string): LiveState & { paused: boolean } {
   const [state, dispatch] = useReducer(reduce, INITIAL);
+  const active = useActive();
 
   useEffect(() => {
+    if (!active) return;
     const stop = new AbortController();
     void (async () => {
       while (!stop.signal.aborted) {
@@ -133,7 +140,7 @@ export function useLive(id: string): LiveState {
       }
     })();
     return () => stop.abort();
-  }, [id]);
+  }, [id, active]);
 
-  return state;
+  return { ...state, paused: !active };
 }

@@ -1,6 +1,10 @@
 /**
- * A small router over the History API, under /admin (admin-api answers every page with index.html).
- * Paths here are relative to /admin: `/conversations/abc` is `/admin/conversations/abc`.
+ * A small router over the History API, under /admin (admin-api answers every path but `/admin/assets/`
+ * and its files with index.html, so a reload of any page works). Paths here are relative to /admin:
+ * `/conversations/abc` is `/admin/conversations/abc`.
+ *
+ * A parameter is one path segment, encoded in a link (`encodeURIComponent`: an id such as
+ * `email:ana@empresa.com~1` or one with `/`) and decoded by `match`.
  */
 
 import { type AnchorHTMLAttributes, useSyncExternalStore } from "react";
@@ -41,10 +45,20 @@ export function match(pattern: string, pathname: string): Record<string, string>
   const params: Record<string, string> = {};
   for (const [i, segment] of want.entries()) {
     const value = have[i] ?? "";
-    if (segment.startsWith(":")) params[segment.slice(1)] = decodeURIComponent(value);
-    else if (segment !== value) return undefined;
+    if (segment.startsWith(":")) {
+      try {
+        params[segment.slice(1)] = decodeURIComponent(value);
+      } catch {
+        return undefined;
+      }
+    } else if (segment !== value) return undefined;
   }
   return params;
+}
+
+/** The path of a page with `id` as one segment: `pagePath("/conversations", id)`. */
+export function pagePath(base: string, id: string): string {
+  return `${base}/${encodeURIComponent(id)}`;
 }
 
 /** A link inside the dashboard: `to` is relative to /admin. */

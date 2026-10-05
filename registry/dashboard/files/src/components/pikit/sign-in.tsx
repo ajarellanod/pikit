@@ -3,26 +3,25 @@ import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
-import { api, ApiFailure, token } from "@/lib/api";
+import { ApiFailure, signIn } from "@/lib/api";
 
 /**
- * Asks for the operator's token (PIKIT_ADMIN_TOKEN with admin-auth-token), checks it against the API
- * and keeps it in this browser.
+ * Asks for the operator's token (PIKIT_ADMIN_TOKEN with admin-auth-token) and signs in with it once:
+ * the browser keeps a session cookie no script can read, never the token.
  */
 export function SignIn({ onSignedIn, refused = false }: { onSignedIn: () => void; refused?: boolean }) {
   const [value, setValue] = useState("");
-  const [problem, setProblem] = useState<string | undefined>(refused ? "The API refused the token: sign in again." : undefined);
+  const [problem, setProblem] = useState<string | undefined>(refused ? "The session ended: sign in again." : undefined);
   const [checking, setChecking] = useState(false);
 
   const submit = async () => {
     setChecking(true);
     setProblem(undefined);
-    token.set(value.trim());
     try {
-      await api("/app");
+      await signIn(value.trim());
+      setValue("");
       onSignedIn();
     } catch (error) {
-      token.clear();
       setProblem(error instanceof ApiFailure && error.status === 401 ? "That is not the operator's token." : `The API cannot be reached: ${String(error)}`);
     } finally {
       setChecking(false);
@@ -36,7 +35,7 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: () => void
           <CardTitle className="flex items-center gap-2">
             <KeyRound className="size-4" /> pikit
           </CardTitle>
-          <CardDescription>Paste the operator's token (PIKIT_ADMIN_TOKEN). It stays in this browser.</CardDescription>
+          <CardDescription>Paste the operator's token (PIKIT_ADMIN_TOKEN). It is sent once; this browser keeps a session, not the token.</CardDescription>
         </CardHeader>
         <CardContent>
           <form
