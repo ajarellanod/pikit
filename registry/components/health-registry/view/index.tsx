@@ -20,7 +20,9 @@ type HealthView = {
   status: Status;
   components: { name: string; status: Status; reason?: string; since: number; essential: boolean }[];
   essential: string[];
+  /** This process's grace: longer after `down` verdicts in a row that restarts did not fix. */
   graceMs: number;
+  downVerdicts: number;
   now: number;
 };
 
@@ -45,6 +47,8 @@ function HealthPage() {
           What each component reported last. An essential component ({data.essential.length === 0 ? "none is" : data.essential.join(", ")}) down for{" "}
           {Math.round(data.graceMs / 1000)} s makes the App down, and its <code>/health</code> fails so that the process is restarted; anything else
           down or degraded makes it degraded.
+          {data.downVerdicts > 0 &&
+            ` The App was found down ${data.downVerdicts} time(s) in a row and the restarts did not fix it: the grace grew, so an outage outside it restarts it less often.`}
         </CardDescription>
       </CardHeader>
       <CardContent>
