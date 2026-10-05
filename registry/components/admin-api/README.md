@@ -16,8 +16,8 @@ installed; it also stands on its own, for a script or an agent that reads the se
 
 Every route under `/admin/api/` asks `admin.auth` first: without an operator's credential
 (`Authorization: Bearer <PIKIT_ADMIN_TOKEN>` with admin-auth-token) the answer is `401`. The JSON of
-every answer is typed in `api.ts`, which the dashboard imports as types; an error is
-`{ error, message? }`.
+every answer is typed in `api.ts`, of which the dashboard keeps an identical copy
+(`src/dashboard/src/lib/admin-api.ts`); an error is `{ error, message? }`.
 
 | Route | Answer |
 |---|---|
