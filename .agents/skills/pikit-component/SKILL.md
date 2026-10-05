@@ -78,6 +78,12 @@ Write its conformance suite next to it (a function returning `ConformanceCase[]`
 `create…Conformance` do). Redeclaring a kit kind or capability is refused. Never a private coupling
 between two components: what one needs from another is a capability.
 
+**How big.** One component per thing whose removal takes away something an agent's `tools` or `model`
+list does not already control: an import, a dependency, a secret, a config block, a table or timer, a
+target, or a risk class (replay safe or unsafe, a shell, the network). Two tools of different risk are
+two components; one per model provider. Build on another's capability, never copy it; a bundle is a
+preset (`{{PIKIT_ROOT}}/features/building-components.md`, "How big a component is").
+
 ## 2. Copy the reference of its kind
 
 | Kind | Reference | What it teaches |

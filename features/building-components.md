@@ -13,6 +13,21 @@ A user who wants memory, routines, approvals or WhatsApp asks their AI agent to 
 project, and gets a component that composes, passes its contract's suite, survives crashes and can
 be shared, without learning pikit's internals first.
 
+## How big a component is (decided)
+A component is the smallest unit whose removal takes away something an agent's own `tools` or
+`model` list does not already control: an import or registration, an npm dependency, a secret or
+variable, a config block, a table or timer, a target constraint, or a risk class (replay safe or
+unsafe, needs a shell, reaches the network).
+- **Merge** only parts identical on all of these that must share one resource (one alarm:
+  `platform-cloudflare`).
+- **Split** when a target, a risk class or a heavy dependency differs: `tool-read` (safe) apart from
+  `tool-write` and `tool-edit` (unsafe), and `tool-bash` (a shell); one `provider-*` per model
+  provider, since targets and variables differ and the manifest must say so.
+- **Build on a capability, never copy its provider**: `workspace-local` uses `execution`.
+- **Decisions live in the component's source** (a tool's `replay`, a policy, a default); the kit holds
+  only what changes when Pi changes and must be the same in every project (SPEC §3.3).
+- **Components never depend on components.** A bundle is a preset.
+
 ## How a component is made (today)
 1. **Pick the contract.** A component provides capabilities (`provides`) and uses others
    (`requires`, `optional`). The kit's shared vocabulary is in `@pikit/contracts` (and in
