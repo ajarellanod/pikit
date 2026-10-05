@@ -16,7 +16,7 @@
 import type { AppExec } from "./deployment-module.ts";
 import type { CredentialsResult } from "./credentials.ts";
 import { modelProvider } from "./references.ts";
-import { readProjectManifest } from "./pikit-json.ts";
+import { type ProjectManifest, readProjectManifest } from "./pikit-json.ts";
 import type { ProbeResult } from "./probe.ts";
 import { probe, runScript, runScriptInApp } from "./run.ts";
 import { CliError } from "../ui.ts";
@@ -75,9 +75,23 @@ export function providersNamed(result: ProbeResult): Set<string> | undefined {
  * and when it provides several providers, whose variables one list cannot tell apart.
  */
 export function apiKeyVariable(projectDir: string, checked: Pick<CheckedCredentials, "owners">, providerId: string): string | undefined {
+  return keyVariableOf(readProjectManifest(projectDir).components, checked, providerId);
+}
+
+/** `apiKeyVariable`, from the installed components' records (`pikit.json`'s `components`). */
+export function keyVariableOf(components: ProjectManifest["components"], checked: Pick<CheckedCredentials, "owners">, providerId: string): string | undefined {
   const owner = checked.owners[providerId];
   if (owner === undefined || Object.values(checked.owners).filter((o) => o === owner).length > 1) return undefined;
-  return readProjectManifest(projectDir).components[owner]?.environment.find((variable) => variable.secret)?.name;
+  return components[owner]?.environment.find((variable) => variable.secret)?.name;
+}
+
+/**
+ * Whether `pikit configure --login <id>` can work: pi-ai has an OAuth login for it
+ * (`provider.auth.oauth`), and the project has a `model.credentials` component to store it in (on
+ * Cloudflare there is none: a key only).
+ */
+export function canLogIn(checked: Pick<CheckedCredentials, "store" | "oauth">, providerId: string): boolean {
+  return checked.store !== undefined && checked.oauth.includes(providerId);
 }
 
 /** How to set a provider's key, for a message: `set ANTHROPIC_API_KEY in .env`, or the component's README. */
