@@ -25,7 +25,8 @@ components:
   - conversations-file
   - router-basic
   # A chat channel chosen instead brings durable delivery with it (`outbound.queue` is offered by
-  # `pikit add`): channel-http answers in the HTTP response and needs none.
+  # `pikit add`, with wakeups-timers to wake its retries): channel-http answers in the HTTP response
+  # and needs none.
   - channel-http
   - server-bun
   - log-events

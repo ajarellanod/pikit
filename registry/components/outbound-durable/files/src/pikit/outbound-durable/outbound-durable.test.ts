@@ -8,7 +8,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createOutboundQueueConformance } from "@pikit/contracts/testing";
+import { createMemoryWakeups, createOutboundQueueConformance } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
 import { BACKOFF_MS, MAX_AGE_MS } from "./queue.ts";
 import { testStorage } from "./storage.test-support.ts";
@@ -27,12 +27,12 @@ function temporaryDatabase(): string {
 // The outbound.queue contract (@pikit/contracts' outbound.ts): order, retries, abandonment, duplicates, restarts.
 // The suite holds this component to its own retry policy (queue.ts).
 const retry = { waitsMs: BACKOFF_MS, maxAgeMs: MAX_AGE_MS };
-for (const c of createOutboundQueueConformance(() => ({ components: [testStorage(temporaryDatabase()), outboundDurable] }), { retry })) {
+for (const c of createOutboundQueueConformance(() => ({ components: [testStorage(temporaryDatabase()), createMemoryWakeups(), outboundDurable] }), { retry })) {
   test(`outbound-durable ${c.group}: ${c.name}`, () => c.run());
 }
 
 // Start and stop honour their deadline.
 const lifecycleDatabase = temporaryDatabase();
-for (const c of createLifecycleConformance(() => ({ component: outboundDurable, providers: [testStorage(lifecycleDatabase)] }))) {
+for (const c of createLifecycleConformance(() => ({ component: outboundDurable, providers: [testStorage(lifecycleDatabase), createMemoryWakeups()] }))) {
   test(`outbound-durable ${c.group}: ${c.name}`, () => c.run());
 }

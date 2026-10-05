@@ -6,6 +6,7 @@
 
 import { writeFileSync } from "node:fs";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { createMemoryWakeups } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
 import { testStorage } from "./storage.test-support.ts";
 
@@ -33,5 +34,5 @@ const channel = defineComponent({
   },
 });
 
-const app = await defineApp({ components: [testStorage(database), outboundDurable, channel], logger: silentLogger }).create();
+const app = await defineApp({ components: [testStorage(database), createMemoryWakeups(), outboundDurable, channel], logger: silentLogger }).create();
 await app.start();

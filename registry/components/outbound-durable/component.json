@@ -11,7 +11,8 @@
     "pikit": "0.0.0",
     "contracts": "0.0.0",
     "capabilities": [
-      "storage.sql"
+      "storage.sql",
+      "wakeups"
     ]
   },
   "optional": {
