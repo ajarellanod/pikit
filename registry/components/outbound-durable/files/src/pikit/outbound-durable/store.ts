@@ -9,7 +9,7 @@
  * @pikit/contracts' feed.ts).
  */
 
-import type { DeliveryReceipt, FeedPage, SqlDatabase, SqlRow, SqlStatements } from "@pikit/contracts";
+import type { DeliveryReceipt, FeedPage, ObservedPage, PendingPiece, SqlDatabase, SqlRow, SqlStatements } from "@pikit/contracts";
 
 /** `pending` → `sending` → `delivered` | `abandoned` (@pikit/contracts' outbound.ts). */
 export type PieceState = "pending" | "sending" | "delivered" | "abandoned";
@@ -62,7 +62,26 @@ interface ReceiptRow extends SqlRow {
   at: number;
 }
 
+interface PendingRow extends SqlRow {
+  seq: number;
+  key: string;
+  channel: string;
+  conversation_key: string;
+  state: string;
+  attempts: number;
+  next_attempt_at: number;
+  possible_duplicate: number;
+  last_error: string | null;
+  created_at: number;
+}
+
 const COLUMNS = "seq, key, channel, conversation_key, text, state, attempts, failures, next_attempt_at, possible_duplicate, created_at";
+
+/** `pending`'s page when it names none, and the most it gives. */
+export const PENDING_PAGE = 50;
+export const PENDING_MAX_PAGE = 500;
+/** `PendingPiece.lastError` is cut to this many characters: a short reason, not a platform's whole answer. */
+const LAST_ERROR_LENGTH = 200;
 
 /**
  * The schema, one step per version. `outbound_meta.schema_version` says how many have run; each runs
@@ -194,7 +213,9 @@ export function createStore(db: SqlDatabase) {
      * may have reached the platform, so they go back to `pending` as possible duplicates.
      */
     async recoverInterrupted(): Promise<number> {
-      return (await db.run("UPDATE outbound_pieces SET state = 'pending', possible_duplicate = 1 WHERE state = 'sending'")).changes;
+      return (
+        await db.run("UPDATE outbound_pieces SET state = 'pending', possible_duplicate = 1, last_error = 'the process stopped while sending' WHERE state = 'sending'")
+      ).changes;
     },
 
     /** The first open piece of every conversation: only a conversation's head may be sent. */
@@ -252,6 +273,23 @@ export function createStore(db: SqlDatabase) {
       });
     },
 
+    /** `OutboundQueue.pending`: the open pieces after the cursor (a `seq`), oldest first; no text. */
+    async readPending(page: { limit?: number; cursor?: string }): Promise<ObservedPage<PendingPiece>> {
+      const limit = page.limit ?? PENDING_PAGE;
+      if (!Number.isSafeInteger(limit) || limit < 1) throw new Error(`outbound-durable: a page's limit is a positive integer, not ${limit}`);
+      if (page.cursor !== undefined && !/^\d+$/.test(page.cursor)) throw new Error(`outbound-durable: "${page.cursor}" is not a cursor of pending()`);
+      const size = Math.min(limit, PENDING_MAX_PAGE);
+      // One row more than the page: whether there is a next one.
+      const rows = await db.query<PendingRow>(
+        `SELECT seq, key, channel, conversation_key, state, attempts, next_attempt_at, possible_duplicate, last_error, created_at
+         FROM outbound_pieces WHERE state IN ('pending', 'sending') AND seq > ? ORDER BY seq LIMIT ?`,
+        [page.cursor === undefined ? 0 : Number(page.cursor), size + 1],
+      );
+      const items = rows.slice(0, size);
+      const last = items.at(-1);
+      return rows.length > size && last !== undefined ? { items: items.map(toPending), next: String(last.seq) } : { items: items.map(toPending) };
+    },
+
     /** `OutboundQueue.receipts.read`: receipts after `after`, and whether some after it were pruned. */
     async readReceipts(after: string | undefined, limit: number): Promise<FeedPage<DeliveryReceipt>> {
       if (!Number.isInteger(limit) || limit < 1) throw new Error(`outbound-durable: limit must be an integer of at least 1, got ${limit}`);
@@ -290,6 +328,27 @@ function toReceipt(row: ReceiptRow): DeliveryReceipt {
         ? { kind: "delivered", platformMessageId: row.platform_message_id ?? "", possibleDuplicate: row.possible_duplicate === 1 }
         : { kind: "abandoned", reason: row.reason ?? "" },
     at: row.at,
+  };
+}
+
+function toPending(row: PendingRow): PendingPiece {
+  const { idempotencyKey, index } = splitKey(row.key);
+  const sending = row.state === "sending";
+  const lastError = row.last_error ?? undefined;
+  return {
+    idempotencyKey,
+    index,
+    channel: row.channel,
+    conversationKey: row.conversation_key,
+    // `pending` in the table: never tried, or tried and waiting to be sent again.
+    state: sending ? "sending" : row.attempts > 0 ? "retrying" : "queued",
+    attempts: row.attempts,
+    ...(!sending && { nextAttemptAt: row.next_attempt_at }),
+    ...(lastError !== undefined && {
+      lastError: lastError.length > LAST_ERROR_LENGTH ? `${lastError.slice(0, LAST_ERROR_LENGTH - 1)}…` : lastError,
+    }),
+    possibleDuplicate: row.possible_duplicate === 1,
+    storedAt: row.created_at,
   };
 }
 

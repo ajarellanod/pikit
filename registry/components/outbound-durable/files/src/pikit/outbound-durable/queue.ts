@@ -91,6 +91,7 @@ export function createQueue(options: QueueOptions) {
       signal?.removeEventListener("abort", abort);
     },
     receipts: { read: (after, limit) => store.readReceipts(after, limit) },
+    pending: (page) => store.readPending(page),
   };
 
   /** One send of `piece` and what comes of it. Never rejects. */
