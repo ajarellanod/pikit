@@ -8,7 +8,7 @@ Talk to your agent in Telegram: send your bot a message, get the answer in the c
   (`storage-kv-sql`, which `pikit add` brings: its place in them). A router (such as
   `router-basic`) picks the agent.
 - **Uses, if installed:** `outbound.queue` (answers stored before they are sent, with receipts):
-  "Sending" below.
+  "Sending" below; `health` (`health-registry`): "Health" below.
 - **Target:** `server`: it receives messages by long polling, which needs a process that keeps
   running.
 - **Installs to:** `src/pikit/channel-telegram/`.
@@ -120,6 +120,16 @@ Each name in `accounts` adds a bot of its own:
 If one bot cannot start (a missing token, a webhook), the channel does not start, and no bot keeps
 polling.
 
+## Health
+
+With `health-registry` installed, each bot reports whether it receives messages: the default one as
+`channel-telegram`, a named one as `channel-telegram:<name>` (`channel-telegram:ops`). A bot is `up`
+once it starts and after each `getUpdates` that answered, `degraded` after one that failed
+(`getUpdates failed: 409`), and `down` after 5 failures in a row (`DOWN_AFTER_FAILURES` in
+`poller.ts`, about 15 s of retries: `getUpdates failed 5 times: 401`). The reason names Telegram's
+code, or `unreachable`, never the token. To restart the process when a bot stays down, list its name
+in health-registry's `essential`.
+
 ## Tests
 
 The tests are copied with the component and run in your project against `fake-telegram.ts`, a
@@ -129,7 +139,7 @@ local stand-in of the Bot API: no bot, token or network needed.
   acknowledgement at stop, the lifecycle conformance suite and the start failures; answers from
   the feed, one that ended while the channel was stopped delivered at the next start (and only
   then), a failed enqueue or send tried again, a send the stop aborted sent at the next start,
-  answers of other channels skipped.
+  answers of other channels skipped; each bot's health reports, and down after 5 failed polls.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
   channel does with a message (routed, deduplicated, stopped, denied, no router), and what comes with
   durability (an answer that ended while stopped or whose event was lost, delivered once; a failed

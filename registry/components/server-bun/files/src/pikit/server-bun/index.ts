@@ -3,7 +3,11 @@
  *
  * It serves every `http.route` that other components provide (a channel's webhook, an admin page),
  * plus two routes of its own:
- * - `GET /health`: 200 while the process can answer at all. A supervisor restarts on failure.
+ * - `GET /health`: `{ status }`, the App's health. Without a `health` provider, 200 `up` while the
+ *   process can answer at all; with one (health-registry), its snapshot's status: 200 `up` or
+ *   `degraded`, and 503 `down` once an essential component stayed down past its grace. A supervisor
+ *   restarts the process on a failure. Which component and why are for operators (the admin API),
+ *   not this unauthenticated route.
  * - `GET /ready`: 200 only once every component has started (`runtime.ready`), and 503 before that
  *   and from the moment the app starts stopping. A load balancer sends traffic only when it is 200.
  *
@@ -51,6 +55,8 @@ export function createServerBun(options: ServerBunOptions = {}) {
     config: Config,
     setup(pikit, config) {
       const routes = pikit.useKeyed("http.route");
+      // Optional: with it, /health is what the components report (@pikit/contracts' health.ts).
+      const health = pikit.useOptional("health");
 
       // Events only flip a flag: the server itself is opened in start and closed in stop.
       let ready = false;
@@ -73,7 +79,10 @@ export function createServerBun(options: ServerBunOptions = {}) {
           const shutdown = new AbortController();
 
           const app = new Hono();
-          app.get("/health", (c) => c.json({ status: "ok" }));
+          app.get("/health", (c) => {
+            const status = health.get()?.snapshot().status ?? "up";
+            return c.json({ status }, status === "down" ? 503 : 200);
+          });
           app.get("/ready", (c) => (ready ? c.json({ status: "ready" }) : c.json({ status: "not_ready" }, 503)));
           const table: (HttpRouteKey & { key: string })[] = [];
           for (const key of routes.keys()) {

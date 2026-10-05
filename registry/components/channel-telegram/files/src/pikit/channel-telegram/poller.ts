@@ -10,13 +10,20 @@
  * the update again after the restart, and the conversation recognises it as a duplicate by its
  * request id, so it is answered once. An update whose handling keeps failing is skipped after a
  * few attempts, so one bad message cannot stop the bot.
+ *
+ * Health (with a `health` provider): the bot is `up` after each `getUpdates` that answered,
+ * `degraded` after one that failed, and `down` after `DOWN_AFTER_FAILURES` in a row. The reason
+ * names the failure by Telegram's code only (`getUpdates failed 5 times: 401`), never the token.
  */
 
 import type { Logger } from "@pikit/core";
+import type { HealthReporter } from "@pikit/contracts";
 import { type TelegramApi, TelegramError, type TelegramUpdate } from "./api.ts";
 
 const ATTEMPTS_PER_UPDATE = 3;
 const LONGEST_BACKOFF_MS = 30_000;
+/** `getUpdates` failures in a row after which the bot is `down`: about 15 s of backoff, past a blip. */
+export const DOWN_AFTER_FAILURES = 5;
 
 export interface Poller {
   /** Stop polling: the request in flight is cancelled, the update being handled finishes. */
@@ -28,8 +35,13 @@ export function startPolling(options: {
   timeoutSeconds: number;
   handle(update: TelegramUpdate): Promise<void>;
   logger: Logger;
+  /** Where the bot reports its state; none without a `health` provider. */
+  health?: HealthReporter;
+  /** The wait after a first failed `getUpdates`, doubled after each next one up to 30 s. */
+  firstRetryMs?: number;
 }): Poller {
-  const { api, handle, logger } = options;
+  const { api, handle, logger, health } = options;
+  const firstRetryMs = options.firstRetryMs ?? 1000;
   const stopping = new AbortController();
   const sleep = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -51,12 +63,16 @@ export function startPolling(options: {
       try {
         updates = await api.getUpdates({ ...(offset !== undefined && { offset }), timeout: options.timeoutSeconds }, stopping.signal);
         failures = 0;
+        health?.up();
       } catch (error) {
         if (stopping.signal.aborted) break;
         failures++;
         logger.warn("channel-telegram: could not receive updates", { error: String(error), hint: hintFor(error) });
+        const reason = `getUpdates failed${failures > 1 ? ` ${failures} times` : ""}: ${failureCode(error)}`;
+        if (failures >= DOWN_AFTER_FAILURES) health?.down(reason);
+        else health?.degraded(reason);
         const retryAfter = error instanceof TelegramError ? error.retryAfter : undefined;
-        await sleep(retryAfter !== undefined ? retryAfter * 1000 : Math.min(LONGEST_BACKOFF_MS, 1000 * 2 ** (failures - 1)));
+        await sleep(retryAfter !== undefined ? retryAfter * 1000 : Math.min(LONGEST_BACKOFF_MS, firstRetryMs * 2 ** (failures - 1)));
         continue;
       }
       for (const update of updates) {
@@ -87,6 +103,12 @@ export function startPolling(options: {
       if (offset !== undefined) await api.getUpdates({ offset, timeout: 0 }, signal).catch(() => {});
     },
   };
+}
+
+/** What failed, for an operator: Telegram's code, `unreachable`, or the error's name. Never its message, which could quote a URL. */
+function failureCode(error: unknown): string {
+  if (error instanceof TelegramError) return error.code === 0 ? "unreachable" : String(error.code);
+  return error instanceof Error ? error.name : "error";
 }
 
 function hintFor(error: unknown): string | undefined {

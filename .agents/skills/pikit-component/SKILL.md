@@ -43,6 +43,7 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | Run later, at least once | `wakeups` (`handle(name, handler)` in `start`, `at(name, time)`) |
 | Deliver to a platform, retried | `outbound.queue` (through `startAnswerDelivery` for a channel) |
 | Talk to a busy conversation | `agent.runtime`'s `dispatch` with `whenBusy: "steer"` (into the run's current round) |
+| Say that it broke after `start` (a stuck poller) | `useOptional("health")`: `reporter(name)`'s `up` / `degraded` / `down` |
 
 Pi's own shapes are in `@pikit/pi-adapter`: `execution`, `workspace`, `model.provider`,
 `model.credentials`, `agent.extension`.
@@ -163,7 +164,7 @@ From `@pikit/contracts/testing`: `createChannelConformance`, `createHttpRouteCon
 `createSqlDatabaseConformance`, `createKeyValueConformance`, `createConversationRegistryConformance`,
 `createAdminAuthConformance`, `createAgentObserveConformance`, `createWakeupsConformance`,
 `createMailboxConformance`, `createSecretStoreConformance`, `createOutboundQueueConformance`,
-`createFeedConformance`; doubles: `createMemoryMailbox()`, `createMemoryKeyValueStorage()`,
+`createFeedConformance`, `createHealthConformance`; doubles: `createMemoryMailbox()`, `createMemoryKeyValueStorage()`,
 `createMemoryWakeups()`, `createMemorySubmissions()`. `createLifecycleConformance` from
 `@pikit/core/testing` when it owns resources. A channel's suite includes the durability cases it must
 pass: an answer that ends while the channel is stopped, or whose event was lost, reaches its sender

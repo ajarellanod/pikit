@@ -43,6 +43,8 @@ export const KINDS: readonly string[] = [
   "platform",
   // Agent behaviour as a Pi extension (`agent.extension`): `extension-house-rules`.
   "extension",
+  // What is up, degraded or down (`health`): `health-registry`.
+  "health",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */

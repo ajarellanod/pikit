@@ -111,6 +111,12 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Whether an HTTP request is an operator's: what every admin route (the dashboard's) asks before answering.",
   },
+  health: {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "What is up, degraded or down: components report their own state, and /health fails when an essential one stays down.",
+  },
   "conversations.registry": {
     mode: "single",
     definedIn: "@pikit/contracts",
