@@ -10,6 +10,7 @@
 - In an edit's oldText/newText, write non-ASCII characters literally (`§`, `⭐`, `…`), never as `\u00a7`-style escapes: an escape matches nothing (or lands literally in the file), and a garbled oldText can still match a nearby span loosely and replace it. After any surprising "replaced", reread the block.
 - In edit-tool text, write non-ASCII characters (`…`, `→`) literally, never as a doubly escaped `\\u2026`: that lands in the file as the six characters `\u2026`. After editing docs, `rg 'u20[0-9a-f]{2}'` the files.
 - Twice in one session the edit tool still wrote `\u00a7` as six characters despite the lessons above. For text with `§` or `…`, write the edit from `js_exec` (`String.fromCharCode(0xa7)`, a unique-match check before replacing), then `rg 'u00a7|u20[0-9a-f]{2}'` the files.
+- Other agents may work in this same checkout. Touch only files you created or were asked to change, and commit by explicit paths (`git add <your paths>`), never `git add -A` or `git commit -a`: once that swept another agent's draft into a commit.
 - pikit is unreleased: never add backward compatibility (aliases, old-format readers, migrations from earlier schemas, "start fresh" handling for old data). Rename and change freely; only provider names (Cloudflare, Docker…) stay as they are, because that is where it deploys.
 
 # Downloaded references

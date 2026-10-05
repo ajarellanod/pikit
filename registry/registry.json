@@ -1,6 +1,14 @@
 {
   "version": 1,
   "components": {
+    "admin-api": {
+      "version": "0.0.0",
+      "description": "The operator's HTTP API: the composition, conversations, transcripts, live events, messages, abort and reset; serves the dashboard's built files.",
+      "targets": [
+        "server"
+      ],
+      "path": "components/admin-api"
+    },
     "admin-auth-token": {
       "version": "0.0.0",
       "description": "Who is an operator: a request carrying the bearer token PIKIT_ADMIN_TOKEN. What admin routes (the dashboard) ask before answering.",

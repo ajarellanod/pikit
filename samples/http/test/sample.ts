@@ -26,6 +26,8 @@ import toolRead from "../../../registry/components/tool-read/files/src/pikit/too
 import toolWrite from "../../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
 
 export const TOKEN = "sample-test-token-0123456789abcdef";
+/** The operators' token (`PIKIT_ADMIN_TOKEN`), for tests that add admin-auth-token. */
+export const ADMIN_TOKEN = "sample-admin-token-0123456789abcdef";
 
 export interface SampleOptions {
   /** The agents; the first one is the router's default. */
@@ -65,7 +67,7 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
 
   const app = await defineApp({
     components: [
-      createSecretsEnv({ env: { PIKIT_HTTP_TOKEN: TOKEN } }),
+      createSecretsEnv({ env: { PIKIT_HTTP_TOKEN: TOKEN, PIKIT_ADMIN_TOKEN: ADMIN_TOKEN } }),
       conversationsFile,
       provider,
       agents,

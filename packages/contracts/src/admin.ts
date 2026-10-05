@@ -1,6 +1,8 @@
 /**
- * `admin.auth`: whether an HTTP request is an operator's. Every admin route (the dashboard's API and
- * assets, a component's own view, SPEC §5) asks it before answering, and answers `401` when it says no:
+ * `admin.auth`: whether an HTTP request is an operator's. Every admin API route (admin-api's, a
+ * component's own, SPEC §5) asks it before answering, and answers `401` when it says no (the
+ * dashboard's built files hold no data and are served without it: a browser's navigation sends no
+ * header, and the page asks the operator for the credential):
  *
  *   const operator = await auth.get().verify(request, ctx);
  *   if (operator === undefined) return new Response("unauthorized", { status: 401, headers: { "www-authenticate": "Bearer" } });
