@@ -98,7 +98,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
    ```
 
    (`ConversationRef.conversationId` is the pi-durable conversation, renamed from `sessionId` with
-   the [move to pi-durable](pi-durable-migration.md); the address's `conversationId` is the
+   the [move to pi-durable](completed/pi-durable-migration.md); the address's `conversationId` is the
    platform's, as on `InboundMessage`.)
 
    `RunSettlement`, `SubmissionStatus` and `PendingConversation` carry a `ConversationRef`

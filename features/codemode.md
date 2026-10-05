@@ -61,7 +61,7 @@ with the move to pi-durable, whose own extensions will replace them).
 ## Open questions
 - **The nested-call path.** pi-agent-core exports `runToolCall` (the `agent-loop` pipeline), but the
   harness pikit drives exposes no way to run one call through its own hooks from inside a tool. Ask
-  Pi for it, or wait for `pi-durable` ([pi-durable-migration](pi-durable-migration.md)).
+  Pi for it, or wait for `pi-durable` ([pi-durable-migration](completed/pi-durable-migration.md)).
 - **Late tools.** Supporting them means changing a conversation's harness tools after it opened
   (`harness.setTools`) without breaking the provider's prompt cache or the agent's tool set.
 - **Where scripts persist.** `store`/`load` values as `codemode-store` session entries, as Pi does,
