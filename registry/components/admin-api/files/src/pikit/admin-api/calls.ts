@@ -6,35 +6,36 @@
  *
  * | Type | Message | Answer |
  * |---|---|---|
- * | `admin-api.app` | — | `ApiApp`: this App's composition |
- * | `admin-api.conversations` | — | `ApiConversation[]`: every conversation of this object (its current one and those a reset left behind) |
+ * | `admin-api.app` | — | `ApiApp`: this App's composition, secrets redacted |
  * | `admin-api.conversation` | `{ conversationId }` | `ApiConversation` |
  * | `admin-api.transcript` | `{ conversationId, limit?, cursor? }` | `ApiPage<ApiTranscriptEntry>` |
  * | `admin-api.snapshot` | `{ conversationId }` | `ApiEvent`: the first event of its live events |
  * | `admin-api.usage` | `{ conversationId }` | `ApiUsage` |
- * | `admin-api.message` | `{ conversationId, text, requestId, whenBusy }` | `{ requestId, admission }` |
+ * | `admin-api.message` | `{ conversationId, text, requestId }` | `{ requestId, admission }`: the operator's follow-up |
+ * | `admin-api.start` | `{ agent, text, requestId }`, to the object of a `dashboard:` key | `ApiStartResponse`: the dashboard's own conversation |
  * | `admin-api.abort` | `{ conversationId }` | `{ conversationId }` |
  * | `admin-api.reset` | `{ conversationId }` | `ApiResetResponse` |
  * | `admin-api.list` | `{ limit, cursor? }` | `IndexPage` (the index object's) |
  *
- * And one message (`send`, `actor.inbox.handle`): `admin-api.seen` `{ key, agent, at }`, to the index.
+ * And one message (`send`, `actor.inbox.handle`): `admin-api.seen` `{ entries: [{ key,
+ * conversationId, agent, at }] }`, to the index.
  *
  * A refusal is an `ActorCallError` (`not_found`, `no_agent`, `not_current`, `invalid_cursor`,
- * `invalid_request`), whose code crosses the call.
+ * `invalid_request`, `unknown_agent`), whose code crosses the call.
  */
 
 import { type ActorInbox, ActorCallError, type JsonValue, type PageRequest } from "@pikit/contracts";
 import { type AdminBackend, refusal } from "./backend.ts";
-import type { ConversationIndex, IndexedKey } from "./conversation-index.ts";
+import type { ConversationIndex, IndexedConversation } from "./conversation-index.ts";
 
 export const CALL = {
   app: "admin-api.app",
-  conversations: "admin-api.conversations",
   conversation: "admin-api.conversation",
   transcript: "admin-api.transcript",
   snapshot: "admin-api.snapshot",
   usage: "admin-api.usage",
   message: "admin-api.message",
+  start: "admin-api.start",
   abort: "admin-api.abort",
   reset: "admin-api.reset",
   list: "admin-api.list",
@@ -43,10 +44,10 @@ export const CALL = {
 /** The message each conversation's object sends the index. */
 export const SEEN = "admin-api.seen";
 
-/** The largest page of `admin-api.list`, and of an object's conversations read at once. */
+/** The largest page of `admin-api.list`, and of a transcript read through a call. */
 export const LIST_MAX = 500;
-/** An object's conversations are read this many pages at most: its current one and the resets'. */
-const OBJECT_PAGES = 20;
+/** Entries of one `seen` at most. */
+const SEEN_MAX = 100;
 
 type Fields = Record<string, unknown>;
 
@@ -67,10 +68,14 @@ const pageOf = (message: JsonValue): PageRequest => {
   return { ...(limit !== undefined && { limit }), ...(cursor !== undefined && { cursor }) };
 };
 
-const seenOf = (message: JsonValue): IndexedKey => {
-  const at = fieldsOf(message).at;
-  if (typeof at !== "number" || !Number.isFinite(at)) throw new ActorCallError("invalid_request", 'admin-api: "at" is epoch milliseconds');
-  return { key: text(message, "key"), agent: text(message, "agent"), at };
+const seenOf = (message: JsonValue): IndexedConversation[] => {
+  const entries = fieldsOf(message).entries;
+  if (!Array.isArray(entries) || entries.length > SEEN_MAX) throw new ActorCallError("invalid_request", `admin-api: "entries" is a list of at most ${SEEN_MAX}`);
+  return entries.map((entry) => {
+    const at = fieldsOf(entry).at;
+    if (typeof at !== "number" || !Number.isFinite(at)) throw new ActorCallError("invalid_request", 'admin-api: "at" is epoch milliseconds');
+    return { key: text(entry, "key"), conversationId: text(entry, "conversationId"), agent: text(entry, "agent"), at };
+  });
 };
 
 const json = (value: unknown): JsonValue => value as JsonValue;
@@ -83,27 +88,17 @@ export function answerCalls(inbox: ActorInbox, backend: AdminBackend, index: Con
   const id = (message: JsonValue) => text(message, "conversationId");
 
   inbox.answer(CALL.app, async (_key, _message, ctx) => json(await backend.app(ctx)));
-  inbox.answer(CALL.conversations, async (_key, _message, ctx) => {
-    const all: unknown[] = [];
-    let cursor: string | undefined;
-    for (let pages = 0; pages < OBJECT_PAGES; pages++) {
-      const page = await backend.conversations({ limit: LIST_MAX, ...(cursor !== undefined && { cursor }) }, ctx);
-      all.push(...page.items);
-      cursor = page.next;
-      if (cursor === undefined) break;
-    }
-    return json(all);
-  });
   inbox.answer(CALL.conversation, async (_key, message, ctx) => json(await backend.conversation(id(message), ctx)));
   inbox.answer(CALL.transcript, async (_key, message, ctx) => json(await backend.transcript(id(message), pageOf(message), ctx)));
   inbox.answer(CALL.snapshot, async (_key, message, ctx) => json(await backend.snapshot(id(message), ctx)));
   inbox.answer(CALL.usage, async (_key, message, ctx) => json(await backend.usage(id(message), ctx)));
   inbox.answer(CALL.message, async (_key, message, ctx) => {
-    const whenBusy = fieldsOf(message).whenBusy;
-    if (whenBusy !== "steer" && whenBusy !== "followUp") throw refusal("invalid_request", 'admin-api: "whenBusy" is "steer" or "followUp"');
-    const sent = await backend.send(id(message), { text: text(message, "text"), requestId: text(message, "requestId"), whenBusy }, ctx);
+    const sent = await backend.send(id(message), { text: text(message, "text"), requestId: text(message, "requestId") }, ctx);
     return { requestId: sent.requestId, admission: sent.admission };
   });
+  inbox.answer(CALL.start, async (key, message, ctx) =>
+    json(await backend.start({ key, agent: text(message, "agent"), text: text(message, "text"), requestId: text(message, "requestId") }, ctx)),
+  );
   inbox.answer(CALL.abort, async (_key, message, ctx) => ({ conversationId: (await backend.abort(id(message), ctx)).conversationId }));
   inbox.answer(CALL.reset, async (_key, message, ctx) => json(await backend.reset(id(message), ctx)));
 

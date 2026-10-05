@@ -16,14 +16,14 @@
       "agent.observe",
       "agent.runtime",
       "conversations.registry",
+      "storage.sql",
       "actor.mailbox"
     ]
   },
   "optional": {
     "capabilities": [
       "outbound.queue",
-      "actor.inbox",
-      "storage.sql"
+      "actor.inbox"
     ]
   },
   "provides": [
@@ -41,13 +41,13 @@
         "admin.auth",
         "agent.observe",
         "agent.runtime",
-        "conversations.registry"
+        "conversations.registry",
+        "storage.sql"
       ],
       "optional": [
         "outbound.queue",
         "actor.inbox",
-        "actor.mailbox",
-        "storage.sql"
+        "actor.mailbox"
       ]
     },
     "worker": {
@@ -60,9 +60,6 @@
       ],
       "optional": []
     }
-  },
-  "hooks": {
-    "beforeDeploy": "deploy.ts"
   },
   "generated": [
     "dashboard-files.ts"

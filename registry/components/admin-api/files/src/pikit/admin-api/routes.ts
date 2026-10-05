@@ -3,7 +3,12 @@
  * a server's contracts, or on Cloudflare the Worker's calls to the objects. Both halves of the
  * component register them (`index.ts`, `worker.ts`).
  *
- * - Every `/admin/api/*` answer asks `admin.auth` first: no operator, `401`, nothing read.
+ * - Every `/admin/api/*` answer asks `admin.auth` first: no operator, `401`, nothing read. But the
+ *   session's: `POST /admin/api/session` gives a browser a session cookie for the credential it posts
+ *   once (`admin.auth`'s `sessions`), `DELETE` clears it. Both need the client's header
+ *   (`ADMIN_CLIENT_HEADER`), so a page of another site cannot sign a browser in or out.
+ * - What an operator writes (`backend.ts`): a message is a follow-up whose request id starts with
+ *   `dashboard:`, and a new conversation is the dashboard's own, `dashboard:<uuid>`.
  * - A backend's refusal (`ActorCallError`) is its status: `not_found` `404`; `no_agent`, `not_current`
  *   `409`; `invalid_cursor`, `invalid_request` `400`. Any other code (an object that could not be
  *   reached, a call that failed) is `503 unavailable`, logged.
@@ -14,15 +19,40 @@
  */
 
 import type { AppContext, Handle, Pikit } from "@pikit/core";
-import { ActorCallError, type AdminAuth, type HttpRoute, type Operator, type OutboundQueue, type PageRequest } from "@pikit/contracts";
+import {
+  ADMIN_CLIENT_HEADER,
+  ActorCallError,
+  type AdminAuth,
+  DASHBOARD_REQUEST_PREFIX,
+  type HttpRoute,
+  type Operator,
+  type OutboundQueue,
+  type PageRequest,
+} from "@pikit/contracts";
 import Type, { type Static } from "typebox";
 import Value from "typebox/value";
-import type { ApiAbortResponse, ApiApp, ApiConversation, ApiError, ApiEvent, ApiPage, ApiPendingPiece, ApiReceipt, ApiReceiptsPage, ApiResetResponse, ApiSendResponse, ApiTranscriptEntry } from "./api.ts";
+import {
+  type ApiAbortResponse,
+  type ApiApp,
+  type ApiConversation,
+  type ApiError,
+  type ApiEvent,
+  type ApiPage,
+  type ApiPendingPiece,
+  type ApiReceipt,
+  type ApiReceiptsPage,
+  type ApiResetResponse,
+  type ApiSendResponse,
+  type ApiSession,
+  type ApiStartResponse,
+  type ApiTranscriptEntry,
+  DASHBOARD_KEY_PREFIX,
+} from "./api.ts";
 import { type Assets, BASE } from "./assets.ts";
 import type { AdminBackend } from "./backend.ts";
 
-/** A request id: what `ApiSendRequest.requestId` may be. */
-const REQUEST_ID = "^[A-Za-z0-9._~:-]{1,128}$";
+/** A request id: what `ApiSendRequest.requestId` may be, the dashboard's (`dashboard:…`). */
+const REQUEST_ID = `^${DASHBOARD_REQUEST_PREFIX}[A-Za-z0-9._~:-]{1,118}$`;
 /** The largest page a client may ask for. */
 const MAX_LIMIT = 500;
 /** The longest message an operator may send, in characters. */
@@ -32,14 +62,20 @@ const SendBody = Type.Object(
   {
     text: Type.String({ minLength: 1, maxLength: MAX_TEXT }),
     requestId: Type.Optional(Type.String({ pattern: REQUEST_ID })),
-    whenBusy: Type.Optional(Type.Union([Type.Literal("steer"), Type.Literal("followUp")])),
   },
   { additionalProperties: false },
 );
-type SendBody = Static<typeof SendBody>;
+const StartBody = Type.Object(
+  {
+    agent: Type.String({ minLength: 1, maxLength: 200 }),
+    text: Type.String({ minLength: 1, maxLength: MAX_TEXT }),
+    requestId: Type.Optional(Type.String({ pattern: REQUEST_ID })),
+  },
+  { additionalProperties: false },
+);
 
 /** The status of each refusal a backend throws; any other is `503`. */
-const STATUS: Record<string, number> = { not_found: 404, no_agent: 409, not_current: 409, invalid_cursor: 400, invalid_request: 400 };
+const STATUS: Record<string, number> = { not_found: 404, no_agent: 409, not_current: 409, invalid_cursor: 400, invalid_request: 400, unknown_agent: 400 };
 
 const json = <T>(status: number, body: T): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 const failure = (status: number, error: string, message?: string): Response =>
@@ -72,17 +108,21 @@ function pageOf(request: Request): PageRequest | { problem: string } {
   return page;
 }
 
-async function readSend(request: Request): Promise<{ body: SendBody } | { problem: string }> {
+/** `request`'s JSON body, checked against `schema`, or what is wrong with it. */
+async function readBody<S extends typeof SendBody | typeof StartBody>(request: Request, schema: S): Promise<{ body: Static<S> } | { problem: string }> {
   let parsed: unknown;
   try {
     parsed = await request.json();
   } catch {
     return { problem: "the body is not JSON" };
   }
-  if (Value.Check(SendBody, parsed)) return { body: parsed };
-  const [first] = Value.Errors(SendBody, parsed);
+  if (Value.Check(schema, parsed)) return { body: parsed as Static<S> };
+  const [first] = Value.Errors(schema, parsed);
   return { problem: `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}` };
 }
+
+/** The request id of an operator's message: the client's, or a new one. */
+const requestIdOf = (given: string | undefined): string => given ?? `${DASHBOARD_REQUEST_PREFIX}${crypto.randomUUID()}`;
 
 /**
  * `events` as server-sent events, a comment every `heartbeatMs`; cancelling the response stops them.
@@ -165,6 +205,26 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   };
   const backend = () => options.backend();
 
+  // A browser's session: the credential once, then a cookie (`admin.auth`'s `sessions`).
+  const session = (key: string, handler: HttpRoute): void => {
+    pikit.provideKeyed("http.route", key, async (request, ctx) => {
+      if (request.headers.get(ADMIN_CLIENT_HEADER) === null) return failure(400, "invalid_request", `send the header ${ADMIN_CLIENT_HEADER}: 1`);
+      return handler(request, ctx);
+    });
+  };
+  session("POST /admin/api/session", async (request, ctx) => {
+    const sessions = options.auth.get().sessions;
+    if (sessions === undefined) return failure(404, "not_installed", "this admin.auth has no browser sessions: send the credential with every call");
+    const opened = await sessions.open(request, ctx);
+    if (opened === undefined) return UNAUTHORIZED();
+    ctx.logger.info("admin-api: an operator signed in", { operator: opened.operator.id });
+    return Response.json({ operator: opened.operator.id } satisfies ApiSession, { headers: { "set-cookie": opened.cookie, "cache-control": "no-store" } });
+  });
+  session("DELETE /admin/api/session", async (request) => {
+    const sessions = options.auth.get().sessions;
+    return new Response(null, { status: 204, headers: { "cache-control": "no-store", ...(sessions !== undefined && { "set-cookie": sessions.close(request) }) } });
+  });
+
   api("GET /admin/api/app", async (_request, ctx) => json<ApiApp>(200, await backend().app(ctx)));
 
   api("GET /admin/api/conversations", async (request, ctx) => {
@@ -183,11 +243,21 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
 
   api("GET /admin/api/conversations/:id/events", async (request, ctx) => eventStream(await backend().live(conversationIdOf(request), ctx), options.heartbeatMs, ctx));
 
-  api("POST /admin/api/conversations/:id/messages", async (request, ctx, operator) => {
-    const read = await readSend(request);
+  api("POST /admin/api/conversations", async (request, ctx, operator) => {
+    const read = await readBody(request, StartBody);
     if ("problem" in read) return failure(400, "invalid_request", read.problem);
-    const requestId = read.body.requestId ?? `admin:${crypto.randomUUID()}`;
-    const sent = await backend().send(conversationIdOf(request), { text: read.body.text, requestId, whenBusy: read.body.whenBusy ?? "steer" }, ctx);
+    const requestId = requestIdOf(read.body.requestId);
+    const key = `${DASHBOARD_KEY_PREFIX}${crypto.randomUUID()}`;
+    const started = await backend().start({ key, agent: read.body.agent, text: read.body.text, requestId }, ctx);
+    ctx.logger.info("admin-api: an operator started a conversation", { operator: operator.id, conversation: key, agent: read.body.agent, requestId });
+    return json<ApiStartResponse>(201, started);
+  });
+
+  api("POST /admin/api/conversations/:id/messages", async (request, ctx, operator) => {
+    const read = await readBody(request, SendBody);
+    if ("problem" in read) return failure(400, "invalid_request", read.problem);
+    const requestId = requestIdOf(read.body.requestId);
+    const sent = await backend().send(conversationIdOf(request), { text: read.body.text, requestId }, ctx);
     ctx.logger.info("admin-api: an operator sent a message", { operator: operator.id, conversation: sent.key, requestId, admission: sent.admission });
     return json<ApiSendResponse>(202, { requestId: sent.requestId, admission: sent.admission });
   });

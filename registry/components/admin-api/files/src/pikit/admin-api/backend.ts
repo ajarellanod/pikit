@@ -4,8 +4,15 @@
  * reset.
  *
  * - **`createLocalBackend`**: the contracts of the App it runs in (`agent.observe`, `agent.runtime`,
- *   `conversations.registry`). On a server that is every conversation; in a Cloudflare Durable
+ *   `conversations.registry`) and the conversation index (`conversation-index.ts`), which the list
+ *   reads, newest activity first. On a server that is every conversation; in a Cloudflare Durable
  *   Object, that object's own, which its answers to the Worker's calls read (`calls.ts`).
+ *
+ * **What the operator writes** (the dashboard is a channel of its own): a message to a conversation is
+ * a follow-up, never a steer, whose request id starts with `dashboard:` (`DASHBOARD_REQUEST_PREFIX`),
+ * so that a run only such messages started is never delivered to the conversation's chat; the agent
+ * reads it after a first line saying it is the operator's (`operatorPrompt`). A new conversation is
+ * one of the dashboard's own (`dashboard:<uuid>`), with an agent of the App.
  * - **`createRemoteBackend`** (`remote.ts`): the Worker's, which reaches each conversation's object by
  *   `actor.mailbox.call` and lists them from the index (`conversation-index.ts`).
  *
@@ -18,7 +25,7 @@
  * (`qualify`), split on the last `~`. A client treats every id as opaque.
  */
 
-import { APP_DESCRIPTION, type AppContext } from "@pikit/core";
+import { APP_DESCRIPTION, type AppContext, type AppDescription } from "@pikit/core";
 import {
   ActorCallError,
   type AgentObserver,
@@ -27,14 +34,35 @@ import {
   type ConversationRegistry,
   type ObservedConversation,
   type PageRequest,
+  redactSecrets,
 } from "@pikit/contracts";
-import type { ApiAbortResponse, ApiApp, ApiConversation, ApiEvent, ApiPage, ApiResetResponse, ApiSendResponse, ApiTranscriptEntry, ApiUsage } from "./api.ts";
+import {
+  type ApiAbortResponse,
+  type ApiApp,
+  type ApiConversation,
+  type ApiEvent,
+  type ApiPage,
+  type ApiResetResponse,
+  type ApiSendResponse,
+  type ApiStartResponse,
+  type ApiTranscriptEntry,
+  type ApiUsage,
+  isDashboardKey,
+  operatorPrompt,
+} from "./api.ts";
+import type { ConversationIndex } from "./conversation-index.ts";
 
-/** A message to a conversation, checked: what `POST …/messages` takes. */
+/** A message to a conversation, checked: what `POST …/messages` takes. Its request id starts with `dashboard:`. */
 export interface Message {
   text: string;
   requestId: string;
-  whenBusy: "steer" | "followUp";
+}
+
+/** A new conversation of the dashboard's own, checked: what `POST /admin/api/conversations` takes. */
+export interface NewConversation extends Message {
+  /** `dashboard:<uuid>`, made by the routes. */
+  key: string;
+  agent: string;
 }
 
 /** What an action did, and to which key (for the operator's log line). */
@@ -44,8 +72,10 @@ export type Aborted = ApiAbortResponse & { key: string };
 export interface AdminBackend {
   /** The composition of the App that runs the agents. */
   app(ctx: AppContext): Promise<ApiApp>;
-  /** Throws `invalid_cursor` for a cursor it did not give. */
+  /** The most recently active first. Throws `invalid_cursor` for a cursor it did not give. */
   conversations(page: PageRequest, ctx: AppContext): Promise<ApiPage<ApiConversation>>;
+  /** A conversation of the dashboard's own, with its first message. Throws `unknown_agent`, `invalid_request`. */
+  start(conversation: NewConversation, ctx: AppContext): Promise<ApiStartResponse>;
   /** Throws `not_found`. */
   conversation(id: string, ctx: AppContext): Promise<ApiConversation>;
   /** Newest first. Throws `not_found`, `invalid_cursor`. */
@@ -66,7 +96,7 @@ export interface AdminBackend {
 }
 
 /** A refusal the routes answer with: `code` is the API's `error`. */
-export function refusal(code: "not_found" | "no_agent" | "not_current" | "invalid_cursor" | "invalid_request", message: string): ActorCallError {
+export function refusal(code: "not_found" | "no_agent" | "not_current" | "invalid_cursor" | "invalid_request" | "unknown_agent", message: string): ActorCallError {
   return new ActorCallError(code, message);
 }
 
@@ -90,6 +120,13 @@ export interface LocalContracts {
   observe(): AgentObserver;
   runtime(): AgentRuntime;
   registry(): ConversationRegistry;
+  /** The index the list reads (on Cloudflare only the index object's has rows, and no call lists there). */
+  index(): ConversationIndex;
+}
+
+/** The App's agents: the keys of `agent.definition`. */
+export function agentsOf(description: AppDescription | undefined): string[] {
+  return Object.keys(description?.capabilities["agent.definition"]?.keys ?? {}).sort();
 }
 
 /** The backend over the contracts of the App it runs in (a server's, or one Durable Object's). */
@@ -136,13 +173,32 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
     return contracts.observe().watch(id, ctx);
   };
 
+  /** Dispatches `message` to `conversation` as the operator's: a follow-up, marked for the agent. */
+  const dispatch = async (conversation: ConversationRef, message: Message, ctx: AppContext) =>
+    contracts.runtime().dispatch({ requestId: message.requestId, conversation, prompt: operatorPrompt(conversation.key, message.text), whenBusy: "followUp" }, ctx);
+
   return {
-    app: async (ctx) => ctx.value(APP_DESCRIPTION) as unknown as ApiApp,
+    async app(ctx) {
+      const description = ctx.value(APP_DESCRIPTION) as unknown as ApiApp;
+      // Config holds no secret; one put there by mistake is still never sent.
+      return { ...description, config: redactSecrets(description.config) };
+    },
 
     async conversations(page, ctx) {
-      const result = await paged(page, () => contracts.observe().conversations(page, ctx));
-      const items = await Promise.all(result.items.map((each) => described(each, ctx)));
-      return { items, ...(result.next !== undefined && { next: result.next }) };
+      const listed = await contracts.index().list({ limit: page.limit ?? 50, ...(page.cursor !== undefined && { cursor: page.cursor }) });
+      // A row whose conversation the runtime no longer has is left out.
+      const found = await Promise.all(listed.items.map((row) => contracts.observe().conversation(row.conversationId, ctx)));
+      const items = await Promise.all(found.filter((each) => each !== undefined).map((each) => described(each, ctx)));
+      return { items, ...(listed.next !== undefined && { next: listed.next }) };
+    },
+
+    async start(message, ctx) {
+      if (!isDashboardKey(message.key)) throw refusal("invalid_request", "a conversation the dashboard starts has a key of its own, dashboard:<id>");
+      const agents = agentsOf(ctx.value(APP_DESCRIPTION));
+      if (!agents.includes(message.agent)) throw refusal("unknown_agent", `no agent "${message.agent}" in the App: ${agents.join(", ") || "none"}`);
+      const conversation = await contracts.registry().resolve(message.key, message.agent, ctx);
+      const admission = await dispatch(conversation, message, ctx);
+      return { key: conversation.key, conversationId: conversation.conversationId, requestId: message.requestId, admission: admission.kind };
     },
 
     conversation: async (id, ctx) => described(await found(id, ctx), ctx),
@@ -174,7 +230,7 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
 
     async send(id, message, ctx) {
       const conversation = await actionable(id, ctx);
-      const admission = await contracts.runtime().dispatch({ requestId: message.requestId, conversation, prompt: message.text, whenBusy: message.whenBusy }, ctx);
+      const admission = await dispatch(conversation, message, ctx);
       return { key: conversation.key, requestId: message.requestId, admission: admission.kind };
     },
 

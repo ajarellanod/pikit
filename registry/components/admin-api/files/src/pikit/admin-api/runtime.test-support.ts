@@ -5,6 +5,7 @@
 
 import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger, type Target, withAbortSignal } from "@pikit/core";
 import {
+  ADMIN_CLIENT_HEADER,
   type AdminAuth,
   type AgentObserver,
   type AgentRequest,
@@ -22,15 +23,34 @@ import {
   type Usage,
 } from "@pikit/contracts";
 
-/** The operator's header, and an `admin.auth` that knows only it (the operator `ops`). */
+/** The operator's header, and an `admin.auth` that knows only it (the operator `ops`), with browser sessions (`SESSION`). */
 export const AUTH = { authorization: "Bearer operator-token" };
+/** The session cookie the double's `sessions.open` gives. */
+export const SESSION = "test_session=ok";
 
 export const auth = defineComponent({
   name: "auth-test",
   setup(pikit) {
-    const provider: AdminAuth = { verify: async (request) => (request.headers.get("authorization") === AUTH.authorization ? { id: "ops" } : undefined) };
+    const provider: AdminAuth = {
+      verify: async (request) => {
+        if (request.headers.has("authorization")) return request.headers.get("authorization") === AUTH.authorization ? { id: "ops" } : undefined;
+        const unsafe = !["GET", "HEAD"].includes(request.method);
+        if (request.headers.get("cookie") !== SESSION || (unsafe && request.headers.get(ADMIN_CLIENT_HEADER) === null)) return undefined;
+        return { id: "ops" };
+      },
+      sessions: {
+        open: async (request) => (request.headers.get("authorization") === AUTH.authorization ? { operator: { id: "ops" }, cookie: `${SESSION}; Path=/admin/api; HttpOnly; SameSite=Strict` } : undefined),
+        close: () => "test_session=; Path=/admin/api; Max-Age=0",
+      },
+    };
     pikit.provide("admin.auth", provider);
   },
+});
+
+/** The App's agents: `assistant` (`agent.definition`; admin-api reads only its key). */
+export const agents = defineComponent({
+  name: "agents-test",
+  setup: (pikit) => pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "test/model" }),
 });
 
 export const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as unknown as Usage;
@@ -71,9 +91,12 @@ export class Runtime {
   readonly observer: AgentObserver = {
     conversations: async (page) => {
       this.pages.push(page);
-      if (page.cursor !== undefined && page.cursor !== "page-2") throw new Error("agent.observe: the cursor is not one this observer gave");
+      // In creation order, as runtime-pi lists them; the cursor is where the next page starts.
+      const from = page.cursor === undefined ? 0 : Number(/^at:([0-9]+)$/.exec(page.cursor)?.[1] ?? Number.NaN);
+      if (Number.isNaN(from)) throw new Error("agent.observe: the cursor is not one this observer gave");
       const all = [...this.conversations.values()];
-      return page.cursor === undefined ? { items: all.slice(0, page.limit ?? 50), next: "page-2" } : { items: [] };
+      const end = from + (page.limit ?? 50);
+      return { items: all.slice(from, end), ...(end < all.length && { next: `at:${end}` }) };
     },
     conversation: async (id) => this.conversations.get(id),
     transcript: async (id, page) => {
@@ -115,26 +138,39 @@ export class Runtime {
   }
 
   readonly runtime: AgentRuntime = {
-    dispatch: async (request) => {
+    dispatch: async (request, ctx) => {
+      const duplicate = this.dispatched.some((each) => each.requestId === request.requestId && each.conversation.conversationId === request.conversation.conversationId);
       this.dispatched.push(request);
       const busy = this.conversations.get(request.conversation.conversationId)?.busy === true;
-      return { kind: busy ? "queued" : "started", requestId: request.requestId };
+      const admission = { kind: duplicate ? "duplicate" : busy ? "queued" : "started", requestId: request.requestId } as const;
+      // As a runtime does, in the caller's context once the message is durable.
+      await ctx.emit("agent.dispatched", { conversation: request.conversation, admission });
+      return admission;
     },
     abort: async (conversation) => void this.aborted.push(conversation),
     resume: async () => {},
   };
 
   readonly registry: ConversationRegistry = {
-    resolve: async () => {
-      throw new Error("not used by admin-api");
+    resolve: async (key, agent) => {
+      const known = this.pointers.get(key);
+      if (known !== undefined) return known;
+      const conversation = { key, agent, conversationId: this.idOf(this.next++) };
+      this.conversations.set(conversation.conversationId, { conversationId: conversation.conversationId, key, agent, busy: false, usage: ZERO });
+      this.pointers.set(key, conversation);
+      return conversation;
     },
     get: async (key) => this.pointers.get(key),
-    reset: async (key) => {
+    reset: async (key, ctx) => {
       const previous = this.pointers.get(key);
       if (previous === undefined) return undefined;
       const conversation = { ...previous, conversationId: this.idOf(this.next++) };
       this.pointers.set(key, conversation);
-      return { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
+      this.conversations.set(conversation.conversationId, { ...conversation, busy: false, usage: ZERO });
+      const reset = { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
+      // As conversations-kv does, once the key points to the new one.
+      await ctx.emit("conversation.reset", reset);
+      return reset;
     },
   };
 

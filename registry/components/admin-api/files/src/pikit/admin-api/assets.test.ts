@@ -40,17 +40,27 @@ test("served under /admin/ to anyone; pages fall back to index.html; assets/ is 
   expect([...new Uint8Array(await assets.serve("/admin/fonts/geist.woff2").arrayBuffer())]).toEqual([0, 1, 2, 255]);
   // A page of the app (an id with `:` and `~`, as on Cloudflare), and the same file twice.
   expect(await assets.serve("/admin/conversations/telegram%3A1~2").text()).toContain("id=root");
+  // An id with `.`, `@` or an encoded `/` is a page too, not a file: a reload shows it.
+  for (const path of ["/admin/conversations/email%3Aana%40empresa.com~1", "/admin/conversations/email:ana@empresa.com~1", "/admin/conversations/a%2Fb.json~3", "/admin/conversations/x.js"]) {
+    const page = assets.serve(path);
+    expect({ path, status: page.status, type: page.headers.get("content-type") }).toEqual({ path, status: 200, type: "text/html; charset=utf-8" });
+  }
+  expect(index.headers.get("content-security-policy")).toContain("default-src 'self'");
   expect(await assets.serve("/admin/").text()).toContain("id=root");
   expect(assets.serve("/admin/assets/missing.js").status).toBe(404);
   expect(assets.built()).toBe(true);
 });
 
-test("a path is looked up among the files only: none leaves them", async () => {
+test("a path is looked up among the files only: none leaves them (a page gets index.html, assets/ a 404)", async () => {
   const assets = createAssets({ ...BUILT, "secret.txt": base64("outside") });
 
-  for (const path of ["/admin/..%2Fsecret.txt", "/admin/%2e%2e/secret.txt", "/admin/assets/..%2F..%2Fsecret.txt", "/admin/%E0", "/admin/a%00b.js", "/admin/..%5Cx.txt", "/admin/assets%2Findex-abc123.js"]) {
+  for (const path of ["/admin/..%2Fsecret.txt", "/admin/%2e%2e/secret.txt", "/admin/%E0", "/admin/a%00b.js", "/admin/..%5Cx.txt", "/admin/assets%2Findex-abc123.js"]) {
     const response = assets.serve(path);
-    expect({ path, status: response.status }).toEqual({ path, status: 404 });
+    expect({ path, status: response.status, page: (await response.text()).includes("id=root") }).toEqual({ path, status: 200, page: true });
+  }
+  for (const path of ["/admin/assets/..%2F..%2Fsecret.txt", "/admin/assets/%E0", "/admin/assets/a%00b.js"]) {
+    const response = assets.serve(path);
+    expect({ path, status: response.status, text: await response.text() }).toEqual({ path, status: 404, text: "not found" });
   }
   // `.` segments are nothing, as in a URL.
   expect(await assets.serve("/admin/./assets/index-abc123.js").text()).toBe("console.log(1)");

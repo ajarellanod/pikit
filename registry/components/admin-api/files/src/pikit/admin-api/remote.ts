@@ -4,30 +4,30 @@
  * to that object (`calls.ts`), whose answers name its conversations by its own ids: here they are
  * qualified, `<key>~<id>` (`backend.ts`).
  *
- * - **The list** asks the index (`INDEX_KEY`, `conversation-index.ts`) for a page of keys, the most
- *   recently active first, then each key's object for its conversations (its current one and those a
- *   reset left behind). A page is at most `KEYS_PER_PAGE` keys whatever `limit` asks (each is a
- *   subrequest; Workers count them), and may hold more conversations than keys. An object that does
- *   not answer is left out of the page, and logged.
+ * - **The list** asks the index (`INDEX_KEY`, `conversation-index.ts`) for a page of conversations,
+ *   the most recently active first, then each one's object for it. A page is at most
+ *   `CONVERSATIONS_PER_PAGE` whatever `limit` asks (each is a subrequest; Workers count them). An
+ *   object that does not answer, or no longer has the conversation, is left out of the page, and logged.
+ * - **A new conversation** of the dashboard's own is its key's object's (`dashboard:<uuid>`): one call.
  * - **Live events are polled**: no call streams, so `live` asks the object for its `snapshot` every
- *   `pollMs` and yields it only when it changed, then ends after `polls` of them (the subrequests of
- *   one request are bounded). The dashboard reconnects to a stream that ended (`live.ts`). Between two
- *   snapshots it sees no text streaming, only where the run is each second.
+ *   `pollMs` (2 s) and yields it only when it changed, then ends after `polls` of them (the
+ *   subrequests of one request are bounded). The dashboard reconnects to a stream that ended
+ *   (`live.ts`). Between two snapshots it sees no text streaming, only where the run is.
  * - **The composition** is an object's App (the index object's: every object runs the same App), where
  *   the agents run.
  */
 
 import type { AppContext } from "@pikit/core";
 import type { ActorMailbox, JsonValue } from "@pikit/contracts";
-import type { ApiApp, ApiConversation, ApiEvent, ApiPage, ApiResetResponse, ApiSendResponse, ApiTranscriptEntry, ApiUsage } from "./api.ts";
+import type { ApiApp, ApiConversation, ApiEvent, ApiPage, ApiResetResponse, ApiSendResponse, ApiStartResponse, ApiTranscriptEntry, ApiUsage } from "./api.ts";
 import { type AdminBackend, NOT_FOUND, qualify, refusal, unqualify } from "./backend.ts";
 import { CALL } from "./calls.ts";
 import { INDEX_KEY, type IndexPage } from "./conversation-index.ts";
 
-/** Keys read in one page of the list: one call each, besides the index's. */
-export const KEYS_PER_PAGE = 20;
-/** How often a live view asks its object for a snapshot. */
-export const POLL_MS = 1_000;
+/** Conversations read in one page of the list: one call each, besides the index's. */
+export const CONVERSATIONS_PER_PAGE = 20;
+/** How often a live view asks its object for a snapshot: each ask is a Durable Object request (the Free plan has 100,000 a day). */
+export const POLL_MS = 2_000;
 /** Snapshots asked per stream before it ends (and the client reconnects): well under a request's subrequests. */
 export const POLLS = 40;
 
@@ -54,22 +54,28 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
     app: (ctx) => call<ApiApp>(INDEX_KEY, CALL.app, null, ctx),
 
     async conversations(page, ctx) {
-      const limit = Math.min(page.limit ?? KEYS_PER_PAGE, KEYS_PER_PAGE);
-      const keys = await call<IndexPage>(INDEX_KEY, CALL.list, { limit, ...(page.cursor !== undefined && { cursor: page.cursor }) }, ctx);
-      const groups = await Promise.all(
-        keys.items.map(async ({ key }) => {
+      const limit = Math.min(page.limit ?? CONVERSATIONS_PER_PAGE, CONVERSATIONS_PER_PAGE);
+      const listed = await call<IndexPage>(INDEX_KEY, CALL.list, { limit, ...(page.cursor !== undefined && { cursor: page.cursor }) }, ctx);
+      const found = await Promise.all(
+        listed.items.map(async ({ key, conversationId }) => {
           try {
-            return (await call<ApiConversation[]>(key, CALL.conversations, null, ctx)).map((each) => qualified(key, each));
+            return qualified(key, await call<ApiConversation>(key, CALL.conversation, { conversationId }, ctx));
           } catch (error) {
             ctx.logger.warn("admin-api: a conversation's object did not answer; it is left out of the list", {
               conversation: key,
               error: error instanceof Error ? error.message : String(error),
             });
-            return [];
+            return undefined;
           }
         }),
       );
-      return { items: groups.flat(), ...(keys.next !== undefined && { next: keys.next }) };
+      return { items: found.filter((each) => each !== undefined), ...(listed.next !== undefined && { next: listed.next }) };
+    },
+
+    async start(message, ctx) {
+      const { key, ...rest } = message;
+      const started = await call<ApiStartResponse>(key, CALL.start, rest, ctx);
+      return { ...started, conversationId: qualify(key, started.conversationId) };
     },
 
     async conversation(id, ctx) {

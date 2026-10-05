@@ -3,13 +3,22 @@
  * a project of its own) keeps an identical copy, `src/dashboard/src/lib/admin-api.ts`: no imports, so
  * it compiles there too. Change both together; the kit's tests check they are the same.
  *
- * Every route needs an operator (`admin.auth`; `Authorization: Bearer <PIKIT_ADMIN_TOKEN>` with
- * admin-auth-token). An error is an `ApiError` with its status.
+ * Every route needs an operator (`admin.auth`): `Authorization: Bearer <PIKIT_ADMIN_TOKEN>` with
+ * admin-auth-token, or the session cookie a browser got from `POST /admin/api/session` (then a `POST`
+ * also carries `x-pikit-admin: 1`). An error is an `ApiError` with its status.
+ *
+ * **The dashboard is a channel of its own.** It reads every conversation, and writes only into its own
+ * (keys `dashboard:<uuid>`, `POST /admin/api/conversations`) and as follow-ups to another channel's
+ * conversation, whose answers it keeps: the request ids of its messages start with `dashboard:`, and a
+ * run only they started is never delivered to the conversation's chat.
  *
  * | Route | Answer |
  * |---|---|
  * | `GET /admin/api/app` | `ApiApp`: the composition (`APP_DESCRIPTION`, no secrets) |
- * | `GET /admin/api/conversations?limit&cursor` | `ApiPage<ApiConversation>` |
+ * | `POST /admin/api/session` | the credential once → `200 ApiSession` and a session cookie (a browser's) |
+ * | `DELETE /admin/api/session` | `204`: the session cookie cleared |
+ * | `GET /admin/api/conversations?limit&cursor` | `ApiPage<ApiConversation>`, the most recently active first |
+ * | `POST /admin/api/conversations` | `ApiStartRequest` → `201 ApiStartResponse`: a conversation of the dashboard's own |
  * | `GET /admin/api/conversations/:id` | `ApiConversation` |
  * | `GET /admin/api/conversations/:id/transcript?limit&cursor` | `ApiPage<ApiTranscriptEntry>`, newest first |
  * | `GET /admin/api/conversations/:id/events` | server-sent events, one `ApiEvent` per `data:` line; `snapshot` first |
@@ -19,6 +28,25 @@
  * | `GET /admin/api/delivery/pending?limit&cursor` | `ApiPage<ApiPendingPiece>`, oldest stored first (with `outbound.queue`) |
  * | `GET /admin/api/delivery/receipts?after&limit` | `ApiReceiptsPage`, in the order they settled (with `outbound.queue`) |
  */
+
+/** The keys of the dashboard's own conversations: `dashboard:<uuid>`. No other channel makes one. */
+export const DASHBOARD_KEY_PREFIX = "dashboard:";
+
+/** Whether `key` is one of the dashboard's own conversations. */
+export const isDashboardKey = (key: string | undefined): boolean => key?.startsWith(DASHBOARD_KEY_PREFIX) === true;
+
+/** How every message from the dashboard starts, as the agent reads it (`operatorPrompt`). */
+export const OPERATOR_NOTE = "[From the operator, in the pikit dashboard";
+
+/**
+ * `text` as the agent reads it, sent from the dashboard to the conversation `key`: a first line says it
+ * comes from the operator, and, in another channel's conversation, that its user sees neither it nor
+ * the answer.
+ */
+export function operatorPrompt(key: string, text: string): string {
+  const note = isDashboardKey(key) ? `${OPERATOR_NOTE}.]` : `${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it.]`;
+  return `${note}\n${text}`;
+}
 
 /** What a conversation cost: every model call and tool summed (pi-ai's `Usage`). */
 export interface ApiUsage {
@@ -76,23 +104,44 @@ export interface ApiEvent {
   [field: string]: unknown;
 }
 
-/** A message from an operator to a conversation. */
+/**
+ * A message from an operator to a conversation: a follow-up (with a run going it waits for it), whose
+ * answer stays in the dashboard. The agent reads it after `operatorPrompt`'s first line.
+ */
 export interface ApiSendRequest {
-  /** The message, as the agent reads it. */
   text: string;
   /**
-   * Its identity: the same one sent again does not run again. 1 to 128 of `A-Z a-z 0-9 . _ ~ : -`.
-   * Absent, admin-api makes one.
+   * Its identity: the same one sent again does not run again. `dashboard:` then 1 to 118 of
+   * `A-Z a-z 0-9 . _ ~ : -`. Absent, admin-api makes one.
    */
   requestId?: string;
-  /** With a run going: `steer` (the default) joins it at its next tool round; `followUp` waits for it. */
-  whenBusy?: "steer" | "followUp";
 }
 
 export interface ApiSendResponse {
   requestId: string;
-  /** `started`: a run started; `queued`: it waits for, or joins, the run going; `duplicate`: already there. */
+  /** `started`: a run started; `queued`: it waits for the run going; `duplicate`: already there. */
   admission: "started" | "queued" | "duplicate";
+}
+
+/** A new conversation of the dashboard's own, with its first message. */
+export interface ApiStartRequest {
+  /** One of the App's agents: the keys of `agent.definition` in `ApiApp.capabilities`. */
+  agent: string;
+  text: string;
+  /** As `ApiSendRequest.requestId`. */
+  requestId?: string;
+}
+
+export interface ApiStartResponse extends ApiSendResponse {
+  conversationId: string;
+  /** `dashboard:<uuid>`. */
+  key: string;
+}
+
+/** A browser's session, opened. */
+export interface ApiSession {
+  /** The operator's id, as `admin.auth` names it. */
+  operator: string;
 }
 
 export interface ApiAbortResponse {
@@ -146,7 +195,10 @@ export interface ApiReceiptsPage {
   next?: string;
 }
 
-/** The composition (`AppDescription`, K13): JSON, no secrets. */
+/**
+ * The composition (`AppDescription`, K13): JSON, no secrets. A config value that looks like one (under a
+ * key such as `token`, `secret`, `password`, `apiKey`, or shaped like a credential) is `[redacted]`.
+ */
 export interface ApiApp {
   version: number;
   target: string;
@@ -159,7 +211,8 @@ export interface ApiApp {
 export interface ApiError {
   /**
    * `unauthorized`, `not_found`, `not_installed`, `invalid_request`, `invalid_cursor`, `no_agent`,
-   * `not_current`; `unavailable` (503) when, on Cloudflare, a conversation's object did not answer.
+   * `not_current`, `unknown_agent`; `unavailable` (503) when, on Cloudflare, a conversation's object
+   * did not answer.
    */
   error: string;
   message?: string;

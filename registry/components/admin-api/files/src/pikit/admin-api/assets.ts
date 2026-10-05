@@ -3,13 +3,18 @@
  * the dashboard's own build writes (`src/dashboard/scripts/embed.ts`, after `vite build`): bundled
  * with the app, so every host serves them the same way, a Worker included, with no disk and no binding.
  *
- * - They hold no data: the page asks the operator for the token and sends it with every API call. A
- *   browser's navigation sends no `Authorization` header, so the files are served to anyone, and every
- *   `/admin/api/*` answer asks `admin.auth`.
- * - A path is decoded and looked up among the files: `..`, an encoded `/` or `\` and a NUL are not found.
+ * - They hold no data: the page asks the operator for the token once, and the browser's session is a
+ *   cookie sent to `/admin/api/` only. The files are served to anyone, and every `/admin/api/*` answer
+ *   asks `admin.auth`.
+ * - A path is decoded and looked up among the files: `..`, an encoded `/` or `\` and a NUL find none.
  * - `/admin` redirects to `/admin/`, so the page's relative URLs resolve under it.
- * - A path with no file and no extension is a page of the app (`/admin/conversations/abc`): it gets
- *   `index.html`, and the app's router shows it. A missing file with an extension is a `404`.
+ * - Only `/admin/assets/…` is files alone: a missing one there is a `404` (an old page's script must
+ *   not get HTML). Any other path that is not a file is a page of the app and gets `index.html`, whatever
+ *   it holds (`/admin/conversations/email%3Aana%40empresa.com~1`, an id with `.`, or `%2F`): the app's
+ *   router shows it, and a reload works.
+ * - Every answer has a Content-Security-Policy (`CSP`): scripts, styles, fonts, images and API calls
+ *   from the same origin only, no inline script, no framing. Inline styles are allowed: the dialogs'
+ *   scroll lock (Radix) sets some, and a style runs no code.
  * - Vite's hashed files (`assets/`) are cached for good; everything else is revalidated.
  */
 
@@ -33,7 +38,21 @@ const TYPES: Record<string, string> = {
   ".wasm": "application/wasm",
 };
 
-const HEADERS = { "x-content-type-options": "nosniff", "x-frame-options": "DENY", "referrer-policy": "no-referrer" };
+/** What the dashboard's page may load: its own files and its own API, nothing inline but styles. */
+export const CSP = [
+  "default-src 'self'",
+  "script-src 'self'",
+  "style-src 'self' 'unsafe-inline'",
+  "img-src 'self' data:",
+  "font-src 'self'",
+  "connect-src 'self'",
+  "object-src 'none'",
+  "base-uri 'self'",
+  "form-action 'self'",
+  "frame-ancestors 'none'",
+].join("; ");
+
+const HEADERS = { "x-content-type-options": "nosniff", "x-frame-options": "DENY", "referrer-policy": "no-referrer", "content-security-policy": CSP };
 
 /** Where the files are mounted. */
 export const BASE = "/admin";
@@ -74,12 +93,13 @@ export function createAssets(files: DashboardFiles): Assets {
     size: () => Object.keys(files).length,
     serve(pathname) {
       if (pathname === BASE) return new Response(null, { status: 308, headers: { ...HEADERS, location: `${BASE}/` } });
-      const segments = segmentsOf(pathname.slice(BASE.length + 1).split("/"));
-      if (segments === undefined) return notFound();
-      const path = segments.join("/");
+      const raw = pathname.slice(BASE.length + 1);
+      const segments = segmentsOf(raw.split("/"));
+      const path = segments?.join("/") ?? "";
 
-      if (path !== "" && has(path)) return send(path, segments[0] === "assets" ? "public, max-age=31536000, immutable" : "no-cache");
-      if (extension(segments.at(-1) ?? "") !== "") return notFound();
+      if (path !== "" && has(path)) return send(path, segments?.[0] === "assets" ? "public, max-age=31536000, immutable" : "no-cache");
+      // Under assets/ there are files only; anything else is a page of the app.
+      if (segments?.[0] === "assets" || raw.startsWith("assets/")) return notFound();
       if (!has("index.html")) {
         return new Response("no dashboard is built here: the project has no src/dashboard/, or it was not built (its own `bun run build`)", {
           status: 404,
@@ -91,7 +111,7 @@ export function createAssets(files: DashboardFiles): Assets {
   };
 }
 
-/** `.js` of `index-abc.js`, lowercased; `""` without one (a leading dot is a name, not an extension). */
+/** `.js` of `index-abc.js`, lowercased; `""` without one (a leading dot is a name, not an extension): its type. */
 function extension(name: string): string {
   const base = name.slice(name.lastIndexOf("/") + 1);
   const dot = base.lastIndexOf(".");

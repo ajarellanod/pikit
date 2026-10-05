@@ -7,9 +7,13 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import type { DeliveryReceipt, OutboundQueue, PendingPiece } from "@pikit/contracts";
+import { ADMIN_CLIENT_HEADER, type DeliveryReceipt, type OutboundQueue, type PendingPiece } from "@pikit/contracts";
+import { sqliteStorage } from "@pikit/pi-adapter/testing";
+import Type from "typebox";
+import { OPERATOR_NOTE } from "./api.ts";
+import { CSP } from "./assets.ts";
 import adminApi from "./index.ts";
-import { AUTH, auth, Runtime, type Served, serve, sse, ZERO } from "./runtime.test-support.ts";
+import { agents, AUTH, auth, Runtime, type Served, SESSION, serve, sse, ZERO } from "./runtime.test-support.ts";
 
 type Subject = Served & { runtime: Runtime };
 
@@ -18,10 +22,16 @@ afterEach(async () => {
   for (const app of running.splice(0)) await app.stop().catch(() => {});
 });
 
-async function started(config: Record<string, unknown> = {}, extra: ComponentDefinition[] = []): Promise<Subject> {
-  const runtime = new Runtime();
-  const served = await serve([auth, runtime.component(), adminApi, ...extra], { "admin-api": config });
+/**
+ * admin-api on a server over `runtime` (made empty when not given: what it holds before the start is
+ * what the index is filled from), once the index is filled.
+ */
+async function started(config: Record<string, unknown> = {}, extra: ComponentDefinition[] = [], runtime = new Runtime(), appConfig: Record<string, unknown> = {}): Promise<Subject> {
+  const served = await serve([auth, agents, sqliteStorage(), runtime.component(), adminApi, ...extra], { "admin-api": config, ...appConfig });
   running.push(served.app);
+  const deadline = Date.now() + 5_000;
+  while (!served.logged.some((each) => each.message.includes("the conversation index has every conversation")) && Date.now() < deadline) await Bun.sleep(5);
+  runtime.pages.length = 0;
   return { ...served, runtime };
 }
 
@@ -31,23 +41,28 @@ const post = (body?: unknown): RequestInit => ({
   ...(body !== undefined && { body: JSON.stringify(body) }),
 });
 
+/** The ids of the list's first page. */
+const listed = async (s: Subject, query = ""): Promise<string[]> =>
+  ((await (await s.fetch(`/admin/api/conversations${query}`, { headers: AUTH })).json()) as { items: { conversationId: string }[] }).items.map((each) => each.conversationId);
+
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const runtime = new Runtime();
-  const app = await defineApp({ components: [auth, runtime.component(), adminApi], logger: silentLogger }).create();
+  const app = await defineApp({ components: [auth, sqliteStorage(), runtime.component(), adminApi], logger: silentLogger }).create();
 
   expect(app.describe().components.find((c) => c.name === "admin-api")).toEqual({
     name: "admin-api",
     provides: ["http.route"],
-    requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry"],
-    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "storage.sql"],
+    requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry", "storage.sql"],
+    optional: ["outbound.queue", "actor.inbox", "actor.mailbox"],
   });
 });
 
 test("every API route answers 401 without an operator, and reads nothing", async () => {
   const s = await started();
   s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
-  const api = s.keys().filter((key) => key.includes("/admin/api"));
-  expect(api.length).toBeGreaterThan(8);
+  // The session's routes take the credential itself (below).
+  const api = s.keys().filter((key) => key.includes("/admin/api") && !key.endsWith("/admin/api/session"));
+  expect(api.length).toBeGreaterThan(9);
 
   for (const key of api) {
     const [method = "GET", pattern = "/"] = key.split(" ");
@@ -76,26 +91,86 @@ test("GET /admin/api/app: the composition the App describes, admin-api in it", a
   expect(body.config["admin-api"]).toMatchObject({ heartbeatMs: 15_000 });
 });
 
-test("GET /admin/api/conversations: a page, each saying whether its key points to it now", async () => {
-  const s = await started();
-  s.runtime.add({ conversationId: "c0", key: "telegram:1", agent: "assistant" }, false);
-  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true, lastActivity: 5 });
-  s.runtime.add({ conversationId: "c2" });
+test("GET /admin/api/app never sends a config value that looks like a secret", async () => {
+  const leaky = defineComponent({
+    name: "leaky-test",
+    config: Type.Object({ botToken: Type.String(), tokenSecret: Type.String(), url: Type.String(), retries: Type.Integer() }),
+    setup() {},
+  });
+  const config = { botToken: "123456789:AAEabcdefghijklmnopqrstuvwxyz012345", tokenSecret: "TELEGRAM_BOT_TOKEN", url: "https://user:hunter2@example.com/", retries: 3 };
+  const s = await started({}, [leaky], undefined, { "leaky-test": config });
 
-  const response = await s.fetch("/admin/api/conversations?limit=10", { headers: AUTH });
+  const text = await (await s.fetch("/admin/api/app", { headers: AUTH })).text();
+
+  expect((JSON.parse(text) as { config: Record<string, unknown> }).config["leaky-test"]).toEqual({ botToken: "[redacted]", tokenSecret: "TELEGRAM_BOT_TOKEN", url: "[redacted]", retries: 3 });
+  expect(text).not.toContain("AAEabcdef");
+  expect(text).not.toContain("hunter2");
+});
+
+test("GET /admin/api/conversations: what the runtime held at start, newest activity first, each saying whether its key points to it now", async () => {
+  const runtime = new Runtime();
+  runtime.add({ conversationId: "c0", key: "telegram:1", agent: "assistant", lastActivity: 1 }, false);
+  runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true, lastActivity: 5 });
+  runtime.add({ conversationId: "c2", key: "http:a", agent: "assistant", lastActivity: 3 });
+  // No message reached it: no key, nothing to index (it can be read by its id).
+  runtime.add({ conversationId: "c3" });
+  const s = await started({}, [], runtime);
+
+  const response = await s.fetch("/admin/api/conversations?limit=2", { headers: AUTH });
   const body = (await response.json()) as { items: Record<string, unknown>[]; next?: string };
 
   expect(response.status).toBe(200);
-  expect(s.runtime.pages).toEqual([{ limit: 10 }]);
-  expect(body.next).toBe("page-2");
   expect(body.items).toEqual([
-    { conversationId: "c0", key: "telegram:1", agent: "assistant", busy: false, usage: ZERO, current: false },
     { conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true, lastActivity: 5, usage: ZERO, current: true },
-    { conversationId: "c2", busy: false, usage: ZERO },
+    { conversationId: "c2", key: "http:a", agent: "assistant", busy: false, lastActivity: 3, usage: ZERO, current: true },
   ]);
+  const last = (await (await s.fetch(`/admin/api/conversations?limit=2&cursor=${encodeURIComponent(body.next as string)}`, { headers: AUTH })).json()) as { items: Record<string, unknown>[]; next?: string };
+  expect(last).toEqual({ items: [{ conversationId: "c0", key: "telegram:1", agent: "assistant", busy: false, lastActivity: 1, usage: ZERO, current: false }] });
+  expect((await s.fetch("/admin/api/conversations/c3", { headers: AUTH })).status).toBe(200);
+});
 
-  const last = await s.fetch(`/admin/api/conversations?cursor=${body.next}`, { headers: AUTH });
-  expect(await last.json()).toEqual({ items: [] });
+test("the list follows activity: a message dispatched, a run settled or failed, a reset move a conversation to the front; a duplicate does not", async () => {
+  const runtime = new Runtime();
+  for (const [id, at] of [["c1", 10], ["c2", 20], ["c3", 30]] as const) runtime.add({ conversationId: id, key: `telegram:${id}`, agent: "assistant", lastActivity: at });
+  const s = await started({}, [], runtime);
+  expect(await listed(s)).toEqual(["c3", "c2", "c1"]);
+  const ctx = s.app.context();
+  const ref = (id: string) => ({ key: `telegram:${id}`, agent: "assistant", conversationId: id });
+
+  await ctx.emit("agent.dispatched", { conversation: ref("c1"), admission: { kind: "queued", requestId: "m1" } });
+  expect(await listed(s)).toEqual(["c1", "c3", "c2"]);
+  await Bun.sleep(2);
+  await ctx.emit("agent.failed", { conversation: ref("c2"), requestId: "m2", requestIds: ["m2"], kind: "failed", messages: [], error: { code: "x", message: "x" } });
+  expect((await listed(s))[0]).toBe("c2");
+  await Bun.sleep(2);
+  await ctx.emit("agent.settled", { conversation: ref("c3"), requestId: "m3", requestIds: ["m3"], kind: "completed", messages: [] });
+  expect((await listed(s))[0]).toBe("c3");
+  await Bun.sleep(2);
+  // A reset's new conversation is listed at once, before any message reaches it.
+  await s.fetch("/admin/api/conversations/c1/reset", post());
+  expect((await listed(s)).slice(0, 2)).toEqual(["c100", "c3"]);
+  // A duplicate admission is no activity.
+  await Bun.sleep(2);
+  await ctx.emit("agent.dispatched", { conversation: ref("c2"), admission: { kind: "duplicate", requestId: "m2" } });
+  expect((await listed(s))[0]).toBe("c100");
+});
+
+test("the list pages through thousands, newest first, a page at a time: nothing is read all at once", async () => {
+  const runtime = new Runtime();
+  for (let i = 0; i < 1_200; i++) runtime.add({ conversationId: `c${i}`, key: `http:${i}`, agent: "assistant", lastActivity: 1_000 + i });
+  const s = await started({}, [], runtime);
+
+  const first = (await (await s.fetch("/admin/api/conversations?limit=50", { headers: AUTH })).json()) as { items: { conversationId: string }[]; next: string };
+  expect(first.items.length).toBe(50);
+  expect(first.items[0]?.conversationId).toBe("c1199");
+  const seen = new Set(first.items.map((each) => each.conversationId));
+  let cursor: string | undefined = first.next;
+  while (cursor !== undefined) {
+    const page = (await (await s.fetch(`/admin/api/conversations?limit=500&cursor=${encodeURIComponent(cursor)}`, { headers: AUTH })).json()) as { items: { conversationId: string }[]; next?: string };
+    for (const each of page.items) seen.add(each.conversationId);
+    cursor = page.next;
+  }
+  expect(seen.size).toBe(1_200);
 });
 
 test("a page's limit and cursor are checked: 400, never a 500", async () => {
@@ -169,7 +244,7 @@ test("GET …/events: a quiet stream gets a heartbeat comment", async () => {
   await reader.cancel();
 });
 
-test("POST …/messages: a steer through agent.runtime, logged without its text", async () => {
+test("POST …/messages to another channel's conversation: a follow-up, the dashboard's request id, marked for the agent, logged without its text", async () => {
   const s = await started();
   s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", busy: true });
 
@@ -178,30 +253,119 @@ test("POST …/messages: a steer through agent.runtime, logged without its text"
 
   expect(response.status).toBe(202);
   expect(body.admission).toBe("queued");
-  expect(body.requestId).toMatch(/^admin:[0-9a-f-]{36}$/);
+  expect(body.requestId).toMatch(/^dashboard:[0-9a-f-]{36}$/);
   expect(s.runtime.dispatched).toEqual([
-    { requestId: body.requestId, conversation: { key: "telegram:1", agent: "assistant", conversationId: "c1" }, prompt: "stop and summarise", whenBusy: "steer" },
+    {
+      requestId: body.requestId,
+      conversation: { key: "telegram:1", agent: "assistant", conversationId: "c1" },
+      prompt: `${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it.]\nstop and summarise`,
+      whenBusy: "followUp",
+    },
   ]);
   const log = s.logged.find((each) => each.message.includes("sent a message"));
   expect(log?.fields).toMatchObject({ operator: "ops", conversation: "telegram:1" });
   expect(JSON.stringify(s.logged)).not.toContain("summarise");
 });
 
-test("POST …/messages: the client's request id and followUp are kept", async () => {
+test("POST …/messages: the client's request id is kept, and must be the dashboard's", async () => {
   const s = await started();
   s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
 
-  const response = await s.fetch("/admin/api/conversations/c1/messages", post({ text: "hi", requestId: "ui:42", whenBusy: "followUp" }));
+  const response = await s.fetch("/admin/api/conversations/c1/messages", post({ text: "hi", requestId: "dashboard:ui-42" }));
+  expect(await response.json()).toEqual({ requestId: "dashboard:ui-42", admission: "started" });
+  expect(s.runtime.dispatched[0]).toMatchObject({ requestId: "dashboard:ui-42", whenBusy: "followUp" });
 
-  expect(await response.json()).toEqual({ requestId: "ui:42", admission: "started" });
-  expect(s.runtime.dispatched[0]).toMatchObject({ requestId: "ui:42", whenBusy: "followUp" });
+  // Another channel's request id, or a steer, are refused: what the dashboard says stays out of the chat.
+  for (const body of [{ text: "hi", requestId: "ui:42" }, { text: "hi", requestId: "telegram:7" }, { text: "hi", whenBusy: "steer" }]) {
+    expect({ body, status: (await s.fetch("/admin/api/conversations/c1/messages", post(body))).status }).toEqual({ body, status: 400 });
+  }
+  expect(s.runtime.dispatched.length).toBe(1);
+});
+
+test("POST /admin/api/conversations: a conversation of the dashboard's own (dashboard:<uuid>), with an agent of the App and its first message", async () => {
+  const s = await started();
+
+  const response = await s.fetch("/admin/api/conversations", post({ agent: "assistant", text: "what changed today?" }));
+  const body = (await response.json()) as { conversationId: string; key: string; requestId: string; admission: string };
+
+  expect(response.status).toBe(201);
+  expect(body.key).toMatch(/^dashboard:[0-9a-f-]{36}$/);
+  expect(body).toMatchObject({ conversationId: "c100", admission: "started", requestId: expect.stringMatching(/^dashboard:/) });
+  expect(s.runtime.pointers.get(body.key)).toEqual({ key: body.key, agent: "assistant", conversationId: "c100" });
+  expect(s.runtime.dispatched).toEqual([
+    { requestId: body.requestId, conversation: { key: body.key, agent: "assistant", conversationId: "c100" }, prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`, whenBusy: "followUp" },
+  ]);
+  expect(s.logged.find((each) => each.message.includes("started a conversation"))?.fields).toMatchObject({ operator: "ops", conversation: body.key, agent: "assistant" });
+  expect(JSON.stringify(s.logged)).not.toContain("what changed");
+  // It is the dashboard's: listed, and continued from here.
+  await Bun.sleep(2);
+  expect((await listed(s))[0]).toBe("c100");
+  expect((await s.fetch("/admin/api/conversations/c100/messages", post({ text: "and yesterday?" }))).status).toBe(202);
+  expect(s.runtime.dispatched[1]?.prompt).toBe(`${OPERATOR_NOTE}.]\nand yesterday?`);
+});
+
+test("POST /admin/api/conversations: an agent the App does not have, or a bad body, is 400 and makes nothing", async () => {
+  const s = await started();
+
+  const unknown = await s.fetch("/admin/api/conversations", post({ agent: "nobody", text: "hi" }));
+  expect(unknown.status).toBe(400);
+  expect(await unknown.json()).toMatchObject({ error: "unknown_agent", message: expect.stringContaining("assistant") });
+  for (const body of [{}, { agent: "assistant" }, { agent: "assistant", text: "" }, { agent: "assistant", text: "hi", key: "telegram:1" }, { agent: "assistant", text: "hi", requestId: "x" }]) {
+    expect({ body, status: (await s.fetch("/admin/api/conversations", post(body))).status }).toEqual({ body, status: 400 });
+  }
+  expect(s.runtime.pointers.size).toBe(0);
+  expect(s.runtime.dispatched).toEqual([]);
+});
+
+test("an id with '.', '/', '@' and ':' is one path segment, encoded: read and acted on like any other", async () => {
+  const s = await started();
+  const id = "email:ana@empresa.com/inbox.1";
+  s.runtime.add({ conversationId: id, key: "email:ana@empresa.com", agent: "assistant" });
+  const path = `/admin/api/conversations/${encodeURIComponent(id)}`;
+
+  expect(await (await s.fetch(path, { headers: AUTH })).json()).toMatchObject({ conversationId: id, current: true });
+  expect((await s.fetch(`${path}/abort`, post())).status).toBe(200);
+  expect(s.runtime.aborted[0]?.conversationId).toBe(id);
+});
+
+test("sessions: the credential once opens a cookie (POST /admin/api/session), which the API then takes; DELETE clears it", async () => {
+  const s = await started();
+  const client = { [ADMIN_CLIENT_HEADER]: "1" };
+
+  const opened = await s.fetch("/admin/api/session", { method: "POST", headers: { ...AUTH, ...client } });
+  expect(opened.status).toBe(200);
+  expect(await opened.json()).toEqual({ operator: "ops" });
+  expect(opened.headers.get("set-cookie")).toStartWith(SESSION);
+  expect(opened.headers.get("cache-control")).toBe("no-store");
+  expect(s.logged.some((each) => each.message.includes("signed in") && each.fields?.operator === "ops")).toBe(true);
+
+  expect((await s.fetch("/admin/api/app", { headers: { cookie: SESSION } })).status).toBe(200);
+  // Without the client's header the cookie changes nothing; with it, it does.
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  expect((await s.fetch("/admin/api/conversations/c1/abort", { method: "POST", headers: { cookie: SESSION } })).status).toBe(401);
+  expect((await s.fetch("/admin/api/conversations/c1/abort", { method: "POST", headers: { cookie: SESSION, ...client } })).status).toBe(200);
+
+  const closed = await s.fetch("/admin/api/session", { method: "DELETE", headers: client });
+  expect(closed.status).toBe(204);
+  expect(closed.headers.get("set-cookie")).toContain("Max-Age=0");
+});
+
+test("sessions: a wrong credential is 401; without the client's header the session's routes refuse (a page of another site cannot sign in or out)", async () => {
+  const s = await started();
+
+  expect((await s.fetch("/admin/api/session", { method: "POST", headers: { authorization: "Bearer wrong", [ADMIN_CLIENT_HEADER]: "1" } })).status).toBe(401);
+  expect((await s.fetch("/admin/api/session", { method: "POST", headers: { [ADMIN_CLIENT_HEADER]: "1" } })).status).toBe(401);
+  for (const method of ["POST", "DELETE"]) {
+    const response = await s.fetch("/admin/api/session", { method, headers: AUTH });
+    expect({ method, status: response.status, cookie: response.headers.get("set-cookie") }).toEqual({ method, status: 400, cookie: null });
+  }
 });
 
 test("POST …/messages: a bad body is 400 and dispatches nothing", async () => {
   const s = await started();
   s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
 
-  for (const body of [{}, { text: "" }, { text: "hi", whenBusy: "now" }, { text: "hi", requestId: "a b" }, { text: "hi", extra: 1 }, "x".repeat(10)]) {
+  for (const body of [{}, { text: "" }, { text: "hi", whenBusy: "followUp" }, { text: "hi", requestId: "dashboard:a b" }, { text: "hi", extra: 1 }, "x".repeat(10)]) {
     const response = await s.fetch("/admin/api/conversations/c1/messages", post(body));
     expect({ body, status: response.status }).toEqual({ body, status: 400 });
   }
@@ -268,6 +432,7 @@ test("without a built dashboard the API still answers, and /admin/ says why ther
   const page = await s.fetch("/admin/");
   expect(page.status).toBe(404);
   expect(await page.text()).toContain("no dashboard is built");
+  expect(page.headers.get("content-security-policy")).toBe(CSP);
   expect((await s.fetch("/admin/api/app", { headers: AUTH })).status).toBe(200);
   expect(s.logged.some((each) => each.message.includes("no dashboard is built"))).toBe(true);
 });

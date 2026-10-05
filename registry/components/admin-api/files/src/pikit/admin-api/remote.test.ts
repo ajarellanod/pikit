@@ -10,12 +10,12 @@ import { afterEach, expect, test } from "bun:test";
 import { type App, type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type ActorCallHandler, ActorCallError, type ActorInboxHandler, type ActorMailbox, answerCall, callResult, type JsonValue } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import type { ApiConversation, ApiEvent } from "./api.ts";
+import { type ApiConversation, type ApiEvent, OPERATOR_NOTE } from "./api.ts";
 import { qualify, unqualify } from "./backend.ts";
 import { INDEX_KEY } from "./conversation-index.ts";
 import adminApi, { worker } from "./index.ts";
-import { KEYS_PER_PAGE, polled } from "./remote.ts";
-import { AUTH, auth, Runtime, type Served, serve, sse } from "./runtime.test-support.ts";
+import { CONVERSATIONS_PER_PAGE, polled } from "./remote.ts";
+import { agents, AUTH, auth, Runtime, type Served, serve, sse } from "./runtime.test-support.ts";
 
 const copy = (value: JsonValue): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
 
@@ -37,6 +37,8 @@ class Platform {
   readonly unreachable = new Set<string>();
   /** What the objects' Apps warned about. */
   readonly warnings: string[] = [];
+  /** What a key's runtime holds before its object starts. */
+  readonly before = new Map<string, (runtime: Runtime) => void>();
 
   readonly mailbox: ActorMailbox = {
     send: async (key, type, message) => {
@@ -66,6 +68,7 @@ class Platform {
 
   private async start(key: string): Promise<FakeObject> {
     const runtime = new Runtime(String);
+    this.before.get(key)?.(runtime);
     const answers = new Map<string, ActorCallHandler>();
     const handlers = new Map<string, ActorInboxHandler>();
     const platform = defineComponent({
@@ -76,14 +79,21 @@ class Platform {
       },
     });
     const logger = { ...silentLogger, warn: (message: string) => void this.warnings.push(message) };
-    const app = await defineApp({ components: [auth, runtime.component(), platform, sqliteStorage(), adminApi], target: "durable", logger }).create();
+    const app = await defineApp({ components: [auth, agents, runtime.component(), platform, sqliteStorage(), adminApi], target: "durable", logger }).create();
     await app.start();
     return { app, runtime, answers, handlers, ctx: app.context() };
   }
 
-  /** What `key`'s object tells the index when a run starts at `at` (the last test sends it from the event). */
-  async started(key: string, at: number): Promise<void> {
-    await this.mailbox.send(INDEX_KEY, "admin-api.seen", { key, agent: "assistant", at }, (await this.object(key)).ctx);
+  /** What `key`'s object tells the index of its conversation `conversationId` active at `at` (the tests below send it from the events). */
+  async active(key: string, at: number, conversationId = "1"): Promise<void> {
+    await this.mailbox.send(INDEX_KEY, "admin-api.seen", { entries: [{ key, conversationId, agent: "assistant", at }] }, (await this.object(key)).ctx);
+  }
+
+  /** The index's first page, as the Worker reads it. */
+  async listed(): Promise<string[]> {
+    const index = await this.object(INDEX_KEY);
+    const page = callResult(await answerCall(index.answers.get("admin-api.list") as ActorCallHandler, INDEX_KEY, { limit: 50 }, index.ctx)) as { items: { key: string; conversationId: string }[] };
+    return page.items.map((each) => qualify(each.key, each.conversationId));
   }
 
   async stop(): Promise<void> {
@@ -129,12 +139,13 @@ test("ids: <key>~<the object's id>, split on the last ~; anything else names no 
   for (const id of ["", "telegram:1", "~2", "telegram:1~", "telegram:1~x", "telegram:1~2a"]) expect({ id, found: unqualify(id) }).toEqual({ id, found: undefined });
 });
 
-test("the Worker's list: keys from the index, newest activity first, each object's conversations with qualified ids", async () => {
+test("the Worker's list: conversations from the index, newest activity first, each read from its object with a qualified id", async () => {
   const { platform, worker: w } = await cloud();
   await chat(platform, "telegram:1", true);
   await chat(platform, "telegram:2");
-  await platform.started("telegram:1", 100);
-  await platform.started("telegram:2", 200);
+  await platform.active("telegram:1", 100, "1");
+  await platform.active("telegram:1", 150, "2");
+  await platform.active("telegram:2", 200);
   platform.calls.length = 0;
 
   const response = await w.fetch("/admin/api/conversations", { headers: AUTH });
@@ -143,29 +154,30 @@ test("the Worker's list: keys from the index, newest activity first, each object
   expect(response.status).toBe(200);
   expect(body.items.map(({ conversationId, current }) => ({ conversationId, current }))).toEqual([
     { conversationId: "telegram:2~1", current: true },
-    { conversationId: "telegram:1~1", current: false },
     { conversationId: "telegram:1~2", current: true },
+    { conversationId: "telegram:1~1", current: false },
   ]);
   expect(body.next).toBeUndefined();
-  // One call to the index, one to each key's object.
-  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.list`, "telegram:2 admin-api.conversations", "telegram:1 admin-api.conversations"]);
+  // One call to the index, one per conversation to its key's object.
+  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.list`, "telegram:2 admin-api.conversation", "telegram:1 admin-api.conversation", "telegram:1 admin-api.conversation"]);
   // The index's object is not a conversation, and was given none.
-  expect(await platform.mailbox.call(INDEX_KEY, "admin-api.conversations", null, w.app.context())).toEqual([]);
+  const none = await platform.mailbox.call(INDEX_KEY, "admin-api.conversation", { conversationId: "1" }, w.app.context()).catch((error: unknown) => error);
+  expect((none as ActorCallError).code).toBe("not_found");
 });
 
-test("the Worker's list pages keys, at most KEYS_PER_PAGE whatever limit asks; an object that does not answer is left out and logged", async () => {
+test("the Worker's list pages, at most CONVERSATIONS_PER_PAGE whatever limit asks; an object that does not answer is left out and logged", async () => {
   const { platform, worker: w } = await cloud();
-  const count = KEYS_PER_PAGE + 3;
+  const count = CONVERSATIONS_PER_PAGE + 3;
   for (let i = 0; i < count; i++) {
     await chat(platform, `telegram:${i}`);
-    await platform.started(`telegram:${i}`, 1_000 + i);
+    await platform.active(`telegram:${i}`, 1_000 + i);
   }
   platform.unreachable.add(`telegram:${count - 1}`);
   platform.calls.length = 0;
 
   const first = (await (await w.fetch("/admin/api/conversations?limit=100", { headers: AUTH })).json()) as { items: ApiConversation[]; next?: string };
-  expect(platform.calls.length).toBe(1 + KEYS_PER_PAGE);
-  expect(first.items.length).toBe(KEYS_PER_PAGE - 1);
+  expect(platform.calls.length).toBe(1 + CONVERSATIONS_PER_PAGE);
+  expect(first.items.length).toBe(CONVERSATIONS_PER_PAGE - 1);
   expect(first.items[0]?.conversationId).toBe(`telegram:${count - 2}~1`);
   expect(w.logged.some((each) => each.message.includes("left out of the list") && each.fields?.conversation === `telegram:${count - 1}`)).toBe(true);
 
@@ -176,6 +188,34 @@ test("the Worker's list pages keys, at most KEYS_PER_PAGE whatever limit asks; a
   const forged = await w.fetch("/admin/api/conversations?cursor=forged", { headers: AUTH });
   expect(forged.status).toBe(400);
   expect(await forged.json()).toMatchObject({ error: "invalid_cursor" });
+});
+
+test("the index learns of an object's conversations when its App starts, and of a message once it is dispatched; told twice, it keeps one row", async () => {
+  const platform = new Platform();
+  platforms.push(platform);
+  // Conversations its object held before admin-api was installed, or whose events were missed.
+  platform.before.set("email:ana@empresa.com", (runtime) => {
+    runtime.add({ conversationId: "1", key: "email:ana@empresa.com", agent: "assistant", lastActivity: 50 }, false);
+    runtime.add({ conversationId: "2", key: "email:ana@empresa.com", agent: "assistant", lastActivity: 70 });
+  });
+  const { app, runtime } = await platform.object("email:ana@empresa.com");
+  expect(await platform.listed()).toEqual(["email:ana@empresa.com~2", "email:ana@empresa.com~1"]);
+
+  await platform.object("telegram:9");
+  const conversation = { key: "telegram:9", agent: "assistant", conversationId: "1" };
+  (await platform.object("telegram:9")).runtime.add(conversation);
+  await (await platform.object("telegram:9")).runtime.runtime.dispatch({ requestId: "m1", conversation, prompt: "hi" }, (await platform.object("telegram:9")).ctx);
+  expect((await platform.listed())[0]).toBe("telegram:9~1");
+
+  // The same again, and the object starting again: one row each, the newest time kept.
+  await app.stop();
+  platform.objects.delete("email:ana@empresa.com");
+  platform.before.set("email:ana@empresa.com", (again) => {
+    for (const each of runtime.conversations.values()) again.add(each, false);
+  });
+  await platform.object("email:ana@empresa.com");
+  await (await platform.object("telegram:9")).runtime.runtime.dispatch({ requestId: "m1", conversation, prompt: "hi" }, (await platform.object("telegram:9")).ctx);
+  expect(await platform.listed()).toEqual(["telegram:9~1", "email:ana@empresa.com~2", "email:ana@empresa.com~1"]);
 });
 
 test("one conversation and its transcript from its object; an unknown or malformed id is 404; an object that cannot be reached is 503", async () => {
@@ -206,10 +246,17 @@ test("actions reach the object of the key, with its own id; its refusals cross t
   const { platform, worker: w } = await cloud();
   const runtime = await chat(platform, "telegram:1", true);
 
-  const sent = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~2")}/messages`, post({ text: "stop and summarise", requestId: "ui:1" }));
+  const sent = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~2")}/messages`, post({ text: "stop and summarise", requestId: "dashboard:1" }));
   expect(sent.status).toBe(202);
-  expect(await sent.json()).toEqual({ requestId: "ui:1", admission: "started" });
-  expect(runtime.dispatched).toEqual([{ requestId: "ui:1", conversation: { key: "telegram:1", agent: "assistant", conversationId: "2" }, prompt: "stop and summarise", whenBusy: "steer" }]);
+  expect(await sent.json()).toEqual({ requestId: "dashboard:1", admission: "started" });
+  expect(runtime.dispatched).toEqual([
+    {
+      requestId: "dashboard:1",
+      conversation: { key: "telegram:1", agent: "assistant", conversationId: "2" },
+      prompt: `${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it.]\nstop and summarise`,
+      whenBusy: "followUp",
+    },
+  ]);
   expect(w.logged.find((each) => each.message.includes("sent a message"))?.fields).toMatchObject({ operator: "ops", conversation: "telegram:1" });
   expect(JSON.stringify(w.logged)).not.toContain("summarise");
 
@@ -225,6 +272,33 @@ test("actions reach the object of the key, with its own id; its refusals cross t
   const reset = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~2")}/reset`, post());
   expect(await reset.json()).toEqual({ key: "telegram:1", previousConversationId: "telegram:1~2", conversationId: "telegram:1~100" });
   expect(runtime.pointers.get("telegram:1")?.conversationId).toBe("100");
+});
+
+test("a conversation of the dashboard's own on the Worker: one call to the object of its new key, listed first at once", async () => {
+  const { platform, worker: w } = await cloud();
+  await chat(platform, "telegram:1");
+  await platform.active("telegram:1", 100);
+  platform.calls.length = 0;
+
+  const response = await w.fetch("/admin/api/conversations", post({ agent: "assistant", text: "what changed today?" }));
+  const body = (await response.json()) as { conversationId: string; key: string; requestId: string; admission: string };
+
+  expect(response.status).toBe(201);
+  expect(body.key).toMatch(/^dashboard:[0-9a-f-]{36}$/);
+  expect(body).toMatchObject({ conversationId: `${body.key}~100`, admission: "started" });
+  expect(platform.calls).toEqual([`${body.key} admin-api.start`]);
+  const { runtime } = await platform.object(body.key);
+  expect(runtime.dispatched).toEqual([
+    { requestId: body.requestId, conversation: { key: body.key, agent: "assistant", conversationId: "100" }, prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`, whenBusy: "followUp" },
+  ]);
+  // Told to the index when the message was dispatched, before any run.
+  expect((await platform.listed())[0]).toBe(body.conversationId);
+  const page = (await (await w.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: ApiConversation[] };
+  expect(page.items.map((each) => each.conversationId)).toEqual([body.conversationId, "telegram:1~1"]);
+
+  const unknown = await w.fetch("/admin/api/conversations", post({ agent: "nobody", text: "hi" }));
+  expect(unknown.status).toBe(400);
+  expect(await unknown.json()).toMatchObject({ error: "unknown_agent" });
 });
 
 test("live events on the Worker: the object's snapshot first, as server-sent events", async () => {
@@ -277,8 +351,9 @@ test("the composition is an object's App (the index's); delivery is not listed o
 
 test("every Worker route answers 401 without an operator, and calls no object", async () => {
   const { platform, worker: w } = await cloud();
-  const api = w.keys().filter((key) => key.includes("/admin/api"));
-  expect(api.length).toBeGreaterThan(8);
+  // The session's routes take the credential itself (admin-api.test.ts).
+  const api = w.keys().filter((key) => key.includes("/admin/api") && !key.endsWith("/admin/api/session"));
+  expect(api.length).toBeGreaterThan(9);
 
   for (const key of api) {
     const [method = "GET", pattern = "/"] = key.split(" ");
@@ -289,15 +364,15 @@ test("every Worker route answers 401 without an operator, and calls no object", 
   expect(platform.objects.size).toBe(0);
 });
 
-test("in an object's App the default export answers only with actor.inbox, actor.mailbox and storage.sql; without them its start says so", async () => {
+test("in an object's App the default export answers only with actor.inbox and actor.mailbox; without them its start says so", async () => {
   const runtime = new Runtime();
-  const app = await defineApp({ components: [auth, runtime.component(), adminApi], target: "durable", logger: silentLogger }).create();
+  const app = await defineApp({ components: [auth, runtime.component(), sqliteStorage(), adminApi], target: "durable", logger: silentLogger }).create();
 
   const failed = (await app.start().catch((error: unknown) => error)) as Error;
-  expect(String(failed.cause)).toContain("admin-api: in a Durable Object's App it answers the Worker's calls and keeps the conversation index, which needs actor.inbox, actor.mailbox, storage.sql");
+  expect(String(failed.cause)).toContain("admin-api: in a Durable Object's App it answers the Worker's calls and tells the conversation index, which needs actor.inbox, actor.mailbox");
 });
 
-test("a run that starts or settles in an object tells the index; a failed send is logged, not the run's", async () => {
+test("a run that settles, fails or is resumed in an object tells the index (a run not resumed was told when its message was dispatched); a failed send is logged, not the run's", async () => {
   const platform = new Platform();
   platforms.push(platform);
   const { app } = await platform.object("telegram:7");
@@ -305,12 +380,16 @@ test("a run that starts or settles in an object tells the index; a failed send i
   const conversation = { key: "telegram:7", agent: "assistant", conversationId: "1" };
 
   await ctx.emit("agent.settled", { conversation, requestId: "r1", requestIds: ["r1"], kind: "completed", messages: [] });
-  const index = await platform.object(INDEX_KEY);
-  const listed = callResult(await answerCall(index.answers.get("admin-api.list") as ActorCallHandler, INDEX_KEY, { limit: 5 }, index.ctx)) as { items: { key: string }[] };
-  expect(listed.items.map((each) => each.key)).toEqual(["telegram:7"]);
+  expect(await platform.listed()).toEqual(["telegram:7~1"]);
+  await ctx.emit("agent.started", { conversation: { ...conversation, conversationId: "2" }, requestId: "r2", resumed: false });
+  expect(await platform.listed()).toEqual(["telegram:7~1"]);
+  await Bun.sleep(2);
+  await ctx.emit("agent.started", { conversation: { ...conversation, conversationId: "2" }, requestId: "r2", resumed: true });
+  expect(await platform.listed()).toEqual(["telegram:7~2", "telegram:7~1"]);
 
   // The index does not take it: the event's other listeners and the run go on.
+  const index = await platform.object(INDEX_KEY);
   index.handlers.delete("admin-api.seen");
-  await ctx.emit("agent.started", { conversation, requestId: "r2", resumed: false });
-  expect(platform.warnings).toEqual(["admin-api: the conversation index did not take this conversation's activity; its next run tells it again"]);
+  await ctx.emit("agent.failed", { conversation, requestId: "r3", requestIds: ["r3"], kind: "failed", messages: [], error: { code: "x", message: "x" } });
+  expect(platform.warnings).toEqual(["admin-api: the conversation index did not take this conversation's activity; its next activity tells it again"]);
 });
