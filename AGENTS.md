@@ -11,6 +11,7 @@
 - In edit-tool text, write non-ASCII characters (`…`, `→`) literally, never as a doubly escaped `\\u2026`: that lands in the file as the six characters `\u2026`. After editing docs, `rg 'u20[0-9a-f]{2}'` the files.
 - Twice in one session the edit tool still wrote `\u00a7` as six characters despite the lessons above. For text with `§` or `…`, write the edit from `js_exec` (`String.fromCharCode(0xa7)`, a unique-match check before replacing), then `rg 'u00a7|u20[0-9a-f]{2}'` the files.
 - Other agents may work in this same checkout. Touch only files you created or were asked to change, and commit by explicit paths (`git add <your paths>`), never `git add -A` or `git commit -a`: once that swept another agent's draft into a commit.
+- Taking over a worktree with changes already staged (a previous agent's `git rm`): a plain `git commit` after `git add <paths>` commits everything staged, and once swept a staged deletion into an unrelated commit. Run `git diff --cached --stat` before every commit, or commit with `git commit <paths>`.
 - Working in a separate worktree (`../pikit-<branch>`): give the edit, write and read tools absolute paths into it. A relative path resolves against the session's cwd, the main checkout, where another agent may be working (it once wrote there).
 - pikit is unreleased: never add backward compatibility (aliases, old-format readers, migrations from earlier schemas, "start fresh" handling for old data). Rename and change freely; only provider names (Cloudflare, Docker…) stay as they are, because that is where it deploys.
 

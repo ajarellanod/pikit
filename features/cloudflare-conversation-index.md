@@ -13,32 +13,34 @@ A global list of the conversations of a Cloudflare deployment, when each one liv
 Durable Object.
 
 ## Where it stands
-Built, inside `admin-api` (its README, "On Cloudflare"), as an actor instead of D1:
+Built, inside `admin-api` (its README, "The conversation index", "On Cloudflare"), as an actor
+instead of D1. A server keeps the same index in its own `storage.sql`, so the list is newest activity
+first, paged, on every host.
 
 - **The index is an object**, `admin-api:index`, of the conversations' own class: it runs the same App
-  and keeps the index in its own `storage.sql` (`admin_api_index`: key, agent, last activity). It holds
-  no conversation; nothing in the App makes one for it.
+  and keeps the index in its own `storage.sql` (`admin_api_conversations`: one row per conversation,
+  its key, its id, its agent, its last activity). It holds no conversation; nothing in the App makes
+  one for it.
 - **Each conversation's object tells it**: admin-api's object half sends `admin-api.seen`
-  `{ key, agent, at }` (`actor.mailbox.send`) when a run starts and when it settles; the index upserts
-  it, keeping the newest time.
-- **The Worker lists** by asking the index for a page of keys, newest activity first
-  (`admin-api.list`), then each key's object for its conversations (`agent.observe` there sees its own:
-  the current one and those a reset made), and names each `<key>~<the object's id>`. Reading, acting on
-  and following one conversation is a call to its object (`actor.mailbox.call`).
+  `{ entries: [{ key, conversationId, agent, at }] }` (`actor.mailbox.send`) when a message is
+  dispatched (once it is durable), when a resumed run starts, when a run settles or fails, on a reset,
+  and when the object's App starts (every conversation it holds); the index upserts each, keeping the
+  newest time.
+- **The Worker lists** by asking the index for a page of conversations, newest activity first
+  (`admin-api.list`), then each one's object for it, and names each `<key>~<the object's id>`.
+  Reading, acting on and following one conversation is a call to its object (`actor.mailbox.call`).
 
 **Why an actor and not D1.** A component cannot add a wrangler binding (`wrangler.jsonc` is
 deployment-cloudflare's, the same for every project), and a D1 database is one more thing to create
 and bind per deployment. An object of the existing class needs neither: the index is reached as any
 actor is (C2), on the same SQL contract, and is gone with the component. Its cost is that every list
-is one call to the index and one per key (a page is at most 20 keys, within a request's subrequests),
+is one call to the index and one per conversation (a page is at most 20, within a request's subrequests),
 and that one object takes every `seen`: fine for an operator's dashboard, not a global query engine.
 
-**What it may miss, honestly.** `seen` is sent from the runtime's events (`agent.started`,
-`agent.settled`), and events can be missed (SPEC K3): an object evicted between the run's commit and
-the send, or an index that did not answer (the send is logged, the run goes on). The key is then
-missing, or its time old, until that conversation's next run sends again. A conversation whose runs
-all happened before admin-api was installed is not listed until it runs again; any conversation can
-still be read by its id. Writing the index in the runtime's commit path, or from a feed with a cursor,
+**What it may miss, honestly.** `seen` is sent from the runtime's events, and events can be missed
+(SPEC K3): an object evicted between the commit and the send, or an index that did not answer (the
+send is logged, the run goes on). The conversation is then missing, or its time old, until its next
+activity, or its object's next start, sends again. Any conversation can still be read by its id. Writing the index in the runtime's commit path, or from a feed with a cursor,
 would close that gap; it is not needed by a dashboard that refreshes.
 
 ## How it fits pikit
