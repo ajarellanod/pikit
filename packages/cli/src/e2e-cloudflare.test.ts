@@ -4,7 +4,7 @@
  * --dry-run`) and typecheck, then `pikit dev` (wrangler dev, workerd) answering `/health` from the
  * object's App. Then a Telegram agent on Cloudflare: `pikit add` of secrets-cloudflare and
  * platform-cloudflare (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
- * is already OpenRouter's: the Anthropic provider is server-only), runtime-pi, conversations-kv and channel-telegram-webhook (with what they offer)
+ * is already OpenRouter's: the Anthropic provider takes only API keys there), runtime-pi, conversations-kv and channel-telegram-webhook (with what they offer)
  * put each half in its App (C1), every add is green, the project installs, typechecks and passes its
  * tests. Then the agent answers, in workerd: with provider-faux (a fake model for tests only) for its
  * model and channel-telegram-webhook's fake Telegram as its API, `pikit dev` (wrangler dev, port 8787)

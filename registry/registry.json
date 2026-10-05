@@ -146,7 +146,8 @@
       "version": "0.0.0",
       "description": "Anthropic's Claude models for your agents. An agent names one as `anthropic/<modelId>`, for example `anthropic/claude-sonnet-4-6`.",
       "targets": [
-        "server"
+        "server",
+        "durable"
       ],
       "path": "components/provider-anthropic"
     },

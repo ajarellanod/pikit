@@ -179,7 +179,7 @@ test("new --target durable records the target, and writes two Apps, wrangler and
   expect(JSON.parse(readFileSync(join(PIKIT_ROOT, "package.json"), "utf8")).devDependencies.wrangler).toBe("4.143.0");
   expect(readFileSync(join(project, ".gitignore"), "utf8")).toContain(".wrangler/\n");
   expect(existsSync(join(project, "wrangler.jsonc"))).toBe(true);
-  // The starter's model is one whose provider runs on Cloudflare: provider-anthropic is server-only.
+  // The starter's model is one whose provider takes an API key on Cloudflare: OpenRouter's.
   expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
 }, 60_000);
 
