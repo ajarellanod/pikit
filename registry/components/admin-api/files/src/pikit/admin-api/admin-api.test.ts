@@ -9,7 +9,7 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, type AppContext, BACKGROUND_CONTEXT, defineApp, defineComponent, type Logger, silentLogger, withAbortSignal } from "@pikit/core";
+import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger, withAbortSignal } from "@pikit/core";
 import {
   type AdminAuth,
   type AgentObserver,
@@ -18,7 +18,10 @@ import {
   compareHttpRoutes,
   type ConversationRef,
   type ConversationRegistry,
+  type DeliveryReceipt,
   type HttpRoute,
+  type OutboundQueue,
+  type PendingPiece,
   matchesHttpRoute,
   type ObservedConversation,
   type ObservedEvent,
@@ -169,7 +172,7 @@ afterEach(async () => {
   for (const folder of folders.splice(0)) rmSync(folder, { recursive: true, force: true });
 });
 
-async function started(config: Record<string, unknown> = {}): Promise<Subject> {
+async function started(config: Record<string, unknown> = {}, extra: ComponentDefinition[] = []): Promise<Subject> {
   const runtime = new Runtime();
   const logged: Logged[] = [];
   const logger: Logger = {
@@ -186,7 +189,7 @@ async function started(config: Record<string, unknown> = {}): Promise<Subject> {
     },
   });
   const app = await defineApp({
-    components: [auth, runtime.component(), adminApi, server],
+    components: [auth, runtime.component(), adminApi, server, ...extra],
     config: { "admin-api": { assets: join(tmpdir(), "pikit-admin-api-none"), ...config } },
     logger,
   }).create();
@@ -225,7 +228,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     name: "admin-api",
     provides: ["http.route"],
     requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry"],
-    optional: [],
+    optional: ["outbound.queue"],
   });
 });
 
@@ -529,4 +532,68 @@ test("without a built dashboard the API still answers, and /admin/ says why ther
   expect(await page.text()).toContain("no dashboard is built");
   expect((await s.fetch("/admin/api/app", { headers: AUTH })).status).toBe(200);
   expect(s.logged.some((each) => each.message.includes("no dashboard is built"))).toBe(true);
+});
+
+const PENDING: PendingPiece[] = [
+  { idempotencyKey: "c1:m1", index: 0, channel: "telegram", conversationKey: "telegram:1", state: "retrying", attempts: 2, nextAttemptAt: 50, lastError: "rate_limited: wait", possibleDuplicate: false, storedAt: 10 },
+  { idempotencyKey: "c1:m2", index: 0, channel: "telegram", conversationKey: "telegram:1", state: "queued", attempts: 0, possibleDuplicate: false, storedAt: 11 },
+];
+const RECEIPTS: DeliveryReceipt[] = [
+  { idempotencyKey: "c1:m0", index: 0, channel: "telegram", conversationKey: "telegram:1", attempts: 1, outcome: { kind: "delivered", platformMessageId: "77", possibleDuplicate: true }, at: 5 },
+  { idempotencyKey: "c2:m0", index: 0, channel: "telegram", conversationKey: "telegram:2", attempts: 3, outcome: { kind: "abandoned", reason: "permanent: chat not found" }, at: 6 },
+];
+
+/** An outbound queue holding PENDING and RECEIPTS, as admin-api reads it. */
+const queue = defineComponent({
+  name: "queue-test",
+  setup(pikit) {
+    const outbound: OutboundQueue = {
+      enqueue: async () => {},
+      attach: () => {},
+      detach: async () => {},
+      pending: async (page) => {
+        if (page.cursor !== undefined && page.cursor !== "p2") throw new Error("not a cursor of this queue");
+        return page.cursor === undefined ? { items: PENDING.slice(0, page.limit ?? 50), next: "p2" } : { items: [] };
+      },
+      receipts: {
+        read: async (after, limit) => {
+          if (after !== undefined && !/^r\d$/.test(after)) throw new Error("malformed cursor");
+          const from = after === undefined ? 0 : Number(after.slice(1)) + 1;
+          return { items: RECEIPTS.slice(from, from + limit).map((fact, i) => ({ cursor: `r${from + i}`, fact })), gap: false };
+        },
+      },
+    };
+    pikit.provide("outbound.queue", outbound);
+  },
+});
+
+test("delivery: what is not delivered yet and what settled, read from outbound.queue; never a piece's text", async () => {
+  const s = await started({}, [queue]);
+
+  const pending = await s.fetch("/admin/api/delivery/pending?limit=10", { headers: AUTH });
+  expect(pending.status).toBe(200);
+  expect(await pending.json()).toEqual({ items: PENDING, next: "p2" });
+
+  const receipts = await s.fetch("/admin/api/delivery/receipts?limit=1", { headers: AUTH });
+  expect(await receipts.json()).toEqual({ items: [{ cursor: "r0", ...RECEIPTS[0] }], gap: false, next: "r0" });
+  const after = await s.fetch("/admin/api/delivery/receipts?after=r0&limit=5", { headers: AUTH });
+  expect(await after.json()).toEqual({ items: [{ cursor: "r1", ...RECEIPTS[1] }], gap: false, next: "r1" });
+  // Past the last one, the cursor stays where it was: read on from it later.
+  const end = await s.fetch("/admin/api/delivery/receipts?after=r1", { headers: AUTH });
+  expect(await end.json()).toEqual({ items: [], gap: false, next: "r1" });
+
+  for (const path of ["/admin/api/delivery/pending?cursor=forged", "/admin/api/delivery/receipts?after=forged", "/admin/api/delivery/receipts?limit=0"]) {
+    expect({ path, status: (await s.fetch(path, { headers: AUTH })).status }).toEqual({ path, status: 400 });
+  }
+  expect((await s.fetch("/admin/api/delivery/pending")).status).toBe(401);
+});
+
+test("delivery without an outbound.queue: 404 not_installed, and the rest of the API as before", async () => {
+  const s = await started();
+
+  for (const path of ["/admin/api/delivery/pending", "/admin/api/delivery/receipts"]) {
+    const response = await s.fetch(path, { headers: AUTH });
+    expect(response.status).toBe(404);
+    expect(await response.json()).toMatchObject({ error: "not_installed" });
+  }
 });

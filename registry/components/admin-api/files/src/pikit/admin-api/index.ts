@@ -10,6 +10,8 @@
  *   `dispatch` (a steer by default), an abort through its `abort`, a reset through
  *   `conversations.registry`'s `reset`. Each is logged with the operator's id and the conversation,
  *   never the message's text.
+ * - **Delivery, when an `outbound.queue` is installed:** the pieces not delivered yet (`pending`) and
+ *   those that settled (`receipts`, read after a cursor), as the queue keeps them; never their text.
  * - **Only a conversation's current one is talked to.** A message, an abort or a reset to a
  *   conversation a reset left behind is `409 not_current`: its key points elsewhere, and the answer
  *   would reach the chat from a conversation it no longer shows.
@@ -28,7 +30,7 @@ import { APP_DESCRIPTION, type AppContext, defineComponent } from "@pikit/core";
 import type { ConversationRef, HttpRoute, ObservedConversation, ObservedEvent, Operator, PageRequest } from "@pikit/contracts";
 import Type, { type Static } from "typebox";
 import Value from "typebox/value";
-import type { ApiAbortResponse, ApiApp, ApiConversation, ApiError, ApiPage, ApiResetResponse, ApiSendResponse, ApiTranscriptEntry } from "./api.ts";
+import type { ApiAbortResponse, ApiApp, ApiConversation, ApiError, ApiPage, ApiPendingPiece, ApiReceipt, ApiReceiptsPage, ApiResetResponse, ApiSendResponse, ApiTranscriptEntry } from "./api.ts";
 import { BASE, createAssets } from "./assets.ts";
 
 const Config = Type.Object({
@@ -154,6 +156,8 @@ export default defineComponent({
     const observe = pikit.use("agent.observe");
     const runtime = pikit.use("agent.runtime");
     const conversations = pikit.use("conversations.registry");
+    // Delivery: shown when an outbound queue is installed.
+    const queue = pikit.useOptional("outbound.queue");
     const assets = createAssets(config.assets);
 
     /** An API route: answers only an operator. */
@@ -258,6 +262,32 @@ export default defineComponent({
       if (reset === undefined) return failure(404, "not_found");
       ctx.logger.info("admin-api: an operator reset a conversation", { operator: operator.id, conversation: conversation.key });
       return json<ApiResetResponse>(200, { key: conversation.key, previousConversationId: reset.previousConversationId, conversationId: reset.newConversationId });
+    });
+
+    const NO_QUEUE = () => failure(404, "not_installed", "no outbound.queue is installed: answers go straight to their platform, with nothing to show here");
+
+    api("GET /admin/api/delivery/pending", async (request) => {
+      const outbound = queue.get();
+      if (outbound === undefined) return NO_QUEUE();
+      const page = pageOf(request);
+      if ("problem" in page) return failure(400, "invalid_request", page.problem);
+      const result = await paged(page, () => outbound.pending(page));
+      if (result instanceof Response) return result;
+      return json<ApiPage<ApiPendingPiece>>(200, result as ApiPage<ApiPendingPiece>);
+    });
+
+    api("GET /admin/api/delivery/receipts", async (request) => {
+      const outbound = queue.get();
+      if (outbound === undefined) return NO_QUEUE();
+      const params = new URL(request.url).searchParams;
+      const after = params.get("after") ?? undefined;
+      const page = pageOf(request);
+      if ("problem" in page) return failure(400, "invalid_request", page.problem);
+      const read = await paged({ ...(after !== undefined && { cursor: after }) }, () => outbound.receipts.read(after, page.limit ?? 100));
+      if (read instanceof Response) return read;
+      const items = read.items.map(({ cursor, fact }) => ({ cursor, ...fact }) as ApiReceipt);
+      const next = items.at(-1)?.cursor ?? after;
+      return json<ApiReceiptsPage>(200, { items, gap: read.gap, ...(next !== undefined && { next }) });
     });
 
     // Under /admin/api/ a path no route above serves is the API's 404, never the dashboard's page.

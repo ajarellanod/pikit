@@ -32,6 +32,12 @@
       "type": "registry:file",
       "title": "conversations",
       "description": "The dashboard's conversations view."
+    },
+    {
+      "name": "delivery",
+      "type": "registry:file",
+      "title": "delivery",
+      "description": "The dashboard's delivery view."
     }
   ]
 }

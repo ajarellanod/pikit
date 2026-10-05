@@ -16,6 +16,8 @@
  * | `POST /admin/api/conversations/:id/messages` | `ApiSendRequest` → `202 ApiSendResponse` |
  * | `POST /admin/api/conversations/:id/abort` | `200 ApiAbortResponse` |
  * | `POST /admin/api/conversations/:id/reset` | `200 ApiResetResponse` |
+ * | `GET /admin/api/delivery/pending?limit&cursor` | `ApiPage<ApiPendingPiece>`, oldest stored first (with `outbound.queue`) |
+ * | `GET /admin/api/delivery/receipts?after&limit` | `ApiReceiptsPage`, in the order they settled (with `outbound.queue`) |
  */
 
 /** What a conversation cost: every model call and tool summed (pi-ai's `Usage`). */
@@ -102,6 +104,45 @@ export interface ApiResetResponse {
   conversationId: string;
 }
 
+/** A piece of an answer not delivered yet (`outbound.queue`'s `pending`). Never its text. */
+export interface ApiPendingPiece {
+  idempotencyKey: string;
+  /** Which of the answer's pieces: 0 is the first. */
+  index: number;
+  channel: string;
+  conversationKey: string;
+  /** `queued`: never tried; `sending`: in flight; `retrying`: tried, waiting to go again. */
+  state: "queued" | "sending" | "retrying";
+  attempts: number;
+  /** Epoch ms before which it is not tried again; absent while sending. */
+  nextAttemptAt?: number;
+  /** Why its last try did not deliver it, short. */
+  lastError?: string;
+  /** Its next send may repeat one that reached the platform. */
+  possibleDuplicate: boolean;
+  storedAt: number;
+}
+
+/** A piece that settled (`outbound.queue`'s `receipts`), with the cursor to read after it. */
+export interface ApiReceipt {
+  cursor: string;
+  idempotencyKey: string;
+  index: number;
+  channel: string;
+  conversationKey: string;
+  attempts: number;
+  outcome: { kind: "delivered"; platformMessageId: string; possibleDuplicate: boolean } | { kind: "abandoned"; reason: string };
+  /** Epoch ms when it settled. */
+  at: number;
+}
+
+/** Receipts after a cursor: `next` is the last one's, to read on from; `gap`: some were pruned before this read. */
+export interface ApiReceiptsPage {
+  items: ApiReceipt[];
+  gap: boolean;
+  next?: string;
+}
+
 /** The composition (`AppDescription`, K13): JSON, no secrets. */
 export interface ApiApp {
   version: number;
@@ -113,7 +154,7 @@ export interface ApiApp {
 }
 
 export interface ApiError {
-  /** `unauthorized`, `not_found`, `invalid_request`, `invalid_cursor`, `no_agent`, `not_current`. */
+  /** `unauthorized`, `not_found`, `not_installed`, `invalid_request`, `invalid_cursor`, `no_agent`, `not_current`. */
   error: string;
   message?: string;
 }

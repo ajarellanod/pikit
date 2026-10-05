@@ -18,7 +18,9 @@
     ]
   },
   "optional": {
-    "capabilities": []
+    "capabilities": [
+      "outbound.queue"
+    ]
   },
   "provides": [
     "http.route"
