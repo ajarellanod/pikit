@@ -28,7 +28,8 @@ there.
 - Inbound and outbound: `admitInbound` (`inbound.normalize`, `route.resolve`) and its outbound
   counterpart `startAnswerDelivery` (a channel's answers from the `answers` feed and its own cursor,
   one ordered lane per conversation, retries with the channel's own waits, idempotency keys, a crash
-  resends at most the piece in flight, marked; on `wakeups` in slices or a timer in the process),
+  resends at most the piece in flight, marked; on `wakeups` in slices or a timer in the process; its
+  header says once what direct and queued delivery each guarantee),
   `conversations.registry` (a key's runtime conversation, resolve and reset), `outbound.queue` with
   `ChannelTransport` and `DeliveryError`, `Feed` (what must not be missed, read with a cursor, K3).
 - Platform: `http.route` (fetch handlers by `"METHOD /path"`, parameters and prefix keys such as
@@ -38,7 +39,8 @@ there.
   `@pikit/contracts/cloudflare` (C5).
 - The channel suite checks any channel end to end, durability included (an answer settled while the
   channel was stopped, a lost event, retries in order, a cut send resent at most once, independent
-  lanes); the convergence suite checks crash recovery.
+  lanes, a transient admission failure never dropped, a redelivered reset command run once); the
+  convergence suite checks crash recovery.
   Contracts still without a suite are listed in `features/building-components.md`.
 
 ### Pi adapter (`@pikit/pi-adapter`, the only package that imports Pi)
@@ -68,8 +70,11 @@ there.
   `call: <tool> <json>` and shows the system prompt on `echo-system`), `credentials-file`.
 - Channels: `channel-http` (server), `channel-telegram` (long polling, server),
   `channel-telegram-webhook` (Cloudflare: a Worker half and an object half, bot password and `/login`,
-  self-registering webhook); both deliver through `startAnswerDelivery`. Routing: `router-basic`,
-  `router-rules`. Delivery: `outbound-durable`.
+  self-registering webhook); both deliver through `startAnswerDelivery`, run a redelivered command
+  once, and share their identical files (held by a test). The poller tries a failing update for 15
+  minutes, never skipping past it, then tells its sender. Routing: `router-basic`, `router-rules`.
+  Delivery: `outbound-durable` (on `wakeups` on both targets: a retry is a timer on a server and the
+  object's alarm on Cloudflare; transient failures never abandon, only an age of 24 hours does).
 - Conversations and storage: `conversations-file`, `conversations-kv`, `storage-sqlite`, `storage-do`,
   `storage-kv-sql`, `secrets-env`, `secrets-cloudflare`, `mailbox-local`, `wakeups-timers`,
   `platform-cloudflare` (mailbox, inbox and wakeups over one alarm).
@@ -84,7 +89,9 @@ there.
   refused by a `beforeTool` hook; the reference agent extension), of the kind `extension-`.
 - Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`) and
   `deployment-cloudflare` (the Worker and one Durable Object per conversation running the project's
-  two Apps; `up` waits for the new version on `/health`, then runs `afterDeploy` hooks, C8).
+  two Apps; `up` waits for the new version on `/health`, then runs `afterDeploy` hooks, C8; while an
+  object's App cannot start, a guard alarm wakes it again, from 30 s doubling up to 1 h, past
+  Cloudflare's 6 retries).
 
 ### Presets
 - `http` and `telegram` (Docker on a server), `telegram-cloudflare` and `cloudflare-minimal`
@@ -102,12 +109,14 @@ there.
   repository its messages say `pikit registry generate <dir>`.
 - `pikit.json` records what each install wrote (files and hashes, npm packages, hooks, offers);
   every change rolls back on failure and leaves a marker when interrupted. Offers install the one
-  provider a component needs (`outbound.queue`, `storage.kv`). Components may declare
+  provider a component needs (`outbound.queue`, `storage.kv`, `wakeups`); it goes with that component
+  unless another requires it. `remove` and `doctor` refuse a project that would answer nobody (a
+  channel without a router, routes without a server), and print doctor's notes. Components may declare
   `configure.ts` and `doctor`, `beforeDeploy` and `afterDeploy` hooks, which run on the machine that
   configures or deploys, never in the app. `pikit add` installs a component's README beside its
   code (`src/pikit/<name>/README.md`).
 - `configure` and `up` check credentials only for the model providers the agents name, and reach
-  the deployment (Docker) only when one is missing here.
+  the deployment (Docker) only when one is missing here; `dev` checks this machine's.
 - `pikit new` copies the skills for AI agents (`.agents/skills/`) into every project, and leaves a
   registry of the project's own (`registry/`) out of `tsc` and `bun test` (`bunfig.toml`); `lib` is
   ES2023.
