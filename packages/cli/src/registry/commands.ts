@@ -4,8 +4,8 @@
  * added later needs no change here.
  */
 
-import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from "node:fs";
+import { join, relative, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Target } from "@pikit/core";
 import { PIKIT_ROOT as REPO } from "../paths.ts";
@@ -216,6 +216,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
   const adapter = options.adapterVersion ?? adapterVersion();
   const problems: string[] = [];
   const manifests: Manifest[] = [];
+  const regenerate = generateCommand(root);
   const names = componentNames(root);
   if (names.length === 0) problems.push(`registry: no components under ${join(root, "components")}`);
   // The kit's vocabulary, extended by what the registry's well-formed manifests declare.
@@ -237,7 +238,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
       continue;
     }
     if (manifest === undefined) {
-      report("component.json is missing: run `bun run registry generate`, then fill in its hand-written fields");
+      report(`component.json is missing: run \`${regenerate}\`, then fill in its hand-written fields`);
       continue;
     }
     manifests.push(manifest);
@@ -251,10 +252,10 @@ export async function validate(root: string, options: { coreVersion?: string; co
     checkDevDependencies(manifest).forEach(report);
 
     try {
-      const drift = checkDrift(manifest, await generatedFor(dir, name, manifest));
+      const drift = checkDrift(manifest, await generatedFor(dir, name, manifest), regenerate);
       drift.forEach(report);
       if (drift.length === 0) {
-        checkFormat(dir, manifest).forEach(report);
+        checkFormat(dir, manifest, regenerate).forEach(report);
         // Only on an up-to-date manifest: a drifted one would report names setup no longer uses.
         checkCapabilities(manifest, catalogue).forEach(report);
       }
@@ -268,9 +269,9 @@ export async function validate(root: string, options: { coreVersion?: string; co
 
   const indexPath = join(root, "registry.json");
   const expected = formatIndex(buildIndex(manifests));
-  if (!existsSync(indexPath)) problems.push("registry.json is missing: run `bun run registry generate`");
+  if (!existsSync(indexPath)) problems.push(`registry.json is missing: run \`${regenerate}\``);
   else if (readFileSync(indexPath, "utf8") !== expected) {
-    problems.push("registry.json does not match the components' manifests: run `bun run registry generate`");
+    problems.push(`registry.json does not match the components' manifests: run \`${regenerate}\``);
   } else {
     // Presets resolve through registry.json, so only once it is right.
     problems.push(...checkPresets(root, catalogue));
@@ -283,7 +284,21 @@ export async function validate(root: string, options: { coreVersion?: string; co
 export function checkSchemaFiles(root: string): string[] {
   return [...schemaFiles()]
     .filter(([file, text]) => !existsSync(join(root, file)) || readFileSync(join(root, file), "utf8") !== text)
-    .map(([file]) => `${file} is missing or out of date: run \`bun run registry generate\``);
+    .map(([file]) => `${file} is missing or out of date: run \`${generateCommand(root)}\``);
+}
+
+/** How this repository regenerates its own registry. */
+export const KIT_GENERATE = "bun run registry generate";
+
+/**
+ * The command that regenerates the registry at `root`, for a message to say: this repository's script
+ * for its own registry, `pikit registry generate <root>` (from the working directory) for any other,
+ * a project's `registry/` among them.
+ */
+export function generateCommand(root: string): string {
+  const real = (path: string) => (existsSync(path) ? realpathSync(path) : resolve(path));
+  if (real(root) === real(join(REPO, "registry"))) return KIT_GENERATE;
+  return `pikit registry generate ${relative(process.cwd(), resolve(root)) || "."}`;
 }
 
 /**
@@ -389,7 +404,7 @@ export function readManifests(root: string): Manifest[] {
 }
 
 /** The generated fields are exactly what setup declares, and every tool states its replay. */
-export function checkDrift(manifest: Manifest, generated: Generated): string[] {
+export function checkDrift(manifest: Manifest, generated: Generated, regenerate = KIT_GENERATE): string[] {
   const problems: string[] = [];
   const expected = withGenerated(manifest, generated);
   const fields: [string, unknown, unknown][] = [
@@ -404,7 +419,7 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
   for (const [field, actual, derived] of fields) {
     if (JSON.stringify(actual) !== JSON.stringify(derived)) {
       problems.push(
-        `${field} drifted from setup: component.json has ${JSON.stringify(actual) ?? "nothing"}, setup declares ${JSON.stringify(derived) ?? "nothing"}; run \`bun run registry generate\``,
+        `${field} drifted from setup: component.json has ${JSON.stringify(actual) ?? "nothing"}, setup declares ${JSON.stringify(derived) ?? "nothing"}; run \`${regenerate}\``,
       );
     }
   }
@@ -417,10 +432,10 @@ export function checkDrift(manifest: Manifest, generated: Generated): string[] {
 }
 
 /** A stable layout keeps every diff to what changed; hand edits keep it by running `generate`. */
-function checkFormat(componentDir: string, manifest: Manifest): string[] {
+function checkFormat(componentDir: string, manifest: Manifest, regenerate: string): string[] {
   return readFileSync(manifestPath(componentDir), "utf8") === formatManifest(manifest)
     ? []
-    : ["component.json is not in generated form (key order, formatting): run `bun run registry generate`"];
+    : [`component.json is not in generated form (key order, formatting): run \`${regenerate}\``];
 }
 
 /** A new component's starting manifest: what can be read from its README and its imports. */

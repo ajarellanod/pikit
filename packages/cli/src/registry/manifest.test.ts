@@ -1,10 +1,10 @@
 import { afterAll, expect, test } from "bun:test";
 import { cpSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, relative } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { checkManifest, kitRangeProblems } from "./checks.ts";
-import { checkSchemaFiles } from "./commands.ts";
+import { checkSchemaFiles, generateCommand } from "./commands.ts";
 import { COMPONENT_SCHEMA_FILE, ManifestSchema, readManifest, schemaProblems } from "./manifest.ts";
 
 const dirs: string[] = [];
@@ -34,9 +34,16 @@ test("validate knows when the registry's JSON Schemas are missing or stale", () 
   expect(checkSchemaFiles(root)).toEqual([]);
   const file = join(root, COMPONENT_SCHEMA_FILE);
   writeFileSync(file, readFileSync(file, "utf8").replace('"pikit component.json"', '"edited by hand"'));
-  expect(checkSchemaFiles(root)).toEqual([`${COMPONENT_SCHEMA_FILE} is missing or out of date: run \`bun run registry generate\``]);
+  // Not this repository's registry: the command is the CLI's, with the registry's path.
+  expect(checkSchemaFiles(root)).toEqual([`${COMPONENT_SCHEMA_FILE} is missing or out of date: run \`pikit registry generate ${relative(process.cwd(), root)}\``]);
   rmSync(join(root, "schema"), { recursive: true });
   expect(checkSchemaFiles(root)).toHaveLength(2);
+});
+
+test("what validate says to run: this repository's script for its registry, the CLI with the path for a project's", () => {
+  expect(generateCommand(DEFAULT_REGISTRY)).toBe("bun run registry generate");
+  expect(generateCommand(join(process.cwd(), "registry", "..", "my-project", "registry"))).toBe(`pikit registry generate ${join("my-project", "registry")}`);
+  expect(generateCommand(process.cwd())).toBe("pikit registry generate .");
 });
 
 test("requires.contracts must accept this repository's @pikit/contracts, and a component that depends on them says which", () => {
