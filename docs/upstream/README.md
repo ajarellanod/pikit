@@ -14,7 +14,7 @@ here with the Pi version.
 | 3 | pi-durable | [Caller context values reach tools](#3-caller-context-values-reach-tools) | Multi-tenant isolation, tracing | medium (high for multi-tenant) | draft (here) |
 | 4 | pi-durable | [Several writers per storage](#4-several-writers-per-storage) | Replicas, Postgres as a shared store | medium | draft (here) |
 | 5 | pi-durable | [Per-conversation scheduling scope](#5-per-conversation-scheduling-scope) | Servers holding many conversations | medium | draft ([file](pi-durable-scheduling-scope.md)) |
-| 6 | pi-durable | [Provider session id](#6-provider-session-id) | Prompt-cache cost on long chats | medium | draft ([file](pi-durable-provider-session-id.md)) |
+| 6 | pi-durable | [Provider session id](#6-provider-session-id) | Prompt-cache cost on long chats | medium | **shipped** in pi-durable 1.0.2 ([#10424](https://github.com/earendil-works/pi/issues/10424)) |
 | 7 | pi-durable | [Table prefix for `SqliteStorage`](#7-table-prefix-for-sqlitestorage) | Generic table names in a shared database | low | draft ([file](pi-durable-table-prefix.md)) |
 | 8 | chord | [Foreign parent's `abortSignal`](#8-chord-foreign-parents-abortsignal) | A bridge (`toChord`) in the adapter | low | **declined** ([#10189](https://github.com/earendil-works/pi/issues/10189), `no-action`) |
 | 9 | chord | [`esbuild` only for the bundler](#9-chord-esbuild-only-for-the-bundler) | An unused dependency installed everywhere | low | draft (here) |
@@ -24,9 +24,12 @@ here with the Pi version.
 | 13 | pi-durable | [Settlement order and run identity on submissions](#13-settlement-order-and-run-identity-on-submissions) | Nothing now: pikit groups runs exactly itself | low (nice to have) | not to send |
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
-([storage-postgres](../../features/storage-postgres.md)), an `ExecutionEnv` conformance suite (pikit
-ported one: `packages/pi-adapter/src/testing/execution.ts`), and a Durable Object example
-(pikit's `storage-do` + `openDurableStorage`, proven with pi-durable's storage conformance).
+([storage-postgres](../../features/storage-postgres.md)), and a Durable Object example (pikit's
+`storage-do` + `openDurableStorage`, proven with pi-durable's storage conformance). pi-durable 1.0.3
+ships its own `ExecutionEnv` suite (`createEnvConformance`); pikit runs it and keeps only the cases it
+lacks (`packages/pi-adapter/src/testing/execution.ts`), which could be offered to it.
+
+Re-checked against pi-durable 1.0.3 (2026-10-05): only proposal 6 is solved; 1 to 5 and 7 are not.
 
 ---
 
@@ -106,12 +109,16 @@ ported one: `packages/pi-adapter/src/testing/execution.ts`), and a Durable Objec
   `maxConcurrentRuns`. Full text: [pi-durable-scheduling-scope.md](pi-durable-scheduling-scope.md).
 
 ## 6. Provider session id
-- **Problem.** pi-durable never sets pi-ai's `sessionId` stream option, so providers that key prompt
-  caching or affinity on it (OpenAI/Azure Responses, Anthropic, Codex) get no key per conversation.
-- **Evidence.** `pi-facts.test.ts`, "pi-durable sends the provider no session id".
+- **Problem.** pi-durable 1.0.0 never set pi-ai's `sessionId` stream option, so providers that key
+  prompt caching or affinity on it (OpenAI/Azure Responses, Anthropic, Codex) got no key per
+  conversation.
 - **pikit meanwhile.** None possible (settings are harness-wide).
-- **Ask.** Default to the conversation id; settable per conversation through `configure()`. Full
-  text: [pi-durable-provider-session-id.md](pi-durable-provider-session-id.md).
+- **Ask.** Default to the conversation id; settable per conversation through `configure()`.
+- **Outcome: shipped.** Not sent by pikit: a maintainer filed and fixed it as
+  [#10424](https://github.com/earendil-works/pi/issues/10424), in pi-durable 1.0.2. Each conversation
+  persists a UUIDv7 in its `pi.provider` document, kept across turns, reopen, reset and compaction (a
+  fork gets its own), and every generation and compaction request sends it. No per-conversation
+  override; pikit needs none. `pi-facts.test.ts` asserts it; the proposal file is deleted.
 
 ## 7. Table prefix for `SqliteStorage`
 - **Problem.** Fixed generic table names (`conversations`, `entries`, `tasks`, `submissions`,
@@ -222,7 +229,7 @@ Rules for pikit:
   whether we would implement it.
 - **Written in the owner's own voice.** If an LLM helped, add a clearly labelled AI-disclosure
   comment (as on #10188/#10189).
-- **API or design requests** (proposals 1, 3, 4, 5, 6, 7, 9, 10, 12, 13) **go to Discord first**, or
+- **API or design requests** (proposals 1, 3, 4, 5, 7, 9, 10, 12, 13) **go to Discord first**, or
   to an RFC (`rfc.earendil.com`) when large. Pi's core is minimal by policy: "if it does not belong in
   core, it should be an extension".
 - **Never in volume, never automated.** Ignoring the guide twice, or many agent-written issues, gets

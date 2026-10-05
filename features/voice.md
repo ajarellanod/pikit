@@ -22,7 +22,7 @@ Voice notes in (transcribed, then answered) and, when asked, voice notes out.
   `packages/contracts/src/inbound.ts`).
 
 ## Pi first
-pi-ai 1.0.0 carries text and images (`ImageContent`), not audio, and Pi transcribes nothing. So
+pi-ai 1.0.3 carries text and images (`ImageContent`), not audio, and Pi transcribes nothing. So
 the transcription is pikit's for now. If pi-ai gains audio input for a model, the transcription
 stage is deleted and the audio goes to the model: check pi-ai before building.
 

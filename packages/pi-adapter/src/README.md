@@ -1,7 +1,7 @@
 # @pikit/pi-adapter: Pi (pi-durable 1.0) behind pikit's contracts
 
 The only package that imports Pi: `@earendil-works/pi-durable`, `@earendil-works/chord`,
-`@earendil-works/pi-ai` and `@earendil-works/pi-mcp`, all exactly `1.0.0`. It implements
+`@earendil-works/pi-ai` and `@earendil-works/pi-mcp`, all exactly `1.0.3`. It implements
 `agent.runtime` on pi-durable's `Harness`, opens pi-durable's storage over pikit's `storage.sql`, and
 gives components Pi's tools, models, MCP client and execution environments by subpath.
 
@@ -12,7 +12,7 @@ gives components Pi's tools, models, MCP client and execution environments by su
 | `.` | `index.ts` | `createDurableRuntime` (`runtime.ts`); `createObserver`, `agent.observe` on pi-durable (`observe.ts`); `openDurableStorage` (`sql.ts`); `modelsFrom`, `modelRefOf` (`models.ts`); `nextWakeAt`, `nextWakeAtOf`, `driveSlice` (`wakeups.ts`); `harnessEnv`; `loginInteraction`; the capability types (`types.ts`) and Pi's types | every |
 | `./tools` | `tools/index.ts` | `defineTool` (what a `tool-*` component writes its tool with: tool-fetch and tool-websearch-brave are the references), `codingTool(name)` (pi-durable's `read`/`write`/`edit`/`bash` with pikit's replay) (`tools/README.md`) | every |
 | `./mcp` | `mcp.ts` | pi-mcp's client, `mcpHttpTransport`, `mcpToolName`, `mcpTool` (provided at setup, described at start) | every |
-| `./execution` | `execution.ts` | pi-durable's `ExecutionEnv` types and helpers; `harnessEnv`, `atCwd` | every |
+| `./execution` | `execution.ts` | pi-durable's `ExecutionEnv` types and helpers (`LineScanner` and the decoders an environment scans with); `harnessEnv`, `atCwd` | every |
 | `./node` | `node.ts` | `createLocalExecution` on pi-durable's `NodeExecutionEnv`: plumbing (a subclass of Pi's class that starts commands from the variables given, never this process's); which variables and which directory is the components' policy (`execution-local`, `workspace-local`) | server |
 | `./providers/anthropic`, `./providers/openrouter` | `providers/*.ts` | pi-ai 1.0's providers by subpath (`openrouterProvider({ apiBase })`) | every |
 | `./providers/faux` | `providers/faux.ts` | pi-ai 1.0's faux provider, for tests only (`provider-faux`) | every |
@@ -21,7 +21,7 @@ gives components Pi's tools, models, MCP client and execution environments by su
 | `./testing` | `testing/index.ts` | `./testing/neutral`, plus `createPiRuntimeFixture` (a SQLite file), `sqliteStorage`, `openSqliteDatabase`, `testComponents` with a `storage.sql` in memory | server |
 | `./testing/neutral` | `testing/neutral.ts` | the scripted model and agent (`scriptedProvider`, `scriptedAgent`, `holdTool`, `recordingBash`), `createRuntimeFixture`, `interruptRun`, `testComponents`, `fakeConversations`, the `workspace` and `model.credentials` conformance suites | every |
 | `./testing/harness` | `testing/harness.ts` | a pi-durable `Harness` smoke over `storage.sql`, in phases, and pi-durable's storage conformance | every |
-| `./execution/testing` | `testing/execution.ts` | `createDurableExecutionConformance`; `callTool`; `runToolCalls` (a Harness with the faux model) | every |
+| `./execution/testing` | `testing/execution.ts` | `createDurableExecutionConformance` (pi-durable's `createEnvConformance`, then the cases it lacks); `callTool`; `runToolCalls` (a Harness with the faux model) | every |
 | `./mcp/testing` | `testing/mcp.ts` | a fake Streamable HTTP MCP server as a `fetch` handler | every |
 | `./wakeups/testing` | `testing/wakeups.ts` | a Harness on an injected clock, and readers of what a run left | every |
 
@@ -166,7 +166,9 @@ pi-durable is the only record of what became of each message; `agent.submissions
 - A run that ends unanswered leaves follow-ups queued in the inbox until the next submission. The
   runtime submits a write of kind `pikit.inbox-kick` (an entry without model messages) to an idle
   conversation with queued inputs: the admission boundary places them and starts their run.
-- pi-durable passes the provider no session id, so prompt-cache keys keyed on it get none.
+
+Closed upstream: since pi-durable 1.0.2 each conversation sends the provider its own persisted
+session id (`pi.provider`), the same on every turn, so prompt caches keyed on it hit (pi-facts.test.ts).
 
 ## Wake-ups (`wakeups.ts`)
 

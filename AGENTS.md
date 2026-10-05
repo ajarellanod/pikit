@@ -13,5 +13,5 @@
 
 # Downloaded references
 
-- `/Users/alex/Projects/Personal/pi` — Pi monorepo (`earendil-works/pi`); read `origin/main` (v1.0.0: `packages/durable`, `packages/chord`, `packages/server`) after `git fetch`, the local `main` checkout is stale.
+- `/Users/alex/Projects/Personal/pi` — Pi monorepo (`earendil-works/pi`); read `origin/main` (v1.0.3: `packages/durable`, `packages/chord`, `packages/server`) after `git fetch`, the local `main` checkout is stale.
 - `/Users/alex/Projects/Personal/shadcn-ui` — shadcn CLI and registry (sparse: `packages/shadcn`, `packages/registry`, `apps/v4/content/docs/registry`), checked at 4.21.1.

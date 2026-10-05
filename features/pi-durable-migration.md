@@ -21,9 +21,10 @@ CLI and installer (zero friction from installer to a running agent), and, later,
 built on pi-durable's `watch()` and `taskGraph()`. Where pikit had built something that pi-durable
 now does, pikit's goes.
 
-## Where Pi stands (checked against Pi 1.0.0)
-- `@earendil-works/pi-durable` 1.0.0 is marked **experimental**: its API changes without notice
-  between releases. pikit pins it and re-checks on each bump.
+## Where Pi stands (checked against Pi 1.0.3)
+- `@earendil-works/pi-durable` 1.0.3 is marked **experimental**: its API changes without notice
+  between releases (1.0.3 added required `ExecutionEnv` methods). pikit pins it and re-checks on
+  each bump.
 - It is a durable harness: `Harness.open()` over a storage, conversations (`root()`,
   `createConversation()`), `submit()` with request-id deduplication, an inbox for a busy
   conversation (steers, follow-ups, writes; `steeringMode` / `followUpMode`), `resume()` after a
@@ -33,6 +34,9 @@ now does, pikit's goes.
 - Storage: memory, JSONL, and a SQLite core over a small `SqliteDatabase` facade. pikit's facade over
   `storage.sql` passes pi-durable's storage conformance on storage-sqlite (Bun) and storage-do
   (workerd).
+- Execution: `ExecutionEnv` (files, positional and directory readers, `watch`, a shell taking a
+  string or an argv) with its own conformance suite since 1.0.3, which execution-local,
+  workspace-local and execution-do pass (execution-do without `watch`).
 - pi-ai 1.0 (`createModels`, providers by subpath) and Chord 1.0 come with it. `pi-agent-core`'s
   `AgentHarness` is gone.
 
@@ -76,8 +80,6 @@ Each has, or will have, a proposal in [`docs/upstream/`](../docs/upstream/):
 - **A failed run leaves queued inputs stuck** in the inbox until the next submission; pikit kicks the
   inbox with an invisible `pikit.inbox-kick` write
   ([proposal](../docs/upstream/pi-durable-inbox-after-failure.md)).
-- **No session id reaches the provider**, so prompt-cache keys get none
-  ([proposal](../docs/upstream/pi-durable-provider-session-id.md)).
 - **The scheduler is global:** opening a Harness resumes every conversation's work, not one's
   ([proposal](../docs/upstream/pi-durable-scheduling-scope.md)).
 - **Table names are unprefixed** (`conversations`, `entries`, `tasks`…), against `storage.sql`'s
@@ -87,6 +89,10 @@ Each has, or will have, a proposal in [`docs/upstream/`](../docs/upstream/):
   so two processes over one SQLite file are unsupported ([replicas](replicas.md)).
 - **A caller's context values (tenant, trace) do not reach tools:** tasks run in the Harness's
   context, so only the run's events see them.
+
+Closed upstream: the provider session id (pi-durable 1.0.2,
+[#10424](https://github.com/earendil-works/pi/issues/10424)): each conversation sends its own,
+persisted, so prompt caches keyed on it hit.
 
 ## Open questions
 - Whether `pi-durable` ships its own Durable Object facade, or pikit keeps its few lines over
