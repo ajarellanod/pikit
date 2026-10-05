@@ -465,7 +465,8 @@ test("remove refuses to take a tool an agent names; with --force it removes it, 
 
   const doctor = await runCli(["doctor"], dir);
   expect(doctor.code).toBe(1);
-  expect(doctor.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool)');
+  // The project's registry names the component that provides it.
+  expect(doctor.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool): install tool-bash');
 });
 
 test("configure --login-method takes browser or code, and only with --login", async () => {

@@ -28,7 +28,10 @@ it into the app.
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes.
 
   It refuses to start without an agent, when an agent names a model no provider has, when an agent
-  names a tool or an extension no component provides, and when an agent's provider has no credentials at all. That
+  names a tool or an extension no component provides (`pikit doctor` names the registry component that
+  provides a missing tool), when an agent names `read`, `write`, `edit` or `bash` and neither
+  `execution` nor `workspace` is installed (the tools that work on files and commands:
+  `ENVIRONMENT_TOOLS` in `index.ts`), and when an agent's provider has no credentials at all. That
   last check makes no network call and refreshes nothing: it only asks whether a credential is stored
   or an environment variable set.
 - **Target:** `server` and `durable`. On Cloudflare it goes in the conversation object's App, with

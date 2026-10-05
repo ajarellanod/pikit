@@ -8,7 +8,7 @@
 import { expect, test } from "bun:test";
 import { atCwd, BACKGROUND_CONTEXT, getOrThrow, harnessEnv } from "@pikit/pi-adapter/execution";
 import { createDurableExecutionConformance, runToolCalls } from "@pikit/pi-adapter/execution/testing";
-import { codingTool } from "@pikit/pi-adapter/tools";
+import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@pikit/pi-adapter/tools";
 import { objectExecution } from "./env.test-support.ts";
 import { fakeDurableObjectStorage } from "./durable-object.test-support.ts";
 
@@ -23,7 +23,7 @@ test("pi-durable's own write, edit, read and bash work on the object's files, in
   const storage = fakeDurableObjectStorage();
   const { env } = objectExecution(storage, { id: "execution-do:test" });
   const results = await runToolCalls({
-    tools: (["read", "write", "edit", "bash"] as const).map(codingTool),
+    tools: [createReadTool(), createWriteTool(), createEditTool(), createBashTool()],
     env: harnessEnv({ execution: () => env }),
     calls: [
       { name: "write", args: { path: "notes/plan.md", content: "# Plan\n\n- clone\n- change\n" } },
@@ -53,7 +53,7 @@ test("pi-durable's own write, edit, read and bash work on the object's files, in
 
 test("a long output is spilled whole to /tmp in the object, and bash names the file", async () => {
   const { env } = objectExecution(fakeDurableObjectStorage(), { id: "execution-do:test" });
-  const [result] = await runToolCalls({ tools: [codingTool("bash")], env: harnessEnv({ execution: () => env }), calls: [{ name: "bash", args: { command: "seq 1 3000" } }] });
+  const [result] = await runToolCalls({ tools: [createBashTool()], env: harnessEnv({ execution: () => env }), calls: [{ name: "bash", args: { command: "seq 1 3000" } }] });
 
   const spill = /Full output: (\/tmp\/pi-output-\S+\.log)/.exec(result?.text ?? "")?.[1];
   expect(result?.isError).toBe(false);

@@ -2,7 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "workspace-local",
   "version": "0.0.0",
-  "description": "Each agent's tools work in a directory of their own on this server: order, not isolation.",
+  "description": "Each agent's tools work in a directory of their own, inside execution: order, not isolation.",
   "targets": [
     "server"
   ],
@@ -10,7 +10,9 @@
     "pikit": "0.0.0",
     "contracts": "0.0.0",
     "adapter": "0.0.0",
-    "capabilities": []
+    "capabilities": [
+      "execution"
+    ]
   },
   "optional": {
     "capabilities": []

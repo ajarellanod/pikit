@@ -10,7 +10,7 @@ gives components Pi's tools, models, MCP client and execution environments by su
 | Export | File | What | Targets |
 |---|---|---|---|
 | `.` | `index.ts` | `createDurableRuntime` (`runtime.ts`); `createObserver`, `agent.observe` on pi-durable (`observe.ts`); `openDurableStorage` (`sql.ts`); `modelsFrom`, `modelRefOf` (`models.ts`); `nextWakeAt`, `nextWakeAtOf`, `driveSlice` (`wakeups.ts`); `harnessEnv`; `loginInteraction`; the capability types (`types.ts`) and Pi's types | every |
-| `./tools` | `tools/index.ts` | `defineTool` (what a `tool-*` component writes its tool with: tool-fetch and tool-websearch-brave are the references), `codingTool(name)` (pi-durable's `read`/`write`/`edit`/`bash` with pikit's replay) (`tools/README.md`) | every |
+| `./tools` | `tools/index.ts` | `defineTool` (what a `tool-*` component writes its tool with: tool-fetch and tool-websearch-brave are the references), pi-durable's `read`/`write`/`edit`/`bash` factories (each `tool-*` component sets their replay) (`tools/README.md`) | every |
 | `./mcp` | `mcp.ts` | pi-mcp's client, `mcpHttpTransport`, `mcpToolName`, `mcpTool` (provided at setup, described at start) | every |
 | `./execution` | `execution.ts` | pi-durable's `ExecutionEnv` types and helpers (`LineScanner` and the decoders an environment scans with); `harnessEnv`, `atCwd` | every |
 | `./node` | `node.ts` | `createLocalExecution` on pi-durable's `NodeExecutionEnv`: plumbing (a subclass of Pi's class that starts commands from the variables given, never this process's); which variables and which directory is the components' policy (`execution-local`, `workspace-local`) | server |

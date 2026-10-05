@@ -132,6 +132,12 @@ shared, upgraded or removed with `pikit remove`, or when it declares a kind or c
   Never another component's files.
 - **What crosses an actor is JSON** (`send`, `call`): use `type` aliases, not interfaces, for it, and
   check it on arrival.
+- **Decisions are in the component's source**: a tool's `replay`, a policy, a default. Pi's own
+  tools come as Pi ships them (`createReadTool()` from `@pikit/pi-adapter/tools`, no replay): spread
+  one and set `replay` in your `setup`, as `tool-read` does.
+- **A tool that works on `api.env`** (Pi's coding tools, or one of yours) `use`s `execution`
+  (`execution.shell` when it needs a shell); `registry validate` refuses one that declares neither.
+  The runtime gives each call its environment: never bind one to the tool.
 - **Fail loudly**: a component that cannot work refuses to start, with a message naming the
   component and what to fix, never a secret's value.
 - **No magic**: nothing happens on import; everything is in `setup`.

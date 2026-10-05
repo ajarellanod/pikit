@@ -10,9 +10,8 @@
  * a command runs does not pick them up by accident. It hides nothing from a command that looks: on
  * Linux, `cat /proc/$PPID/environ` prints the server's whole environment (the same OS user may read
  * it), and its `.env` is a file like any other. A variable added to `variables` (a `GITHUB_TOKEN` for
- * `gh`) is in every command's environment. With `workspace-local` installed, the tools work in its
- * directories with its own `variables`, and this component's `root` and `variables` have no effect on
- * them.
+ * `gh`) is in every command's environment. `workspace-local` builds on this environment: its agents'
+ * directories are inside `root`, and their commands get these `variables`.
  *
  * NOT A SANDBOX. Commands run as the server's OS user and can read and change whatever that user
  * can, outside the working directory too: other projects, `~/.ssh`, this app's credentials file.

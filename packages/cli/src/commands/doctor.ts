@@ -10,7 +10,8 @@
  * - the app composes: every required capability has a provider, selections are valid, the config
  *   matches the merged schema (the core's own `create()` decides);
  * - every tool and model provider an agent names statically is an installed key, when a
- *   component (the runtime) uses it: the runtime would refuse to start otherwise (`references.ts`);
+ *   component (the runtime) uses it: the runtime would refuse to start otherwise (`references.ts`).
+ *   A missing one names the registry component that provides it, from the project's registries;
  * - the app answers someone: a channel has a router (a `route.resolve` stage), and `http.route`s a
  *   server, but in the Worker's App, whose host serves them (`serving.ts`);
  * - every variable a component marks required is set in the environment or in `.env` (names
@@ -34,7 +35,10 @@ import { packageName, scanImports } from "../registry/imports.ts";
 import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from "../project/component-doctor.ts";
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
-import { brokenReferences } from "../project/references.ts";
+import { brokenReferences, type KeyProviders, manifestProviders } from "../project/references.ts";
+import { registryPath } from "../project/registry-location.ts";
+import { openRegistry } from "../project/registry-source.ts";
+import type { Manifest } from "../registry/manifest.ts";
 import { servingGaps } from "../project/serving.ts";
 import { checkLockfile } from "../project/lockfile.ts";
 import { incompleteOperation, incompleteOperationMessage } from "../project/operation.ts";
@@ -94,7 +98,7 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
       if (listable && !result.listed.includes(name)) notes.push(`${name} is installed but not listed in pikit.config.ts`);
     }
     notes.push(...unusedProviders(result.description.components));
-    problems.push(...brokenReferences(result));
+    problems.push(...brokenReferences(result, undefined, registryProviders(projectDir, project.registries)));
     problems.push(...servingGaps(result).map((gap) => gap.message));
     if (options.componentChecks !== false) {
       const checked = await componentChecks(projectDir, options.componentChecks === "unless-before-deploy");
@@ -151,6 +155,29 @@ async function componentChecks(projectDir: string, unlessBeforeDeploy: boolean):
   if (doctorHooks(projectDir, { unlessBeforeDeploy }).length === 0) return { problems: [], notes: [] };
   const result = await runScript<ComponentDoctorResult>("component-doctor.ts", projectDir, unlessBeforeDeploy ? [UNLESS_BEFORE_DEPLOY] : []);
   return result.ok ? result : { problems: [`the components' own checks could not run: ${result.error}`], notes: [] };
+}
+
+/**
+ * What the project's registries provide, by key (`manifestProviders`), read only when a reference is
+ * broken. A registry that cannot be read names nothing: the problem is still reported, without a hint.
+ */
+function registryProviders(projectDir: string, registries: Record<string, string>): KeyProviders {
+  let providers: KeyProviders | undefined;
+  return (capability, key) => {
+    if (providers === undefined) {
+      const manifests: Manifest[] = [];
+      for (const location of Object.values(registries)) {
+        try {
+          const registry = openRegistry(registryPath(projectDir, location));
+          for (const name of registry.names()) manifests.push(registry.manifest(name));
+        } catch {
+          // Left out: see above.
+        }
+      }
+      providers = manifestProviders(manifests);
+    }
+    return providers(capability, key);
+  };
 }
 
 /** Components that provide capabilities no other component uses: installed, and doing nothing. */

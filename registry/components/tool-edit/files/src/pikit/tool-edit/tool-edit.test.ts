@@ -1,57 +1,29 @@
 /**
- * tool-edit's tests. They are copied with the component and keep running in your project. The tool
- * is called on a test environment over a temporary directory (`createLocalExecution`, the one behind
- * `execution-local`), as the runtime gives it one per call.
+ * tool-edit's tests. They are copied with the component and keep running in your project. They
+ * check what this component decides (its key, its replay, what it needs installed), not what the tool
+ * does: that is pi-durable's, tested there.
  */
 
-import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { expect, test } from "bun:test";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { AgentTool } from "@pikit/contracts";
-import type { ExecutionEnv } from "@pikit/pi-adapter";
-import { callTool } from "@pikit/pi-adapter/execution/testing";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
+import { createEditTool } from "@pikit/pi-adapter/tools";
 import toolUnderTest from "./index.ts";
 
-const directories: string[] = [];
-afterAll(() => {
-  for (const dir of directories) rmSync(dir, { recursive: true, force: true });
+/** `execution` and `execution.shell`, as execution-local provides them; no test touches its files. */
+const execution = defineComponent({
+  name: "execution-test",
+  setup(pikit) {
+    const env = createLocalExecution({ cwd: tmpdir(), env: {} });
+    pikit.provide("execution", env);
+    pikit.provide("execution.shell", env);
+  },
 });
 
-/** `execution` and `execution.shell` over `env`, as execution-local provides them. */
-function executionOf(env: ExecutionEnv) {
-  return defineComponent({
-    name: "execution-test",
-    setup(pikit) {
-      pikit.provide("execution", env);
-      pikit.provide("execution.shell", env);
-    },
-  });
-}
-
-/** The tool as installed in a started app, and an environment over a temporary directory. */
-async function installed(): Promise<{ tool: AgentTool; dir: string; env: ExecutionEnv; stop(): Promise<void> }> {
-  const dir = mkdtempSync(join(tmpdir(), "pikit-tool-edit-"));
-  directories.push(dir);
-  const env = createLocalExecution({ cwd: dir, env: { PATH: process.env.PATH ?? "" } });
-  let tool: AgentTool | undefined;
-  const reader = defineComponent({
-    name: "tool-reader",
-    setup(pikit) {
-      const tools = pikit.useKeyed("agent.tool");
-      return { start: () => void (tool = tools.get("edit")) };
-    },
-  });
-  const app = await defineApp({ components: [executionOf(env), toolUnderTest, reader], logger: silentLogger }).create();
-  await app.start();
-  if (tool === undefined) throw new Error("agent.tool edit was not provided");
-  return { tool, dir, env, stop: () => app.stop() };
-}
-
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
-  const app = await defineApp({ components: [executionOf(createLocalExecution({ cwd: tmpdir(), env: {} })), toolUnderTest], logger: silentLogger }).create();
+  const app = await defineApp({ components: [execution, toolUnderTest], logger: silentLogger }).create();
 
   expect(app.describe().components.find((component) => component.name === "tool-edit")).toMatchObject({
     provides: ["agent.tool"],
@@ -61,20 +33,24 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().capabilities["agent.tool"]?.keys).toEqual({ edit: "tool-edit" });
 });
 
-test("it provides pi-durable's edit tool under its own name, with replay unsafe", async () => {
-  const s = await installed();
+test("it provides pi-durable's edit tool under its own name, unchanged but for its replay, unsafe", async () => {
+  let tool: AgentTool | undefined;
+  const reader = defineComponent({
+    name: "tool-reader",
+    setup(pikit) {
+      const tools = pikit.useKeyed("agent.tool");
+      return { start: () => void (tool = tools.get("edit")) };
+    },
+  });
+  const app = await defineApp({ components: [execution, toolUnderTest, reader], logger: silentLogger }).create();
+  await app.start();
 
-  expect([s.tool.name, s.tool.replay]).toEqual(["edit", "unsafe"]);
-  await s.stop();
+  const pis = createEditTool();
+  expect([tool?.name, tool?.replay]).toEqual(["edit", "unsafe"]);
+  expect([tool?.description, tool?.parameters]).toEqual([pis.description, pis.parameters]);
+  await app.stop();
 });
 
-test("the agent replaces exact text in a file", async () => {
-  const s = await installed();
-  writeFileSync(join(s.dir, "c.txt"), "one two three\n");
-
-  const result = await callTool(s.tool, { path: "c.txt", edits: [{ oldText: "two", newText: "2" }] }, { env: s.env });
-
-  expect(result.isError).toBe(false);
-  expect(readFileSync(join(s.dir, "c.txt"), "utf8")).toBe("one 2 three\n");
-  await s.stop();
+test("it cannot be installed without an execution", async () => {
+  await expect(defineApp({ components: [toolUnderTest], logger: silentLogger }).create()).rejects.toThrow("execution");
 });

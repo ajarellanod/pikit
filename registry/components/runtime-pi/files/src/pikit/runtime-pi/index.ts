@@ -72,6 +72,13 @@ const Config = Type.Object({
   }),
 });
 
+/**
+ * The tools that work on the environment the runtime builds for each call (`api.env`): pi-durable's
+ * coding tools. An agent that names one needs an `execution` (or a `workspace`), or every call fails;
+ * start refuses instead. Add the name of a tool of yours that works on `api.env`.
+ */
+const ENVIRONMENT_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit", "bash"]);
+
 /** The wakeup handler that drives this worker's runs, with `wakeups` installed. */
 export const DRIVE = "runtime-pi.drive";
 
@@ -158,10 +165,20 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             }
             if (key.startsWith("pikit.")) throw new Error(`runtime-pi: the agent.extension "${key}" has a reserved name (pikit.*: the runtime's own)`);
           }
+          const environment = execution.get() !== undefined || workspace.get() !== undefined;
           for (const name of agents.keys()) {
             for (const tool of agents.get(name)?.tools ?? []) {
               if (typeof tool === "string" && tools.get(tool) === undefined) {
-                throw new Error(`runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides (install tool-${tool}?)`);
+                throw new Error(
+                  `runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides: ` +
+                    `install the component that provides it (\`pikit doctor\` names it from the registry), or take "${tool}" out of the agent's tools`,
+                );
+              }
+              if (typeof tool === "string" && !environment && ENVIRONMENT_TOOLS.has(tool)) {
+                throw new Error(
+                  `runtime-pi: agent "${name}" names the tool "${tool}", which works on files and commands, and no execution is installed: ` +
+                    `install one (execution-local on a server, execution-do on Cloudflare), or take "${tool}" out of the agent's tools`,
+                );
               }
             }
             for (const extension of agents.get(name)?.extensions ?? []) {
