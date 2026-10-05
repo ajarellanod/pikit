@@ -59,8 +59,9 @@ there.
 
 ### Components (`registry/`, copied into projects as source)
 - Runtime and models: `runtime-pi` (resumes what is pending at start; with `wakeups`, drives runs in
-  slices), `provider-anthropic` (server), `provider-openrouter` (`apiBase`), `provider-faux` (a fake
-  model for tests only), `credentials-file`.
+  slices), `provider-anthropic` (server), `provider-openrouter` (`apiBase`), `provider-faux` (fake
+  models for tests and trials: `faux/echo`, and `faux/scripted`, which calls a tool on
+  `call: <tool> <json>` and shows the system prompt on `echo-system`), `credentials-file`.
 - Channels: `channel-http` (server), `channel-telegram` (long polling, server),
   `channel-telegram-webhook` (Cloudflare: a Worker half and an object half, bot password and `/login`,
   self-registering webhook); both deliver through `startAnswerDelivery`. Routing: `router-basic`,
@@ -91,12 +92,20 @@ there.
   `dev`, `up | down | restart | status | logs` (delegated to the installed `deployment-*`),
   `registry validate | generate | capabilities`. A registry's components may declare their own
   kinds and capabilities (`declares` in `component.json`); the kit's catalogue is the default.
+  `validate` holds imports per file kind: what shipped files import is a `dependency` (with a
+  `requires` range for a kit package), what only tests import a `devDependency`. Outside the kit
+  repository its messages say `pikit registry generate <dir>`.
 - `pikit.json` records what each install wrote (files and hashes, npm packages, hooks, offers);
   every change rolls back on failure and leaves a marker when interrupted. Offers install the one
   provider a component needs (`outbound.queue`, `storage.kv`). Components may declare
   `configure.ts` and `doctor`, `beforeDeploy` and `afterDeploy` hooks, which run on the machine that
-  configures or deploys, never in the app.
-- `pikit new` copies the skills for AI agents (`.agents/skills/`) into every project.
+  configures or deploys, never in the app. `pikit add` installs a component's README beside its
+  code (`src/pikit/<name>/README.md`).
+- `configure` and `up` check credentials only for the model providers the agents name, and reach
+  the deployment (Docker) only when one is missing here.
+- `pikit new` copies the skills for AI agents (`.agents/skills/`) into every project, and leaves a
+  registry of the project's own (`registry/`) out of `tsc` and `bun test` (`bunfig.toml`); `lib` is
+  ES2023.
 
 ### Installer and templates
 - `installer/install.sh`: from an empty server to a running agent (Docker), or `--durable` for

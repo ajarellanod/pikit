@@ -87,16 +87,18 @@ between two components: what one needs from another is a capability.
 | Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2) |
 | A feature of your own kind | `features/memory.md` | `declares`, a contract file, an actor per owner with `call` |
 
-Installed ones are in `src/pikit/`; the rest are in the registry the CLI uses (`pikit add <name>` to
-read one in place, `pikit remove <name>` after).
+Installed ones are in `src/pikit/`, each with its README; the rest are in the registry the CLI uses
+(`pikit add <name> --yes` to read one in place, `pikit remove <name>` after).
 
 A component is a folder:
 
 ```
 component.json                         name, description, targets, requires, optional, provides,
-                                       declares, dependencies, files, environment (provides /
-                                       requires.capabilities / optional are generated from setup)
-README.md                              what it does, what it needs, its guarantees, how it is tested
+                                       declares, dependencies, devDependencies, files, environment
+                                       (provides / requires.capabilities / optional are generated
+                                       from setup, capabilities in the order setup calls use())
+README.md                              what it does, what it needs, its guarantees, how it is tested;
+                                       installed as src/pikit/<name>/README.md
 files/src/pikit/<name>/index.ts        export default defineComponent({ name, config?, setup })
 files/src/pikit/<name>/<name>.test.ts  its tests, copied with it into the project
 ```
@@ -116,7 +118,10 @@ shared, upgraded or removed with `pikit remove`, or when it declares a kind or c
   the App is defined. A secret is read through `secrets` (`secrets.get().get("NAME")`) and declared in
   `component.json`'s `environment`. Two strategies are two components, not a config switch.
 - **Imports**: `@pikit/core`, `@pikit/contracts`, `@pikit/pi-adapter` (never `@earendil-works/*`),
-  `typebox`, and npm packages the component declares. A component for both targets imports no
+  `typebox`, and npm packages the component declares: what its shipped files import in
+  `dependencies` (with a `requires.contracts` / `requires.adapter` range for those kit packages),
+  what only its tests import in `devDependencies` (`@pikit/pi-adapter` for
+  `@pikit/pi-adapter/testing`, with no range). A component for both targets imports no
   `node:*`, `bun:*` or `cloudflare:*` outside its tests; one that does says `"targets": ["server"]`.
   Never another component's files.
 - **What crosses an actor is JSON** (`send`, `call`): use `type` aliases, not interfaces, for it, and
@@ -167,23 +172,37 @@ cut after it left goes again at most once, marked or under the same key; one con
 hold up no other.
 
 Also a test named "what setup declares" that pins `app.describe().components` for it. No network in
-tests: a local `Bun.serve` stands in for any API. The model is `scriptedProvider()` from
-`@pikit/pi-adapter/testing` (`faux/scripted`: `call: <tool> <json>` calls a tool), with
-`sqliteStorage(path)` for `storage.sql`; `provider-faux` (`faux/echo`) is for an end-to-end run of the
-project through a real channel. A test that needs another component (runtime-pi) is the project's own
+tests: a local `Bun.serve` stands in for any API; `sqliteStorage(path)` (`@pikit/pi-adapter/testing`)
+is a `storage.sql` on a file. A test that needs another component (runtime-pi) is the project's own
 (`test/*.test.ts`, importing `src/pikit/*`), never the component's. A `durable` component also runs in
 the workerd lane of the pikit repository (`tests/workerd`).
+
+**The model** for a tool or an extension end to end (a project test, or a trial in `pikit dev`) is
+provider-faux's `faux/scripted` (`pikit add provider-faux --yes`, an agent on `model: "faux/scripted"`):
+
+| The message | The model |
+|---|---|
+| `call: <tool> <json>` | calls the tool; the turn after answers `<tool>: <result>` or `<tool> failed: <error>` |
+| `echo-system` / `echo-system <section>` | answers the system prompt it got / that section, or `(no section <section>)` |
+| `echo-tools` | answers the tools it was offered, sorted, or `(no tools)` |
+| anything else | `faux: <the message>` (as `faux/echo`) |
+
+A run's answer is its `agent.settled` event's `text`. A test that must see the requests themselves
+(how many system messages carried a section) uses `scriptedProvider({ onRequest })` from
+`@pikit/pi-adapter/testing` instead, provided as `model.provider` under `faux` (the same `call:` rule;
+it answers `answer: <message>`).
 
 ## 6. Check it composes
 
 In the pikit repository, `bun run registry generate` and `bun run registry validate`. In a project,
-your registry is a folder (`registry/components/<name>/`; add `"registry"` to `exclude` in
-`tsconfig.json`, since the installed copy is the one checked):
+your registry is a folder, `registry/components/<name>/` (a project made by `pikit new` leaves
+`registry/` out of `tsc` and `bun test`: the installed copy in `src/pikit/` is the one checked).
+`pikit add` and `pikit upgrade` ask before they write: without a terminal, pass `--yes`.
 
 ```sh
 pikit registry generate registry      # provides / requires / optional of component.json, from setup
-pikit registry validate registry      # manifest, files, imports per target, kinds and capabilities
-pikit add <name> --registry registry  # copies it, lists it in pikit.config.ts, installs npm deps
+pikit registry validate registry      # manifest, files, imports per target and per file kind, kinds and capabilities
+pikit add <name> --registry registry --yes  # copies it and its README, lists it in pikit.config.ts, installs npm deps
 pikit upgrade <name> --yes            # after each edit in registry/: takes the new version
 pikit doctor                          # green: everything provided and configured
 bun test && bun run typecheck
@@ -191,7 +210,9 @@ pikit dev                             # and try it
 ```
 
 `pikit add` offers providers only from the registry it installs from: add the kit's (`pikit add
-mailbox-local`) yourself when doctor says one is missing.
+mailbox-local --yes`) yourself when doctor says one is missing. `pikit remove <name>` refuses while an
+agent names a key only it provides (a tool, an extension): take the name out of the agent first, or
+pass `--force` and doctor reports the agent until you do.
 
 Done means: its suite and tests pass, `registry validate` is clean, `pikit add` then `pikit doctor`
 is green, `pikit remove <name>` leaves the project as it was, and its README says what it provides,

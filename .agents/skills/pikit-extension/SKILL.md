@@ -12,8 +12,8 @@ component is a component, with the same rules (synchronous `setup`, resources in
 values, tests ship with it).
 
 **Reference:** `extension-house-rules` (a section from config, a `beforeTool` hook): `pikit add
-extension-house-rules` to read it in `src/pikit/extension-house-rules/`, README "How this extension is
-built". **A real App test:** `src/pikit/runtime-pi/extensions.test.ts` (a section that reads a
+extension-house-rules --yes` to read it in `src/pikit/extension-house-rules/`, its README "How this
+extension is built". **A real App test:** `src/pikit/runtime-pi/extensions.test.ts` (a section that reads a
 document a tool wrote, a hook that blocks `bash`, another that rewrites requests, per-agent selection,
 state across a restart).
 
@@ -148,14 +148,24 @@ differ, or when the name starts with `pikit.` (the runtime's own). `pikit doctor
 
 ## 4. Test it
 
-The model in tests is the scripted faux provider: `scriptedProvider()` from
-`@pikit/pi-adapter/testing`, provided as `model.provider` under `faux`, agents on `faux/scripted`.
-Each turn answers `answer: <newest user message>`; a message `call: <tool> <json>` makes it call that
-tool with those arguments (then it answers as usual), `bash: <command>` calls `bash` (then answers
-`tool said: <result>`). `recordingBash(ran)` is a `bash` that records instead of running;
-`sqliteStorage(path)` is a `storage.sql` on a file, so a second App over the same path is a restart.
-`scriptedProvider({ onRequest })` sees every request: the sections it carried are its `system`
-messages' `sections` (a change per message; `null` removes one).
+The model in a real App is provider-faux's `faux/scripted` (`pikit add provider-faux --yes`; compose
+`src/pikit/provider-faux/index.ts`, agents on `model: "faux/scripted"`), which needs no account:
+
+- `call: <tool> <json>` makes it call that tool with those arguments; the turn after answers
+  `<tool>: <result text>`, or `<tool> failed: <error text>`;
+- `echo-system <section>` answers with that section as the request carried it (`<key>\n...\n</key>`),
+  or `(no section <section>)`; `echo-system` alone, with the whole system prompt;
+- `echo-tools` answers with the tools it was offered, sorted, or `(no tools)`;
+- anything else answers `faux: <the message>`.
+
+A run's answer is its `agent.settled` event's `text`: assert what your extension put in the prompt with
+`echo-system <your section>`, and what a tool or hook did with `call:`. `sqliteStorage(path)`
+(`@pikit/pi-adapter/testing`) is a `storage.sql` on a file, so a second App over the same path is a
+restart. To see the requests themselves (how many system messages carried a section: "sent once"),
+provide `scriptedProvider({ onRequest })` from `@pikit/pi-adapter/testing` under `faux` instead (the
+same `call:` rule; it answers `answer: <message>`, `bash: <command>` calls `bash`): a request's
+sections are its `system` messages' `sections` (a change per message; `null` removes one).
+`recordingBash(ran)` is a `bash` that records instead of running.
 
 1. **The component's own tests** (`files/src/pikit/<name>/<name>.test.ts`, copied with it): "what
    setup declares" (`provides: ["agent.extension"]`, `capabilities["agent.extension"].keys`), the
@@ -163,19 +173,20 @@ messages' `sections` (a change per message; `null` removes one).
    the hook decides), refused config. They cannot import another component's files (SPEC P4).
 2. **A real App** (in a project, a test of the project's own, `test/<name>.test.ts`, which may import
    `src/pikit/runtime-pi/index.ts`; in the pikit repository, `app.test.ts` beside `files/`): runtime-pi,
-   your component, an agents component, `scriptedProvider` and `sqliteStorage(path)`. Copy the
-   `start` / `ask` / `sections` helpers of `src/pikit/runtime-pi/extensions.test.ts`. Prove: the
-   section is in the requests of an agent that names it and absent from one that does not; a hook
-   blocks or rewrites what it should and nothing else; a tool's effect is seen by the next request;
-   what must survive does after `stop()` and a new App over the same file; a stable section is sent
-   once.
-3. **End to end**, optional: `pikit add provider-faux`, an agent on `faux/echo`, `pikit dev`, and a
-   message through the real channel.
+   your component, an agents component, provider-faux (`faux/scripted`) and `sqliteStorage(path)`.
+   Copy the `start` / `ask` helpers of `src/pikit/runtime-pi/extensions.test.ts`. Prove: the section
+   is what `echo-system <section>` answers for an agent that names it, and `(no section <section>)` for one
+   that does not; a hook blocks or rewrites what it should and nothing else; a tool's effect is seen
+   by the next request; what must survive does after `stop()` and a new App over the same file; a
+   stable section is sent once (`scriptedProvider({ onRequest })`).
+3. **End to end**, optional: `pikit add provider-faux --yes`, an agent on `faux/scripted`, `pikit
+   dev`, and `call: <tool> <json>` / `echo-system <section>` through the real channel.
 
 ## 5. Done
 
 `bun test` and `bun run typecheck` pass; `pikit registry generate` / `validate` are clean for your
-registry; `pikit add` then `pikit doctor` is green; an agent that names it behaves as designed and one
-that does not is unchanged; `pikit remove <name>` (after taking the name out of the agents) leaves the
+registry; `pikit add --yes` then `pikit doctor` is green; an agent that names it behaves as designed
+and one that does not is unchanged; `pikit remove <name>` (after taking the name out of the agents:
+it refuses while one names it, and with `--force` doctor reports that agent until you do) leaves the
 project as it was; its README says what it adds to the prompt, which calls it blocks or changes, what
 it stores, and how it is tested (copy `extension-house-rules`' README).
