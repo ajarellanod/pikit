@@ -10,7 +10,7 @@ import { type AppContext, defineApp, defineComponent, type Logger, silentLogger 
 import type { JsonValue } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createHttpRouteConformance } from "@pikit/contracts/testing";
-import { createObjectHost, createWorkerHost, createWorkerServer, HEALTH_OBJECT, type ObjectState } from "./host.ts";
+import { createObjectHost, createWorkerHost, createWorkerServer, GUARD_FIRST_MS, GUARD_MAX_MS, HEALTH_OBJECT, type ObjectState, START_FAILURES_KEY } from "./host.ts";
 
 // What every handler can rely on (`http.route`): the Worker's server passes the suite, prefixes included.
 for (const c of createHttpRouteConformance(() => {
@@ -20,11 +20,26 @@ for (const c of createHttpRouteConformance(() => {
   test(`Worker server ${c.group}: ${c.name}`, () => c.run());
 }
 
+/** A DurableObjectStorage's part the host uses: its key-value storage and its alarm, in memory. */
+function fakeStorage() {
+  const values = new Map<string, unknown>();
+  const storage = {
+    values,
+    alarm: null as number | null,
+    get: async (key: string) => values.get(key),
+    put: async (key: string, value: number) => void values.set(key, value),
+    delete: async (key: string) => values.delete(key),
+    getAlarm: async () => storage.alarm,
+    setAlarm: async (time: number) => void (storage.alarm = time),
+  };
+  return storage;
+}
+
 /** A DurableObjectState's part the entrypoint uses; counts `blockConcurrencyWhile` calls and whether one is running. */
 function fakeState(id = "object-1") {
   const state = {
     id: { toString: () => id },
-    storage: { kind: "storage of " + id },
+    storage: fakeStorage(),
     blocked: 0,
     inside: false,
     async blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T> {
@@ -130,6 +145,61 @@ test("a failed start rolls back, rethrows (Cloudflare resets the object), and th
 
   await expect(host.health()).resolves.toEqual({ ok: true });
   expect(state.blocked).toBe(2);
+});
+
+test("while its start keeps failing, the alarm leaves a guard alarm set, further each time; once it starts, the pending work runs", async () => {
+  let failing = true;
+  let alarms = 0;
+  const flaky = defineComponent({
+    name: "flaky",
+    setup: () => ({
+      start(ctx) {
+        if (failing) throw new Error("no database");
+        ctx.value(WORKERS_HOST)?.object?.onAlarm(async () => void alarms++);
+      },
+    }),
+  });
+  const state = fakeState();
+  const host = createObjectHost(defineApp({ components: [flaky] }), state, {}, { logger: silentLogger });
+  /** The guard's wait after an alarm, in ms from when it was set; `null` when there is none. */
+  const fail = async (info: { retryCount: number; isRetry: boolean }) => {
+    // Cloudflare took the alarm that fired: during its handler, there is none.
+    state.storage.alarm = null;
+    const before = Date.now();
+    await expect(host.alarm(info)).rejects.toThrow(/failed to start/);
+    return state.storage.alarm === null ? null : state.storage.alarm - before;
+  };
+
+  // The first attempt is Cloudflare's to retry: no write.
+  expect(await fail({ retryCount: 0, isRetry: false })).toBeNull();
+  expect(state.storage.values.size).toBe(0);
+  // Its retry sets the guard, which replaces the retries; each guard sets the next, twice as far, up to an hour.
+  const waits = [await fail({ retryCount: 1, isRetry: true })];
+  for (let i = 0; i < 9; i++) waits.push(await fail({ retryCount: 0, isRetry: false }));
+  const expected = [1, 2, 4, 8, 16, 32, 64, 120, 120, 120].map((n) => Math.min(GUARD_MAX_MS, n * GUARD_FIRST_MS));
+  waits.forEach((wait, i) => {
+    expect(wait).toBeGreaterThanOrEqual(expected[i] as number);
+    expect(wait).toBeLessThan((expected[i] as number) + 1_000);
+  });
+  expect(state.storage.values.get(START_FAILURES_KEY)).toBe(10);
+
+  // A sooner alarm stands.
+  state.storage.alarm = null;
+  const sooner = Date.now() + 1_000;
+  await state.storage.setAlarm(sooner);
+  await expect(host.alarm({ retryCount: 0, isRetry: false })).rejects.toThrow(/failed to start/);
+  expect(await state.storage.getAlarm()).toBe(sooner);
+
+  // It starts: the alarm's work runs, and the count is gone (the App's own alarm owner replaces the guard).
+  failing = false;
+  await host.alarm({ retryCount: 0, isRetry: false });
+  expect(alarms).toBe(1);
+  expect(state.storage.values.has(START_FAILURES_KEY)).toBe(false);
+  // A started App's alarms touch nothing.
+  state.storage.alarm = null;
+  await host.alarm({ retryCount: 1, isRetry: true });
+  expect(alarms).toBe(2);
+  expect(state.storage.alarm).toBeNull();
 });
 
 test("a start past its deadline, with a rollback that hangs, still ends within both deadlines (K2)", async () => {

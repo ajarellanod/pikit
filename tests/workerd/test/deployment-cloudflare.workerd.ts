@@ -3,15 +3,22 @@
  * C5): the `Conversation` class and the Worker's `fetch`, over the small Apps of `src/deployment.ts`.
  * `WORKERS_HOST` reaches each App's start, `/health` starts one object's App and reports the version,
  * the object's RPC and alarm reach the handlers its App registered, a failed start resets the object
- * and an evicted one starts again on its next event.
+ * and an evicted one starts again on its next event, and an alarm whose start keeps failing leaves
+ * its guard alarm, which workerd's own scheduler runs instead of its retries.
  */
 
 import { env, evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import type { JsonValue } from "@pikit/contracts";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { createHttpRouteConformance } from "@pikit/contracts/testing";
-import { createWorkerHost, createWorkerServer, HEALTH_OBJECT } from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
+import {
+  createWorkerHost,
+  createWorkerServer,
+  GUARD_FIRST_MS,
+  HEALTH_OBJECT,
+  START_FAILURES_KEY,
+} from "../../../registry/components/deployment-cloudflare/files/src/pikit/deployment-cloudflare/host.ts";
 import { entrypoint } from "../src/deployment.ts";
 
 // The Worker's server passes the `http.route` suite in workerd, prefix keys (`GET /admin/*`) included.
@@ -112,4 +119,41 @@ it("a failed start rejects the event and resets the object; the next event start
   await runInDurableObject(again.stub, (_instance, state) => state.storage.delete("fail-start"));
   await again.rpc.deliver("text", "chat:3", null);
   expect(await stored(again.stub, "starts")).toBe(1);
+});
+
+it("an alarm whose start keeps failing is not dropped: its retry sets the guard alarm, which replaces workerd's retries; once the App starts, the alarm's work runs", async () => {
+  const { id } = newObject();
+  // A new stub for each step: a failed start resets the object.
+  const inside = <T>(callback: (state: DurableObjectState) => Promise<T>) => runInDurableObject(env.CONVERSATION.get(id), (_instance, state) => callback(state));
+  await inside((state) => state.storage.put("fail-start", true));
+  try {
+    // Due now: workerd's own scheduler fires it, its start fails, and it retries it about 2 s later.
+    const before = Date.now();
+    await inside((state) => state.storage.setAlarm(before));
+    const guard = await vi.waitFor(
+      async () => {
+        const [failures, alarm] = await inside(async (state) => [await state.storage.get(START_FAILURES_KEY), await state.storage.getAlarm()] as const);
+        // The retry counted its failed start and set the guard, half a minute later.
+        expect(failures).toBe(1);
+        expect(alarm).toBeGreaterThan(before + GUARD_FIRST_MS);
+        return alarm as number;
+      },
+      { timeout: 15_000, interval: 250 },
+    );
+    // No retry runs before the guard: the retry would have counted another failed start.
+    await new Promise((resolve) => setTimeout(resolve, 5_000));
+    expect(await inside((state) => state.storage.get(START_FAILURES_KEY))).toBe(1);
+    expect(await inside((state) => state.storage.getAlarm())).toBe(guard);
+
+    // The start works again: the guard (fired here, not waited for) starts the App, and its alarm runs.
+    await inside((state) => state.storage.delete("fail-start"));
+    expect(await runDurableObjectAlarm(env.CONVERSATION.get(id))).toBe(true);
+    expect(await inside((state) => state.storage.get("alarms"))).toBe(1);
+    expect(await inside((state) => state.storage.get(START_FAILURES_KEY))).toBeUndefined();
+  } finally {
+    await inside(async (state) => {
+      await state.storage.delete("fail-start");
+      await state.storage.deleteAlarm();
+    });
+  }
 });
