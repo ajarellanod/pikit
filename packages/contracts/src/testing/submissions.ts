@@ -12,6 +12,12 @@
  * Pruning and restarting are the provider's to do; the cases that need them run only when the options
  * say the fixture can.
  *
+ * The cases settle runs as a runtime groups them, so a real runtime's fixture can make it record them
+ * through its messages and runs (runtime-pi's, `@pikit/pi-adapter`'s `submissions-conformance.test.ts`):
+ * a request admitted to a conversation with no run going starts a run alone; those admitted while it
+ * goes are taken together by the next run. Only those still waiting are abandoned (a run that took a
+ * request settles it). A failed run's error is the code runtime-pi gives a model's failure.
+ *
  * `createMemorySubmissions` is the in-memory double: it passes this suite, and it stands in for a
  * provider in the tests of a runtime or a channel.
  */
@@ -158,14 +164,18 @@ export function createSubmissionsConformance(
       const s = f.submissions();
       await s.admitted(conversation(1), "r1", c);
       await s.admitted(conversation(1), "r2", c);
-      await s.admitted(conversation(2), "r3", c);
-      const run = completed(conversation(1), ["r1", "r2"]);
+      await s.admitted(conversation(1), "r3", c);
+      await s.admitted(conversation(2), "r4", c);
+      const first = completed(conversation(1), ["r1"]);
+      // r2 and r3 waited while r1's run went: the next run takes them together.
+      const run = completed(conversation(1), ["r2", "r3"]);
 
+      await s.settled(first, c);
       await s.settled(run, c);
 
-      expect(pending(await s.pending(c)), [["conversation-2", ["r3"]]], "pending after the run");
-      expect(await s.get(conversation(1), "r2", c), { kind: "settled", conversation: conversation(1), requestId: "r2", run }, "a request the run took");
-      expect(await answers(f), [run], "answers");
+      expect(pending(await s.pending(c)), [["conversation-2", ["r4"]]], "pending after the run");
+      expect(await s.get(conversation(1), "r3", c), { kind: "settled", conversation: conversation(1), requestId: "r3", run }, "a request the run took");
+      expect(await answers(f), [first, run], "answers");
     }),
 
     submissionsCase("settling the same run again changes nothing", async (f, c) => {
@@ -229,7 +239,7 @@ export function createSubmissionsConformance(
         requestId: "r1",
         requestIds: ["r1"],
         kind: "failed",
-        error: { code: "provider_error", message: "the model failed" },
+        error: { code: "model_error", message: "the model failed" },
       };
       const aborted: RunSettlement = { conversation: conversation(2), requestId: "r2", requestIds: ["r2"], kind: "aborted" };
       const empty: RunSettlement = { conversation: conversation(3), requestId: "r3", requestIds: ["r3"], kind: "completed", text: "" };
@@ -250,36 +260,42 @@ export function createSubmissionsConformance(
   cases.push(
     submissionsCase("abandoning settles the pending requests unanswered, and appends one settlement for them", async (f, c) => {
       const s = f.submissions();
+      // r1's run goes; r2 and r3 wait for the next.
       await s.admitted(conversation(1), "r1", c);
       await s.admitted(conversation(1), "r2", c);
-      await s.admitted(conversation(2), "r3", c);
+      await s.admitted(conversation(1), "r3", c);
+      await s.admitted(conversation(2), "r4", c);
 
-      const appended = await s.abandoned(conversation(1), ["r1", "r2"], "agent_removed", c);
+      const appended = await s.abandoned(conversation(1), ["r2", "r3"], "agent_removed", c);
 
-      const expected = abandon(conversation(1), ["r1", "r2"], "agent_removed");
+      const expected = abandon(conversation(1), ["r2", "r3"], "agent_removed");
       expect(appended, expected, "the settlement appended");
       expect(await answers(f), [expected], "answers");
-      expect(pending(await s.pending(c)), [["conversation-2", ["r3"]]], "pending");
-      expect(await s.get(conversation(1), "r2", c), { kind: "settled", conversation: conversation(1), requestId: "r2", run: expected }, "get");
+      expect(pending(await s.pending(c)), [["conversation-1", ["r1"]], ["conversation-2", ["r4"]]], "pending");
+      expect(await s.get(conversation(1), "r3", c), { kind: "settled", conversation: conversation(1), requestId: "r3", run: expected }, "get");
     }),
 
     submissionsCase("abandoning leaves a settled or unknown request as it is", async (f, c) => {
       const s = f.submissions();
       const run = completed(conversation(1), ["r1"]);
       await s.admitted(conversation(1), "r1", c);
-      await s.admitted(conversation(1), "r2", c);
       await s.settled(run, c);
+      // r2's run goes; r3 waits for the next.
+      await s.admitted(conversation(1), "r2", c);
+      await s.admitted(conversation(1), "r3", c);
 
-      const appended = await s.abandoned(conversation(1), ["r1", "unknown", "r2"], "too_old", c);
+      const appended = await s.abandoned(conversation(1), ["r1", "unknown", "r3"], "too_old", c);
 
-      expect(appended, abandon(conversation(1), ["r2"], "too_old"), "the settlement: only the pending one");
+      expect(appended, abandon(conversation(1), ["r3"], "too_old"), "the settlement: only the pending one");
       expect(await s.get(conversation(1), "r1", c), { kind: "settled", conversation: conversation(1), requestId: "r1", run }, "the settled one");
       expect(await s.get(conversation(1), "unknown", c), undefined, "the unknown one");
-      expect(await s.pending(c), [], "pending");
+      expect(pending(await s.pending(c)), [["conversation-1", ["r2"]]], "pending");
     }),
 
     submissionsCase("abandoning again, or nothing pending, changes nothing", async (f, c) => {
       const s = f.submissions();
+      // r0's run goes; r1 waits for the next.
+      await s.admitted(conversation(1), "r0", c);
       await s.admitted(conversation(1), "r1", c);
 
       await s.abandoned(conversation(1), ["r1"], "conversation_missing", c);
