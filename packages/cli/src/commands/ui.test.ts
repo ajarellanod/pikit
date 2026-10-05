@@ -88,11 +88,11 @@ function snapshot(dir: string, prefix = ""): Record<string, string> {
   return files;
 }
 
-async function withUi(files = DASHBOARD): Promise<{ dir: string; root: string }> {
+async function withUi(files: Record<string, string> = DASHBOARD): Promise<{ dir: string; root: string }> {
   const root = registry(files);
   const dir = project(root);
   const on = await runCli(["ui", "on", "--yes"], dir);
-  expect(on.out).toContain("src/dashboard/ written: 3 files");
+  expect(on.out).toContain(`src/dashboard/ written: ${Object.keys(files).length} files`);
   expect(on.code).toBe(0);
   return { dir, root };
 }
@@ -203,4 +203,21 @@ test("pikit upgrade writes a conflict in the dashboard with markers, names it an
   expect(run.code).toBe(1);
   const text = read(dir, "src/dashboard/src/app.tsx");
   expect(text).toContain("<<<<<<< yours\nexport const line9 = 'mine';\n=======\nexport const line9 = 'theirs';\n>>>>>>> dashboard@");
+});
+
+test("pikit doctor names the dashboard's edited and deleted files; a lockfile its bun install rewrote is not an edit", async () => {
+  const { dir } = await withUi({ ...DASHBOARD, "bun.lock": "{ lock: 1 }\n" });
+  writeFileSync(join(dir, "src/dashboard/src/app.tsx"), lines({ 2: "export const line2 = 'mine';" }));
+  rmSync(join(dir, "src/dashboard/README.md"));
+  writeFileSync(join(dir, "src/dashboard/bun.lock"), "{ lock: 2 }\n");
+
+  const doctor = await runCli(["doctor"], dir);
+  expect(doctor.out).toContain("modified: src/dashboard/src/app.tsx (dashboard)");
+  expect(doctor.out).toContain("deleted: src/dashboard/README.md (dashboard)");
+  expect(doctor.out).not.toContain("src/dashboard/bun.lock");
+
+  // Only the real edit holds up `ui off`.
+  const off = await runCli(["ui", "off", "--yes"], dir);
+  expect(off.err).toContain("src/dashboard/src/app.tsx (modified)");
+  expect(off.err).not.toContain("bun.lock");
 });

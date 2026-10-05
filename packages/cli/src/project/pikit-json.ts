@@ -171,6 +171,6 @@ export function ownedDependencies(component: InstalledComponent): { dependencies
 }
 
 /** Installed files that are gone. */
-export function missingFiles(projectDir: string, component: InstalledComponent): string[] {
+export function missingFiles(projectDir: string, component: Pick<InstalledComponent, "files">): string[] {
   return Object.keys(component.files).filter((file) => !existsSync(confinedPath(projectDir, file)));
 }

@@ -36,7 +36,7 @@ import { incompleteOperation, incompleteOperationMessage } from "../project/oper
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
 import { log } from "../ui.ts";
 import { confinedPath } from "../project/paths.ts";
-import { DASHBOARD_DIR } from "../project/dashboard.ts";
+import { DASHBOARD_DIR, dashboardRecord } from "../project/dashboard.ts";
 
 export interface DoctorReport {
   problems: string[];
@@ -106,6 +106,15 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
       for (const file of missingFiles(projectDir, component)) notes.push(`deleted: ${file} (${name})`);
     } catch (error) {
       problems.push(`${name}'s installed files cannot be checked: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  // The dashboard's files, as for a component's (`pikit ui on`).
+  if (project.dashboard !== undefined) {
+    try {
+      for (const file of modifiedFiles(projectDir, dashboardRecord(project.dashboard))) notes.push(`modified: ${file} (dashboard)`);
+      for (const file of missingFiles(projectDir, project.dashboard)) notes.push(`deleted: ${file} (dashboard)`);
+    } catch (error) {
+      problems.push(`the dashboard's files cannot be checked: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 

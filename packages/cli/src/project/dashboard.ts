@@ -51,6 +51,17 @@ export function recordDashboard(registry: Registry, registryName: string, files:
   return { registry: registryName, ...(registry.commit !== undefined && { commit: registry.commit }), files: hashes, components: [...components] };
 }
 
+/**
+ * The dashboard's lockfile, which its `bun install` may rewrite: never the user's edit (as a component's
+ * `generated` files), so it does not hold up `pikit ui off` nor show as modified.
+ */
+export const DASHBOARD_GENERATED = [`${DASHBOARD_DIR}/bun.lock`];
+
+/** The record as `modifiedFiles` reads it: its files, and those its toolchain rewrites. */
+export function dashboardRecord(dashboard: InstalledDashboard): { files: InstalledDashboard["files"]; generated: string[] } {
+  return { files: dashboard.files, generated: DASHBOARD_GENERATED };
+}
+
 /** Files in `src/dashboard/` the record does not name, but what its toolchain makes: the user's own. */
 export function unrecordedDashboardFiles(projectDir: string, dashboard: InstalledDashboard | undefined): string[] {
   const dir = confinedPath(projectDir, DASHBOARD_DIR);

@@ -31,6 +31,11 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **A base UI with shadcn/ui, extensible by components.** Not the largest interface: enough to
   start, and every other view comes from a component that brings it (SPEC §5). No platform
   under pikit (Pi Durable, Cloudflare, Rivet) offers an interface that is the user's to extend.
+- **Pi first, watched:** Pi's `pi-server` (experimental: clients attached to durable sessions, a Unix
+  socket and CBOR, authentication left to the application) is the closest thing Pi has to the admin
+  API's live part. When it reaches a browser (an HTTP or WebSocket transport) with authentication,
+  admin-api's events and actions move onto it and pikit's own transport goes. The coding agent's RPC
+  mode is for one process over stdio; its event vocabulary is the one `agent.observe` forwards.
 - **When:** in phases, each one usable. The first has landed (CHANGELOG): `admin-api`,
   `src/dashboard/` (`registry/dashboard/`) and `pikit new --ui` / `pikit ui on|off` on a server, with
   the conversations, one live, steer, abort and reset, cost and the composition. Next:

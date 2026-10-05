@@ -25,7 +25,7 @@
 
 import { copyFileSync, existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basePath, unreferencedBases } from "../project/bases.ts";
-import { DASHBOARD_DIR, dashboardFiles, recordDashboard, unrecordedDashboardFiles } from "../project/dashboard.ts";
+import { DASHBOARD_DIR, DASHBOARD_GENERATED, dashboardFiles, dashboardRecord, recordDashboard, unrecordedDashboardFiles } from "../project/dashboard.ts";
 import { assertNoIncompleteOperation, beginOperation, finishOperation } from "../project/operation.ts";
 import { confinedPath } from "../project/paths.ts";
 import { hashFile, type InstalledDashboard, modifiedFiles, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
@@ -182,7 +182,7 @@ export async function uiOff(projectDir: string, options: UiOptions = {}): Promis
     return;
   }
   const force = options.force === true;
-  const modified = modifiedFiles(projectDir, dashboard);
+  const modified = modifiedFiles(projectDir, dashboardRecord(dashboard));
   const own = unrecordedDashboardFiles(projectDir, dashboard);
   if ((modified.length > 0 || own.length > 0) && !force) {
     const lines = [...modified.map((file) => `${file} (modified)`), ...own.map((file) => `${file} (yours)`)];
@@ -243,7 +243,7 @@ export async function upgradeDashboard(projectDir: string, options: UpgradeOptio
   const next = recordDashboard(registry, previous.registry, files, previous.components);
   const removed: string[] = [];
   const kept: string[] = [];
-  const modified = new Set(modifiedFiles(projectDir, previous));
+  const modified = new Set(modifiedFiles(projectDir, dashboardRecord(previous)));
   for (const [file, recorded] of Object.entries(previous.files)) {
     if (files.has(file) || !existsSync(confinedPath(projectDir, file))) continue;
     if (modified.has(file)) {
@@ -265,7 +265,7 @@ export async function upgradeDashboard(projectDir: string, options: UpgradeOptio
     throw new CliError(`the dashboard's new version adds files you have, which differ; pass --force to write over them:\n  ${clashing.map(([target]) => target).join("\n  ")}`);
   }
   const label = `dashboard@${registry.commit ?? "registry"}`;
-  const { writes, changes: shipped, notes } = await mergeShipped(projectDir, files, previous.files, new Set(), label);
+  const { writes, changes: shipped, notes } = await mergeShipped(projectDir, files, previous.files, new Set(DASHBOARD_GENERATED), label);
   const changes: FileChanges = { ...shipped, removed, kept };
   describe(changes, notes, registry);
   if (options.dryRun === true) return;
@@ -301,7 +301,7 @@ export async function upgradeDashboard(projectDir: string, options: UpgradeOptio
   }
   finishOperation(projectDir);
   log.ok("the dashboard is upgraded");
-  if (writes.has(`${DASHBOARD_DIR}/package.json`) || writes.has(`${DASHBOARD_DIR}/bun.lock`)) await installDashboardPackages(projectDir);
+  if (writes.has(`${DASHBOARD_DIR}/package.json`)) await installDashboardPackages(projectDir);
   if (changes.conflicted.length > 0) {
     throw new CliError(
       `these files of the dashboard have conflicts between your edits and the new version:\n  ${changes.conflicted.join("\n  ")}\n` +

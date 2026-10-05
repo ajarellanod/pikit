@@ -1,14 +1,52 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { api, type ApiConversation, type ApiPage, useApi } from "@/lib/api";
+import { api, type ApiConversation, type ApiPage } from "@/lib/api";
 import { formatAgo, formatCost } from "@/lib/format";
 import { navigate } from "@/lib/router";
 
 const PAGE = 100;
+/** At most this many pages are read: the runtime lists in creation order, so the latest are on the last page. */
+const MAX_PAGES = 10;
+
+/**
+ * Every conversation (up to MAX_PAGES pages), read again every `everyMs`. The runtime lists them in
+ * creation order (`agent.observe`), so all pages are read and sorted here by activity.
+ */
+function useAllConversations(everyMs: number) {
+  const [items, setItems] = useState<ApiConversation[]>();
+  const [truncated, setTruncated] = useState(false);
+  const [error, setError] = useState<Error>();
+  const read = useCallback(async () => {
+    const all: ApiConversation[] = [];
+    let cursor: string | undefined;
+    let pages = 0;
+    do {
+      const page = await api<ApiPage<ApiConversation>>(`/conversations?limit=${PAGE}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`);
+      all.push(...page.items);
+      cursor = page.next;
+    } while (cursor !== undefined && ++pages < MAX_PAGES);
+    return { all, truncated: cursor !== undefined };
+  }, []);
+
+  useEffect(() => {
+    let live = true;
+    const load = () =>
+      read()
+        .then(({ all, truncated }) => live && (setItems(all), setTruncated(truncated), setError(undefined)))
+        .catch((thrown: unknown) => live && setError(thrown instanceof Error ? thrown : new Error(String(thrown))));
+    void load();
+    const timer = setInterval(() => void load(), everyMs);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [read, everyMs]);
+
+  return { items, truncated, error };
+}
 
 export function Status({ conversation }: { conversation: ApiConversation }) {
   if (conversation.current === false) return <Badge variant="outline">left behind</Badge>;
@@ -18,31 +56,8 @@ export function Status({ conversation }: { conversation: ApiConversation }) {
 
 /** Every conversation of the runtime, the most recently active first. */
 export function ConversationsPage() {
-  const first = useApi<ApiPage<ApiConversation>>(`/conversations?limit=${PAGE}`, 5000);
-  const [more, setMore] = useState<ApiConversation[]>([]);
-  const [next, setNext] = useState<string>();
-  const [loadingMore, setLoadingMore] = useState(false);
-
-  useEffect(() => {
-    if (more.length === 0) setNext(first.data?.next);
-  }, [first.data, more.length]);
-
-  const loadMore = async () => {
-    if (next === undefined) return;
-    setLoadingMore(true);
-    try {
-      const page = await api<ApiPage<ApiConversation>>(`/conversations?limit=${PAGE}&cursor=${encodeURIComponent(next)}`);
-      setMore((items) => [...items, ...page.items]);
-      setNext(page.next);
-    } finally {
-      setLoadingMore(false);
-    }
-  };
-
-  const seen = new Set<string>();
-  const items = [...(first.data?.items ?? []), ...more]
-    .filter((each) => !seen.has(each.conversationId) && seen.add(each.conversationId))
-    .sort((a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0));
+  const { items: read, truncated, error } = useAllConversations(10_000);
+  const items = [...(read ?? [])].sort((a, b) => (b.lastActivity ?? 0) - (a.lastActivity ?? 0));
 
   return (
     <Card>
@@ -51,7 +66,7 @@ export function ConversationsPage() {
         <CardDescription>Every conversation of the agent runtime. Open one to follow it live, steer it, stop it or reset it.</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {first.error !== undefined && <ErrorNote error={first.error} />}
+        {error !== undefined && <ErrorNote error={error} />}
         <Table>
           <TableHeader>
             <TableRow>
@@ -77,7 +92,7 @@ export function ConversationsPage() {
                 <TableCell className="text-right tabular-nums">{formatCost(conversation.usage)}</TableCell>
               </TableRow>
             ))}
-            {items.length === 0 && !first.loading && (
+            {items.length === 0 && read !== undefined && (
               <TableRow>
                 <TableCell colSpan={5} className="py-10 text-center text-muted-foreground">
                   No conversations yet: send your agent a message.
@@ -86,11 +101,7 @@ export function ConversationsPage() {
             )}
           </TableBody>
         </Table>
-        {next !== undefined && (
-          <Button variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
-            {loadingMore ? "Loading…" : "Load more"}
-          </Button>
-        )}
+        {truncated && <p className="text-sm text-muted-foreground">Showing the first {PAGE * MAX_PAGES} conversations the runtime keeps.</p>}
       </CardContent>
     </Card>
   );

@@ -3,7 +3,8 @@
  * The runtime provides it (runtime-pi, from pi-durable's records), so it is the truth of what the
  * runtime holds, never a copy kept on the side.
  *
- * - **`conversations`** lists the runtime's conversations, newest first, a page at a time: each with
+ * - **`conversations`** lists the runtime's conversations in the order it keeps them (runtime-pi:
+ *   creation order, oldest first; pi-durable has no other, docs/upstream proposal 14), a page at a time: each with
  *   its key and agent (once a message reached it), whether a run is going, when it last changed and
  *   what it cost. A conversation a reset left behind is listed too, under the same key: the registry
  *   (`conversations.registry`) says which one a key is in now.

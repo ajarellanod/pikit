@@ -22,6 +22,7 @@ here with the Pi version.
 | 11 | pi-mcp | [`StreamableHttpTransport` on Workers](#11-pi-mcp-streamablehttptransport-on-workers) | A `fetch` wrapper in the adapter | low | **shipped** in pi-mcp 1.0 ([#10188](https://github.com/earendil-works/pi/issues/10188)) |
 | 12 | pi-ai | [A default for `select` login prompts](#12-pi-ai-a-default-for-select-login-prompts) | Non-interactive logins broke on 1.0 | low | note (here) |
 | 13 | pi-durable | [Settlement order and run identity on submissions](#13-settlement-order-and-run-identity-on-submissions) | Nothing now: pikit groups runs exactly itself | low (nice to have) | not to send |
+| 14 | pi-durable | [Conversations newest first](#14-conversations-newest-first) | The dashboard reads every page to show the latest conversations first | low | draft (here) |
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
 ([storage-postgres](../../features/storage-postgres.md)), and a Durable Object example (pikit's
@@ -209,6 +210,14 @@ Re-checked against pi-durable 1.0.3 (2026-10-05): only proposal 6 is solved; 1 t
     atomically.
 - **If it is ever raised:** on Discord or in an RFC, not as an issue: it is an API request, which
   Pi's issue tracker does not favour (see below), and pikit no longer needs it.
+
+## 14. Conversations newest first
+- **Problem.** `Storage.scanConversations(query, limit, cursor)` pages in id order, oldest first,
+  with no other order. An operator's list (the dashboard, SPEC §5) wants the latest conversations
+  first: a server with thousands of them puts those on the last page.
+- **Meanwhile.** `agent.observe` lists in creation order (its contract says so), and the dashboard
+  reads the pages up to a bound and sorts them by activity.
+- **Ask.** A descending scan (`order: "desc"` on `ConversationQuery`), or a scan by last activity.
 
 ---
 

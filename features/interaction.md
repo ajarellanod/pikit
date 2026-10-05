@@ -25,7 +25,9 @@ answer from the person in the conversation's chat, unmodified.
 ## Pi first
 Pi's `ctx.ui.select` / `confirm` / `input` / `notify` are the API, and Pi's own RPC mode already
 answers them from a client (`docs/rpc-extension-ui.md` of `pi-coding-agent`). pikit adds no
-`ask_user` tool of its own: it answers Pi's API from a chat.
+`ask_user` tool of its own: it answers Pi's API from a chat. The dashboard (SPEC §5) is a second
+place to answer it: RPC's dialog records (`extension_ui_request` / `extension_ui_response`) are the
+shape to follow for its card, as they are for a chat.
 
 ## Open questions
 - The deadline of a question, and what the run sees when it passes (`undefined`, as with no UI).
