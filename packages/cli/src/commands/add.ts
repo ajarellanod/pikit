@@ -10,7 +10,8 @@
  *   4. show what it writes: files (each one outside `src/pikit/<name>/` by its path), npm dependencies
  *      and dev dependencies, environment, capabilities, source
  *   5. confirm, naming the files outside `src/pikit/<name>/` (`--yes` in a script)
- *   6. write its files; refuse to overwrite a file that differs without `--force`. A reinstall
+ *   6. write its files, and its README as `src/pikit/<name>/README.md` (`registry.files`); refuse to
+ *      overwrite a file that differs without `--force`. A reinstall
  *      (`--force`) overwrites the user's edits (`pikit upgrade` merges them instead), and deletes the
  *      files the installed version wrote that this one no longer ships, unless the user modified one:
  *      that one is kept, named, and stays recorded as the component's, so `pikit remove` asks for

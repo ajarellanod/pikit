@@ -52,7 +52,10 @@ export interface Registry {
    * With `targets`, only the components that run on all of them are answers.
    */
   slots(name: string, targets?: readonly string[]): PresetSlot[];
-  /** Every file a component installs: project-relative target → absolute source. */
+  /**
+   * Every file a component installs: project-relative target → absolute source. Its README
+   * (`README.md` at its root) goes beside its code, as `src/pikit/<name>/README.md`.
+   */
   files(name: string): Map<string, string>;
 }
 
@@ -161,6 +164,10 @@ export function openRegistry(path: string): Registry {
           files.set(posix.normalize(target.replaceAll("\\", "/")), from);
         }
       }
+      // Its README, beside its code: what the project's AI agent reads to use it, or to write the next one.
+      const readme = confinedPath(componentDir, "README.md");
+      const installed = `src/pikit/${name}/README.md`;
+      if (existsSync(readme) && statSync(readme).isFile() && !files.has(installed)) files.set(installed, readme);
       return files;
     },
   };
