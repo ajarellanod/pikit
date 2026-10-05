@@ -1,4 +1,4 @@
-# Moving the kit to Pi's durable runtime
+# Moving the kit to Pi's durable runtime (done)
 
 **Public appeal:** —
 
@@ -40,15 +40,14 @@ now does, pikit's goes.
 - pi-ai 1.0 (`createModels`, providers by subpath) and Chord 1.0 come with it. `pi-agent-core`'s
   `AgentHarness` is gone.
 
-## Done and doing
-- **Done** (on `feat/pi-durable`): pi-durable's storage over `storage.sql` on
-  both targets; models, providers and credentials on pi-ai 1.0; tools, MCP and execution on
-  pi-durable; wake-ups for hosts that are evicted (a next due time derived from the Harness); a
+## Done
+- pi-durable's storage over `storage.sql` on both targets; models, providers and credentials on
+  pi-ai 1.0; tools, MCP and execution on pi-durable; wake-ups for hosts that are evicted (a next due time derived from the Harness); a
   runtime implementing `agent.runtime` on pi-durable. Before them, unmodified Pi coding-agent
   extensions stopped running: pi-durable's own extensions are the extension model from now on.
-- **Doing:** the switch-over. The components move to those pieces (`runtime-pi`,
-  `deployment-cloudflare` and the Durable Object hosts, the conversation registries, the tools and
-  providers), and the contracts follow.
+- The switch-over: the components run on those pieces (`runtime-pi`, `deployment-cloudflare` and
+  the Durable Object hosts, the conversation registries, the tools and providers), and the contracts
+  followed.
 
 ## What moves to Pi, and what goes
 - **Pi's now:** sessions (pi-durable conversations), resume after a crash or eviction, request-id

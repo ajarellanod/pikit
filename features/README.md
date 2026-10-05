@@ -64,7 +64,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |
 | [second-agent-runtime](second-agent-runtime.md) | | Another agent loop behind `AgentRuntime` | No |
 | [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
-| [pi-durable-migration](pi-durable-migration.md) | | The kit on Pi's durable runtime (in progress): what moves to Pi, the switch-over's decisions, the gaps proposed upstream | Yes: Pi 1.0 removed the `AgentHarness` the runtime ran on |
+| [pi-durable-migration](pi-durable-migration.md) | | The kit on Pi's durable runtime (done): what moves to Pi, the switch-over's decisions, the gaps proposed upstream | Yes: Pi 1.0 removed the `AgentHarness` the runtime ran on |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations; replies in their thread | No |
 | [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation | Open: SPEC §6's git workspace |

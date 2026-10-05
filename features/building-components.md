@@ -58,14 +58,14 @@ be shared, without learning pikit's internals first.
    (which also checks that every tool and extension an agent names is installed).
 6. **Share it.** A registry is a folder with `registry.json`; anyone can `pikit add` from it
    (`--registry <path>`). Git registries (`github:someone/registry`) are planned
-   ([open registries](open-registries.md)); the shadcn registry format is the distribution
-   candidate for UI pieces.
+   ([open registries](open-registries.md)). A component's view is a shadcn registry item, which
+   `pikit add` installs into `src/dashboard/` when the project has a UI (SPEC §5).
 
 ## What is missing (to make this the easy path)
 - **More skills for AI agents** (`.agents/skills/`). `pikit-component` (the steps above) and
   `pikit-extension` (agent behaviour) ship with every project; "add a dashboard view" comes with
-  `admin-dashboard`, and a focused "write a channel" when the next channel shows what the general
-  skill leaves out.
+  the dashboard (`src/dashboard/`, SPEC §5), and a focused "write a channel" when the next channel
+  shows what the general skill leaves out.
 - **A helper to run an extension in a Harness turn** without runtime-pi (as `runToolCalls` does for a
   tool): today a component's own tests check its extension's parts, and the real App test is the
   project's own, because it imports `src/pikit/runtime-pi/`.
@@ -74,7 +74,7 @@ be shared, without learning pikit's internals first.
   be identical).
 - **A suite for every contract.** Missing today: `execution`/`ExecutionEnv` is in the adapter
   (`@pikit/pi-adapter/execution/testing`), not in contracts; the agent tool shape has none; future
-  contracts (`dashboard.view`, memory) get theirs when written.
+  contracts (memory) get theirs when written.
 - **Design notes as build guides.** Each ⭐ note in `features/` states: the contract (and suite),
   the Pi pieces it relies on, what it must guarantee, the tests that prove it. [Memory](memory.md)
   is the first one written so.
@@ -95,8 +95,6 @@ or that must see each request or tool call, is an extension. What Pi cannot give
 delivery, deployment, the dashboard) is a pikit component.
 
 ## Open questions
-- Whether a `dashboard.view` contract (a view and its admin API routes, shown when installed) is
-  part of `admin-dashboard`'s first version or comes with the first component that needs a view.
 - Whether skills live in the kit repository (copied by `pikit new`) or are a component
   (`agent-skills`) like any other.
 
@@ -129,4 +127,4 @@ The skills for AI agents live in the kit repository, `.agents/skills/<skill>/SKI
 nothing, and every project needs it from the first minute. A project made by an older CLI copies a
 newer skill by hand. There are two: `pikit-component` (the steps above, executable by an agent) and
 `pikit-extension` (agent behaviour as an `agent.extension`); "add a dashboard view" comes with
-`admin-dashboard`.
+the dashboard (SPEC §5).

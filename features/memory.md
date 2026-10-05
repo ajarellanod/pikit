@@ -417,8 +417,9 @@ The model of the project test and of a trial in `pikit dev` is provider-faux's `
   they are tested.
 
 ## After v1
-- **A dashboard view**: an admin route component (`http.route` `GET /admin/memory/*`, asking
-  `admin.auth`) that uses `memory`: list and forget a person's memories. On Cloudflare routes run in
+- **A dashboard view**: admin routes (`http.route` `GET /admin/api/memory/*`, asking `admin.auth`)
+  that use `memory`, and a view (a shadcn registry item that `pikit add` puts in `src/dashboard/`,
+  SPEC §5): list and forget a person's memories. On Cloudflare routes run in
   the Worker's App, which has no `storage.sql`: give memory-sql a Worker half (`apps.worker` in its
   `component.json`) that provides `memory` through `actor.mailbox` only. Listing every person needs an
   index of persons (as the [conversation index](cloudflare-conversation-index.md) does for

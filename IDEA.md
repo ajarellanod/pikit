@@ -73,7 +73,7 @@ Then, as needs grow, add what exists:
 ```bash
 pikit add outbound-durable        # reliable delivery with retries
 pikit add channel-http            # a second channel: router and agents unchanged
-pikit add admin-dashboard         # the base dashboard, yours to extend (planned)
+pikit ui on                       # the base dashboard in src/dashboard/, yours to extend (planned)
 ```
 
 and build what does not, with your AI, from the feature's design note and its contract's
@@ -117,9 +117,10 @@ Same agents, same routing, same channels. Different infrastructure underneath.
 - **A registry of components**: channels, routers, storage providers, outboxes, executors,
   workspaces, deployment targets, and a few reference components for each kind. Each one is
   source you copy, and a model for the ones you write.
-- **A base dashboard** (`admin-dashboard`): built with shadcn/ui, copied into your project like
-  any component, small on purpose (conversations, one conversation live, steer and abort, cost,
-  health) and made to be extended: a component you write can bring its own view.
+- **A base dashboard**, if you want a UI (`pikit new --ui`, `pikit ui on`): a shadcn/ui project of
+  its own in `src/dashboard/`, yours like any component, over an admin API (`admin-api`); small on
+  purpose (conversations, one conversation live, steer and abort, cost, health) and made to be
+  extended: a component you write can bring its own view, a shadcn registry item.
 - **A CLI**: `new`, `add`, `remove`, `diff`, `upgrade`, `doctor`, `up`, `deploy`. With the
   installer, its goal is zero friction from installing pikit to a running agent.
 - **Two runtime models**: `server`, a long-running process (Docker on a VPS, systemd; later
