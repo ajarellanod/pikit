@@ -19,6 +19,11 @@
  * The rules under test:
  * - a message reaches the agent only through the whole path, and a sender whose message does not
  *   reach it is told, never left without an answer;
+ * - a message whose admission fails for a while (the runtime cannot take it) is never dropped in
+ *   silence: the platform or the sender delivers it again, and it reaches the agent once the failure
+ *   passes, answered once;
+ * - a command to start over (`resetCommand`) that the platform delivers again, as after a crash
+ *   before the channel acknowledged it, starts over once and is answered once;
  * - durability comes with the contracts: an answer that ends while the channel is stopped, or whose
  *   event is lost, reaches its sender once the channel runs again, once; a send the platform failed
  *   is tried again, and its conversation's later answers wait for it; a send cut after it left goes
@@ -110,6 +115,12 @@ export interface ChannelConformanceOptions {
   timeoutMs?: number;
   /** How long nothing must happen, when a case checks that nothing does. Default 300 ms. */
   quietMs?: number;
+  /**
+   * The message that starts its conversation over (`/new`), for a channel that takes one: the case of
+   * a redelivered command runs only with it. A channel whose reset is no message has none (channel-http
+   * resets on its own endpoint, with nothing a platform could deliver twice).
+   */
+  resetCommand?: string;
 }
 
 /** What every run's answer starts with (then its number, `(1)`): a sender who was told it got the agent's answer. */
@@ -123,6 +134,9 @@ const HALT_ROUTE = "[halt at route]";
 const DENY = "[deny]";
 const MOVE = "[move to another conversation]";
 
+/** How many admissions in a row fail in the case of a transient failure: more than a few quick tries survive. */
+const TRANSIENT_FAILURES = 3;
+
 const GROUP = "channel";
 const check = checker(GROUP);
 const CONVERSATIONS = ["alpha", "beta"] as const;
@@ -134,6 +148,7 @@ export function createChannelConformance(
   const timeoutMs = options.timeoutMs ?? 5000;
   const quietMs = options.quietMs ?? 300;
   const pushed = (options.answers ?? "pushed") === "pushed";
+  const { resetCommand } = options;
   const channelCase = (name: string, run: (s: Subject) => Promise<void>, withRouter = true): ConformanceCase => ({
     group: GROUP,
     name,
@@ -218,6 +233,23 @@ export function createChannelConformance(
       false,
     ),
 
+    channelCase("a message whose admission fails for a while is not dropped: it reaches the agent once the failure passes, answered once", async (s) => {
+      s.failAdmissions(TRANSIENT_FAILURES);
+      const message = { id: "m1", conversation: "alpha", text: "hello" };
+      await s.fixture.deliver(message);
+      if (!pushed) {
+        // Answered in its response, the sender is told each failure and sends the message again, as a
+        // client retries. A pushed channel's platform delivers it again by itself (or the channel retries).
+        for (let failed = 1; failed <= TRANSIENT_FAILURES; failed++) {
+          const told = await s.fixture.told("alpha");
+          check(told.length === failed && !told.some((line) => line.includes(CONFORMANCE_ANSWER)), `the sender told failure ${failed}, told ${JSON.stringify(told)}`);
+          await s.fixture.deliver(message);
+        }
+      }
+      await toldExactly(s, "alpha", 1, "the answer to the message whose admission failed for a while");
+      check(s.started === 1, `one run, got ${s.started}`);
+    }),
+
     channelCase("a stage that moves a message to another conversation does not get it dispatched", async (s) => {
       await s.fixture.deliver({ id: "m1", conversation: "alpha", text: `hijack ${MOVE}` });
       await s.quiet();
@@ -247,6 +279,27 @@ export function createChannelConformance(
       await toldExactly(s, "alpha", 1, "the answer whose event was lost");
     }),
   ];
+
+  if (resetCommand !== undefined) {
+    cases.push(
+      channelCase("a command to start over that the platform delivers again after a restart starts over once, and is answered once", async (s) => {
+        await s.fixture.deliver({ id: "m1", conversation: "alpha", text: "hello" });
+        await toldExactly(s, "alpha", 1, "the answer before the command");
+        const command = { id: "m2", conversation: "alpha", text: resetCommand };
+        await s.fixture.deliver(command);
+        await s.eventually(async () => (s.resets > 0 && (await s.fixture.told("alpha")).length > 1 ? true : undefined), "the conversation to start over, and its sender to be told");
+        const told = await s.fixture.told("alpha");
+        // A crash before the platform learned the command was handled: it delivers it again.
+        await s.restart();
+        await s.fixture.deliver(command);
+        await s.quiet();
+        await s.quiet();
+        check(s.resets === 1, `one reset for one command delivered twice, got ${s.resets}`);
+        const after = await s.fixture.told("alpha");
+        check(after.length === told.length, `the command answered once, told ${JSON.stringify(after)}`);
+      }),
+    );
+  }
 
   if (pushed) {
     cases.push(
@@ -300,6 +353,8 @@ interface Subject {
   readonly settled: number;
   /** Runs started and held (`holdRuns`), not ended yet. */
   readonly held: number;
+  /** Conversations started over (`conversations.registry`'s `reset`). */
+  readonly resets: number;
   /** Errors the apps logged. */
   errors: string[];
   /** From now on a run does not end until `settleHeld`. */
@@ -308,6 +363,8 @@ interface Subject {
   settleHeld(): Promise<void>;
   /** From now on a run's end is recorded, and its events are lost. */
   loseEvents(): void;
+  /** The next `count` dispatches throw, as a runtime that cannot take messages for a while. */
+  failAdmissions(count: number): void;
   /** Stops the App, runs `between`, and starts a new one over the same storage. */
   restart(between?: () => Promise<void>): Promise<void>;
   /** Resolves with `probe()`'s first defined value; throws after the timeout. */
@@ -325,6 +382,10 @@ interface Durable {
   held: AgentResult[];
   hold: boolean;
   loseEvents: boolean;
+  /** Dispatches left to fail (`failAdmissions`). */
+  failAdmissions: number;
+  /** The keys of the conversations started over, in order. */
+  resets: string[];
   /** The running App's context for events, or `undefined` between Apps. */
   events: AppContext | undefined;
   /** The record of submissions: each request's status, and the feed of run ends. */
@@ -342,6 +403,8 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
     held: [],
     hold: false,
     loseEvents: false,
+    failAdmissions: 0,
+    resets: [],
     events: undefined,
     statuses: new Map(),
     answers: createMemoryFeed<RunSettlement>(),
@@ -378,6 +441,9 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
     get held() {
       return durable.held.length;
     },
+    get resets() {
+      return durable.resets.length;
+    },
     errors,
     holdRuns() {
       durable.hold = true;
@@ -388,6 +454,9 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
     },
     loseEvents() {
       durable.loseEvents = true;
+    },
+    failAdmissions(count) {
+      durable.failAdmissions = count;
     },
     async restart(between) {
       await app.stop();
@@ -439,7 +508,14 @@ function fakeConversations(durable: Durable): ComponentDefinition {
           return conversation;
         },
         get: async (key) => known.get(key),
-        reset: async () => undefined,
+        async reset(key) {
+          const previous = known.get(key);
+          if (previous === undefined) return undefined;
+          const conversation = { ...previous, conversationId: `${previous.conversationId}-reset-${durable.resets.length + 1}` };
+          known.set(key, conversation);
+          durable.resets.push(key);
+          return { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
+        },
       };
       pikit.provide("conversations.registry", registry);
     },
@@ -482,6 +558,10 @@ function fakeRuntime(durable: Durable): ComponentDefinition {
     setup(pikit) {
       const runtime: AgentRuntime = {
         async dispatch(request) {
+          if (durable.failAdmissions > 0) {
+            durable.failAdmissions--;
+            throw new Error("conformance: the runtime cannot take messages for a while");
+          }
           const duplicate = durable.dispatched.some((d) => d.requestId === request.requestId && d.conversation.key === request.conversation.key);
           durable.dispatched.push(request);
           if (duplicate) return { kind: "duplicate", requestId: request.requestId };

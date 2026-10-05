@@ -376,7 +376,8 @@ secret: no bot, token or network needed. Only tests import it.
   cool-down, a login kept across restarts and after the password is removed, and logged out by a new
   password.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
-  channel does with a message, and what comes with durability (an answer that ended while stopped or
+  channel does with a message (a transient failure of admission answered `500` and posted again
+  until taken, `/new` delivered again run once included), and what comes with durability (an answer that ended while stopped or
   whose event was lost, delivered once; a failed send tried again in order; a send cut mid-flight
   resent once, marked; one chat's failures holding up no other).
 - `configure.test.ts` covers the setup: a checked token, the generated secret, allowing whoever

@@ -141,7 +141,8 @@ Only tests import it.
 - `poller.test.ts` covers the poller: a failing update tried again without moving past it, and one
   still failing past the time budget skipped, its sender told first.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
-  channel does with a message (routed, deduplicated, stopped, denied, no router), and what comes with
+  channel does with a message (routed, deduplicated, stopped, denied, no router, a transient failure
+  of admission not dropped, `/new` delivered again run once), and what comes with
   durability (an answer that ended while stopped or whose event was lost, delivered once; a failed
   send tried again in order; a send cut mid-flight resent once, marked; one chat's failures holding
   up no other), through Telegram. The delivery itself is tested in `@pikit/contracts`.
