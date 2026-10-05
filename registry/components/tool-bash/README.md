@@ -39,5 +39,5 @@ A shell can do anything the environment's OS user can, outside the working direc
 It covers the tool under its name, its replay, what it does, and that a call in a run works in its
 agent's workspace when one is installed.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

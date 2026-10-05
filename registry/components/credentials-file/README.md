@@ -45,7 +45,7 @@ the Pi CLI would lose its session.
 A credential gets here through pi-ai's login flow:
 `modelsFrom([provider], { credentials }).login("anthropic", "oauth", interaction)`, from
 `@pikit/pi-adapter`. The `http` sample has a script that does it (`samples/http/scripts/login.ts`).
-`pikit configure` will do it once the CLI exists.
+`pikit configure` does it too, when it sets up the model.
 
 ## Config
 
@@ -63,5 +63,5 @@ A credential gets here through pi-ai's login flow:
 - the lifecycle conformance suite;
 - the file mode, a write by another process, and the start failures above, without leaking a value.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

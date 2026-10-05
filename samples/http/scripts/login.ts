@@ -14,7 +14,8 @@
  * app refreshes them later and writes the new ones back.
  *
  * It never prints a token. It never touches Pi's own `~/.pi/agent/auth.json`: a refresh would rotate
- * the token the Pi CLI holds. `pikit configure` will do this once the CLI exists.
+ * the token the Pi CLI holds. `pikit configure` does this too, in a
+ * generated project.
  */
 
 import { createInterface } from "node:readline/promises";

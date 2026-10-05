@@ -4,9 +4,9 @@ Scenario 1 (`test/scenario-1.test.ts`). Claude (through Pi) behind an HTTP API, 
 token, conversations that survive restarts, and an honest `/ready`. The agent has tools: it reads,
 writes and edits files and runs commands in its workspace.
 
-This is a fixture of the repository, not a generated project. There is no CLI yet, so
-`pikit.config.ts` imports the components straight from `registry/`. `pikit new --preset http` will
-copy them to `src/pikit/` instead.
+This is a fixture of the repository, not a generated project. `pikit.config.ts` imports the
+components straight from `registry/`, so its tests run the registry's own code. `pikit new --preset
+http` copies them to `src/pikit/` instead.
 
 | Component | Does |
 |---|---|
@@ -123,8 +123,8 @@ The agent has `bash` on your machine, as your user. `execution-local` is not a s
    The running app refreshes them before they expire and writes the new ones back.
 
 The script never prints a token. Do not copy `~/.pi/agent/auth.json` from the Pi CLI: a refresh here
-would rotate the token the CLI holds, and log it out. `pikit configure` will do this once the CLI
-exists.
+would rotate the token the CLI holds, and log it out. In a generated project, `pikit configure` does
+this.
 
 Bun loads `.env` files from the working directory by itself. The sample does not rely on that; keep
 secrets in the environment of the process that runs it.

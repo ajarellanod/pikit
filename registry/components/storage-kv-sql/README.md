@@ -40,8 +40,8 @@ await store?.delete("cursor");
 
 ## Removing it
 
-`pikit remove storage-kv-sql` refuses while a component requires `storage.kv`; a component that only
-can use it (`channel-telegram`) goes back to working without it. The table stays: it is your data.
+`pikit remove storage-kv-sql` refuses while a component requires `storage.kv` (`channel-telegram`
+does); a component that only can use it goes back to working without it. The table stays: it is your data.
 
 ## Tests
 

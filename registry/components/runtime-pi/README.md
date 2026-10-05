@@ -258,4 +258,4 @@ document its tool wrote, a `beforeTool` hook that blocks, a `beforeRequest` hook
 the start failures, and the extension's state across a restart.
 
 `component.json` is generated from `setup` by the CLI (`pikit registry validate`) and is not written
-by hand. Until the CLI exists, the test "what setup declares" pins it.
+by hand; the test "what setup declares" pins it.

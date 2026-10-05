@@ -36,7 +36,7 @@ The OAuth login (pi-ai 1.0) first asks how to log in: `browser` (a callback on l
 
 To log in with a Claude subscription, run pi-ai's OAuth flow and store the result in
 `model.credentials`. The `http` sample has a script for it (`samples/http/scripts/login.ts`).
-`pikit configure` will do it once the CLI exists. Never reuse Pi's own `~/.pi/agent/auth.json`: a
+`pikit configure` does it too, when it sets up the model. Never reuse Pi's own `~/.pi/agent/auth.json`: a
 refresh would rotate the token the Pi CLI holds.
 
 ## Tests
@@ -44,5 +44,5 @@ refresh would rotate the token the Pi CLI holds.
 `provider-anthropic.test.ts` is copied with the component and runs in your project. It makes no
 request and reads no credential.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

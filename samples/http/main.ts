@@ -4,7 +4,7 @@
  * It is `deployment-docker`'s `main.ts`: start with a deadline, stop on SIGTERM or
  * SIGINT with a deadline, exit non-zero when either fails, JSON-lines logs. In a project that
  * component's own `src/pikit/deployment-docker/main.ts` runs `pikit.config.ts`. This fixture imports
- * the entrypoint straight from `registry/` because there is no CLI to copy it yet.
+ * the entrypoint straight from `registry/`, so it runs the registry's own code.
  */
 
 import { runEntrypoint } from "../../registry/components/deployment-docker/files/src/pikit/deployment-docker/entrypoint.ts";
