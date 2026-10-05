@@ -24,11 +24,12 @@ export function basePath(hash: string): string {
   return `${BASES_DIR}/${hex}`;
 }
 
-/** The bases in the project that no installed component names: project-relative paths. */
+/** The bases in the project that no installed component, nor the dashboard, names: project-relative paths. */
 export function unreferencedBases(projectDir: string, project: ProjectManifest): string[] {
   const dir = confinedPath(projectDir, BASES_DIR);
   if (!existsSync(dir)) return [];
-  const hashes = Object.values(project.components).flatMap((c) => Object.values(c.files).map(({ hash }) => hash));
+  const recorded = [...Object.values(project.components), ...(project.dashboard === undefined ? [] : [project.dashboard])];
+  const hashes = recorded.flatMap((c) => Object.values(c.files).map(({ hash }) => hash));
   const named = new Set(hashes.map((hash) => `${BASES_DIR}/${hash.slice("sha256:".length)}`));
   return readdirSync(dir)
     .map((file) => {

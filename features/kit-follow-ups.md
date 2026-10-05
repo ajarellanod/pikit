@@ -31,21 +31,15 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **A base UI with shadcn/ui, extensible by components.** Not the largest interface: enough to
   start, and every other view comes from a component that brings it (SPEC §5). No platform
   under pikit (Pi Durable, Cloudflare, Rivet) offers an interface that is the user's to extend.
-- **When:** next, in phases, each one usable:
-  1. `admin-api`, `src/dashboard/` and `pikit new --ui` / `pikit ui on|off`, on a server: the
-     conversations, one live (joinable while the user talks in their chat), steer, abort and reset,
-     cost per conversation, the composition; `shadcn add` and hot reload work from the start.
+- **When:** in phases, each one usable. The first has landed (CHANGELOG): `admin-api`,
+  `src/dashboard/` (`registry/dashboard/`) and `pikit new --ui` / `pikit ui on|off` on a server, with
+  the conversations, one live, steer, abort and reset, cost and the composition. Next:
   2. pikit's UI pieces and views as shadcn registry items (`@pikit`), components with a view through
      `pikit add`, the "add a view" skill, and the health and delivery views (with `health-registry`,
      [health](health.md)).
   3. Cloudflare: a conversation's object read and watched from the Worker, and
      [the index](cloudflare-conversation-index.md) to list them all.
   4. The agent changing its own UI, through SPEC §6's gate.
-
-  What phase 1 reads is built:
-  `APP_DESCRIPTION` (K13), `agent.observe` (conversations, transcript, live events, usage),
-  `admin.auth` (`admin-auth-token`) and prefix routes (`GET /admin/*`). Listing every conversation on
-  Cloudflare still needs [an index](cloudflare-conversation-index.md).
 
 ## Building on the bases must be the easy path
 - **Why:** pikit gives the bases and the user builds their assistant on them (SPEC P1, MANIFESTO

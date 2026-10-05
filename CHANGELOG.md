@@ -79,12 +79,21 @@ there.
   `execution-do` (files in the object's SQL, a shell without processes, `git`, `node` in QuickJS;
   pi-durable 1.0.3's environment: positional and directory readers, argv `exec`, no `watch`).
 - Serving and operating: `server-bun` (`/health`, `/ready`), `admin-auth-token` (operators by a bearer
-  token from `secrets`), `log-events`.
+  token from `secrets`), `admin-api` (the operator's HTTP API under `/admin/api/*`: the composition,
+  conversations, a transcript, live events as server-sent events, a message that steers, abort and
+  reset; it serves the dashboard's built files at `/admin/`; server), `log-events`.
 - Agent behaviour: `extension-house-rules` (rules from config as a system prompt section, listed tools
   refused by a `beforeTool` hook; the reference agent extension), of the kind `extension-`.
 - Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`) and
   `deployment-cloudflare` (the Worker and one Durable Object per conversation running the project's
   two Apps; `up` waits for the new version on `/health`, then runs `afterDeploy` hooks, C8).
+
+### Dashboard (`registry/dashboard/`)
+- A project's choice, not a component (SPEC §5): `src/dashboard/`, a shadcn/ui project of its own
+  (Vite, React, Tailwind v4, pinned packages) over `admin-api`: sign-in with the operator's token,
+  the conversations, one of them live (its transcript, the answer being written, the tools running),
+  a message that steers it, abort, reset, its cost, and the composition. A view is a folder of
+  `src/views/`, shown when the capabilities it declares are installed. Server only for now.
 
 ### Presets
 - `http` and `telegram` (Docker on a server), `telegram-cloudflare` and `cloudflare-minimal`
@@ -109,8 +118,13 @@ there.
 - `configure` and `up` check credentials only for the model providers the agents name, and reach
   the deployment (Docker) only when one is missing here.
 - `pikit new` copies the skills for AI agents (`.agents/skills/`) into every project, and leaves a
-  registry of the project's own (`registry/`) out of `tsc` and `bun test` (`bunfig.toml`); `lib` is
-  ES2023.
+  registry of the project's own (`registry/`) and the dashboard (`src/dashboard/`) out of `tsc` and
+  `bun test` (`bunfig.toml`); `lib` is ES2023.
+- `pikit new --ui` (and the guided path's question) and `pikit ui on | off`: the dashboard and what it
+  needs (`admin-auth-token`, `admin-api`), or neither; `off` refuses to lose your edits or your own
+  views without `--force`. `pikit.json`'s `dashboard` records its files and `pikit-bases/` keeps them,
+  so `pikit upgrade` (without names) merges its new version with your edits. `deployment-docker`'s
+  image builds it in a stage of its own.
 
 ### Installer and templates
 - `installer/install.sh`: from an empty server to a running agent (Docker), or `--durable` for

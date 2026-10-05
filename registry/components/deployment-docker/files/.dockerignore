@@ -9,8 +9,12 @@
 # conversations and model credentials to wherever the image goes.
 .pikit
 
-# Installed inside the image from bun.lock, for its own platform.
+# Installed inside the image from bun.lock, for its own platform: the project's, and the dashboard's.
 node_modules
+**/node_modules
+
+# The dashboard's build: made in the image (Dockerfile's `dashboard` stage), never this machine's.
+src/dashboard/dist
 
 .git
 

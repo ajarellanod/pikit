@@ -5,7 +5,8 @@
  * It asks, in order: the agent's name (its folder), where it runs (its target, only when the registry
  * has presets for several), the preset to start from (only when several base presets run there), each
  * of that preset's questions (`choose`: where to talk to the agent is "which channel-* component",
- * answered by every one in the registry, by its `title`), then runs `new`, `configure` (each
+ * answered by every one in the registry, by its `title`), whether it gets a dashboard (on a server;
+ * `--ui` answers it), then runs `new`, `configure` (each
  * component's own step, then the model's login) and `up` or `dev`: the same functions the commands
  * run, nothing of its own. It knows nothing about Telegram, any channel or any platform: the choices
  * come from the registry, the questions from the components, and `up` is the deployment component's
@@ -65,6 +66,8 @@ export interface WizardOptions {
   preset?: string;
   /** Answers the preset's questions of their kinds (`--with`). */
   with?: readonly string[];
+  /** Answers "add a dashboard?" (`--ui`). */
+  ui?: boolean;
 }
 
 export async function newWizard(parentDir: string, options: WizardOptions = {}): Promise<number> {
@@ -88,9 +91,11 @@ export async function newWizard(parentDir: string, options: WizardOptions = {}):
       target = options.target ?? (await chooseTarget(registry, options.preset));
       const preset = options.preset ?? (await choosePreset(registry, target));
       const choices = await answerSlots(registry, preset, target, options.with ?? []);
+      // The dashboard runs on a server for now (`ui.ts`): on Cloudflare the question is not asked.
+      const ui = target === "durable" ? false : (options.ui ?? (await confirm("Add a dashboard? (a web UI at /admin/ to follow, steer and stop conversations)", false)));
       const creating = spinner(`Creating ${name}: its components, then \`bun install\``);
       try {
-        await newProject(project.dir, { preset, with: choices, registry: registryPath, target, next: false, quiet: true });
+        await newProject(project.dir, { preset, with: choices, registry: registryPath, target, next: false, quiet: true, ui });
       } catch (error) {
         creating.error(`Could not create ${name}`);
         throw error;
@@ -98,7 +103,7 @@ export async function newWizard(parentDir: string, options: WizardOptions = {}):
       creating.stop(`Created ${name} in ${project.dir}`);
       const registryFlag = options.registry === undefined ? "" : ` --registry ${options.registry}`;
       const targetFlag = target === DEFAULT_TARGET ? "" : ` --target ${target}`;
-      log.info(`The same, in a script: pikit new ${name}${targetFlag} --preset ${preset}${choices.map((c) => ` --with ${c}`).join("")}${registryFlag}`);
+      log.info(`The same, in a script: pikit new ${name}${targetFlag} --preset ${preset}${choices.map((c) => ` --with ${c}`).join("")}${ui ? " --ui" : ""}${registryFlag}`);
     }
 
     if (!(await confirm("Configure it now? (where you talk to it, and the model's login)", true))) return later(name, "configure");

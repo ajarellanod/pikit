@@ -16,6 +16,7 @@ import { doctor } from "./commands/doctor.ts";
 import { newProject } from "./commands/new.ts";
 import { registryCommand } from "./commands/registry.ts";
 import { remove } from "./commands/remove.ts";
+import { uiOff, uiOn } from "./commands/ui.ts";
 import { upgrade } from "./commands/upgrade.ts";
 import { PIKIT_ROOT } from "./paths.ts";
 import { Cancelled, CliError, isInteractive, log } from "./ui.ts";
@@ -24,10 +25,11 @@ const USAGE = `pikit: a kit for Pi.
 
 Usage:
   pikit new [--target <t>] [--preset <p>]   a new agent, step by step (in a terminal); flags answer its questions
-  pikit new <dir> [--target server|durable] [--preset <name> [--with <component>]...] [--registry <path>]   a new project
+  pikit new <dir> [--target server|durable] [--preset <name> [--with <component>]...] [--ui] [--registry <path>]   a new project (--ui: with the dashboard)
   pikit add <component> [--registry <path>] [--force] [--yes]
   pikit remove <component> [--force]
-  pikit upgrade [<component>...] [--dry-run] [--force] [--yes]   take the registry's version, merging your edits
+  pikit upgrade [<component>...] [--dry-run] [--force] [--yes]   take the registry's version, merging your edits (without names, the dashboard too)
+  pikit ui on | off [--force] [--yes]  the dashboard: src/dashboard/ and the admin API, or neither
   pikit doctor                        the component graph, and what is missing
   pikit configure [--yes] [--generate <NAME>]... [--login <provider> [--login-method browser|code] [--local]]
   pikit dev                           run the project here, reloading on change (on Cloudflare: wrangler dev)
@@ -67,6 +69,7 @@ async function main(argv: string[]): Promise<number> {
       preset: { type: "string" },
       target: { type: "string" },
       with: { type: "string", multiple: true },
+      ui: { type: "boolean" },
       registry: { type: "string" },
       force: { type: "boolean" },
       "dry-run": { type: "boolean" },
@@ -107,9 +110,11 @@ async function main(argv: string[]): Promise<number> {
           ...(values.target !== undefined && { target: values.target }),
           ...(values.preset !== undefined && { preset: values.preset }),
           ...(values.with !== undefined && { with: values.with }),
+          ...(values.ui !== undefined && { ui: values.ui }),
         });
       }
       await newProject(one("dir"), {
+        ...(values.ui === true && { ui: true }),
         ...(values.target !== undefined && { target: values.target }),
         ...(values.preset !== undefined && { preset: values.preset }),
         ...(values.with !== undefined && { with: values.with }),
@@ -146,6 +151,12 @@ async function main(argv: string[]): Promise<number> {
         ...(method !== undefined && { loginMethod: method as LoginMethod }),
         local: values.local === true,
       });
+      return 0;
+    }
+    case "ui": {
+      const action = one("on|off");
+      if (action !== "on" && action !== "off") throw new CliError("usage: pikit ui on | off", 2);
+      await (action === "on" ? uiOn : uiOff)(cwd, { force: values.force === true, yes: values.yes === true });
       return 0;
     }
     case "dev":

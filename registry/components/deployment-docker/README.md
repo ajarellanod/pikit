@@ -61,6 +61,10 @@ Docker rotates the log files (5 × 10 MB). Read them with `pikit logs`, or
 
 - `oven/bun:1.4-slim`, dependencies installed from `bun.lock` with `--production`, running as the
   unprivileged user `bun`.
+- A project with a UI (`src/dashboard/`, `pikit ui on`) gets its dashboard built in a stage of its own
+  (`bun install --frozen-lockfile` and its `build`, from its own `bun.lock`); only the static files
+  reach the image, at `src/dashboard/dist`, where `admin-api` serves them. Without a UI the stage builds
+  nothing.
 - `vendor/` is copied before the install. Until `@pikit/*` is published on npm, `pikit new`
   vendors those packages there as tarballs, and `package.json` depends on them with
   `file:vendor/…`, so the image builds from the project's directory alone.

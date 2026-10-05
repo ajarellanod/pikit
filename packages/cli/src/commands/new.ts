@@ -1,6 +1,9 @@
 /**
- * `pikit new <dir> [--target <server|durable>] [--preset <name> [--with <component>]...] [--registry <path>]`:
+ * `pikit new <dir> [--target <server|durable>] [--preset <name> [--with <component>]...] [--ui] [--registry <path>]`:
  * a new project.
+ *
+ * `--ui` gives it a UI (SPEC §5, `ui.ts`): the dashboard's files in `src/dashboard/` and the components
+ * it needs, installed with the preset's; its own `bun install` runs after the project's.
  *
  * It writes the project's own part (`starter.ts`), vendors the kit packages into `vendor/`, adds
  * every component of the preset through the same install flow as `pikit add`, runs
@@ -35,9 +38,12 @@ import { kitCommit, vendorKit } from "../project/vendor.ts";
 import { kindOf, TARGETS } from "../registry/manifest.ts";
 import { CliError, log } from "../ui.ts";
 import { checkCompatible, installComponent, notPortable, warnUnchosen } from "./add.ts";
+import { DASHBOARD_DIR, dashboardFiles } from "../project/dashboard.ts";
+import { Undo } from "../project/undo.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
 import * as starter from "./starter.ts";
+import { checkUiTarget, installDashboardPackages, UI_COMPONENTS, uiNext, writeDashboard } from "./ui.ts";
 
 export interface NewOptions {
   preset?: string;
@@ -50,6 +56,8 @@ export interface NewOptions {
   quiet?: boolean;
   /** Where it runs: `server` (default) or `durable`. */
   target?: string;
+  /** With a UI (SPEC §5): `src/dashboard/`, and the components it needs (`ui.ts`). */
+  ui?: boolean;
 }
 
 /** Refuses a `--target` that is not one (exit 2). */
@@ -90,7 +98,12 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   // channel, and what it needs. A preset lists only what every project of it uses, and names its
   // storage: an offer needs the registry's only provider, which a second one would take away
   // (`registry validate` checks that each preset composes, `checkPresets`).
-  const { order: components, installedFor } = withOffers(registry, chosen, targets);
+  // A UI is the dashboard's files and what they need, added like the preset's own.
+  if (options.ui === true) checkUiTarget(targets);
+  const dashboard = options.ui === true ? dashboardFiles(registry) : undefined;
+  if (options.ui === true && dashboard === undefined) throw new CliError(`the registry ${registry.root} has no dashboard (dashboard/files/)`);
+  const asked = options.ui === true ? [...chosen, ...UI_COMPONENTS.filter((c) => !chosen.includes(c))] : chosen;
+  const { order: components, installedFor } = withOffers(registry, asked, targets);
   warnUnchosen(registry, chosen, [], targets);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
   try {
@@ -120,7 +133,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write("tsconfig.json", starter.tsconfig());
     write("bunfig.toml", starter.BUNFIG);
     write(".gitignore", starter.gitignore(target));
-    write("README.md", starter.readme(name, components, target));
+    write("README.md", starter.readme(name, components, target, dashboard !== undefined));
     write(CONFIG_FILE, starter.configFile(target));
     // Its prompt says where people reach it: the channels being installed.
     const channels = components.filter((c) => kindOf(c) === "channel").map((c) => ({ name: c, title: registry.manifest(c).title }));
@@ -153,8 +166,17 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
       if (installed.includes(component)) config = setConfigEntry(config, component, value);
     }
     write(CONFIG_FILE, config);
+    if (dashboard !== undefined) {
+      const project = readProjectManifest(projectDir);
+      writeDashboard(projectDir, project, registry, "default", dashboard, UI_COMPONENTS, new Undo(projectDir));
+      writeProjectManifest(projectDir, project);
+    }
 
     await bunInstall(projectDir, { quiet: options.quiet === true });
+    if (dashboard !== undefined) {
+      step(`bun install in ${DASHBOARD_DIR}/`);
+      await installDashboardPackages(projectDir, true);
+    }
 
     step("pikit doctor");
     report = await doctor(projectDir, { quiet: true, componentChecks: false });
@@ -173,6 +195,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   if (options.next === false) return;
   const elsewhere = target === "durable" ? "deploy it to Cloudflare" : "run it in Docker";
   log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev         # or \`pikit up\` to ${elsewhere}`);
+  if (dashboard !== undefined) log.info(`\n${uiNext()}`);
 }
 
 /**

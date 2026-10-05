@@ -70,6 +70,22 @@ export interface InstalledComponent {
   installedFor?: string[];
 }
 
+/**
+ * The dashboard (SPEC §5), when the project has a UI (`pikit new --ui`, `pikit ui on`): the files the
+ * registry's `dashboard/files/` wrote in `src/dashboard/`, recorded and kept as bases like a component's,
+ * so `pikit upgrade` merges the registry's changes with the user's edits (P6).
+ */
+export interface InstalledDashboard {
+  /** A key of `registries`. */
+  registry: string;
+  /** The registry's Git commit when it was written; `-dirty` when it had uncommitted changes. */
+  commit?: string;
+  /** Project-relative path → its hash as written. */
+  files: Record<string, { hash: string }>;
+  /** The components `pikit ui on` installed for it (`admin-api`, …): `pikit ui off` removes them. */
+  components: string[];
+}
+
 export interface ProjectManifest {
   /** Schema version of `pikit.json`. */
   version: 1;
@@ -82,6 +98,8 @@ export interface ProjectManifest {
   /** Name → location: `builtin`, a path inside the project (`./…`), or an absolute path (`registry-location.ts`). */
   registries: Record<string, string>;
   components: Record<string, InstalledComponent>;
+  /** The dashboard's files; absent in a project without a UI. */
+  dashboard?: InstalledDashboard;
 }
 
 /** A new project's targets unless `pikit new --target` says otherwise. */
@@ -116,7 +134,13 @@ export function writeProjectManifest(projectDir: string, manifest: ProjectManife
   }
   // Keys in one order, whatever order the object was built in.
   const { version, kit, targets, registries } = manifest;
-  writeFileSync(confinedPath(projectDir, PIKIT_JSON), `${JSON.stringify({ version, ...(kit !== undefined && { kit }), targets, registries, components }, null, 2)}\n`);
+  const dashboard = manifest.dashboard === undefined ? undefined : { ...manifest.dashboard, files: sortedFiles(manifest.dashboard.files) };
+  const text = JSON.stringify({ version, ...(kit !== undefined && { kit }), targets, registries, components, ...(dashboard !== undefined && { dashboard }) }, null, 2);
+  writeFileSync(confinedPath(projectDir, PIKIT_JSON), `${text}\n`);
+}
+
+function sortedFiles(files: Record<string, { hash: string }>): Record<string, { hash: string }> {
+  return Object.fromEntries(Object.keys(files).sort().map((file) => [file, files[file] as { hash: string }]));
 }
 
 export function hashOf(content: string | Uint8Array): string {
@@ -131,7 +155,7 @@ export function hashFile(path: string): string {
  * Installed files whose content no longer has the hash recorded at install (the user's edits). A file
  * the component declares `generated` is its hooks', not the user's: never one of them.
  */
-export function modifiedFiles(projectDir: string, component: InstalledComponent): string[] {
+export function modifiedFiles(projectDir: string, component: Pick<InstalledComponent, "files" | "generated">): string[] {
   const generated = new Set(component.generated ?? []);
   return Object.entries(component.files)
     .filter(([file, { hash }]) => {

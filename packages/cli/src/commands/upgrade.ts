@@ -1,7 +1,8 @@
 /**
  * `pikit upgrade [<component>...]`: installed components take their registry's version, and keep
  * the user's edits (SPEC P6). Without names, every installed component whose registry has another
- * version of it (another version, other files, another manifest); `--dry-run` only says what it
+ * version of it (another version, other files, another manifest), then the dashboard when the project
+ * has one (`ui.ts`, `upgradeDashboard`: its files by the same rules); `--dry-run` only says what it
  * would do.
  *
  * Each file the new version ships, against the file as installed (its hash in `pikit.json`, its base
@@ -77,6 +78,7 @@ import {
 } from "./add.ts";
 import { doctor } from "./doctor.ts";
 import { bunInstall } from "./install.ts";
+import { upgradeDashboard } from "./ui.ts";
 
 export interface UpgradeOptions {
   /**
@@ -91,8 +93,8 @@ export interface UpgradeOptions {
   dryRun?: boolean;
 }
 
-/** What an upgrade does to each file of a component. */
-interface FileChanges {
+/** What an upgrade does to each file of a component (or of the dashboard). */
+export interface FileChanges {
   /** Not modified, changed by the registry: replaced. */
   updated: string[];
   /** Modified, changed by the registry: merged cleanly. */
@@ -117,7 +119,13 @@ interface UpgradePlan extends Plan {
   notes: string[];
 }
 
+/** The components named (all of them without names), then, without names, the dashboard (`ui.ts`). */
 export async function upgrade(projectDir: string, names: readonly string[], options: UpgradeOptions = {}): Promise<void> {
+  await upgradeComponents(projectDir, names, options);
+  if (names.length === 0) await upgradeDashboard(projectDir, options);
+}
+
+async function upgradeComponents(projectDir: string, names: readonly string[], options: UpgradeOptions): Promise<void> {
   assertNoIncompleteOperation(projectDir);
   const force = options.force === true;
   const draft = readDraft(projectDir);
@@ -251,14 +259,41 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
   // The files it ships that it did not install: refused where they are another component's, or differ.
   checkConflicts(projectDir, project, name, new Map([...files].filter(([target]) => !(target in previous.files))), force);
 
-  const changes: FileChanges = { updated: [], merged: [], conflicted: [], added: [], removed: obsolete, kept, notRestored: [] };
+  const generated = new Set([...(previous.generated ?? []), ...(record.generated ?? [])]);
+  const { writes, changes: shipped, notes } = await mergeShipped(projectDir, files, previous.files, generated, `${name}@${manifest.version}`);
+  const changes: FileChanges = { ...shipped, removed: obsolete, kept };
+
+  // The manifest's changes, on the draft.
+  if (JSON.stringify(previous.environment) !== JSON.stringify(record.environment)) {
+    draft.example.after = replaceExampleBlock(draft.example.after, name, exampleBlock(name, record.environment));
+  }
+  if (draft.config !== undefined && hasWorkerApp(project.targets) && JSON.stringify(previous.apps) !== JSON.stringify(record.apps)) {
+    draft.config.after = setWorkerWiring(draft.config.after, name, workerWiring(name, manifest, project.targets));
+  }
+  project.components[name] = record;
+  return { name, registry, registryName, manifest, files, writes, obsolete, previous, dropped, changes, notes };
+}
+
+/**
+ * What upgrading the shipped `files` (target → new source) does to each, against what was installed
+ * (`previous`, by target) and the project's copy: replaced, merged, conflicted, added or not restored
+ * (the rules at the top of this file). `label` names the new version in conflict markers. Nothing is
+ * written: the writes are returned.
+ */
+export async function mergeShipped(
+  projectDir: string,
+  files: ReadonlyMap<string, string>,
+  previous: Readonly<Record<string, { hash: string }>>,
+  generated: ReadonlySet<string>,
+  label: string,
+): Promise<{ writes: Plan["writes"]; changes: Omit<FileChanges, "removed" | "kept">; notes: string[] }> {
+  const changes: Omit<FileChanges, "removed" | "kept"> = { updated: [], merged: [], conflicted: [], added: [], notRestored: [] };
   const writes: Plan["writes"] = new Map();
   const notes: string[] = [];
-  const generated = new Set([...(previous.generated ?? []), ...(record.generated ?? [])]);
   for (const [target, source] of files) {
     const path = confinedPath(projectDir, target);
     const theirs = hashFile(source);
-    const installed = previous.files[target]?.hash;
+    const installed = previous[target]?.hash;
     if (installed === undefined) {
       if (!existsSync(path) || hashFile(path) !== theirs) writes.set(target, { source });
       changes.added.push(target);
@@ -272,10 +307,10 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
       } else if (ours !== theirs) {
         const base = confinedPath(projectDir, basePath(installed));
         if (hasConflictMarkers(path)) notes.push(`${target} still has the conflict markers of an earlier upgrade: they are merged as your lines`);
-        const merged = await mergeFile(path, existsSync(base) ? base : undefined, source, `${name}@${manifest.version}`);
+        const merged = await mergeFile(path, existsSync(base) ? base : undefined, source, label);
         if ("error" in merged) {
           changes.conflicted.push(target);
-          notes.push(`${target}: ${merged.error}. Yours is kept as it is; ${name} ${manifest.version}'s is ${basePath(theirs)}`);
+          notes.push(`${target}: ${merged.error}. Yours is kept as it is; ${label}'s is ${basePath(theirs)}`);
         } else {
           writes.set(target, { content: merged.content });
           (merged.conflicts > 0 ? changes.conflicted : changes.merged).push(target);
@@ -284,16 +319,7 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
       }
     }
   }
-
-  // The manifest's changes, on the draft.
-  if (JSON.stringify(previous.environment) !== JSON.stringify(record.environment)) {
-    draft.example.after = replaceExampleBlock(draft.example.after, name, exampleBlock(name, record.environment));
-  }
-  if (draft.config !== undefined && hasWorkerApp(project.targets) && JSON.stringify(previous.apps) !== JSON.stringify(record.apps)) {
-    draft.config.after = setWorkerWiring(draft.config.after, name, workerWiring(name, manifest, project.targets));
-  }
-  project.components[name] = record;
-  return { name, registry, registryName, manifest, files, writes, obsolete, previous, dropped, changes, notes };
+  return { writes, changes, notes };
 }
 
 /** What is installed is what the registry has: the version, each file's hash, and what the manifest declares. */

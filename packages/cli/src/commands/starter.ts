@@ -28,6 +28,7 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PIKIT_ROOT } from "../paths.ts";
+import { DASHBOARD_DIR } from "../project/dashboard.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
 import { starterModel } from "../project/starter-model.ts";
 
@@ -90,12 +91,13 @@ export const PROJECT_REGISTRY = "registry";
 /** The kit's compiler options (the same `lib` the components are checked with). */
 export function tsconfig(): string {
   const base = JSON.parse(readFileSync(join(PIKIT_ROOT, "tsconfig.base.json"), "utf8")) as { compilerOptions: unknown };
-  return `${JSON.stringify({ compilerOptions: base.compilerOptions, exclude: ["node_modules", "vendor", ".pikit", PROJECT_REGISTRY] }, null, 2)}\n`;
+  return `${JSON.stringify({ compilerOptions: base.compilerOptions, exclude: ["node_modules", "vendor", ".pikit", PROJECT_REGISTRY, DASHBOARD_DIR] }, null, 2)}\n`;
 }
 
 export const BUNFIG = `[test]
 # ${PROJECT_REGISTRY}/ holds the source of your own components; their installed copies in src/pikit/ are the ones tested.
-pathIgnorePatterns = ["${PROJECT_REGISTRY}/**"]
+# ${DASHBOARD_DIR}/, when the project has a UI, is a project of its own, with its own toolchain.
+pathIgnorePatterns = ["${PROJECT_REGISTRY}/**", "${DASHBOARD_DIR}/**"]
 `;
 
 export const GITIGNORE = `node_modules/
@@ -255,7 +257,7 @@ export default defineComponent({
 });
 `;
 
-export function readme(name: string, components: string[], target = "server"): string {
+export function readme(name: string, components: string[], target = "server", ui = false): string {
   const run =
     target === "durable"
       ? `pikit configure   # the variables in .env.example (they go up as the Worker's secrets), and a model API key
@@ -281,7 +283,7 @@ read, edit and remove.
 | \`src/agents/\` | your agents (\`assistant\`) |
 | \`src/extensions/\` | your own components (\`agents.ts\`) |
 | \`src/pikit/<component>/\` | installed components, each with its README and its tests |
-| \`registry/\` | if you make one: your own components, to \`pikit add <name> --registry registry\` (\`tsc\` and \`bun test\` skip it and check the installed copy) |
+| \`registry/\` | if you make one: your own components, to \`pikit add <name> --registry registry\` (\`tsc\` and \`bun test\` skip it and check the installed copy) |${ui ? "\n| \`src/dashboard/\` | the dashboard: a shadcn/ui project of its own (its README says how to run it and add a view), served at \`/admin/\` by \`admin-api\` |" : ""}
 | \`pikit.json\` | what \`pikit add\` installed: registry, version, commit, and each file's hash |
 | \`.agents/skills/\` | skills for your AI agent: how to write a component (\`pikit-component\`) and an agent extension (\`pikit-extension\`) for this project |
 | \`vendor/\` | \`@pikit/core\`, \`@pikit/contracts\` and \`@pikit/pi-adapter\`, until they are on npm |
