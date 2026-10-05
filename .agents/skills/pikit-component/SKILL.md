@@ -49,6 +49,7 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | Run later, at least once | `wakeups` (`handle(name, handler)` in `start`, `at(name, time)`) |
 | Deliver to a platform, retried | `outbound.queue` (through `startAnswerDelivery` for a channel) |
 | Talk to a busy conversation | `agent.runtime`'s `dispatch` with `whenBusy: "steer"` (into the run's current round) |
+| Models from another provider | `model.provider` under the provider's id (below: "A model provider") |
 
 Pi's own shapes are in `@pikit/pi-adapter`: `execution`, `workspace`, `model.provider`,
 `model.credentials`, `agent.extension`.
@@ -89,12 +90,38 @@ between two components: what one needs from another is a capability.
 | Store | `storage-sqlite`, `storage-kv-sql`, `conversations-kv` | providing a storage contract; state in `storage.kv` with `setIfAbsent` |
 | Actor messages and calls | `mailbox-local` (what `send` / `call` promise) | `actor.inbox`'s `handle` and `answer` in `start` |
 | Admin route / auth | `admin-auth-token` | `admin.auth`, a secret read at start, constant-time compare |
-| Model provider | `provider-openrouter`, `provider-faux` | a pi-ai provider as `model.provider`, `modelProviders` |
+| Model provider | `provider-openrouter`, `provider-openai-compatible`, `provider-faux` | a pi-ai provider as `model.provider` by its id, `modelProviders`, the key's variable first in `environment` |
 | Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2) |
 | A feature of your own kind | `{{PIKIT_ROOT}}/features/memory.md` | `declares`, a contract file, an actor per owner with `call` |
 
 Installed ones are in `src/pikit/`, each with its README; the rest are in the registry the CLI uses
 (`pikit add <name> --yes` to read one in place, `pikit remove <name>` after).
+
+**A model provider** is about ten lines. Every provider pi-ai ships is a subpath of the adapter,
+`@pikit/pi-adapter/providers/<id>` (`groq`, `mistral`, `google`, `openai`, `xai`, `deepseek`…; one
+per id, no barrel, so the app carries only yours):
+
+```ts
+import { defineComponent } from "@pikit/core";
+import { groqProvider } from "@pikit/pi-adapter/providers/groq";
+
+export default defineComponent({
+  name: "provider-groq",
+  setup(pikit) {
+    const provider = groqProvider();
+    pikit.provideKeyed("model.provider", provider.id, provider); // agents name groq/<model>
+  },
+});
+```
+
+Its `component.json` declares the key's variable first in `environment` (`{ "name": "GROQ_API_KEY",
+"secret": true, "required": false }`: `pikit configure` offers to set that one; pi-ai's README lists
+each provider's), and `targets` `["server", "durable"]` unless the subpath is in the CLI's
+`SERVER_ONLY_EXPORTS` (Bedrock, Vertex: `registry validate` refuses `durable` then). runtime-pi reads
+the variable through `secrets` first, then the environment. An endpoint pi-ai does not know is
+`createProvider` with `envApiKeyAuth` (`@pikit/pi-adapter/provider`) and an API from
+`@pikit/pi-adapter/api/<name>` (`openAICompletionsApi` from `api/openai-completions`): copy
+`provider-openai-compatible`, or install it and configure it. Never `@earendil-works/*` directly.
 
 A component is a folder:
 

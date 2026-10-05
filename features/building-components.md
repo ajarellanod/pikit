@@ -31,7 +31,10 @@ be shared, without learning pikit's internals first.
    `channel-telegram` (a channel), `storage-sqlite` (a `storage.sql` provider), `tool-fetch` (a tool),
    `deployment-docker` (a deployment), `extension-house-rules` (agent behaviour: a section and a
    `beforeTool` hook, provided as `agent.extension`; runtime-pi's `extensions.test.ts` adds a
-   document and a tool). A component is a folder in a registry:
+   document and a tool), `provider-openrouter` (a model provider: about ten lines, since every
+   pi-ai provider is a subpath of the adapter, `@pikit/pi-adapter/providers/<id>`, and an unknown
+   endpoint is `createProvider` from `@pikit/pi-adapter/provider` with an API from
+   `@pikit/pi-adapter/api/<name>`, as `provider-openai-compatible` does). A component is a folder in a registry:
    `component.json` (name, description, targets, requires, provides, dependencies, files) and
    `files/src/pikit/<name>/index.ts` exporting `defineComponent({ name, config, setup })`.
 3. **Durability comes with the contracts.** Keep state in `storage.sql` / `storage.kv` or a
@@ -114,8 +117,8 @@ MANIFESTO principle 13 promises a conformance suite for every contract. These do
   runtime-pi, the one real provider, records from pi-durable's own commits instead. runtime-pi runs
   the feed suite on its `answers` (`packages/pi-adapter/src/answers.test.ts`) and proves the rest with
   its own tests (`recovery.test.ts`, `submissions.test.ts`).
-- **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openrouter and
-  provider-faux each test their own.
+- **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openrouter,
+  provider-openai-compatible and provider-faux each test their own.
 - **`agent.conversations`.** Only exercised through the `agent.runtime` and `conversations.registry`
   suites (a fixture creates conversations with it), never on its own.
 - **`route.resolve` as a router's stage.** The channel suite checks that a channel honours a stage's
