@@ -114,8 +114,10 @@ there.
   `registry validate | generate | capabilities`. A registry's components may declare their own
   kinds and capabilities (`declares` in `component.json`); the kit's catalogue is the default.
   `validate` holds imports per file kind: what shipped files import is a `dependency` (with a
-  `requires` range for a kit package), what only tests import a `devDependency`. Outside the kit
-  repository its messages say `pikit registry generate <dir>`.
+  `requires` range for a kit package), what only tests import a `devDependency`. It refuses a
+  component other than `admin-*` whose shipped files name `APP_DESCRIPTION` (K13), and `setup` that
+  declares differently on two of its targets (K1). Outside the kit repository its messages say
+  `pikit registry generate <dir>`.
 - `pikit.json` records what each install wrote (files and hashes, npm packages, hooks, offers);
   every change rolls back on failure and leaves a marker when interrupted. Offers install the one
   provider a component needs (`outbound.queue`, `storage.kv`, `wakeups`); it goes with that component
@@ -126,7 +128,8 @@ there.
   code (`src/pikit/<name>/README.md`).
 - `configure` and `up` check credentials only for the model providers the agents name, and reach
   the deployment (Docker) only when one is missing here; `dev` checks this machine's.
-- `pikit new` copies the skills for AI agents (`.agents/skills/`) into every project, and leaves a
+- `pikit new` copies the skills for AI agents (`.agents/skills/`) into every project, with where the
+  kit is written in (this machine's checkout, and GitHub at the project's kit commit), and leaves a
   registry of the project's own (`registry/`) and the dashboard (`src/dashboard/`) out of `tsc` and
   `bun test` (`bunfig.toml`); `lib` is ES2023.
 - `pikit new --ui` (and the guided path's question) and `pikit ui on | off`: the dashboard and what it
