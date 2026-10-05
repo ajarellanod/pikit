@@ -21,12 +21,12 @@
  * prints a value, and never reads or writes Pi's own `~/.pi/agent/auth.json`.
  */
 
-import type { EnvironmentVariable } from "../registry/manifest.ts";
 import { type ComponentConfigureResult, componentsWithSteps } from "../project/component-configure.ts";
+import { declaredVariables, planModels, planVariables } from "../project/configure-plan.ts";
 import { type AppExec, deploymentExec } from "../project/deployment-module.ts";
 import { ENV_FILE, readEnv, writeEnv } from "../project/env-file.ts";
 import type { CredentialsResult } from "../project/credentials.ts";
-import { apiKeyHint, apiKeyVariable, type CheckedCredentials, checkModelCredentials, providersInUse } from "../project/model-credentials.ts";
+import { apiKeyHint, canLogIn, type CheckedCredentials, checkModelCredentials, providersInUse } from "../project/model-credentials.ts";
 import { readProjectManifest } from "../project/pikit-json.ts";
 import { runScript, runScriptInApp } from "../project/run.ts";
 import { ask, askSecret, beginGuided, Cancelled, CliError, choose, isInteractive, log } from "../ui.ts";
@@ -62,23 +62,35 @@ const PI_LOGIN_METHOD: Record<LoginMethod, string> = { browser: "browser", code:
 export async function configure(projectDir: string, options: ConfigureOptions = {}): Promise<void> {
   const interactive = options.yes !== true && isInteractive();
   if (interactive) beginGuided();
-  const variables = declaredVariables(projectDir);
   const stepMissing = await componentSteps(projectDir, interactive);
+  const { components } = readProjectManifest(projectDir);
   // A component with a step of its own owns its variables: they are not asked for again here.
-  const owned = new Set(componentsWithSteps(projectDir).flatMap((name) => readProjectManifest(projectDir).components[name]?.environment.map((v) => v.name) ?? []));
-  const current = readEnv(projectDir);
+  const owned = new Set(componentsWithSteps(projectDir).flatMap((name) => components[name]?.environment.map((v) => v.name) ?? []));
+  const steps = planVariables(declaredVariables(components), {
+    owned,
+    current: readEnv(projectDir),
+    environment: process.env,
+    generate: options.generate ?? [],
+    interactive,
+  });
   const updates = new Map<string, string>();
   const missing: string[] = [];
 
-  for (const v of variables) {
-    if (owned.has(v.name)) continue;
-    if ((current.get(v.name) ?? "") !== "") {
-      log.info(`  ${v.name}: already set`);
-      continue;
-    }
-    const value = await valueFor(v, options, interactive);
-    if (value !== undefined && value !== "") updates.set(v.name, value);
-    else if (v.required) missing.push(v.name);
+  for (const step of steps) {
+    const { name, description, secret } = step.variable;
+    let value: string | undefined;
+    if (step.action === "set") log.info(`  ${name}: already set`);
+    else if (step.action === "generate") value = randomToken();
+    else if (step.action === "environment") {
+      log.info(`  ${name}: taken from the environment`);
+      value = step.value;
+    } else if (step.action === "ask") {
+      const question = `${name}${description ? ` — ${description}` : ""}${step.generable ? " (Enter generates one)" : ""}`;
+      const answer = secret ? await askSecret(question) : await ask(question);
+      value = answer === "" && step.generable ? randomToken() : answer;
+      if (value === "") missing.push(name);
+    } else if (step.action === "missing") missing.push(name);
+    if (value !== undefined && value !== "") updates.set(name, value);
   }
   if (updates.size > 0) {
     writeEnv(projectDir, updates);
@@ -91,7 +103,7 @@ export async function configure(projectDir: string, options: ConfigureOptions = 
     ...stepMissing,
     ...missing.map((name) => `${name} is required and not set: export it, pass --generate ${name}, or run \`pikit configure\` in a terminal`),
     ...models.left.map((id) => {
-      const login = models.checked.oauth.includes(id) ? `run \`pikit configure --login ${id}\` in a terminal, or ` : "";
+      const login = canLogIn(models.checked, id) ? `run \`pikit configure --login ${id}\` in a terminal, or ` : "";
       return `the model provider "${id}" has no credentials: ${login}${apiKeyHint(projectDir, models.checked, id)}`;
     }),
   ];
@@ -109,33 +121,6 @@ async function componentSteps(projectDir: string, interactive: boolean): Promise
   return result.missing;
 }
 
-/** Every installed component's variables, once each; required when any component requires it. */
-function declaredVariables(projectDir: string): EnvironmentVariable[] {
-  const byName = new Map<string, EnvironmentVariable>();
-  for (const component of Object.values(readProjectManifest(projectDir).components)) {
-    for (const v of component.environment) {
-      const seen = byName.get(v.name);
-      byName.set(v.name, seen === undefined ? v : { ...seen, required: seen.required || v.required, secret: seen.secret || v.secret });
-    }
-  }
-  return [...byName.values()];
-}
-
-async function valueFor(v: EnvironmentVariable, options: ConfigureOptions, interactive: boolean): Promise<string | undefined> {
-  if (options.generate?.includes(v.name)) return randomToken();
-  const exported = process.env[v.name];
-  if (exported !== undefined && exported !== "") {
-    log.info(`  ${v.name}: taken from the environment`);
-    return exported;
-  }
-  // Optional variables (a provider's API key) are asked for in the model step, not one by one.
-  if (!interactive || !v.required) return undefined;
-  const generable = v.secret && /_TOKEN$/.test(v.name);
-  const question = `${v.name}${v.description ? ` — ${v.description}` : ""}${generable ? " (Enter generates one)" : ""}`;
-  const answer = v.secret ? await askSecret(question) : await ask(question);
-  return answer === "" && generable ? randomToken() : answer;
-}
-
 /** Returns the providers still without credentials, and what was checked on this machine. */
 async function configureModels(projectDir: string, options: ConfigureOptions, interactive: boolean): Promise<{ left: string[]; checked: CheckedCredentials }> {
   const used = await providersInUse(projectDir);
@@ -147,6 +132,7 @@ async function configureModels(projectDir: string, options: ConfigureOptions, in
   if (options.login !== undefined) {
     if (!ids.includes(options.login) && !here.unused.includes(options.login)) throw new CliError(`no installed component provides the model provider "${options.login}"`);
     if (!here.oauth.includes(options.login)) throw new CliError(`the model provider "${options.login}" has no login: it takes an API key (${apiKeyHint(projectDir, here, options.login)})`);
+    if (!canLogIn(here, options.login)) throw new CliError(`the model provider "${options.login}" has no model.credentials component to store a login: ${apiKeyHint(projectDir, here, options.login)}`);
     await login(projectDir, options.login, here.store, exec, options.loginMethod);
     return { left: ids.filter((id) => here.providers[id] !== true && id !== options.login), checked: here };
   }
@@ -164,35 +150,21 @@ async function configureModels(projectDir: string, options: ConfigureOptions, in
       log.warn(`the deployment could not run a command where the app runs (${why}): a login now is for \`pikit dev\` only; run \`pikit configure\` again once it can`);
     }
   }
-  for (const id of ids) {
-    if (here.providers[id] === true) log.info(`  model provider ${id}: has credentials`);
-    else if (there?.[id] === true) log.info(`  model provider ${id}: has credentials for \`pikit up\` (for \`pikit dev\` too: \`pikit configure --login ${id} --local\`)`);
+  const plan = planModels({ checked: here, there, components: readProjectManifest(projectDir).components, exec: exec !== undefined });
+  for (const { id, has } of plan) {
+    if (has === "here") log.info(`  model provider ${id}: has credentials`);
+    else if (has === "there") log.info(`  model provider ${id}: has credentials for \`pikit up\` (for \`pikit dev\` too: \`pikit configure --login ${id} --local\`)`);
   }
-  const unconfigured = lacking.filter((id) => there?.[id] !== true);
-  if (!interactive) return { left: unconfigured, checked: here };
+  const unconfigured = plan.filter((step) => step.has === "none");
+  if (!interactive) return { left: unconfigured.map((step) => step.id), checked: here };
 
   const left: string[] = [];
-  for (const id of unconfigured) {
-    // A login is stored by `model.credentials`: without one (a Cloudflare project) it has nowhere to
-    // go. And only a provider with an OAuth login has one (pi-ai's `provider.auth.oauth`).
-    const canLogIn = here.store !== undefined && here.oauth.includes(id);
-    const keyName = apiKeyVariable(projectDir, here, id);
-    const hasKeyVariable = keyName !== undefined;
-    const inApp = there !== undefined;
-    if (!canLogIn && !hasKeyVariable) {
+  for (const { id, choices, keyName } of unconfigured) {
+    if (choices.length === 0) {
       left.push(id);
       continue;
     }
-    const choice = await choose<"up" | "key" | "dev" | "skip">(`The model provider "${id}" has no credentials. How should your agent reach it?`, [
-      ...(!canLogIn
-        ? []
-        : inApp
-          ? [{ value: "up" as const, label: "Log in with your subscription, for `pikit up`", hint: "OAuth, code login: open a URL, sign in, paste the code the page shows back here" }]
-          : [{ value: "dev" as const, label: `Log in with your subscription${exec === undefined ? "" : ", for `pikit dev` only"}`, hint: LOGIN_HERE }]),
-      ...(hasKeyVariable ? [{ value: "key" as const, label: "Paste an API key", hint: `stored in ${ENV_FILE} as ${keyName}; \`pikit up\` and \`pikit dev\` both read it` }] : []),
-      ...(canLogIn && inApp ? [{ value: "dev" as const, label: "Log in with your subscription, for `pikit dev` only", hint: `on this machine; ${LOGIN_HERE}` }] : []),
-      { value: "skip", label: "Skip for now" },
-    ]);
+    const choice = await choose(`The model provider "${id}" has no credentials. How should your agent reach it?`, choices);
     if (choice === "up") await login(projectDir, id, here.store, exec);
     else if (choice === "dev") await login(projectDir, id, here.store, undefined);
     else if (choice === "key" && keyName !== undefined) {
@@ -206,8 +178,6 @@ async function configureModels(projectDir: string, options: ConfigureOptions, in
   }
   return { left, checked: here };
 }
-
-const LOGIN_HERE = "OAuth: browser login (it comes back by itself) or code login (paste the code the page shows)";
 
 /**
  * Where the app runs, a choice of login method (Anthropic's: browser or code) is answered with
