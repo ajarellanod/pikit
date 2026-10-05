@@ -12,8 +12,12 @@ A Discord bot that answers in direct messages and, when mentioned, in server cha
 ## How it fits pikit
 - `channel-discord`: authenticates, builds the key (`discord:<channel>[:<thread>]`), calls
   `admitInbound`, answers every outcome, passes `createChannelConformance`
-  (`@pikit/contracts/testing`), and attaches its `ChannelTransport` to `outbound.queue`. Several
-  bots are instances (`discord:<account>`).
+  (`@pikit/contracts/testing`). Several bots are instances (`discord:<account>`).
+- Answers: it calls `startAnswerDelivery` in its `start` (`packages/contracts/src/delivery.ts`,
+  [answer delivery](completed/outbound-delivery.md)) and gives only what is its platform's: its
+  `ChannelTransport` (split, send one piece with its key, classify a failure), `route`, `text` and
+  `policy`. So it requires `agent.submissions` and `storage.kv` (and `wakeups` on `durable`), and the
+  engine enqueues to `outbound.queue` when one is installed.
 - Receiving messages needs the Gateway (a long-lived WebSocket with the message content intent):
   server first. The Interactions endpoint (signed webhooks) carries only slash commands and buttons.
 - Sends: REST message create; `rate_limited` from Discord's `retry_after`. Whether a create with a

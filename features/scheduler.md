@@ -23,8 +23,9 @@ are scheduled prompts defined as files next to the agent, reviewed and versioned
 - A job reaches an agent through `admitInbound`, which `packages/contracts/src/inbound.ts` already
   names for "every producer of messages (a channel, a scheduler)". Its request id is derived from
   the job and its tick, so a tick fired twice is one message (logical deduplication is Pi's).
-- The answer travels as any answer does: `agent.submissions`'s `answers` and a channel with
-  `outbound.queue`. A channel that cannot push (HTTP) cannot receive a routine's answer.
+- The answer travels as any answer does: `agent.submissions`'s `answers`, delivered by the
+  conversation's channel through `startAnswerDelivery` (`packages/contracts/src/delivery.ts`). A
+  channel that cannot push (HTTP) cannot receive a routine's answer.
 - What a missed tick does after downtime is the component's policy, declared to its suite.
 - Absent: no timer, no table, no config key.
 
