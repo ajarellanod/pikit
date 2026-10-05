@@ -24,8 +24,12 @@ services:
     # before Docker sends SIGKILL.
     stop_grace_period: 20s
     healthcheck:
-      # `/health` answers 200 while the process can answer. The slim image has no curl; Bun fetches.
-      test: ["CMD", "bun", "--eval", "fetch('http://127.0.0.1:3000/health').then((r) => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      # `/health` answers 200 while the app is up or degraded, and 503 once `health` says it is down (an
+      # essential component down past its grace: health-registry). Docker only marks a container
+      # unhealthy, it restarts nothing: on a 503 the check itself sends SIGTERM to PID 1 (the init), the
+      # app stops cleanly, and `restart: unless-stopped` starts it again. A refused connection or a
+      # timeout (still starting, or stuck) only counts as unhealthy. The slim image has no curl; Bun fetches.
+      test: ["CMD", "bun", "--eval", "fetch('http://127.0.0.1:3000/health').then((r) => { if (r.status === 503) process.kill(1, 'SIGTERM'); process.exit(r.ok ? 0 : 1); }, () => process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 3

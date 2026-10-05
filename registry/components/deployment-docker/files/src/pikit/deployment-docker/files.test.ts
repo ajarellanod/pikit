@@ -94,6 +94,12 @@ test("Dockerfile: the dashboard, when the project has one, is built in its own s
   expect(dockerfile.slice(app)).toContain("COPY --from=dashboard /build/src/dashboard/dist ./src/dashboard/dist");
 });
 
+test("compose.yaml: a 503 from /health (the app is down) stops PID 1, so Docker restarts the process; nothing else does", () => {
+  const check = lines("compose.yaml").find((line) => line.trimStart().startsWith("test:")) ?? "";
+  expect(check).toContain("r.status === 503) process.kill(1, 'SIGTERM')");
+  expect(lines("compose.yaml").join("\n")).toMatch(/restart: unless-stopped/);
+});
+
 test("compose.yaml: a stop grace period longer than the entrypoint's stop deadline", () => {
   const grace = duration(composeValue("stop_grace_period"));
   expect(grace).toBeGreaterThan(STOP_DEADLINE_MS);

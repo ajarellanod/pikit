@@ -73,7 +73,9 @@ Docker rotates the log files (5 × 10 MB). Read them with `pikit logs`, or
 - Secrets are never in the image. `.dockerignore` keeps `.env` out of the build, and compose passes
   `.env` to the container when it starts.
 - `restart: unless-stopped`, a healthcheck on `GET /health`, and `init: true` (a small PID 1 that
-  forwards signals and reaps the commands the agent's tools run).
+  forwards signals and reaps the commands the agent's tools run). Docker restarts nothing for an
+  unhealthy container, so when `/health` answers 503 (`health` says the app is down: health-registry)
+  the check sends SIGTERM to PID 1: the app stops cleanly and the restart policy starts it again.
 - The port is published on `127.0.0.1:3000` only. To serve other machines, put a TLS proxy in front,
   or publish `"3000:3000"`, knowing that the bearer token is then the only lock.
 

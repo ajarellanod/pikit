@@ -60,10 +60,10 @@ outage is not a component failure: Pi retries model calls itself (`RetryPolicy`)
 
 ## Open questions
 - **What "the supervisor restarts" means per deployment.** systemd and Kubernetes restart on a
-  failed probe when told to; Docker Compose only marks the container `unhealthy`
-  (deployment-docker's healthcheck), and restarts nothing without an autoheal companion or a
-  restart from `pikit status`. Cloudflare has no process to restart: each object's App has its own
-  health-registry, and nothing reads it yet.
+  failed probe when told to. Docker Compose only marks a container `unhealthy`, so
+  deployment-docker's healthcheck sends SIGTERM to PID 1 when `/health` answers 503, and the restart
+  policy starts the app again (a refused connection or a timeout never does). Cloudflare has no
+  process to restart: each object's App has its own health-registry, and nothing reads it yet.
 - **More reporters.** Only channel-telegram reports. Candidates: outbound-durable (deliveries
   failing), a webhook channel's last set, tool-mcp's connections, runtime-pi's storage.
 - **A `health.changed` event**, if the dashboard's live view needs one (a notice, never the truth).
