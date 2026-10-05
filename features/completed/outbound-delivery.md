@@ -7,9 +7,9 @@ suite's durability cases, `packages/contracts/src/testing/channel.ts`). Origin: 
 audit's finding 7, and the audit of "durability for free" (MANIFESTO principle 13): every channel
 rewrote the same delivery engine, the channel suite tested none of it.
 
-**Needed by:** every chat channel ([Slack](channel-slack.md), [Discord](channel-discord.md),
-[WhatsApp](channel-whatsapp.md), [email](channel-email.md), [Google Chat](channel-google-chat.md)),
-and the first `outbound.prepare` stage ([pipeline anchors](pipeline-anchors.md)), which now has one
+**Needed by:** every chat channel ([Slack](../channel-slack.md), [Discord](../channel-discord.md),
+[WhatsApp](../channel-whatsapp.md), [email](../channel-email.md), [Google Chat](../channel-google-chat.md)),
+and the first `outbound.prepare` stage ([pipeline anchors](../pipeline-anchors.md)), which now has one
 place to run.
 
 ## What it gives
@@ -115,7 +115,7 @@ failures, and runs as wakeups cut by budget and by the slice's deadline.
 - **`outbound.prepare`** (redaction, policy, formatting): it belongs in `startAnswerDelivery`, after
   `text` and before the fork, where every pushed answer passes; `channel-http` would call the same
   stage on its response. Its value type is decided with its first real stage
-  ([pipeline anchors](pipeline-anchors.md)). A stage must answer the same for the same input: a piece
+  ([pipeline anchors](../pipeline-anchors.md)). A stage must answer the same for the same input: a piece
   marked `sent` must stand for the text a retry would send.
 - **Answers and the channel's own replies share no line.** A command's reply can go out between two
   pieces of an answer (rare: a run takes longer than a command). A channel that needs them ordered
@@ -128,6 +128,9 @@ Nothing in Pi: channels and delivery are pikit's (SPEC P1). It reads only `agent
 ## Open questions
 - **Rich content with the queue:** the queue stores text split by the transport; once `parts` exist,
   the fold happens before `enqueue` or the queue stores parts too. Decided with
-  [rich content](rich-content.md).
-- **A stuck answer forever.** A transient failure is retried every minute with no end (the queue gives
-  up after 24 hours); whether the direct path gives up too, and how it tells the user, is open.
+  [rich content](../rich-content.md).
+- **A stuck answer forever.** On the direct path a transient failure is retried every minute with no
+  end, logged as an error from `blockedAfter` on; the queue gives a piece up only once it is older
+  than its maximum age (24 hours for `outbound-durable`), with `outbound.abandoned` and a receipt
+  (`delivery.ts`, "Direct or queued"). Whether the direct path gives up too, and how either tells the
+  user, is open.

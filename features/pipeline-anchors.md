@@ -15,7 +15,7 @@ what an answer looks like as it leaves, and an agent's state read or changed fro
 
 ## How it fits pikit
 - `outbound.prepare` transforms an `OutboundMessage` as it leaves its channel: enqueued, sent
-  directly, or returned in an HTTP response. Where it runs: [answer delivery](outbound-delivery.md).
+  directly, or returned in an HTTP response. Where it runs: [answer delivery](completed/outbound-delivery.md).
 - `agent.state` for components outside a run (an admin route, a scheduler): a capability, added with
   the first one that needs it.
 - Each is a contract in `@pikit/contracts` (SPEC §3): its value type is decided with two real

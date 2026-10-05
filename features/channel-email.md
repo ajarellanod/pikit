@@ -16,6 +16,11 @@ the same thread.
   (on Cloudflare, Email Routing hands a message to a Worker). It builds the key from the thread
   (`Message-ID`, `In-Reply-To`, `References`), calls `admitInbound`, and passes
   `createChannelConformance` (`@pikit/contracts/testing`).
+- Answers: it calls `startAnswerDelivery` in its `start` (`packages/contracts/src/delivery.ts`,
+  [answer delivery](completed/outbound-delivery.md)) and gives only what is its platform's: its
+  `ChannelTransport` (split, send one piece with its key, classify a failure), `route`, `text` and
+  `policy`. So it requires `agent.submissions` and `storage.kv` (and `wakeups` on `durable`), and the
+  engine enqueues to `outbound.queue` when one is installed.
 - `Message-ID` is the delivery id; a redelivered message is a duplicate by request id.
 - `From` can be forged: senders are authorized by an allowlist plus the receiving server's SPF,
   DKIM and DMARC results, never by `From` alone.

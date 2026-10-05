@@ -50,14 +50,14 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   conversation (`inbound.ts:36-37`, `channel-telegram/inbound.ts:89`). `admitInbound` already forbids
   a stage to change them (`inbound.ts:104-109`).
 - **Where Telegram parses a key** (`chatIn`, `channel-telegram/account.ts:45-50`):
-  - answers: `ours` and `find` (`channel-telegram/index.ts:87-96`), `deliver` skips a key it cannot
-    parse (`index.ts:104-105`), typing (`index.ts:123-125`); the webhook's object half does the same
-    through `findBot` (`channel-telegram-webhook/bot.ts:39-41`; `delivery.ts:153,199,251`,
-    `index.ts:118`);
+  - answers: `find` (`channel-telegram/index.ts:91-98`) is the `route` it gives
+    `startAnswerDelivery` (`index.ts:128`), which passes over a key `route` does not claim
+    (`packages/contracts/src/delivery.ts:243-249`), and typing (`index.ts:100-111`); the webhook's
+    object half does the same through `findBot` (`channel-telegram-webhook/bot.ts:39-41`;
+    `index.ts:102,132,160`);
   - outbound: both transports parse `OutboundPiece.conversationKey`
-    (`channel-telegram/transport.ts:32`, `channel-telegram-webhook/transport.ts:33`), which the
-    channel fills with `answer.conversation.key` (`channel-telegram/index.ts:118`,
-    `channel-telegram-webhook/delivery.ts:160,176`);
+    (`channel-telegram/transport.ts:35`, `channel-telegram-webhook/transport.ts:35`), which
+    `startAnswerDelivery` fills with the answer's `conversation.key` (`delivery.ts:166,187`);
   - the actor: the Worker half sends each update to `conversationKeyOf(instance, chat)`
     (`channel-telegram-webhook/worker.ts:156`), and the object half refuses a key that is not one of
     its chats (`channel-telegram-webhook/index.ts:88-97`).
@@ -66,14 +66,14 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
   channel-http's `GET` and `reset` routes rebuild `conversationKey(id)` (`channel-http/index.ts:206,218`).
 - **Where the key is used opaquely** (no change needed): the registries' maps
   (`conversations-kv/index.ts:63`, `conversations-file/index.ts:57`), the answer lanes
-  (`channel-telegram/answers.ts:178`), the outbox's per-conversation order
+  (`packages/contracts/src/delivery.ts:149,261`), the outbox's per-conversation order
   (`outbound-durable/queue.ts:164`), log fields (`log-events/fields.ts:15-16`), the answers log's rows
   (`packages/pi-adapter/src/answers.ts`). channel-http matches its answers by session and request, not by
   key (`channel-http/index.ts:164`).
 - **What goes wrong if a key is rewritten.** Every channel passes over settlements that are not its
-  own, as it must, because the `answers` feed is shared (`channel-telegram/index.ts:104-105`,
-  `channel-telegram-webhook/delivery.ts:155`); a skipped settlement counts as handled and the cursor
-  moves past it (`channel-telegram/answers.ts:182`, `channel-telegram-webhook/delivery.ts:230`). A
+  own, as it must, because the `answers` feed is shared (`packages/contracts/src/delivery.ts:243-249`, through each
+  channel's `route`); a skipped settlement counts as handled and the cursor moves past it
+  (`delivery.ts:248,288-291`). A
   rewritten key that its channel cannot parse is therefore skipped by every channel, with no error: the
   message is never answered and nothing says so, against P5 (`SPEC.md:34`). `/new` would reset a key
   that has no conversation (`channel-telegram/inbound.ts:81-82` answers "This is already a new
@@ -98,7 +98,7 @@ says it is: an opaque identity (`packages/contracts/src/agent.ts:41-47`).
    ```
 
    (`ConversationRef.conversationId` is the pi-durable conversation, renamed from `sessionId` with
-   the [move to pi-durable](pi-durable-migration.md); the address's `conversationId` is the
+   the [move to pi-durable](completed/pi-durable-migration.md); the address's `conversationId` is the
    platform's, as on `InboundMessage`.)
 
    `RunSettlement`, `SubmissionStatus` and `PendingConversation` carry a `ConversationRef`

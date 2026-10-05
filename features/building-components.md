@@ -36,7 +36,8 @@ be shared, without learning pikit's internals first.
    `files/src/pikit/<name>/index.ts` exporting `defineComponent({ name, config, setup })`.
 3. **Durability comes with the contracts.** Keep state in `storage.sql` / `storage.kv` or a
    pi-durable document, wake with `wakeups`, read what must not be missed from a feed with a cursor
-   (SPEC K3), deliver through `outbound.queue`. A component that does this never has to think about
+   (SPEC K3), deliver a channel's answers through `startAnswerDelivery` (which uses `outbound.queue`
+   when installed). A component that does this never has to think about
    crashes, evictions or deploys. Each kind has its ready-made path:
    - a **channel** calls `admitInbound` for each message and `startAnswerDelivery` in its `start`
      (`@pikit/contracts`): answers from the `answers` feed with a cursor of its own, one lane per
@@ -108,6 +109,11 @@ MANIFESTO principle 13 promises a conformance suite for every contract. These do
   (`createDurableExecutionConformance`, `@pikit/pi-adapter/execution/testing`), since the contract is
   pi-durable's `ExecutionEnv`. Likewise `workspace` (`createWorkspaceConformance`) and
   `model.credentials` (`createCredentialStoreConformance`), in `@pikit/pi-adapter/testing/neutral`.
+- **`agent.submissions`.** Its suite exists (`createSubmissionsConformance`), but runs only on the
+  in-memory double (`createMemorySubmissions`): it writes through `SubmissionsRecorder`, and
+  runtime-pi, the one real provider, records from pi-durable's own commits instead. runtime-pi runs
+  the feed suite on its `answers` (`packages/pi-adapter/src/answers.test.ts`) and proves the rest with
+  its own tests (`recovery.test.ts`, `submissions.test.ts`).
 - **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openrouter and
   provider-faux each test their own.
 - **`agent.conversations`.** Only exercised through the `agent.runtime` and `conversations.registry`

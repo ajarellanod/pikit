@@ -9,7 +9,7 @@ here with the Pi version.
 
 | # | Package | Proposal | Hurts pikit | Priority | Status |
 |---|---|---|---|---|---|
-| 1 | pi-durable | [Next due time of sleeping work](#1-next-due-time-of-sleeping-work) | Durable Objects stall after eviction | **high** | draft ([file](pi-durable-next-wake.md)) |
+| 1 | pi-durable | [Next due time of sleeping work](#1-next-due-time-of-sleeping-work) | Durable Objects stall after eviction | **high** | open upstream as [#10325](https://github.com/earendil-works/pi/issues/10325) (not ours; reopened, assigned); pikit to comment there ([file](pi-durable-next-wake.md)) |
 | 2 | pi-durable | [Queued inputs stuck after a failed run](#2-queued-inputs-stuck-after-a-failed-run) | A message is never answered until the user writes again | **high** | draft ([file](pi-durable-inbox-after-failure.md)) |
 | 3 | pi-durable | [Caller context values reach tools](#3-caller-context-values-reach-tools) | Multi-tenant isolation, tracing | medium (high for multi-tenant) | draft (here) |
 | 4 | pi-durable | [Several writers per storage](#4-several-writers-per-storage) | Replicas, Postgres as a shared store | medium | draft (here) |
@@ -17,11 +17,14 @@ here with the Pi version.
 | 6 | pi-durable | [Provider session id](#6-provider-session-id) | Prompt-cache cost on long chats | medium | **shipped** in pi-durable 1.0.2 ([#10424](https://github.com/earendil-works/pi/issues/10424)) |
 | 7 | pi-durable | [Table prefix for `SqliteStorage`](#7-table-prefix-for-sqlitestorage) | Generic table names in a shared database | low | draft ([file](pi-durable-table-prefix.md)) |
 | 8 | chord | [Foreign parent's `abortSignal`](#8-chord-foreign-parents-abortsignal) | A bridge (`toChord`) in the adapter | low | **declined** ([#10189](https://github.com/earendil-works/pi/issues/10189), `no-action`) |
-| 9 | chord | [`esbuild` only for the bundler](#9-chord-esbuild-only-for-the-bundler) | An unused dependency installed everywhere | low | draft (here) |
+| 9 | chord | [`esbuild` only for the bundler](#9-chord-esbuild-only-for-the-bundler) | An unused dependency installed everywhere | low | **declined** ([#9225](https://github.com/earendil-works/pi/issues/9225), not ours, `no-action`): not to send |
 | 10 | chord | [A stability statement](#10-chord-a-stability-statement) | Why Chord stays out of `@pikit/core` | low | draft (here) |
 | 11 | pi-mcp | [`StreamableHttpTransport` on Workers](#11-pi-mcp-streamablehttptransport-on-workers) | A `fetch` wrapper in the adapter | low | **shipped** in pi-mcp 1.0 ([#10188](https://github.com/earendil-works/pi/issues/10188)) |
 | 12 | pi-ai | [A default for `select` login prompts](#12-pi-ai-a-default-for-select-login-prompts) | Non-interactive logins broke on 1.0 | low | note (here) |
 | 13 | pi-durable | [Settlement order and run identity on submissions](#13-settlement-order-and-run-identity-on-submissions) | Nothing now: pikit groups runs exactly itself | low (nice to have) | not to send |
+| 14 | pi-ai | [Provider SDKs as hard dependencies](#14-pi-ai-provider-sdks-as-hard-dependencies) | Every project installs every provider's SDK | low | **declined** ([#2297](https://github.com/earendil-works/pi/issues/2297), [#5053](https://github.com/earendil-works/pi/issues/5053)): not to send |
+| 15 | pi-durable | [`abortSubmission` with a reason](#15-abortsubmission-with-a-reason) | `abandon` repeats `abortSubmission` with its own reason | low | note (here) |
+| 16 | pi-durable | [No time on a submission](#16-no-time-on-a-submission) | pikit keeps admission times in `pikit.admissions` | low | note (here) |
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
 ([storage-postgres](../../features/storage-postgres.md)), and a Durable Object example (pikit's
@@ -30,6 +33,21 @@ ships its own `ExecutionEnv` suite (`createEnvConformance`); pikit runs it and k
 lacks (`packages/pi-adapter/src/testing/execution.ts`), which could be offered to it.
 
 Re-checked against pi-durable 1.0.3 (2026-10-05): only proposal 6 is solved; 1 to 5 and 7 are not.
+
+**Pending for the owner:** comment on [#10325](https://github.com/earendil-works/pi/issues/10325)
+(proposal 1), endorsing its `inspect()`-reports-sleeping shape, in the owner's own voice. Nothing
+else is to be sent now.
+
+## At each Pi pin bump
+When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
+1. `bun test packages/pi-adapter` (`pi-facts.test.ts` fails first when a fact pikit relies on
+   changed), then the whole suite and `bun run test:workerd`.
+2. For each proposal still open above, `gh search issues --repo earendil-works/pi "<its subject>"`
+   and `gh issue view <n> -R earendil-works/pi --json state,stateReason` for every issue it cites:
+   one opened, shipped or declined since changes its status here, and a shipped one deletes its
+   workaround (MANIFESTO, principle 1).
+3. Re-read the CHANGELOG of each pinned package for the proposals' subjects, and update the
+   "Re-checked against" line above and the `Status:` line of each proposal file.
 
 ---
 
@@ -45,6 +63,12 @@ Re-checked against pi-durable 1.0.3 (2026-10-05): only proposal 6 is solved; 1 t
   checkpoints `until`.
 - **Ask.** `harness.nextDueAt()`, sleeps recorded durably (`wakeAt` on the task record), and an
   `onScheduled(at)` hook so hosts need no polling. Full text: [pi-durable-next-wake.md](pi-durable-next-wake.md).
+- **Upstream.** Someone else running pi-durable on Durable Objects opened
+  [#10325](https://github.com/earendil-works/pi/issues/10325) ("let a host tell when a harness is
+  only sleeping"); it was auto-closed, then reopened and assigned to a maintainer. Its shape,
+  `inspect()` reporting a task as sleeping until a time, is option A of our file and enough for
+  pikit. So pikit does not open its own issue nor push `nextDueAt()`: the owner comments on #10325
+  endorsing that shape, with pikit's case (an alarm set from the next due time) as evidence.
 
 ## 2. Queued inputs stuck after a failed run
 - **Problem.** Follow-ups queued while a run goes are placed only when it answers. If it ends
@@ -142,6 +166,9 @@ Re-checked against pi-durable 1.0.3 (2026-10-05): only proposal 6 is solved; 1 t
 - **Problem.** `esbuild` is a hard dependency of `@earendil-works/chord`, though only the `./bundler`
   subpath imports it; every pi-durable install pulls it (a nested copy next to pikit's own).
 - **Ask.** An optional peer dependency, or the bundler in its own package.
+- **Outcome: declined.** Asked by someone else as
+  [#9225](https://github.com/earendil-works/pi/issues/9225) (2026-09-06), auto-closed `not planned`
+  with `no-action` and never reopened. Not to be sent again; Chord 1.0.3 still has it.
 
 ## 10. Chord: a stability statement
 - **Problem.** Chord is 1.0 by lockstep versioning with Pi, while its `PLANNING.md` says it is not a
@@ -210,6 +237,41 @@ Re-checked against pi-durable 1.0.3 (2026-10-05): only proposal 6 is solved; 1 t
 - **If it is ever raised:** on Discord or in an RFC, not as an issue: it is an API request, which
   Pi's issue tracker does not favour (see below), and pikit no longer needs it.
 
+## 14. pi-ai: provider SDKs as hard dependencies
+- **Problem.** `@earendil-works/pi-ai` lists every provider's SDK (Anthropic, OpenAI, Google,
+  Mistral, Bedrock…) in `dependencies`, so every project installs all of them, whichever provider it
+  uses (against MANIFESTO principle 5 for the install, not for what is loaded: providers are lazy).
+- **Outcome: declined; no new proposal.** Asked as
+  [#2297](https://github.com/earendil-works/pi/issues/2297): its PR landed only the lazy imports,
+  the SDKs stayed in `dependencies`, and the issue was closed as completed. The follow-up asking for
+  optional peer dependencies, [#5053](https://github.com/earendil-works/pi/issues/5053), was closed
+  `not planned` with `no-action`. pikit accepts the install size.
+
+## 15. `abortSubmission` with a reason
+- **Problem.** `Harness.abortSubmission(id, context, conversationId?)` settles one queued input
+  `unanswered` with reason `aborted` and no detail, in its own commit. pikit gives up on messages
+  nothing can answer (an agent removed, a conversation that cannot open, a message waiting too long)
+  and must say why, for several inputs at once, as one settlement.
+- **pikit meanwhile.** `abandon` (`abandonQueued`, `packages/pi-adapter/src/runtime.ts:703-728`)
+  repeats `abortSubmission` in one `harness.commit`: it settles each queued input with reason
+  `abandoned` and its own detail, and removes it from `pi.inbox` (`InboxDoc`) itself, so it relies
+  on pi-durable's inbox document. Covered by `recovery.test.ts` ("abandon settles the queued
+  requests unanswered…"); it stays a single commit.
+- **Ask (minor).** `abortSubmission(ids, context, { reason, detail })`: several ids, one commit, the
+  host's reason and detail. Additive. Low priority: pikit's version works and is tested.
+
+## 16. No time on a submission
+- **Problem.** A `SubmissionRecord` carries no time: neither when it was admitted nor when it
+  settled. A host that gives up on messages waiting too long, or shows how long a conversation
+  waits, cannot read it from pi-durable.
+- **pikit meanwhile.** The runtime keeps each pending request's admission time in its own
+  `pikit.admissions` document (`AdmissionsDoc`, `packages/pi-adapter/src/submissions.ts`), written in
+  the commit before the submission; `agent.submissions`' `pending` reports it as
+  `oldestAdmittedAt`.
+- **Ask (minor).** `admittedAt` (and `settledAt`) on `SubmissionRecord`, from the Harness clock
+  (`HarnessOptions.now`). Additive. Low priority: pikit's document needs it for other reasons too
+  (it bounds reconciliation).
+
 ---
 
 ## How to send
@@ -229,7 +291,8 @@ Rules for pikit:
   whether we would implement it.
 - **Written in the owner's own voice.** If an LLM helped, add a clearly labelled AI-disclosure
   comment (as on #10188/#10189).
-- **API or design requests** (proposals 1, 3, 4, 5, 7, 9, 10, 12, 13) **go to Discord first**, or
+- **API or design requests** (proposals 3, 4, 5, 7, 10, 12, 13, 15, 16; 1 is already an open
+  issue, which we only comment on) **go to Discord first**, or
   to an RFC (`rfc.earendil.com`) when large. Pi's core is minimal by policy: "if it does not belong in
   core, it should be an extension".
 - **Never in volume, never automated.** Ignoring the guide twice, or many agent-written issues, gets
