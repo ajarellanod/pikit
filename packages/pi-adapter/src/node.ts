@@ -35,7 +35,7 @@ class LocalExecutionEnv extends NodeExecutionEnv {
     super({ cwd });
   }
 
-  override exec(command: string, options: ShellExecOptions | undefined, context: Context): ReturnType<ExecutionEnv["exec"]> {
+  override exec(command: string | readonly string[], options: ShellExecOptions | undefined, context: Context): ReturnType<ExecutionEnv["exec"]> {
     const inherit = options?.inheritEnv ?? true;
     return super.exec(command, { ...options, inheritEnv: false, env: { ...(inherit ? this.defaults : {}), ...options?.env } }, context);
   }

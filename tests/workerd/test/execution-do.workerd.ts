@@ -29,11 +29,11 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-// pi-durable's ExecutionEnv contract, with a shell, each case in an object of its own.
+// pi-durable's ExecutionEnv contract, with a shell and without watching, each case in an object of its own.
 for (const c of createDurableExecutionConformance(async () => {
   const { app, env } = await started(objectHost());
-  return { env, shell: true, dispose: () => app.stop() };
-})) {
+  return { env, dispose: () => app.stop() };
+}, { expect, watch: false })) {
   it(`execution-do ${c.group}: ${c.name}`, () => inObject(c));
 }
 

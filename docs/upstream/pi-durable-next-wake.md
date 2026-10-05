@@ -1,6 +1,6 @@
 # Proposal for pi-durable: report when sleeping work is next due
 
-Status: draft for upstream (`@earendil-works/pi-durable`, against 1.0.0). From pikit, which runs one
+Status: draft for upstream (`@earendil-works/pi-durable`, against 1.0.3). From pikit, which runs one
 Harness per Cloudflare Durable Object.
 
 ## Motivation

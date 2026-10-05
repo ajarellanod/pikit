@@ -6,8 +6,11 @@
  * What pi-durable's environment asks beyond files and a shell:
  * - `FileSystem` has a `readonly id` (equal ids see the same files at the same paths: `edit` and
  *   `write` serialize changes to one file by `id` and path), and `truncateFile` and `flushFile`;
- * - `Shell.exec` streams every raw chunk to `onOutput(text, context)` and no longer bounds the output
- *   (the Harness keeps the tail a tool shows): no `capture`, no `onUpdate`, no truncation in its result;
+ * - `FileSystem` opens positional readers (`openBinaryReader`, whose `scanLines` the `read` tool uses),
+ *   paged directory readers (`openDirReader`), and watches (`watch`, or `not_supported`);
+ * - `Shell.exec` takes a shell string or an argv array (run without a shell), streams every raw chunk
+ *   to `onOutput(text, context, { stream })` and does not bound the output (the Harness keeps the tail
+ *   a tool shows): no `capture`, no `onUpdate`, no truncation in its result;
  * - past `spill`'s thresholds the whole output goes to a temporary file, whose path is the result's
  *   `spillPath` (also on a timeout or abort error). The result is `{ exitCode, spillPath? }`.
  *
@@ -19,21 +22,43 @@ import type { Context } from "@earendil-works/chord";
 import type { EnvTarget } from "@earendil-works/pi-durable";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 
-export { err, ExecutionError, FileError, getOrThrow, getOrUndefined, ok, toError } from "@earendil-works/pi-durable/env";
+/** `LineScanner` and the decoders: what an environment scans and decodes with, exactly as pi-durable's own. */
+export {
+  err,
+  ExecutionError,
+  FileError,
+  getOrThrow,
+  getOrUndefined,
+  LineScanner,
+  ok,
+  rangeDecoder,
+  StreamDecoder,
+  startsWithBom,
+  toError,
+} from "@earendil-works/pi-durable/env";
 export type {
+  BinaryReader,
+  DirReader,
   ExecutionEnv,
   ExecutionErrorCode,
   FileErrorCode,
   FileInfo,
   FileKind,
   FileSystem,
+  FileWatcher,
+  LineScan,
   Result,
   Shell,
   ShellExecOptions,
   ShellExecResult,
+  ShellOutputInfo,
+  ShellOutputSkip,
+  ShellOutputWindow,
   ShellSpillOptions,
   TextLine,
   TextLineReader,
+  WatchChange,
+  WatchTarget,
 } from "@earendil-works/pi-durable/env";
 export type { EnvTarget } from "@earendil-works/pi-durable";
 /** Chord's `Context`, which every pi-durable call takes (not `@pikit/core`'s: a separate type), and its helpers. */

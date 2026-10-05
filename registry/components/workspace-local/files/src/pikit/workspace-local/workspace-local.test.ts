@@ -59,9 +59,9 @@ for (const c of createWorkspaceConformance(async () => {
 for (const c of createDurableExecutionConformance(async () => {
   const { app, workspace } = await started({ root: temporaryRoot() });
   const { env } = await workspace.resolve(conversation("support"), app.context());
-  return { env, shell: true, dispose: () => app.stop() };
-})) {
-  test(`workspace-local ${c.group}: ${c.name}`, () => c.run());
+  return { env, dispose: () => app.stop() };
+}, { expect })) {
+  test(`workspace-local ${c.group}: ${c.name}`, () => c.run(), c.timeoutMs);
 }
 
 // Start and stop honour their deadline.

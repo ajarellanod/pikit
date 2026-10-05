@@ -59,11 +59,11 @@ async function run(env: ExecutionEnv, command: string, cwd?: string) {
   return { exitCode: result.value.exitCode, output };
 }
 
-// pi-durable's ExecutionEnv contract, with a shell.
+// pi-durable's ExecutionEnv contract, with a shell and without watching.
 for (const c of createDurableExecutionConformance(async () => {
   const { app, env } = await started();
-  return { env, shell: true, dispose: () => app.stop() };
-})) {
+  return { env, dispose: () => app.stop() };
+}, { expect, watch: false })) {
   test(`execution-do ${c.group}: ${c.name}`, () => c.run());
 }
 

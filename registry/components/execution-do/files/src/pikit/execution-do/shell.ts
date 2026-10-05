@@ -31,6 +31,8 @@ export interface ShellRun {
   /** Start from `env` alone, not from the shell's own variables. */
   replaceEnv?: boolean;
   signal?: AbortSignal;
+  /** Arguments of the command's program, passed to it unparsed (no expansion, splitting or globbing). */
+  args?: string[];
 }
 
 /** Bytes read and requests' time, per `curl`. */
@@ -111,6 +113,7 @@ export function createShell(options: ShellOptions) {
           ...(run.env !== undefined && { env: run.env }),
           ...(run.replaceEnv === true && { replaceEnv: true }),
           ...(run.signal !== undefined && { signal: run.signal }),
+          ...(run.args !== undefined && { args: run.args }),
         });
       } catch (error) {
         // A redirection just-bash does not guard (`echo x > .git/HEAD`) throws the filesystem's error

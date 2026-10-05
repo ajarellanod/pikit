@@ -42,12 +42,16 @@ there.
   Contracts still without a suite are listed in `features/building-components.md`.
 
 ### Pi adapter (`@pikit/pi-adapter`, the only package that imports Pi)
-- On `@earendil-works/pi-durable` 1.0 (with `chord`, `pi-ai` and `pi-mcp` 1.0, exact pins):
+- On `@earendil-works/pi-durable` 1.0.3 (with `chord`, `pi-ai` and `pi-mcp` 1.0.3, exact pins):
   `createDurableRuntime` runs `agent.runtime`, `agent.conversations` and `agent.submissions` on one
   pi-durable `Harness` per storage, over `storage.sql` (`openDurableStorage`; pi-durable's storage
   conformance passes on SQLite and on a Durable Object). Messages queued while a run goes are answered
   together by the next run, steers join the run going; settlements are grouped exactly by their
-  inputs' commit and logged once in `runtime_pi_answers`.
+  inputs' commit and logged once in `runtime_pi_answers`. Each conversation sends the provider its own
+  session id, the same on every turn, so prompt caches keyed on it hit.
+- `createDurableExecutionConformance` runs pi-durable's `ExecutionEnv` suite (readers, `watch`, argv
+  `exec`, output streams) and then pikit's cases it lacks; `watch: false` and `shell: false` leave out
+  what an environment does not have.
 - `agent.extension` (keyed): a component adds agent behaviour as a pi-durable extension (system
   prompt sections, hooks, tool wraps, tasks), from `@pikit/pi-adapter/extensions`; agents select
   them by name.
@@ -72,7 +76,8 @@ there.
 - Tools and execution: `tool-read`, `tool-write`, `tool-edit`, `tool-bash` (Pi's own), `tool-fetch`
   and `tool-websearch-brave` (their source in the component: the references for writing a tool),
   `tool-mcp` (remote MCP servers, with a deploy-time seed), `execution-local`, `workspace-local`,
-  `execution-do` (files in the object's SQL, a shell without processes, `git`, `node` in QuickJS).
+  `execution-do` (files in the object's SQL, a shell without processes, `git`, `node` in QuickJS;
+  pi-durable 1.0.3's environment: positional and directory readers, argv `exec`, no `watch`).
 - Serving and operating: `server-bun` (`/health`, `/ready`), `admin-auth-token` (operators by a bearer
   token from `secrets`), `log-events`.
 - Agent behaviour: `extension-house-rules` (rules from config as a system prompt section, listed tools

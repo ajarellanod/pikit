@@ -3,10 +3,13 @@
  * run pi-durable tools in a test. Runner-independent (a failed check throws) and neutral: the workerd
  * lane runs it in a Durable Object.
  *
- * - `createDurableExecutionConformance`: pi-durable's `ExecutionEnv`. pi-durable ships no suite for it
- *   (its `./testing` has only storage's), so this one checks what pi-durable's own `NodeExecutionEnv`
- *   tests check, and `id`, `truncateFile`, `flushFile`, `onOutput`, `spill`. Run it on pi-durable's
- *   `NodeExecutionEnv` too: it is the reference.
+ * - `createDurableExecutionConformance`: pi-durable's `ExecutionEnv`. pi-durable's own suite
+ *   (`createEnvConformance`: binary and directory readers, `watch`, argv `exec`, output streams and
+ *   window, timeout and abort), then what it does not check: `id` and paths, text reads and writes,
+ *   `truncateFile`, `flushFile`, metadata, rename and remove, temporary files, a string command's
+ *   `cwd`, `env` and `inheritEnv`, `spill`, a throwing `onOutput`, a missing working directory, and an
+ *   environment without a shell or without `watch`. Run it on pi-durable's `NodeExecutionEnv` too: it is
+ *   the reference.
  * - `callTool`: one direct `execute`, its result built as the Harness builds it (the retained output
  *   when it returns no content, an error result when it throws).
  * - `runToolCalls`: a real `Harness` (memory storage, pi-ai 1.0's faux model) whose model calls the
@@ -14,7 +17,7 @@
  */
 
 import type { Context } from "@earendil-works/chord";
-import { BACKGROUND_CONTEXT, withAbortSignal } from "@earendil-works/chord/context";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import {
   createRegistry,
   defineExtension,
@@ -26,6 +29,7 @@ import {
   type ToolRegistration,
 } from "@earendil-works/pi-durable";
 import type { ExecutionEnv, ShellExecOptions } from "@earendil-works/pi-durable/env";
+import { createEnvConformance, createExpectAssertions, type ExpectLike } from "@earendil-works/pi-durable/testing";
 import type { ConformanceCase } from "@pikit/core/testing";
 import type { ToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
@@ -35,32 +39,52 @@ import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-work
 export interface DurableExecutionFixture {
   /** Its `cwd` is a new, empty directory the suite may write to. */
   env: ExecutionEnv;
-  /** Whether `exec` runs commands (`execution.shell`). Without a shell it must answer `shell_unavailable`. */
-  shell: boolean;
   /** Release what the fixture holds (the directory, the app). */
   dispose?(): Promise<void>;
 }
 
+export interface DurableExecutionConformanceOptions {
+  /** The test runner's `expect` (Bun's or Vitest's): pi-durable's cases check with it. */
+  expect: ExpectLike;
+  /** Whether `exec` runs commands (`execution.shell`). Without a shell it must answer `shell_unavailable`. Default: true. */
+  shell?: boolean;
+  /** Whether `watch` reports changes. Without, it must answer `not_supported`. Default: true. */
+  watch?: boolean;
+  /** Whether the shell's `ln -s` makes symbolic links. Default: `shell`. */
+  symlinks?: boolean;
+}
+
+/** A case, and how long it may take when that is longer than a runner's default (pi-durable's `watch` cases). */
+export type DurableExecutionCase = ConformanceCase & { readonly timeoutMs?: number };
+
 const GROUP = "durable execution";
 const ctx = BACKGROUND_CONTEXT;
 
-export function createDurableExecutionConformance(factory: () => DurableExecutionFixture | Promise<DurableExecutionFixture>): readonly ConformanceCase[] {
-  const executionCase = (name: string, run: (env: ExecutionEnv) => Promise<void>, needs?: "shell" | "no shell"): ConformanceCase => ({
-    group: GROUP,
-    name,
-    run: async () => {
-      const fixture = await factory();
-      try {
-        if (needs === "shell" && !fixture.shell) return;
-        if (needs === "no shell" && fixture.shell) return;
-        await run(fixture.env);
-      } finally {
-        await fixture.dispose?.();
-      }
-    },
-  });
+export function createDurableExecutionConformance(
+  factory: () => DurableExecutionFixture | Promise<DurableExecutionFixture>,
+  options: DurableExecutionConformanceOptions,
+): readonly DurableExecutionCase[] {
+  const shell = options.shell ?? true;
+  const watch = options.watch ?? true;
+  const withFixture = async (run: (env: ExecutionEnv) => Promise<void>) => {
+    const fixture = await factory();
+    try {
+      await run(fixture.env);
+    } finally {
+      await fixture.dispose?.();
+    }
+  };
+  const executionCase = (name: string, run: (env: ExecutionEnv) => Promise<void>, needs?: "shell" | "no shell" | "no watch"): DurableExecutionCase | undefined => {
+    if ((needs === "shell" && !shell) || (needs === "no shell" && shell) || (needs === "no watch" && watch)) return undefined;
+    return { group: GROUP, name, run: () => withFixture(run) };
+  };
 
-  return [
+  // pi-durable's cases, less those of what the environment does not have: they fail loudly if pi-durable renames them.
+  const pi = createEnvConformance({ assertions: createExpectAssertions(options.expect), withEnv: withFixture, symlinks: options.symlinks ?? shell })
+    .filter((c) => (shell || !/\bexec\b/.test(c.name)) && (watch || !c.name.startsWith("watch ")))
+    .map((c): DurableExecutionCase => ({ group: "pi-durable env", name: c.name, run: () => c.run(), ...(c.timeoutMs !== undefined && { timeoutMs: c.timeoutMs }) }));
+
+  return [...pi, ...[
     executionCase("id names the file namespace, and a relative path is relative to cwd", async (env) => {
       check(typeof env.id === "string" && env.id !== "", "a non-empty id");
       const expected = value(await env.joinPath([env.cwd, "notes", "a.txt"], ctx), "joinPath");
@@ -247,39 +271,21 @@ export function createDurableExecutionConformance(factory: () => DurableExecutio
     ),
 
     executionCase(
-      "a command past its timeout is stopped with a timeout error",
-      async (env) => {
-        const started = Date.now();
-        const result = await env.exec("sleep 10", { timeout: 0.3 }, ctx);
-
-        same(code(result), "timeout", "the result");
-        check(Date.now() - started < 5000, "the command to stop at its timeout");
-      },
-      "shell",
-    ),
-
-    executionCase(
-      "cancelling the context stops the command with an aborted error",
-      async (env) => {
-        const controller = new AbortController();
-        setTimeout(() => controller.abort(new Error("conformance: cancelled")), 200);
-        const started = Date.now();
-        const result = await env.exec("sleep 10", undefined, withAbortSignal(controller.signal, ctx));
-
-        same(code(result), "aborted", "the result");
-        check(Date.now() - started < 5000, "the command to stop when cancelled");
-      },
-      "shell",
-    ),
-
-    executionCase(
       "without a shell, exec answers shell_unavailable",
       async (env) => {
         same(code(await env.exec("echo hello", undefined, ctx)), "shell_unavailable", "the result");
       },
       "no shell",
     ),
-  ];
+
+    executionCase(
+      "without watching, watch answers not_supported",
+      async (env) => {
+        same(code(await env.watch([{ path: "." }], () => {}, ctx)), "not_supported", "the result");
+      },
+      "no watch",
+    ),
+  ].filter((c): c is DurableExecutionCase => c !== undefined)];
 }
 
 /** Runs `command`, collecting its output from `onOutput`. Fails the case if exec fails. */
