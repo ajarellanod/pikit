@@ -11,6 +11,8 @@
  *   matches the merged schema (the core's own `create()` decides);
  * - every tool and model provider an agent names statically is an installed key, when a
  *   component (the runtime) uses it: the runtime would refuse to start otherwise (`references.ts`);
+ * - the app answers someone: a channel has a router (a `route.resolve` stage), and `http.route`s a
+ *   server, but in the Worker's App, whose host serves them (`serving.ts`);
  * - every variable a component marks required is set in the environment or in `.env` (names
  *   only, never a value);
  * - the Pi import rule (S1): only `@pikit/pi-adapter` imports Pi. Neither components nor project
@@ -31,6 +33,7 @@ import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from ".
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
 import { brokenReferences } from "../project/references.ts";
+import { servingGaps } from "../project/serving.ts";
 import { checkLockfile } from "../project/lockfile.ts";
 import { incompleteOperation, incompleteOperationMessage } from "../project/operation.ts";
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
@@ -86,6 +89,7 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
     }
     notes.push(...unusedProviders(result.description.components));
     problems.push(...brokenReferences(result));
+    problems.push(...servingGaps(result).map((gap) => gap.message));
     if (options.componentChecks !== false) {
       const checked = await componentChecks(projectDir, options.componentChecks === "unless-before-deploy");
       problems.push(...checked.problems);

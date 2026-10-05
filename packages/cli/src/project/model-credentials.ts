@@ -16,6 +16,7 @@
 import type { AppExec } from "./deployment-module.ts";
 import type { CredentialsResult } from "./credentials.ts";
 import { modelProvider } from "./references.ts";
+import type { ProbeResult } from "./probe.ts";
 import { probe, runScript, runScriptInApp } from "./run.ts";
 import { CliError } from "../ui.ts";
 
@@ -55,7 +56,11 @@ export function usedOnly(checked: Extract<CredentialsResult, { ok: true }>, used
  * every installed provider counts. A model `prepare(state)` picks per run cannot be seen.
  */
 export async function providersInUse(projectDir: string): Promise<Set<string> | undefined> {
-  const result = await probe(projectDir);
+  return providersNamed(await probe(projectDir));
+}
+
+/** `providersInUse`, from a probe the caller has already. */
+export function providersNamed(result: ProbeResult): Set<string> | undefined {
   if (!result.ok) return undefined;
   const providers = result.agents.map((agent) => modelProvider(agent.model));
   return providers.includes(undefined) ? undefined : new Set(providers as string[]);

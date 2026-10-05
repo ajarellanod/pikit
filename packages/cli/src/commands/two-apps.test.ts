@@ -133,9 +133,10 @@ test("on Cloudflare, add puts each half in its App, checks each App, records the
   expect(withBoth).toContain("  components: [\n    channelFake,\n    secretsFake,\n  ],\n  config,\n");
   expect(withBoth).toContain("  components: [\n    channelFakeWorker,\n    secretsFake,\n  ],\n  config: workerConfig,\n");
 
-  // doctor shows the Worker's App too.
+  // doctor shows the Worker's App too. Its routes need no server component: the Worker's host serves them.
   const doctor = await runCli(["doctor"], dir);
   expect(doctor.code).toBe(0);
+  expect(doctor.err).not.toContain("no component serves it");
   expect(doctor.out).toContain("The Worker's App (export const worker):");
   expect(doctor.out).toMatch(/ {4}channel-fake-worker +provides http.route · requires secrets\n/);
 

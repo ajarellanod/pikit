@@ -179,6 +179,7 @@ test("what a composed project provides, per App, without the components about to
     capabilities: {},
     pipelines: {},
     config: {},
+    stagesBy: {},
   });
   const result: ProbeResult = {
     ok: true,

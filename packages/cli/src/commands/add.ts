@@ -25,7 +25,7 @@
  *  10. record the registry, version, commit, kit ranges, file hashes, hooks and the npm packages it added
  *      in `pikit.json`, and keep each file
  *      as installed, its base, in `pikit-bases/` (`bases.ts`)
- *  11. `pikit doctor`
+ *  11. `pikit doctor`, its notes printed (a provider nothing uses)
  *
  * Every refusal (steps 1–5, for the component and the providers it brings) comes before the first
  * write. A step that fails after it puts back what was written: `package.json`, `bun.lock`,
@@ -159,6 +159,7 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   if (refreshed.length > 0) pruneVendor(projectDir);
   finishOperation(projectDir);
   const report = await doctor(projectDir, { quiet: true, componentChecks: false });
+  for (const note of report.notes) log.info(`  ${note}`);
   if (report.problems.length > 0) {
     for (const problem of report.problems) log.problem(problem);
     throw new CliError(`${name} is installed, but \`pikit doctor\` found ${report.problems.length} problem(s)`);
