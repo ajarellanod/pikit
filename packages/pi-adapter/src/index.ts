@@ -10,6 +10,7 @@ export type { DurableExtension, DurableModels, DurableTool } from "./agent.ts";
 export type { DurableMessage, DurableUsage } from "./result.ts";
 export { toChord } from "./context.ts";
 export { modelRefOf, modelsFrom, parseModelName } from "./models.ts";
+export { createModelComplete } from "./complete.ts";
 export type { ModelsOptions } from "./models.ts";
 export { createObserver, OBSERVE_MAX_PAGE, OBSERVE_PAGE } from "./observe.ts";
 export type { ObservedRuntime } from "./observe.ts";

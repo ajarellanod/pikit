@@ -9,9 +9,9 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppEvents, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withCancel } from "@pikit/core";
-import { AGENT_STATE, type AgentRuntime, type AgentSubmissions, type AgentTool, type ConversationRef, defineAgent, type WakeupHandler } from "@pikit/contracts";
+import { AGENT_STATE, type AgentCommand, type AgentRuntime, type AgentSubmissions, type AgentTool, type ConversationRef, defineAgent, type WakeupHandler } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { createAgentRuntimeConformance, createMemoryWakeups } from "@pikit/contracts/testing";
+import { createAgentCommandConformance, createAgentRuntimeConformance, createMemoryWakeups, createModelCompleteConformance } from "@pikit/contracts/testing";
 import type { Credential, CredentialStore } from "@pikit/pi-adapter";
 import {
   createPiRuntimeFixture,
@@ -121,7 +121,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   const described = app.describe().components.find((component) => component.name === "runtime-pi");
 
   expect(described).toMatchObject({
-    provides: ["agent.runtime", "agent.conversations", "agent.submissions", "agent.observe"],
+    provides: ["agent.runtime", "agent.conversations", "agent.submissions", "agent.observe", "model.complete", "agent.command"],
     requires: ["storage.sql"],
     optional: ["agent.definition", "model.provider", "model.credentials", "secrets", "agent.tool", "agent.extension", "execution", "workspace", "wakeups"],
   });
@@ -539,3 +539,73 @@ test("an agent's prepare gives it bash once a tool has moved its state on", asyn
   expect(deployed).toBe("tool said: ran");
   await app.stop();
 });
+
+// model.complete: a text from one of the models the agents run on (the scripted model answers
+// `answer: <prompt>`).
+for (const c of createModelCompleteConformance(() => {
+  const { storage, agents, provider } = testComponents();
+  return { components: [storage, agents, provider, runtimePi], model: "faux/scripted", unknownModel: "faux/no-such-model", answer: (prompt) => `answer: ${prompt}` };
+})) {
+  test(`runtime-pi ${c.group}: ${c.name}`, () => c.run(), 30_000);
+}
+
+/** A conversation of the scripted agent with one exchange (`hello`, answered), through `seen`. */
+async function oneExchange(seen: ReturnType<typeof observer>, key: string, ctx: Parameters<AgentRuntime["dispatch"]>[1]): Promise<ConversationRef> {
+  const conversation = await seen.conversation(key);
+  const before = seen.results.length;
+  await seen.runtime().dispatch({ requestId: `${key}-1`, conversation, prompt: "hello" }, ctx);
+  await until(() => seen.results.length > before, "the first answer");
+  return conversation;
+}
+
+// /compact (agent.command), Pi's: in the conversation it runs in. A short one has nothing to cut.
+for (const c of createAgentCommandConformance(() => {
+  const { storage, agents, provider } = testComponents();
+  const seen = observer();
+  return {
+    components: [storage, agents, provider, runtimePi, seen.component],
+    conversation: (app) => oneExchange(seen, "test:compact", app.context()),
+    runs: [
+      {
+        name: "compact",
+        check: async (outcome) => {
+          expect(outcome.text).toStartWith("Nothing to compact");
+        },
+      },
+    ],
+  };
+})) {
+  test(`runtime-pi /compact ${c.group}: ${c.name}`, () => c.run(), 30_000);
+}
+
+test("/compact summarizes the older messages of its conversation with its agent's model; the conversation goes on", async () => {
+  const { storage, agents, provider } = testComponents();
+  const seen = observer();
+  let compact: AgentCommand | undefined;
+  const commands = defineComponent({
+    name: "commands-reader",
+    setup(pikit) {
+      const handle = pikit.useKeyed("agent.command");
+      return { start: () => void (compact = handle.get("compact")) };
+    },
+  });
+  // Keep almost nothing verbatim: every exchange but the last is summarized.
+  const runtime = createRuntimePi({ settings: { compaction: { keepRecentTokens: 1 } } });
+  const app = await defineApp({ components: [storage, agents, provider, runtime, seen.component, commands], logger: silentLogger }).create();
+  await app.start();
+  try {
+    const ctx = app.context();
+    const conversation = await oneExchange(seen, "test:compacted", ctx);
+    await seen.runtime().dispatch({ requestId: "test:compacted-2", conversation, prompt: "and again" }, ctx);
+    await until(() => seen.results.length > 1, "the second answer");
+
+    const done = await compact?.run(conversation, "keep the greetings", ctx);
+
+    expect(done).toEqual({ text: "Compacted: the older messages are summarized, and the model reads the summary from now on." });
+    await seen.runtime().dispatch({ requestId: "test:compacted-3", conversation, prompt: "still here?" }, ctx);
+    await until(() => seen.results.length > 2, "the answer after the compaction");
+    expect(seen.results.at(-1)).toMatchObject({ kind: "completed", text: "answer: still here?" });
+  } finally {
+    await app.stop();
+  }
+}, 30_000);

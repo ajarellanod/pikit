@@ -173,6 +173,15 @@ export interface DurableRuntime extends AgentRuntime {
    * `agent.failed` (code `abandoned`, message `reason`). One a run took (`placed`) is left to it, logged.
    */
   abandon(conversation: ConversationRef, requestIds: readonly string[], reason: string, ctx: AppContext): Promise<void>;
+  /**
+   * Compact the conversation now (pi-durable's manual compaction): its older entries are summarized
+   * (with `instructions`, when given, saying what to keep) by its agent's model, and the summary heads
+   * what the model sees from then on; the entries stay in storage and in the transcript. It runs while
+   * the conversation keeps working, and its summary is placed at once when idle, otherwise at the next
+   * turn boundary. Resolves once it settled: `compacted` is `false` when the conversation was too short
+   * to cut anything. Rejects when the compaction failed (the model's error), or `ctx` was cancelled.
+   */
+  compact(conversation: ConversationRef, instructions: string | undefined, ctx: AppContext): Promise<{ compacted: boolean }>;
   /** Whether this worker drives the conversation now: a run going, or a step or an announcement under way. */
   holds(conversation: Pick<ConversationRef, "conversationId">): boolean;
   /**
@@ -879,6 +888,26 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       const harness = await harnessOf(ctx);
       const id = conversationIdOf(conversation);
       await inLine(id, async () => (await conversationOf(harness, conversation, ctx)).abort(toChord(ctx)));
+    },
+
+    async compact(conversation: ConversationRef, instructions: string | undefined, ctx: AppContext): Promise<{ compacted: boolean }> {
+      const harness = await harnessOf(ctx);
+      const id = conversationIdOf(conversation);
+      const chord = toChord(ctx);
+      // In the conversation's line: its agent (and so the model that summarizes) as `prepare` gives it now.
+      const task = await inLine(id, async () => {
+        const handle = await conversationOf(harness, conversation, ctx);
+        await reconfigure(harness, id, ctx, options.agent(conversation.agent) === undefined ? undefined : conversation);
+        return handle.compact(instructions === undefined || instructions.trim() === "" ? undefined : instructions, chord);
+      });
+      const { outcome } = (await harness.waitForTask(task, chord)).state;
+      if (outcome.status !== "completed") {
+        throw new Error(outcome.status === "failed" ? `the compaction failed: ${outcome.error.message}` : `the compaction ended unfinished (${outcome.status})`);
+      }
+      const { entryId, submissionId } = outcome.result;
+      // A conversation-owned summary is a write, placed at once when idle, else at the next boundary.
+      if (submissionId !== undefined) await (await harness.submission(submissionId, chord))?.wait(chord);
+      return { compacted: entryId !== undefined || submissionId !== undefined };
     },
 
     async resume(conversation: ConversationRef, ctx: AppContext): Promise<void> {

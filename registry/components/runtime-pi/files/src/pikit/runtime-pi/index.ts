@@ -5,7 +5,10 @@
  * It provides `agent.runtime`, `agent.conversations` (where `conversations.registry` creates the
  * conversation of a new key, or of a reset), and `agent.submissions`: what became of each admitted
  * message, read from pi-durable, and `answers`, the log of every run's end channels deliver from
- * (`runtime_pi_answers`, kept `keepSettledDays`). At start, the conversations holding a message nobody
+ * (`runtime_pi_answers`, kept `keepSettledDays`). It also provides `model.complete` (a text from one
+ * of the models its agents run on, once: admin-api's conversation titles) and the slash command
+ * `/compact` (`agent.command`: pi-durable's manual compaction of the conversation it runs in, with
+ * what follows it as the summary's instructions). At start, the conversations holding a message nobody
  * answered are resumed in the background (`resume.ts`), or by a wakeup with `wakeups`, with no new
  * message needed. Messages that can never be answered are abandoned, and their senders told: at once
  * when their agent is gone, and after `abandonPendingAfterHours` when resuming them fails.
@@ -45,9 +48,19 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import type { AgentConversations, AgentRuntime, AgentSubmissions, ConversationRef, Wakeups } from "@pikit/contracts";
+import type { AgentCommand, AgentConversations, AgentRuntime, AgentSubmissions, ConversationRef, Wakeups } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createDurableRuntime, createObserver, type DurableRuntime, type DurableRuntimeOptions, modelsFrom, nextWakeAtOf, parseModelName } from "@pikit/pi-adapter";
+import {
+  createDurableRuntime,
+  createModelComplete,
+  createObserver,
+  type DurableRuntime,
+  type DurableRuntimeOptions,
+  type Models,
+  modelsFrom,
+  nextWakeAtOf,
+  parseModelName,
+} from "@pikit/pi-adapter";
 import Type from "typebox";
 import { resumePending, type ResumeOptions } from "./resume.ts";
 
@@ -146,13 +159,34 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       pikit.provide("agent.submissions", submissions);
       // What an operator sees of the runtime (the dashboard), read-only, from pi-durable's records.
       pikit.provide("agent.observe", createObserver(current));
+      // A text from one of the models, once (a conversation's title): the models the agents run on.
+      let models: Models | undefined;
+      pikit.provide(
+        "model.complete",
+        createModelComplete(() => {
+          if (models === undefined) throw new Error("runtime-pi: model.complete used while the app is not running");
+          return models;
+        }),
+      );
+      // Pi's /compact, in the conversation it is run in (admin-api runs it from the dashboard's "/").
+      const compact: AgentCommand = {
+        description: "Compact the context: summarize the older messages",
+        argumentHint: "<what the summary keeps>",
+        async run(conversation, args, ctx) {
+          const done = await current().compact(conversation, args === "" ? undefined : args, ctx);
+          await wakeFor(conversation, ctx);
+          return { text: done.compacted ? "Compacted: the older messages are summarized, and the model reads the summary from now on." : "Nothing to compact: the conversation is short enough as it is." };
+        },
+      };
+      pikit.provideKeyed("agent.command", "compact", compact);
 
       return {
         async start(ctx) {
-          const models = modelsFrom(
+          const made = modelsFrom(
             providers.keys().flatMap((key) => providers.get(key) ?? []),
             { credentials: credentials.get(), secrets: secrets.get() },
           );
+          models = made;
           // Fail at start, not at the first message: an agent that cannot run is a broken deployment.
           if (agents.keys().length === 0) throw new Error("runtime-pi: no agent.definition is provided");
           for (const key of tools.keys()) {
@@ -191,11 +225,11 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             }
             const model = agents.get(name)?.model ?? "";
             const ref = parseModelName(model);
-            if (ref === undefined || models.getModel(ref.provider, ref.modelId) === undefined) {
+            if (ref === undefined || made.getModel(ref.provider, ref.modelId) === undefined) {
               throw new Error(`runtime-pi: agent "${name}" names model "${model}", which no model.provider provides`);
             }
             // Checked without a network call or an OAuth refresh: is anything configured at all?
-            if ((await models.checkAuth(ref.provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) === undefined) {
+            if ((await made.checkAuth(ref.provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) === undefined) {
               throw new Error(
                 `runtime-pi: agent "${name}" uses provider "${ref.provider}", which has no credentials: ` +
                   "log in to store one in model.credentials, or set the provider's API key in the environment",
@@ -217,7 +251,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             agent: (name) => agents.get(name),
             tool: (name) => tools.get(name),
             extension: (name) => extensions.get(name),
-            models,
+            models: made,
             events: background,
             now,
             conversations: perObject ? "root" : "ownerless",

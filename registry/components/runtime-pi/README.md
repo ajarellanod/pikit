@@ -7,7 +7,9 @@ it into the app.
   conversation of a new key, or of a reset), and `agent.submissions` (what became of each message,
   and the `answers` feed channels deliver from: "Nothing admitted goes unanswered" below), and
   `agent.observe` (what an operator sees, read-only from pi-durable's records: conversations, a
-  transcript, live events, usage; `createObserver` in the adapter's `observe.ts`).
+  transcript, live events, usage; `createObserver` in the adapter's `observe.ts`). Also
+  `model.complete` (a text from one of the models the agents run on, once: admin-api titles
+  conversations with it) and one slash command, `agent.command` `compact` ("/compact" below).
 - **Requires:** `storage.sql`: pi-durable keeps every conversation there (its transcript, its state,
   its runs and the messages it holds). On a server that is `storage-sqlite`, in a Cloudflare object
   `storage-do`. Its tables are pi-durable's (`conversations`, `entries`, `tasks`, `submissions`,
@@ -264,3 +266,19 @@ the start failures, and the extension's state across a restart.
 
 `component.json` is generated from `setup` by the CLI (`pikit registry validate`) and is not written
 by hand; the test "what setup declares" pins it.
+
+## /compact and model.complete
+
+- **`/compact [what the summary keeps]`** is Pi's command, registered through `agent.command` as any
+  component's is (admin-api lists it in the dashboard's "/" and runs it in the conversation): it
+  compacts that conversation now with pi-durable's manual compaction (`DurableRuntime.compact`): its
+  older entries are summarized by its agent's model, with what follows the command as the summary's
+  instructions, and the model reads the summary from then on; the entries stay in storage and in the
+  transcript. It waits for the summary, and answers whether anything was cut ("Nothing to compact" for
+  a conversation shorter than what pi-durable keeps verbatim, `keepRecentTokens`).
+- **`model.complete`** asks one of the App's models for a text once (`createModelComplete` in the
+  adapter: pi-ai's `completeSimple` over the same models, providers and credentials as the agents):
+  no conversation, no tools, not counted in any conversation's usage. A model the providers do not
+  have, a failed call or a cancelled context is a rejection. It passes `createModelCompleteConformance`
+  (`runtime-pi.test.ts`, with the scripted faux model), and `/compact` the `agent.command` suite.
+

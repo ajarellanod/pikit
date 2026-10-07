@@ -32,7 +32,9 @@
     "agent.runtime",
     "agent.conversations",
     "agent.submissions",
-    "agent.observe"
+    "agent.observe",
+    "model.complete",
+    "agent.command"
   ],
   "dependencies": {
     "@pikit/contracts": "0.0.0",
