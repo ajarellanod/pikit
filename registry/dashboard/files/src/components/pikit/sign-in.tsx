@@ -45,8 +45,9 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
 
   return (
     <main className="relative flex min-h-svh items-center justify-center overflow-hidden bg-canvas p-6 text-ink">
-      {/* a soft light behind the card: depth without a picture */}
-      <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 45% at 50% 42%, var(--page) 0%, transparent 70%)" }} />
+      {/* the product's banner behind the card: a field of dots fading out, and the mark's warm light */}
+      <div aria-hidden className="sign-in-glow pointer-events-none absolute inset-0" />
+      <div aria-hidden className="sign-in-dots pointer-events-none absolute inset-0" />
 
       <div className="relative w-full max-w-[400px]" style={rise(0)}>
         <div className="rounded-[20px] bg-surface p-1.5 shadow-overlay">
@@ -56,11 +57,17 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
               <span className="text-[19px] leading-[26px] font-semibold tracking-[-0.02em] text-ink">Pikit</span>
             </div>
 
-            <h1 className="mt-7 text-[22px] font-medium tracking-[-0.02em] text-ink" style={rise(2)}>
+            {/* what happens to the token, quietly, before anything is asked */}
+            <div className="mt-5 inline-flex max-w-full items-center gap-1.5 rounded-full bg-inset px-2.5 py-1 text-[11.5px] leading-4 text-ink-3 shadow-hairline" style={rise(2)}>
+              <span className="size-1.5 shrink-0 rounded-full bg-green" aria-hidden />
+              <span className="truncate">Sent once; this browser keeps a session, never the token.</span>
+            </div>
+
+            <h1 className="mt-4 text-[22px] font-medium tracking-[-0.02em] text-ink" style={rise(2)}>
               Sign in
             </h1>
             <p className="mt-1.5 text-[13.5px] leading-[1.55] text-ink-2" style={rise(2)}>
-              Paste the operator token to see this service's conversations, live.
+              Paste your Pikit token to see this service's conversations, live.
             </p>
 
             <form
@@ -72,7 +79,7 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
               }}
             >
               <label htmlFor="operator-token" className="text-[12.5px] font-medium text-ink-2">
-                Operator token
+                Pikit token
               </label>
               <div
                 className={`group flex h-11 items-center gap-2 rounded-[12px] bg-inset pr-1.5 pl-3 shadow-inset-field ring-1 transition-[box-shadow,background-color] duration-150 focus-within:bg-surface focus-within:ring-2 ${problem === undefined ? "ring-line focus-within:ring-line-strong" : "ring-red/50 focus-within:ring-red/60"}`}
@@ -136,10 +143,6 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
             </form>
           </div>
 
-          <div className="flex items-center gap-2 rounded-[13px] bg-inset px-4 py-3 text-[12px] leading-[1.45] text-ink-3 shadow-hairline" style={rise(4)}>
-            <span className="size-1.5 shrink-0 rounded-full bg-green" aria-hidden />
-            The token is sent once. This browser keeps a session it cannot read, never the token.
-          </div>
         </div>
       </div>
     </main>

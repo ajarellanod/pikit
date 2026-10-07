@@ -494,3 +494,24 @@ test("slash commands on the Worker: listed from the index object's App, run in t
   expect({ status: behind.status, body: await behind.json() }).toMatchObject({ status: 409, body: { error: "not_current" } });
   expect(await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~100")}`, { headers: AUTH })).json()).toMatchObject({ current: true, title: "Weekend plans" });
 });
+
+test("archive and delete on the Worker: one call to the index object, which lists them apart (archived) or never (deleted)", async () => {
+  const { platform, worker: w } = await cloud();
+  await chat(platform, "telegram:1", true);
+  await chat(platform, "telegram:2");
+  await platform.active("telegram:1", 100, "1");
+  await platform.active("telegram:2", 200);
+  const ids = async (archived = false) =>
+    ((await (await w.fetch(`/admin/api/conversations${archived ? "?archived=1" : ""}`, { headers: AUTH })).json()) as { items: ApiConversation[] }).items.map((each) => each.conversationId);
+  platform.calls.length = 0;
+
+  const archived = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/archive`, { method: "POST", headers: { ...AUTH, "x-pikit-admin": "1" } });
+  expect(archived.status).toBe(200);
+  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.hide`]);
+  await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:2~1")}/delete`, { method: "POST", headers: { ...AUTH, "x-pikit-admin": "1" } });
+
+  expect(await ids()).toEqual([]);
+  expect(await ids(true)).toEqual(["telegram:1~1"]);
+  const unknown = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:9~1")}/archive`, { method: "POST", headers: { ...AUTH, "x-pikit-admin": "1" } });
+  expect(unknown.status).toBe(404);
+});

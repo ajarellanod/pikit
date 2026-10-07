@@ -63,7 +63,7 @@ import {
   operatorPrompt,
   WEB_SEARCH_TOOL,
 } from "./api.ts";
-import type { ConversationIndex } from "./conversation-index.ts";
+import type { ConversationIndex, Hidden } from "./conversation-index.ts";
 
 /**
  * A message to a conversation, checked: what `POST …/messages` takes (its attachments by
@@ -94,8 +94,16 @@ export interface AdminBackend {
   app(ctx: AppContext): Promise<ApiApp>;
   /** The App's agents, by name. */
   agents(ctx: AppContext): Promise<ApiAgents>;
-  /** The most recently active first. Throws `invalid_cursor` for a cursor it did not give. */
-  conversations(page: PageRequest, ctx: AppContext): Promise<ApiPage<ApiConversation>>;
+  /**
+   * The most recently active first: those listed, or with `archived` those the operator archived.
+   * Throws `invalid_cursor` for a cursor it did not give.
+   */
+  conversations(page: PageRequest, ctx: AppContext, archived?: boolean): Promise<ApiPage<ApiConversation>>;
+  /**
+   * Puts the conversation away (`archived`, `deleted`) or back in the list (`undefined`): the list
+   * only, nothing of the runtime's. Any conversation, current or not. Throws `not_found`.
+   */
+  hide(id: string, how: Hidden | undefined, ctx: AppContext): Promise<void>;
   /** A conversation of the dashboard's own, with its first message. Throws `unknown_agent`, `invalid_request`. */
   start(conversation: NewConversation, ctx: AppContext): Promise<ApiStartResponse>;
   /** Throws `not_found`. */
@@ -271,8 +279,8 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
 
     agents: async () => ({ items: contracts.agents() }),
 
-    async conversations(page, ctx) {
-      const listed = await contracts.index().list({ limit: page.limit ?? 50, ...(page.cursor !== undefined && { cursor: page.cursor }) });
+    async conversations(page, ctx, archived = false) {
+      const listed = await contracts.index().list({ limit: page.limit ?? 50, archived, ...(page.cursor !== undefined && { cursor: page.cursor }) });
       // A row whose conversation the runtime no longer has is left out.
       const found = await Promise.all(listed.items.map((row) => contracts.observe().conversation(row.conversationId, ctx)));
       const items = await Promise.all(found.filter((each) => each !== undefined).map((each) => described(each, ctx)));
@@ -291,6 +299,12 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
     },
 
     conversation: async (id, ctx) => described(await found(id, ctx), ctx),
+
+    async hide(id, how, ctx) {
+      const conversation = await found(id, ctx);
+      const key = conversation.key ?? (await contracts.keyOf(conversation.conversationId, ctx));
+      if (key === undefined || !(await contracts.index().hide(key, conversation.conversationId, how))) throw refusal("not_found", NOT_FOUND);
+    },
 
     async transcript(id, page, ctx) {
       const result = id === "" ? undefined : await paged(page, () => contracts.observe().transcript(id, page, ctx));

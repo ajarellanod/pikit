@@ -18,7 +18,8 @@
  * | `admin-api.reset` | `{ conversationId }` | `ApiResetResponse` |
  * | `admin-api.commands` | — | `ApiCommands`: this App's slash commands |
  * | `admin-api.command` | `{ conversationId, name, args }` | `ApiCommandResponse`: the command run in the conversation |
- * | `admin-api.list` | `{ limit, cursor? }` | `IndexPage` (the index object's) |
+ * | `admin-api.list` | `{ limit, cursor?, archived? }` | `IndexPage` (the index object's) |
+ * | `admin-api.hide` | `{ key, conversationId, how? }` (`archived`, `deleted`; absent: back in the list) | `{}` (the index object's; `not_found` when it has no such conversation) |
  *
  * And one message (`send`, `actor.inbox.handle`): `admin-api.seen` `{ entries: [{ key,
  * conversationId, agent, at }] }`, to the index.
@@ -51,6 +52,7 @@ export const CALL = {
   commands: "admin-api.commands",
   command: "admin-api.command",
   list: "admin-api.list",
+  hide: "admin-api.hide",
 } as const;
 
 /** The message each conversation's object sends the index. */
@@ -151,6 +153,13 @@ export function answerCalls(inbox: ActorInbox, backendOf: (key: string) => Admin
   inbox.handle(SEEN, async (_key, message) => index.seen(seenOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {
     const page = pageOf(message);
-    return json(await index.list({ limit: page.limit ?? 50, ...(page.cursor !== undefined && { cursor: page.cursor }) }));
+    const archived = fieldsOf(message).archived === true;
+    return json(await index.list({ limit: page.limit ?? 50, archived, ...(page.cursor !== undefined && { cursor: page.cursor }) }));
+  });
+  inbox.answer(CALL.hide, async (_key, message) => {
+    const how = fieldsOf(message).how;
+    if (how !== undefined && how !== "archived" && how !== "deleted") throw refusal("invalid_request", 'admin-api: "how" is "archived" or "deleted"');
+    if (!(await index.hide(text(message, "key"), text(message, "conversationId"), how))) throw refusal("not_found", "the index has no such conversation");
+    return {};
   });
 }

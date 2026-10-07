@@ -18,6 +18,13 @@
  *
  * `seen` is an upsert: sent twice, or late, it changes nothing a newer one wrote.
  *
+ * **Archived and deleted.** The operator puts a conversation away (`hide`): a third table,
+ * `admin_api_hidden`, holds one row per conversation put away, with how (`archived`: listed apart,
+ * restorable; `deleted`: never listed again) and its activity then. New activity brings it back to
+ * the list by itself (a person wrote again: the operator must see it); a start's backfill, which
+ * brings no newer activity, does not. Nothing of the runtime's is deleted: pi-durable keeps every
+ * conversation (docs/upstream, "Delete a conversation").
+ *
  * **Titles.** A title names a key, so the conversations a reset left behind share it with the key's
  * current one: a second table of the same storage, `admin_api_titles`, holds one row per key (its
  * title, whose it is, the text a model is asked to title, the model's tries). On a server it is the
@@ -35,6 +42,10 @@ import { refusal } from "./backend.ts";
 export const INDEX_KEY = "admin-api:index";
 const TABLE = "admin_api_conversations";
 const TITLES = "admin_api_titles";
+const HIDDEN = "admin_api_hidden";
+
+/** How the operator put a conversation away. */
+export type Hidden = "archived" | "deleted";
 /** A model is asked to title a key at most this often: once, and once more if that failed. */
 export const TITLE_TRIES = 2;
 
@@ -56,8 +67,16 @@ export interface IndexPage {
 export interface ConversationIndex {
   /** Records each entry, unless the index already has a newer time for its conversation. */
   seen(entries: readonly IndexedConversation[]): Promise<void>;
-  /** At most `limit` conversations, the most recently active first. Throws `invalid_cursor`. */
-  list(page: { limit: number; cursor?: string }): Promise<IndexPage>;
+  /**
+   * At most `limit` conversations, the most recently active first: those listed (not put away), or
+   * with `archived` those archived. Throws `invalid_cursor`.
+   */
+  list(page: { limit: number; cursor?: string; archived?: boolean }): Promise<IndexPage>;
+  /**
+   * Puts conversation `conversationId` of `key` away (`archived`, `deleted`) as of its activity now, or
+   * back in the list (`undefined`). `false` when the index has no such conversation.
+   */
+  hide(key: string, conversationId: string, how: Hidden | undefined): Promise<boolean>;
   /**
    * The key of conversation `conversationId`, its newest row's: a server's ids are unique (on
    * Cloudflare an object's are not, and only the index object has rows).
@@ -105,6 +124,9 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
       await database.run(
         `CREATE TABLE IF NOT EXISTS ${TITLES} (key TEXT PRIMARY KEY, title TEXT, source TEXT, input TEXT, tries INTEGER NOT NULL DEFAULT 0)`,
       );
+      await database.run(
+        `CREATE TABLE IF NOT EXISTS ${HIDDEN} (key TEXT NOT NULL, conversation TEXT NOT NULL, how TEXT NOT NULL, at BIGINT NOT NULL, PRIMARY KEY (key, conversation))`,
+      );
     })().catch((error: unknown) => {
       ready = undefined;
       throw error;
@@ -129,17 +151,37 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
       });
     },
 
-    async list({ limit, cursor }) {
+    async list({ limit, cursor, archived = false }) {
       const after = cursor === undefined ? undefined : parseCursor(cursor);
+      // Put away while no newer activity came: archived ones listed apart, deleted ones never.
+      const away = `h.how IS NOT NULL AND h.at >= c.at`;
       const rows = await (await db()).query<{ key: string; conversation: string; agent: string; at: number }>(
-        `SELECT key, conversation, agent, at FROM ${TABLE}` +
-          (after === undefined ? "" : " WHERE at < ? OR (at = ? AND (key > ? OR (key = ? AND conversation > ?)))") +
-          " ORDER BY at DESC, key ASC, conversation ASC LIMIT ?",
+        `SELECT c.key AS key, c.conversation AS conversation, c.agent AS agent, c.at AS at FROM ${TABLE} c ` +
+          `LEFT JOIN ${HIDDEN} h ON h.key = c.key AND h.conversation = c.conversation ` +
+          `WHERE ${archived ? `${away} AND h.how = 'archived'` : `NOT (${away})`}` +
+          (after === undefined ? "" : " AND (c.at < ? OR (c.at = ? AND (c.key > ? OR (c.key = ? AND c.conversation > ?))))") +
+          " ORDER BY c.at DESC, c.key ASC, c.conversation ASC LIMIT ?",
         after === undefined ? [limit + 1] : [after.at, after.at, after.key, after.key, after.conversationId, limit + 1],
       );
       const items = rows.slice(0, limit).map(({ key, conversation, agent, at }) => ({ key, conversationId: conversation, agent, at: Number(at) }));
       const last = items.at(-1);
       return { items, ...(rows.length > limit && last !== undefined && { next: cursorOf(last) }) };
+    },
+
+    async hide(key, conversationId, how) {
+      const database = await db();
+      return database.transaction(async (tx) => {
+        const [row] = await tx.query<{ at: number }>(`SELECT at FROM ${TABLE} WHERE key = ? AND conversation = ?`, [key, conversationId]);
+        if (row === undefined) return false;
+        if (how === undefined) await tx.run(`DELETE FROM ${HIDDEN} WHERE key = ? AND conversation = ?`, [key, conversationId]);
+        else {
+          await tx.run(
+            `INSERT INTO ${HIDDEN} (key, conversation, how, at) VALUES (?, ?, ?, ?) ON CONFLICT (key, conversation) DO UPDATE SET how = excluded.how, at = excluded.at`,
+            [key, conversationId, how, Number(row.at)],
+          );
+        }
+        return true;
+      });
     },
 
     async keyOf(conversationId) {

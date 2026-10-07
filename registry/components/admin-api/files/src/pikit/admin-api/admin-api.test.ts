@@ -844,3 +844,50 @@ test("a run that failed or was aborted titles nothing, and without model.complet
   await Bun.sleep(20);
   expect(await titleOf(bare, "c1")).toBeUndefined();
 });
+
+test("archive, unarchive, delete: the list only, any conversation; archived ones listed apart; unknown 404, an operator's only", async () => {
+  const runtime = new Runtime();
+  runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", lastActivity: 1 });
+  runtime.add({ conversationId: "c2", key: "dashboard:2", agent: "assistant", lastActivity: 2 });
+  const s = await started({}, [], runtime);
+  const listed = async (archived = false) =>
+    ((await (await s.fetch(`/admin/api/conversations${archived ? "?archived=1" : ""}`, { headers: AUTH })).json()) as { items: { conversationId: string }[] }).items.map((each) => each.conversationId);
+  expect(await listed()).toEqual(["c2", "c1"]);
+
+  const archived = await s.fetch("/admin/api/conversations/c1/archive", post());
+  expect(archived.status).toBe(200);
+  expect(await archived.json()).toEqual({ conversationId: "c1" });
+  expect(await s.fetch("/admin/api/conversations/c2/delete", post()).then((r) => r.status)).toBe(200);
+  expect(await listed()).toEqual([]);
+  expect(await listed(true)).toEqual(["c1"]);
+
+  expect(await s.fetch("/admin/api/conversations/c1/unarchive", post()).then((r) => r.status)).toBe(200);
+  expect(await listed()).toEqual(["c1"]);
+  // The runtime keeps both: nothing of its own is deleted.
+  expect(runtime.conversations.has("c2")).toBe(true);
+
+  expect((await s.fetch("/admin/api/conversations/c9/archive", post())).status).toBe(404);
+  expect((await s.fetch("/admin/api/conversations?archived=yes", { headers: AUTH })).status).toBe(400);
+  expect((await s.fetch("/admin/api/conversations/c1/delete", { method: "POST" })).status).toBe(401);
+});
+
+test("at start, the keys with no title yet are titled from their first message, the most recently active first", async () => {
+  const runtime = new Runtime();
+  runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", lastActivity: 1 });
+  runtime.add({ conversationId: "c2", key: "dashboard:2", agent: "assistant", lastActivity: 2 });
+  const user = (text: string) => ({ role: "user", content: text });
+  // Newest first, as a transcript is read: the first message is the last entry.
+  runtime.transcripts.set("c1", [
+    { id: "e2", kind: "message", messages: [{ role: "assistant", content: "faux" }] },
+    { id: "e1", kind: "message", messages: [user("plan a trip to Lisbon")] },
+  ]);
+  runtime.transcripts.set("c2", [{ id: "e1", kind: "message", messages: [user("[From the operator, in the pikit dashboard: …]\nreview the notes")] }]);
+  const model = fakeModel((request) => `Title of ${request.prompt}`);
+
+  const s = await started({}, [model.component], runtime);
+  await until(async () => (await titleOf(s, "c1")) !== undefined, "the older conversation's title");
+
+  expect(model.asked.map((each) => each.prompt)).toEqual(["review the notes", "plan a trip to Lisbon"]);
+  expect(await titleOf(s, "c2")).toBe("Title of review the notes");
+  expect(await titleOf(s, "c1")).toBe("Title of plan a trip to Lisbon");
+});

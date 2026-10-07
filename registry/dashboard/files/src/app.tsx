@@ -6,7 +6,7 @@
  * conversation's Context). A page that loads with a session still open goes straight in.
  */
 
-import { EditPencil, Home, LogOut, SoundHigh, SoundOff } from "iconoir-react";
+import { Archive, EditPencil, Home, LogOut, SoundHigh, SoundOff, Trash, Undo } from "iconoir-react";
 import { useCallback, useEffect, useState } from "react";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem } from "@/components/bui/SidebarNav";
@@ -15,9 +15,19 @@ import { ThemeToggle } from "@/components/bui/ThemeToggle";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Mark } from "@/components/pikit/mark";
 import { SignIn } from "@/components/pikit/sign-in";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setTarget } from "@/lib/activity";
-import { api, type ApiAgents, type ApiApp, type ApiCommands, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
+import { api, type ApiAgents, type ApiApp, type ApiCommands, type ApiConversation, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
 import { ChatsProvider, useChats } from "@/lib/chats";
 import { BASE, match, navigate, pagePath, usePath } from "@/lib/router";
 import { appName, ShellContext, usePageTitle } from "@/lib/shell";
@@ -114,9 +124,9 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const found = views.flatMap((view) => view.pages.map((page) => ({ view, page, params: match(page.path, path) }))).find((each) => each.params !== undefined);
   const chatView = views.find((view) => view.id === "conversations");
   const home = chatView?.pages[0]?.path ?? views[0]?.pages[0]?.path ?? "/";
-  const [draft, setDraft] = useState(0);
   const agents = useApi<ApiAgents>("/agents");
   const commands = useApi<ApiCommands>("/commands");
+  const [draft, setDraft] = useState(0);
   /** A fresh home (its draft empty), with `agent` chosen when given. */
   const newChat = useCallback(
     (agent?: string) => {
@@ -168,13 +178,35 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       }),
   ];
 
-  const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation) => ({
-    id: conversation.conversationId,
-    label: chats.titleOf(conversation),
-    busy: conversation.busy,
-    active: path === pagePath(CHAT, conversation.conversationId),
-    href: `${BASE}${pagePath(CHAT, conversation.conversationId)}`,
-  }));
+  /** The conversation the operator asked to delete: confirmed first. */
+  const [deleting, setDeleting] = useState<{ id: string; title: string }>();
+  const [hideError, setHideError] = useState<Error>();
+  const put = (id: string, action: "archive" | "unarchive" | "delete") => {
+    setHideError(undefined);
+    const leaving = action !== "unarchive" && path === pagePath(CHAT, id);
+    chats.hide(id, action).then(
+      () => leaving && newChat(),
+      (thrown: unknown) => setHideError(thrown instanceof Error ? thrown : new Error(String(thrown))),
+    );
+  };
+  const rowOf = (conversation: ApiConversation, archived: boolean): SidebarChat => {
+    const id = conversation.conversationId;
+    const title = chats.titleOf(conversation);
+    return {
+      id,
+      label: title,
+      busy: conversation.busy,
+      active: path === pagePath(CHAT, id),
+      href: `${BASE}${pagePath(CHAT, id)}`,
+      actions: [
+        archived
+          ? { key: "unarchive", label: "Restore", icon: <Undo />, onSelect: () => put(id, "unarchive") }
+          : { key: "archive", label: "Archive", icon: <Archive />, onSelect: () => put(id, "archive") },
+        { key: "delete", label: "Delete", icon: <Trash />, danger: true, onSelect: () => setDeleting({ id, title }) },
+      ],
+    };
+  };
+  const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation) => rowOf(conversation, false));
 
   const Page = found?.page.component;
   const page =
@@ -201,6 +233,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           workspace={{ name, logo: <Mark size={20} /> }}
           items={items}
           chats={sidebarChats}
+          archived={{ chats: chats.archived?.map((conversation) => rowOf(conversation, true)), onOpen: chats.loadArchived }}
           chatsEmpty={chats.error !== undefined ? "The chats cannot be read" : chats.items === undefined ? "Loading" : "No chats yet"}
           onPickChat={(id) => navigate(pagePath(CHAT, id))}
           chatsFooter={
@@ -212,11 +245,6 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           }
           menu={(close) => (
             <>
-              <div className="flex h-11 items-center gap-2 px-2">
-                <Mark size={20} />
-                <span className="min-w-0 flex-1 truncate text-[14px] leading-5 font-medium text-ink">{name}</span>
-              </div>
-              <MenuSeparator />
               <div className="flex h-10 items-center gap-1.5 px-2">
                 <span className="min-w-0 flex-1 text-[13.5px] text-ink">Theme</span>
                 <ThemeToggle />
@@ -246,8 +274,36 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           )}
         />
 
+        <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Delete this chat?</AlertDialogTitle>
+              <AlertDialogDescription>
+                “{deleting?.title}” leaves the list for good. If its person writes again, it comes back with the new message.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel>Cancel</AlertDialogCancel>
+              <AlertDialogAction
+                className="bg-red text-white hover:bg-red/90"
+                onClick={() => {
+                  if (deleting !== undefined) put(deleting.id, "delete");
+                  setDeleting(undefined);
+                }}
+              >
+                Delete
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
+
         <div className="flex min-w-0 flex-1 gap-2.5">
           <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-window border border-line bg-page">
+            {hideError !== undefined && (
+              <div className="border-b border-line px-3 py-2">
+                <ErrorNote error={hideError} title="The chat could not be changed" />
+              </div>
+            )}
             <TabBar path={path} home={home} onActions={setActions} onNewChat={() => newChat()} />
             <div className="flex min-h-0 flex-1 flex-col">{page}</div>
           </section>

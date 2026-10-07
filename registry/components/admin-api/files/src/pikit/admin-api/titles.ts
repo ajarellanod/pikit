@@ -9,6 +9,9 @@
  * - **The model**: admin-api's `titleModel` when set, else the conversation's agent's.
  * - **The answer** is cleaned (`cleanTitle`: one line, no quotes, at most `TITLE_MAX` characters);
  *   one with nothing left is a failure.
+ * - **At start** (`untitled`), the most recently active keys with no title yet (made before titles
+ *   existed, or before admin-api was installed) are titled from their first message, one at a time and
+ *   at most `UNTITLED_PER_START` per start: an old history costs a few model calls, never hundreds.
  */
 
 import type { AppContext } from "@pikit/core";
@@ -24,6 +27,8 @@ export const TITLE_SYSTEM =
 export const TITLE_INPUT = 1_000;
 /** The most tokens a title may take. */
 export const TITLE_TOKENS = 32;
+/** The keys with no title titled at one start, the most recently active first. */
+export const UNTITLED_PER_START = 20;
 
 /** What was written in a user message (pi-ai's JSON), without the operator's note line; `undefined` for another. */
 export function userTextOf(message: unknown): string | undefined {
@@ -67,10 +72,10 @@ export function createTitler(options: TitlerOptions) {
   const titling = new Set<string>();
   const work = new Set<Promise<void>>();
 
-  const title = async (result: AgentResult, ctx: AppContext): Promise<void> => {
-    const { key, agent } = result.conversation;
+  const title = async (conversation: { key: string; agent: string }, messages: readonly unknown[], ctx: AppContext): Promise<void> => {
+    const { key, agent } = conversation;
     const complete = options.complete();
-    const input = firstTextOf(result.messages as unknown[]);
+    const input = firstTextOf(messages);
     const model = options.modelFor(agent);
     if (complete === undefined || model === undefined) return;
     // A run whose messages hold no text (images only) leaves the title to a later one.
@@ -97,7 +102,7 @@ export function createTitler(options: TitlerOptions) {
     settled(result: AgentResult, ctx: AppContext): void {
       if (result.kind !== "completed" || titling.has(result.conversation.key)) return;
       titling.add(result.conversation.key);
-      const done = title(result, ctx)
+      const done = title(result.conversation, result.messages as unknown[], ctx)
         .catch((error: unknown) =>
           ctx.logger.warn("admin-api: a conversation could not be titled", { conversation: result.conversation.key, error: error instanceof Error ? error.message : String(error) }),
         )
@@ -106,6 +111,34 @@ export function createTitler(options: TitlerOptions) {
           work.delete(done);
         });
       work.add(done);
+    },
+    /**
+     * Titles the keys of `conversations` that have none, the most recently active first, at most
+     * `UNTITLED_PER_START`, one at a time: `firstMessages` reads a conversation's first messages.
+     */
+    async untitled(
+      conversations: readonly { key: string; agent: string; conversationId: string; at: number }[],
+      firstMessages: (conversationId: string) => Promise<readonly unknown[]>,
+      ctx: AppContext,
+    ): Promise<number> {
+      if (options.complete() === undefined) return 0;
+      const newest = new Map<string, { key: string; agent: string; conversationId: string; at: number }>();
+      for (const each of conversations) if ((newest.get(each.key)?.at ?? -1) < each.at) newest.set(each.key, each);
+      let titled = 0;
+      for (const each of [...newest.values()].sort((a, b) => b.at - a.at)) {
+        if (titled >= UNTITLED_PER_START || ctx.abortSignal?.aborted === true) break;
+        if (titling.has(each.key) || (await options.index().title(each.key)) !== undefined) continue;
+        titling.add(each.key);
+        try {
+          await title(each, await firstMessages(each.conversationId), ctx);
+          titled++;
+        } catch (error) {
+          ctx.logger.warn("admin-api: a conversation could not be titled", { conversation: each.key, error: error instanceof Error ? error.message : String(error) });
+        } finally {
+          titling.delete(each.key);
+        }
+      }
+      return titled;
     },
     /** Resolves once the titles under way are done. */
     async idle(): Promise<void> {

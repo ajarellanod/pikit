@@ -78,9 +78,9 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
 
     agents: (ctx) => call<ApiAgents>(INDEX_KEY, CALL.agents, null, ctx),
 
-    async conversations(page, ctx) {
+    async conversations(page, ctx, archived = false) {
       const limit = Math.min(page.limit ?? CONVERSATIONS_PER_PAGE, CONVERSATIONS_PER_PAGE);
-      const listed = await call<IndexPage>(INDEX_KEY, CALL.list, { limit, ...(page.cursor !== undefined && { cursor: page.cursor }) }, ctx);
+      const listed = await call<IndexPage>(INDEX_KEY, CALL.list, { limit, ...(archived && { archived }), ...(page.cursor !== undefined && { cursor: page.cursor }) }, ctx);
       const found = await Promise.all(
         listed.items.map(async ({ key, conversationId }) => {
           try {
@@ -101,6 +101,12 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
       const { key, agent, ...rest } = message;
       const started = await call<ApiStartResponse>(key, CALL.start, { agent, ...(sendable(rest) as object) } as JsonValue, ctx);
       return { ...started, conversationId: qualify(key, started.conversationId) };
+    },
+
+    async hide(id, how, ctx) {
+      // The index object keeps what is put away: the conversation's own object is not asked.
+      const { key, local } = target(id);
+      await call<JsonValue>(INDEX_KEY, CALL.hide, { key, conversationId: local, ...(how !== undefined && { how }) }, ctx);
     },
 
     async conversation(id, ctx) {

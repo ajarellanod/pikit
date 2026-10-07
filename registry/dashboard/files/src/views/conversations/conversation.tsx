@@ -1,8 +1,8 @@
 /**
  * One conversation, live: its transcript, the answer being written, the thinking and the tools
  * running; and what an operator does to it (SPEC §5): a message (with images, a web search), a stop,
- * a reset. Its top bar holds nothing but two buttons: the Context panel (the images sent in it, what
- * its web searches and fetches found) and a menu with the reset. Its composer shows its assistant: a
+ * a reset (`/new`). Its top bar holds nothing but, when there is any, the Context panel's button (the
+ * images sent in it, what its web searches and fetches found). Its composer shows its assistant: a
  * conversation never changes agent, so picking another starts a new chat with it. Its "/" runs the
  * App's commands here (`POST …/commands/:name`): what one answers is a quiet note in the thread, for
  * the operator only (no channel gets it); one that left the conversation behind (`/new`) is followed
@@ -14,30 +14,17 @@
  * it nor the answer); a run that also answers a user's message is delivered to the user, as always.
  */
 
-import { MoreHoriz, Refresh, SidebarExpand } from "iconoir-react";
+import { SidebarExpand } from "iconoir-react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
-import GlideMenu from "@/components/bui/GlideMenu";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { type Message, Reply, turnsOf, UserBubble, userText } from "@/components/pikit/message";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog";
-import { isDashboardKey } from "@/lib/admin-api";
-import {
   api,
   type ApiCommandResponse,
   type ApiConversation,
   type ApiPage,
-  type ApiResetResponse,
   type ApiSendResponse,
   type ApiTranscriptEntry,
   post,
@@ -101,92 +88,6 @@ function useContextOpen(): [boolean, (open: boolean) => void] {
   return [open, set];
 }
 
-/** The conversation's menu: its reset, which `onReset` confirms first. */
-function ConversationMenu({ actionable, onReset }: { actionable: boolean; onReset: () => void }) {
-  const [open, setOpen] = useState(false);
-
-  useEffect(() => {
-    if (!open) return;
-    const close = (event: PointerEvent) => {
-      if (!(event.target as Element).closest("[data-conversation-menu]")) setOpen(false);
-    };
-    const escape = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
-    document.addEventListener("pointerdown", close);
-    document.addEventListener("keydown", escape);
-    return () => {
-      document.removeEventListener("pointerdown", close);
-      document.removeEventListener("keydown", escape);
-    };
-  }, [open]);
-
-  return (
-    <div data-conversation-menu className="relative">
-      <button
-        type="button"
-        aria-label="Conversation actions"
-        aria-expanded={open}
-        disabled={!actionable}
-        onClick={() => setOpen((current) => !current)}
-        className="flex size-7 items-center justify-center rounded-[7px] text-ink-3 transition-colors duration-100 enabled:hover:bg-hover enabled:hover:text-ink disabled:opacity-40"
-      >
-        <MoreHoriz width={16} height={16} strokeWidth={2} />
-      </button>
-      {open && (
-        <div className="absolute top-full right-0 z-50 mt-1.5 w-56 rounded-[14px] bg-surface p-1.5 shadow-overlay" style={{ animation: "pop-in 180ms cubic-bezier(0.23,1,0.32,1) both", transformOrigin: "top right" }}>
-          <GlideMenu className="flex flex-col gap-px" highlightClassName="inset-x-0 rounded-[8px] bg-hover-2">
-            <button
-              data-menu-row
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                onReset();
-              }}
-              className="relative z-10 flex h-9 w-full items-center gap-2 rounded-[8px] px-2 text-left text-[13.5px] text-red"
-            >
-              <Refresh width={16} height={16} strokeWidth={1.9} />
-              Reset conversation…
-            </button>
-          </GlideMenu>
-        </div>
-      )}
-    </div>
-  );
-}
-
-/** The reset, confirmed: the key starts again in a new conversation, which the page follows. */
-function ResetDialog({ conversation, open, onOpenChange, onError }: { conversation: ApiConversation; open: boolean; onOpenChange: (open: boolean) => void; onError: (error: Error | undefined) => void }) {
-  const chats = useChats();
-  const reset = async () => {
-    onError(undefined);
-    try {
-      const done = await post<ApiResetResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/reset`);
-      chats.replaced(conversation.conversationId, done.conversationId);
-      chats.reload();
-      navigate(pagePath("/conversations", done.conversationId), { replace: true });
-    } catch (thrown) {
-      onError(thrown instanceof Error ? thrown : new Error(String(thrown)));
-    }
-  };
-  return (
-    <AlertDialog open={open} onOpenChange={onOpenChange}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle>Reset this conversation?</AlertDialogTitle>
-          <AlertDialogDescription>
-            {isDashboardKey(conversation.key) ? "This chat" : conversation.key} starts again with an empty history. This conversation is kept and stays readable here; a run still going finishes in it.
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Cancel</AlertDialogCancel>
-          <AlertDialogAction className="bg-red text-white hover:bg-red/90" onClick={() => void reset()}>
-            Reset
-          </AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  );
-}
-
 /** What a command answered: a quiet note in the thread, the operator's only. */
 function CommandNoteRow({ note }: { note: CommandNote }) {
   return (
@@ -240,7 +141,6 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const summary = useApi<ApiConversation>(`/conversations/${encodeURIComponent(id)}`);
   const transcript = useTranscript(id, live.changes);
   const [contextOpen, setContextOpen] = useContextOpen();
-  const [confirming, setConfirming] = useState(false);
   const [actionError, setActionError] = useState<Error>();
   const [note, setNote] = useState<string>();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -301,8 +201,6 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const waiting = live.busy && !streaming;
   const last = turns.at(-1);
   const since = [...messages].reverse().find((message) => message.timestamp !== undefined)?.timestamp;
-  const dashboardOwn = isDashboardKey(conversation?.key);
-  const actionable = conversation?.current === true;
   const webSearch = webSearchOf(described, conversation?.agent);
   const send = async ({ text, images, webSearch: search }: ComposerMessage) => {
     if (conversation === undefined) return;
@@ -354,9 +252,14 @@ export function ConversationPage({ params }: { params: Record<string, string> })
     );
   };
 
+  // The Context panel's button shows only when there is something to show there.
+  const contextImages = imagesOf(messages);
+  const contextSources = sourcesOf(messages);
+  const hasContext = contextImages.length > 0 || contextSources.length > 0;
+
   return (
     <div className="relative flex min-h-0 flex-1 flex-col">
-      {conversation !== undefined && (
+      {conversation !== undefined && hasContext && (
         <TabActions>
           <button
             type="button"
@@ -368,10 +271,8 @@ export function ConversationPage({ params }: { params: Record<string, string> })
           >
             <SidebarExpand width={16} height={16} strokeWidth={1.9} />
           </button>
-          <ConversationMenu actionable={actionable} onReset={() => setConfirming(true)} />
         </TabActions>
       )}
-      {conversation !== undefined && <ResetDialog conversation={conversation} open={confirming} onOpenChange={setConfirming} onError={setActionError} />}
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="flex flex-col gap-8 px-4 pt-8 sm:px-8 lg:px-12" style={{ paddingBottom: composerH + 16 }}>
@@ -459,19 +360,15 @@ export function ConversationPage({ params }: { params: Record<string, string> })
                 onStop={stop}
                 onSend={send}
               />
-              {(note !== undefined || (conversation !== undefined && !dashboardOwn)) && (
-                <p className="px-1 text-center text-[12px] text-ink-3">
-                  {note ?? `Only you see what you write here, and its answer: nothing reaches ${conversation?.key}'s chat.`}
-                </p>
-              )}
+              {note !== undefined && <p className="px-1 text-center text-[12px] text-ink-3">{note}</p>}
             </>
           )}
         </div>
       </div>
 
-      {contextOpen && conversation !== undefined && (
+      {contextOpen && hasContext && conversation !== undefined && (
         <SidePanel>
-          <ContextPanel images={imagesOf(messages)} sources={sourcesOf(messages)} onClose={() => setContextOpen(false)} />
+          <ContextPanel images={contextImages} sources={contextSources} onClose={() => setContextOpen(false)} />
         </SidePanel>
       )}
     </div>

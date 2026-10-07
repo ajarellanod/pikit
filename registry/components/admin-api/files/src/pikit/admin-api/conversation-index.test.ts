@@ -41,7 +41,7 @@ test("seen is an upsert: a repeated or late one leaves the newest time and its a
 
   expect(await conversations.list({ limit: 10 })).toEqual({ items: [row("telegram:1", 300)] });
   // Its own tables, prefixed with the component's name.
-  expect(await sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'admin_api_%' ORDER BY name")).toEqual([{ name: "admin_api_conversations" }, { name: "admin_api_titles" }]);
+  expect(await sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'admin_api_%' ORDER BY name")).toEqual([{ name: "admin_api_conversations" }, { name: "admin_api_hidden" }, { name: "admin_api_titles" }]);
 });
 
 test("one row per conversation: a key's conversations (a reset's) are listed each by its own activity", async () => {
@@ -119,4 +119,42 @@ test("titles: a model titles a key once (one more try if that failed), from the 
   await titles.name("http:b", "Named first");
   expect(await titles.titling("http:b", "text")).toBeUndefined();
   expect(await titles.title("http:b")).toBe("Named first");
+});
+
+test("hide: archived ones are listed apart, deleted ones never; new activity lists either again, a backfill does not", async () => {
+  const { index: conversations } = await index();
+  await conversations.seen([row("telegram:1", 100), row("telegram:2", 200), row("dashboard:a", 300)]);
+  const keys = async (archived = false) => (await conversations.list({ limit: 10, archived })).items.map((each) => each.key);
+
+  expect(await conversations.hide("telegram:1", "1", "archived")).toBe(true);
+  expect(await conversations.hide("dashboard:a", "1", "deleted")).toBe(true);
+  expect(await keys()).toEqual(["telegram:2"]);
+  expect(await keys(true)).toEqual(["telegram:1"]);
+
+  // A start's backfill brings no newer activity: they stay put away.
+  await conversations.seen([row("telegram:1", 100), row("dashboard:a", 300)]);
+  expect(await keys()).toEqual(["telegram:2"]);
+
+  // A person wrote again: back in the list; so is a deleted one that gets a message.
+  await conversations.seen([row("telegram:1", 400), row("dashboard:a", 500)]);
+  expect(await keys()).toEqual(["dashboard:a", "telegram:1", "telegram:2"]);
+  expect(await keys(true)).toEqual([]);
+
+  // Back by the operator; an unknown conversation is said.
+  await conversations.hide("telegram:2", "1", "archived");
+  expect(await conversations.hide("telegram:2", "1", undefined)).toBe(true);
+  expect(await keys()).toContain("telegram:2");
+  expect(await conversations.hide("telegram:9", "1", "archived")).toBe(false);
+});
+
+test("hide pages like the list: archived ones a page at a time", async () => {
+  const { index: conversations } = await index();
+  await conversations.seen([1, 2, 3, 4, 5].map((n) => row(`telegram:${n}`, n * 100)));
+  for (const n of [1, 2, 3, 4]) await conversations.hide(`telegram:${n}`, "1", "archived");
+
+  const first = await conversations.list({ limit: 3, archived: true });
+  const second = await conversations.list({ limit: 3, archived: true, ...(first.next !== undefined && { cursor: first.next }) });
+  expect(first.items.map((each) => each.key)).toEqual(["telegram:4", "telegram:3", "telegram:2"]);
+  expect(second.items.map((each) => each.key)).toEqual(["telegram:1"]);
+  expect(second.next).toBeUndefined();
 });

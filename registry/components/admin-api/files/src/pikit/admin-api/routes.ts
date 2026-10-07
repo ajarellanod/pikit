@@ -49,6 +49,7 @@ import {
   type ApiPendingPiece,
   type ApiReceipt,
   type ApiReceiptsPage,
+  type ApiHideResponse,
   type ApiResetResponse,
   type ApiSendResponse,
   type ApiSession,
@@ -281,7 +282,9 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   api("GET /admin/api/conversations", async (request, ctx) => {
     const page = pageOf(request);
     if ("problem" in page) return failure(400, "invalid_request", page.problem);
-    return json<ApiPage<ApiConversation>>(200, await backend().conversations(page, ctx));
+    const archived = new URL(request.url).searchParams.get("archived");
+    if (archived !== null && archived !== "1" && archived !== "0") return failure(400, "invalid_request", "archived is 1 or 0");
+    return json<ApiPage<ApiConversation>>(200, await backend().conversations(page, ctx, archived === "1"));
   });
 
   api("GET /admin/api/conversations/:id", async (request, ctx) => json<ApiConversation>(200, await backend().conversation(conversationIdOf(request), ctx)));
@@ -325,6 +328,16 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     ctx.logger.info("admin-api: an operator reset a conversation", { operator: operator.id, conversation: reset.key });
     return json<ApiResetResponse>(200, reset);
   });
+
+  // The list only: what the operator puts away, and puts back. Any conversation, current or not.
+  for (const [action, how] of [["archive", "archived"], ["unarchive", undefined], ["delete", "deleted"]] as const) {
+    api(`POST /admin/api/conversations/:id/${action}`, async (request, ctx, operator) => {
+      const id = conversationIdOf(request);
+      await backend().hide(id, how, ctx);
+      ctx.logger.info(`admin-api: an operator's ${action}`, { operator: operator.id, conversation: id });
+      return json<ApiHideResponse>(200, { conversationId: id });
+    });
+  }
 
   api("GET /admin/api/commands", async (_request, ctx) => json<ApiCommands>(200, await backend().commands(ctx)));
 

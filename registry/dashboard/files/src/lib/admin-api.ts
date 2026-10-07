@@ -18,7 +18,7 @@
  * | `GET /admin/api/agents` | `ApiAgents`: the App's agents, their model and tools |
  * | `POST /admin/api/session` | the credential once → `200 ApiSession` and a session cookie (a browser's) |
  * | `DELETE /admin/api/session` | `204`: the session cookie cleared |
- * | `GET /admin/api/conversations?limit&cursor` | `ApiPage<ApiConversation>`, the most recently active first |
+ * | `GET /admin/api/conversations?limit&cursor&archived` | `ApiPage<ApiConversation>`, the most recently active first: those listed, or with `archived=1` those archived |
  * | `POST /admin/api/conversations` | `ApiStartRequest` → `201 ApiStartResponse`: a conversation of the dashboard's own |
  * | `GET /admin/api/conversations/:id` | `ApiConversation` |
  * | `GET /admin/api/conversations/:id/transcript?limit&cursor` | `ApiPage<ApiTranscriptEntry>`, newest first |
@@ -26,6 +26,7 @@
  * | `POST /admin/api/conversations/:id/messages` | `ApiSendRequest` → `202 ApiSendResponse` |
  * | `POST /admin/api/conversations/:id/abort` | `200 ApiAbortResponse` |
  * | `POST /admin/api/conversations/:id/reset` | `200 ApiResetResponse` |
+ * | `POST /admin/api/conversations/:id/archive`, `…/unarchive`, `…/delete` | `200 ApiHideResponse`: the list only (a deleted one is never listed again, nothing of the runtime's is deleted; new activity lists either again) |
  * | `GET /admin/api/commands` | `ApiCommands`: the slash commands the App registered (`agent.command`) |
  * | `POST /admin/api/conversations/:id/commands/:name` | `ApiCommandRequest` → `200 ApiCommandResponse`: the command run in the conversation |
  * | `GET /admin/api/delivery/pending?limit&cursor` | `ApiPage<ApiPendingPiece>`, oldest stored first (with `outbound.queue`) |
@@ -300,6 +301,11 @@ export interface ApiSession {
 }
 
 export interface ApiAbortResponse {
+  conversationId: string;
+}
+
+/** What archive, unarchive and delete did: the conversation, put away or back in the list. */
+export interface ApiHideResponse {
   conversationId: string;
 }
 

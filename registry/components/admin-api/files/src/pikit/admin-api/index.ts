@@ -65,6 +65,20 @@ export { worker, WORKER_NAME } from "./worker.ts";
 /** Conversations read from `agent.observe` per page when the App starts, and sent to the index at once. */
 const BACKFILL_PAGE = 100;
 
+/** A conversation's first messages, oldest first: its transcript's last page (newest first), read through at most 50 pages. */
+async function firstMessages(observer: AgentObserver, conversationId: string, ctx: AppContext): Promise<readonly unknown[]> {
+  let cursor: string | undefined;
+  let last: readonly { messages: readonly unknown[] }[] = [];
+  for (let pages = 0; pages < 50; pages++) {
+    const page = await observer.transcript(conversationId, { limit: BACKFILL_PAGE, ...(cursor !== undefined && { cursor }) }, ctx);
+    if (page === undefined) return [];
+    last = page.items;
+    cursor = page.next;
+    if (cursor === undefined) break;
+  }
+  return [...last].reverse().flatMap((entry) => entry.messages);
+}
+
 export default defineComponent({
   name: "admin-api",
   config: Config,
@@ -169,10 +183,13 @@ export default defineComponent({
     pikit.on("agent.failed", (result, ctx) => active(result.conversation, ctx));
     pikit.on("conversation.reset", ({ conversation }, ctx) => active(conversation, ctx));
 
-    /** Every conversation `observer` holds with a key, a page at a time, into the index: what events may have missed. */
+    /**
+     * Every conversation `observer` holds with a key, a page at a time, into the index: what events may
+     * have missed. Then the keys with no title yet are titled (`untitled`).
+     */
     const backfill = async (observer: AgentObserver, ctx: AppContext): Promise<number> => {
       let cursor: string | undefined;
-      let count = 0;
+      const all: { key: string; agent: string; conversationId: string; at: number }[] = [];
       do {
         if (ctx.abortSignal?.aborted === true) break;
         const page = await observer.conversations({ limit: BACKFILL_PAGE, ...(cursor !== undefined && { cursor }) }, ctx);
@@ -180,10 +197,13 @@ export default defineComponent({
           key === undefined || agent === undefined ? [] : [{ key, agent, conversationId, at: lastActivity ?? 0 }],
         );
         await seen(entries, ctx);
-        count += entries.length;
+        all.push(...entries);
         cursor = page.next;
       } while (cursor !== undefined);
-      return count;
+      await titler.untitled(all, (conversationId) => firstMessages(observer, conversationId, ctx), ctx).catch((error: unknown) =>
+        ctx.logger.warn("admin-api: the conversations with no title were not titled", { error: error instanceof Error ? error.message : String(error) }),
+      );
+      return all.length;
     };
 
     let stopping: AbortController | undefined;

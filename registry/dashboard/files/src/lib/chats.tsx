@@ -11,12 +11,16 @@
  * one of the dashboard's own. A conversation with no key (no message reached it and no reset pointed a
  * key to it) has nothing to show or do: the list leaves it out. Tabs are kept in
  * `localStorage["pikit-tabs"]`.
+ *
+ * The operator puts a conversation away from its row (`hide`): archived (listed apart, `archived`,
+ * read when opened) or deleted (never listed again). The list only: the runtime keeps it, and new
+ * activity (a person writes again) lists it again by itself.
  */
 
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { every, usePolling } from "./activity.ts";
 import { cleanTitle, isDashboardKey } from "./admin-api.ts";
-import { api, type ApiApp, type ApiConversation, type ApiPage } from "./api.ts";
+import { api, type ApiApp, type ApiConversation, type ApiPage, post } from "./api.ts";
 
 const PAGE = 50;
 const TABS = "pikit-tabs";
@@ -94,6 +98,11 @@ export interface Chats {
   closeTab(id: string): Tab | undefined;
   /** The conversation `from` was reset into `to`: its tab follows (the title is the key's). */
   replaced(from: string, to: string): void;
+  /** The archived ones, the most recently active first; undefined until `loadArchived` read them. */
+  archived: ApiConversation[] | undefined;
+  loadArchived(): void;
+  /** Archives, restores (`unarchive`) or deletes a conversation: from the list only. Its tab closes when it leaves the list. */
+  hide(id: string, action: "archive" | "unarchive" | "delete"): Promise<void>;
 }
 
 const ChatsContext = createContext<Chats | undefined>(undefined);
@@ -112,6 +121,9 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
   const [firsts, setFirsts] = useState<Record<string, string>>({});
   const [notes, setNotes] = useState<Record<string, CommandNote[]>>({});
   const [tabs, setTabs] = useState<Tab[]>(() => load<Tab[]>(TABS, []).filter((tab) => typeof tab?.id === "string"));
+  const [archived, setArchived] = useState<ApiConversation[]>();
+  /** Put away by this page, with their activity then: left out of the pages read until newer activity lists one again. */
+  const [gone, setGone] = useState<ReadonlyMap<string, number>>(new Map());
 
   const reload = useCallback(() => {
     api<ApiPage<ApiConversation>>(`/conversations?limit=${PAGE}`)
@@ -192,13 +204,41 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
   }, []);
 
   // A conversation active again since the older pages were read is on the first page: shown once.
-  // One with no key has nothing to show or do: left out.
+  // One with no key has nothing to show or do: left out; so is one this page just put away.
   const items = useMemo(() => {
     if (first === undefined) return undefined;
     const seen = new Set<string>();
-    return [...first.items, ...older].filter((each) => each.key !== undefined && !seen.has(each.conversationId) && seen.add(each.conversationId));
-  }, [first, older]);
+    return [...first.items, ...older].filter((each) => each.key !== undefined && !gone.has(each.conversationId) && !seen.has(each.conversationId) && seen.add(each.conversationId));
+  }, [first, older, gone]);
 
-  const value: Chats = { items, error, hasOlder: cursor !== undefined, loadOlder, reload, titleOf, tabTitle, setFirstMessage, notesOf, addNote, tabs, openTab, closeTab, replaced };
+  const loadArchived = useCallback(() => {
+    api<ApiPage<ApiConversation>>(`/conversations?archived=1&limit=${PAGE}`)
+      .then((page) => setArchived(page.items.filter((each) => each.key !== undefined)))
+      .catch((thrown: unknown) => setError(thrown instanceof Error ? thrown : new Error(String(thrown))));
+  }, []);
+
+  const hide = useCallback(
+    async (id: string, action: "archive" | "unarchive" | "delete") => {
+      await post(`/conversations/${encodeURIComponent(id)}/${action}`);
+      if (action === "unarchive") setGone((all) => new Map([...all].filter(([each]) => each !== id)));
+      else {
+        const at = [...(first?.items ?? []), ...older].find((each) => each.conversationId === id)?.lastActivity ?? 0;
+        setGone((all) => new Map([...all, [id, at]]));
+        setTabs((all) => all.filter((tab) => tab.id !== id));
+      }
+      if (archived !== undefined || action !== "delete") loadArchived();
+      reload();
+    },
+    [archived, first, older, loadArchived, reload],
+  );
+
+  // Active again since it was put away (a person wrote): the API lists it again, and so does this page.
+  useEffect(() => {
+    if (first === undefined || gone.size === 0) return;
+    const back = first.items.filter((each) => (gone.get(each.conversationId) ?? Infinity) < (each.lastActivity ?? 0)).map((each) => each.conversationId);
+    if (back.length > 0) setGone((all) => new Map([...all].filter(([id]) => !back.includes(id))));
+  }, [first, gone]);
+
+  const value: Chats = { items, error, hasOlder: cursor !== undefined, loadOlder, reload, titleOf, tabTitle, setFirstMessage, notesOf, addNote, tabs, openTab, closeTab, replaced, archived, loadArchived, hide };
   return <ChatsContext.Provider value={value}>{children}</ChatsContext.Provider>;
 }
