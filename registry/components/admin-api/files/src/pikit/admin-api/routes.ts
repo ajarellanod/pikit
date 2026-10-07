@@ -9,9 +9,12 @@
  *   (`ADMIN_CLIENT_HEADER`), so a page of another site cannot sign a browser in or out.
  * - What an operator writes (`backend.ts`): a message is a follow-up whose request id starts with
  *   `dashboard:`, and a new conversation is the dashboard's own, `dashboard:<uuid>`.
- * - A backend's refusal (`ActorCallError`) is its status: `not_found` `404`; `no_agent`, `not_current`
- *   `409`; `invalid_cursor`, `invalid_request`, `unknown_agent` `400`; `too_large` `413`. Any other code
- *   (an object that could not be reached, a call that failed) is `503 unavailable`, logged.
+ * - A backend's refusal (`ActorCallError`) is its status: `not_found`, `unknown_command` `404`;
+ *   `no_agent`, `not_current` `409`; `invalid_cursor`, `invalid_request`, `unknown_agent` `400`;
+ *   `too_large` `413`; `command_failed` `422`. Any other code (an object that could not be reached, a
+ *   call that failed) is `503 unavailable`, logged.
+ * - A slash command (`agent.command`) runs in a conversation as the other actions do (an operator, the
+ *   key's current conversation), logged with its name, never its arguments.
  * - A message's images are checked here (`attachmentsProblem`: their number and types `400`, their size
  *   `413`), and a body larger than the most a message can be is `413` before it is read.
  * - Each action is logged with the operator's id and the conversation's key, never the message's text.
@@ -37,6 +40,8 @@ import {
   type ApiAbortResponse,
   type ApiAgents,
   type ApiApp,
+  type ApiCommandResponse,
+  type ApiCommands,
   type ApiConversation,
   type ApiError,
   type ApiEvent,
@@ -51,6 +56,7 @@ import {
   type ApiTranscriptEntry,
   attachmentsProblem,
   DASHBOARD_KEY_PREFIX,
+  MAX_COMMAND_ARGS,
   MAX_IMAGE_BYTES,
   MAX_IMAGES,
 } from "./api.ts";
@@ -77,9 +83,20 @@ const MessageFields = {
 };
 const SendBody = Type.Object(MessageFields, { additionalProperties: false });
 const StartBody = Type.Object({ agent: Type.String({ minLength: 1, maxLength: 200 }), ...MessageFields }, { additionalProperties: false });
+const CommandBody = Type.Object({ args: Type.Optional(Type.String({ maxLength: MAX_COMMAND_ARGS })) }, { additionalProperties: false });
 
 /** The status of each refusal a backend throws; any other is `503`. */
-const STATUS: Record<string, number> = { not_found: 404, no_agent: 409, not_current: 409, invalid_cursor: 400, invalid_request: 400, unknown_agent: 400, too_large: 413 };
+const STATUS: Record<string, number> = {
+  not_found: 404,
+  unknown_command: 404,
+  no_agent: 409,
+  not_current: 409,
+  invalid_cursor: 400,
+  invalid_request: 400,
+  unknown_agent: 400,
+  too_large: 413,
+  command_failed: 422,
+};
 
 const json = <T>(status: number, body: T): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 const failure = (status: number, error: string, message?: string): Response =>
@@ -90,6 +107,16 @@ const UNAUTHORIZED = (): Response =>
 /** The `:id` of `/admin/api/conversations/:id/…`, decoded; `""` when malformed. */
 function conversationIdOf(request: Request): string {
   const raw = new URL(request.url).pathname.split("/")[4] ?? "";
+  try {
+    return decodeURIComponent(raw);
+  } catch {
+    return "";
+  }
+}
+
+/** The `:name` of `/admin/api/conversations/:id/commands/:name`, decoded; `""` when malformed. */
+function commandNameOf(request: Request): string {
+  const raw = new URL(request.url).pathname.split("/")[6] ?? "";
   try {
     return decodeURIComponent(raw);
   } catch {
@@ -297,6 +324,27 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     const reset = await backend().reset(conversationIdOf(request), ctx);
     ctx.logger.info("admin-api: an operator reset a conversation", { operator: operator.id, conversation: reset.key });
     return json<ApiResetResponse>(200, reset);
+  });
+
+  api("GET /admin/api/commands", async (_request, ctx) => json<ApiCommands>(200, await backend().commands(ctx)));
+
+  api("POST /admin/api/conversations/:id/commands/:name", async (request, ctx, operator) => {
+    if (Number(request.headers.get("content-length") ?? 0) > MAX_COMMAND_ARGS * 6 + 1024) return failure(413, "too_large", `a command's arguments are at most ${MAX_COMMAND_ARGS} characters`);
+    const raw = await request.text();
+    let parsed: unknown = {};
+    try {
+      if (raw.trim() !== "") parsed = JSON.parse(raw);
+    } catch {
+      return failure(400, "invalid_request", "the body is not JSON");
+    }
+    if (!Value.Check(CommandBody, parsed)) {
+      const [first] = Value.Errors(CommandBody, parsed);
+      return failure(400, "invalid_request", `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}`);
+    }
+    const name = commandNameOf(request);
+    const ran = await backend().command(conversationIdOf(request), name, (parsed as Static<typeof CommandBody>).args ?? "", ctx);
+    ctx.logger.info("admin-api: an operator ran a command", { operator: operator.id, conversation: ran.key, command: name });
+    return json<ApiCommandResponse>(200, ran.text === undefined ? {} : { text: ran.text });
   });
 
   /** A page read with the client's cursor: a queue refuses a cursor it did not give. */

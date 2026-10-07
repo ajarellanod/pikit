@@ -463,3 +463,34 @@ test("a run that settles, fails or is resumed in an object tells the index (a ru
   await ctx.emit("agent.failed", { conversation, requestId: "r3", requestIds: ["r3"], kind: "failed", messages: [], error: { code: "x", message: "x" } });
   expect(platform.warnings).toEqual(["admin-api: the conversation index did not take this conversation's activity; its next activity tells it again"]);
 });
+
+test("slash commands on the Worker: listed from the index object's App, run in the conversation's object (refusals cross the call); a title is the object's, in the list too", async () => {
+  const { platform, worker: w } = await cloud();
+  const runtime = await chat(platform, "telegram:1");
+  await platform.active("telegram:1", 100);
+  platform.calls.length = 0;
+
+  const listedCommands = (await (await w.fetch("/admin/api/commands", { headers: AUTH })).json()) as { items: { name: string }[] };
+  expect(listedCommands.items.map((each) => each.name)).toEqual(["name", "new"]);
+  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.commands`]);
+
+  const path = (name: string) => `/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/commands/${name}`;
+  platform.calls.length = 0;
+  const named = await w.fetch(path("name"), post({ args: "Weekend plans" }));
+  expect(await named.json()).toEqual({ text: "Titled \u201cWeekend plans\u201d." });
+  expect(platform.calls).toEqual(["telegram:1 admin-api.command"]);
+  const page = (await (await w.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: ApiConversation[] };
+  expect(page.items).toMatchObject([{ conversationId: "telegram:1~1", title: "Weekend plans" }]);
+  expect(w.logged.find((each) => each.message.includes("ran a command"))?.fields).toEqual({ operator: "ops", conversation: "telegram:1", command: "name" });
+
+  expect((await w.fetch(path("nope"), post())).status).toBe(404);
+  const failing = await w.fetch(path("name"), post({ args: "" }));
+  expect({ status: failing.status, body: await failing.json() }).toMatchObject({ status: 422, body: { error: "command_failed" } });
+
+  const fresh = await w.fetch(path("new"), post());
+  expect(fresh.status).toBe(200);
+  expect(runtime.pointers.get("telegram:1")?.conversationId).toBe("100");
+  const behind = await w.fetch(path("name"), post({ args: "Too late" }));
+  expect({ status: behind.status, body: await behind.json() }).toMatchObject({ status: 409, body: { error: "not_current" } });
+  expect(await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~100")}`, { headers: AUTH })).json()).toMatchObject({ current: true, title: "Weekend plans" });
+});

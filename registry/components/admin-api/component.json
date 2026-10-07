@@ -24,11 +24,14 @@
     "capabilities": [
       "outbound.queue",
       "actor.inbox",
-      "agent.definition"
+      "agent.definition",
+      "agent.command",
+      "model.complete"
     ]
   },
   "provides": [
-    "http.route"
+    "http.route",
+    "agent.command"
   ],
   "apps": {
     "worker": "worker"
@@ -36,7 +39,8 @@
   "halves": {
     "default": {
       "provides": [
-        "http.route"
+        "http.route",
+        "agent.command"
       ],
       "requires": [
         "admin.auth",
@@ -49,7 +53,9 @@
         "outbound.queue",
         "actor.inbox",
         "actor.mailbox",
-        "agent.definition"
+        "agent.definition",
+        "agent.command",
+        "model.complete"
       ]
     },
     "worker": {

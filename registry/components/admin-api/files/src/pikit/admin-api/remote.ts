@@ -13,8 +13,9 @@
  *   `pollMs` (2 s) and yields it only when it changed, then ends after `polls` of them (the
  *   subrequests of one request are bounded). The dashboard reconnects to a stream that ended
  *   (`live.ts`). Between two snapshots it sees no text streaming, only where the run is.
- * - **The composition** and **the agents** are an object's App's (the index object's: every object
- *   runs the same App), where the agents run.
+ * - **The composition**, **the agents** and **the slash commands** are an object's App's (the index
+ *   object's: every object runs the same App), where the agents run. A command runs in its
+ *   conversation's object, as the other actions do.
  * - **A message's images** are at most `MAX_DURABLE_IMAGE_BYTES` in all (`413 too_large`), checked
  *   before the call: the object stores the message in one Durable Object row (2 MB at most).
  */
@@ -24,6 +25,8 @@ import type { ActorMailbox, JsonValue } from "@pikit/contracts";
 import {
   type ApiAgents,
   type ApiApp,
+  type ApiCommandResponse,
+  type ApiCommands,
   type ApiConversation,
   type ApiEvent,
   type ApiPage,
@@ -143,6 +146,14 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
       const { key, local } = target(id);
       const reset = await call<ApiResetResponse>(key, CALL.reset, { conversationId: local }, ctx);
       return { key: reset.key, previousConversationId: qualify(key, reset.previousConversationId), conversationId: qualify(key, reset.conversationId) };
+    },
+
+    commands: (ctx) => call<ApiCommands>(INDEX_KEY, CALL.commands, null, ctx),
+
+    async command(id, name, args, ctx) {
+      const { key, local } = target(id);
+      const answer = await call<ApiCommandResponse>(key, CALL.command, { conversationId: local, name, args }, ctx);
+      return { key, ...(typeof answer.text === "string" && { text: answer.text }) };
     },
   };
 }

@@ -14,13 +14,15 @@
  * reads it after a first line saying it is the operator's (`operatorPrompt`), which also asks for a web
  * search when the message does (only of an agent with `WEB_SEARCH_TOOL`), and its images in the
  * request (`AgentRequest.images`). A new conversation is one of the dashboard's own
- * (`dashboard:<uuid>`), with an agent of the App.
+ * (`dashboard:<uuid>`), with an agent of the App. A slash command (`agent.command`, the App's) runs
+ * in a conversation as the other actions do: only in a key's current one (`runAgentCommand`).
  * - **`createRemoteBackend`** (`remote.ts`): the Worker's, which reaches each conversation's object by
  *   `actor.mailbox.call` and lists them from the index (`conversation-index.ts`).
  *
- * A refusal is an `ActorCallError` whose code the routes answer with (`not_found` is a `404`,
- * `no_agent` and `not_current` a `409`, `invalid_cursor` and `invalid_request` a `400`): the same error
- * crosses a call from an object to the Worker whole.
+ * A refusal is an `ActorCallError` whose code the routes answer with (`not_found` and
+ * `unknown_command` are a `404`, `no_agent` and `not_current` a `409`, `invalid_cursor` and
+ * `invalid_request` a `400`, `command_failed` a `422`): the same error crosses a call from an object to
+ * the Worker whole.
  *
  * **Ids.** On a server a conversation's id is the runtime's. On Cloudflare every object numbers its
  * own conversations from `1`, so the Worker's API names one `<conversation key>~<the object's id>`
@@ -32,11 +34,14 @@ import {
   ActorCallError,
   type AgentObserver,
   type AgentRuntime,
+  type CommandLookup,
   type ConversationRef,
   type ConversationRegistry,
   type ObservedConversation,
   type PageRequest,
+  listAgentCommands,
   redactSecrets,
+  runAgentCommand,
 } from "@pikit/contracts";
 import {
   type ApiAbortResponse,
@@ -44,6 +49,8 @@ import {
   type ApiAgents,
   type ApiApp,
   type ApiAttachment,
+  type ApiCommandResponse,
+  type ApiCommands,
   type ApiConversation,
   type ApiEvent,
   type ApiPage,
@@ -80,6 +87,7 @@ export interface NewConversation extends Message {
 /** What an action did, and to which key (for the operator's log line). */
 export type Sent = ApiSendResponse & { key: string };
 export type Aborted = ApiAbortResponse & { key: string };
+export type Commanded = ApiCommandResponse & { key: string };
 
 export interface AdminBackend {
   /** The composition of the App that runs the agents. */
@@ -111,10 +119,21 @@ export interface AdminBackend {
   send(id: string, message: Message, ctx: AppContext): Promise<Sent>;
   abort(id: string, ctx: AppContext): Promise<Aborted>;
   reset(id: string, ctx: AppContext): Promise<ApiResetResponse>;
+  /** The App's slash commands (`agent.command`), by name. */
+  commands(ctx: AppContext): Promise<ApiCommands>;
+  /**
+   * Runs the command `name` in the conversation with `args`, as an action: it throws
+   * `unknown_command` (no such command, before anything else), the actions' refusals, and
+   * `command_failed` with the command's message.
+   */
+  command(id: string, name: string, args: string, ctx: AppContext): Promise<Commanded>;
 }
 
 /** A refusal the routes answer with: `code` is the API's `error`. */
-export function refusal(code: "not_found" | "no_agent" | "not_current" | "invalid_cursor" | "invalid_request" | "unknown_agent" | "too_large", message: string): ActorCallError {
+export function refusal(
+  code: "not_found" | "no_agent" | "not_current" | "invalid_cursor" | "invalid_request" | "unknown_agent" | "too_large" | "unknown_command" | "command_failed",
+  message: string,
+): ActorCallError {
   return new ActorCallError(code, message);
 }
 
@@ -148,6 +167,8 @@ export interface LocalContracts {
   keyOf(conversationId: string, ctx: AppContext): Promise<string | undefined>;
   /** The App's agents (`agent.definition`), by name: `agentOf` describes each. */
   agents(): ApiAgent[];
+  /** The App's slash commands (`agent.command`). */
+  commands(): CommandLookup;
 }
 
 /** An agent definition as the API says it: its name, its model, the names of the tools it is defined with. */
@@ -179,10 +200,12 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
     return agent === undefined ? undefined : { key, agent, current: now?.conversationId === conversation.conversationId };
   };
 
-  /** The conversation, with its key, its agent and whether its key points to it now when it has a key. */
+  /** The conversation, with its key, its agent, whether its key points to it now and its key's title when it has a key. */
   const described = async (conversation: ObservedConversation, ctx: AppContext): Promise<ApiConversation> => {
     const identity = await identify(conversation, ctx);
-    return identity === undefined ? (conversation as ApiConversation) : { ...(conversation as ApiConversation), ...identity };
+    if (identity === undefined) return conversation as ApiConversation;
+    const title = await contracts.index().title(identity.key);
+    return { ...(conversation as ApiConversation), ...identity, ...(title !== undefined && { title }) };
   };
 
   const found = async (id: string, ctx: AppContext): Promise<ObservedConversation> => {
@@ -311,6 +334,18 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       const reset = await contracts.registry().reset(conversation.key, ctx);
       if (reset === undefined) throw refusal("not_found", NOT_FOUND);
       return { key: conversation.key, previousConversationId: reset.previousConversationId, conversationId: reset.newConversationId };
+    },
+
+    commands: async () => ({ items: listAgentCommands(contracts.commands()) }),
+
+    async command(id, name, args, ctx) {
+      const commands = contracts.commands();
+      if (!listAgentCommands(commands).some((each) => each.name === name)) throw refusal("unknown_command", `no command "/${name}" in the App`);
+      const conversation = await actionable(id, ctx);
+      const outcome = await runAgentCommand(commands, name, conversation, args, ctx);
+      if (outcome.kind === "unknown") throw refusal("unknown_command", `no command "/${name}" in the App`);
+      if (outcome.kind === "failed") throw refusal("command_failed", outcome.message);
+      return { key: conversation.key, ...(outcome.text !== undefined && { text: outcome.text }) };
     },
   };
 }

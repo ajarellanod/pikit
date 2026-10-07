@@ -215,3 +215,38 @@ it("an operator's images, 1 MB in all, are stored in the object, reach the agent
     await worker.stop();
   }
 });
+
+it("slash commands in real objects: listed from the index object's App, run in the conversation's object; its first answer gets a title from the model, which /name replaces", async () => {
+  const answers: string[] = [];
+  composeObjects([storageDo, storageKvSql, platformCloudflare, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
+  const worker = await workerApp();
+  try {
+    const commands = (await (await worker.fetch("/admin/api/commands")).json()) as { items: { name: string }[] };
+    expect(commands.items.map((each) => each.name)).toEqual(["compact", "name", "new"]);
+
+    const started = (await (
+      await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "scripted", text: "Plan a weekend in Porto" }) })
+    ).json()) as { key: string; conversationId: string };
+    await vi.waitFor(() => expect(answers).toContain(`${started.key}: answer: ${OPERATOR_NOTE}.]\nPlan a weekend in Porto`), { timeout: 10_000 });
+    // Titled in the object, after the run settled, by the agent's model (`answer: <first message>`, cleaned).
+    await vi.waitFor(
+      async () => expect(await (await worker.fetch(`/admin/api/conversations/${id(started.conversationId)}`)).json()).toMatchObject({ title: "Answer: Plan a weekend in Porto" }),
+      { timeout: 10_000 },
+    );
+
+    const path = (name: string) => `/admin/api/conversations/${id(started.conversationId)}/commands/${name}`;
+    const compacted = await worker.fetch(path("compact"), { method: "POST" });
+    expect(await compacted.json()).toEqual({ text: "Nothing to compact: the conversation is short enough as it is." });
+    const named = await worker.fetch(path("name"), { method: "POST", body: JSON.stringify({ args: "Porto weekend" }) });
+    expect(named.status).toBe(200);
+    const listed = (await (await worker.fetch("/admin/api/conversations?limit=1")).json()) as { items: { conversationId: string; title?: string }[] };
+    expect(listed.items).toMatchObject([{ conversationId: started.conversationId, title: "Porto weekend" }]);
+    expect((await worker.fetch(path("nope"), { method: "POST" })).status).toBe(404);
+
+    const fresh = await worker.fetch(path("new"), { method: "POST" });
+    expect(fresh.status).toBe(200);
+    expect((await worker.fetch(path("name"), { method: "POST", body: JSON.stringify({ args: "late" }) })).status).toBe(409);
+  } finally {
+    await worker.stop();
+  }
+});

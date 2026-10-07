@@ -22,6 +22,15 @@
  *   or failed, a reset) and, when the App starts, from what `agent.observe` holds.
  * - **Delivery, when an `outbound.queue` is installed:** the pieces not delivered yet (`pending`) and
  *   those that settled (`receipts`, read after a cursor), as the queue keeps them; never their text.
+ * - **Slash commands** are the App's `agent.command`s, listed and run in a conversation (as an action:
+ *   its key's current one) by `runAgentCommand`. admin-api registers two of Pi's built-ins, through the
+ *   same capability: `/new` (Pi's "Start a new session": the key's reset, `conversations.registry`'s
+ *   `reset`) and `/name <title>` (the conversation's title). runtime-pi registers `/compact`; a
+ *   component of yours registers its own.
+ * - **Titles**: after a conversation's first run settles, a model (`model.complete`, runtime-pi's;
+ *   `titleModel`, else the agent's) titles its key from its first message, in the background, once
+ *   (tried once more after a later run if that failed): `titles.ts`. `/name` replaces it. They are
+ *   kept with the index (`conversation-index.ts`) and listed with each conversation.
  * - **Only a conversation's current one is talked to.** A message, an abort or a reset to a
  *   conversation a reset left behind is `409 not_current`. A reset's new conversation is its key's
  *   current one, with the key's agent, before any message reaches it: it is talked to at once.
@@ -40,7 +49,8 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import type { AgentObserver, ConversationRef } from "@pikit/contracts";
+import { type AgentCommand, type AgentObserver, type ConversationRef, isCommandName } from "@pikit/contracts";
+import { cleanTitle } from "./api.ts";
 import { createAssets } from "./assets.ts";
 import { agentOf, createLocalBackend } from "./backend.ts";
 import { answerCalls, SEEN } from "./calls.ts";
@@ -48,6 +58,7 @@ import { Config } from "./config.ts";
 import { createConversationIndex, INDEX_KEY, type IndexedConversation } from "./conversation-index.ts";
 import { DASHBOARD_FILES } from "./dashboard-files.ts";
 import { provideRoutes } from "./routes.ts";
+import { createTitler } from "./titles.ts";
 
 export { worker, WORKER_NAME } from "./worker.ts";
 
@@ -71,6 +82,10 @@ export default defineComponent({
     const mailbox = pikit.useOptional("actor.mailbox");
     // The agents, for `GET /admin/api/agents` and a web search asked of one.
     const definitions = pikit.useKeyed("agent.definition");
+    // The slash commands the dashboard lists and runs: its own two below, runtime-pi's, yours.
+    const commands = pikit.useKeyed("agent.command");
+    // Titles: a model's text, through the runtime's models.
+    const completion = pikit.useOptional("model.complete");
     const durable = pikit.target === "durable";
     const assets = createAssets(DASHBOARD_FILES);
     const index = createConversationIndex(() => sql.get());
@@ -80,6 +95,7 @@ export default defineComponent({
       registry: () => registry.get(),
       index: () => index,
       agents: () => definitions.keys().sort().map((name) => agentOf(name, definitions.get(name))),
+      commands: () => ({ keys: () => commands.keys().filter(isCommandName), get: (name: string) => commands.get(name) }),
     };
     // A server's: a conversation no message reached yet is its key's by the index's row (a reset's new one).
     const backend = createLocalBackend({ ...contracts, keyOf: (conversationId) => index.keyOf(conversationId) });
@@ -91,6 +107,34 @@ export default defineComponent({
       noQueue: "no outbound.queue is installed: answers go straight to their platform, with nothing to show here",
       heartbeatMs: config.heartbeatMs,
       assets,
+    });
+
+    // Pi's built-ins pikit does for real, registered as any component's are.
+    const newConversation: AgentCommand = {
+      description: "Start a new conversation: this one is kept, and its key starts again empty",
+      async run(conversation, _args, ctx) {
+        const reset = await registry.get().reset(conversation.key, ctx);
+        if (reset === undefined) throw new Error("this conversation's key points to no conversation");
+        return { text: "A new conversation started; the previous one is kept, and can be read." };
+      },
+    };
+    const nameCommand: AgentCommand = {
+      description: "Set the conversation's title",
+      argumentHint: "<title>",
+      async run(conversation, args) {
+        const title = cleanTitle(args);
+        if (title === undefined) throw new Error("Write the title after the command: /name <title>");
+        await index.name(conversation.key, title);
+        return { text: `Titled \u201c${title}\u201d.` };
+      },
+    };
+    pikit.provideKeyed("agent.command", "new", newConversation);
+    pikit.provideKeyed("agent.command", "name", nameCommand);
+
+    const titler = createTitler({
+      index: () => index,
+      complete: () => completion.get(),
+      modelFor: (agent) => config.titleModel ?? definitions.get(agent)?.model,
     });
 
     /**
@@ -117,7 +161,11 @@ export default defineComponent({
     pikit.on("agent.dispatched", ({ conversation, admission }, ctx) => (admission.kind === "duplicate" ? undefined : active(conversation, ctx)));
     // On Cloudflare a run that is not resumed was dispatched in this object just before: one message fewer.
     pikit.on("agent.started", ({ conversation, resumed }, ctx) => (durable && !resumed ? undefined : active(conversation, ctx)));
-    pikit.on("agent.settled", (result, ctx) => active(result.conversation, ctx));
+    pikit.on("agent.settled", (result, ctx) => {
+      // In the background: no event or request waits for a title.
+      titler.settled(result, ctx.derive(() => background));
+      return active(result.conversation, ctx);
+    });
     pikit.on("agent.failed", (result, ctx) => active(result.conversation, ctx));
     pikit.on("conversation.reset", ({ conversation }, ctx) => active(conversation, ctx));
 
@@ -140,16 +188,18 @@ export default defineComponent({
 
     let stopping: AbortController | undefined;
     let filling: Promise<void> | undefined;
+    /** What outlives the events: titles, the index's filling. Cancelled at stop. */
+    let background = BACKGROUND_CONTEXT;
 
     return {
       async start(ctx) {
+        stopping = new AbortController();
+        background = withAbortSignal(stopping.signal, BACKGROUND_CONTEXT);
         if (!durable) {
           if (assets.built()) ctx.logger.info("admin-api: the dashboard is served at /admin/", { files: assets.size() });
           else ctx.logger.info("admin-api: no dashboard is built; the API alone is served at /admin/api/");
           // In the background: a server with thousands of conversations starts at once.
-          stopping = new AbortController();
-          const background = ctx.derive(() => withAbortSignal((stopping as AbortController).signal, BACKGROUND_CONTEXT));
-          filling = backfill(observe.get(), background).then(
+          filling = backfill(observe.get(), ctx.derive(() => background)).then(
             (count) => ctx.logger.info("admin-api: the conversation index has every conversation of the runtime", { conversations: count }),
             (error: unknown) => ctx.logger.warn("admin-api: the conversation index was not filled from the runtime; events keep it", { error: error instanceof Error ? error.message : String(error) }),
           );
@@ -169,7 +219,7 @@ export default defineComponent({
       },
       async stop() {
         stopping?.abort();
-        await filling;
+        await Promise.all([filling, titler.idle()]);
       },
     };
   },

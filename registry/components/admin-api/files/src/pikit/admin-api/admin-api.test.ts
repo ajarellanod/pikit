@@ -7,10 +7,12 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { ADMIN_CLIENT_HEADER, type DeliveryReceipt, type OutboundQueue, type PendingPiece } from "@pikit/contracts";
+import { ADMIN_CLIENT_HEADER, type AgentCommand, type CompletionRequest, type ConversationRef, type DeliveryReceipt, type OutboundQueue, type PendingPiece, type SqlDatabase } from "@pikit/contracts";
+import { createAgentCommandConformance } from "@pikit/contracts/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import Type from "typebox";
 import { MAX_IMAGE_BYTES, OPERATOR_NOTE } from "./api.ts";
+import { TITLE_SYSTEM, TITLE_TOKENS } from "./titles.ts";
 import { CSP } from "./assets.ts";
 import adminApi from "./index.ts";
 import { agents, AUTH, auth, imageOf, PIXEL, Runtime, type Served, SESSION, serve, sse, ZERO } from "./runtime.test-support.ts";
@@ -51,9 +53,9 @@ test("what setup declares: component.json's provides / requires / optional come 
 
   expect(app.describe().components.find((c) => c.name === "admin-api")).toEqual({
     name: "admin-api",
-    provides: ["http.route"],
+    provides: ["http.route", "agent.command"],
     requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry", "storage.sql"],
-    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "agent.definition"],
+    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "agent.definition", "agent.command", "model.complete"],
   });
 });
 
@@ -623,4 +625,222 @@ test("delivery without an outbound.queue: 404 not_installed, and the rest of the
     expect(response.status).toBe(404);
     expect(await response.json()).toMatchObject({ error: "not_installed" });
   }
+});
+
+// Slash commands (agent.command) and titles.
+
+/** A command of the project's own, `/deploy <environment>`, recording where it ran; and one of a malformed name. */
+function deployCommand(ran: { conversation: ConversationRef; args: string }[]) {
+  return defineComponent({
+    name: "deploy-test",
+    setup(pikit) {
+      const deploy: AgentCommand = {
+        description: "Deploy the current branch",
+        argumentHint: "<environment>",
+        run: async (conversation, args) => {
+          ran.push({ conversation, args });
+          return { text: `Deploying to ${args}.` };
+        },
+      };
+      pikit.provideKeyed("agent.command", "deploy", deploy);
+      pikit.provideKeyed("agent.command", "Bad Name", deploy);
+    },
+  });
+}
+
+/** `model.complete` as a test answers it (`answer`), recording what it was asked. */
+function fakeModel(answer: (request: CompletionRequest) => Promise<string> | string) {
+  const asked: CompletionRequest[] = [];
+  const component = defineComponent({
+    name: "model-test",
+    setup: (pikit) => pikit.provide("model.complete", { complete: async (request) => (asked.push(request), answer(request)) }),
+  });
+  return { component, asked };
+}
+
+const command = (s: Subject, id: string, name: string, body?: unknown) => s.fetch(`/admin/api/conversations/${encodeURIComponent(id)}/commands/${encodeURIComponent(name)}`, post(body));
+const titleOf = async (s: Subject, id: string) => ((await (await s.fetch(`/admin/api/conversations/${id}`, { headers: AUTH })).json()) as { title?: string }).title;
+
+/** Waits until `probe` holds, polling. */
+async function until(probe: () => boolean | Promise<boolean>, what: string): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (!(await probe())) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await Bun.sleep(5);
+  }
+}
+
+test("GET /admin/api/commands: the App's slash commands by name (admin-api's /new and /name among them), with their hints; a malformed one is left out", async () => {
+  const s = await started({}, [deployCommand([])]);
+
+  const response = await s.fetch("/admin/api/commands", { headers: AUTH });
+
+  expect(await response.json()).toEqual({
+    items: [
+      { name: "deploy", description: "Deploy the current branch", argumentHint: "<environment>" },
+      { name: "name", description: "Set the conversation's title", argumentHint: "<title>" },
+      { name: "new", description: "Start a new conversation: this one is kept, and its key starts again empty" },
+    ],
+  });
+});
+
+test("POST …/commands/:name runs a command in the conversation, as an action: its note comes back; unknown 404, failing 422, left behind 409; logged by name, never its arguments", async () => {
+  const ran: { conversation: ConversationRef; args: string }[] = [];
+  const s = await started({}, [deployCommand(ran)]);
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  // Listed once a message reached it.
+  await s.app.context().emit("agent.dispatched", { conversation: { key: "telegram:1", agent: "assistant", conversationId: "c1" }, admission: { kind: "started", requestId: "m0" } });
+
+  const deployed = await command(s, "c1", "deploy", { args: "  staging  " });
+  expect(deployed.status).toBe(200);
+  expect(await deployed.json()).toEqual({ text: "Deploying to staging." });
+  expect(ran).toEqual([{ conversation: { key: "telegram:1", agent: "assistant", conversationId: "c1" }, args: "staging" }]);
+  expect(s.logged.find((each) => each.message.includes("ran a command"))?.fields).toEqual({ operator: "ops", conversation: "telegram:1", command: "deploy" });
+  expect(JSON.stringify(s.logged)).not.toContain("staging");
+  // Nothing reached the agent: a command is not a message.
+  expect(s.runtime.dispatched).toEqual([]);
+
+  expect(await (await command(s, "c1", "nope")).json()).toMatchObject({ error: "unknown_command" });
+  expect((await command(s, "c1", "nope")).status).toBe(404);
+  expect((await command(s, "c1", "Bad Name")).status).toBe(404);
+  const failing = await command(s, "c1", "name", { args: "  " });
+  expect(failing.status).toBe(422);
+  expect(await failing.json()).toEqual({ error: "command_failed", message: "Write the title after the command: /name <title>" });
+  expect((await command(s, "c1", "name", { args: 5 })).status).toBe(400);
+  expect((await command(s, "c1", "name", { title: "x" })).status).toBe(400);
+  expect((await command(s, "nobody", "name", { args: "x" })).status).toBe(404);
+
+  // /name: the key's title, in one conversation and in the list.
+  const named = await command(s, "c1", "name", { args: '"Trip to Lisbon."' });
+  expect(await named.json()).toEqual({ text: "Titled \u201cTrip to Lisbon\u201d." });
+  expect(await titleOf(s, "c1")).toBe("Trip to Lisbon");
+  const page = (await (await s.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: { conversationId: string; title?: string }[] };
+  expect(page.items.find((each) => each.conversationId === "c1")?.title).toBe("Trip to Lisbon");
+
+  // /new: the key starts again in a new conversation, which keeps the key's title; the old one is behind.
+  const fresh = await command(s, "c1", "new");
+  expect(await fresh.json()).toEqual({ text: "A new conversation started; the previous one is kept, and can be read." });
+  expect(s.runtime.pointers.get("telegram:1")?.conversationId).toBe("c100");
+  expect(await (await s.fetch("/admin/api/conversations/c100", { headers: AUTH })).json()).toMatchObject({ key: "telegram:1", current: true, title: "Trip to Lisbon" });
+  const behind = await command(s, "c1", "name", { args: "Too late" });
+  expect(behind.status).toBe(409);
+  expect(await behind.json()).toMatchObject({ error: "not_current" });
+});
+
+// admin-api's own commands pass the agent.command suite: /name titles the key, /new resets it.
+for (const c of createAgentCommandConformance(() => {
+  const runtime = new Runtime();
+  let sql: SqlDatabase | undefined;
+  const reader = defineComponent({
+    name: "sql-reader",
+    setup(pikit) {
+      const handle = pikit.use("storage.sql");
+      return { start: () => void (sql = handle.get()) };
+    },
+  });
+  return {
+    components: [auth, agents, sqliteStorage(), runtime.component(), adminApi, reader],
+    conversation: async (_app, ctx) => runtime.registry.resolve("dashboard:suite", "assistant", ctx),
+    runs: [
+      {
+        name: "name",
+        args: "Weekend plans",
+        check: async (outcome, conversation) => {
+          expect(outcome.text).toBe("Titled \u201cWeekend plans\u201d.");
+          expect(await sql?.query("SELECT title FROM admin_api_titles WHERE key = ?", [conversation.key])).toEqual([{ title: "Weekend plans" }]);
+        },
+      },
+      {
+        name: "new",
+        check: async (_outcome, conversation) => {
+          expect(runtime.pointers.get(conversation.key)?.conversationId).not.toBe(conversation.conversationId);
+        },
+      },
+    ],
+    failures: [{ name: "name", args: "" }],
+  };
+})) {
+  test(`admin-api's commands ${c.group}: ${c.name}`, () => c.run());
+}
+
+/** A run of `key`'s conversation `id` that settled, whose first message the operator wrote. */
+const settled = (key: string, id: string, text: string, requestId = "m1") => ({
+  conversation: { key, agent: "assistant", conversationId: id },
+  requestId,
+  requestIds: [requestId],
+  kind: "completed" as const,
+  messages: [
+    { role: "user", content: [{ type: "text", text: `${OPERATOR_NOTE}.]\n${text}` }, { type: "image", mimeType: "image/png", data: PIXEL }] },
+    { role: "assistant", content: [{ type: "text", text: "Sure." }] },
+  ] as never[],
+});
+
+test("a model titles a conversation's key after its first run settles, in the background, from its first message; once", async () => {
+  let release!: () => void;
+  const held = new Promise<void>((resolve) => (release = resolve));
+  const model = fakeModel(async () => (await held, 'Title: "Trip to Lisbon."\nSecond line'));
+  const s = await started({}, [model.component]);
+  s.runtime.add({ conversationId: "c1", key: "dashboard:1", agent: "assistant" });
+
+  // The event does not wait for the model.
+  await s.app.context().emit("agent.settled", settled("dashboard:1", "c1", "Plan a trip to Lisbon in May"));
+  await until(() => model.asked.length === 1, "the model to be asked");
+  expect(await titleOf(s, "c1")).toBeUndefined();
+  release();
+  await until(async () => (await titleOf(s, "c1")) !== undefined, "the title");
+
+  expect(await titleOf(s, "c1")).toBe("Trip to Lisbon");
+  expect(model.asked).toEqual([{ model: "test/model", system: TITLE_SYSTEM, prompt: "Plan a trip to Lisbon in May", maxTokens: TITLE_TOKENS }]);
+  // Later runs leave it as it is.
+  await s.app.context().emit("agent.settled", settled("dashboard:1", "c1", "And Porto?", "m2"));
+  await Bun.sleep(20);
+  expect(model.asked.length).toBe(1);
+  expect(s.logged.find((each) => each.message.includes("titled a conversation"))?.fields).toEqual({ conversation: "dashboard:1", model: "test/model" });
+});
+
+test("a title that failed is tried once more after a later run, from the first message, then never; titleModel names the model; /name wins over any model", async () => {
+  let calls = 0;
+  const model = fakeModel(() => {
+    calls++;
+    if (calls === 1) throw new Error("the provider is down");
+    return calls === 2 ? "   " : "Never written";
+  });
+  const s = await started({ titleModel: "test/titles" }, [model.component]);
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  s.runtime.add({ conversationId: "c2", key: "telegram:2", agent: "assistant" });
+  const ctx = s.app.context();
+
+  await ctx.emit("agent.settled", settled("telegram:1", "c1", "first"));
+  await until(() => s.logged.some((each) => each.message.includes("did not title")), "the failure to be logged");
+  await ctx.emit("agent.settled", settled("telegram:1", "c1", "second", "m2"));
+  await until(() => s.logged.filter((each) => each.message.includes("did not title")).length === 2, "the second failure (an answer with no title)");
+  await ctx.emit("agent.settled", settled("telegram:1", "c1", "third", "m3"));
+  await Bun.sleep(20);
+  expect(model.asked.map((each) => [each.model, each.prompt])).toEqual([
+    ["test/titles", "first"],
+    ["test/titles", "first"],
+  ]);
+  expect(await titleOf(s, "c1")).toBeUndefined();
+
+  // Named by the operator first: no model is asked.
+  await command(s, "c2", "name", { args: "Mine" });
+  await ctx.emit("agent.settled", settled("telegram:2", "c2", "hello"));
+  await Bun.sleep(20);
+  expect(model.asked.length).toBe(2);
+  expect(await titleOf(s, "c2")).toBe("Mine");
+});
+
+test("a run that failed or was aborted titles nothing, and without model.complete nothing is titled", async () => {
+  const model = fakeModel(() => "Never");
+  const s = await started({}, [model.component]);
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  await s.app.context().emit("agent.settled", { ...settled("telegram:1", "c1", "hi"), kind: "aborted" });
+  await Bun.sleep(20);
+  expect(model.asked).toEqual([]);
+
+  const bare = await started();
+  bare.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant" });
+  await bare.app.context().emit("agent.settled", settled("telegram:1", "c1", "hi"));
+  await Bun.sleep(20);
+  expect(await titleOf(bare, "c1")).toBeUndefined();
 });

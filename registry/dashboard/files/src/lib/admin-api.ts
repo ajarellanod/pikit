@@ -26,6 +26,8 @@
  * | `POST /admin/api/conversations/:id/messages` | `ApiSendRequest` → `202 ApiSendResponse` |
  * | `POST /admin/api/conversations/:id/abort` | `200 ApiAbortResponse` |
  * | `POST /admin/api/conversations/:id/reset` | `200 ApiResetResponse` |
+ * | `GET /admin/api/commands` | `ApiCommands`: the slash commands the App registered (`agent.command`) |
+ * | `POST /admin/api/conversations/:id/commands/:name` | `ApiCommandRequest` → `200 ApiCommandResponse`: the command run in the conversation |
  * | `GET /admin/api/delivery/pending?limit&cursor` | `ApiPage<ApiPendingPiece>`, oldest stored first (with `outbound.queue`) |
  * | `GET /admin/api/delivery/receipts?after&limit` | `ApiReceiptsPage`, in the order they settled (with `outbound.queue`) |
  */
@@ -54,6 +56,35 @@ export function operatorPrompt(key: string, text: string, options: { webSearch?:
   ];
   const note = asks.length === 0 ? `${OPERATOR_NOTE}.]` : `${OPERATOR_NOTE}: ${asks.join("; ")}.]`;
   return `${note}\n${text}`;
+}
+
+/** The longest title a conversation has (`cleanTitle`). */
+export const TITLE_MAX = 60;
+
+/** Labels a model may put before a title ("Title: …"), in a few languages: taken off. */
+const TITLE_LABEL = /^(?:title|name|subject|topic|t\u00edtulo|titulo|titre|titel|titolo|nombre|nom)(?:\s*:\s*|\s+[-\u2013\u2014]\s+)/i;
+/** Quotes and markdown a title is wrapped in. */
+const TITLE_WRAP = /^[\s"'`*_#>\u2018\u2019\u201c\u201d\u00ab\u00bb\u300c\u300d-]+|[\s"'`*_\u2018\u2019\u201c\u201d\u00ab\u00bb\u300c\u300d]+$/g;
+
+/**
+ * A presentable title from `text` (a model's answer, or what an operator wrote with `/name`), or
+ * `undefined` when nothing is left: its first line that has words, without a label ("Title:"),
+ * quotes or markdown around it, its spaces collapsed, no `.`, `,`, `;` or `:` at its end, its first
+ * letter a capital, at most `TITLE_MAX` characters (cut at a word, with an ellipsis).
+ */
+export function cleanTitle(text: string): string | undefined {
+  const line = text
+    .split(/\r?\n/)
+    .map((each) => each.replace(TITLE_WRAP, "").replace(TITLE_LABEL, "").replace(TITLE_WRAP, "").replace(/\s+/g, " ").trim())
+    .find((each) => /[\p{L}\p{N}]/u.test(each));
+  if (line === undefined) return undefined;
+  let title = line.replace(/[.,;:\s]+$/u, "");
+  if (title.length > TITLE_MAX) {
+    const cut = title.slice(0, TITLE_MAX - 1);
+    const space = cut.lastIndexOf(" ");
+    title = `${(space >= TITLE_MAX / 3 ? cut.slice(0, space) : cut).replace(/[.,;:\s]+$/u, "")}\u2026`;
+  }
+  return title === "" ? undefined : title.charAt(0).toLocaleUpperCase() + title.slice(1);
 }
 
 /** The images an operator may attach to a message: these types, `MAX_IMAGES` of `MAX_IMAGE_BYTES` at most. */
@@ -126,6 +157,11 @@ export interface ApiConversation {
    * not talked to. Absent when it has no key: no message reached it and no reset pointed a key to it.
    */
   current?: boolean;
+  /**
+   * Its key's title (`cleanTitle`), shared by the conversations a reset left behind: the one a model
+   * gave it after its first run, or the operator's (`/name`). Absent until then.
+   */
+  title?: string;
 }
 
 /** One page, and the cursor of the next (absent on the last page). */
@@ -225,6 +261,38 @@ export interface ApiStartResponse extends ApiSendResponse {
   key: string;
 }
 
+/** A slash command the App registered (`agent.command`), as a menu lists it. */
+export interface ApiCommand {
+  /** Without its slash: `new`, `name`, `compact`. */
+  name: string;
+  /** One line. */
+  description: string;
+  /** What its arguments are: `<title>`. Absent: it takes none. */
+  argumentHint?: string;
+}
+
+export interface ApiCommands {
+  /** By name. Empty when the App registered none. */
+  items: ApiCommand[];
+}
+
+/** A command run in a conversation: what follows its name. */
+export interface ApiCommandRequest {
+  /** The text after `/name `, at most `MAX_COMMAND_ARGS` characters; absent or empty: none. */
+  args?: string;
+}
+
+/** The longest arguments a command takes, in characters. */
+export const MAX_COMMAND_ARGS = 4_000;
+
+/**
+ * What a command answered: a note for the operator (the dashboard shows it in the conversation,
+ * quietly; no channel gets it, and it is in the transcript only if the command wrote there), or none.
+ */
+export interface ApiCommandResponse {
+  text?: string;
+}
+
 /** A browser's session, opened. */
 export interface ApiSession {
   /** The operator's id, as `admin.auth` names it. */
@@ -298,7 +366,9 @@ export interface ApiApp {
 export interface ApiError {
   /**
    * `unauthorized`, `not_found`, `not_installed`, `invalid_request`, `invalid_cursor`, `no_agent`,
-   * `not_current`, `unknown_agent`, `too_large` (413: an image, or a body, larger than the API takes);
+   * `not_current`, `unknown_agent`, `too_large` (413: an image, or a body, larger than the API takes),
+   * `unknown_command` (404: no command of that name), `command_failed` (422: the command could not do
+   * it, its message says why);
    * `unavailable` (503) when, on Cloudflare, a conversation's object did not answer.
    */
   error: string;

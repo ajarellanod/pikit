@@ -16,13 +16,16 @@
  * | `admin-api.start` | `{ agent, text, requestId, attachments?, webSearch? }`, to the object of a `dashboard:` key | `ApiStartResponse`: the dashboard's own conversation |
  * | `admin-api.abort` | `{ conversationId }` | `{ conversationId }` |
  * | `admin-api.reset` | `{ conversationId }` | `ApiResetResponse` |
+ * | `admin-api.commands` | — | `ApiCommands`: this App's slash commands |
+ * | `admin-api.command` | `{ conversationId, name, args }` | `ApiCommandResponse`: the command run in the conversation |
  * | `admin-api.list` | `{ limit, cursor? }` | `IndexPage` (the index object's) |
  *
  * And one message (`send`, `actor.inbox.handle`): `admin-api.seen` `{ entries: [{ key,
  * conversationId, agent, at }] }`, to the index.
  *
  * A refusal is an `ActorCallError` (`not_found`, `no_agent`, `not_current`, `invalid_cursor`,
- * `invalid_request`, `unknown_agent`, `too_large`), whose code crosses the call.
+ * `invalid_request`, `unknown_agent`, `too_large`, `unknown_command`, `command_failed`), whose code
+ * crosses the call.
  *
  * **Sizes.** A call carries at most 32 MiB each way (Workers RPC). A message's images are at most
  * `MAX_DURABLE_IMAGE_BYTES` there (the Worker checks, `remote.ts`; the object again), and a transcript
@@ -45,6 +48,8 @@ export const CALL = {
   start: "admin-api.start",
   abort: "admin-api.abort",
   reset: "admin-api.reset",
+  commands: "admin-api.commands",
+  command: "admin-api.command",
   list: "admin-api.list",
 } as const;
 
@@ -135,6 +140,13 @@ export function answerCalls(inbox: ActorInbox, backendOf: (key: string) => Admin
   inbox.answer(CALL.start, async (key, message, ctx) => json(await backendOf(key).start({ key, agent: text(message, "agent"), ...messageOf(message) }, ctx)));
   inbox.answer(CALL.abort, async (key, message, ctx) => ({ conversationId: (await backendOf(key).abort(id(message), ctx)).conversationId }));
   inbox.answer(CALL.reset, async (key, message, ctx) => json(await backendOf(key).reset(id(message), ctx)));
+  inbox.answer(CALL.commands, async (key, _message, ctx) => json(await backendOf(key).commands(ctx)));
+  inbox.answer(CALL.command, async (key, message, ctx) => {
+    const { args } = fieldsOf(message);
+    if (args !== undefined && typeof args !== "string") throw refusal("invalid_request", 'admin-api: "args" is a string');
+    const { text: note } = await backendOf(key).command(id(message), text(message, "name"), args ?? "", ctx);
+    return note === undefined ? {} : { text: note };
+  });
 
   inbox.handle(SEEN, async (_key, message) => index.seen(seenOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {

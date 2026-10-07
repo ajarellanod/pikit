@@ -40,8 +40,8 @@ test("seen is an upsert: a repeated or late one leaves the newest time and its a
   await conversations.seen([row("telegram:1", 300), row("telegram:1", 200, "1", "older")]);
 
   expect(await conversations.list({ limit: 10 })).toEqual({ items: [row("telegram:1", 300)] });
-  // Its own table, prefixed with the component's name.
-  expect(await sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'admin_api_%'")).toEqual([{ name: "admin_api_conversations" }]);
+  // Its own tables, prefixed with the component's name.
+  expect(await sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'admin_api_%' ORDER BY name")).toEqual([{ name: "admin_api_conversations" }, { name: "admin_api_titles" }]);
 });
 
 test("one row per conversation: a key's conversations (a reset's) are listed each by its own activity", async () => {
@@ -95,4 +95,28 @@ test("keys and ids with ':', '~', '/', '.' and '@' page like any others; a curso
     expect(refused).toBeInstanceOf(ActorCallError);
     expect((refused as ActorCallError).code).toBe("invalid_cursor");
   }
+});
+
+test("titles: a model titles a key once (one more try if that failed), from the first text it was given; the operator's replaces any, and no model replaces it", async () => {
+  const { index: titles } = await index();
+
+  expect(await titles.title("telegram:1")).toBeUndefined();
+  expect(await titles.titling("telegram:1", "first message")).toEqual({ input: "first message" });
+  // The first try failed: the second titles the first message too.
+  expect(await titles.titling("telegram:1", "a later message")).toEqual({ input: "first message" });
+  expect(await titles.titling("telegram:1", "later still")).toBeUndefined();
+  expect(await titles.title("telegram:1")).toBeUndefined();
+
+  expect(await titles.titling("http:a", "hello")).toEqual({ input: "hello" });
+  await titles.titled("http:a", "Greetings");
+  expect(await titles.title("http:a")).toBe("Greetings");
+  expect(await titles.titling("http:a", "hello again")).toBeUndefined();
+
+  await titles.name("http:a", "Mine");
+  await titles.titled("http:a", "A model's");
+  expect(await titles.title("http:a")).toBe("Mine");
+  // Named before any model tried: none will.
+  await titles.name("http:b", "Named first");
+  expect(await titles.titling("http:b", "text")).toBeUndefined();
+  expect(await titles.title("http:b")).toBe("Named first");
 });
