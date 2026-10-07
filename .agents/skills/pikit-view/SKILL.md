@@ -71,14 +71,14 @@ pikit.provideKeyed("http.route", "GET /admin/api/<component>/<what>", async (req
 
 ```tsx
 // view/index.tsx (a component's) or src/dashboard/src/views/<id>/index.tsx (the project's)
-import { HeartPulse } from "lucide-react";
+import { Activity } from "iconoir-react";
 import { defineView } from "@/lib/views";
 import { HealthPage } from "./health";
 
 export default defineView({
   id: "health-registry",          // the folder's name; a component's view is named after the component
   title: "Health",
-  icon: HeartPulse,               // lucide icons only: no paid icon sets
+  icon: Activity,                 // iconoir icons (free): never a paid icon set
   requires: ["health"],           // capabilities that must be provided for it to show
   order: 20,
   pages: [{ path: "/health-registry", component: HealthPage }],
@@ -95,8 +95,10 @@ export default defineView({
   `/`); `match` decodes it.
 - The page runs under a Content-Security-Policy (`default-src 'self'`): no inline script, nothing
   from another origin (fonts, images and styles come from the build).
-- Build it from the primitives in `src/components/ui/` and the pieces in `src/components/pikit/`
-  (`ErrorNote`, `MessageView`). Need another primitive: `bunx shadcn@latest add <name>` in
+- Build it from Beautiful UI's primitives in `src/components/bui/` (the dashboard's look: `StatusPill`,
+  `Button`, `TaskRows`, `ToolChips`, `LoadingState`), shadcn's in `src/components/ui/` (in the same
+  colours), and the pieces in `src/components/pikit/` (`ErrorNote`, `MessageView`). Use the tokens'
+  classes (`bg-surface`, `text-ink-2`, `shadow-card`, `rounded-card`), not raw colours. Need another primitive: `bunx shadcn@latest add <name>` in
   `src/dashboard/`. A component's view may use only primitives the base dashboard ships, or say in its
   README which ones to add.
 - Import with `@/…`; relative imports only inside the view's own folder.

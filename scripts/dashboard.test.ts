@@ -92,6 +92,26 @@ test("it is served under /admin/ and its primitives are attributed", () => {
   expect(read("vite.config.ts")).toContain('base: "/admin/"');
   expect(read("NOTICE")).toContain("shadcn/ui");
   expect(read("NOTICE")).toContain("MIT");
+  expect(read("NOTICE")).toContain("Beautiful UI");
+  expect(read("NOTICE")).toContain("Copyright (c) 2026 Shane Levine");
+  expect(read("NOTICE")).toContain("iconoir");
+});
+
+test("it keeps the Content-Security-Policy: no inline script, every asset a file, no paid icon set", () => {
+  const html = read("index.html");
+  const scripts = [...html.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)];
+
+  expect(scripts.length).toBeGreaterThan(0);
+  for (const [, attributes = "", body = ""] of scripts) {
+    expect(attributes).toContain("src=");
+    expect(body.trim()).toBe("");
+  }
+  // The theme before the first paint is a file of public/, not an inline script.
+  expect(html).toContain('<script src="/admin/theme.js"></script>');
+  expect(existsSync(join(DASHBOARD, "public/theme.js"))).toBe(true);
+  // A font inlined as a data: URI is refused by `font-src 'self'`.
+  expect(read("vite.config.ts")).toContain("assetsInlineLimit: 0");
+  expect(read("package.json")).not.toContain("@central-icons-react");
 });
 
 test("the @pikit shadcn registry (registry/ui/r/) is what scripts/ui-registry.ts generates from the sources", () => {

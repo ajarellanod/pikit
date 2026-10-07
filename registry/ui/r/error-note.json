@@ -5,18 +5,17 @@
   "title": "error-note",
   "description": "pikit's error-note piece of the dashboard.",
   "dependencies": [
-    "lucide-react@1.52.0"
+    "iconoir-react@7.12.1"
   ],
   "registryDependencies": [
-    "@pikit/lib",
-    "alert"
+    "@pikit/lib"
   ],
   "files": [
     {
       "path": "registry/dashboard/files/src/components/pikit/error-note.tsx",
       "type": "registry:file",
       "target": "~/src/components/pikit/error-note.tsx",
-      "content": "import { CircleAlert } from \"lucide-react\";\nimport { Alert, AlertDescription, AlertTitle } from \"@/components/ui/alert\";\nimport { ApiFailure } from \"@/lib/api\";\n\n/** An error from the admin API, said plainly. */\nexport function ErrorNote({ error, title = \"Something went wrong\" }: { error: Error; title?: string }) {\n  return (\n    <Alert variant=\"destructive\">\n      <CircleAlert />\n      <AlertTitle>{error instanceof ApiFailure ? `${title} (${error.status})` : title}</AlertTitle>\n      <AlertDescription>{error.message}</AlertDescription>\n    </Alert>\n  );\n}\n"
+      "content": "import { WarningCircle } from \"iconoir-react\";\nimport { ApiFailure } from \"@/lib/api\";\n\n/** An error from the admin API, said plainly. */\nexport function ErrorNote({ error, title = \"Something went wrong\" }: { error: Error; title?: string }) {\n  return (\n    <div role=\"alert\" className=\"flex gap-2.5 rounded-card bg-red-tint px-3 py-2.5 text-[13px]\">\n      <WarningCircle width={16} height={16} strokeWidth={2} className=\"mt-0.5 shrink-0 text-red\" />\n      <div className=\"min-w-0\">\n        <div className=\"font-medium text-red\">{error instanceof ApiFailure ? `${title} (${error.status})` : title}</div>\n        <div className=\"text-ink-2 [overflow-wrap:anywhere]\">{error.message}</div>\n      </div>\n    </div>\n  );\n}\n"
     }
   ]
 }

@@ -10,11 +10,12 @@
  * content inline (what `shadcn build` makes):
  * - `lib`: the dashboard's client of the admin API, views and router (`src/lib/`, but shadcn's utils);
  * - the shared pieces of `src/components/pikit/`, one item each (`message`, `error-note`);
+ * - `bui`: Beautiful UI's primitives as the dashboard has them (`src/components/bui/`);
  * - the base views of `src/views/` (`conversations`, `composition`);
  * - every registry component's view (its manifest's `view`), named after the component.
  * Imports decide the rest: `@/components/ui/<x>` is the shadcn primitive `x` (`registryDependencies`),
- * `@/components/pikit/<x>` and `@/lib/<x>` are `@pikit` items, a bare package is an npm dependency at
- * the version the dashboard pins.
+ * `@/components/pikit/<x>` and `@/lib/<x>` are `@pikit` items, `@/components/bui/<x>` is `@pikit/bui`,
+ * a bare package is an npm dependency at the version the dashboard pins.
  *
  * Served from the repository: `registry/dashboard/files/components.json` names
  * `https://raw.githubusercontent.com/ajarellanod/pikit/main/registry/ui/r/{name}.json`.
@@ -72,6 +73,12 @@ function items(): Item[] {
     const name = file.replace(/\.tsx?$/, "");
     all.push({ name, title: name, description: `pikit's ${name} piece of the dashboard.`, sources: [{ path: join(pieces, file), target: `src/components/pikit/${file}` }] });
   }
+  all.push({
+    name: "bui",
+    title: "Beautiful UI primitives",
+    description: "Beautiful UI's primitives (MIT) as pikit's dashboard has them, fed by real data: the sidebar, the composer, thinking, tool chips, task rows, pills. They use the tokens of the dashboard's src/index.css.",
+    sources: folder(join(DASHBOARD, "src/components/bui"), "src/components/bui"),
+  });
   const views = join(DASHBOARD, "src/views");
   for (const view of readdirSync(views).sort()) {
     all.push({ name: view, title: view, description: `The dashboard's ${view} view.`, sources: folder(join(views, view), `src/views/${view}`) });
@@ -107,6 +114,9 @@ function itemJson(item: Item, versions: Record<string, string>, names: Set<strin
       const ui = /^@\/components\/ui\/([\w-]+)$/.exec(specifier);
       const own = /^@\/(?:components\/pikit|lib)\/([\w-]+?)(?:\.tsx?)?$/.exec(specifier);
       if (ui !== null) registry.add(ui[1] as string);
+      else if (specifier.startsWith("@/components/bui/")) {
+        if (item.name !== "bui") registry.add("@pikit/bui");
+      }
       else if (own !== null) {
         const name = own[1] === "utils" ? undefined : names.has(own[1] as string) ? (own[1] as string) : "lib";
         if (name !== undefined && name !== item.name) registry.add(`@pikit/${name}`);

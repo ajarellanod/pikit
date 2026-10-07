@@ -22,6 +22,12 @@
       "description": "pikit's message piece of the dashboard."
     },
     {
+      "name": "bui",
+      "type": "registry:file",
+      "title": "Beautiful UI primitives",
+      "description": "Beautiful UI's primitives (MIT) as pikit's dashboard has them, fed by real data: the sidebar, the composer, thinking, tool chips, task rows, pills. They use the tokens of the dashboard's src/index.css."
+    },
+    {
       "name": "composition",
       "type": "registry:file",
       "title": "composition",
