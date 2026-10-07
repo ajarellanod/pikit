@@ -84,6 +84,12 @@ order.
 - **Hibernation** is off by default (`CELLD_IDLE_EVICT_S` unset: only memory pressure or the
   residency cap evict). At 30 s, 300 resident conversations went to 0 and the node's memory from
   911 to about 490 MB (macOS keeps freed pages); waking one took 122 ms, 20 at once p50 475 ms.
+- **On real S3** (a bucket in eu-west-1 created for the test and deleted after it, reached from a
+  laptop about 42 ms away; `celld diagnose` passes its conditional writes): the chaos run above
+  gave 9,919 messages, none lost, none out of order, one marked resend; a warm turn took 256 ms on
+  one node and 19 ms on three; a new conversation about 216 ms; waking a hibernated one 355 ms, 20
+  at once p50 610 ms. celld does not read `~/.aws`'s credential files: give it environment
+  variables or an instance or task role.
 - pikit's inbound deduplication held: updates repeated minutes later (the same chat and message id,
   `telegram:<chat>:<message id>`) got no second answer.
 
@@ -135,7 +141,7 @@ A spike tool `sandbox` ran commands in a container per conversation through `@cl
   Wait for it, or encrypt the values and give the nodes the key.
 - `/health`'s version without `version_metadata` (C8: `pikit up` waits for the version it deployed):
   the deployment celld's `/state` reports, or a variable the component writes.
-- A real bucket (R2, S3): the spike only simulated its latency.
+- R2, GCS and Tigris are untested (S3 is tested); and a fleet in the bucket's region, not a laptop.
 - Channels that do not retry see the `500`s of a failover or a drain (`channel-http` has no
   `durable` twin yet).
 - What an operator does when a node's disk is lost for good: blocked conversations and no documented
