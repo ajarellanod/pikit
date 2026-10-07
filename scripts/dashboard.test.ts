@@ -9,6 +9,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAssets, type DashboardFiles } from "../registry/components/admin-api/files/src/pikit/admin-api/assets.ts";
+import { assistantName } from "../registry/dashboard/files/src/lib/names.ts";
 import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/views/conversations/sources.ts";
 import { generated, OUTPUT } from "./ui-registry.ts";
 
@@ -148,4 +149,24 @@ test("the Context panel reads a transcript's sources as the websearch and fetch 
     { title: "Cloudflare Durable Objects", href: "https://developers.cloudflare.com/durable-objects/", body: "", badge: "WEB", meta: "result 3" },
     { title: "Example Domain", href: "https://example.com/", body: "This domain is for examples.", badge: "HTML", meta: "28 characters" },
   ]);
+});
+
+test("an assistant is shown by its words, the first capitalized; its stored name stays as it is", () => {
+  expect(["assistant", "support-bot", "sales_helper-v2", "Ops", "a--b", "-"].map(assistantName)).toEqual(["Assistant", "Support bot", "Sales helper v2", "Ops", "A b", "-"]);
+});
+
+test('the "/" menu lists only the commands the App registered; titles are the API\'s, never kept or looked for in the browser', () => {
+  const composer = read("src/views/conversations/composer.ts");
+  const promptBar = read("src/components/bui/PromptBar.tsx");
+  const chats = read("src/lib/chats.tsx");
+  // No command of the dashboard's own: its actions are buttons.
+  expect(composer).not.toContain("composerCommands");
+  expect(promptBar).not.toMatch(/control\?: "image"/);
+  for (const page of ["src/views/conversations/home.tsx", "src/views/conversations/conversation.tsx"]) expect(read(page)).toContain("commands={commands ?? []}");
+  expect(read("src/app.tsx")).toContain('useApi<ApiCommands>("/commands")');
+  expect(promptBar).toContain('"No commands"');
+  // Titles: the API's, no localStorage of them, no transcript read to name a chat.
+  expect(chats).not.toContain("pikit-titles");
+  expect(chats).not.toContain("/transcript");
+  expect(chats).toContain("conversation.title");
 });

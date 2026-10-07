@@ -3,7 +3,8 @@
  * the composer, where Beautiful UI picks a model; `?agent=<name>` chooses one, as a conversation's
  * composer does when another is picked there) and writes the first message, with images and a web
  * search when wanted: `POST /admin/api/conversations` makes `dashboard:<uuid>`, whose answers appear
- * only here, and no other channel can continue it. Below, the last conversations, to continue.
+ * only here, and no other channel can continue it. Below, the last conversations, to continue. The
+ * "/" menu lists the App's commands, which run in a conversation: here, they say so.
  */
 
 import { ChatBubble } from "iconoir-react";
@@ -14,7 +15,7 @@ import { type ApiStartResponse, post } from "@/lib/api";
 import { agentsOf, defaultAgentOf, NEW_CHAT, useChats } from "@/lib/chats";
 import { Link, navigate, pagePath } from "@/lib/router";
 import { useShell } from "@/lib/shell";
-import { attachmentsOf, composerCommands, imageLimits, webSearchOf } from "./composer";
+import { assistantName, assistantOptions, attachmentsOf, imageLimits, webSearchOf } from "./composer";
 
 /* -- the entrance (ms after mount): hello, question, composer, suggestions -- */
 const HOME_REVEAL_TIMING = [170, 330, 400, 550];
@@ -32,7 +33,7 @@ function homeRevealStyle(visible: boolean): CSSProperties {
 }
 
 export function HomePage() {
-  const { app, agents: described, views, operator, newChat } = useShell();
+  const { app, agents: described, commands, operator } = useShell();
   const chats = useChats();
   const agents = agentsOf(app);
   const [agent, setAgent] = useState<string | undefined>(() => new URLSearchParams(window.location.search).get("agent") ?? undefined);
@@ -52,7 +53,7 @@ export function HomePage() {
     setError(undefined);
     try {
       const started = await post<ApiStartResponse>("/conversations", { agent: chosen, text, ...(images.length > 0 && { attachments: attachmentsOf(images) }), ...(search && { webSearch: true }) });
-      if (text !== "") chats.setTitle(started.key, text);
+      if (text !== "") chats.setFirstMessage(started.key, text);
       chats.reload();
       navigate(pagePath("/conversations", started.conversationId));
     } catch (thrown) {
@@ -79,17 +80,22 @@ export function HomePage() {
         <div className="home-reveal relative mt-7" style={homeRevealStyle(stage >= 3)}>
           <PromptBar
             autoFocus
-            placeholder={chosen === undefined ? "The App has no agent to talk to" : `Ask ${chosen} anything…`}
+            placeholder={chosen === undefined ? "The App has no agent to talk to" : `Ask ${assistantName(chosen)} anything…`}
             disabled={chosen === undefined}
             picker={{
               label: "assistant",
-              options: agents.map((name) => ({ key: name, name, ...(name === fallback && agents.length > 1 && { tag: "default" }) })),
+              options: assistantOptions(agents, (name) => (name === fallback && agents.length > 1 ? "default" : undefined)),
               value: chosen,
               onChange: setAgent,
             }}
             images={imageLimits(app)}
             webSearch={webSearch}
-            commands={composerCommands({ views, newChat: () => newChat(), webSearch: webSearch.available, assistants: agents.length > 1 })}
+            commands={commands ?? []}
+            commandsNote="Commands run in a conversation: start one, then run them there"
+            onCommand={(name) => {
+              setError(new Error(`/${name} runs in a conversation: start one with a first message, then run it there.`));
+              throw new Error("no conversation");
+            }}
             onSend={start}
           />
           {error !== undefined && (
@@ -111,7 +117,7 @@ export function HomePage() {
                 <span className="flex w-[15px] shrink-0 justify-center text-ink-3">
                   <ChatBubble width={15} height={15} strokeWidth={1.9} />
                 </span>
-                <span className="min-w-0 truncate">Continue {title === NEW_CHAT ? `the chat with ${conversation.agent ?? "the assistant"}` : title}</span>
+                <span className="min-w-0 truncate">Continue {title === NEW_CHAT ? `the chat with ${conversation.agent === undefined ? "the assistant" : assistantName(conversation.agent)}` : title}</span>
               </Link>
             );
           })}

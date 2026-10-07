@@ -16,7 +16,7 @@ import { ErrorNote } from "@/components/pikit/error-note";
 import { Monogram, SignIn } from "@/components/pikit/sign-in";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setTarget } from "@/lib/activity";
-import { api, type ApiAgents, type ApiApp, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
+import { api, type ApiAgents, type ApiApp, type ApiCommands, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
 import { ChatsProvider, useChats } from "@/lib/chats";
 import { BASE, match, navigate, pagePath, usePath } from "@/lib/router";
 import { appName, ShellContext } from "@/lib/shell";
@@ -115,6 +115,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const home = chatView?.pages[0]?.path ?? views[0]?.pages[0]?.path ?? "/";
   const [draft, setDraft] = useState(0);
   const agents = useApi<ApiAgents>("/agents");
+  const commands = useApi<ApiCommands>("/commands");
   /** A fresh home (its draft empty), with `agent` chosen when given. */
   const newChat = useCallback(
     (agent?: string) => {
@@ -174,7 +175,9 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
     );
 
   return (
-    <ShellContext.Provider value={{ app, ...(agents.data !== undefined && { agents: agents.data.items }), newChat, views, operator, slots: { actions, side } }}>
+    <ShellContext.Provider
+      value={{ app, ...(agents.data !== undefined && { agents: agents.data.items }), ...(commands.data !== undefined && { commands: commands.data.items }), newChat, views, operator, slots: { actions, side } }}
+    >
       <main className="flex h-[100dvh] gap-0 bg-canvas p-2.5 pl-0 text-ink">
         <SidebarNav
           defaultCollapsed={narrow}

@@ -1,76 +1,46 @@
 /**
  * The conversations the sidebar and the tabs show: every one, the most recently active first (the
  * API's index: the first page read again every 10 s while the dashboard is active, 30 s on
- * Cloudflare, older pages on demand), the tabs the operator opened, and the titles this browser knows.
+ * Cloudflare, older pages on demand), the tabs the operator opened, and what the commands answered.
  *
  * A title names a conversation key, so the conversations a reset left behind share it with the key's
- * current one: for another channel's key the id in it (`telegram:12345` is `12345`, on `telegram`);
- * for one of the dashboard's own, the first message the operator wrote in it, kept in this browser
- * (`localStorage["pikit-titles"]`): when it started it here, once its transcript was read from the
- * beginning, or read for it in the background (one key at a time, once), "New chat" until then. A
- * conversation with no key (no message reached it and no reset pointed a key to it) has nothing to
- * show or do: the list leaves it out. Tabs are kept in `localStorage["pikit-tabs"]`.
+ * current one. It is the API's (`ApiConversation.title`: a model's, made after the key's first run, or
+ * the operator's `/name`); until there is one, the first message written in the key when this page
+ * has it at hand (sent from the home, or read in the open conversation's transcript: never looked
+ * for), else for another channel's key the id in it (`telegram:12345` is `12345`), and "New chat" for
+ * one of the dashboard's own. A conversation with no key (no message reached it and no reset pointed a
+ * key to it) has nothing to show or do: the list leaves it out. Tabs are kept in
+ * `localStorage["pikit-tabs"]`.
  */
 
-import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useRef, useState } from "react";
+import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { every, usePolling } from "./activity.ts";
-import { isDashboardKey, OPERATOR_NOTE } from "./admin-api.ts";
-import { api, type ApiApp, type ApiConversation, type ApiPage, type ApiTranscriptEntry } from "./api.ts";
+import { cleanTitle, isDashboardKey } from "./admin-api.ts";
+import { api, type ApiApp, type ApiConversation, type ApiPage } from "./api.ts";
 
 const PAGE = 50;
-const TITLES = "pikit-titles";
 const TABS = "pikit-tabs";
-/** Titles kept, the newest; tabs kept. */
-const KEPT_TITLES = 300;
+/** Tabs kept. */
 const KEPT_TABS = 12;
-/** A dashboard key's title is looked for in its transcript's first pages at most: `TITLE_PAGES` of `TITLE_PAGE` entries. */
-const TITLE_PAGE = 200;
-const TITLE_PAGES = 5;
-/** The title of a dashboard conversation whose first message is not known (yet). */
+/** The title of a dashboard conversation with no title and no first message at hand. */
 export const NEW_CHAT = "New chat";
+
+/** What a command answered in a conversation: a quiet note there, in this page only (no channel gets it). */
+export interface CommandNote {
+  id: number;
+  /** The command, without its slash. */
+  command: string;
+  text: string;
+  at: number;
+}
+
+let nextNote = 0;
 
 export interface Tab {
   id: string;
   /** Its conversation's key: its title follows the key's. */
   key?: string;
   title: string;
-}
-
-/** A title from a message's text: one line, at most 80 characters. */
-const titleFrom = (text: string): string => text.replace(/\s+/g, " ").trim().slice(0, 80);
-
-/** What the operator or a user wrote in a user message (the runtime's JSON), without the operator's note. */
-function userTextOf(message: unknown): string | undefined {
-  const { role, content } = (message ?? {}) as { role?: unknown; content?: unknown };
-  if (role !== "user") return undefined;
-  const text =
-    typeof content === "string"
-      ? content
-      : Array.isArray(content)
-        ? content.flatMap((part: { type?: unknown; text?: unknown }) => (part?.type === "text" && typeof part.text === "string" ? [part.text] : [])).join("\n")
-        : "";
-  if (!text.startsWith(OPERATOR_NOTE)) return text;
-  const newline = text.indexOf("\n");
-  return newline === -1 ? "" : text.slice(newline + 1);
-}
-
-/** The first message written in conversation `id`: its transcript read back to the start (bounded). */
-async function firstMessageOf(id: string): Promise<string | undefined> {
-  let cursor: string | undefined;
-  let oldest: string | undefined;
-  for (let pages = 0; pages < TITLE_PAGES; pages++) {
-    const page = await api<ApiPage<ApiTranscriptEntry>>(`/conversations/${encodeURIComponent(id)}/transcript?limit=${TITLE_PAGE}${cursor === undefined ? "" : `&cursor=${encodeURIComponent(cursor)}`}`);
-    // Newest first: the last user message of the page is its oldest.
-    for (const entry of page.items) {
-      for (const message of entry.messages) {
-        const text = userTextOf(message);
-        if (text !== undefined && titleFrom(text) !== "") oldest = text;
-      }
-    }
-    if (page.next === undefined) break;
-    cursor = page.next;
-  }
-  return oldest;
 }
 
 function load<T>(key: string, fallback: T): T {
@@ -107,12 +77,16 @@ export interface Chats {
   hasOlder: boolean;
   loadOlder(): Promise<void>;
   reload(): void;
-  /** Its key's title (`NEW_CHAT` for a dashboard key whose first message is not known yet). */
+  /** Its key's title: the API's, else the first message at hand, the id in its key, or `NEW_CHAT`. */
   titleOf(conversation: ApiConversation): string;
   /** A tab's title: its key's, as it is now. */
   tabTitle(tab: Tab): string;
-  /** A dashboard key's title, from the first message written in it; one it has already is kept. */
-  setTitle(key: string, text: string): void;
+  /** The first message written in `key`, as this page knows it: the title until the API has one. */
+  setFirstMessage(key: string, text: string): void;
+  /** The notes the commands run in conversation `id` answered, oldest first. */
+  notesOf(id: string): CommandNote[];
+  /** A command's answer in conversation `id`. */
+  addNote(id: string, command: string, text: string): void;
   tabs: Tab[];
   /** Opens (or refreshes) the tab of `conversation`. */
   openTab(conversation: ApiConversation): void;
@@ -135,10 +109,9 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
   const [older, setOlder] = useState<ApiConversation[]>([]);
   const [next, setNext] = useState<string | null>();
   const [error, setError] = useState<Error>();
-  const [titles, setTitles] = useState<Record<string, string>>(() => load(TITLES, {}));
+  const [firsts, setFirsts] = useState<Record<string, string>>({});
+  const [notes, setNotes] = useState<Record<string, CommandNote[]>>({});
   const [tabs, setTabs] = useState<Tab[]>(() => load<Tab[]>(TABS, []).filter((tab) => typeof tab?.id === "string"));
-  /** Dashboard keys whose title was looked for in this page: once each. */
-  const asked = useRef(new Set<string>());
 
   const reload = useCallback(() => {
     api<ApiPage<ApiConversation>>(`/conversations?limit=${PAGE}`)
@@ -160,21 +133,36 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     }
   }, [cursor]);
 
-  useEffect(() => save(TITLES, Object.fromEntries(Object.entries(titles).slice(-KEPT_TITLES))), [titles]);
   useEffect(() => save(TABS, tabs.slice(-KEPT_TABS)), [tabs]);
 
-  const titleOfKey = useCallback((key: string | undefined): string => {
-    if (key === undefined) return NEW_CHAT;
-    if (isDashboardKey(key)) return titles[key] ?? NEW_CHAT;
-    return key.slice(key.indexOf(":") + 1) || key;
-  }, [titles]);
-  const titleOf = useCallback((conversation: ApiConversation): string => titleOfKey(conversation.key), [titleOfKey]);
+  // The API's titles, by key: any conversation of a key carries it.
+  const titled = useMemo(() => {
+    const byKey = new Map<string, string>();
+    for (const each of [...(first?.items ?? []), ...older]) if (each.key !== undefined && each.title !== undefined) byKey.set(each.key, each.title);
+    return byKey;
+  }, [first, older]);
+
+  const titleOfKey = useCallback(
+    (key: string | undefined, title?: string): string => {
+      if (key === undefined) return NEW_CHAT;
+      const known = title ?? titled.get(key) ?? firsts[key];
+      if (known !== undefined) return known;
+      return isDashboardKey(key) ? NEW_CHAT : key.slice(key.indexOf(":") + 1) || key;
+    },
+    [titled, firsts],
+  );
+  const titleOf = useCallback((conversation: ApiConversation): string => titleOfKey(conversation.key, conversation.title), [titleOfKey]);
   const tabTitle = useCallback((tab: Tab): string => (tab.key === undefined ? tab.title : titleOfKey(tab.key)), [titleOfKey]);
 
-  const setTitle = useCallback((key: string, text: string) => {
-    const title = titleFrom(text);
-    if (title === "" || !isDashboardKey(key)) return;
-    setTitles((all) => (all[key] !== undefined ? all : { ...all, [key]: title }));
+  const setFirstMessage = useCallback((key: string, text: string) => {
+    const title = cleanTitle(text);
+    if (title === undefined) return;
+    setFirsts((all) => (all[key] !== undefined ? all : { ...all, [key]: title }));
+  }, []);
+
+  const notesOf = useCallback((id: string): CommandNote[] => notes[id] ?? [], [notes]);
+  const addNote = useCallback((id: string, command: string, text: string) => {
+    setNotes((all) => ({ ...all, [id]: [...(all[id] ?? []), { id: nextNote++, command, text, at: Date.now() }] }));
   }, []);
 
   const openTab = useCallback(
@@ -211,22 +199,6 @@ export function ChatsProvider({ children }: { children: ReactNode }) {
     return [...first.items, ...older].filter((each) => each.key !== undefined && !seen.has(each.conversationId) && seen.add(each.conversationId));
   }, [first, older]);
 
-  // The titles of the dashboard keys listed without one, one key at a time: from the key's least
-  // recently active conversation listed (its first, when a reset left it behind).
-  const [looking, setLooking] = useState(false);
-  useEffect(() => {
-    if (looking || items === undefined) return;
-    const untitled = [...items].reverse().find((each) => isDashboardKey(each.key) && titles[each.key as string] === undefined && !asked.current.has(each.key as string));
-    if (untitled === undefined) return;
-    const key = untitled.key as string;
-    asked.current.add(key);
-    setLooking(true);
-    firstMessageOf(untitled.conversationId)
-      .then((text) => text !== undefined && setTitle(key, text))
-      .catch(() => undefined)
-      .finally(() => setLooking(false));
-  }, [items, titles, looking, setTitle]);
-
-  const value: Chats = { items, error, hasOlder: cursor !== undefined, loadOlder, reload, titleOf, tabTitle, setTitle, tabs, openTab, closeTab, replaced };
+  const value: Chats = { items, error, hasOlder: cursor !== undefined, loadOlder, reload, titleOf, tabTitle, setFirstMessage, notesOf, addNote, tabs, openTab, closeTab, replaced };
   return <ChatsContext.Provider value={value}>{children}</ChatsContext.Provider>;
 }

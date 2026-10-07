@@ -3,7 +3,10 @@
  * running; and what an operator does to it (SPEC §5): a message (with images, a web search), a stop,
  * a reset. Its top bar holds nothing but two buttons: the Context panel (the images sent in it, what
  * its web searches and fetches found) and a menu with the reset. Its composer shows its assistant: a
- * conversation never changes agent, so picking another starts a new chat with it.
+ * conversation never changes agent, so picking another starts a new chat with it. Its "/" runs the
+ * App's commands here (`POST …/commands/:name`): what one answers is a quiet note in the thread, for
+ * the operator only (no channel gets it); one that left the conversation behind (`/new`) is followed
+ * to its key's new conversation, the note with it.
  *
  * The dashboard is a channel of its own: a message from here is a follow-up (it waits for a run
  * going) whose answer stays here. In another channel's conversation nothing said here reaches that
@@ -29,11 +32,21 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog";
 import { isDashboardKey } from "@/lib/admin-api";
-import { api, type ApiConversation, type ApiPage, type ApiResetResponse, type ApiSendResponse, type ApiTranscriptEntry, post, useApi } from "@/lib/api";
-import { agentsOf, useChats } from "@/lib/chats";
+import {
+  api,
+  type ApiCommandResponse,
+  type ApiConversation,
+  type ApiPage,
+  type ApiResetResponse,
+  type ApiSendResponse,
+  type ApiTranscriptEntry,
+  post,
+  useApi,
+} from "@/lib/api";
+import { agentsOf, type CommandNote, useChats } from "@/lib/chats";
 import { navigate, pagePath } from "@/lib/router";
 import { SidePanel, TabActions, useShell } from "@/lib/shell";
-import { attachmentsOf, composerCommands, imageLimits, webSearchOf } from "./composer";
+import { assistantOptions, attachmentsOf, imageLimits, webSearchOf } from "./composer";
 import { ContextPanel } from "./context";
 import { useLive } from "./live";
 import { imagesOf, sourcesOf } from "./sources";
@@ -174,6 +187,17 @@ function ResetDialog({ conversation, open, onOpenChange, onError }: { conversati
   );
 }
 
+/** What a command answered: a quiet note in the thread, the operator's only. */
+function CommandNoteRow({ note }: { note: CommandNote }) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-card bg-inset px-3 py-2.5 shadow-hairline" style={{ animation: "fade-up 320ms cubic-bezier(0.23,1,0.32,1) both" }}>
+      <span className="mt-px flex h-5 shrink-0 items-center rounded-chip bg-surface px-1.5 font-mono text-[11.5px] text-ink-2 shadow-hairline">/{note.command}</span>
+      <p className="min-w-0 flex-1 text-[13px] leading-5 text-ink-2 [overflow-wrap:anywhere]">{note.text}</p>
+      <span className="mt-0.5 shrink-0 text-[11px] text-ink-3">Only you see this</span>
+    </div>
+  );
+}
+
 /** The thread follows its end while the operator is there; scrolling up to read releases it. */
 function useStickToBottom(scroller: RefObject<HTMLDivElement | null>, id: string) {
   useEffect(() => {
@@ -210,7 +234,7 @@ function useStickToBottom(scroller: RefObject<HTMLDivElement | null>, id: string
 export function ConversationPage({ params }: { params: Record<string, string> }) {
   const id = params.id ?? "";
   const chats = useChats();
-  const { app, agents: described, views, newChat } = useShell();
+  const { app, agents: described, commands, newChat } = useShell();
   const agents = agentsOf(app);
   const live = useLive(id);
   const summary = useApi<ApiConversation>(`/conversations/${encodeURIComponent(id)}`);
@@ -231,7 +255,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
     return () => clearTimeout(timer);
   }, [live.changes, live.busy, reload]);
 
-  const { openTab, setTitle } = chats;
+  const { openTab, setFirstMessage } = chats;
   useEffect(() => {
     if (conversation !== undefined) openTab(conversation);
   }, [conversation, openTab]);
@@ -239,11 +263,12 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const messages = transcript.entries.flatMap((entry) => entry.messages as Message[]);
   const turns = turnsOf(messages, live);
 
-  // A dashboard key is titled by the first words written in it, once read (a title it has is kept).
+  // Until the API titles its key, a chat is named by the first words written in it, once read here.
   const firstText = transcript.hasOlder ? undefined : turns.map((turn) => (turn.kind === "user" ? userText(turn.message).text.trim() : "")).find((text) => text !== "");
   useEffect(() => {
-    if (conversation?.key !== undefined && isDashboardKey(conversation.key) && firstText !== undefined) setTitle(conversation.key, firstText);
-  }, [conversation, firstText, setTitle]);
+    if (conversation?.key !== undefined && conversation.title === undefined && firstText !== undefined) setFirstMessage(conversation.key, firstText);
+  }, [conversation, firstText, setFirstMessage]);
+  const notes = chats.notesOf(id);
 
   useStickToBottom(scrollRef, id);
 
@@ -289,6 +314,33 @@ export function ConversationPage({ params }: { params: Record<string, string> })
       });
       setActionError(undefined);
       setNote(sent.admission === "queued" ? "Sent: it runs once the run going ends." : sent.admission === "duplicate" ? "Already sent." : undefined);
+    } catch (thrown) {
+      setActionError(thrown instanceof Error ? thrown : new Error(String(thrown)));
+      throw thrown;
+    }
+  };
+  /**
+   * Runs `/name args` here. Its note stays in this page; a command that left this conversation behind
+   * (`/new`) is followed to its key's current one, which gets the note.
+   */
+  const runCommand = async (name: string, args: string) => {
+    if (conversation === undefined) return;
+    try {
+      const answer = await post<ApiCommandResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/commands/${encodeURIComponent(name)}`, { args });
+      setActionError(undefined);
+      let target = conversation.conversationId;
+      const now = await api<ApiConversation>(`/conversations/${encodeURIComponent(conversation.conversationId)}`).catch(() => undefined);
+      if (now?.current === false && now.key !== undefined) {
+        const page = await api<ApiPage<ApiConversation>>("/conversations?limit=50").catch(() => undefined);
+        target = page?.items.find((each) => each.key === now.key && each.current === true)?.conversationId ?? target;
+      }
+      chats.addNote(target, name, answer.text ?? `Ran /${name}.`);
+      chats.reload();
+      if (target === conversation.conversationId) reload();
+      else {
+        chats.replaced(conversation.conversationId, target);
+        navigate(pagePath("/conversations", target), { replace: true });
+      }
     } catch (thrown) {
       setActionError(thrown instanceof Error ? thrown : new Error(String(thrown)));
       throw thrown;
@@ -341,7 +393,12 @@ export function ConversationPage({ params }: { params: Record<string, string> })
             </div>
           )}
           {turns.map((turn, i) => (
-            <div key={turn.key} className="mx-auto w-full max-w-[720px]">
+            <div key={turn.key} className="mx-auto flex w-full max-w-[720px] flex-col gap-8">
+              {/* a command's note goes before the first message written after it */}
+              {turn.kind === "user" &&
+                notes
+                  .filter((note) => note.at <= (turn.message.timestamp ?? 0) && !turns.slice(0, i).some((before) => before.kind === "user" && note.at <= (before.message.timestamp ?? 0)))
+                  .map((note) => <CommandNoteRow key={`note-${note.id}`} note={note} />)}
               {turn.kind === "user" ? (
                 <UserBubble message={turn.message} from={conversation?.key} />
               ) : (
@@ -349,12 +406,19 @@ export function ConversationPage({ params }: { params: Record<string, string> })
               )}
             </div>
           ))}
+          {notes
+            .filter((note) => !turns.some((turn) => turn.kind === "user" && note.at <= (turn.message.timestamp ?? 0)))
+            .map((note) => (
+              <div key={`note-${note.id}`} className="mx-auto w-full max-w-[720px]">
+                <CommandNoteRow note={note} />
+              </div>
+            ))}
           {waiting && last?.kind !== "reply" && (
             <div className="mx-auto w-full max-w-[720px]">
               <Reply segments={[]} waiting since={since} />
             </div>
           )}
-          {transcript.loaded && turns.length === 0 && !live.busy && <p className="mx-auto w-full max-w-[720px] text-[13.5px] text-ink-3">No messages yet.</p>}
+          {transcript.loaded && turns.length === 0 && notes.length === 0 && !live.busy && <p className="mx-auto w-full max-w-[720px] text-[13.5px] text-ink-3">No messages yet.</p>}
         </div>
       </div>
 
@@ -379,26 +443,18 @@ export function ConversationPage({ params }: { params: Record<string, string> })
                     ? undefined
                     : {
                         label: "assistant",
-                        options: (agents.includes(conversation.agent) ? agents : [conversation.agent, ...agents]).map((name) => ({
-                          key: name,
-                          name,
-                          ...(name !== conversation.agent && { tag: "new chat" }),
-                        })),
+                        options: assistantOptions(agents.includes(conversation.agent) ? agents : [conversation.agent, ...agents], (name) =>
+                          name !== conversation.agent ? "new chat" : undefined,
+                        ),
                         value: conversation.agent,
                         onChange: (agent) => newChat(agent),
-                        note: "A chat keeps its assistant: another one starts a new chat with it.",
+                        ...(agents.some((name) => name !== conversation.agent) && { note: "A chat keeps its assistant: another one starts a new chat with it." }),
                       }
                 }
                 images={imageLimits(app)}
                 webSearch={webSearch}
-                commands={composerCommands({
-                  views,
-                  newChat: () => newChat(),
-                  ...(live.busy && { stop }),
-                  ...(actionable && { reset: () => setConfirming(true) }),
-                  webSearch: webSearch.available,
-                  assistants: agents.length > 1,
-                })}
+                commands={commands ?? []}
+                onCommand={runCommand}
                 busy={live.busy}
                 onStop={stop}
                 onSend={send}

@@ -13,16 +13,25 @@ the model's thinking, the tool calls as chips) and its composer, and a **Context
 or the system's (the default); interaction sounds on until you turn them off. Both are kept in this
 browser.
 
-- **The composer**: the assistant where the harness picks its model (in a new chat it chooses the
-  agent; in a conversation it shows its agent, and picking another starts a new chat with it, since a
-  conversation never changes agent); **+** with exactly two things: **Add image** (PNG, JPEG, WebP or
+- **The composer**: the assistant where the harness picks its model, always a dropdown, even with
+  one (in a new chat it chooses the agent; in a conversation it shows its agent, and picking another
+  starts a new chat with it, since a conversation never changes agent). An agent is shown by its
+  words, the first capitalized (`support-bot` is "Support bot", `assistantName`); its name stays as
+  it is; **+** with exactly two things: **Add image** (PNG, JPEG, WebP or
   GIF, at most 4 of 5 MB each, 1 MB in all on Cloudflare; checked here and by the API; pasting one
   works too) and **Web search** for the next message (only for an assistant with the `websearch`
   tool); and the send button, which stops the run going when there is nothing to send.
-- **The "/" menu**: `/` at the start of the composer opens the commands, filtered as you type (arrows,
-  Enter or Tab, Escape): `/new`, `/stop` (while a run goes), `/reset` (confirmed first), `/image`,
-  `/search` (an assistant with the tool), `/assistant`, and one per view shown (`/health`,
-  `/delivery`, `/composition`, a component's view by its id).
+- **The "/" menu**: `/` at the start of the composer opens the App's slash commands, and only them:
+  what its components registered (`agent.command`, read once from `GET /admin/api/commands`; the
+  kit's are `/new`, `/name <title>` and `/compact`), filtered as you type (arrows, Enter or Tab,
+  Escape). Picking one that takes arguments writes `/name ` for you to go on (Tab completes a name;
+  Enter on a whole name runs it, its arguments being optional then); Enter on `/name args` runs it in
+  the conversation, and what it answers is a quiet note in the thread, for you only (no
+  channel gets it). `/new` takes you to the key's new conversation. With no command registered the
+  menu says "No commands", and text that names no command is sent as a message. The dashboard's own
+  actions are buttons, never commands: stop (the send button), reset (the menu), images and web
+  search (**+**), the assistant (the picker), the views (the sidebar). On the home a command says it
+  runs in a conversation.
 - **A conversation's top bar** has no figures: the **Context** button and the **…** menu (Reset,
   confirmed). **Context** shows the images sent in the conversation and its sources (what its web
   searches and fetches returned: title, address, snippet), as far as its transcript is read here.
@@ -44,14 +53,20 @@ built files under `/admin/`.
   answer, is sent to that chat; the agent reads that the message is the operator's and that the user
   does not see it. A run that also answers the user's own message is delivered to the user, as always.
 - **Abort** and **reset** work on every conversation. After a reset you write on in the key's new
-  conversation at once; the one left behind stays readable, listed under the same name. A chat is
-  named by its key: a dashboard one by the first words written in it (read once and kept in this
-  browser), another channel's by the id in its key. The list shows names only, no channel.
+  conversation at once; the one left behind stays readable, listed under the same name.
+- **Titles**: a chat is named by its key's title, which admin-api has a model write after its first
+  answer (`ApiConversation.title`; `/name` sets your own), everywhere it is named: the sidebar, the
+  tabs, the home. Until there is one, by the first message when the page has it (you just sent it,
+  or the open conversation shows it), else another channel's by the id in its key and the
+  dashboard's own "New chat". Nothing about names is kept in the browser. The list shows names only,
+  no channel.
 
 ## Signing in
 
 The page asks for the operator's token (`PIKIT_ADMIN_TOKEN`; `pikit configure --generate
-PIKIT_ADMIN_TOKEN` writes one) once, and posts it to `POST /admin/api/session`: the browser gets a
+PIKIT_ADMIN_TOKEN` writes one) once, on a card in Beautiful UI's language (the mark, a field that
+shows or hides the token, the primary button with its progress, a line that says what went wrong;
+it rises in, or simply appears with reduced motion; light and dark), and posts it to `POST /admin/api/session`: the browser gets a
 session cookie (HttpOnly, SameSite=Strict, sent to `/admin/api/` only, 12 h), never keeps the token,
 and no script can read the session. Every call also sends `x-pikit-admin: 1`, which a page of
 another site cannot. **Sign out** clears the cookie. The files are served with a Content-Security-Policy
@@ -103,9 +118,9 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/lib/admin-api.ts` | the API's JSON, typed: an identical copy of `src/pikit/admin-api/api.ts` |
 | `src/lib/views.ts` | how views are found and when they show |
 | `src/lib/router.tsx` | the pages under `/admin` |
-| `src/views/conversations/` | the home, a conversation, what their composers share (`composer.ts`: the image limits, web search, the "/" commands), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
-| `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles: a key's, shared by the conversations a reset left behind (`useChats`, `agentsOf`) |
-| `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, the views, `newChat`, `TabActions`, `SidePanel` |
+| `src/views/conversations/` | the home, a conversation (its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
+| `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles (the API's: a key's, shared by the conversations a reset left behind), the commands' notes (`useChats`, `agentsOf`) |
+| `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, its commands, the views, `newChat`, `TabActions`, `SidePanel` |
 | `src/lib/theme.ts`, `public/theme.js` | light, dark or the system's, before the first paint |
 | `src/lib/sounds.ts` | the interaction sounds, and their switch |
 | `src/app.tsx` | sign-in, the sidebar, the tabs and the page the path names |
@@ -151,6 +166,22 @@ More primitives: `bunx shadcn@latest add dialog` (from this folder). pikit's own
 shadcn items too: `bunx shadcn@latest add @pikit/<item>` (`components.json` names the registry; its
 list is `registry/ui/r/registry.json` in the pikit repository). A component with a view installs it
 here itself (`pikit add`). The skill `pikit-view` (`.agents/skills/`) teaches an AI agent all of this.
+
+## Add a command
+
+A slash command is not the dashboard's: a component registers it, and the "/" lists it. In a
+component of yours (skill `pikit-component`, "A slash command"):
+
+```ts
+pikit.provideKeyed("agent.command", "deploy", {
+  description: "Deploy the current branch",
+  argumentHint: "<environment>",
+  run: async (conversation, args, ctx) => ({ text: `Deploying to ${args}.` }),
+});
+```
+
+It runs in the App that holds the conversation, through contracts only; its `text` is the note the
+operator sees. Nothing in `src/` changes.
 
 ## Notices
 

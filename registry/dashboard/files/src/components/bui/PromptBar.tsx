@@ -4,11 +4,14 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
  * PROMPT BAR
  * Beautiful UI's hero composer, with real controls: the "+"
  * menu (add images, web search for the next message), the
- * "/" menu (commands, filtered as you type), and a picker
- * where the harness picks its model. While a run goes the
- * send button stops it. Enter sends, Shift+Enter breaks a
- * line; in a menu, arrows move, Enter or Tab pick, Escape
- * closes it.
+ * "/" menu (the commands the App registered, filtered as you
+ * type; none: a quiet "No commands", and the text is sent as
+ * a message), and a picker where the harness picks its
+ * model, a dropdown even with one option. While a run goes
+ * the send button stops it. Enter sends (or runs "/name
+ * args" when it names a command), Shift+Enter breaks a line;
+ * in a menu, arrows move, Enter picks (a command whose whole
+ * name is typed runs), Tab completes, Escape closes.
  * --------------------------------------------------------- */
 
 function Icon({ children, size = 15, strokeWidth = 1.8 }: { children: ReactNode; size?: number; strokeWidth?: number }) {
@@ -59,18 +62,21 @@ export type ComposerImage = { name: string; mimeType: string; data: string };
 /** What is sent: the text, the images, and whether the next message asks for a web search. */
 export type ComposerMessage = { text: string; images: ComposerImage[]; webSearch: boolean };
 
-/** A "/" command: it runs, or works one of the composer's own controls. */
+/** A "/" command, as the App registered it (`GET /admin/api/commands`). */
 export type Command = {
   /** without its slash: "new" */
   name: string;
   description: string;
-  run?: () => void;
-  control?: "image" | "search" | "assistant";
+  /** what it takes after its name: "<title>"; absent, it runs as soon as it is picked */
+  argumentHint?: string;
 };
+
+/** "/name args": a command's name and what follows it, when the draft is one. */
+const COMMAND_LINE = /^\/([a-z0-9][a-z0-9:-]*)(?:\s+([\s\S]*))?$/;
 
 type Attached = { id: number; file: File; url: string };
 
-type MenuRow = { key: string; name: string; desc: string; icon?: ReactNode; trailing?: ReactNode; disabled?: boolean; pick: () => void };
+type MenuRow = { key: string; name: string; hint?: string; desc: string; icon?: ReactNode; trailing?: ReactNode; disabled?: boolean; pick: () => void };
 
 const megabytes = (bytes: number) => `${Math.round((bytes / 1024 / 1024) * 10) / 10} MB`;
 
@@ -97,6 +103,8 @@ export default function PromptBar({
   images,
   webSearch,
   commands = [],
+  onCommand,
+  commandsNote = "Type to search commands",
 }: {
   placeholder?: string;
   picker?: Picker;
@@ -111,8 +119,12 @@ export default function PromptBar({
   images?: ImageLimits;
   /** "Web search" in the "+" menu: `available` when the assistant has the tool, else `unavailable` says why */
   webSearch?: { available: boolean; unavailable?: string };
-  /** the "/" menu, in order */
+  /** the "/" menu: the App's commands, by name */
   commands?: Command[];
+  /** runs "/name args"; the draft is cleared once it resolves, kept when it throws */
+  onCommand?: (name: string, args: string) => Promise<void> | void;
+  /** the line under the commands */
+  commandsNote?: string;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -139,15 +151,15 @@ export default function PromptBar({
   attachedRef.current = attached;
 
   const options = picker?.options ?? [];
-  const choosable = picker?.onChange !== undefined && options.length > 1;
+  const choosable = picker?.onChange !== undefined && options.length > 0;
   const chosen = options.find((option) => option.key === picker?.value);
   const canSearch = webSearch?.available === true;
   const webSearchOn = searching && canSearch;
 
   /* a "/" typed at the start opens the commands, filtered by what follows it */
-  const slash = dismissed || plusOpen ? null : /^\/([\w-]*)$/.exec(draft);
+  const slash = dismissed || plusOpen ? null : /^\/([\w:-]*)$/.exec(draft);
   const query = slash?.[1]?.toLowerCase() ?? "";
-  const menu: "plus" | "slash" | null = plusOpen ? "plus" : slash !== null && commands.length > 0 ? "slash" : null;
+  const menu: "plus" | "slash" | null = plusOpen ? "plus" : slash !== null ? "slash" : null;
 
   const openPicker = () => {
     setPlusOpen(false);
@@ -158,18 +170,37 @@ export default function PromptBar({
     if (canSearch) setSearching((on) => !on);
     inputRef.current?.focus();
   };
-  const openAssistant = () => {
-    setPlusOpen(false);
-    if (choosable) setModelOpen(true);
+  /* a command's draft: what the operator wrote names one of the App's commands */
+  const commandOf = (text: string): { name: string; args: string } | undefined => {
+    const line = COMMAND_LINE.exec(text.trim());
+    const name = line?.[1];
+    return name !== undefined && onCommand !== undefined && commands.some((command) => command.name === name) ? { name, args: (line?.[2] ?? "").trim() } : undefined;
   };
 
-  const run = (command: Command) => {
-    setDraft("");
-    setDismissed(false);
-    if (command.control === "image") openPicker();
-    else if (command.control === "search") toggleSearch();
-    else if (command.control === "assistant") openAssistant();
-    else command.run?.();
+  const runCommand = async (name: string, args: string) => {
+    if (onCommand === undefined) return;
+    setSending(true);
+    setPlusOpen(false);
+    setModelOpen(false);
+    try {
+      await onCommand(name, args);
+      setDraft("");
+      setDismissed(false);
+    } catch {
+      // The caller says why; the draft stays.
+    } finally {
+      setSending(false);
+      inputRef.current?.focus();
+    }
+  };
+
+  /* picked from the menu: one that takes arguments waits for them, another runs at once */
+  const pick = (command: Command) => {
+    if (command.argumentHint !== undefined) {
+      setDraft(`/${command.name} `);
+      setDismissed(true);
+      inputRef.current?.focus();
+    } else void runCommand(command.name, "");
   };
 
   const rows: MenuRow[] =
@@ -209,7 +240,7 @@ export default function PromptBar({
       : menu === "slash"
         ? commands
             .filter((command) => command.name.startsWith(query))
-            .map((command) => ({ key: command.name, name: `/${command.name}`, desc: command.description, pick: () => run(command) }))
+            .map((command) => ({ key: command.name, name: `/${command.name}`, ...(command.argumentHint !== undefined && { hint: command.argumentHint }), desc: command.description, pick: () => pick(command) }))
         : [];
 
   useEffect(() => {
@@ -318,6 +349,8 @@ export default function PromptBar({
 
   const send = async () => {
     if (!canSend) return;
+    const command = attached.length === 0 ? commandOf(draft) : undefined;
+    if (command !== undefined) return runCommand(command.name, command.args);
     setSending(true);
     setModelOpen(false);
     setPlusOpen(false);
@@ -391,12 +424,15 @@ export default function PromptBar({
               >
                 {row.icon !== undefined && <span className={`flex size-5.5 shrink-0 items-center justify-center ${row.disabled ? "text-ink-3" : "text-ink-2"}`}>{row.icon}</span>}
                 <span className={`shrink-0 text-[12.5px] font-medium ${row.disabled ? "text-ink-3" : "text-ink"}`}>{row.name}</span>
+                {row.hint !== undefined && <span className="shrink-0 font-mono text-[11.5px] text-ink-3">{row.hint}</span>}
                 <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">{row.desc}</span>
                 {row.trailing}
               </button>
             ))}
-            {rows.length === 0 && <div className="flex h-9 items-center px-2 text-[12px] text-ink-3">No command “/{query}”</div>}
-            {menu === "slash" && <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 text-[11px] text-ink-3">Type to search commands</div>}
+            {rows.length === 0 && (
+              <div className="flex h-9 items-center px-2 text-[12px] text-ink-3">{menu === "slash" && commands.length === 0 ? "No commands" : `No command “/${query}”`}</div>
+            )}
+            {menu === "slash" && rows.length > 0 && <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 text-[11px] text-ink-3">{commandsNote}</div>}
           </div>
         )}
 
@@ -502,7 +538,12 @@ export default function PromptBar({
                   if ((event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) || event.key === "Tab") {
                     event.preventDefault();
                     const row = rows[active];
-                    if (row !== undefined && row.disabled !== true) row.pick();
+                    if (row === undefined || row.disabled === true) return;
+                    const command = menu === "slash" ? commands.find((each) => each.name === row.key) : undefined;
+                    // Tab completes a command; Enter on its whole name runs it (its arguments are optional then).
+                    if (command !== undefined && event.key === "Tab") setDraft(`/${command.name} `);
+                    else if (command !== undefined && query === command.name) void runCommand(command.name, "");
+                    else row.pick();
                     return;
                   }
                 }

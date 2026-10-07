@@ -1,4 +1,5 @@
-import { useState } from "react";
+import { ArrowRight, Eye, EyeClosed, Lock, WarningCircle } from "iconoir-react";
+import { useRef, useState } from "react";
 import { Button } from "@/components/bui/Button";
 import { ApiFailure, signIn } from "@/lib/api";
 
@@ -11,16 +12,25 @@ export function Monogram({ name = "pi", size = 20 }: { name?: string; size?: num
   );
 }
 
+/** Each part of the card rises in after the one before it (`sign-in-rise`; none with reduced motion). */
+const rise = (step: number) => ({ animation: `sign-in-rise 620ms cubic-bezier(0.16, 1, 0.3, 1) ${80 + step * 60}ms both` });
+
 /**
  * Asks for the operator's token (PIKIT_ADMIN_TOKEN with admin-auth-token) and signs in with it once:
- * the browser keeps a session cookie no script can read, never the token.
+ * the browser keeps a session cookie no script can read, never the token. In Beautiful UI's language:
+ * a raised card on the app's canvas (its shadow scale), the mark and the product, a title and what to
+ * paste, an inset field that shows or hides the token, the primary pill with its progress, and a line
+ * that says what went wrong and what to do.
  */
 export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator: string | undefined) => void; refused?: boolean }) {
   const [value, setValue] = useState("");
-  const [problem, setProblem] = useState<string | undefined>(refused ? "The session ended: sign in again." : undefined);
+  const [shown, setShown] = useState(false);
+  const [problem, setProblem] = useState<string | undefined>(refused ? "Your session ended. Sign in again to go on." : undefined);
   const [checking, setChecking] = useState(false);
+  const field = useRef<HTMLInputElement>(null);
 
   const submit = async () => {
+    if (value.trim() === "" || checking) return;
     setChecking(true);
     setProblem(undefined);
     try {
@@ -28,43 +38,118 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
       setValue("");
       onSignedIn(operator);
     } catch (error) {
-      setProblem(error instanceof ApiFailure && error.status === 401 ? "That is not the operator's token." : `The API cannot be reached: ${String(error)}`);
+      setProblem(
+        error instanceof ApiFailure && error.status === 401
+          ? "That token was not accepted. Check PIKIT_ADMIN_TOKEN in the service's environment."
+          : `The service could not be reached: ${error instanceof Error ? error.message : String(error)}`,
+      );
+      field.current?.select();
     } finally {
       setChecking(false);
     }
   };
 
   return (
-    <main className="flex min-h-svh items-center justify-center bg-canvas p-6 text-ink">
-      <div className="w-full max-w-[380px] rounded-window border border-line bg-page p-6 shadow-card" style={{ animation: "fade-up 450ms cubic-bezier(0.23,1,0.32,1) both" }}>
-        <div className="flex items-center gap-2">
-          <Monogram size={24} />
-          <span className="text-[14px] font-medium text-ink-2">pikit</span>
+    <main className="relative flex min-h-svh items-center justify-center overflow-hidden bg-canvas p-6 text-ink">
+      {/* a soft light behind the card: depth without a picture */}
+      <div aria-hidden className="pointer-events-none absolute inset-0" style={{ background: "radial-gradient(60% 45% at 50% 42%, var(--page) 0%, transparent 70%)" }} />
+
+      <div className="relative w-full max-w-[400px]" style={rise(0)}>
+        <div className="rounded-[20px] bg-surface p-1.5 shadow-overlay">
+          <div className="rounded-[15px] px-6 pt-6 pb-5">
+            <div className="flex items-center gap-2.5" style={rise(1)}>
+              <Monogram size={28} />
+              <div className="min-w-0 leading-tight">
+                <div className="text-[14px] font-semibold tracking-[-0.01em] text-ink">pikit</div>
+                <div className="text-[12px] text-ink-3">Operator dashboard</div>
+              </div>
+            </div>
+
+            <h1 className="mt-7 text-[22px] font-medium tracking-[-0.02em] text-ink" style={rise(2)}>
+              Sign in
+            </h1>
+            <p className="mt-1.5 text-[13.5px] leading-[1.55] text-ink-2" style={rise(2)}>
+              Paste the operator token to see this service's conversations, live.
+            </p>
+
+            <form
+              className="mt-6 flex flex-col gap-3"
+              style={rise(3)}
+              onSubmit={(event) => {
+                event.preventDefault();
+                void submit();
+              }}
+            >
+              <label htmlFor="operator-token" className="text-[12.5px] font-medium text-ink-2">
+                Operator token
+              </label>
+              <div
+                className={`group flex h-11 items-center gap-2 rounded-[12px] bg-inset pr-1.5 pl-3 shadow-inset-field ring-1 transition-[box-shadow,background-color] duration-150 focus-within:bg-surface focus-within:ring-2 ${problem === undefined ? "ring-line focus-within:ring-line-strong" : "ring-red/50 focus-within:ring-red/60"}`}
+              >
+                <Lock width={15} height={15} strokeWidth={1.9} className="shrink-0 text-ink-3" aria-hidden />
+                <input
+                  id="operator-token"
+                  ref={field}
+                  type={shown ? "text" : "password"}
+                  autoComplete="current-password"
+                  spellCheck={false}
+                  placeholder="Paste the token"
+                  aria-invalid={problem !== undefined}
+                  aria-describedby={problem === undefined ? "operator-token-help" : "operator-token-problem"}
+                  value={value}
+                  onChange={(event) => {
+                    setValue(event.target.value);
+                    if (problem !== undefined) setProblem(undefined);
+                  }}
+                  autoFocus
+                  className="h-full min-w-0 flex-1 bg-transparent font-mono text-[13.5px] tracking-[0.01em] text-ink outline-none placeholder:font-sans placeholder:tracking-normal placeholder:text-ink-3"
+                />
+                <button
+                  type="button"
+                  aria-label={shown ? "Hide the token" : "Show the token"}
+                  aria-pressed={shown}
+                  onClick={() => {
+                    setShown((current) => !current);
+                    field.current?.focus();
+                  }}
+                  className="flex size-8 shrink-0 items-center justify-center rounded-[8px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink"
+                >
+                  {shown ? <EyeClosed width={16} height={16} strokeWidth={1.9} /> : <Eye width={16} height={16} strokeWidth={1.9} />}
+                </button>
+              </div>
+
+              {problem === undefined ? (
+                <p id="operator-token-help" className="text-[12px] leading-[1.5] text-ink-3">
+                  It is <span className="font-mono text-[11.5px] text-ink-2">PIKIT_ADMIN_TOKEN</span> in the service's environment.
+                </p>
+              ) : (
+                <p id="operator-token-problem" role="alert" className="flex items-start gap-1.5 text-[12.5px] leading-[1.5] text-red" style={{ animation: "fade-in 160ms ease both" }}>
+                  <WarningCircle width={15} height={15} strokeWidth={1.9} className="mt-[1.5px] shrink-0" aria-hidden />
+                  {problem}
+                </p>
+              )}
+
+              <Button type="submit" variant="primary" className="mt-2 h-10 w-full gap-2 py-0" disabled={checking || value.trim() === ""} aria-busy={checking}>
+                {checking ? (
+                  <>
+                    <span className="size-3.5 rounded-full border-[1.5px] border-current border-t-transparent" style={{ animation: "spin 700ms linear infinite" }} aria-hidden />
+                    Signing in
+                  </>
+                ) : (
+                  <>
+                    Sign in
+                    <ArrowRight width={15} height={15} strokeWidth={2} aria-hidden />
+                  </>
+                )}
+              </Button>
+            </form>
+          </div>
+
+          <div className="flex items-center gap-2 rounded-[13px] bg-inset px-4 py-3 text-[12px] leading-[1.45] text-ink-3 shadow-hairline" style={rise(4)}>
+            <span className="size-1.5 shrink-0 rounded-full bg-green" aria-hidden />
+            The token is sent once. This browser keeps a session it cannot read, never the token.
+          </div>
         </div>
-        <h1 className="mt-6 text-[22px] font-normal tracking-[-0.02em] text-ink">Sign in</h1>
-        <p className="mt-1 text-[13px] leading-relaxed text-ink-2">Paste the operator's token (PIKIT_ADMIN_TOKEN). It is sent once; this browser keeps a session, not the token.</p>
-        <form
-          className="mt-5 flex flex-col gap-3"
-          onSubmit={(event) => {
-            event.preventDefault();
-            void submit();
-          }}
-        >
-          <input
-            type="password"
-            autoComplete="current-password"
-            placeholder="Token"
-            aria-label="The operator's token"
-            value={value}
-            onChange={(event) => setValue(event.target.value)}
-            autoFocus
-            className="h-10 w-full rounded-[10px] border border-line bg-surface px-3 text-[14px] text-ink shadow-card outline-none transition-[border-color] duration-150 placeholder:text-ink-3 focus:border-line-strong"
-          />
-          {problem !== undefined && <p className="text-[13px] text-red">{problem}</p>}
-          <Button type="submit" variant="primary" className="w-full" disabled={checking || value.trim() === ""}>
-            {checking ? "Checking…" : "Sign in"}
-          </Button>
-        </form>
       </div>
     </main>
   );

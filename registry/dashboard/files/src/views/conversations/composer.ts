@@ -1,16 +1,17 @@
 /**
  * What the home's and a conversation's composers share: the images it takes (admin-api's limits, the
  * smaller total on Cloudflare), whether the assistant can search the web, the attachments a message
- * sends, and the "/" commands, in order: `/new`, `/stop` (a run going), `/reset` (a conversation),
- * `/image`, `/search` (an assistant with the tool), `/assistant` (more than one), then one per view the
- * App shows, by its id.
+ * sends, and how an assistant is named (`assistantName`). The "/" menu lists only the commands the App
+ * registered (`agent.command`, `GET /admin/api/commands`, read by the shell): the dashboard's own
+ * actions (stop, reset, images, web search, the assistant, the views) are its buttons, never commands.
  */
 
-import type { Command, ComposerImage, ImageLimits } from "@/components/bui/PromptBar";
+import type { ComposerImage, ImageLimits, PickerOption } from "@/components/bui/PromptBar";
 import { IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, WEB_SEARCH_TOOL } from "@/lib/admin-api";
 import type { ApiAgent, ApiApp, ApiAttachment } from "@/lib/api";
-import { navigate } from "@/lib/router";
-import type { View } from "@/lib/views";
+import { assistantName } from "@/lib/names";
+
+export { assistantName };
 
 export const imageLimits = (app: ApiApp): ImageLimits => ({
   types: IMAGE_TYPES,
@@ -24,33 +25,15 @@ export function webSearchOf(agents: ApiAgent[] | undefined, agent: string | unde
   const found = agents?.find((each) => each.name === agent);
   return {
     available: found?.tools.includes(WEB_SEARCH_TOOL) === true,
-    unavailable: agents === undefined ? "The assistants are not read yet" : `${agent ?? "This assistant"} has no web search tool`,
+    unavailable: agents === undefined ? "The assistants are not read yet" : `${agent === undefined ? "This assistant" : assistantName(agent)} has no web search tool`,
   };
 }
 
 export const attachmentsOf = (images: ComposerImage[]): ApiAttachment[] => images.map(({ mimeType, data }) => ({ kind: "image", mimeType, data }));
 
-export function composerCommands(options: {
-  views: View[];
-  newChat: () => void;
-  /** Present while a run goes. */
-  stop?: () => void;
-  /** Present in a conversation that takes actions. */
-  reset?: () => void;
-  webSearch: boolean;
-  /** More than one assistant to choose from. */
-  assistants: boolean;
-}): Command[] {
-  const views = options.views
-    .filter((view) => view.id !== "conversations")
-    .map((view): Command => ({ name: view.id, description: `Open ${view.title}`, run: () => navigate(view.pages[0]?.path ?? `/${view.id}`) }));
-  return [
-    { name: "new", description: "Start a new chat", run: options.newChat },
-    ...(options.stop === undefined ? [] : [{ name: "stop", description: "Stop the run going", run: options.stop }]),
-    ...(options.reset === undefined ? [] : [{ name: "reset", description: "Reset this conversation", run: options.reset }]),
-    { name: "image", description: "Add an image", control: "image" },
-    ...(options.webSearch ? [{ name: "search", description: "Web search for the next message", control: "search" as const }] : []),
-    ...(options.assistants ? [{ name: "assistant", description: "Choose the assistant", control: "assistant" as const }] : []),
-    ...views,
-  ];
-}
+/** The assistants as the composer's picker lists them: by their shown name, `tag`s for some. */
+export const assistantOptions = (names: string[], tag: (name: string) => string | undefined = () => undefined): PickerOption[] =>
+  names.map((name) => {
+    const tagged = tag(name);
+    return { key: name, name: assistantName(name), ...(tagged !== undefined && { tag: tagged }) };
+  });

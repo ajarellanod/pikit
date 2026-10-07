@@ -1,5 +1,5 @@
 /**
- * What the shell (`app.tsx`) gives the pages: the App's composition, its agents, the views it shows,
+ * What the shell (`app.tsx`) gives the pages: the App's composition, its agents, its slash commands, the views it shows,
  * the operator, a new chat (`newChat`), and two places a page can fill: the tab bar's right end
  * (`TabActions`: a conversation's Context button and its menu) and the side panel next to the main pane
  * (`SidePanel`: a conversation's Context).
@@ -7,13 +7,15 @@
 
 import { createContext, type ReactNode, useContext } from "react";
 import { createPortal } from "react-dom";
-import type { ApiAgent, ApiApp } from "./api.ts";
+import type { ApiAgent, ApiApp, ApiCommand } from "./api.ts";
 import type { View } from "./views.ts";
 
 export interface ShellState {
   app: ApiApp;
   /** The App's agents (`GET /admin/api/agents`), by name; undefined until read. */
   agents?: ApiAgent[];
+  /** The App's slash commands (`GET /admin/api/commands`), by name; undefined until read. */
+  commands?: ApiCommand[];
   /** Opens a new chat (the home, its draft empty), with `agent` chosen when given. */
   newChat(agent?: string): void;
   /** The views the App's composition allows, in sidebar order. */

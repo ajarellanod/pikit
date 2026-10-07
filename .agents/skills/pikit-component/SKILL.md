@@ -40,6 +40,8 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 |---|---|
 | A chat platform | a channel: `admitInbound` for each message, `startAnswerDelivery` for the answers (both `@pikit/contracts`) |
 | Something the model calls | `agent.tool` (`defineTool` from `@pikit/pi-adapter/tools`) |
+| A slash command the operator runs (`/deploy staging` in the dashboard's "/") | `agent.command` under its name (below: "A slash command") |
+| A text from one of the App's models, once (a title, a label) | `model.complete` (runtime-pi's): `complete({ model, system?, prompt, maxTokens? }, ctx)` |
 | Text in every request, a check on tool calls, per-conversation state | `agent.extension` (skill `pikit-extension`) |
 | Durable data | `storage.sql` (tables prefixed with your name) or `storage.kv` (a namespace named after you) |
 | Routing a message to an agent | a stage of the `route.resolve` pipeline |
@@ -129,6 +131,28 @@ the variable through `secrets` first, then the environment. An endpoint pi-ai do
 `createProvider` with `envApiKeyAuth` (`@pikit/pi-adapter/provider`) and an API from
 `@pikit/pi-adapter/api/<name>` (`openAICompletionsApi` from `api/openai-completions`): copy
 `provider-openai-compatible`, or install it and configure it. Never `@earendil-works/*` directly.
+
+**A slash command** is registered as Pi's `registerCommand` registers one: under its name (Pi's
+rule: lowercase letters, digits, `-`, `:`), with a one-line description, the hint of its arguments,
+and what it does in the conversation it runs in. The dashboard lists every `agent.command` in its "/"
+(admin-api's `GET /admin/api/commands`) and runs one there; what `run` returns is a quiet note for the
+operator, which no channel gets. It runs in the App that holds the conversation (on Cloudflare, its
+Durable Object) and acts only through contracts. Throw an `Error` to refuse, its message for the
+operator. Prove it with `createAgentCommandConformance` (`@pikit/contracts/testing`).
+
+```ts
+pikit.provideKeyed("agent.command", "deploy", {
+  description: "Deploy the current branch",
+  argumentHint: "<environment>",
+  async run(conversation, args, ctx) {
+    if (args === "") throw new Error("Name the environment: /deploy <environment>");
+    await deploys.get().start(args, conversation.key, ctx);   // a contract you use
+    return { text: `Deploying to ${args}.` };
+  },
+});
+```
+
+The kit's own: `/new` and `/name` (admin-api), `/compact` (runtime-pi).
 
 A component is a folder:
 

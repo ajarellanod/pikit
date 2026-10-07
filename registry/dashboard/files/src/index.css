@@ -378,6 +378,20 @@ a:focus-visible .animated-underline::after {
   }
 }
 
+/* the sign-in card and its parts: rise, sharpen, settle */
+@keyframes sign-in-rise {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+    filter: blur(0);
+  }
+}
+
 @keyframes spin {
   to {
     transform: rotate(360deg);
