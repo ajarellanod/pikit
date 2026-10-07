@@ -5,7 +5,8 @@
 **Specified:** partly (the former SPEC §7.2 and §4.5: `conversations.ownership`, `[planned]`)
 
 **Needed by:** nothing required. One server replica needs no ownership component, and Cloudflare gets
-it from the platform (`idFromName`, C1, C2).
+it from the platform (`idFromName`, C1, C2), as celld does on your own machines
+([deployment-celld](deployment-celld.md)): the self-hosted way to scale out.
 
 ## What it gives
 Several server processes behind one address, for availability or load, with each conversation's
