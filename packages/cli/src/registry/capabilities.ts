@@ -167,6 +167,13 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "Timers: a component registers a named handler and asks for it to run at or after a time, at least once, retried with backoff.",
   },
+  "model.complete": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Provided by the runtime (runtime-pi owns the models and their credentials), so never offered.
+    summary: "Ask one of the App's models for a text, once (a prompt in, its text out): a title, a summary, a label.",
+  },
   "model.credentials": {
     mode: "single",
     definedIn: "@pikit/pi-adapter",
@@ -210,6 +217,12 @@ export const CAPABILITIES: Catalogue = {
     definedIn: "@pikit/pi-adapter",
     stability: "experimental",
     summary: "One Pi extension per name (prompt sections, hooks on model requests and tool calls, wrappers, durable tasks, tools); an agent runs with only the extensions it names.",
+  },
+  "agent.command": {
+    mode: "keyed",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "One slash command per name (Pi's rule: /new, /name), run in a conversation by whoever runs commands (the dashboard), answering a note.",
   },
   "http.route": {
     mode: "keyed",

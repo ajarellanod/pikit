@@ -51,3 +51,9 @@ export { createAdminAuthConformance } from "./admin.ts";
 
 export type { HealthFixture, HealthPolicy } from "./health.ts";
 export { createHealthConformance } from "./health.ts";
+
+export type { AgentCommandFixture } from "./agent-command.ts";
+export { createAgentCommandConformance } from "./agent-command.ts";
+
+export type { ModelCompleteFixture } from "./model-complete.ts";
+export { createModelCompleteConformance } from "./model-complete.ts";

@@ -25,6 +25,10 @@ export type {
   Usage,
 } from "./agent.ts";
 
+export type { AgentCommand, CommandInfo, CommandLookup, CommandOutcome } from "./command.ts";
+export { COMMAND_NAME, commandProblem, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
+export type { CompletionRequest, ModelComplete } from "./model.ts";
+
 export { admitInbound } from "./inbound.ts";
 export type { AdmitOptions, InboundMessage, InboundOutcome, RouteDecision } from "./inbound.ts";
 
