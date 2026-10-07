@@ -2,15 +2,8 @@ import { ArrowRight, Eye, EyeClosed, Lock, WarningCircle } from "iconoir-react";
 import { useRef, useState } from "react";
 import { Button } from "@/components/bui/Button";
 import { ApiFailure, signIn } from "@/lib/api";
-
-/** The App's mark: a monogram tile, as the favicon. */
-export function Monogram({ name = "pi", size = 20 }: { name?: string; size?: number }) {
-  return (
-    <span className="flex shrink-0 items-center justify-center rounded-[6px] bg-ink font-semibold text-surface" style={{ width: size, height: size, fontSize: Math.round(size * 0.5) }}>
-      {name.slice(0, 2).toLowerCase()}
-    </span>
-  );
-}
+import { usePageTitle } from "@/lib/shell";
+import { Mark } from "./mark";
 
 /** Each part of the card rises in after the one before it (`sign-in-rise`; none with reduced motion). */
 const rise = (step: number) => ({ animation: `sign-in-rise 620ms cubic-bezier(0.16, 1, 0.3, 1) ${80 + step * 60}ms both` });
@@ -28,6 +21,7 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
   const [problem, setProblem] = useState<string | undefined>(refused ? "Your session ended. Sign in again to go on." : undefined);
   const [checking, setChecking] = useState(false);
   const field = useRef<HTMLInputElement>(null);
+  usePageTitle("Sign in");
 
   const submit = async () => {
     if (value.trim() === "" || checking) return;
@@ -58,11 +52,8 @@ export function SignIn({ onSignedIn, refused = false }: { onSignedIn: (operator:
         <div className="rounded-[20px] bg-surface p-1.5 shadow-overlay">
           <div className="rounded-[15px] px-6 pt-6 pb-5">
             <div className="flex items-center gap-2.5" style={rise(1)}>
-              <Monogram size={28} />
-              <div className="min-w-0 leading-tight">
-                <div className="text-[14px] font-semibold tracking-[-0.01em] text-ink">pikit</div>
-                <div className="text-[12px] text-ink-3">Operator dashboard</div>
-              </div>
+              <Mark size={26} />
+              <span className="text-[19px] leading-[26px] font-semibold tracking-[-0.02em] text-ink">Pikit</span>
             </div>
 
             <h1 className="mt-7 text-[22px] font-medium tracking-[-0.02em] text-ink" style={rise(2)}>

@@ -70,7 +70,7 @@ export function HomePage() {
       <div className="mx-auto flex min-h-full max-w-[720px] flex-col justify-center px-4 py-10 sm:px-8">
         <h1 className="text-[26px] font-normal tracking-[-0.02em] text-ink">
           <span className="home-reveal block text-ink-3" style={homeRevealStyle(stage >= 1)}>
-            Hello{operator === undefined ? "" : ` ${operator}`}
+            Hello{operator === undefined || operator === "operator" ? "" : ` ${operator}`}
           </span>
           <span className="home-reveal block" style={homeRevealStyle(stage >= 2)}>
             What can I help you with?

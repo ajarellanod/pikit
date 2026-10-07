@@ -5,7 +5,7 @@
  * (`SidePanel`: a conversation's Context).
  */
 
-import { createContext, type ReactNode, useContext } from "react";
+import { createContext, type ReactNode, useContext, useEffect } from "react";
 import { createPortal } from "react-dom";
 import type { ApiAgent, ApiApp, ApiCommand } from "./api.ts";
 import type { View } from "./views.ts";
@@ -46,8 +46,18 @@ export function SidePanel({ children }: { children: ReactNode }) {
   return target === null || target === undefined ? null : createPortal(children, target);
 }
 
-/** The App's name: `ApiApp` has none yet, so "pikit" unless one is there. */
+/** The App's name: `ApiApp` has none yet, so "Pikit" unless one is there. */
 export function appName(app: ApiApp): string {
   const name = (app as { name?: unknown }).name;
-  return typeof name === "string" && name.trim() !== "" ? name : "pikit";
+  return typeof name === "string" && name.trim() !== "" ? name : "Pikit";
+}
+
+/**
+ * The browser tab's title while a page shows: `<what> · <App>`, or the App's name alone. Every page of
+ * the shell sets it (the shell does, from the page it renders), so it never keeps a page's that left.
+ */
+export function usePageTitle(what: string | undefined, app = "Pikit"): void {
+  useEffect(() => {
+    document.title = what === undefined || what.trim() === "" ? app : `${what} · ${app}`;
+  }, [what, app]);
 }

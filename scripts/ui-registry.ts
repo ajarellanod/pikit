@@ -69,7 +69,8 @@ function items(): Item[] {
       .map((file) => ({ path: join(lib, file), target: `src/lib/${file}` })),
   });
   const pieces = join(DASHBOARD, "src/components/pikit");
-  for (const file of list(pieces).filter((f) => f !== "sign-in.tsx")) {
+  // The shell's own (the sign-in, the product's mark and its files in public/) are not pieces to install.
+  for (const file of list(pieces).filter((f) => f !== "sign-in.tsx" && f !== "mark.tsx")) {
     const name = file.replace(/\.tsx?$/, "");
     all.push({ name, title: name, description: `pikit's ${name} piece of the dashboard.`, sources: [{ path: join(pieces, file), target: `src/components/pikit/${file}` }] });
   }

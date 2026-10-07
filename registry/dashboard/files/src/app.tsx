@@ -13,13 +13,14 @@ import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem 
 import { Switch } from "@/components/bui/Switch";
 import { ThemeToggle } from "@/components/bui/ThemeToggle";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { Monogram, SignIn } from "@/components/pikit/sign-in";
+import { Mark } from "@/components/pikit/mark";
+import { SignIn } from "@/components/pikit/sign-in";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setTarget } from "@/lib/activity";
 import { api, type ApiAgents, type ApiApp, type ApiCommands, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
 import { ChatsProvider, useChats } from "@/lib/chats";
 import { BASE, match, navigate, pagePath, usePath } from "@/lib/router";
-import { appName, ShellContext } from "@/lib/shell";
+import { appName, ShellContext, usePageTitle } from "@/lib/shell";
 import { setSounds, useSounds } from "@/lib/sounds";
 import { visibleViews } from "@/lib/views";
 
@@ -133,6 +134,22 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
     if (found === undefined && (path === "/" || path === "")) navigate(home, { replace: true });
   }, [found, home, path]);
 
+  // The tab's title: the conversation's (its AI title, as the sidebar names it), the view's, or New chat.
+  const openId = found?.page.path === `${CHAT}/:id` ? found.params?.id : undefined;
+  const openTab = openId === undefined ? undefined : chats.tabs.find((tab) => tab.id === openId);
+  const openChat = openId === undefined ? undefined : (chats.items ?? []).find((conversation) => conversation.conversationId === openId);
+  const pageTitle =
+    openId !== undefined
+      ? openTab !== undefined
+        ? chats.tabTitle(openTab)
+        : openChat !== undefined
+          ? chats.titleOf(openChat)
+          : "Chat"
+      : found?.view.id === "conversations"
+        ? "New chat"
+        : found?.view.title;
+  usePageTitle(pageTitle, name);
+
   const items: SidebarItem[] = [
     {
       key: "new",
@@ -181,7 +198,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       <main className="flex h-[100dvh] gap-0 bg-canvas p-2.5 pl-0 text-ink">
         <SidebarNav
           defaultCollapsed={narrow}
-          workspace={{ name, logo: <Monogram size={18} /> }}
+          workspace={{ name, logo: <Mark size={20} /> }}
           items={items}
           chats={sidebarChats}
           chatsEmpty={chats.error !== undefined ? "The chats cannot be read" : chats.items === undefined ? "Loading" : "No chats yet"}
@@ -195,14 +212,9 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           }
           menu={(close) => (
             <>
-              <div className="flex h-12 items-center gap-2 px-2">
-                <Monogram size={24} />
-                <div className="min-w-0 flex-1">
-                  <div className="truncate text-[13.5px] font-medium text-ink">{name}</div>
-                  <div className="truncate text-[12px] text-ink-3">
-                    {operator ?? "operator"} · {app.target}, {app.components.length} components
-                  </div>
-                </div>
+              <div className="flex h-11 items-center gap-2 px-2">
+                <Mark size={20} />
+                <span className="min-w-0 flex-1 truncate text-[14px] leading-5 font-medium text-ink">{name}</span>
               </div>
               <MenuSeparator />
               <div className="flex h-10 items-center gap-1.5 px-2">
