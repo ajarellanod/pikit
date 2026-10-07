@@ -1,5 +1,7 @@
 /**
- * `pikit add <component>`: the install flow.
+ * `pikit add <component>...`: the install flow. Several names are one install: each step below runs
+ * for all of them (in `dependencyOrder`), the providers are offered for the set, and one
+ * confirmation, kit refresh, `bun install` and doctor serve them all.
  *
  *   1. resolve the registry (`builtin`, or a local path) and the component's version and commit
  *   2. read the component's package
@@ -25,10 +27,10 @@
  *  10. record the registry, version, commit, kit ranges, file hashes, hooks and the npm packages it added
  *      in `pikit.json`, and keep each file
  *      as installed, its base, in `pikit-bases/` (`bases.ts`)
- *  11. `pikit doctor`
+ *  11. `pikit doctor`, its notes printed (a provider nothing uses)
  *
- * Every refusal (steps 1–5, for the component and the providers it brings) comes before the first
- * write. A step that fails after it puts back what was written: `package.json`, `bun.lock`,
+ * Every refusal (steps 1–5, for every named component and the providers they bring) comes before
+ * the first write. A step that fails after it puts back what was written: `package.json`, `bun.lock`,
  * `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files, the bases and the new tarballs.
  */
 
@@ -64,6 +66,7 @@ import {
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation, registryPath } from "../project/registry-location.ts";
 import {
+  dependencyOrder,
   mergeProvided,
   type Offer,
   offeredProviders,
@@ -109,9 +112,16 @@ export interface AddOptions {
   installedFor?: string;
 }
 
-export async function add(projectDir: string, name: string, options: AddOptions = {}): Promise<void> {
+/**
+ * `pikit add <name>...`: one or several components, as one transaction. Every plan is made, and every
+ * refusal raised, before the first write; then one kit refresh, one `bun install`, one doctor. The
+ * named components install in `dependencyOrder`, and their providers are offered for the set: one
+ * that two of them need comes once, and one that a named component provides is not offered.
+ */
+export async function add(projectDir: string, names: readonly string[], options: AddOptions = {}): Promise<void> {
+  if (names.length === 0) throw new CliError("usage: pikit add <component>...", 2);
   assertNoIncompleteOperation(projectDir);
-  // Steps 1–5 for the component and the providers it brings, before anything is written: a refusal
+  // Steps 1–5 for the components and the providers they bring, before anything is written: a refusal
   // (installed, incompatible, a conflict, a config shape, a "no") leaves the project as it was.
   const draft = readDraft(projectDir);
   checkKit(projectDir, draft.project, options.force === true);
@@ -120,25 +130,66 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   const registry = openRegistry(registryPath(projectDir, location));
   if (!isPortable(location)) log.warn(notPortable(location));
   const installed = Object.keys(draft.project.components);
-  // What the project provides now, but for the component a reinstall replaces.
-  draft.provided = await composedProvides(projectDir, name in draft.project.components ? [name] : []);
-  const plans = [planInstall(projectDir, draft, registry, registryName, name, options)];
-  if (options.quiet !== true) describePlan(plans[0] as Plan);
-  await confirmPlan(plans[0] as Plan, options);
-  const offers = draft.provided === undefined ? [] : await acceptedOffers(registry, name, installed, draft.project.targets, draft.provided, options);
+  const named = dependencyOrder(
+    [...new Set(names)].map((name) => registry.manifest(name)),
+    draft.project.targets,
+  );
+  // What the project provides now, but for the components a reinstall replaces.
+  const composed = await composedProvides(projectDir, named.filter((name) => name in draft.project.components));
+  draft.provided = composed;
+  const plans = named.map((name) => planInstall(projectDir, draft, registry, registryName, name, options));
+  if (options.quiet !== true) for (const plan of plans) describePlan(plan);
+  await confirmPlans(plans, options);
+  const offers = composed === undefined ? [] : await acceptedOffers(registry, named, installed, draft.project.targets, composed, options);
   for (const offer of offers) {
     const offered = planInstall(projectDir, draft, registry, registryName, offer.component, { ...options, installedFor: offer.for });
+    // A provider two named components need is offered once, for the first: it is installed for each.
+    const record = draft.project.components[offer.component] as InstalledComponent;
+    const users = named.filter((name) => broughtFor(registry, name, offer.component, installed, draft.project.targets, composed));
+    if (named.includes(offer.for)) record.installedFor = [...new Set([...(record.installedFor ?? []), ...users])];
     if (options.quiet !== true) describePlan(offered);
     plans.push(offered);
   }
 
-  // Steps 6–10 and `bun install`. What they write is put back if one fails, so the project is never
-  // left half-added: a package.json that bun.lock does not match fails the next frozen install.
+  // Steps 6–10 and `bun install`, as one transaction.
+  await applyInstall(projectDir, `pikit add ${named.join(" ")}${options.force === true ? " --force" : ""}`, draft, plans, "nothing was added");
+  const which = named.join(", ");
+  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
+  for (const note of report.notes) log.info(`  ${note}`);
+  if (report.problems.length > 0) {
+    for (const problem of report.problems) log.problem(problem);
+    throw new CliError(`${which} ${named.length === 1 ? "is" : "are"} installed, but \`pikit doctor\` found ${report.problems.length} problem(s)`);
+  }
+  for (const missing of report.unconfigured) log.warn(missing);
+  log.ok(`${which} installed; \`pikit doctor\` is green${report.unconfigured.length > 0 ? " (run \`pikit configure\` for the variables above)" : ""}`);
+}
+
+/** Whether `name`, added on its own to what the project composes, would be offered `component` for itself. */
+function broughtFor(
+  registry: Registry,
+  name: string,
+  component: string,
+  installed: readonly string[],
+  targets: readonly string[],
+  composed: ProvidedCapabilities | undefined,
+): boolean {
+  return offeredProviders(registry, [name], installed, targets, composed).some((offer) => offer.component === component && offer.for === name);
+}
+
+/**
+ * The writes of `add` and `upgrade`, as one transaction: the operation marker (`operation.ts`), the
+ * kit refreshed to this CLI's (the components come from its registry, so the core they need is its
+ * kit, `vendor.ts`), the confirmed `plans` and the draft (`applyPlans`), then `bun install` when a
+ * dependency or the kit changed. When a step fails, `undo` puts back what was written, so the project
+ * is never left half-changed (a package.json that bun.lock does not match fails the next frozen
+ * install), `notDone` is said, and the error is thrown again. The marker stays only when `bun install`
+ * ran: node_modules is not put back. Returns the kit packages refreshed.
+ */
+export async function applyInstall(projectDir: string, command: string, draft: Draft, plans: readonly Plan[], notDone: string): Promise<string[]> {
   const undo = new Undo(projectDir);
-  beginOperation(projectDir, `pikit add ${name}${options.force === true ? " --force" : ""}`);
+  beginOperation(projectDir, command);
   let refreshed: string[] = [];
   try {
-    // The component comes from this CLI's registry: the core it needs is this CLI's kit (vendor.ts).
     undo.keep(PACKAGE_JSON);
     refreshed = refreshKit(projectDir);
     if (refreshed.length > 0) log.step(`the project's kit packages (${refreshed.join(", ")}) are refreshed to this CLI's, in vendor/`);
@@ -152,19 +203,13 @@ export async function add(projectDir: string, name: string, options: AddOptions 
   } catch (error) {
     undo.restore();
     if (!undo.installed) finishOperation(projectDir);
-    log.warn(`nothing was added: the project's files are back as they were${undo.installed ? ` (node_modules may not be: run \`bun install\`, then delete ${OPERATION_MARKER})` : ""}`);
+    log.warn(`${notDone}: the project's files are back as they were${undo.installed ? ` (node_modules may not be: run \`bun install\`, then delete ${OPERATION_MARKER})` : ""}`);
     throw error;
   }
   // Only now: until the install rewrote bun.lock, it named the old tarballs.
   if (refreshed.length > 0) pruneVendor(projectDir);
   finishOperation(projectDir);
-  const report = await doctor(projectDir, { quiet: true, componentChecks: false });
-  if (report.problems.length > 0) {
-    for (const problem of report.problems) log.problem(problem);
-    throw new CliError(`${name} is installed, but \`pikit doctor\` found ${report.problems.length} problem(s)`);
-  }
-  for (const missing of report.unconfigured) log.warn(missing);
-  log.ok(`${name} installed; \`pikit doctor\` is green${report.unconfigured.length > 0 ? " (run \`pikit configure\` for the variables above)" : ""}`);
+  return refreshed;
 }
 
 /**
@@ -190,22 +235,22 @@ export async function composedProvides(projectDir: string, excluding: readonly s
 }
 
 /**
- * The providers `name` brings (`offers.ts`), given what the project provides (`composedProvides`),
+ * The providers `names` bring (`offers.ts`), given what the project provides (`composedProvides`),
  * each asked about (Enter is yes), or all of them with `--yes`. A declined provider takes what only
  * it needed with it.
  */
 export async function acceptedOffers(
   registry: Registry,
-  name: string,
+  names: readonly string[],
   installed: readonly string[],
   targets: readonly string[],
   provided: ProvidedCapabilities,
   options: AddOptions,
 ): Promise<Offer[]> {
-  warnUnchosen(registry, [name], installed, targets, provided);
+  warnUnchosen(registry, names, installed, targets, provided);
   const accepted: Offer[] = [];
   const declined = new Set<string>();
-  for (const offer of offeredProviders(registry, [name], installed, targets, provided).reverse()) {
+  for (const offer of offeredProviders(registry, names, installed, targets, provided).reverse()) {
     if (declined.has(offer.for)) {
       declined.add(offer.component);
       continue;
@@ -258,7 +303,7 @@ export async function installComponent(
   const registry = openRegistry(registryPath(projectDir, draft.project.registries[registryName] as string));
   const plan = planInstall(projectDir, draft, registry, registryName, name, options);
   if (options.quiet !== true) describePlan(plan);
-  await confirmPlan(plan, options);
+  await confirmPlans([plan], options);
   const undo = new Undo(projectDir);
   try {
     return applyPlans(projectDir, draft, [plan], undo);
@@ -455,9 +500,10 @@ export function workerWiring(name: string, manifest: Manifest, targets: readonly
  * Refused too, unless `--force`, when an installed component does not accept this CLI's core,
  * contracts or adapter (`requires` in pikit.json): the contracts stay 0.x on their own schedule (SPEC
  * K8), and nothing else would check the components already vendored against them. The draft records
- * the kit the project will have.
+ * the kit the project will have. `action` is what replaces it, in the messages.
  */
-export function checkKit(projectDir: string, project: ProjectManifest, force: boolean): void {
+export function checkKit(projectDir: string, project: ProjectManifest, force: boolean, action = "adding a component"): void {
+  const Action = `${action.charAt(0).toUpperCase()}${action.slice(1)}`;
   const { vendored, stale } = staleKit(projectDir);
   const cli = kitCommit();
   if (stale.length === 0) {
@@ -471,7 +517,7 @@ export function checkKit(projectDir: string, project: ProjectManifest, force: bo
     const what = `this project's kit (vendor/) comes from pikit ${current}, which this CLI's checkout (${cli}) does not include: this CLI is older, or on another branch`;
     if (!force) {
       throw new CliError(
-        `${what}. Adding a component replaces the project's kit with this CLI's, and the components installed with the newer kit may need what only it has.\n` +
+        `${what}. ${Action} replaces the project's kit with this CLI's, and the components installed with the newer kit may need what only it has.\n` +
           "Update pikit (run the installer again, or `git pull` in its checkout), or pass --force to replace the kit anyway (then check with `pikit doctor`).",
       );
     }
@@ -481,7 +527,7 @@ export function checkKit(projectDir: string, project: ProjectManifest, force: bo
   }
   const refused = incompatibleInstalled(project);
   if (refused.length > 0) {
-    const what = `adding a component replaces the project's kit with this CLI's (@pikit/core ${coreVersion()}, @pikit/contracts ${contractsVersion()}, @pikit/pi-adapter ${adapterVersion()}), which these installed components do not accept:\n  ${refused.join("\n  ")}`;
+    const what = `${action} replaces the project's kit with this CLI's (@pikit/core ${coreVersion()}, @pikit/contracts ${contractsVersion()}, @pikit/pi-adapter ${adapterVersion()}), which these installed components do not accept:\n  ${refused.join("\n  ")}`;
     if (!force) {
       throw new CliError(
         `${what}\nUse a pikit whose kit they accept, or pass --force to replace the kit anyway (then check them with \`pikit doctor\` and a type-check).`,
@@ -493,11 +539,12 @@ export function checkKit(projectDir: string, project: ProjectManifest, force: bo
   else project.kit = { commit: cli };
 }
 
-/** Step 5: `--yes`, or a "yes" at a terminal. */
-async function confirmPlan(plan: Plan, options: AddOptions): Promise<void> {
+/** Step 5, once for all the plans: `--yes`, or a "yes" at a terminal. */
+async function confirmPlans(plans: readonly Plan[], options: AddOptions): Promise<void> {
   if (options.yes === true) return;
   if (!isInteractive()) throw new CliError("pikit add asks for confirmation; pass --yes when it runs without a terminal");
-  if (!(await confirm(`Install ${plan.name}?${alsoWrites(plan.name, plan.files)}`))) throw new CliError("cancelled", 1);
+  const question = `Install ${plans.map((plan) => plan.name).join(", ")}?${plans.map((plan) => alsoWrites(plan.name, plan.files)).join("")}`;
+  if (!(await confirm(question))) throw new CliError("cancelled", 1);
 }
 
 /** Where a component's own files go; the plan names every file it writes anywhere else. */

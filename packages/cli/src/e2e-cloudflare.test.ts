@@ -4,7 +4,7 @@
  * --dry-run`) and typecheck, then `pikit dev` (wrangler dev, workerd) answering `/health` from the
  * object's App. Then a Telegram agent on Cloudflare: `pikit add` of secrets-cloudflare and
  * platform-cloudflare (both in both Apps), provider-openrouter (the starter agent's model on Cloudflare
- * is already OpenRouter's: the Anthropic provider is server-only), runtime-pi, conversations-kv and channel-telegram-webhook (with what they offer)
+ * is already OpenRouter's: the Anthropic provider takes only API keys there), runtime-pi, conversations-kv and channel-telegram-webhook (with what they offer)
  * put each half in its App (C1), every add is green, the project installs, typechecks and passes its
  * tests. Then the agent answers, in workerd: with provider-faux (a fake model for tests only) for its
  * model and channel-telegram-webhook's fake Telegram as its API, `pikit dev` (wrangler dev, port 8787)
@@ -152,6 +152,13 @@ test.skipIf(!E2E)(
     expect(runtime.out).not.toContain("for runtime-pi");
     // The registry, which creates conversations through the runtime's agent.conversations.
     await add("conversations-kv");
+    // Every message to the starter agent (the Telegram preset installs router-basic; this one did not),
+    // before the channel: without a router, doctor reports a channel that answers nobody. Installed,
+    // then configured: its `defaultAgent` has no default, so its add ends asking for it.
+    const routed = await run([process.execPath, MAIN, "add", "router-basic", "--yes"]);
+    expect(routed.err).toContain("defaultAgent");
+    expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components)).toContain("router-basic");
+    writeFileSync(configPath, setConfigEntry(readFileSync(configPath, "utf8"), "router-basic", `{ defaultAgent: "assistant" }`));
 
     // The channel: its object half needs actor.inbox and wakeups (platform-cloudflare), the runtime and
     // the rest in the object's App; its Worker half, actor.mailbox (platform-cloudflare) in the Worker's.
@@ -167,6 +174,7 @@ test.skipIf(!E2E)(
         "providerOpenrouter",
         "runtimePi",
         "conversationsKv",
+        "routerBasic",
         "channelTelegramWebhook",
         "outboundDurable",
       ],
@@ -191,12 +199,6 @@ test.skipIf(!E2E)(
     // The agent answers, in workerd. Its model: provider-faux (tests only). Telegram: the fake, as both
     // halves' API. The Worker's secrets: .env, which `pikit dev` (wrangler dev) reads.
     await add("provider-faux");
-    // Every message to the starter agent (the Telegram preset installs router-basic; this one did not).
-    // Installed, then configured: its `defaultAgent` has no default, so its add ends asking for it.
-    const routed = await run([process.execPath, MAIN, "add", "router-basic", "--yes"]);
-    expect(routed.err).toContain("defaultAgent");
-    expect(Object.keys(JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components)).toContain("router-basic");
-    writeFileSync(configPath, setConfigEntry(readFileSync(configPath, "utf8"), "router-basic", `{ defaultAgent: "assistant" }`));
     const withFaux = readFileSync(configPath, "utf8");
     writeFileSync(agentPath, agentBefore.replace(/model: "[^"]+"/, 'model: "faux/echo"'));
     let config = withFaux;
@@ -226,14 +228,9 @@ test.skipIf(!E2E)(
       writeFileSync(agentPath, agentBefore);
       writeFileSync(configPath, withFaux);
     }
-    for (const name of ["router-basic", "provider-faux"]) {
-      const removed = await run([process.execPath, MAIN, "remove", name]);
-      expect(removed.err).not.toContain("\u2717");
-      expect(removed.code).toBe(0);
-    }
-
     // remove undoes both Apps, and what came for each; the project is the preset's again, and green.
-    for (const name of ["channel-telegram-webhook", "conversations-kv", "runtime-pi", "provider-openrouter", "platform-cloudflare", "secrets-cloudflare"]) {
+    // The router goes after the channel: remove refuses to leave a channel that no router answers.
+    for (const name of ["provider-faux", "channel-telegram-webhook", "router-basic", "conversations-kv", "runtime-pi", "provider-openrouter", "platform-cloudflare", "secrets-cloudflare"]) {
       const removed = await run([process.execPath, MAIN, "remove", name]);
       expect(removed.err).not.toContain("\u2717");
       expect(removed.code).toBe(0);

@@ -58,13 +58,11 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [interaction](interaction.md) | | Pi extensions' questions answered in the chat | No |
 | [multi-tenant-isolation](multi-tenant-isolation.md) | | Tenants that cannot reach each other | No |
 | [open-registries](open-registries.md) | | Git, HTTP and private registries, and a gallery | No: `pikit upgrade` (P6) merges from the bases in `pikit-bases/`, from the registry as recorded (`builtin`, a path) |
-| [outbound-delivery](outbound-delivery.md) | | One answer-delivery protocol for every channel; where `outbound.prepare` runs | No; before the next chat channel |
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |
 | [second-agent-runtime](second-agent-runtime.md) | | Another agent loop behind `AgentRuntime` | No |
 | [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
-| [pi-durable-migration](pi-durable-migration.md) | | The kit on Pi's durable runtime (done): what moves to Pi, the switch-over's decisions, the gaps proposed upstream | Yes: Pi 1.0 removed the `AgentHarness` the runtime ran on |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations; replies in their thread | No |
 | [workspace-snapshots](workspace-snapshots.md) | | Workspaces in git or snapshots, restored with their conversation | Open: SPEC §6's git workspace |
@@ -78,6 +76,8 @@ how it fits pikit, what Pi already does, where the code and its tests are, and w
 
 | Feature | One line |
 |---|---|
+| [outbound-delivery](completed/outbound-delivery.md) | `startAnswerDelivery`: one answer-delivery protocol for every chat channel, direct or queued; where `outbound.prepare` will run |
+| [pi-durable-migration](completed/pi-durable-migration.md) | The kit on Pi's durable runtime: what moved to Pi, the switch-over's decisions, the gaps proposed upstream |
 | [mcp](completed/mcp.md) | Tools of remote MCP servers for the agents that name them: `tool-mcp` over Pi's `pi-mcp` (Streamable HTTP, both targets); OAuth and stdio still open |
 | [storage-kv](completed/storage-kv.md) | `storage.kv`: small JSON values per component, by key; `storage-kv-sql` provides it, `channel-telegram` keeps its cursor there |
 | [tool-component](completed/tool-component.md) | A tool of your own: pi-durable's `defineTool` (from `@pikit/pi-adapter/tools`) in a component providing `agent.tool`, with its `replay`; `tool-fetch` and `tool-websearch-brave` are the references |

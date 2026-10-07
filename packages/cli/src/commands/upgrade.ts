@@ -5,6 +5,13 @@
  * has one (`ui.ts`, `upgradeDashboard`: its files by the same rules); `--dry-run` only says what it
  * would do.
  *
+ * The kit in `vendor/` (`@pikit/core`, `@pikit/contracts`, `@pikit/pi-adapter`, and so the Pi the
+ * adapter pins) becomes this CLI's whenever components are upgraded, as with `add` (`vendor.ts`).
+ * Without names it is a plan of its own: a project whose kit is not this CLI's gets it even when no
+ * component changed, shown in `--dry-run` and in the confirmation like a component. A kit newer than
+ * this CLI's is never replaced that way (only with `--force`): it is said, and left.
+ * `pikit doctor` notes a kit that is not this CLI's.
+ *
  * Each file the new version ships, against the file as installed (its hash in `pikit.json`, its base
  * in `pikit-bases/`, `bases.ts`) and the project's copy:
  * - not modified: replaced when the registry changed it;
@@ -51,16 +58,14 @@ import { mergeProvided, offeredProviders, providedByManifests } from "../project
 import { hashFile, type InstalledComponent, type ProjectManifest } from "../project/pikit-json.ts";
 import { registryPath } from "../project/registry-location.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
-import { Undo } from "../project/undo.ts";
 import { confinedPath } from "../project/paths.ts";
-import { assertNoIncompleteOperation, beginOperation, finishOperation, OPERATION_MARKER } from "../project/operation.ts";
-import { pruneVendor, refreshKit } from "../project/vendor.ts";
+import { assertNoIncompleteOperation } from "../project/operation.ts";
+import { kitCommit, kitOrder, kitPi, staleKit } from "../project/vendor.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
 import {
   acceptedOffers,
   alsoWrites,
-  applyPlans,
-  BUN_LOCK,
+  applyInstall,
   checkCompatible,
   checkConflicts,
   checkKit,
@@ -68,7 +73,6 @@ import {
   describePlan,
   type Draft,
   ownDir,
-  PACKAGE_JSON,
   type Plan,
   planInstall,
   readDraft,
@@ -77,7 +81,6 @@ import {
   workerWiring,
 } from "./add.ts";
 import { doctor } from "./doctor.ts";
-import { bunInstall } from "./install.ts";
 import { upgradeDashboard } from "./ui.ts";
 
 export interface UpgradeOptions {
@@ -119,6 +122,16 @@ interface UpgradePlan extends Plan {
   notes: string[];
 }
 
+/** The kit's refresh to this CLI's (`refreshKit`): the packages that differ, and the commits and Pi of both kits. */
+interface KitPlan {
+  packages: string[];
+  /** `pikit.json`'s `kit.commit`, and this CLI's (`kitCommit`); undefined when unknown. */
+  from: string | undefined;
+  to: string | undefined;
+  /** `@earendil-works/pi-durable` as the project has it installed, and as this CLI's adapter pins it. */
+  pi: { from: string | undefined; to: string | undefined };
+}
+
 /** The components named (all of them without names), then, without names, the dashboard (`ui.ts`). */
 export async function upgrade(projectDir: string, names: readonly string[], options: UpgradeOptions = {}): Promise<void> {
   await upgradeComponents(projectDir, names, options);
@@ -155,14 +168,20 @@ async function upgradeComponents(projectDir: string, names: readonly string[], o
     else plans.push(plan);
   }
   if (upToDate.length > 0 && names.length > 0) log.info(`up to date: ${upToDate.join(", ")}`);
-  if (plans.length === 0) {
-    log.ok(names.length > 0 ? "nothing to upgrade" : "every component is up to date with its registry");
+  // The kit comes with any component upgraded; without names, on its own too.
+  const kit = plans.length > 0 || names.length === 0 ? planKit(projectDir, draft.project, plans.length === 0 && !force) : undefined;
+  if (plans.length === 0 && kit === undefined) {
+    const { vendored, stale } = staleKit(projectDir);
+    const kitCurrent = vendored && stale.length === 0 ? ", and the kit is this CLI's" : "";
+    log.ok(names.length > 0 ? "nothing to upgrade" : `every component is up to date with its registry${kitCurrent}`);
     return;
   }
-  checkKit(projectDir, draft.project, force);
+  checkKit(projectDir, draft.project, force, "upgrading");
+  if (kit !== undefined) describeKit(kit);
   // What the project will provide: what it composes now, without what the upgraded components' installed
   // versions provide (and only theirs: those up to date stay as they compose), with what every new version declares.
-  const composed = await composedProvides(projectDir, plans.map((plan) => plan.name));
+  // Only the kit: no component's provides change, nothing is offered.
+  const composed = plans.length === 0 ? undefined : await composedProvides(projectDir, plans.map((plan) => plan.name));
   if (composed !== undefined) draft.provided = mergeProvided(composed, providedByManifests(plans.map((plan) => plan.manifest), draft.project.targets));
   for (const plan of plans) warnUnprovided(draft.project, plan.manifest, draft.provided);
   for (const plan of plans) describeUpgrade(plan);
@@ -177,12 +196,12 @@ async function upgradeComponents(projectDir: string, names: readonly string[], o
     log.ok("--dry-run: nothing was written");
     return;
   }
-  await confirmUpgrade(plans, options);
+  await confirmUpgrade(plans, kit, options);
   const all: Plan[] = [...plans];
   for (const plan of plans) {
     // Each planned provider joins `draft.provided` (`planInstall`): one two components need comes once.
     if (draft.provided === undefined) break;
-    for (const offer of await acceptedOffers(plan.registry, plan.name, installed, draft.project.targets, draft.provided, options)) {
+    for (const offer of await acceptedOffers(plan.registry, [plan.name], installed, draft.project.targets, draft.provided, options)) {
       // Two upgraded components may need the same provider: it comes once.
       if (offer.component in draft.project.components) continue;
       const offered = planInstall(projectDir, draft, plan.registry, plan.registryName, offer.component, { force, yes: options.yes === true, installedFor: offer.for });
@@ -191,28 +210,9 @@ async function upgradeComponents(projectDir: string, names: readonly string[], o
     }
   }
 
-  const undo = new Undo(projectDir);
-  beginOperation(projectDir, `pikit upgrade${names.length > 0 ? ` ${names.join(" ")}` : ""}${force ? " --force" : ""}`);
-  let refreshed: string[] = [];
-  try {
-    undo.keep(PACKAGE_JSON);
-    refreshed = refreshKit(projectDir);
-    if (refreshed.length > 0) log.step(`the project's kit packages (${refreshed.join(", ")}) are refreshed to this CLI's, in vendor/`);
-    const { dependenciesChanged } = applyPlans(projectDir, draft, all, undo);
-    if (dependenciesChanged || refreshed.length > 0) {
-      undo.keep(BUN_LOCK);
-      undo.keep("bun.lockb");
-      undo.installed = true;
-      await bunInstall(projectDir);
-    }
-  } catch (error) {
-    undo.restore();
-    if (!undo.installed) finishOperation(projectDir);
-    log.warn(`nothing was upgraded: the project's files are back as they were${undo.installed ? ` (node_modules may not be: run \`bun install\`, then delete ${OPERATION_MARKER})` : ""}`);
-    throw error;
-  }
-  if (refreshed.length > 0) pruneVendor(projectDir);
-  finishOperation(projectDir);
+  const command = `pikit upgrade${names.length > 0 ? ` ${names.join(" ")}` : ""}${force ? " --force" : ""}`;
+  const refreshed = await applyInstall(projectDir, command, draft, all, "nothing was upgraded");
+  if (refreshed.length > 0) log.ok(`the kit is this CLI's${kit?.to === undefined ? "" : ` (${kit.to})`}`);
   for (const plan of plans) log.ok(`${plan.name} upgraded: ${plan.previous.version} → ${plan.manifest.version}`);
 
   const conflicted = plans.flatMap((plan) => plan.changes.conflicted.map((file) => `${file} (${plan.name}@${plan.manifest.version})`));
@@ -229,6 +229,29 @@ async function upgradeComponents(projectDir: string, names: readonly string[], o
   }
   for (const missing of report.unconfigured) log.warn(missing);
   log.ok(`\`pikit doctor\` is green${report.unconfigured.length > 0 ? " (run \`pikit configure\` for the variables above)" : ""}`);
+}
+
+/**
+ * The kit's refresh, when the project's is not this CLI's (`staleKit`); undefined when it is. With
+ * `unlessNewer` (only the kit to upgrade, no `--force`), a kit this CLI's checkout does not include
+ * (newer, or another branch's) is not one: it is said, and left as it is.
+ */
+function planKit(projectDir: string, project: ProjectManifest, unlessNewer: boolean): KitPlan | undefined {
+  const { stale } = staleKit(projectDir);
+  if (stale.length === 0) return undefined;
+  const from = project.kit?.commit;
+  if (unlessNewer && kitOrder(from).verdict === "downgrade") {
+    log.warn(`the project's kit (vendor/) comes from pikit ${from}, which this CLI's checkout (${kitCommit()}) does not include: it is left as it is. Update pikit to upgrade it (or pass --force to replace it with this CLI's)`);
+    return undefined;
+  }
+  return { packages: stale, from, to: kitCommit(), pi: { from: kitPi(projectDir), to: kitPi() } };
+}
+
+/** The kit's plan: its packages, from which commit to which, and Pi's version when it changes. */
+function describeKit({ packages, from, to, pi }: KitPlan): void {
+  log.step(`the kit (vendor/): ${from ?? "an unrecorded kit"} → this CLI's${to === undefined ? "" : ` ${to}`}`);
+  log.info(`  refreshed: ${packages.join(", ")}`);
+  if (pi.to !== undefined && pi.from !== pi.to) log.info(`  Pi (@earendil-works/pi-durable): ${pi.from ?? "not installed"} → ${pi.to}`);
 }
 
 function registryOf(projectDir: string, project: ProjectManifest, key: string): Registry {
@@ -371,11 +394,12 @@ function describeUpgrade({ name, registry, manifest, previous, changes, notes, d
 }
 
 /** `--yes`, or a "yes" at a terminal, naming the files written outside each component's directory. */
-async function confirmUpgrade(plans: readonly UpgradePlan[], options: UpgradeOptions): Promise<void> {
+async function confirmUpgrade(plans: readonly UpgradePlan[], kit: KitPlan | undefined, options: UpgradeOptions): Promise<void> {
   if (options.yes === true) return;
   if (!isInteractive()) throw new CliError("pikit upgrade asks for confirmation; pass --yes when it runs without a terminal (--dry-run shows what it does)");
   const outside = plans.map((plan) => alsoWrites(plan.name, plan.writes)).join("");
-  if (!(await confirm(`Upgrade ${plans.map((plan) => plan.name).join(", ")}?${outside}`))) throw new CliError("cancelled", 1);
+  const what = [...(kit === undefined ? [] : ["the kit (vendor/)"]), ...plans.map((plan) => plan.name)];
+  if (!(await confirm(`Upgrade ${what.join(", ")}?${outside}`))) throw new CliError("cancelled", 1);
 }
 
 /** Whether a file still has the conflict markers `upgrade` wrote. */

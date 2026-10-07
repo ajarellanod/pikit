@@ -101,5 +101,5 @@ In this repository, `storage-kv-sql.test.ts` also runs the conformance suite ove
 on a SQLite file, and two processes racing over one database. It is not copied: a component's files
 never import another component's.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

@@ -11,7 +11,9 @@
  *   own allowed users and conversations. A router can send each bot to its own agent
  *   (`router-rules`).
  * - Ingress (`poller.ts`, `inbound.ts`): a message is acknowledged to Telegram only once its
- *   conversation durably accepted it; a redelivery is a duplicate request, answered once.
+ *   conversation durably accepted it; a redelivery is a duplicate request, answered once, and a
+ *   redelivered command runs once. One whose admission keeps failing is tried again for 15 minutes,
+ *   then its sender is told and it is skipped.
  * - Answers: one per run, whichever messages the run took, delivered by `startAnswerDelivery`
  *   (`@pikit/contracts`) from `agent.submissions`' feed (runtime-pi provides it), with a cursor and
  *   marks in this channel's namespace of `storage.kv` (`storage-kv-sql`). `agent.settled` /
@@ -36,7 +38,7 @@ import { type AgentResult, type AnswerDelivery, type ChannelTransport, type Deli
 import Type from "typebox";
 import { type Account, ACCOUNT_NAME, accountsOf, chatIn } from "./account.ts";
 import { botLink, createTelegramApi, parseAllowedUsers, TelegramError } from "./api.ts";
-import { handleUpdate, type InboundDeps } from "./inbound.ts";
+import { handleUpdate, type InboundDeps, tellNotTaken } from "./inbound.ts";
 import { type Poller, startPolling } from "./poller.ts";
 import { createReplies, type Replies } from "./replies.ts";
 import { createTelegramTransport } from "./transport.ts";
@@ -180,10 +182,17 @@ export default defineComponent({
         delivery: replies,
         conversations: conversations.get(),
         runtime: runtime.get(),
+        store: storage.get().namespace("channel-telegram"),
         ctx: background,
         refused: new Set(),
       };
-      const poller = startPolling({ api, timeoutSeconds: config.pollTimeoutSeconds, handle: (update) => handleUpdate(update, deps), logger: background.logger });
+      const poller = startPolling({
+        api,
+        timeoutSeconds: config.pollTimeoutSeconds,
+        handle: (update) => handleUpdate(update, deps),
+        giveUp: (update) => tellNotTaken(update, deps),
+        logger: background.logger,
+      });
       background.logger.info("channel-telegram: receiving messages", {
         instance: account.instance,
         bot: `@${me.username ?? me.first_name}`,

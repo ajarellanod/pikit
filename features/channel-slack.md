@@ -12,8 +12,12 @@ A Slack app that answers in direct messages and, when mentioned, in channels and
 ## How it fits pikit
 - `channel-slack`: authenticates, builds the key (`slack:<channel>[:<thread_ts>]`), calls
   `admitInbound`, answers every outcome, passes `createChannelConformance`
-  (`@pikit/contracts/testing`), and attaches its `ChannelTransport` to `outbound.queue`. Workspaces
-  are instances.
+  (`@pikit/contracts/testing`). Workspaces are instances.
+- Answers: it calls `startAnswerDelivery` in its `start` (`packages/contracts/src/delivery.ts`,
+  [answer delivery](completed/outbound-delivery.md)) and gives only what is its platform's: its
+  `ChannelTransport` (split, send one piece with its key, classify a failure), `route`, `text` and
+  `policy`. So it requires `agent.submissions` and `storage.kv` (and `wakeups` on `durable`), and the
+  engine enqueues to `outbound.queue` when one is installed.
 - Two ways in:
   - **Events API**: signed webhooks (`X-Slack-Signature`), an ack within 3 seconds, retries marked
     by `X-Slack-Retry-Num`; deduplicated by `event_id` with [inbound dedup](inbound-dedup.md)

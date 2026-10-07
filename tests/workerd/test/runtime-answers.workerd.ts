@@ -3,6 +3,8 @@
  *
  * - The answers log (`@pikit/pi-adapter`'s `answers.ts`) under the feed suite (SPEC K3), with pruning
  *   and restarts (a restart is a new app over the same object), each case in an object of its own.
+ * - The whole `agent.submissions` suite (`createSubmissionsConformance`) on the runtime, through
+ *   `createPiSubmissionsFixture`, with restarts, each case in an object of its own.
  * - Reconciliation across an eviction, in deployment-cloudflare's real `Conversation` class
  *   (`PlatformConversation`): a run settles in pi-durable while its log cannot be written (a SQLite
  *   trigger refuses the append, as a process killed between the two would leave it), the object is
@@ -15,8 +17,8 @@
 import { BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import type { ActorMailbox, ConversationRef, RunSettlement, SqlDatabase } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createFeedConformance, withWorkersHost } from "@pikit/contracts/testing";
-import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
+import { createFeedConformance, createSubmissionsConformance, withWorkersHost } from "@pikit/contracts/testing";
+import { createPiSubmissionsFixture, holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
@@ -83,6 +85,12 @@ for (const c of createFeedConformance<RunSettlement>(
   { prunes: true, restarts: true },
 )) {
   it(`runtime-pi's answers log over storage-do ${c.group}: ${c.name}`, () => inObject(c));
+}
+
+// The whole `agent.submissions` suite on the runtime runtime-pi provides it from, over storage-do; a
+// restart is a new app over the same object.
+for (const c of createSubmissionsConformance(() => createPiSubmissionsFixture({ components: withWorkersHost(objectHost(), [storageDo]) }), { restarts: true })) {
+  it(`runtime-pi's agent.submissions over storage-do ${c.group}: ${c.name}`, () => inObject(c));
 }
 
 /** The scripted agent and model: each run answers `answer: <message>`. */

@@ -17,8 +17,10 @@ which installs it (`bun install` at the root: this directory is a workspace).
 |---|---|
 | `test/storage-do.workerd.ts` | `storage.sql` on `storage-do`; `storage.kv` on `storage-kv-sql` over `storage-do`; the start as `deployment-cloudflare` does it; the SQL limits `storage-do`'s README states |
 | `test/runtime-answers.workerd.ts` | runtime-pi's `agent.submissions` in an object: its `answers` log under the feed suite (pruning, restarts) over `storage-do`; in a `PlatformConversation` object, a run settled in pi-durable whose log a crash refused (a SQLite trigger), the object evicted between two alarms, logged and announced once by the next instance, and a redelivery adding nothing |
+| `test/provider-anthropic.workerd.ts` | `provider-anthropic` in a real object's App with `storage-do`, `runtime-pi` and `secrets-cloudflare`: an agent answers through pi-ai's Anthropic SDK, loaded by its lazy API in workerd, from a fake Anthropic API behind `fetch`, with the key from the Worker's secrets; no OAuth on this target |
 | `test/secrets-cloudflare.workerd.ts` | `secrets` on `secrets-cloudflare`, over the Worker's real `env` |
-| `test/deployment-cloudflare.workerd.ts` | `deployment-cloudflare`'s entrypoint: its `Conversation` class (exported by `src/worker.ts`, over the small Apps of `src/deployment.ts`) and its Worker `fetch`: `/health`, `WORKERS_HOST`, `deliver` and the alarm reaching their handlers, eviction, a failed start resetting the object |
+| `test/deployment-cloudflare.workerd.ts` | `deployment-cloudflare`'s entrypoint: its `Conversation` class (exported by `src/worker.ts`, over the small Apps of `src/deployment.ts`) and its Worker `fetch`: `/health`, `WORKERS_HOST`, `deliver` and the alarm reaching their handlers, eviction, a failed start resetting the object, an alarm whose start keeps failing kept by its guard alarm (workerd's own scheduler retrying it) |
+| `test/direct-delivery.workerd.ts` | channel-telegram-webhook's answer delivery without an outbox (`startAnswerDelivery` sending directly), in a `PlatformConversation` object composed as the telegram-cloudflare preset's, Telegram a fake behind `fetch`: an answer whose send was refused waits for its retry across an eviction, and the next instance delivers it once |
 | `test/execution-do.workerd.ts` | pi-durable's `ExecutionEnv` suite on `execution-do`; pi-durable's own `write`, `read`, `edit` and `bash` tools on it through the `tool-*` components; the shell, `node` in QuickJS and its budget, the `.git` fence, and `git` clone, commit and push against a fake GitHub |
 | `test/durable-execution.workerd.ts` | `execution-do`'s environment (`env.ts`) under pi-durable's `ExecutionEnv` suite and pi-durable's tools in a Harness turn, on a real object, after an eviction too |
 | `test/platform-cloudflare.workerd.ts` | `wakeups` on `platform-cloudflare` over a real object's SQL (the alarm simulated on the suite's clock); `actor.mailbox` and `actor.inbox` from the Worker's App by real RPC to deployment-cloudflare's `Conversation` class (`PlatformConversation`); on that class, the real alarm (set, fired, after an eviction), the slice (and a handler asking again every 100 ms, on time, while another waits it out), the backoff, a request waiting for its handler, an object's own mailbox |
@@ -26,6 +28,7 @@ which installs it (`bun install` at the root: this directory is a workspace).
 | `test/tool-mcp.workerd.ts` | `@pikit/pi-adapter/mcp`'s transport on workerd's real `fetch` (JSON and server-sent event answers), and pi-mcp's own transport, which calls `fetch` without a receiver as workerd requires; `tool-mcp` in an App: tools described at start, calls, a reported failure as an error result, a forgotten session, a secret token; a start from the kept listing, and from the bundled seed (`seed.ts`) with nothing kept, with no request |
 | `test/durable-storage.workerd.ts` | pi-durable 1.0's storage conformance on `openDurableStorage` (`@pikit/pi-adapter`) over `storage-do`; a pi-durable `Harness` over it: answered, reopened, after an eviction, a tool call, an interrupted run resumed, a run continuing across the object's events |
 | `test/durable-wakeups.workerd.ts` | `nextWakeAt` and `driveSlice` (`@pikit/pi-adapter/wakeups`) on a real object: a run evicted during a model error's backoff is completed by the alarm `nextWakeAt` set |
+| `test/outbound-durable.workerd.ts` | `outbound-durable` in a `PlatformConversation` object's App (over `storage-do` and `platform-cloudflare`'s `wakeups`): a failed send retried by the object's alarm after an eviction, with no new message; a send cut by the slice's deadline sent again by the next alarm, after an eviction, as a possible duplicate |
 
 Each case of a storage suite runs in a Durable Object of its own (`runInDurableObject` on a new id),
 and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint
@@ -82,7 +85,10 @@ classes, which it does not export. Measured with wrangler 4.143.0 and pi-durable
 | The same with execution-do and the four tools (`src/bundle.ts`) | 4,045 KiB | 980 KiB |
 
 execution-do adds about 800 KiB gzip: just-bash, isomorphic-git and QuickJS's WebAssembly (503 KB,
-226 KiB gzip). The budget is 10 MB compressed (SPEC §4). `wrangler.jsonc` carries the rule that
+226 KiB gzip). CI's workerd job measures a whole project's Worker, the telegram-cloudflare preset's
+(`bun scripts/bundle-size.ts`: 6,086 KiB, 1,318 KiB gzip on October 5, 2026), and fails it over
+Cloudflare's limit, 64 MiB uncompressed (there is no compressed limit). What a larger bundle meets
+first is the Worker's 1 s startup limit, which no step measures. `wrangler.jsonc` carries the rule that
 bundles that WebAssembly as a compiled module (execution-do's README, "On Cloudflare").
 
 `tool-mcp` added to `src/bundle.ts` adds 48 KiB, 11 KiB gzip (measured on September 29, 2026, then taken out):

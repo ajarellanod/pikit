@@ -14,7 +14,7 @@ import type { WorkersHost } from "@pikit/contracts/cloudflare";
 // @ts-ignore: typed by Workers' runtime types (`wrangler types`) where they are installed; under Bun's
 // types the class below extends an untyped base, and host.ts types what is used of it.
 import { DurableObject } from "cloudflare:workers";
-import { createObjectHost, createWorkerHost, type HostOptions, type ObjectHost, type ObjectState } from "./host.ts";
+import { type AlarmInfo, createObjectHost, createWorkerHost, type HostOptions, type ObjectHost, type ObjectState } from "./host.ts";
 
 export interface Entrypoint {
   /** The Durable Object class: `wrangler.jsonc` binds it as `CONVERSATION`, with a SQLite migration. */
@@ -56,8 +56,8 @@ export function createEntrypoint(object: AppDefinition, worker: AppDefinition | 
       return await this.#objectHost().call(type, key, message);
     }
 
-    async alarm(): Promise<void> {
-      await this.#objectHost().alarm();
+    async alarm(info?: AlarmInfo): Promise<void> {
+      await this.#objectHost().alarm(info);
     }
   }
 

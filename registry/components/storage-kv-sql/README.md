@@ -8,7 +8,8 @@ pikit add storage-sqlite      # the database it keeps its values in
 pikit add storage-kv-sql
 ```
 
-`pikit add channel-telegram` offers it (with `storage-sqlite` when nothing provides `storage.sql`).
+`pikit add channel-telegram` (or any component that requires `storage.kv`) offers it, with
+`storage-sqlite` when nothing provides `storage.sql`.
 
 ## Using it
 
@@ -40,8 +41,8 @@ await store?.delete("cursor");
 
 ## Removing it
 
-`pikit remove storage-kv-sql` refuses while a component requires `storage.kv`; a component that only
-can use it (`channel-telegram`) goes back to working without it. The table stays: it is your data.
+`pikit remove storage-kv-sql` refuses while a component requires `storage.kv` (every chat channel,
+which keeps its delivery cursor there, and `conversations-kv`). The table stays: it is your data.
 
 ## Tests
 

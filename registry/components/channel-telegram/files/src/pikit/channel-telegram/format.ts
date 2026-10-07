@@ -2,11 +2,14 @@
  * An agent's answer as Telegram shows it. Models write Markdown; Telegram shows `**bold**` as it is
  * unless the message uses one of its own formats. This converts the common subset (bold, italics,
  * strikethrough, inline code, code blocks, links, headings, bullets) to Telegram's HTML, escaping
- * everything else. When Telegram still refuses a message, `replies.ts` sends it as plain text, so a
- * formatting mistake costs looks, never an answer.
+ * everything else. When Telegram still refuses a message, `transport.ts` sends it as plain text, so
+ * a formatting mistake costs looks, never an answer.
  *
  * Telegram also refuses messages longer than 4096 characters, so long answers are split first, at
  * paragraph, line or word boundaries, and a code block cut in two is closed and reopened.
+ *
+ * The same file in channel-telegram and channel-telegram-webhook (components never import each
+ * other, C6); the registry's `channel-telegram-webhook/twins.test.ts` keeps the two identical.
  */
 
 /** Telegram's limit for one message. */

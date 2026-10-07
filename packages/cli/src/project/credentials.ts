@@ -7,7 +7,9 @@
  *   `model.credentials` (`credentials-file`) and those that provide `model.provider`, with the
  *   config `pikit.config.ts` gives them, so the tokens land exactly where the app reads them.
  * - `check` reports, per provider, whether anything is configured (a stored credential or the
- *   provider's variable in the environment), without a network call or an OAuth refresh.
+ *   provider's variable in the environment), without a network call or an OAuth refresh; and, for
+ *   `pikit configure`, the component that provides it (whose manifest names its key's variable) and
+ *   whether it has an OAuth login at all (pi-ai's `provider.auth.oauth`).
  * - `login <provider> [<option>]` runs pi-ai's own OAuth flow through `@pikit/pi-adapter` and pi-ai
  *   writes the tokens through `model.credentials`. The adapter's `loginInteraction` asks pi-ai's
  *   prompts on this terminal: a choice (Anthropic's login method: browser or copy-code) as a numbered
@@ -34,8 +36,8 @@ import type { AppDefinition, ComponentDefinition, defineApp, defineComponent } f
  * adapter through its own `node_modules`, which made TypeScript 7 lose the core tests' relative
  * module augmentations. Opaque where the script only passes values through.
  */
-/** pi-ai's `Provider`, passed through untouched. */
-type Provider = { readonly id: string };
+/** pi-ai's `Provider`, passed through untouched but for whether it has an OAuth login. */
+type Provider = { readonly id: string; readonly auth?: { readonly oauth?: unknown } };
 /** pi-ai's `CredentialStore`, passed through untouched. */
 type CredentialStore = object;
 /** pi-ai's `AuthPrompt`: what its login flow asks. */
@@ -70,12 +72,23 @@ type ModelsFrom = (
 };
 
 export type CredentialsResult =
-  | { ok: true; providers: Record<string, boolean>; store: string | undefined }
+  | {
+      ok: true;
+      /** Provider id → whether anything is configured. */
+      providers: Record<string, boolean>;
+      store: string | undefined;
+      /** Provider id → the component that provides it. */
+      owners: Record<string, string>;
+      /** The providers with an OAuth login (`provider.auth.oauth`); the others take only keys. */
+      oauth: string[];
+    }
   | { ok: false; error: string };
 
 interface Found {
   credentials: CredentialStore | undefined;
   providers: Map<string, Provider>;
+  /** Provider id → the component that provides it. */
+  owners: Record<string, string>;
 }
 
 /** A module of the project, resolved from its `node_modules`. */
@@ -92,12 +105,13 @@ async function openCredentials(projectDir: string): Promise<{ found: Found; stop
   const described = (await definition.create()).describe();
   const store = described.capabilities["model.credentials"];
   const storeName = store?.selected ?? store?.providers[0];
-  const providerNames = new Set(Object.values(described.capabilities["model.provider"]?.keys ?? {}));
+  const owners = described.capabilities["model.provider"]?.keys ?? {};
+  const providerNames = new Set(Object.values(owners));
   const names = new Set([...providerNames, ...(storeName === undefined ? [] : [storeName])]);
   const components = definition.components.filter((c) => names.has(c.name));
   const config = Object.fromEntries(Object.entries(definition.config).filter(([key]) => names.has(key)));
 
-  const found: Found = { credentials: undefined, providers: new Map() };
+  const found: Found = { credentials: undefined, providers: new Map(), owners: { ...owners } };
   const probe: ComponentDefinition = core.defineComponent({
     name: "configure-credentials",
     setup(pikit) {
@@ -125,7 +139,7 @@ async function check(projectDir: string): Promise<CredentialsResult> {
     const all = models([...found.providers.values()], { credentials: found.credentials });
     const providers: Record<string, boolean> = {};
     for (const id of found.providers.keys()) providers[id] = (await all.checkAuth(id)) !== undefined;
-    return { ok: true, providers, store };
+    return { ok: true, providers, store, ...offered(found) };
   } finally {
     await stop();
   }
@@ -138,16 +152,23 @@ async function login(projectDir: string, providerId: string, preferred: string |
   try {
     const provider = found.providers.get(providerId);
     if (provider === undefined) return { ok: false, error: `no installed component provides the model provider "${providerId}"` };
+    if (provider.auth?.oauth === undefined) return { ok: false, error: `the model provider "${providerId}" has no login: it takes an API key` };
     if (found.credentials === undefined) {
       return { ok: false, error: "no installed component provides model.credentials, so a login has nowhere to be stored (install credentials-file)" };
     }
     const interaction = choosing(loginInteraction(terminal), terminal, { preferred, interactive: process.stdin.isTTY === true });
     await models([provider], { credentials: found.credentials }).login(providerId, "oauth", interaction);
-    return { ok: true, providers: { [providerId]: true }, store };
+    return { ok: true, providers: { [providerId]: true }, store, ...offered(found) };
   } finally {
     terminal.close();
     await stop();
   }
+}
+
+/** Who provides each provider, and which have an OAuth login. */
+function offered(found: Found): { owners: Record<string, string>; oauth: string[] } {
+  const oauth = [...found.providers].filter(([, provider]) => provider.auth?.oauth !== undefined).map(([id]) => id);
+  return { owners: found.owners, oauth };
 }
 
 /**

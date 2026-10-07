@@ -8,7 +8,8 @@
  * Telegram also refuses messages longer than 4096 characters, so long answers are split first, at
  * paragraph, line or word boundaries, and a code block cut in two is closed and reopened.
  *
- * Copied from channel-telegram's `format.ts`: components never import each other (C6).
+ * The same file in channel-telegram and channel-telegram-webhook (components never import each
+ * other, C6); the registry's `channel-telegram-webhook/twins.test.ts` keeps the two identical.
  */
 
 /** Telegram's limit for one message. */

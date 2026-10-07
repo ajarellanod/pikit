@@ -17,13 +17,13 @@ An agent gets this tool only when it names it:
 defineAgent({ name: "ops", model: "anthropic/claude-sonnet-4-6", tools: ["bash"] })
 ```
 
-pikit does not reimplement the tool; it is Pi's. The component adds only two things:
+pikit does not reimplement the tool; it is Pi's. The component decides only what Pi leaves open:
 - the environment it works on, read when the tool runs: in a run, the agent's own `workspace` when
   one is installed (`workspace-local` gives each agent a directory); otherwise `execution.shell`.
-  A `workspace` without a shell makes every `bash` call fail (`workspace-local` has one);
+  `workspace-local` gives each agent `execution` itself, in its directory, so with its shell;
 - It needs a real shell, so it requires `execution.shell`. An environment without one
   (`execution` only) cannot install it, and `pikit doctor` says so.
-- its replay: `"unsafe"`: a command can do anything, so after a crash pi-durable reports the call as interrupted (with its output so far) and the model decides whether to run it again.
+- its replay, written in its `index.ts`: `"unsafe"`: a command can do anything, so after a crash pi-durable reports the call as interrupted (with its output so far) and the model decides whether to run it again.
 
 ## Before you give it to an agent
 
@@ -35,9 +35,9 @@ A shell can do anything the environment's OS user can, outside the working direc
 
 ## Tests
 
-`tool-bash.test.ts` is copied with the component and runs in your project, in a temporary directory.
-It covers the tool under its name, its replay, what it does, and that a call in a run works in its
-agent's workspace when one is installed.
+`tool-bash.test.ts` is copied with the component and runs in your project. It covers what this
+component decides: the tool under its name, unchanged but for its replay, and what it needs
+installed. What the tool does is pi-durable's, tested there.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

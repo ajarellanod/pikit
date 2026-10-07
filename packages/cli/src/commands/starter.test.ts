@@ -1,5 +1,8 @@
 import { expect, test } from "bun:test";
-import { agent, BUNFIG, introduction, PROJECT_REGISTRY, SKILLS_DIR, skillFiles, tsconfig } from "./starter.ts";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
+import { agent, BUNFIG, introduction, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
 
 test("a project is ready for a registry of its own and a dashboard: tsc and bun test leave registry/ and src/dashboard/ out, and its lib has ES2023", () => {
   const config = JSON.parse(tsconfig()) as { compilerOptions: { lib: string[] }; exclude: string[] };
@@ -38,4 +41,60 @@ test("the kit's skills for AI agents are what pikit new copies, by their path in
     expect(skills.find((skill) => skill.path.endsWith(`${name}/SKILL.md`))?.text).toStartWith(`---\nname: ${name}\n`);
   }
   expect(skillFiles("/nonexistent")).toEqual([]);
+});
+
+test("the copied skills say where the kit is: this CLI's checkout, and online at the project's kit commit", () => {
+  const source = readFileSync(join(PIKIT_ROOT, SKILLS_DIR, "pikit-component", "SKILL.md"), "utf8");
+  expect(source).toContain("{{PIKIT_ROOT}}/features/memory.md");
+  expect(source).toContain("{{PIKIT_URL}}");
+
+  const skills = skillFiles(PIKIT_ROOT, "abc1234-dirty");
+  for (const skill of skills) expect(skill.text).not.toContain("{{PIKIT_");
+  const component = skills.find((skill) => skill.path.endsWith("pikit-component/SKILL.md"))?.text ?? "";
+  expect(component).toContain(`\`${PIKIT_ROOT}/features/memory.md\``);
+  // Pinned at the commit the vendored kit was packed from; uncommitted changes have no URL.
+  expect(component).toContain(`${KIT_REPOSITORY}/tree/abc1234.`);
+  expect(withKitLocation("{{PIKIT_URL}}", "/kit", undefined)).toBe(KIT_REPOSITORY);
+
+  // Every kit file a skill names exists, so the path it gives a project's agent opens.
+  const named = skills.flatMap((skill) => [...skill.text.matchAll(new RegExp(`${PIKIT_ROOT}/([\\w./-]+)`, "g"))].map((m) => m[1] ?? ""));
+  expect(named.length).toBeGreaterThan(3);
+  for (const path of named.filter((p) => !p.includes("<"))) expect(existsSync(join(PIKIT_ROOT, path.replace(/[.]$/, "")))).toBe(true);
+});
+
+test("on a server the starter agent does not name bash, even installed, and says why; on Cloudflare it does", () => {
+  const installed = ["read", "write", "edit", "bash"];
+  const server = agent(installed, "faux/echo", [], "server");
+  expect(server).toContain('tools: ["read","write","edit"],');
+  expect(server).toContain("`bash` is installed but not named here: it runs commands as this server's user");
+  expect(server).toContain("src/pikit/tool-bash/README.md");
+  expect(server).toContain("read, write and edit files there.");
+  expect(server).not.toContain("run commands in it");
+
+  const durable = agent(installed, "faux/echo", [], "durable");
+  expect(durable).toContain('tools: ["read","write","edit","bash"],');
+  expect(durable).toContain("read, write and edit files there, and to run commands in it.");
+  expect(durable).not.toContain("installed but not named");
+  expect(starterTools(["read"], "server")).toEqual(["read"]);
+});
+
+test("the README says what `pikit up` does by the installed deployment, never by the target", () => {
+  expect(readme("a", ["channel-http", "deployment-docker"])).toContain("pikit up          # or run it in Docker (deployment-docker): then pikit status, logs, down");
+  expect(readme("a", ["deployment-cloudflare"], "durable")).toContain("pikit up          # or deploy it to Cloudflare (deployment-cloudflare): then pikit status, logs");
+  expect(readme("a", ["deployment-fly"])).toContain("pikit up          # or deploy it with deployment-fly (deployment-fly)\n");
+  const none = readme("a", ["channel-http"]);
+  expect(none).not.toContain("Docker");
+  expect(none).toContain("there is none");
+  expect(upText(["channel-http"])).toBeUndefined();
+  expect(upText(["deployment-docker"])).toBe("run it in Docker");
+});
+
+test("the README says where pikit comes from and where the kit is, as pikit new writes it", () => {
+  const text = withKitLocation(readme("a", []), PIKIT_ROOT, "abc1234");
+  expect(text).toContain("## Where pikit is");
+  expect(text).toContain(`It runs from the kit's checkout at \`${PIKIT_ROOT}\``);
+  expect(text).toContain("installer/install.sh");
+  expect(text).toContain(`${KIT_REPOSITORY}/tree/abc1234.`);
+  expect(text).not.toContain("{{PIKIT_");
+  expect(existsSync(join(PIKIT_ROOT, "installer", "install.sh"))).toBe(true);
 });

@@ -13,6 +13,7 @@
  * project with no runtime resolves no name, so nothing it names is broken.
  */
 
+import type { Manifest } from "../registry/manifest.ts";
 import type { AgentReferences, ProbeResult } from "./probe.ts";
 
 type Composed = Extract<ProbeResult, { ok: true }>;
@@ -42,11 +43,29 @@ export function modelProvider(model: string): string | undefined {
   return model.includes("/") ? model.slice(0, model.indexOf("/")) : undefined;
 }
 
+/** The registry components that provide `key` of `capability`. */
+export type KeyProviders = (capability: string, key: string) => string[];
+
+/**
+ * The components of `manifests` that provide a key with their default config, as their generated
+ * fields record it: a tool in `replay.tools`, a model provider in `modelProviders`. Nothing for a key
+ * only a config gives (an MCP server's tools, `tool-mcp`'s) or for an extension.
+ */
+export function manifestProviders(manifests: readonly Manifest[]): KeyProviders {
+  return (capability, key) =>
+    manifests
+      .filter((manifest) =>
+        capability === "agent.tool" ? manifest.replay?.tools?.[key] !== undefined : capability === "model.provider" && (manifest.modelProviders ?? []).includes(key),
+      )
+      .map((manifest) => manifest.name);
+}
+
 /**
  * The references that are broken now, or, with `removing`, that removing that component would
- * break: the keys only it provides. The agents it provides itself go with it.
+ * break: the keys only it provides. The agents it provides itself go with it. With `providers`, a
+ * broken one names what to install.
  */
-export function brokenReferences(result: Composed, removing?: string): string[] {
+export function brokenReferences(result: Composed, removing?: string, providers?: KeyProviders): string[] {
   const { components, capabilities } = result.description;
   const broken: string[] = [];
   for (const kind of KINDS) {
@@ -58,7 +77,9 @@ export function brokenReferences(result: Composed, removing?: string): string[] 
       for (const key of kind.keys(agent)) {
         const owner = owners[key];
         if (removing === undefined && owner === undefined) {
-          broken.push(`agent "${agent.agent}" names ${kind.describe(agent, key, "no installed component")} (${kind.capability})`);
+          const candidates = providers?.(kind.capability, key) ?? [];
+          const install = candidates.length === 0 ? "" : `: install ${candidates.length === 1 ? candidates[0] : `one of ${candidates.join(", ")}`}`;
+          broken.push(`agent "${agent.agent}" names ${kind.describe(agent, key, "no installed component")} (${kind.capability})${install}`);
         } else if (removing !== undefined && owner === removing) {
           broken.push(`agent "${agent.agent}" names ${kind.describe(agent, key, `only ${removing}`)}`);
         }

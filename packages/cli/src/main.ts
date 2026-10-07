@@ -26,7 +26,7 @@ const USAGE = `pikit: a kit for Pi.
 Usage:
   pikit new [--target <t>] [--preset <p>]   a new agent, step by step (in a terminal); flags answer its questions
   pikit new <dir> [--target server|durable] [--preset <name> [--with <component>]...] [--ui] [--registry <path>]   a new project (--ui: with the dashboard)
-  pikit add <component> [--registry <path>] [--force] [--yes]
+  pikit add <component>... [--registry <path>] [--force] [--yes]   several at once: one transaction, one install
   pikit remove <component> [--force]
   pikit upgrade [<component>...] [--dry-run] [--force] [--yes]   take the registry's version, merging your edits (without names, the dashboard too)
   pikit ui on | off [--force] [--yes]  the dashboard: src/dashboard/ and the admin API, or neither
@@ -41,14 +41,14 @@ Usage:
 Project commands run in the current directory.`;
 
 /**
- * Commands the former SPEC (§11) planned and pikit does not have yet: where each is specified now,
- * or `""` when nothing current specifies it.
+ * Commands the former SPEC (§11) planned and pikit does not have yet: where each is specified now (a
+ * file of the kit, and what to read there), or `""` when nothing current specifies it.
  */
 const LATER: Record<string, string> = {
   init: "",
   create: "",
-  outdated: "SPEC P6",
-  diff: "SPEC P6",
+  outdated: "SPEC.md, P6",
+  diff: "SPEC.md, P6",
   config: "features/config-files.md",
   expose: "",
   deploy: "",
@@ -122,7 +122,8 @@ async function main(argv: string[]): Promise<number> {
       });
       return 0;
     case "add":
-      await add(cwd, one("component"), {
+      if (rest.length === 0) throw new CliError("usage: pikit add <component>...", 2);
+      await add(cwd, rest, {
         ...(values.registry !== undefined && { registry: values.registry }),
         force: values.force === true,
         yes: values.yes === true,
@@ -172,7 +173,7 @@ async function main(argv: string[]): Promise<number> {
   }
   const later = LATER[command];
   if (later !== undefined) {
-    log.info(`pikit ${command}: not built yet${later === "" ? "" : ` (see ${later})`}`);
+    log.info(`pikit ${command}: not built yet${later === "" ? "" : ` (see ${join(PIKIT_ROOT, later)})`}`);
     return 1;
   }
   throw new CliError(`unknown command "${command}"\n\n${USAGE}`, 2);

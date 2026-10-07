@@ -18,9 +18,10 @@ posted and edited as the model writes, then replaced by the final answer.
   preview, and no flag says so.
 - A component (the `stream-to-edit` of the moved text; `outbound-stream` fits the naming table)
   listens to the runtime's message updates and edits the preview, throttled per platform.
-- Previews never go through the outbox: "losing one costs nothing" (the former SPEC §5). The final
-  answer is still the outbox's, keyed by `answerKey`: it edits the preview into the answer, or sends
-  it and deletes the preview, and the receipt says which message holds it.
+- Previews never go through answer delivery: "losing one costs nothing" (the former SPEC §5). The
+  final answer is still `startAnswerDelivery`'s (`packages/contracts/src/delivery.ts`), keyed by
+  `answerKey`, sent directly or through `outbound.queue`: it edits the preview into the answer, or
+  sends it and deletes the preview, and with the queue the receipt says which message holds it.
 - On Cloudflare, the dashboard's live updates use the Durable Object's hibernating WebSocket
   (SPEC §5).
 - Absent: "typing…", then the answer, as today.

@@ -56,6 +56,11 @@ Anything that is not core is a component, and components are copied into your pr
 source. You read them, edit them and delete them. No black box sits between you and the
 behavior of your own system.
 
+Two kit packages sit beside the core and are not copied: the contracts, the words parts share
+and the protocols every part must follow alike, with the choices passed in by your components;
+and the adapter, the one door to Pi, which follows Pi's changes so nothing of yours has to. They
+hold no choice you would make differently (SPEC §3.3).
+
 ### 5. If you don't need it, it doesn't exist.
 
 Nothing is disabled or hidden behind a flag or left loaded but idle: what you did not install

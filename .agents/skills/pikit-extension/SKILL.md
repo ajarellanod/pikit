@@ -9,7 +9,8 @@ What an agent does besides its model, prompt and tools is a Pi extension (pi-dur
 `defineExtension`), provided by a component under the keyed capability `agent.extension` and run
 only by the agents that name it. Read `.agents/skills/pikit-component/SKILL.md` first: an extension
 component is a component, with the same rules (synchronous `setup`, resources in `start`, config holds
-values, tests ship with it).
+values, tests ship with it). `{{PIKIT_ROOT}}` below is the pikit repository (the kit) on this machine
+({{PIKIT_URL}} online), as that skill says.
 
 **Reference:** `extension-house-rules` (a section from config, a `beforeTool` hook): `pikit add
 extension-house-rules --yes` to read it in `src/pikit/extension-house-rules/`, its README "How this
@@ -22,7 +23,7 @@ state across a restart).
 | You want | Write |
 |---|---|
 | One more thing the model can call | a tool component (`pikit-component`, reference `tool-fetch`) |
-| Switch model, prompt, tools or extensions with the conversation's state (a mode, a phase) | the agent's `prepare(state)` in `src/agents/<agent>/agent.ts`: pure and synchronous |
+| Switch model, prompt, tools or extensions with the conversation's state (a mode, a phase) | the agent's `prepare(state)` in `src/agents/<agent>/agent.ts`: pure and synchronous. The definition owns the conversation's agent (SPEC §6): the runtime rebuilds it from `prepare` at each admission and state update, so nothing else changes it live |
 | Text in every request (rules, a persona, recalled memories), possibly read from a store | an extension's **section** |
 | See or change each model request or answer, each tool call or result, a compaction | an extension's **hook** |
 | Decorate a tool or a section someone else provides | an extension's **wrap** |
@@ -86,7 +87,7 @@ defineExtension({
   Hooks only read documents (`api.snapshot`); they keep a value per task with
   `api.memo(name, candidate, context)`. State shared across conversations (a person's memory, a
   project's settings) is not a document: it is a capability of yours (`storage.sql`, or an actor
-  per owner reached with `actor.mailbox`'s `call`, as `features/memory.md` does).
+  per owner reached with `actor.mailbox`'s `call`, as `{{PIKIT_ROOT}}/features/memory.md` does).
 - **Using a capability inside a section, hook or tool:** they get a Chord context, and capabilities
   take an `AppContext`. Keep the App's context from `start` without its cancellation, and put the
   call's context under it:
@@ -170,7 +171,7 @@ sections are its `system` messages' `sections` (a change per message; `null` rem
 1. **The component's own tests** (`files/src/pikit/<name>/<name>.test.ts`, copied with it): "what
    setup declares" (`provides: ["agent.extension"]`, `capabilities["agent.extension"].keys`), the
    extension's name, sections and hooks, the pure functions behind them (what the section says, what
-   the hook decides), refused config. They cannot import another component's files (SPEC P4).
+   the hook decides), refused config. They cannot import another component's files (P4 in `{{PIKIT_ROOT}}/SPEC.md`).
 2. **A real App** (in a project, a test of the project's own, `test/<name>.test.ts`, which may import
    `src/pikit/runtime-pi/index.ts`; in the pikit repository, `app.test.ts` beside `files/`): runtime-pi,
    your component, an agents component, provider-faux (`faux/scripted`) and `sqliteStorage(path)`.

@@ -26,5 +26,5 @@ the working directory on its own; that is Bun's behaviour, not this component's.
 conformance suite from `@pikit/contracts/testing`: values read back exactly, unset and empty ones read
 `undefined`, and no value reaches `describe()` or a log line.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

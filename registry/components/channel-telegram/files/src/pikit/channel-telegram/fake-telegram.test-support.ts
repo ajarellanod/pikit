@@ -2,6 +2,8 @@
  * A fake Telegram Bot API for channel-telegram's tests: the methods the channel calls, with
  * Telegram's long polling and offset rules, served on a free local port. Tests make users "say"
  * things and read what the bot sent, without a real bot, token or network.
+ *
+ * Test support: only tests import it (`*.test-support.ts`), so it never reaches the app.
  */
 
 import type { TelegramUpdate, TelegramUser } from "./api.ts";

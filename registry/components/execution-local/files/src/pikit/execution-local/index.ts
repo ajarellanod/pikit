@@ -6,9 +6,12 @@
  * `NodeExecutionEnv`, in a working directory. Relative paths and commands start there.
  *
  * Commands do not inherit the server's environment. They start from an allowlist of variables
- * (`PATH`, `HOME`, `LANG`…), so `env` in a command does not print the server's secrets. Add a
- * variable to `variables` when a command needs it (a `GITHUB_TOKEN` for `gh`), knowing that the
- * agent can then read it.
+ * (`PATH`, `HOME`, `LANG`…), so `env` in a command does not print the server's secrets, and a program
+ * a command runs does not pick them up by accident. It hides nothing from a command that looks: on
+ * Linux, `cat /proc/$PPID/environ` prints the server's whole environment (the same OS user may read
+ * it), and its `.env` is a file like any other. A variable added to `variables` (a `GITHUB_TOKEN` for
+ * `gh`) is in every command's environment. `workspace-local` builds on this environment: its agents'
+ * directories are inside `root`, and their commands get these `variables`.
  *
  * NOT A SANDBOX. Commands run as the server's OS user and can read and change whatever that user
  * can, outside the working directory too: other projects, `~/.ssh`, this app's credentials file.

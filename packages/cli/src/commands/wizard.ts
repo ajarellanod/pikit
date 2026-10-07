@@ -36,22 +36,34 @@ import { ask, beginGuided, Cancelled, CliError, choose, confirm, intro, log, out
 import { configure } from "./configure.ts";
 import { deployment, dev } from "./deployment.ts";
 import { checkTarget, newProject, UNFINISHED, validProjectName } from "./new.ts";
+import { deploymentOf } from "./starter.ts";
 
 const DEFAULT_NAME = "my-agent";
 const DEFAULT_TARGET = NEW_PROJECT_TARGETS[0] as string;
 
 /** What the guided path says of each target, `pikit.json`'s `targets`. */
-const TARGET_TEXT: Record<string, { label: string; hint: string; up: string; upHint: string; running: string }> = {
+const TARGET_TEXT: Record<string, { label: string; hint: string }> = {
   server: {
     label: "server — a long-lived process (Docker on a VPS)",
     hint: "or on your own machine while it is on",
-    up: "In Docker, in the background (`pikit up`)",
-    upHint: "it keeps running after you log out",
-    running: "Your agent is running. In its folder (`cd {name}`): `pikit logs --follow` to watch it, `pikit status`, `pikit down` to stop it.",
   },
   durable: {
     label: "durable — on Cloudflare (Workers + Durable Objects)",
     hint: "no server to keep: a Durable Object per chat; the Workers Free plan is enough",
+  },
+};
+
+/**
+ * What it says of `pikit up`, by the project's deployment (`deployment-*`), which `up` delegates to:
+ * never by the target. Another deployment gets the general words; without one, `up` is not offered.
+ */
+const DEPLOYMENT_TEXT: Record<string, { up: string; upHint: string; running: string }> = {
+  "deployment-docker": {
+    up: "In Docker, in the background (`pikit up`)",
+    upHint: "it keeps running after you log out",
+    running: "Your agent is running. In its folder (`cd {name}`): `pikit logs --follow` to watch it, `pikit status`, `pikit down` to stop it.",
+  },
+  "deployment-cloudflare": {
     up: "On Cloudflare (`pikit up`)",
     upHint: "it deploys the Worker, which runs without this machine",
     running: "Your agent is deployed. In its folder (`cd {name}`): `pikit logs` to watch it, `pikit status`, `pikit down` to delete it.",
@@ -115,7 +127,7 @@ export async function newWizard(parentDir: string, options: WizardOptions = {}):
       outro(`Fix that, then run \`pikit new\` again and answer "${name}": it continues from here.`);
       return 1;
     }
-    return await start(project.dir, name, target);
+    return await start(project.dir, name);
   } catch (error) {
     if (error instanceof Cancelled) outro(`Stopped. Run \`pikit new\` again${name === DEFAULT_NAME ? "" : ` and answer "${name}"`} to continue.`);
     throw error;
@@ -202,16 +214,17 @@ function option(value: string, title: string): { value: string; label: string; h
   return { value, label, ...(rest.length > 0 && { hint: rest.join(": ") }) };
 }
 
-async function start(dir: string, name: string, target: string): Promise<number> {
-  const text = TARGET_TEXT[target];
+async function start(dir: string, name: string): Promise<number> {
+  const deployedBy = deploymentOf(Object.keys(readProjectManifest(dir).components));
+  const text = deployedBy === undefined ? undefined : DEPLOYMENT_TEXT[deployedBy];
   const choice = await choose<"up" | "dev" | "later">(
     "Start it?",
     [
-      { value: "up", label: text?.up ?? "In the background (`pikit up`)", ...(text !== undefined && { hint: text.upHint }) },
+      ...(deployedBy === undefined ? [] : [{ value: "up" as const, label: text?.up ?? `With ${deployedBy} (\`pikit up\`)`, ...(text !== undefined && { hint: text.upHint }) }]),
       { value: "dev", label: "Here, in this terminal (`pikit dev`)", hint: "Ctrl-C stops it" },
       { value: "later", label: "Not now" },
     ],
-    "up",
+    deployedBy === undefined ? "dev" : "up",
   );
   if (choice === "dev") return await dev(dir);
   if (choice === "later") return later(name, "up");

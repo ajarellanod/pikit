@@ -54,7 +54,7 @@ edit, and delete.
 ## What you get
 
 ```bash
-curl -fsSL https://get.pikit.dev | sh
+curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/install.sh | sh
 pikit new my-agent --preset telegram
 cd my-agent
 pikit configure
@@ -121,8 +121,9 @@ Same agents, same routing, same channels. Different infrastructure underneath.
   its own in `src/dashboard/`, yours like any component, over an admin API (`admin-api`); small on
   purpose (conversations, one conversation live, steer and abort, cost, health) and made to be
   extended: a component you write can bring its own view, a shadcn registry item.
-- **A CLI**: `new`, `add`, `remove`, `diff`, `upgrade`, `doctor`, `up`, `deploy`. With the
-  installer, its goal is zero friction from installing pikit to a running agent.
+- **A CLI**: `new`, `add`, `remove`, `upgrade`, `doctor`, `configure`, `dev`, `up` / `down` /
+  `restart` / `status`, `logs`, `registry` (`pikit --help`). With the installer, its goal is zero
+  friction from installing pikit to a running agent.
 - **Two runtime models**: `server`, a long-running process (Docker on a VPS, systemd; later
   exe.dev, E2B, Modal), and `durable`, one actor per conversation (Cloudflare Workers + Durable
   Objects). Deployment is never closed to them (`features/deployment-targets.md`).

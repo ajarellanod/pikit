@@ -9,7 +9,7 @@
 its proof (scenario 4). A second provider also helps `storage.sql` become
 `stable` (two independent providers, `packages/cli/src/registry/capabilities.ts`), which the
 Cloudflare provider (`storage-do`) may give as well. (Conversations are pi-durable's own storage:
-there is no sessions contract, [pi-durable migration](pi-durable-migration.md).)
+there is no sessions contract, [pi-durable migration](completed/pi-durable-migration.md).)
 
 ## What it gives
 Conversations, sessions and every component's tables in Postgres, for a managed database or

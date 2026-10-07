@@ -1,6 +1,7 @@
 import { expect, test } from "bun:test";
 import type { AgentReferences, ProbeResult } from "./probe.ts";
-import { brokenReferences } from "./references.ts";
+import type { Manifest } from "../registry/manifest.ts";
+import { brokenReferences, manifestProviders } from "./references.ts";
 
 type Composed = Extract<ProbeResult, { ok: true }>;
 
@@ -14,6 +15,7 @@ function app(keys: Record<string, Record<string, string>>, agents: AgentReferenc
       capabilities: Object.fromEntries(Object.entries(keys).map(([name, owners]) => [name, { providers: [...new Set(Object.values(owners))], keys: owners }])),
       pipelines: {},
       config: {},
+      stagesBy: {},
     },
     agents,
   };
@@ -52,4 +54,20 @@ test("with no component that uses the capability, a name resolves nowhere and is
   expect(brokenReferences(app({}, [soporte], []))).toEqual([]);
   // Removing the runtime removes the only reader of the names.
   expect(brokenReferences(app(complete, [soporte]), "runtime-pi")).toEqual([]);
+});
+
+test("with the registry's manifests, a broken tool or model provider names the component to install", () => {
+  const manifests = [
+    { name: "tool-websearch-brave", replay: { tools: { websearch: "safe" } } },
+    { name: "tool-mcp" },
+    { name: "provider-anthropic", modelProviders: ["anthropic"] },
+  ] as unknown as Manifest[];
+  const searcher: AgentReferences = { agent: "soporte", component: "agents", model: "anthropic/claude-x", tools: ["websearch", "wiki_search"], extensions: [] };
+
+  expect(brokenReferences(app({}, [searcher]), undefined, manifestProviders(manifests))).toEqual([
+    'agent "soporte" names the tool "websearch", which no installed component provides (agent.tool): install tool-websearch-brave',
+    // An MCP tool is named in tool-mcp's config: no manifest records it.
+    'agent "soporte" names the tool "wiki_search", which no installed component provides (agent.tool)',
+    'agent "soporte" names the model "anthropic/claude-x", whose provider "anthropic" no installed component provides (model.provider): install provider-anthropic',
+  ]);
 });

@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import type { Manifest } from "../registry/manifest.ts";
 import { declaredByApp } from "./apps.ts";
-import { offeredProviders, type ProvidedCapabilities, providedByApp, providedByManifests, unchosenProviders, withOffers } from "./offers.ts";
+import { dependencyOrder, offeredProviders, type ProvidedCapabilities, providedByApp, providedByManifests, unchosenProviders, withOffers } from "./offers.ts";
 import type { ProbeResult } from "./probe.ts";
 import { openRegistry, type Registry } from "./registry-source.ts";
 
@@ -17,10 +17,11 @@ const registry = openRegistry(DEFAULT_REGISTRY);
 const composing = (installed: readonly string[], targets: readonly string[] = ["server"], from: Registry = registry): ProvidedCapabilities =>
   providedByManifests(installed.map((name) => from.manifest(name)), targets);
 
-test("a chat channel brings a place for its cursor (required), durable delivery, and the storage they require; providers first", () => {
+test("a chat channel brings a place for its cursor (required), durable delivery, and the storage and timers they require; providers first", () => {
   expect(offeredProviders(registry, ["channel-telegram"])).toEqual([
     { component: "storage-sqlite", capability: "storage.sql", for: "storage-kv-sql", why: "required" },
     { component: "storage-kv-sql", capability: "storage.kv", for: "channel-telegram", why: "required" },
+    { component: "wakeups-timers", capability: "wakeups", for: "outbound-durable", why: "required" },
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram", why: "recommended" },
   ]);
 });
@@ -65,7 +66,7 @@ test("only providers that run on the project's targets are offered: on Cloudflar
 });
 
 test("on Cloudflare the Telegram webhook's object half brings durable delivery (the runtime provides the record of submissions); its Worker half nothing of the object's", () => {
-  const preset = ["storage-do", "storage-kv-sql", "deployment-cloudflare", "runtime-pi", "conversations-kv"];
+  const preset = ["platform-cloudflare", "storage-do", "storage-kv-sql", "deployment-cloudflare", "runtime-pi", "conversations-kv"];
   expect(offeredProviders(registry, ["channel-telegram-webhook"], preset, ["durable"], composing(preset, ["durable"]))).toEqual([
     { component: "outbound-durable", capability: "outbound.queue", for: "channel-telegram-webhook", why: "recommended" },
   ]);
@@ -119,12 +120,12 @@ test("a provider is offered in the App that misses it: one that goes only in the
   ]);
 });
 
-test("with a second provider, nothing is offered for it (the user's choice); the presets named their storage, and bring the rest over it", () => {
+test("with a second provider, nothing is offered for it (the user's choice); the presets named their storage and key-value store, and bring the rest over them", () => {
   const sqlite = registry.manifest("storage-sqlite");
   const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
   expect(offeredProviders(two, ["conversations-kv"]).map((o) => o.component)).toEqual(["storage-kv-sql"]);
   const telegram = registry.preset("telegram");
-  expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["storage-kv-sql", "outbound-durable"]);
+  expect(withOffers(two, telegram, ["server"]).order.filter((c) => !telegram.includes(c))).toEqual(["wakeups-timers", "outbound-durable"]);
 });
 
 test("an optional capability with two providers is not offered, and is named as the user's choice instead of left out in silence", () => {
@@ -141,7 +142,7 @@ test("a required capability with two providers is named with its candidates too:
   const sqlite = registry.manifest("storage-sqlite");
   const two = { ...registry, names: () => [...registry.names(), "storage-postgres"], manifest: (name: string) => (name === "storage-postgres" ? { ...sqlite, name } : registry.manifest(name)) } as Registry;
   // The channel's chain needs storage.sql through each provider it brings; with two providers none comes.
-  expect(offeredProviders(two, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["storage-kv-sql", "outbound-durable"]);
+  expect(offeredProviders(two, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["storage-kv-sql", "wakeups-timers", "outbound-durable"]);
   expect(unchosenProviders(two, ["channel-telegram"], [], ["server"])).toEqual([
     { capability: "storage.sql", why: "required", for: "storage-kv-sql", providers: ["storage-sqlite", "storage-postgres"] },
     { capability: "storage.sql", why: "required", for: "outbound-durable", providers: ["storage-sqlite", "storage-postgres"] },
@@ -169,7 +170,7 @@ test("with something installed and the composition unknown, nothing is offered n
   expect(offeredProviders(registry, ["channel-telegram"], ["tool-bash"], ["server"])).toEqual([]);
   expect(unchosenProviders(registry, ["channel-telegram"], ["tool-bash"], ["server"])).toEqual([]);
   // Nothing installed (a new project): the manifests are all there is.
-  expect(offeredProviders(registry, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["storage-sqlite", "storage-kv-sql", "outbound-durable"]);
+  expect(offeredProviders(registry, ["channel-telegram"], [], ["server"]).map((o) => o.component)).toEqual(["storage-sqlite", "storage-kv-sql", "wakeups-timers", "outbound-durable"]);
 });
 
 test("what a composed project provides, per App, without the components about to be replaced and their Worker halves", () => {
@@ -178,6 +179,7 @@ test("what a composed project provides, per App, without the components about to
     capabilities: {},
     pipelines: {},
     config: {},
+    stagesBy: {},
   });
   const result: ProbeResult = {
     ok: true,
@@ -195,21 +197,35 @@ test("what a composed project provides, per App, without the components about to
 });
 
 test("pikit new places what a component brings right before it; a provider already brought is not brought again", () => {
-  // The preset names its storage (`presets/http.yaml`), and the runtime provides the record of submissions: nothing is brought.
+  // The preset names its storage and key-value store (`presets/http.yaml`), and the runtime provides
+  // the record of submissions: nothing is brought.
   const http = registry.preset("http", []);
   expect(http).toContain("storage-sqlite");
+  expect(http).toContain("storage-kv-sql");
+  // The neutral conversation registry (SPEC C5), after the runtime that creates its conversations.
+  expect(http).toContain("conversations-kv");
+  expect(http).not.toContain("conversations-file");
+  expect(http.indexOf("runtime-pi")).toBeLessThan(http.indexOf("conversations-kv"));
   const withHttp = withOffers(registry, http);
   expect(withHttp.order).toEqual(http);
   expect(Object.fromEntries(withHttp.installedFor)).toEqual({});
 
-  // The preset's storage serves the outbox and the key-value store too: the chat channel brings only those two.
+  // The preset's storage serves the outbox too, and its key-value store the cursor: the chat channel
+  // brings only the outbox and its timers.
   const telegram = registry.preset("http", ["channel-telegram"]);
   const { order, installedFor } = withOffers(registry, telegram);
   const at = order.indexOf("channel-telegram");
-  expect(order.slice(at - 2, at + 1)).toEqual(["storage-kv-sql", "outbound-durable", "channel-telegram"]);
-  expect(order.filter((c) => !telegram.includes(c))).toEqual(["storage-kv-sql", "outbound-durable"]);
+  expect(order.slice(at - 2, at + 1)).toEqual(["wakeups-timers", "outbound-durable", "channel-telegram"]);
+  expect(order.filter((c) => !telegram.includes(c))).toEqual(["wakeups-timers", "outbound-durable"]);
   expect(Object.fromEntries(installedFor)).toEqual({
     "outbound-durable": "channel-telegram",
-    "storage-kv-sql": "channel-telegram",
+    "wakeups-timers": "outbound-durable",
   });
+});
+
+test("several names install providers first, by what each declares; otherwise in the order named", () => {
+  const order = (names: string[]) => dependencyOrder(names.map((name) => registry.manifest(name)), ["server"]);
+  expect(order(["channel-telegram", "storage-kv-sql", "storage-sqlite"])).toEqual(["storage-sqlite", "storage-kv-sql", "channel-telegram"]);
+  expect(order(["conversations-kv", "storage-sqlite", "storage-kv-sql"])).toEqual(["storage-sqlite", "storage-kv-sql", "conversations-kv"]);
+  expect(order(["tool-read", "log-events", "tool-bash"])).toEqual(["tool-read", "log-events", "tool-bash"]);
 });

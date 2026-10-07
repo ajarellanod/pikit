@@ -10,15 +10,20 @@
  * - the app composes: every required capability has a provider, selections are valid, the config
  *   matches the merged schema (the core's own `create()` decides);
  * - every tool and model provider an agent names statically is an installed key, when a
- *   component (the runtime) uses it: the runtime would refuse to start otherwise (`references.ts`);
+ *   component (the runtime) uses it: the runtime would refuse to start otherwise (`references.ts`).
+ *   A missing one names the registry component that provides it, from the project's registries;
+ * - the app answers someone: a channel has a router (a `route.resolve` stage), and `http.route`s a
+ *   server, but in the Worker's App, whose host serves them (`serving.ts`);
  * - every variable a component marks required is set in the environment or in `.env` (names
  *   only, never a value);
- * - the Pi import rule (S1): only `@pikit/pi-adapter` imports Pi. Neither components nor project
+ * - the Pi import rule: only `@pikit/pi-adapter` imports Pi. Neither components nor project
  *   code import `@earendil-works/*`;
  * - each installed component's own check, the file its `hooks.doctor` names (`component-doctor.ts`),
  *   once the app composes: `tool-mcp` reaches each MCP server it names. Only such a check may reach the
  *   network; a project without one runs none.
- * Installed files that differ from what was installed are listed as information: they are yours.
+ * Installed files that differ from what was installed are listed as information: they are yours. So
+ * is a kit in `vendor/` that is not this CLI's (`staleKit`): behind it, `pikit upgrade` refreshes it;
+ * from a checkout this CLI's does not include, updating pikit does.
  *
  * `problems` fail the command. `unconfigured` fail it too, but `pikit new` expects them: a new
  * project is configured next, by `pikit configure`.
@@ -30,13 +35,18 @@ import { packageName, scanImports } from "../registry/imports.ts";
 import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from "../project/component-doctor.ts";
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
-import { brokenReferences } from "../project/references.ts";
+import { brokenReferences, type KeyProviders, manifestProviders } from "../project/references.ts";
+import { registryPath } from "../project/registry-location.ts";
+import { openRegistry } from "../project/registry-source.ts";
+import type { Manifest } from "../registry/manifest.ts";
+import { servingGaps } from "../project/serving.ts";
 import { checkLockfile } from "../project/lockfile.ts";
 import { incompleteOperation, incompleteOperationMessage } from "../project/operation.ts";
 import { missingFiles, modifiedFiles, readProjectManifest } from "../project/pikit-json.ts";
 import { log } from "../ui.ts";
 import { confinedPath } from "../project/paths.ts";
 import { DASHBOARD_DIR } from "../project/dashboard.ts";
+import { kitCommit, kitOrder, staleKit } from "../project/vendor.ts";
 
 export interface DoctorReport {
   problems: string[];
@@ -70,6 +80,8 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
   const lockfile = checkLockfile(projectDir);
   problems.push(...lockfile.problems);
   notes.push(...lockfile.notes);
+  const kit = kitNote(projectDir, project.kit?.commit);
+  if (kit !== undefined) notes.push(kit);
 
   const result = await probe(projectDir);
   if (!result.ok) problems.push(`pikit.config.ts does not compose: ${result.error}`);
@@ -86,7 +98,8 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
       if (listable && !result.listed.includes(name)) notes.push(`${name} is installed but not listed in pikit.config.ts`);
     }
     notes.push(...unusedProviders(result.description.components));
-    problems.push(...brokenReferences(result));
+    problems.push(...brokenReferences(result, undefined, registryProviders(projectDir, project.registries)));
+    problems.push(...servingGaps(result).map((gap) => gap.message));
     if (options.componentChecks !== false) {
       const checked = await componentChecks(projectDir, options.componentChecks === "unless-before-deploy");
       problems.push(...checked.problems);
@@ -125,11 +138,46 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
   return { problems, unconfigured, notes, probe: result };
 }
 
+/** What to say of a kit in `vendor/` that is not this CLI's; nothing when it is, or when there is none. */
+function kitNote(projectDir: string, commit: string | undefined): string | undefined {
+  if (!existsSync(join(projectDir, "package.json"))) return undefined;
+  const { stale } = staleKit(projectDir);
+  if (stale.length === 0) return undefined;
+  const cli = kitCommit() ?? "not in Git";
+  if (kitOrder(commit).verdict === "downgrade") {
+    return `the project's kit (vendor/) comes from pikit ${commit}, which this CLI's checkout (${cli}) does not include: update pikit before \`pikit add\` or \`pikit upgrade\``;
+  }
+  return `the project's kit (vendor/) is ${commit === undefined ? "another" : `pikit ${commit}`}, not this CLI's (${cli}): \`pikit upgrade\` refreshes it (${stale.join(", ")})`;
+}
+
 /** What the installed components' own checks find; nothing, and no process, without a check to run. */
 async function componentChecks(projectDir: string, unlessBeforeDeploy: boolean): Promise<{ problems: string[]; notes: string[] }> {
   if (doctorHooks(projectDir, { unlessBeforeDeploy }).length === 0) return { problems: [], notes: [] };
   const result = await runScript<ComponentDoctorResult>("component-doctor.ts", projectDir, unlessBeforeDeploy ? [UNLESS_BEFORE_DEPLOY] : []);
   return result.ok ? result : { problems: [`the components' own checks could not run: ${result.error}`], notes: [] };
+}
+
+/**
+ * What the project's registries provide, by key (`manifestProviders`), read only when a reference is
+ * broken. A registry that cannot be read names nothing: the problem is still reported, without a hint.
+ */
+function registryProviders(projectDir: string, registries: Record<string, string>): KeyProviders {
+  let providers: KeyProviders | undefined;
+  return (capability, key) => {
+    if (providers === undefined) {
+      const manifests: Manifest[] = [];
+      for (const location of Object.values(registries)) {
+        try {
+          const registry = openRegistry(registryPath(projectDir, location));
+          for (const name of registry.names()) manifests.push(registry.manifest(name));
+        } catch {
+          // Left out: see above.
+        }
+      }
+      providers = manifestProviders(manifests);
+    }
+    return providers(capability, key);
+  };
 }
 
 /** Components that provide capabilities no other component uses: installed, and doing nothing. */
@@ -166,13 +214,13 @@ function printGraph(description: AppDescription, indent = ""): void {
   log.info(`${indent}Config:\n${JSON.stringify(config, null, 2).replace(/^/gm, `${indent}  `)}`);
 }
 
-/** S1 in the project: `@earendil-works/*` is imported only by the adapter. */
+/** The Pi import rule in the project: `@earendil-works/*` is imported only by the adapter. */
 export function checkPiImports(projectDir: string, sources: readonly string[] = projectSources(projectDir)): string[] {
   const problems: string[] = [];
   for (const file of sources) {
     for (const specifier of scanImports(readFileSync(join(projectDir, file), "utf8"))) {
       if (!specifier.startsWith("@earendil-works/")) continue;
-      problems.push(`${file} imports "${specifier}": only @pikit/pi-adapter imports Pi (S1)`);
+      problems.push(`${file} imports "${specifier}": only @pikit/pi-adapter imports Pi`);
     }
   }
   return problems;

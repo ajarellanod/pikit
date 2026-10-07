@@ -15,6 +15,11 @@ A Google Chat app: an agent per space, answering in the space's threads, with ca
 - `channel-google-chat`: verifies the webhook's JWT, builds the key
   (`googlechat:spaces/AAA:threads/BBB`), calls `admitInbound`, answers every outcome, and passes
   `createChannelConformance` (`@pikit/contracts/testing`). Several apps are instances.
+- Answers: it calls `startAnswerDelivery` in its `start` (`packages/contracts/src/delivery.ts`,
+  [answer delivery](completed/outbound-delivery.md)) and gives only what is its platform's: its
+  `ChannelTransport` (split, send one piece with its key, classify a failure), `route`, `text` and
+  `policy`. So it requires `agent.submissions` and `storage.kv` (and `wakeups` on `durable`), and the
+  engine enqueues to `outbound.queue` when one is installed.
 - Acknowledges the webhook only once the message is admitted (P5); Google retries, so it needs
   [inbound dedup](inbound-dedup.md).
 - Its transport is `idempotent`: a create with the same `requestId` is dropped by Google

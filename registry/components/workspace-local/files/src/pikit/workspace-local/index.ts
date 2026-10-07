@@ -1,41 +1,34 @@
 /**
- * workspace-local: each agent's tools work in a directory of their own on this server (the `workspace`
- * capability, in @pikit/pi-adapter).
+ * workspace-local: each agent's tools work in a directory of their own (the `workspace` capability,
+ * in @pikit/pi-adapter), inside the `execution` installed.
  *
- * It provides `workspace`. The tool components (`tool-read`, `tool-write`, `tool-edit`, `tool-bash`)
- * ask it, on every call in a run, for the workspace of the run's conversation, and this component
- * answers with the agent's directory: `<root>/<agent>/`, created on the first call. Every
- * conversation of one agent shares it; two agents never do. Without this component, every agent
- * works in `execution`'s one directory, as before.
+ * It provides `workspace` and uses `execution`. The runtime asks it, on every tool call in a run, for
+ * the workspace of the run's conversation, and this component answers with `execution` itself, at
+ * the agent's directory: `<root>/<agent>/`, created on the agent's calls (`atCwd`, a view of the same
+ * environment with another working directory). Every conversation of one agent shares it; two agents
+ * never do. Without this component, every agent works in `execution`'s one directory.
  *
- * Each directory is pi-durable's own `NodeExecutionEnv` (through `createLocalExecution`), with a shell.
- * Commands start from an allowlist of the server's variables, as `execution-local`'s do, so `env` in
- * a command does not print the server's secrets.
+ * The environment is `execution`'s, unchanged but for its directory: its files, its shell, its
+ * variables (`execution-local`'s `variables`), and its `stop`, which kills the commands still running.
+ * `root` is relative to `execution`'s working directory (`execution-local`'s `root`), or absolute.
  *
  * ORDER, NOT ISOLATION. The directory is where an agent's tools start, not a wall. Paths are not
- * confined, and `bash` runs as the server's OS user: it can `cd ..`, read another agent's files and
- * this app's `.pikit/credentials.json`. Isolation needs each agent's tools in a sandbox of their own
- * (an `execution-docker`, features/sandboxed-execution.md).
+ * confined, and `bash` runs as `execution` runs it (with `execution-local`, as the server's OS user):
+ * it can `cd ..`, read another agent's files and this app's `.pikit/credentials.json`. Isolation needs
+ * each agent's tools in a sandbox of their own (an `execution-docker`, features/sandboxed-execution.md).
  *
  * Target: `server`.
  */
 
-import { access, constants, mkdir } from "node:fs/promises";
-import { join, resolve } from "node:path";
 import { defineComponent } from "@pikit/core";
 import { type ConversationRef } from "@pikit/contracts";
-import type { Workspace, WorkspaceProvider } from "@pikit/pi-adapter";
-import { createLocalExecution } from "@pikit/pi-adapter/node";
+import { toChord, type WorkspaceProvider } from "@pikit/pi-adapter";
+import { atCwd } from "@pikit/pi-adapter/execution";
 import Type from "typebox";
 
-/** What common tools need to run, and nothing that is usually a secret (as `execution-local`). */
-export const DEFAULT_VARIABLES = ["HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR", "TZ", "USER"];
-
 const Config = Type.Object({
-  /** Where the agents' directories go, relative to the server's working directory. Created at start. */
-  root: Type.String({ minLength: 1, default: ".pikit/workspaces" }),
-  /** The server's variables a command starts with; every other one is left out. */
-  variables: Type.Array(Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }), { default: DEFAULT_VARIABLES }),
+  /** Where the agents' directories go: relative to `execution`'s working directory, or absolute. Created at start. */
+  root: Type.String({ minLength: 1, default: "agents" }),
 });
 
 /**
@@ -49,59 +42,32 @@ export default defineComponent({
   name: "workspace-local",
   config: Config,
   setup(pikit, config) {
-    const root = resolve(config.root);
-    const variables = pick(process.env, config.variables);
-    // Per agent, the workspace once its directory exists. A cache: the directories are the state.
-    const workspaces = new Map<string, Promise<Workspace>>();
-
-    async function open(agent: string): Promise<Workspace> {
-      const cwd = join(root, agent);
-      await mkdir(cwd, { recursive: true });
-      return { env: createLocalExecution({ cwd, env: variables }) };
-    }
+    const execution = pikit.use("execution");
+    const root = config.root.replace(/\/+$/, "");
 
     const provider: WorkspaceProvider = {
-      async resolve(conversation: ConversationRef) {
+      async resolve(conversation: ConversationRef, context) {
         const agent = conversation.agent;
         if (!AGENT_NAME.test(agent)) {
           throw new Error(`workspace-local: agent name ${JSON.stringify(agent)} is not a safe directory name (kebab-case)`);
         }
-        let workspace = workspaces.get(agent);
-        if (workspace === undefined) {
-          const opening = open(agent);
-          workspace = opening;
-          workspaces.set(agent, opening);
-          // A directory that could not be made is not remembered: the next call tries again.
-          opening.catch(() => {
-            if (workspaces.get(agent) === opening) workspaces.delete(agent);
-          });
-        }
-        return workspace;
+        const env = execution.get();
+        const ctx = toChord(context);
+        const cwd = `${root}/${agent}`;
+        // Every call: a directory removed meanwhile is made again, and one made already costs nothing.
+        const made = await env.createDir(cwd, { recursive: true }, ctx);
+        if (!made.ok) throw made.error;
+        return { env: await atCwd(env, cwd, ctx) };
       },
     };
     pikit.provide("workspace", provider);
 
     return {
-      async start() {
+      async start(ctx) {
         // Fail at start: tools with nowhere to work are a broken deployment.
-        await mkdir(root, { recursive: true });
-        await access(root, constants.R_OK | constants.W_OK);
-      },
-      async stop(ctx) {
-        // Kill the commands still running in any agent's directory, so none outlives the app.
-        const opened = await Promise.allSettled(workspaces.values());
-        workspaces.clear();
-        for (const result of opened) if (result.status === "fulfilled") await result.value.env.cleanup(ctx);
+        const made = await execution.get().createDir(root, { recursive: true }, toChord(ctx));
+        if (!made.ok) throw made.error;
       },
     };
   },
 });
-
-function pick(from: Readonly<Record<string, string | undefined>>, names: readonly string[]): Record<string, string> {
-  const picked: Record<string, string> = {};
-  for (const name of names) {
-    const value = from[name];
-    if (value !== undefined) picked[name] = value;
-  }
-  return picked;
-}

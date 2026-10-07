@@ -86,15 +86,16 @@ test.skipIf(!E2E)(
     expect(tests.err).toContain(" 0 fail");
     expect(tests.code).toBe(0);
 
-    // The project's own Worker bundles, QuickJS's WebAssembly included, within the 10 MB budget (SPEC §4).
+    // The project's own Worker bundles, QuickJS's WebAssembly included, within Cloudflare's 64 MiB
+    // uncompressed limit (SPEC §4; wrangler's "Total Upload"). There is no compressed limit.
     const bundle = await run([join(project, "node_modules", ".bin", "wrangler"), "deploy", "--dry-run", "--outdir", join(parent, "bundle"), "--name", NAME], {
       env: { WRANGLER_SEND_METRICS: "false" },
     });
     expect(bundle.code).toBe(0);
-    const gzip = /gzip: ([\d.]+) KiB/.exec(bundle.out + bundle.err)?.[1];
-    expect(Number(gzip)).toBeGreaterThan(0);
-    expect(Number(gzip)).toBeLessThan(10 * 1024);
-    console.info(`e2e telegram-cloudflare: the Worker's bundle is ${gzip} KiB gzip`);
+    const [, total, gzip] = /Total Upload: ([\d.]+) KiB \/ gzip: ([\d.]+) KiB/.exec(bundle.out + bundle.err) ?? [];
+    expect(Number(total)).toBeGreaterThan(0);
+    expect(Number(total)).toBeLessThan(64 * 1024);
+    console.info(`e2e telegram-cloudflare: the Worker's bundle is ${total} KiB (${gzip} KiB gzip)`);
   },
   TIMEOUT,
 );

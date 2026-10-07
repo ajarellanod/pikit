@@ -4,15 +4,15 @@
  * - A channel knows its platform: it offers a `ChannelTransport` (split a text into pieces the
  *   platform takes, send one, classify a failure).
  * - `outbound.queue` knows delivery: it stores a message before sending it, sends each conversation's
- *   pieces in order, retries, and gives up. `durable` means it survives the process.
+ *   pieces in order, retries, and gives up (when, its provider says: `outbound-durable` only on a
+ *   permanent failure or after 24 hours). `durable` means it survives the process.
  * - A channel attaches its transport to the queue while it runs (`attach` / `detach`). A keyed
  *   capability for transports would be a cycle: the queue would use the channels, and the channels
  *   the queue.
  * - A channel's answers reach either through `startAnswerDelivery` (`delivery.ts`): from
  *   `agent.submissions`' feed, enqueued when a queue is installed, else sent directly through the
- *   transport, each piece marked in the channel's `storage.kv` so a crash resends at most the piece in
- *   flight. The queue adds what the direct path lacks: delivery receipts, and retries that outlive
- *   the channel's own (an outage longer than the channel's stop).
+ *   transport. What each path guarantees, and how they differ, is said once, in `delivery.ts`'s
+ *   header ("Direct or queued").
  *
  * The guarantee is at-least-once. A piece whose send may have reached the platform (the process
  * died during it, a timeout) is sent again as a possible duplicate: an idempotent transport passes the
@@ -148,7 +148,7 @@ declare module "@pikit/core" {
   interface AppEvents {
     /** A piece reached its platform. */
     "outbound.delivered": { channel: string; conversationKey: string; key: string; attempts: number; possibleDuplicate: boolean };
-    /** A piece was given up: its error was permanent, it failed too often, or it waited too long. */
+    /** A piece was given up: its error was permanent, or it was not delivered within the queue's maximum age. */
     "outbound.abandoned": { channel: string; conversationKey: string; key: string; attempts: number; reason: string };
   }
 }

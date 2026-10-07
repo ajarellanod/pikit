@@ -14,7 +14,8 @@ RUN if [ -f src/dashboard/package.json ]; then \
       cd src/dashboard && bun install --frozen-lockfile && bun --bun run build; \
     else mkdir -p src/dashboard/dist; fi
 
-# Bun >= 1.4: older Bun never fires some stop deadlines (see pikit's AGENTS.md).
+# Bun >= 1.4: older Bun never fires an `AbortSignal.timeout()` whose last listener was removed
+# (oven-sh/bun#37666), so a stop deadline would hang instead of firing.
 FROM oven/bun:1.4-slim
 
 WORKDIR /app

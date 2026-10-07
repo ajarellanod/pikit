@@ -56,7 +56,8 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   model an App runs on (§4), never a provider, and the CLI, the component schema's `targets` enum and
   `defineApp({ target })` share that one closed list. A component's targets are declared in its
   `component.json`; a component that needs something different per target gets it through a
-  capability (or `WORKERS_HOST`, C5), never by branching on `pikit.target` in `setup`. *Why:* a target
+  capability (or `WORKERS_HOST`, C5), never by branching on `pikit.target` in `setup` (`registry
+  validate` describes `setup` on every target its manifest declares and refuses a difference). *Why:* a target
   is part of the composition (a deployment recomposes the App on its own), so the kernel carries it;
   `setup` that branches on it would make the generated manifest depend on the target it was generated
   for. A third value (`functions`) is a kernel change recorded here, made only when a host of that
@@ -119,7 +120,8 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   components in start order, what each provides and requires, the selected providers and keys, the
   resolved pipelines and the config. `AppDescription` carries a `version` and changes additively.
   Only `admin-*` components (the dashboard, §5) and the self-knowledge component (§6) may read it,
-  and `registry validate` rejects any other component that does: a component never changes its
+  and `registry validate` rejects any other component whose shipped files name it (the self-knowledge
+  component gets its exemption there when it is built): a component never changes its
   behavior by looking at what else is installed (that is `useOptional`'s job). What the app does not
   know (installed versions, modified files, bases) stays in `pikit.json`, read from the project.
   *Why:* it is the truth of what runs, on both targets and for each App (K7), with no build step and
@@ -132,8 +134,9 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
 
 Scheduling, approvals, health and degradation policy, deduplication, routing, storage, channels,
 delivery, the dashboard, self-knowledge and self-change. Each is a capability in `@pikit/contracts` and a component (the dashboard's UI
-is a project's choice over its component, `admin-api`, §5). A new kernel
-export is a decision recorded here.
+is a project's choice over its component, `admin-api`, §5); what every component of one must do alike (admitting a
+message, delivering answers) is a contracts helper, its policy passed in by the component (§3.3). A
+new kernel export is a decision recorded here.
 
 **What a component asks of the CLI** stays out of the kernel and out of the CLI too: the component
 ships it as a file of its own directory, and the CLI (or the deployment component) calls it with a
@@ -159,6 +162,32 @@ the app:
 Where no CLI deploys (a "Deploy to Cloudflare" button, Workers Builds), no hook runs: what
 `beforeDeploy` writes is committed with the project, and what `afterDeploy` registers the app also
 registers itself (C8).
+
+### 3.3 The kit layer
+
+Besides the core, two kit packages are vendored into every project and versioned apart (K8,
+`requires.contracts`, `requires.adapter`): `@pikit/contracts` and `@pikit/pi-adapter`. They are not
+components and are not copied as source, so what each may hold is decided here; anything else is a
+component.
+
+- **The adapter maps Pi and absorbs its churn.** `@pikit/pi-adapter` is the only package that imports
+  Pi (`scripts/boundaries.test.ts`, `registry validate`). It implements the contracts on pi-durable,
+  gives components Pi's types, tools, models and environments, and bridges what Pi lacks until Pi ships
+  it (P1). It holds what changes when Pi changes and must be the same in every project, nothing else.
+  *Why:* Pi changes weekly; one package that follows it leaves every component and project as it was.
+- **A contracts helper is protocol, with the policy passed in.** `admitInbound` and
+  `startAnswerDelivery` are what every provider must do alike for a guarantee to hold (one admission
+  per message, a cursor per channel, a lane per conversation, idempotency keys). What may differ (the
+  route, the text, how to send, the backoff) is the calling component's, passed in. *Why:* a guarantee
+  each component writes again is one each can break; a choice made inside the helper would be policy
+  the user cannot edit (P3).
+- **The answers log is the adapter's, by exception.** `agent.submissions` and its `answers` log
+  (`runtime_pi_answers`, `packages/pi-adapter/src/answers.ts`) stay in the adapter, not in
+  runtime-pi: what has been logged is recorded in pi-durable's own commit (`pikit.admissions`, written
+  with each admission), and runs are read and grouped from pi-durable's commits and entries, which only
+  Pi's types describe. *Why:* moving the commit-reading code into owned source would put pi-durable's
+  commit format in a component, breaking it at each Pi release, and an edit there could log an answer
+  twice or never; exactly once is the kit's to keep, under the adapter's crash tests.
 
 ## 4. Cloudflare is required
 
@@ -203,7 +232,9 @@ What it requires:
   workspace and execution providers for Cloudflare, the dashboard (§5), and `deployment-cloudflare`.
 - **The actor model holds there.** One conversation is owned by one Durable Object (C1). An
   evicted object loses nothing: the next request or alarm resumes the run (`resume()`), per K6.
-- **The budgets hold.** Bundle ≤ 10 MB compressed, cold start ≤ 1 s, ≤ 128 MB per isolate,
+- **The budgets hold.** Bundle ≤ 64 MiB uncompressed (wrangler's `Total Upload`: Cloudflare's limit on
+  every plan, with no compressed limit since September 2026, developers.cloudflare.com/workers/platform/limits),
+  cold start ≤ 1 s, ≤ 128 MB per isolate,
   ≤ 6 concurrent outbound connections, measured, not estimated.
 - **The proof runs.** The required set deploys and answers; a run killed by eviction mid-drive
   completes after `resume()`; pi-durable's storage on the object's SQL passes pi-durable's storage
@@ -256,8 +287,11 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   cancelled) to be woken again at once. Each invocation has its own budget; measured on the Free plan:
   30 s of CPU (waiting on the network does not count), 50 subrequests, about 200 MB of memory before
   the object is reset, 15 minutes of wall clock for an alarm (a cut alarm is retried), and a deploy
-  cuts every alarm in progress (it is retried). Slices keep every one of these far away. *Why:* K6
-  already makes a reset lose nothing; slices make a long conversation a sequence of short events.
+  cuts every alarm in progress (it is retried). Slices keep every one of these far away. An alarm that
+  throws is retried 6 times, about 2 minutes in all, then dropped: while an object's App cannot start,
+  `deployment-cloudflare` sets a guard alarm before each start, up to an hour ahead, so the object is
+  never left without one. *Why:* K6 already makes a reset lose nothing; slices make a long
+  conversation a sequence of short events.
 - **C5. State through neutral contracts; the platform through one context key.** The runtime's
   state (pi-durable's storage on `storage.sql`) and conversations (`conversations-kv`, on
   `storage.kv`) have neutral providers that run on both targets; the only Cloudflare-specific storage
@@ -394,9 +428,18 @@ takes the same idea from one Pi process to the whole service: what Pi cannot do 
 which pikit it runs in, and change, test, approve, deploy and roll back that service.
 
 pikit has no code hot reload: a reload is a restart, and since pi-durable checkpoints every step, a
-restart loses nothing (K6). What changes live is data: a conversation's agent (`configure()`),
-settings read when used, skills and memory kept as documents or files. Code changes only through
-the path below (`features/kit-follow-ups.md`, "No code hot reload").
+restart loses nothing (K6). What changes live is data: the conversation state its agent's `prepare`
+reads (a mode, a phase), settings read when used, skills and memory kept as documents or files. Code
+changes only through the path below (`features/kit-follow-ups.md`, "No code hot reload").
+
+**The definition owns the agent.** A conversation's `pi.agent` (model, instructions, tools,
+extensions) is what its agent's definition (`defineAgent`, through `prepare(state)`) gives: the
+runtime rebuilds it at each admission, in the commit of each state update, and before a reopened
+Harness resumes, so a `configure()` made on the conversation directly is undone at the next of these.
+A live change goes through the state or data the definition reads. *Why:* one source for what a
+conversation runs, so a restart, a reopened Harness and an evicted object build the same agent.
+Writing only when the definition itself changed (so a direct `configure()` lasts) is a later change,
+made if users need it.
 
 **Who.** One agent per project is the steward: the main agent, declared so in its `defineAgent`.
 Only it gets the self-knowledge and the self-change tools. Only senders trusted as its operators may

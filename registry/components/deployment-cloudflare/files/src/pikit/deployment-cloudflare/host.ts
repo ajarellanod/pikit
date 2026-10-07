@@ -10,6 +10,17 @@
  *   its deadline is rolled back within a deadline of its own and rethrown, so Cloudflare resets the
  *   object and the next event starts over (K2, K6). The App is never stopped otherwise: an object is
  *   evicted without warning, and whatever must survive is already committed.
+ * - **The guard alarm.** Cloudflare retries an alarm that throws 6 times, from 2 s apart, doubling,
+ *   then drops it (https://developers.cloudflare.com/durable-objects/api/alarms/: "Because alarms are
+ *   only retried up to 6 times on error, it's recommended to catch any exceptions inside your alarm()
+ *   handler and schedule a new alarm"): a start that keeps failing for 2 minutes would leave the
+ *   object's pending work until its chat's next message. So an alarm whose start failed before (a
+ *   retry, or failed starts counted in the object's storage) sets the alarm again before it starts the
+ *   App, `GUARD_FIRST_MS` ahead, doubling at each failed start in a row up to `GUARD_MAX_MS`. An alarm
+ *   set during a handler that throws replaces the platform's retry (workerd's `alarm-scheduler.c++`:
+ *   "If an alarm is queued, there's no point in retrying the current one"), so the guard is the retry,
+ *   and it never ends. Once the App runs, its alarm's owner (platform-cloudflare's `wakeups`) sets the
+ *   alarm as its rows say, which replaces the guard.
  * - **The Worker** (`createWorkerHost`) composes `export const worker` once per isolate, on its first
  *   request, with `WORKERS_HOST` `{ env, origin }` on its start context (`origin`: that request's, where
  *   the Worker is reached), and serves its `http.route`s, as
@@ -42,6 +53,12 @@ import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 export const START_DEADLINE_MS = 20_000;
 /** Longest the rollback of a failed start may take, after which the error is rethrown anyway. */
 export const ROLLBACK_DEADLINE_MS = 5_000;
+/** The guard alarm's wait after the first failed start of an alarm's retries; it doubles at each one after. */
+export const GUARD_FIRST_MS = 30_000;
+/** The guard alarm's longest wait. */
+export const GUARD_MAX_MS = 60 * 60_000;
+/** In the object's key-value storage: its alarms' failed starts in a row, while there are some. */
+export const START_FAILURES_KEY = "pikit:start-failures";
 /** The Durable Object binding in `wrangler.jsonc`: the `Conversation` class. */
 export const OBJECT_BINDING = "CONVERSATION";
 /** The object `GET /health` starts: one of its own, never a conversation's. */
@@ -58,20 +75,38 @@ export interface HostOptions {
   rollbackDeadlineMs?: number;
 }
 
+/** What the host uses of a `DurableObjectStorage` (Cloudflare's type, written structurally): the guard alarm's. */
+export interface ObjectStorage {
+  get(key: string): Promise<unknown>;
+  put(key: string, value: number): Promise<void>;
+  delete(key: string): Promise<boolean>;
+  getAlarm(): Promise<number | null>;
+  setAlarm(time: number): Promise<void>;
+}
+
 /** What the entrypoint uses of a `DurableObjectState` (Cloudflare's type, written structurally). */
 export interface ObjectState {
   id: { toString(): string };
   /** The object's `DurableObjectStorage`, passed on untouched in `WORKERS_HOST`. */
-  storage: unknown;
+  storage: ObjectStorage;
   blockConcurrencyWhile<T>(callback: () => Promise<T>): Promise<T>;
+}
+
+/** The `alarmInfo` Cloudflare passes to an object's alarm. */
+export interface AlarmInfo {
+  retryCount: number;
+  isRetry: boolean;
 }
 
 /** What the `Conversation` class forwards to: one per object instance. */
 export interface ObjectHost {
   /** Starts the App if it has not started; rejects as the start did. */
   health(): Promise<{ ok: true }>;
-  /** The object's alarm: the handler a component registered with `onAlarm`. A rejection makes Cloudflare retry it. */
-  alarm(): Promise<void>;
+  /**
+   * The object's alarm: the handler a component registered with `onAlarm`. A rejection makes
+   * Cloudflare retry it; one from a start that failed before leaves the guard alarm set.
+   */
+  alarm(info?: AlarmInfo): Promise<void>;
   /** A message for this object (`actor.mailbox`'s RPC): the handler a component registered with `onDeliver`. */
   deliver(type: string, key: string, message: JsonValue): Promise<void>;
   /** A call for this object (`actor.mailbox.call`'s RPC): the handler a component registered with `onCall`. */
@@ -129,13 +164,39 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
         throw error;
       }));
 
+  /**
+   * Before an alarm starts the App: when its start failed before, sets the guard alarm (unless a
+   * sooner one is set) and counts this start as failed until it succeeds. Says whether it did.
+   */
+  const guard = async (info: AlarmInfo | undefined): Promise<boolean> => {
+    const { storage } = state;
+    const stored = await storage.get(START_FAILURES_KEY);
+    const failures = typeof stored === "number" ? stored : 0;
+    if (failures === 0 && info?.isRetry !== true) return false;
+    const waitMs = Math.min(GUARD_MAX_MS, GUARD_FIRST_MS * 2 ** failures);
+    const time = Date.now() + waitMs;
+    const current = await storage.getAlarm();
+    if (current === null || current > time) await storage.setAlarm(time);
+    await storage.put(START_FAILURES_KEY, failures + 1);
+    logger.warn("pikit: the object's alarm starts its App after a failed start; a guard alarm wakes it again if this one fails too", {
+      object: host.object?.id,
+      failures,
+      retryCount: info?.retryCount,
+      guardInMs: Math.min(waitMs, (current ?? Infinity) - Date.now()),
+    });
+    return true;
+  };
+
   return {
     async health() {
       await start();
       return { ok: true };
     },
-    async alarm() {
+    async alarm(info) {
+      // An instance whose App started (or is starting, for another event) does not need it.
+      const guarded = started === undefined && (await guard(info));
       await start();
+      if (guarded) await state.storage.delete(START_FAILURES_KEY);
       if (onAlarm === undefined) {
         logger.warn("pikit: the object's alarm fired, but no component handles it", { object: host.object?.id });
         return;

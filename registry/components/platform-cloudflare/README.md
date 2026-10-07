@@ -71,6 +71,10 @@ is set to the earliest row whose name has a handler.
   if it is sooner; a `cancel` during it drops the retry. A run cut by the App's stop leaves its row
   as it was.
 - **At start**, if rows exist, the alarm is set again (a reset may have lost it).
+- **Cloudflare retries an alarm that rejects 6 times** (from 2 s apart, doubling: about 2 minutes),
+  then drops it. A rejection here is the storage failing, rare and brief. An App that cannot start
+  never reaches this component: deployment-cloudflare's entrypoint keeps the object woken then, with
+  its guard alarm (its README), which this component's next `arm` replaces.
 
 Nothing else in the object may set its alarm: a component that needs to wake uses `wakeups`.
 

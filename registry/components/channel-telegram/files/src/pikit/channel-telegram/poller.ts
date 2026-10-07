@@ -8,15 +8,39 @@
  * it. The offset moves past an update only after `handle` resolved, that is once the message is
  * durably accepted by its conversation (`dispatch`'s admission, @pikit/contracts' agent.ts). A crash before that gets
  * the update again after the restart, and the conversation recognises it as a duplicate by its
- * request id, so it is answered once. An update whose handling keeps failing is skipped after a
- * few attempts, so one bad message cannot stop the bot.
+ * request id, so it is answered once.
+ *
+ * An update whose handling fails (what admission needs is down for a while: a restart, a busy
+ * database) is tried again with backoff, and the offset stays before it meanwhile: Telegram keeps it,
+ * and the bot's later updates wait behind it, in order. One that still fails after
+ * `GIVE_UP_AFTER_MS` is taken for a poison message: its sender is told (`giveUp`), and it is skipped,
+ * so one bad message cannot stop the bot for good.
  */
 
 import type { Logger } from "@pikit/core";
 import { type TelegramApi, TelegramError, type TelegramUpdate } from "./api.ts";
 
-const ATTEMPTS_PER_UPDATE = 3;
+/** Waits between tries of `getUpdates` that failed: 1 s, doubling, up to this long. */
 const LONGEST_BACKOFF_MS = 30_000;
+
+/**
+ * How long an update that keeps failing is tried, from its first failure, before it is skipped and
+ * its sender told: 15 minutes. Longer than what admission needs usually takes to come back (a
+ * restart, a deploy, a database failover), so a transient failure loses nothing; short enough that a
+ * poison message holds the bot's other chats up only that long. Telegram keeps an update for 24 hours,
+ * so waiting costs nothing else.
+ */
+export const GIVE_UP_AFTER_MS = 15 * 60_000;
+
+/** How an update that keeps failing is tried: after 0.5 s, doubling, up to a minute apart (about 20 tries in all). */
+export interface UpdateRetry {
+  firstMs: number;
+  longestMs: number;
+  giveUpAfterMs: number;
+}
+export const UPDATE_RETRY: UpdateRetry = { firstMs: 500, longestMs: 60_000, giveUpAfterMs: GIVE_UP_AFTER_MS };
+/** From this failure of one update on, each one is logged as an error: the bot's chats are waiting. */
+const LOUD_AFTER = 3;
 
 export interface Poller {
   /** Stop polling: the request in flight is cancelled, the update being handled finishes. */
@@ -27,9 +51,14 @@ export function startPolling(options: {
   api: TelegramApi;
   timeoutSeconds: number;
   handle(update: TelegramUpdate): Promise<void>;
+  /** Tells the sender of an update that kept failing, before it is skipped; best effort. */
+  giveUp(update: TelegramUpdate): Promise<void>;
   logger: Logger;
+  /** `UPDATE_RETRY` unless a test shortens it. */
+  retry?: UpdateRetry;
 }): Poller {
-  const { api, handle, logger } = options;
+  const { api, handle, giveUp, logger } = options;
+  const retry = options.retry ?? UPDATE_RETRY;
   const stopping = new AbortController();
   const sleep = (ms: number) =>
     new Promise<void>((resolve) => {
@@ -45,7 +74,8 @@ export function startPolling(options: {
   let offset: number | undefined;
   const loop = (async () => {
     let failures = 0;
-    const attempts = new Map<number, number>();
+    /** The update that is failing: the offset stays before it until it is handled or given up. */
+    let failing: { updateId: number; since: number; tries: number } | undefined;
     while (!stopping.signal.aborted) {
       let updates: TelegramUpdate[];
       try {
@@ -64,16 +94,28 @@ export function startPolling(options: {
         try {
           await handle(update);
         } catch (error) {
-          const tried = (attempts.get(update.update_id) ?? 0) + 1;
-          attempts.set(update.update_id, tried);
-          if (tried < ATTEMPTS_PER_UPDATE) {
-            logger.warn("channel-telegram: an update failed; it will be tried again", { update: update.update_id, error: String(error) });
-            await sleep(1000 * tried);
+          if (stopping.signal.aborted) break;
+          if (failing?.updateId !== update.update_id) failing = { updateId: update.update_id, since: Date.now(), tries: 0 };
+          failing.tries++;
+          const failedFor = Date.now() - failing.since;
+          if (failedFor < retry.giveUpAfterMs) {
+            const wait = Math.min(retry.longestMs, retry.firstMs * 2 ** (failing.tries - 1));
+            const fields = { update: update.update_id, tries: failing.tries, failingForMs: failedFor, error: String(error) };
+            if (failing.tries < LOUD_AFTER) logger.warn("channel-telegram: an update failed; it will be tried again", fields);
+            else logger.error("channel-telegram: an update keeps failing; the bot's later messages wait behind it", fields);
+            await sleep(wait);
+            // Asks again from the same offset: Telegram answers this update first.
             break;
           }
-          logger.error("channel-telegram: an update kept failing and is skipped", { update: update.update_id, error: String(error) });
+          logger.error("channel-telegram: an update kept failing and is skipped; its sender is told", {
+            update: update.update_id,
+            tries: failing.tries,
+            failingForMs: failedFor,
+            error: String(error),
+          });
+          await giveUp(update).catch((told: unknown) => logger.error("channel-telegram: the sender of a skipped update could not be told", { update: update.update_id, error: String(told) }));
         }
-        attempts.delete(update.update_id);
+        failing = undefined;
         offset = update.update_id + 1;
       }
     }
