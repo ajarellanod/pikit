@@ -13,6 +13,21 @@ A user who wants memory, routines, approvals or WhatsApp asks their AI agent to 
 project, and gets a component that composes, passes its contract's suite, survives crashes and can
 be shared, without learning pikit's internals first.
 
+## How big a component is (decided)
+A component is the smallest unit whose removal takes away something an agent's own `tools` or
+`model` list does not already control: an import or registration, an npm dependency, a secret or
+variable, a config block, a table or timer, a target constraint, or a risk class (replay safe or
+unsafe, needs a shell, reaches the network).
+- **Merge** only parts identical on all of these that must share one resource (one alarm:
+  `platform-cloudflare`).
+- **Split** when a target, a risk class or a heavy dependency differs: `tool-read` (safe) apart from
+  `tool-write` and `tool-edit` (unsafe), and `tool-bash` (a shell); one `provider-*` per model
+  provider, since targets and variables differ and the manifest must say so.
+- **Build on a capability, never copy its provider**: `workspace-local` uses `execution`.
+- **Decisions live in the component's source** (a tool's `replay`, a policy, a default); the kit holds
+  only what changes when Pi changes and must be the same in every project (SPEC §3.3).
+- **Components never depend on components.** A bundle is a preset.
+
 ## How a component is made (today)
 1. **Pick the contract.** A component provides capabilities (`provides`) and uses others
    (`requires`, `optional`). The kit's shared vocabulary is in `@pikit/contracts` (and in
@@ -31,12 +46,19 @@ be shared, without learning pikit's internals first.
    `channel-telegram` (a channel), `storage-sqlite` (a `storage.sql` provider), `tool-fetch` (a tool),
    `deployment-docker` (a deployment), `extension-house-rules` (agent behaviour: a section and a
    `beforeTool` hook, provided as `agent.extension`; runtime-pi's `extensions.test.ts` adds a
-   document and a tool). A component is a folder in a registry:
+   document and a tool), `provider-openrouter` (a model provider: about ten lines, since every
+   pi-ai provider is a subpath of the adapter, `@pikit/pi-adapter/providers/<id>`, and an unknown
+   endpoint is `createProvider` from `@pikit/pi-adapter/provider` with an API from
+   `@pikit/pi-adapter/api/<name>`, as `provider-openai-compatible` does). A component is a folder in a registry:
    `component.json` (name, description, targets, requires, provides, dependencies, files) and
-   `files/src/pikit/<name>/index.ts` exporting `defineComponent({ name, config, setup })`.
+   `files/src/pikit/<name>/index.ts` exporting `defineComponent({ name, config, setup })`. What the
+   component decides (a tool's `replay`, a policy, a default) is written in that source, never in the
+   kit: `tool-read` spreads Pi's `createReadTool()` and sets `replay: "safe"`. A tool that works on
+   `api.env` uses `execution` (`execution.shell` for a shell), which `registry validate` checks.
 3. **Durability comes with the contracts.** Keep state in `storage.sql` / `storage.kv` or a
    pi-durable document, wake with `wakeups`, read what must not be missed from a feed with a cursor
-   (SPEC K3), deliver through `outbound.queue`. A component that does this never has to think about
+   (SPEC K3), deliver a channel's answers through `startAnswerDelivery` (which uses `outbound.queue`
+   when installed). A component that does this never has to think about
    crashes, evictions or deploys. Each kind has its ready-made path:
    - a **channel** calls `admitInbound` for each message and `startAnswerDelivery` in its `start`
      (`@pikit/contracts`): answers from the `answers` feed with a cursor of its own, one lane per
@@ -108,8 +130,17 @@ MANIFESTO principle 13 promises a conformance suite for every contract. These do
   (`createDurableExecutionConformance`, `@pikit/pi-adapter/execution/testing`), since the contract is
   pi-durable's `ExecutionEnv`. Likewise `workspace` (`createWorkspaceConformance`) and
   `model.credentials` (`createCredentialStoreConformance`), in `@pikit/pi-adapter/testing/neutral`.
-- **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openrouter and
-  provider-faux each test their own.
+- **`agent.submissions`: now runs on its real provider.** Its suite (`createSubmissionsConformance`)
+  runs on the in-memory double and on runtime-pi's runtime over pi-durable: on storage-sqlite
+  (`packages/pi-adapter/src/submissions-conformance.test.ts`) and on storage-do in the workerd lane
+  (`runtime-answers.workerd.ts`). runtime-pi records only from pi-durable's commits, so its fixture
+  (`createPiSubmissionsFixture`, `@pikit/pi-adapter/testing/neutral`) makes the runtime record each of
+  the suite's `SubmissionsRecorder` writes through messages, runs and `abandon`; the suite settles
+  runs as a runtime groups them. Only `prunes` is left out: past the log's retention, runtime-pi's
+  `get` reads pi-durable. The log's pruning runs under the feed suite (`answers.test.ts`), and crash
+  recovery has its own tests (`recovery.test.ts`, `submissions.test.ts`).
+- **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openrouter,
+  provider-openai-compatible and provider-faux each test their own.
 - **`agent.conversations`.** Only exercised through the `agent.runtime` and `conversations.registry`
   suites (a fixture creates conversations with it), never on its own.
 - **`route.resolve` as a router's stage.** The channel suite checks that a channel honours a stage's

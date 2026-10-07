@@ -69,23 +69,24 @@ now does, pikit's goes.
   it): it is the pi-durable conversation's id.
 - **`sessions.store`, `sessions-sql` and `sessions-jsonl` are removed** (above).
 - **`agent.submissions` stays, provided by runtime-pi from pi-durable** (above).
-- **No code hot reload; a reload is a restart** ([kit follow-ups](kit-follow-ups.md)).
+- **No code hot reload; a reload is a restart** ([kit follow-ups](../kit-follow-ups.md)).
 
 ## Open problems (pi-durable gaps, to propose upstream)
-Each has, or will have, a proposal in [`docs/upstream/`](../docs/upstream/):
+Each has, or will have, a proposal in [`docs/upstream/`](../../docs/upstream/):
 - **No API for the next due time.** A host that is evicted cannot know when sleeping work is due;
   pikit derives it from the built-in tasks' checkpoints
-  ([proposal](../docs/upstream/pi-durable-next-wake.md)).
+  ([proposal](../../docs/upstream/pi-durable-next-wake.md); open upstream as
+  [#10325](https://github.com/earendil-works/pi/issues/10325)).
 - **A failed run leaves queued inputs stuck** in the inbox until the next submission; pikit kicks the
   inbox with an invisible `pikit.inbox-kick` write
-  ([proposal](../docs/upstream/pi-durable-inbox-after-failure.md)).
+  ([proposal](../../docs/upstream/pi-durable-inbox-after-failure.md)).
 - **The scheduler is global:** opening a Harness resumes every conversation's work, not one's
-  ([proposal](../docs/upstream/pi-durable-scheduling-scope.md)).
+  ([proposal](../../docs/upstream/pi-durable-scheduling-scope.md)).
 - **Table names are unprefixed** (`conversations`, `entries`, `tasks`…), against `storage.sql`'s
   "prefix your tables" rule, so one database holds one pi-durable Session
-  ([proposal](../docs/upstream/pi-durable-table-prefix.md)).
+  ([proposal](../../docs/upstream/pi-durable-table-prefix.md)).
 - **One process per storage:** the next id is cached in memory and there is no cross-process lock,
-  so two processes over one SQLite file are unsupported ([replicas](replicas.md)).
+  so two processes over one SQLite file are unsupported ([replicas](../replicas.md)).
 - **A caller's context values (tenant, trace) do not reach tools:** tasks run in the Harness's
   context, so only the run's events see them.
 

@@ -7,8 +7,9 @@
  *
  * How long to wait and when to give up is the provider's policy, not the contract's:
  * the provider declares it (`retry`), and the suite holds it to what it declared. What every queue
- * must do is the rest: order, retry after a transient failure, no retry after a permanent one, rate
- * limits that do not count as failures, possible duplicates marked, receipts.
+ * must do is the rest: order, retry after a transient failure for as long as the piece is young enough
+ * (never abandoned for their number), no retry after a permanent one, rate limits that do not count
+ * as failures, possible duplicates marked, receipts.
  *
  * The suite owns the clock (`createManualClock`), so retries are checked to the millisecond without
  * waiting, and the transport, which it scripts: a piece's send succeeds, fails with a given kind, or
@@ -64,8 +65,8 @@ export interface OutboundQueueConformanceOptions {
   /** The provider's own retry policy, which the suite holds it to. */
   retry: {
     /**
-     * The wait after each transient failure, in order; at least one. A transient failure after the
-     * last wait abandons the piece, so a piece gets `waitsMs.length + 1` attempts.
+     * The wait after each transient failure in a row, in order; at least one. The last repeats:
+     * transient failures never abandon a piece, only its age does.
      */
     waitsMs: readonly number[];
     /** A piece not delivered this long after it was enqueued is abandoned, whatever the reason. */
@@ -93,7 +94,8 @@ export function createOutboundQueueConformance(
     throw new Error("outbound.queue conformance: retry.waitsMs needs at least one positive wait, and retry.maxAgeMs must be positive");
   }
   const firstWait = waitsMs[0] as number;
-  const attempts = waitsMs.length + 1;
+  /** Every declared wait, then the last one three more times. */
+  const waits = [...waitsMs, ...Array.from({ length: 3 }, () => waitsMs.at(-1) as number)];
   const queueCase = (name: string, run: (s: Subject) => Promise<void>): ConformanceCase => ({
     group: GROUP,
     name,
@@ -168,22 +170,21 @@ export function createOutboundQueueConformance(
       );
     }),
 
-    queueCase(`transient failures are retried after the declared waits (${waitsMs.map(duration).join(", ")}), then abandoned`, async (s) => {
+    queueCase(`transient failures are retried after the declared waits (${waitsMs.map(duration).join(", ")}), the last repeating, and never abandoned for their number`, async (s) => {
       const w = await s.open();
-      const transport = scripted({ "m1#0": Array.from({ length: attempts + 5 }, () => transient()) });
+      const transport = scripted({ "m1#0": waits.map(() => transient()) });
       w.queue.attach("chat", transport);
       await w.queue.enqueue(message("m1", "chat:1", "hello"));
       await eventually(() => transport.calls.length === 1, "the first attempt");
-      for (const [i, wait] of waitsMs.entries()) {
+      for (const [i, wait] of waits.entries()) {
         await s.clock.advance(wait - 1);
         expect(transport.calls.length, i + 1, `attempts 1 ms before the wait of ${wait} ms ends`);
         await s.clock.advance(1);
         await eventually(() => transport.calls.length === i + 2, `attempt ${i + 2} once the wait ends`);
       }
-      await eventually(() => w.abandoned.length === 1, `the piece abandoned after failure ${attempts}`);
-      expect(w.abandoned[0]?.attempts, attempts, "attempts of the abandoned piece");
-      await s.clock.advance(maxAgeMs);
-      expect(transport.calls.length, attempts, "no attempt after it was abandoned");
+      await eventually(() => w.delivered.length === 1, `delivered at attempt ${waits.length + 1}, once the platform answers`);
+      expect(w.abandoned, [], "nothing abandoned for failing transiently");
+      expect(w.delivered[0]?.attempts, waits.length + 1, "attempts of the delivered piece");
     }),
 
     queueCase("a permanent failure is abandoned at once, and its conversation moves on", async (s) => {

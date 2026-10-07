@@ -15,7 +15,18 @@ import { withOffers } from "../project/offers.ts";
 import { openRegistry, PRESET_SCHEMA_FILE, PresetSchema, type Registry, readPreset } from "../project/registry-source.ts";
 import { starterModel, starterModelProblem } from "../project/starter-model.ts";
 import { capabilityEntry, type RegistryCatalogue, registryCatalogue } from "./capabilities.ts";
-import { checkCapabilities, checkDependencies, checkDevDependencies, checkImports, checkLayout, checkManifest, checkNaming, checkView } from "./checks.ts";
+import {
+  checkCapabilities,
+  checkDependencies,
+  checkDescriptionReaders,
+  checkEnvironmentUsers,
+  checkDevDependencies,
+  checkImports,
+  checkLayout,
+  checkManifest,
+  checkNaming,
+  checkView,
+} from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
 import {
   BOTH_APPS,
@@ -75,18 +86,17 @@ function entryOf(componentDir: string, name: string): string {
   return join(componentDir, "files", "src", "pikit", name, "index.ts");
 }
 
-/** Describe on the first declared target: setup registers the same graph on every target. */
+/** Describe on the first declared target: setup registers the same graph on every target (SPEC K1, `checkTargets`). */
 function describeTarget(manifest: Manifest | undefined): Target {
   const first = manifest?.targets?.[0];
   return (TARGETS as readonly string[]).includes(first ?? "") ? (first as Target) : "server";
 }
 
-async function generatedFor(componentDir: string, name: string, manifest: Manifest | undefined): Promise<Generated> {
+async function generatedFor(componentDir: string, name: string, manifest: Manifest | undefined, target = describeTarget(manifest)): Promise<Generated> {
   const entry = entryOf(componentDir, name);
   const component = await loadComponent(entry);
   // Not an app component (no setup): nothing to derive.
   if (component === undefined) return { provides: [], requires: [], optional: [] };
-  const target = describeTarget(manifest);
   const own = await describeComponent(component, target);
   // A component with a half for the Worker's App (C1): the manifest covers both halves, and says what
   // each declares. The default export in both Apps (`"default"`) is one component: nothing to add.
@@ -100,6 +110,35 @@ async function generatedFor(componentDir: string, name: string, manifest: Manife
   const worker = await describeComponent(half, target);
   const declared = ({ provides, requires, optional }: Generated) => ({ provides, requires, optional });
   return { ...mergeGenerated([own, worker]), halves: { default: declared(own), worker: declared(worker) } };
+}
+
+/**
+ * `setup` never branches on the target (SPEC K1): described on each other target its manifest declares,
+ * it succeeds and declares what it declares on the first (`described`), field by field.
+ */
+async function checkTargets(componentDir: string, name: string, manifest: Manifest, described: Generated): Promise<string[]> {
+  const first = describeTarget(manifest);
+  const problems: string[] = [];
+  for (const target of TARGETS.filter((t) => t !== first && manifest.targets.includes(t))) {
+    let other: Generated;
+    try {
+      other = await generatedFor(componentDir, name, manifest, target);
+    } catch (error) {
+      problems.push(`setup could not be described on ${target}, one of its targets (SPEC K1): ${error instanceof Error ? error.message : String(error)}`);
+      continue;
+    }
+    const fields = new Set([...Object.keys(described), ...Object.keys(other)]) as Set<keyof Generated>;
+    for (const field of fields) {
+      const [on, off] = [JSON.stringify(described[field]) ?? "nothing", JSON.stringify(other[field]) ?? "nothing"];
+      if (on !== off) {
+        problems.push(
+          `setup declares ${field} ${on} on ${first} but ${off} on ${target}: setup never branches on pikit.target (SPEC K1); ` +
+            "what differs per target comes through a capability, or is a component per target",
+        );
+      }
+    }
+  }
+  return problems;
 }
 
 /** Each of `hooks` names a file of the component that exports a function of the hook's name. */
@@ -252,14 +291,19 @@ export async function validate(root: string, options: { coreVersion?: string; co
     checkDevDependencies(manifest).forEach(report);
     checkView(dir, name, manifest).forEach(report);
 
+    checkDescriptionReaders(dir, name).forEach(report);
+
     try {
-      const drift = checkDrift(manifest, await generatedFor(dir, name, manifest), regenerate);
+      const described = await generatedFor(dir, name, manifest);
+      const drift = checkDrift(manifest, described, regenerate);
       drift.forEach(report);
       if (drift.length === 0) {
         checkFormat(dir, manifest, regenerate).forEach(report);
         // Only on an up-to-date manifest: a drifted one would report names setup no longer uses.
         checkCapabilities(manifest, catalogue).forEach(report);
+        checkEnvironmentUsers(dir, manifest).forEach(report);
       }
+      (await checkTargets(dir, name, manifest, described)).forEach(report);
     } catch (error) {
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
     }

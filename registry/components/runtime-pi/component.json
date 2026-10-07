@@ -20,6 +20,7 @@
       "agent.definition",
       "model.provider",
       "model.credentials",
+      "secrets",
       "agent.tool",
       "agent.extension",
       "execution",

@@ -156,7 +156,8 @@
       "version": "0.0.0",
       "description": "Anthropic's Claude models for your agents. An agent names one as `anthropic/<modelId>`, for example `anthropic/claude-sonnet-4-6`.",
       "targets": [
-        "server"
+        "server",
+        "durable"
       ],
       "path": "components/provider-anthropic"
     },
@@ -168,6 +169,15 @@
         "durable"
       ],
       "path": "components/provider-faux"
+    },
+    "provider-openai-compatible": {
+      "version": "0.0.0",
+      "description": "The models of any endpoint that speaks OpenAI's chat completions (vLLM, Ollama, LM Studio, a gateway), for your agents. An agent names one as `<id>/<model>`, for example `ollama/llama3.1:8b`.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/provider-openai-compatible"
     },
     "provider-openrouter": {
       "version": "0.0.0",
@@ -327,7 +337,7 @@
     },
     "workspace-local": {
       "version": "0.0.0",
-      "description": "Each agent's tools work in a directory of their own on this server: order, not isolation.",
+      "description": "Each agent's tools work in a directory of their own, inside execution: order, not isolation.",
       "targets": [
         "server"
       ],

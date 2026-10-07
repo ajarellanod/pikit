@@ -25,7 +25,8 @@ import {
   deploymentExec,
   loadDeployment,
 } from "../project/deployment-module.ts";
-import { checkModelCredentials } from "../project/model-credentials.ts";
+import { apiKeyHint, checkModelCredentials, providersNamed } from "../project/model-credentials.ts";
+import type { ProbeResult } from "../project/probe.ts";
 import { projectEnv } from "../project/run.ts";
 import { CliError, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
@@ -34,13 +35,41 @@ export { DEPLOYMENT_COMMANDS, type DeploymentCommand, deploymentComponent };
 
 /**
  * `up` and `dev` start the app: refuse before that when doctor would. `up` leaves the check of a
- * component with a `beforeDeploy` hook to that hook, which it runs right before the build.
+ * component with a `beforeDeploy` hook to that hook, which it runs right before the build. `dev` also
+ * checks the model credentials on this machine (`checkLocalCredentials`); `up` checks them where the
+ * app runs (`checkAppCredentials`).
  */
 async function checkReady(projectDir: string, command: "up" | "dev"): Promise<void> {
   const report = await doctor(projectDir, { quiet: true, componentChecks: command === "up" ? "unless-before-deploy" : true });
   for (const problem of report.problems) log.problem(problem);
   for (const missing of report.unconfigured) log.problem(missing);
   if (report.problems.length + report.unconfigured.length > 0) throw new CliError("fix what `pikit doctor` reports first");
+  if (command === "dev") await checkLocalCredentials(projectDir, report.probe);
+}
+
+/**
+ * `dev` refuses to start an agent that cannot reach its model from this machine: a login in `.pikit/`
+ * here, or the API key in `.env` or the shell's environment. Not a doctor check: a login made for
+ * `pikit up` is kept where the app runs, never here, and doctor must not fail `up` for it. Only the
+ * installed providers the agents name are checked; with none (no provider installed yet, so nothing
+ * runs a model), there is nothing to check and no adapter to check it with.
+ */
+async function checkLocalCredentials(projectDir: string, probed: ProbeResult): Promise<void> {
+  if (!probed.ok) return;
+  const used = providersNamed(probed);
+  const installed = Object.keys(probed.description.capabilities["model.provider"]?.keys ?? {});
+  if (!installed.some((id) => used === undefined || used.has(id))) return;
+  const checked = await checkModelCredentials(projectDir, undefined, used);
+  const missing = Object.entries(checked.providers)
+    .filter(([, ok]) => !ok)
+    .map(([id]) => id);
+  for (const id of missing) {
+    // A login is kept by `model.credentials`: without one (on Cloudflare), or for a provider with no
+    // OAuth login, the key is the only way.
+    const login = checked.store === undefined || !checked.oauth.includes(id) ? "" : `run \`pikit configure --login ${id} --local\`, or `;
+    log.problem(`the model provider "${id}" has no credentials on this machine, for \`pikit dev\`: ${login}${apiKeyHint(projectDir, checked, id)}`);
+  }
+  if (missing.length > 0) throw new CliError("the app would start without model credentials");
 }
 
 /**

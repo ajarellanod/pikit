@@ -64,5 +64,5 @@ port. It covers:
 - `/health` with a `health` provider: `200` up or degraded, `503` down, the status only;
 - the start failures above, and the body limit.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

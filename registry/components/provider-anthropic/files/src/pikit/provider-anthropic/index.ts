@@ -17,10 +17,11 @@
  *
  * Its OAuth login first asks how to log in: `browser` (a callback on localhost) or `copy_code`
  * (Anthropic's page shows a code to paste, for a login where the app runs).
-
  *
- * Target: `server`. On Cloudflare, an API key would work, but an OAuth refresh loads its flow
- * with a dynamic import, which Workers do not allow.
+ * Targets: `server` and `durable`. On `durable` (a Cloudflare Worker) only keys: the provider has no
+ * OAuth there. pi-ai loads its OAuth flow (login and refresh) with an import no bundler follows, so a
+ * Worker cannot run it, and a subscription's tokens could not be refreshed; a subscription login
+ * stays a server's. Workload identity federation reads a token file: a server's too.
  */
 
 import { defineComponent } from "@pikit/core";
@@ -32,6 +33,8 @@ export default defineComponent({
   setup(pikit) {
     // Building the provider opens nothing: no connection, no credential read until a request.
     const provider: Provider = anthropicProvider();
-    pikit.provideKeyed("model.provider", provider.id, provider);
+    // pi-ai's providers are plain objects (`createProvider`): spreading keeps every method.
+    const keysOnly: Provider = { ...provider, auth: { ...(provider.auth.apiKey !== undefined && { apiKey: provider.auth.apiKey }) } };
+    pikit.provideKeyed("model.provider", provider.id, pikit.target === "durable" ? keysOnly : provider);
   },
 });

@@ -27,7 +27,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { basename, dirname, join, resolve } from "node:path";
-import { DEFAULT_REGISTRY } from "../paths.ts";
+import { DEFAULT_REGISTRY, PIKIT_ROOT } from "../paths.ts";
 import { CONFIG_FILE, setConfigEntry } from "../project/config-file.ts";
 import { emptyManifest, NEW_PROJECT_TARGETS, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { withOffers } from "../project/offers.ts";
@@ -133,21 +133,23 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write("bunfig.toml", starter.BUNFIG);
     write(".gitignore", starter.gitignore(target));
     write(".gitattributes", starter.GITATTRIBUTES);
-    write("README.md", starter.readme(name, components, target, dashboard !== undefined));
+    // Where `pikit` and the kit are, written in as in the skills.
+    const commit = kitCommit();
+    write("README.md", starter.withKitLocation(starter.readme(name, components, target, dashboard !== undefined), PIKIT_ROOT, commit));
     write(CONFIG_FILE, starter.configFile(target));
     // Its prompt says where people reach it: the channels being installed.
     const channels = components.filter((c) => kindOf(c) === "channel").map((c) => ({ name: c, title: registry.manifest(c).title }));
-    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels));
+    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels, target));
     write("src/extensions/agents.ts", starter.AGENTS);
-    // The kit's skills for AI agents: how to write a component for this project.
-    for (const skill of starter.skillFiles()) {
+    // The kit's skills for AI agents: how to write a component for this project, and where the kit is.
+    for (const skill of starter.skillFiles(PIKIT_ROOT, commit)) {
       mkdirSync(dirname(join(projectDir, skill.path)), { recursive: true });
       write(skill.path, skill.text);
     }
     // `builtin` for this CLI's registry: the project resolves it wherever it is cloned.
     const location = recordedLocation(projectDir, registry.root);
     if (!isPortable(location)) log.warn(notPortable(location));
-    writeProjectManifest(projectDir, emptyManifest(location, kitCommit(), targets));
+    writeProjectManifest(projectDir, emptyManifest(location, commit, targets));
     // The dashboard before the components: those with a view install it in src/dashboard/.
     if (dashboard !== undefined) {
       const project = readProjectManifest(projectDir);
@@ -194,8 +196,9 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   rmSync(join(projectDir, UNFINISHED));
   if (options.quiet !== true) log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
   if (options.next === false) return;
-  const elsewhere = target === "durable" ? "deploy it to Cloudflare" : "run it in Docker";
-  log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev         # or \`pikit up\` to ${elsewhere}`);
+  // What `pikit up` does is the installed deployment's: nothing is said of one that is not there.
+  const elsewhere = starter.upText(installed);
+  log.info(`\nNext:\n  cd ${dir}\n  pikit configure   # ${report.unconfigured.length > 0 ? "set the variables it needs, and log in to a model provider" : "log in to a model provider"}\n  pikit dev${elsewhere === undefined ? "         # run it here" : `         # or \`pikit up\` to ${elsewhere}`}`);
   if (dashboard !== undefined) log.info(`\n${uiNext()}`);
 }
 

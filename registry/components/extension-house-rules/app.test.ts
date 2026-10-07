@@ -16,6 +16,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type AgentDefinition, type AgentRuntime, type AgentTool, type ConversationRef, defineAgent } from "@pikit/contracts";
+import { createLocalExecution } from "@pikit/pi-adapter/node";
 import { type ModelRequest, recordingBash, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import houseRules from "./files/src/pikit/extension-house-rules/index.ts";
@@ -31,8 +32,15 @@ const config = { "extension-house-rules": { rules: ["Answer in English."], denie
 const agentsComponent = (agents: AgentDefinition[]) =>
   defineComponent({ name: "agents-test", setup: (pikit) => agents.forEach((agent) => pikit.provideKeyed("agent.definition", agent.name, agent)) });
 
-/** A `bash` tool that records the commands it ran, instead of running them. */
-const bash = (ran: string[]) => defineComponent({ name: "tool-test", setup: (pikit) => pikit.provideKeyed("agent.tool", "bash", recordingBash(ran) as AgentTool) });
+/** A `bash` stand-in that records commands, and an `execution` (never touched): the runtime refuses `bash` without one. */
+const bash = (ran: string[]) =>
+  defineComponent({
+    name: "tool-test",
+    setup(pikit) {
+      pikit.provideKeyed("agent.tool", "bash", recordingBash(ran) as AgentTool);
+      pikit.provide("execution", createLocalExecution({ cwd: tmpdir(), env: {} }));
+    },
+  });
 
 /** The system prompt sections a request carried: pi-durable sends each change as a positional system message. */
 function sections(request: ModelRequest | undefined): Record<string, string> {

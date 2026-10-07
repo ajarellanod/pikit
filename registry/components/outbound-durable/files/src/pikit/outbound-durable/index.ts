@@ -1,12 +1,13 @@
 /**
- * outbound-durable: every answer is stored before it is sent, and delivered even across crashes and
- * platform outages (@pikit/contracts' outbound.ts). It provides `outbound.queue` on `storage.sql`.
+ * outbound-durable: every answer is stored before it is sent, and delivered across crashes,
+ * evictions and platform outages of up to 24 hours (@pikit/contracts' outbound.ts). It provides
+ * `outbound.queue` on `storage.sql` and `wakeups`.
  *
  * - A channel attaches its transport while it runs; its answers are enqueued (stored), then sent by
- *   one loop, each conversation's pieces in order.
- * - Failures are the transport's to classify: a transient one is retried after 5 s, 30 s, 2 min and
- *   10 min and abandoned at the fifth; a rate limit waits what the platform asked; a permanent one is
- *   abandoned at once; anything older than 24 hours is abandoned.
+ *   runs of its `wakeups` handler, each conversation's pieces in order (queue.ts).
+ * - Failures are the transport's to classify: a transient one is retried after 5 s, 30 s, 2 min, then
+ *   every 10 min; a rate limit waits what the platform asked; a permanent one is abandoned at once;
+ *   anything older than 24 hours is abandoned. An abandonment is logged as an error.
  * - A send the process died during is sent again, as a possible duplicate: the platform drops it
  *   (idempotent transports) or the reader sees a marker. At-least-once.
  * - Abandoned pieces stay in `outbound_pieces` for 30 days, with their reason; delivered ones for 7.
@@ -15,11 +16,14 @@
  * - `pending` lists the pieces not settled yet, oldest first, without their text: what an operator sees waiting.
  * - Its tables carry a schema version (`outbound_meta`), so an existing database gains new tables.
  *
+ * How this differs from a channel's direct delivery: @pikit/contracts' delivery.ts, in its header.
+ *
  * It follows Hermes' delivery ledger, with what NanoClaw and OpenClaw lack: backoff, order per
  * conversation, progress per piece, one send path.
  *
  * Targets: `server` and `durable`: it imports nothing platform-specific; its storage is
- * `storage.sql` and its time is the app's clock.
+ * `storage.sql`, its time the app's clock, and its retries are `wakeups` (`wakeups-timers` on a
+ * server, `platform-cloudflare`'s alarm in a Durable Object, where nothing runs between events).
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
@@ -43,6 +47,7 @@ export default defineComponent({
   config: Config,
   setup(pikit, config) {
     const storage = pikit.use("storage.sql");
+    const wakeups = pikit.use("wakeups");
     let queue: ReturnType<typeof createQueue> | undefined;
 
     const running = () => {
@@ -75,6 +80,8 @@ export default defineComponent({
           emit: (name, payload) => background.emit(name, payload),
           concurrency: config.concurrency,
           housekeeping: prune,
+          wakeups: wakeups.get(),
+          ctx: background,
         });
         queue.start();
       },

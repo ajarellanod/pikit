@@ -36,7 +36,7 @@ export function startTyping(bots: readonly Bot[], submissions: AgentSubmissions,
       const found = findBot(bots, pending.conversation.key);
       if (found === undefined || now - pending.oldestAdmittedAt > TYPING_AT_MOST_MS) continue;
       any = true;
-      await found.bot.api.sendChatAction(found.chatId, "typing", within(TELEGRAM_TIMEOUT_MS, ctx.abortSignal)).catch(() => {});
+      await within(TELEGRAM_TIMEOUT_MS, ctx.abortSignal, (signal) => found.bot.api.sendChatAction(found.chatId, "typing", signal)).catch(() => {});
     }
     if (kicked) await wakeups.at(TYPING, ctx.clock.now(), ctx);
     else if (any) await wakeups.at(TYPING, ctx.clock.now() + TYPING_EVERY_MS, ctx);

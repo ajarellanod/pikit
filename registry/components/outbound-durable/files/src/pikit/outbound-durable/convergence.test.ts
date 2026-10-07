@@ -11,7 +11,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { defineComponent } from "@pikit/core";
 import { type OutboundQueue } from "@pikit/contracts";
-import { type ConvergenceFixture, createConvergenceConformance } from "@pikit/contracts/testing";
+import { type ConvergenceFixture, createConvergenceConformance, createMemoryWakeups } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
 import { BACKOFF_MS } from "./queue.ts";
 import { openTestDatabase } from "./storage.test-support.ts";
@@ -38,6 +38,7 @@ function fixture(): ConvergenceFixture {
     // After a storage failure, the world waits out the queue's first backoff before it looks again.
     retryAfterMs: BACKOFF_MS[0],
     components: (life) => [
+      createMemoryWakeups(),
       outboundDurable,
       defineComponent({
         name: "platform",

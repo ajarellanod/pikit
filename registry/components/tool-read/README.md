@@ -17,16 +17,16 @@ An agent gets this tool only when it names it:
 defineAgent({ name: "ops", model: "anthropic/claude-sonnet-4-6", tools: ["read"] })
 ```
 
-pikit does not reimplement the tool; it is Pi's. The component adds only two things:
+pikit does not reimplement the tool; it is Pi's. The component decides only what Pi leaves open:
 - the environment it works on, read when the tool runs: in a run, the agent's own `workspace` when
   one is installed (`workspace-local` gives each agent a directory); otherwise `execution`;
-- its replay: `"safe"`: it only reads, so a run resumed after a crash reads again.
+- its replay, written in its `index.ts`: `"safe"`: it only reads, so a run resumed after a crash reads again.
 
 ## Tests
 
-`tool-read.test.ts` is copied with the component and runs in your project, in a temporary directory.
-It covers the tool under its name, its replay, what it does, and that a call in a run works in its
-agent's workspace when one is installed.
+`tool-read.test.ts` is copied with the component and runs in your project. It covers what this
+component decides: the tool under its name, unchanged but for its replay, and what it needs
+installed. What the tool does is pi-durable's, tested there.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

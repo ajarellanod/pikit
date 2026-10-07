@@ -33,6 +33,23 @@
  *   asks for the next one. Without (a server: a process that stays up), the same runs are driven by a
  *   timer in this process. Nothing is kept in memory that a crash would lose but a retry's wait.
  *
+ * **Direct or queued: what each guarantees** (the one place that says it; the queue's contract and
+ * outbound-durable's README point here). Both are at-least-once with the same keys, survive restarts
+ * and evictions, and keep each conversation's answers in order.
+ * - **Direct** (no `outbound.queue`): this engine sends each piece through the transport, marked in
+ *   the channel's `storage.kv`. A failed answer is retried for good (`policy.retryMs`, the last
+ *   repeating; an error in the log from `policy.blockedAfter` failures on) and holds up its
+ *   conversation's later answers, and the feed's cursor, until it goes. Only a `permanent` refusal
+ *   gives it up, logged as an error. Nothing records what was delivered.
+ * - **Queued** (`outbound.queue`, `outbound-durable`): the answer is enqueued, marked done here, and
+ *   the queue sends it from its own records, its retries driven by `wakeups` as this engine's are. It
+ *   adds a record of every piece and a receipt for each one that settles (`receipts`: what a
+ *   component that must not miss a delivery reads), and the channel's cursor moves on at once. It
+ *   gives a piece up on a `permanent` refusal, or once it is older than the queue's maximum age (24
+ *   hours for `outbound-durable`; transient failures alone never do), logged as an error, with
+ *   `outbound.abandoned` and a receipt. So direct waits longer for a platform that is down; queued
+ *   says what became of every piece.
+ *
  * **What survives a crash, step by step.** No transaction spans the queue, the platform and the
  * cursor (a platform has none, and `outbound.queue` is another component's storage), so each step is
  * idempotent and the writes are ordered so that a crash between two of them repeats only an
@@ -185,10 +202,14 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
       if (signal.aborted || budget.left <= 0) return { kind: "cut" };
       budget.left--;
       await store.set(mark, SENDING);
+      // A timer cleared once the send settles, not `AbortSignal.timeout`: a pending timer is work in
+      // flight, and a Durable Object waits for it before it can be evicted.
+      const timeout = new AbortController();
+      const timer = setTimeout(() => timeout.abort(new DOMException(`the send took longer than ${policy.sendTimeoutMs} ms`, "TimeoutError")), policy.sendTimeoutMs);
       try {
         await transport.send(
           { key: `${key}#${index}`, conversationKey: fact.conversation.key, text: piece, possibleDuplicate: state === SENDING },
-          AbortSignal.any([signal, AbortSignal.timeout(policy.sendTimeoutMs)]),
+          AbortSignal.any([signal, timeout.signal]),
         );
       } catch (error) {
         // Cut (a stop, the slice's deadline): it may have reached the platform, and stays `sending`.
@@ -200,6 +221,8 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
           break;
         }
         return { kind: "failed", error };
+      } finally {
+        clearTimeout(timer);
       }
       await store.set(mark, SENT);
     }

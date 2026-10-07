@@ -41,7 +41,8 @@ test("--version, help, unknown commands and commands not built yet", async () =>
   expect((await runCli(["add", "--bogus"], cwd)).code).toBe(2);
   const later = await runCli(["diff"], cwd);
   expect(later.code).toBe(1);
-  expect(later.out).toContain("pikit diff: not built yet (see SPEC P6)");
+  // A path the user can open: the kit's own SPEC.md.
+  expect(later.out).toContain(`pikit diff: not built yet (see ${join(PIKIT_ROOT, "SPEC.md")}, P6)`);
   expect((await runCli(["upgrade"], cwd)).err).toContain("is not a pikit project");
 });
 
@@ -180,7 +181,7 @@ test("new --target durable records the target, and writes two Apps, wrangler and
   // The dashboard's built module is generated: collapsed in a diff, built again by every deploy.
   expect(readFileSync(join(project, ".gitattributes"), "utf8")).toContain("src/pikit/admin-api/dashboard-files.ts linguist-generated=true -diff\n");
   expect(existsSync(join(project, "wrangler.jsonc"))).toBe(true);
-  // The starter's model is one whose provider runs on Cloudflare: provider-anthropic is server-only.
+  // The starter's model is one whose provider takes an API key on Cloudflare: OpenRouter's.
   expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
 }, 60_000);
 
@@ -438,14 +439,14 @@ test("doctor fails when an agent names a tool no installed component provides", 
   expect(broken.err).toContain('agent "soporte" names the tool "shell", which no installed component provides (agent.tool)');
 });
 
-test("doctor fails when the project's own code imports Pi: only @pikit/pi-adapter does (S1)", async () => {
+test("doctor fails when the project's own code imports Pi: only @pikit/pi-adapter does", async () => {
   const dir = agentProject(["bash"]);
   // Built, so this file does not import Pi itself in the boundaries' eyes.
   const pi = '"@earendil-works/pi-ai"';
   writeFileSync(join(dir, "src/extensions/pi.ts"), `import type { Models } from ${pi};\n\nexport type M = Models;\n`);
   const broken = await runCli(["doctor"], dir);
   expect(broken.code).toBe(1);
-  expect(broken.err).toContain('src/extensions/pi.ts imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi (S1)');
+  expect(broken.err).toContain('src/extensions/pi.ts imports "@earendil-works/pi-ai": only @pikit/pi-adapter imports Pi');
 });
 
 test("remove refuses to take a tool an agent names; with --force it removes it, and doctor reports the name", async () => {
@@ -466,7 +467,8 @@ test("remove refuses to take a tool an agent names; with --force it removes it, 
 
   const doctor = await runCli(["doctor"], dir);
   expect(doctor.code).toBe(1);
-  expect(doctor.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool)');
+  // The project's registry names the component that provides it.
+  expect(doctor.err).toContain('agent "soporte" names the tool "bash", which no installed component provides (agent.tool): install tool-bash');
 });
 
 test("configure --login-method takes browser or code, and only with --login", async () => {

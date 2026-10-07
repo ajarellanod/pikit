@@ -508,3 +508,73 @@ test.skipIf(!CLI_IN_GIT)("an older kit is replaced without a word; an unrecorded
   expect(unrecorded.err).toContain("the project's kit is replaced with this CLI's");
   expect(unrecorded.err).toContain("pikit.json does not record the project's kit");
 }, 60_000);
+
+// Several names: one transaction.
+
+/** The components `pikit.config.ts` lists, in order. */
+const listed = (dir: string) => readFileSync(join(dir, "pikit.config.ts"), "utf8")
+  .split("\n")
+  .filter((line) => line.includes("/src/pikit/"))
+  .map((line) => line.split("/").at(-2));
+
+test("several names are one add: a provider two of them can use is offered once, and installed for both", async () => {
+  const dir = composingProject();
+  const uses = (name: string) => [component(name, 'pikit.useOptional("outbound.queue");'), { optional: { capabilities: ["outbound.queue"] } }] as [string, Record<string, unknown>];
+  const registry = registryOf({
+    "channel-one": uses("channel-one"),
+    "channel-two": uses("channel-two"),
+    "outbound-fake": [component("outbound-fake", 'pikit.provide("outbound.queue", {});'), { provides: ["outbound.queue"] }],
+  });
+  const run = await runCli(["add", "channel-one", "channel-two", "--registry", registry, "--yes"], dir);
+  expect(run.code).toBe(0);
+  expect(run.out.split("outbound-fake, for channel-").length).toBe(2);
+  expect(run.out).toContain("channel-one, channel-two installed; `pikit doctor` is green");
+  const components = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8")).components;
+  expect(Object.keys(components).sort()).toEqual(["channel-one", "channel-two", "outbound-fake"]);
+  expect(components["outbound-fake"].installedFor.sort()).toEqual(["channel-one", "channel-two"]);
+  expect(components["channel-one"].installedFor).toBeUndefined();
+  expect(listed(dir)).toEqual(["channel-one", "channel-two", "outbound-fake"]);
+  expect(existsSync(join(dir, OPERATION_MARKER))).toBe(false);
+}, 60_000);
+
+test("a named component that provides what another needs counts: nothing is offered, and it is listed first", async () => {
+  const dir = composingProject();
+  // Two providers of the queue: added alone, channel-fake gets none, and it says so.
+  const run = await runCli(["add", "channel-fake", "outbound-other", "--registry", queueRegistry(), "--yes"], dir);
+  expect(run.code).toBe(0);
+  expect(run.err).not.toContain("each provide it");
+  expect(run.out).not.toContain(", for channel-fake");
+  expect(listed(dir)).toEqual(["outbound-other", "channel-fake"]);
+  const components = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8")).components;
+  expect(Object.keys(components).sort()).toEqual(["channel-fake", "outbound-other"]);
+  expect(components["outbound-other"].installedFor).toBeUndefined();
+}, 60_000);
+
+test("a refusal for the second name leaves nothing written, and no plan shown", async () => {
+  const dir = otherKitProject(["tool-bash"]);
+  const before = snapshot(dir);
+  for (const second of ["tool-bash", "no-such-component"]) {
+    const run = await runCli(["add", "log-events", second, "--yes"], dir);
+    expect(run.code).toBe(1);
+    expect(run.err).toContain(second === "tool-bash" ? "tool-bash is already installed" : "no-such-component");
+    expect(run.out).not.toContain("log-events 0.0.0 from");
+    expect(snapshot(dir)).toEqual(before);
+  }
+}, 60_000);
+
+test("several names whose `bun install` fails are all put back, under one marker", async () => {
+  const dir = otherKitProject();
+  writeFileSync(join(dir, "bunfig.toml"), '[install]\nregistry = "http://127.0.0.1:9/"\n');
+  const before = snapshot(dir);
+  const run = await runCli(["add", "log-events", "router-basic", "--yes"], dir);
+  expect(run.code).toBe(1);
+  expect(run.out).toContain("log-events 0.0.0 from");
+  expect(run.out).toContain("router-basic 0.0.0 from");
+  expect(run.err).toContain("`bun install` failed");
+  expect(run.err.split("nothing was added").length).toBe(2);
+  const after = snapshot(dir);
+  expect(JSON.parse(after[OPERATION_MARKER] as string).command).toBe("pikit add log-events router-basic");
+  delete after[OPERATION_MARKER];
+  expect(after).toEqual(before);
+  expect(existsSync(join(dir, "pikit-bases"))).toBe(false);
+}, 120_000);

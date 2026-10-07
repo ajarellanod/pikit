@@ -5,7 +5,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type ConfigureIO, configure, findToken } from "./configure.ts";
-import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.ts";
+import { type FakeTelegram, startFakeTelegram } from "./fake-telegram.test-support.ts";
 
 const OWNER = { id: 1001, first_name: "Ada", username: "ada" };
 const STRANGER = { id: 2002, first_name: "Eve" };

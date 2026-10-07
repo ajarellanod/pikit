@@ -25,7 +25,7 @@ export interface Piece {
   state: PieceState;
   /** Sends tried, whatever came of them. */
   attempts: number;
-  /** Transient failures only: the fifth abandons. A rate limit is not a failure. */
+  /** Transient failures only: they choose the wait, never abandon. A rate limit is not a failure. */
   failures: number;
   /** Not sent before this time (ms). */
   nextAttemptAt: number;

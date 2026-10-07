@@ -10,7 +10,7 @@ import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import type { WorkersHost } from "@pikit/contracts/cloudflare";
 import { BACKGROUND_CONTEXT, getOrThrow, harnessEnv } from "@pikit/pi-adapter/execution";
 import { createDurableExecutionConformance, runToolCalls } from "@pikit/pi-adapter/execution/testing";
-import { codingTool } from "@pikit/pi-adapter/tools";
+import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@pikit/pi-adapter/tools";
 import { expect, it } from "vitest";
 import { objectExecution } from "../../../registry/components/execution-do/files/src/pikit/execution-do/env.test-support.ts";
 import type { DurableObjectFilesStorage } from "../../../registry/components/execution-do/files/src/pikit/execution-do/files.ts";
@@ -33,7 +33,7 @@ it("pi-durable's own write, edit, read and bash work on the object's files, call
   inObject(async (host) => {
     const { env: workspace } = inThe(host);
     const results = await runToolCalls({
-      tools: (["read", "write", "edit", "bash"] as const).map(codingTool),
+      tools: [createReadTool(), createWriteTool(), createEditTool(), createBashTool()],
       env: harnessEnv({ execution: () => workspace }),
       calls: [
         { name: "write", args: { path: "notes/plan.md", content: "# Plan\n\n- clone\n- change\n" } },
@@ -68,7 +68,7 @@ it("pi-durable's own write, edit, read and bash work on the object's files, call
 it("a long output is spilled whole into the object, and bash names the file", () =>
   inObject(async (host) => {
     const { env: workspace } = inThe(host);
-    const [result] = await runToolCalls({ tools: [codingTool("bash")], env: harnessEnv({ execution: () => workspace }), calls: [{ name: "bash", args: { command: "seq 1 3000" } }] });
+    const [result] = await runToolCalls({ tools: [createBashTool()], env: harnessEnv({ execution: () => workspace }), calls: [{ name: "bash", args: { command: "seq 1 3000" } }] });
 
     const spill = /Full output: (\/tmp\/pi-output-\S+\.log)/.exec(result?.text ?? "")?.[1];
     expect(result?.isError).toBe(false);
@@ -81,7 +81,7 @@ it("what the tools wrote outlives the object's instance", async () => {
   await runInDurableObject(stub, async (_instance, state: DurableObjectState) => {
     const { env: workspace } = inThe(hostOf(state));
     const [result] = await runToolCalls({
-      tools: [codingTool("write")],
+      tools: [createWriteTool()],
       env: harnessEnv({ execution: () => workspace }),
       calls: [{ name: "write", args: { path: "kept.txt", content: "still here\n" } }],
     });
@@ -90,7 +90,7 @@ it("what the tools wrote outlives the object's instance", async () => {
   await evictDurableObject(stub);
   await runInDurableObject(stub, async (_instance, state: DurableObjectState) => {
     const { env: workspace } = inThe(hostOf(state));
-    const [read] = await runToolCalls({ tools: [codingTool("read")], env: harnessEnv({ execution: () => workspace }), calls: [{ name: "read", args: { path: "kept.txt" } }] });
+    const [read] = await runToolCalls({ tools: [createReadTool()], env: harnessEnv({ execution: () => workspace }), calls: [{ name: "read", args: { path: "kept.txt" } }] });
     expect(read?.text).toBe("still here\n");
   });
 });

@@ -69,5 +69,5 @@ The file (mode `0600`):
 - the lifecycle conformance suite;
 - the file's content, a `__proto__` key, and the start failures above.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

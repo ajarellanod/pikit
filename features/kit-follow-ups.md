@@ -19,7 +19,7 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **The deployed bot** (`pikit-telegram-cloudflare`, the first preset's template) is upgraded to
   the pi-durable kit, and its code improved, once everything is on npm, not from commits.
 - **When:** now that the kit runs on pi-durable (the switch-over is done:
-  [pi-durable migration](pi-durable-migration.md)).
+  [pi-durable migration](completed/pi-durable-migration.md)).
 - **Size:** medium: package publishing, `pikit new`/`upgrade` resolving versions instead of commits.
 
 ## Dashboard and deployment stay open
@@ -60,38 +60,29 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   still without a suite are listed in [building components](building-components.md).
 - **When:** the other skills with what they teach (adding a view with the dashboard).
 
-## Upstream contributions (pending the owner's decision)
-- **Chord's context loses a foreign parent's `abortSignal`.**
-  - *Why:* Chord's `withContextValue` reads cancellation through a private key, so a pikit context
-    that Pi derives loses its signal; `toChord` in `packages/pi-adapter/src/context.ts` re-attaches it
-    (Chord 1.0 still has the gap).
-    Proposed fix: `ContextValue.abortSignal` returns its own value when it holds the abort key, and
-    `parent.abortSignal` otherwise. With it, pikit deletes the bridge.
-  - *When:* once the owner decides to send it.
-  - *Size:* a few lines upstream, and a test; then a small deletion in the adapter.
-
 ## Chord: through the adapter and components, never in `@pikit/core`
-- **Decided (re-checked against Chord 1.0):** `@pikit/core` stays, and Chord does not enter the
+- **Decided (re-checked against Chord 1.0.3, which changed nothing since 1.0.0 but its version):** `@pikit/core` stays, and Chord does not enter the
   kernel. The kernel's only runtime dependency is `typebox` (SPEC §3); `Context` is pikit's own and
   frozen (K5), matching Chord's shape and bridged by the adapter (`toChord`).
-- **Why, with Chord 1.0:** portability is no longer the objection (it runs in Bun and in bare
+- **Why, with Chord 1.0.3:** portability is no longer the objection (it runs in Bun and in bare
   workerd). What remains:
   - its 1.0 is 1.0 in name, not stable: it comes from Pi's lockstep versioning, and Chord's
     `PLANNING.md` says it is not a stable public contract, while the kernel promises 1.x (K8, P7);
-  - `esbuild` is still a hard dependency, though only its `./bundler` subpath uses it;
-  - `withContextValue` still drops a foreign parent's `abortSignal` (below, "Upstream
-    contributions"), which pikit bridges;
+  - `esbuild` is still a hard dependency, though only its `./bundler` subpath uses it (asked
+    upstream by someone else as [#9225](https://github.com/earendil-works/pi/issues/9225), closed
+    `no-action`: not to be sent again);
+  - `withContextValue` still drops a foreign parent's `abortSignal`: pikit asked for the fix
+    ([#10189](https://github.com/earendil-works/pi/issues/10189)), which was declined (closed
+    `no-action`), so the adapter's bridge (`toChord`, `packages/pi-adapter/src/context.ts`) stays;
   - its facades pay off only with hot reload or remote services, which pikit does not do (below);
   - it lacks what pikit's kernel provides: typed events, pipelines with priority and halt, optional
     dependencies, provider selection, keyed lookup, cancellable start/stop with deadlines and
     rollback, `describe()`, and per-component config validation.
 - **Keep:** aligning `Context` with Chord's shape.
-- **Candidates**, each through the adapter or a component, when its feature is built:
-  - the operator UI's live state (SPEC §5): pi-durable's `watch()`/`taskGraph()`, and Chord's
-    `replicatedState` and `delta` for the rest (health);
-  - [health](health.md): Chord's availability semantics (stable handles, `unavailable` /
-    `replaced`, `ready()`).
-- **Open:** the `abortSignal` fix upstream; `esbuild` as an optional peer of Chord; Chord's semver.
+- **Candidate**, through the adapter, when its feature is built: the operator UI's live state
+  (SPEC §5), pi-durable's `watch()` and `taskGraph()` mapped through the `agent.observe` contract. pikit
+  uses no Chord services, so nothing else of Chord's is a candidate.
+- **Open:** Chord's semver ([docs/upstream](../docs/upstream/README.md), proposal 10).
 - **Size:** none now; each candidate is weighed with its feature.
 
 ## No code hot reload

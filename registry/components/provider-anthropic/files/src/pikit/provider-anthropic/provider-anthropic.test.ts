@@ -4,8 +4,8 @@
  */
 
 import { expect, test } from "bun:test";
-import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import type { Provider } from "@pikit/pi-adapter";
+import { defineApp, defineComponent, silentLogger, type Target } from "@pikit/core";
+import { modelsFrom, type Provider } from "@pikit/pi-adapter";
 import providerAnthropic from "./index.ts";
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
@@ -15,7 +15,8 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().capabilities["model.provider"]).toEqual({ providers: ["provider-anthropic"], keys: { anthropic: "provider-anthropic" } });
 });
 
-test("it provides pi-ai's Anthropic provider under the key anthropic, with OAuth and API-key sign-in", async () => {
+/** The provider the component provides under `anthropic`, on `target`. */
+async function providerOn(target: Target): Promise<Provider | undefined> {
   let provider: Provider | undefined;
   const reader = defineComponent({
     name: "provider-reader",
@@ -24,12 +25,27 @@ test("it provides pi-ai's Anthropic provider under the key anthropic, with OAuth
       return { start: () => void (provider = providers.get("anthropic")) };
     },
   });
-  const app = await defineApp({ components: [providerAnthropic, reader], logger: silentLogger }).create();
+  const app = await defineApp({ components: [providerAnthropic, reader], target, logger: silentLogger }).create();
   await app.start();
+  await app.stop();
+  return provider;
+}
+
+test("it provides pi-ai's Anthropic provider under the key anthropic, with OAuth and API-key sign-in", async () => {
+  const provider = await providerOn("server");
 
   expect(provider?.id).toBe("anthropic");
   expect(provider?.auth.oauth).toBeDefined();
   expect(provider?.auth.apiKey).toBeDefined();
   expect(provider?.getModels().map((model) => model.id)).toContain("claude-sonnet-4-6");
-  await app.stop();
+});
+
+test("on durable (a Worker), keys only: no OAuth, the same models, and a key in the environment configures it", async () => {
+  const provider = await providerOn("durable");
+
+  expect(provider?.auth.oauth).toBeUndefined();
+  expect(provider?.auth.apiKey).toBeDefined();
+  expect(provider?.getModels()).toEqual((await providerOn("server"))?.getModels() ?? []);
+  const models = modelsFrom(provider === undefined ? [] : [provider], { authContext: { env: async (name) => (name === "ANTHROPIC_API_KEY" ? "sk-ant-test" : undefined), fileExists: async () => false } });
+  expect((await models.getAuth("anthropic"))?.auth.apiKey).toBe("sk-ant-test");
 });

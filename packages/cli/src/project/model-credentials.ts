@@ -16,6 +16,8 @@
 import type { AppExec } from "./deployment-module.ts";
 import type { CredentialsResult } from "./credentials.ts";
 import { modelProvider } from "./references.ts";
+import { type ProjectManifest, readProjectManifest } from "./pikit-json.ts";
+import type { ProbeResult } from "./probe.ts";
 import { probe, runScript, runScriptInApp } from "./run.ts";
 import { CliError } from "../ui.ts";
 
@@ -55,13 +57,46 @@ export function usedOnly(checked: Extract<CredentialsResult, { ok: true }>, used
  * every installed provider counts. A model `prepare(state)` picks per run cannot be seen.
  */
 export async function providersInUse(projectDir: string): Promise<Set<string> | undefined> {
-  const result = await probe(projectDir);
+  return providersNamed(await probe(projectDir));
+}
+
+/** `providersInUse`, from a probe the caller has already. */
+export function providersNamed(result: ProbeResult): Set<string> | undefined {
   if (!result.ok) return undefined;
   const providers = result.agents.map((agent) => modelProvider(agent.model));
   return providers.includes(undefined) ? undefined : new Set(providers as string[]);
 }
 
-/** pi-ai's variable for a provider's API key: `ANTHROPIC_API_KEY` for `anthropic`. */
-export function apiKeyName(providerId: string): string {
-  return `${providerId.toUpperCase().replace(/[^A-Z0-9]/g, "_")}_API_KEY`;
+/**
+ * The variable holding a provider's API key, from the manifest of the component that provides it
+ * (`checked.owners`), as `pikit.json` recorded it: its first secret variable (`ANTHROPIC_API_KEY` for
+ * provider-anthropic, the manifest's `environment` lists it first). `undefined` when that component
+ * declares none (its key's variable is config, as provider-openai-compatible's; or it needs no key),
+ * and when it provides several providers, whose variables one list cannot tell apart.
+ */
+export function apiKeyVariable(projectDir: string, checked: Pick<CheckedCredentials, "owners">, providerId: string): string | undefined {
+  return keyVariableOf(readProjectManifest(projectDir).components, checked, providerId);
+}
+
+/** `apiKeyVariable`, from the installed components' records (`pikit.json`'s `components`). */
+export function keyVariableOf(components: ProjectManifest["components"], checked: Pick<CheckedCredentials, "owners">, providerId: string): string | undefined {
+  const owner = checked.owners[providerId];
+  if (owner === undefined || Object.values(checked.owners).filter((o) => o === owner).length > 1) return undefined;
+  return components[owner]?.environment.find((variable) => variable.secret)?.name;
+}
+
+/**
+ * Whether `pikit configure --login <id>` can work: pi-ai has an OAuth login for it
+ * (`provider.auth.oauth`), and the project has a `model.credentials` component to store it in (on
+ * Cloudflare there is none: a key only).
+ */
+export function canLogIn(checked: Pick<CheckedCredentials, "store" | "oauth">, providerId: string): boolean {
+  return checked.store !== undefined && checked.oauth.includes(providerId);
+}
+
+/** How to set a provider's key, for a message: `set ANTHROPIC_API_KEY in .env`, or the component's README. */
+export function apiKeyHint(projectDir: string, checked: Pick<CheckedCredentials, "owners">, providerId: string): string {
+  const variable = apiKeyVariable(projectDir, checked, providerId);
+  const owner = checked.owners[providerId];
+  return variable !== undefined ? `set ${variable} in .env` : `set its API key as ${owner ?? "its component"}'s README says`;
 }

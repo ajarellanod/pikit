@@ -12,6 +12,12 @@ owns. A component that follows the steps below composes, survives crashes and ev
 shared. Agent behaviour (prompt sections, hooks on requests and tool calls) is a component too, of a
 special shape: read `.agents/skills/pikit-extension/SKILL.md` for it.
 
+**Where the kit is.** `{{PIKIT_ROOT}}` is the pikit repository (the kit) this project was made with,
+on this machine; online, {{PIKIT_URL}}. Its design notes are in `features/`, its decisions (the
+K, C and P names READMEs cite) in `SPEC.md`, its components in `registry/components/`. (`pikit new`
+writes both when it copies this skill into a project; in the pikit repository itself, they are its
+root.)
+
 ## 0. Know the project before you write
 
 ```sh
@@ -22,9 +28,9 @@ pikit registry capabilities     # every capability: what it is for, its stabilit
 Read `pikit.config.ts` (everything that runs is listed there) and `pikit.json` (what was installed,
 and the target: `server` is a long-lived process, `durable` an actor per conversation on Cloudflare).
 Installed components are in `src/pikit/<name>/`, each with a README and its tests; the project's own
-are in `src/extensions/`. If the feature has a design note (`features/<feature>.md` in the pikit
-repository), read it first: it names the contract, what must be guaranteed and the tests that prove
-it (`features/memory.md` is a complete build guide).
+are in `src/extensions/`. If the feature has a design note (`{{PIKIT_ROOT}}/features/<feature>.md`),
+read it first: it names the contract, what must be guaranteed and the tests that prove it
+(`{{PIKIT_ROOT}}/features/memory.md` is a complete build guide).
 
 ## 1. Pick the contract
 
@@ -38,11 +44,12 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | Durable data | `storage.sql` (tables prefixed with your name) or `storage.kv` (a namespace named after you) |
 | Routing a message to an agent | a stage of the `route.resolve` pipeline |
 | An HTTP endpoint | `http.route` (`"POST /v1/x"`, `"GET /items/:id"`, a prefix `"GET /admin/*"`) |
-| An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; name the App with `APP_DESCRIPTION` |
+| An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; the composition is `APP_DESCRIPTION`, which only a component named `admin-*` may read (SPEC K13, checked by `registry validate`) |
 | Reach another conversation or an actor of yours | `actor.mailbox`: `send` (a message, held durably) or `call` (ask for an answer), handled with `actor.inbox`'s `handle` / `answer` |
 | Run later, at least once | `wakeups` (`handle(name, handler)` in `start`, `at(name, time)`) |
 | Deliver to a platform, retried | `outbound.queue` (through `startAnswerDelivery` for a channel) |
 | Talk to a busy conversation | `agent.runtime`'s `dispatch` with `whenBusy: "steer"` (into the run's current round) |
+| Models from another provider | `model.provider` under the provider's id (below: "A model provider") |
 | Say that it broke after `start` (a stuck poller) | `useOptional("health")`: `reporter(name)`'s `up` / `degraded` / `down` |
 
 Pi's own shapes are in `@pikit/pi-adapter`: `execution`, `workspace`, `model.provider`,
@@ -72,6 +79,12 @@ Write its conformance suite next to it (a function returning `ConformanceCase[]`
 `create…Conformance` do). Redeclaring a kit kind or capability is refused. Never a private coupling
 between two components: what one needs from another is a capability.
 
+**How big.** One component per thing whose removal takes away something an agent's `tools` or `model`
+list does not already control: an import, a dependency, a secret, a config block, a table or timer, a
+target, or a risk class (replay safe or unsafe, a shell, the network). Two tools of different risk are
+two components; one per model provider. Build on another's capability, never copy it; a bundle is a
+preset (`{{PIKIT_ROOT}}/features/building-components.md`, "How big a component is").
+
 ## 2. Copy the reference of its kind
 
 | Kind | Reference | What it teaches |
@@ -84,12 +97,38 @@ between two components: what one needs from another is a capability.
 | Store | `storage-sqlite`, `storage-kv-sql`, `conversations-kv` | providing a storage contract; state in `storage.kv` with `setIfAbsent` |
 | Actor messages and calls | `mailbox-local` (what `send` / `call` promise) | `actor.inbox`'s `handle` and `answer` in `start` |
 | Admin route / auth | `admin-auth-token` | `admin.auth`, a secret read at start, constant-time compare |
-| Model provider | `provider-openrouter`, `provider-faux` | a pi-ai provider as `model.provider`, `modelProviders` |
+| Model provider | `provider-openrouter`, `provider-openai-compatible`, `provider-faux` | a pi-ai provider as `model.provider` by its id, `modelProviders`, the key's variable first in `environment` |
 | Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2) |
-| A feature of your own kind | `features/memory.md` | `declares`, a contract file, an actor per owner with `call` |
+| A feature of your own kind | `{{PIKIT_ROOT}}/features/memory.md` | `declares`, a contract file, an actor per owner with `call` |
 
 Installed ones are in `src/pikit/`, each with its README; the rest are in the registry the CLI uses
 (`pikit add <name> --yes` to read one in place, `pikit remove <name>` after).
+
+**A model provider** is about ten lines. Every provider pi-ai ships is a subpath of the adapter,
+`@pikit/pi-adapter/providers/<id>` (`groq`, `mistral`, `google`, `openai`, `xai`, `deepseek`…; one
+per id, no barrel, so the app carries only yours):
+
+```ts
+import { defineComponent } from "@pikit/core";
+import { groqProvider } from "@pikit/pi-adapter/providers/groq";
+
+export default defineComponent({
+  name: "provider-groq",
+  setup(pikit) {
+    const provider = groqProvider();
+    pikit.provideKeyed("model.provider", provider.id, provider); // agents name groq/<model>
+  },
+});
+```
+
+Its `component.json` declares the key's variable first in `environment` (`{ "name": "GROQ_API_KEY",
+"secret": true, "required": false }`: `pikit configure` offers to set that one; pi-ai's README lists
+each provider's), and `targets` `["server", "durable"]` unless the subpath is in the CLI's
+`SERVER_ONLY_EXPORTS` (Bedrock, Vertex: `registry validate` refuses `durable` then). runtime-pi reads
+the variable through `secrets` first, then the environment. An endpoint pi-ai does not know is
+`createProvider` with `envApiKeyAuth` (`@pikit/pi-adapter/provider`) and an API from
+`@pikit/pi-adapter/api/<name>` (`openAICompletionsApi` from `api/openai-completions`): copy
+`provider-openai-compatible`, or install it and configure it. Never `@earendil-works/*` directly.
 
 A component is a folder:
 
@@ -127,6 +166,12 @@ shared, upgraded or removed with `pikit remove`, or when it declares a kind or c
   Never another component's files.
 - **What crosses an actor is JSON** (`send`, `call`): use `type` aliases, not interfaces, for it, and
   check it on arrival.
+- **Decisions are in the component's source**: a tool's `replay`, a policy, a default. Pi's own
+  tools come as Pi ships them (`createReadTool()` from `@pikit/pi-adapter/tools`, no replay): spread
+  one and set `replay` in your `setup`, as `tool-read` does.
+- **A tool that works on `api.env`** (Pi's coding tools, or one of yours) `use`s `execution`
+  (`execution.shell` when it needs a shell); `registry validate` refuses one that declares neither.
+  The runtime gives each call its environment: never bind one to the tool.
 - **Fail loudly**: a component that cannot work refuses to start, with a message naming the
   component and what to fix, never a secret's value.
 - **No magic**: nothing happens on import; everything is in `setup`.
@@ -176,7 +221,7 @@ Also a test named "what setup declares" that pins `app.describe().components` fo
 tests: a local `Bun.serve` stands in for any API; `sqliteStorage(path)` (`@pikit/pi-adapter/testing`)
 is a `storage.sql` on a file. A test that needs another component (runtime-pi) is the project's own
 (`test/*.test.ts`, importing `src/pikit/*`), never the component's. A `durable` component also runs in
-the workerd lane of the pikit repository (`tests/workerd`).
+the workerd lane of the pikit repository (`{{PIKIT_ROOT}}/tests/workerd`).
 
 **The model** for a tool or an extension end to end (a project test, or a trial in `pikit dev`) is
 provider-faux's `faux/scripted` (`pikit add provider-faux --yes`, an agent on `model: "faux/scripted"`):

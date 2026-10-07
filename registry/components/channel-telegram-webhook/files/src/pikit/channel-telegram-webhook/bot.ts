@@ -26,7 +26,7 @@ export function createBot(account: Account, api: TelegramApi): Bot {
     api,
     transport: createTelegramTransport(api, account.instance),
     me() {
-      me ??= api.getMe(AbortSignal.timeout(TELEGRAM_TIMEOUT_MS)).catch((error: unknown) => {
+      me ??= within(TELEGRAM_TIMEOUT_MS, undefined, (signal) => api.getMe(signal)).catch((error: unknown) => {
         me = undefined;
         throw error;
       });
@@ -44,8 +44,17 @@ export function findBot(bots: readonly Bot[], key: string): { bot: Bot; chatId: 
   return undefined;
 }
 
-/** `signal` and a timeout of `ms`, whichever ends first. */
-export function within(ms: number, signal: AbortSignal | undefined): AbortSignal {
-  const timeout = AbortSignal.timeout(ms);
-  return signal === undefined ? timeout : AbortSignal.any([signal, timeout]);
+/**
+ * `call`, given a signal that aborts with `signal` or after `ms`, whichever comes first. The timeout is
+ * a timer cleared once the call settles, not `AbortSignal.timeout`: a pending timer is work in flight,
+ * and a Durable Object waits for it before it can be evicted (as `startAnswerDelivery`'s sends).
+ */
+export async function within<T>(ms: number, signal: AbortSignal | undefined, call: (signal: AbortSignal) => Promise<T>): Promise<T> {
+  const timeout = new AbortController();
+  const timer = setTimeout(() => timeout.abort(new DOMException(`the request took longer than ${ms} ms`, "TimeoutError")), ms);
+  try {
+    return await call(signal === undefined ? timeout.signal : AbortSignal.any([signal, timeout.signal]));
+  } finally {
+    clearTimeout(timer);
+  }
 }

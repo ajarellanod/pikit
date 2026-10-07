@@ -24,7 +24,7 @@ conversation, and a delivery whose first attempt crashed is retried instead of d
 
 ## Pi first
 Logical deduplication ("was this message answered?") is Pi's submission `requestId`, bridged by the
-adapter until `pi-durable` ([pi-durable migration](pi-durable-migration.md)). This is transport
+adapter until `pi-durable` ([pi-durable migration](completed/pi-durable-migration.md)). This is transport
 deduplication only; it never decides a duplicate from a record of its own.
 
 ## Open questions

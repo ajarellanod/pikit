@@ -14,7 +14,8 @@
  *
  * It also reports what each agent names by key (tools, extensions, model), read from the
  * `agent.definition`s provided during setup: the names the runtime resolves only at start, which
- * `doctor` and `remove` check against the installed keys (`references.ts`).
+ * `doctor` and `remove` check against the installed keys (`references.ts`); and, per App, which
+ * component registered each pipeline stage, which `describe()` names by id only (`serving.ts`).
  */
 
 import { writeFileSync } from "node:fs";
@@ -27,6 +28,11 @@ export interface AppDescription {
   capabilities: Record<string, { providers: string[]; selected?: string; keys?: Record<string, string> }>;
   pipelines: Record<string, { id: string; priority: number }[]>;
   config: Record<string, unknown>;
+  /**
+   * Not `describe()`'s, the probe's: per pipeline, the component that registered each of its stages,
+   * in registration order.
+   */
+  stagesBy: Record<string, string[]>;
 }
 
 export type ProbeResult =
@@ -57,31 +63,48 @@ export interface AgentReferences {
   extensions: string[];
 }
 
+interface PikitLike {
+  provideKeyed(name: string, key: string, impl: unknown): void;
+  pipeline(name: string, stage: unknown, options?: unknown): void;
+}
+
 interface ComponentLike {
   name: string;
-  setup: (pikit: { provideKeyed(name: string, key: string, impl: unknown): void }, config: unknown) => unknown;
+  setup: (pikit: PikitLike, config: unknown) => unknown;
+}
+
+/** What the setups of the App being created register, as `record` notes it. */
+interface Recorded {
+  /** Undefined for an App whose agents are not read (the Worker's). */
+  agents: AgentReferences[] | undefined;
+  stagesBy: Record<string, string[]>;
 }
 
 /**
- * Records the `agent.definition`s the components provide when their setup runs. `App` gives no way
- * to read a provided value without starting, and starting is what doctor must not do, so each
- * setup gets a `pikit` whose `provideKeyed` notes the definition before registering it as usual.
- * Only this child process sees the wrapped setups; it exits right after.
+ * Records what the components register when their setup runs, into `recording()`: the
+ * `agent.definition`s they provide, and the component of each pipeline stage. `App` gives no way to
+ * read a provided value without starting, and starting is what doctor must not do, so each setup gets
+ * a `pikit` that notes them before registering them as usual. A component listed in both Apps is
+ * wrapped once; each App's setups record into its own `Recorded`. Only this child process sees the
+ * wrapped setups; it exits right after.
  */
-function recordAgents(components: ComponentLike[]): AgentReferences[] {
-  const agents: AgentReferences[] = [];
-  for (const component of components) {
+function record(components: ComponentLike[], recording: () => Recorded): void {
+  for (const component of new Set(components)) {
     const setup = component.setup;
     component.setup = (pikit, config) =>
       setup.call(component, {
         ...pikit,
         provideKeyed(name, key, impl) {
-          if (name === "agent.definition") agents.push(referencesOf(key, component.name, impl));
+          if (name === "agent.definition") recording().agents?.push(referencesOf(key, component.name, impl));
           pikit.provideKeyed(name, key, impl);
+        },
+        pipeline(name, stage, options) {
+          const { stagesBy } = recording();
+          (stagesBy[name] ??= []).push(component.name);
+          pikit.pipeline(name, stage, options);
         },
       }, config);
   }
-  return agents;
 }
 
 function referencesOf(agent: string, component: string, definition: unknown): AgentReferences {
@@ -104,20 +127,25 @@ if (import.meta.main) {
     if (worker !== undefined && (typeof worker.create !== "function" || !Array.isArray(worker.components))) {
       throw new Error("pikit.config.ts exports a `worker` that is not made with defineApp({ components, config })");
     }
-    const agents = recordAgents(definition.components);
+    const main: Recorded = { agents: [], stagesBy: {} };
+    const workers: Recorded = { agents: undefined, stagesBy: {} };
+    let recording = main;
+    record([...definition.components, ...(worker?.components ?? [])], () => recording);
     const app = await definition.create();
+    recording = workers;
     let workerApp: { describe(): unknown } | undefined;
     try {
       workerApp = await worker?.create?.();
     } catch (error) {
       throw new Error(`the Worker's App (export const worker): ${error instanceof Error ? error.message : String(error)}`);
     }
+    const described = (created: { describe(): unknown }, { stagesBy }: Recorded): AppDescription => ({ ...(created.describe() as Omit<AppDescription, "stagesBy">), stagesBy });
     result = {
       ok: true,
       listed: [...definition.components, ...(worker?.components ?? [])].map((c) => c.name),
-      description: app.describe() as AppDescription,
-      ...(workerApp !== undefined && { worker: workerApp.describe() as AppDescription }),
-      agents,
+      description: described(app, main),
+      ...(workerApp !== undefined && { worker: described(workerApp, workers) }),
+      agents: main.agents ?? [],
     };
   } catch (error) {
     result = { ok: false, error: error instanceof Error ? error.message : String(error) };

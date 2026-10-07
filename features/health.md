@@ -25,7 +25,7 @@ process is restarted when what broke is essential.
 ## Pi first
 Chord has the consumer half: stable handles, `unavailable` / `replaced`, calls that fail fast
 without queueing, `ready()`. pikit follows its semantics so that the move to Pi's runtime
-([pi-durable migration](pi-durable-migration.md)) does not leave two models. A model provider's
+([pi-durable migration](completed/pi-durable-migration.md)) does not leave two models. A model provider's
 outage is not a component failure: Pi retries model calls itself (`RetryPolicy`).
 
 ## Decisions

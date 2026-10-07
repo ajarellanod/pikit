@@ -24,6 +24,8 @@
  *   workspace when a provider is installed, otherwise on `execution`);
  * - `model.credentials`, if installed: where the providers' credentials live. Without it, providers
  *   read only their environment variables (`ANTHROPIC_API_KEY`).
+ * - `secrets`, if installed: where those variables are read first, before the environment (on
+ *   Cloudflare, the Worker's secrets, with no `process.env`);
  * - `wakeups`, if installed: runs are driven inside wakeups, in slices (SPEC §4.1, C4), for a host
  *   that keeps running only while an event is in progress (a Durable Object). See `createDriver` below.
  *
@@ -72,6 +74,13 @@ const Config = Type.Object({
   }),
 });
 
+/**
+ * The tools that work on the environment the runtime builds for each call (`api.env`): pi-durable's
+ * coding tools. An agent that names one needs an `execution` (or a `workspace`), or every call fails;
+ * start refuses instead. Add the name of a tool of yours that works on `api.env`.
+ */
+const ENVIRONMENT_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit", "bash"]);
+
 /** The wakeup handler that drives this worker's runs, with `wakeups` installed. */
 export const DRIVE = "runtime-pi.drive";
 
@@ -89,6 +98,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
       const credentials = pikit.useOptional("model.credentials");
+      const secrets = pikit.useOptional("secrets");
       const tools = pikit.useKeyed("agent.tool");
       const extensions = pikit.useKeyed("agent.extension");
       const execution = pikit.useOptional("execution");
@@ -141,7 +151,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         async start(ctx) {
           const models = modelsFrom(
             providers.keys().flatMap((key) => providers.get(key) ?? []),
-            { credentials: credentials.get() },
+            { credentials: credentials.get(), secrets: secrets.get() },
           );
           // Fail at start, not at the first message: an agent that cannot run is a broken deployment.
           if (agents.keys().length === 0) throw new Error("runtime-pi: no agent.definition is provided");
@@ -158,10 +168,20 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             }
             if (key.startsWith("pikit.")) throw new Error(`runtime-pi: the agent.extension "${key}" has a reserved name (pikit.*: the runtime's own)`);
           }
+          const environment = execution.get() !== undefined || workspace.get() !== undefined;
           for (const name of agents.keys()) {
             for (const tool of agents.get(name)?.tools ?? []) {
               if (typeof tool === "string" && tools.get(tool) === undefined) {
-                throw new Error(`runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides (install tool-${tool}?)`);
+                throw new Error(
+                  `runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides: ` +
+                    `install the component that provides it (\`pikit doctor\` names it from the registry), or take "${tool}" out of the agent's tools`,
+                );
+              }
+              if (typeof tool === "string" && !environment && ENVIRONMENT_TOOLS.has(tool)) {
+                throw new Error(
+                  `runtime-pi: agent "${name}" names the tool "${tool}", which works on files and commands, and no execution is installed: ` +
+                    `install one (execution-local on a server, execution-do on Cloudflare), or take "${tool}" out of the agent's tools`,
+                );
               }
             }
             for (const extension of agents.get(name)?.extensions ?? []) {

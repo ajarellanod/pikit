@@ -24,11 +24,16 @@ it into the app.
   - `model.credentials`, if installed: where the providers' credentials live (API keys, OAuth tokens).
     pi-ai refreshes OAuth tokens and writes them back there. Without it, providers read only their
     environment variables (`ANTHROPIC_API_KEY`);
+  - `secrets`, if installed: where those variables are read first, then the environment. On
+    Cloudflare, `secrets-cloudflare` reads them from the Worker's secrets, with no `process.env`;
   - `wakeups`, if installed: runs are driven inside wakeups, in slices, instead of by promises left
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes.
 
   It refuses to start without an agent, when an agent names a model no provider has, when an agent
-  names a tool or an extension no component provides, and when an agent's provider has no credentials at all. That
+  names a tool or an extension no component provides (`pikit doctor` names the registry component that
+  provides a missing tool), when an agent names `read`, `write`, `edit` or `bash` and neither
+  `execution` nor `workspace` is installed (the tools that work on files and commands:
+  `ENVIRONMENT_TOOLS` in `index.ts`), and when an agent's provider has no credentials at all. That
   last check makes no network call and refreshes nothing: it only asks whether a credential is stored
   or an environment variable set.
 - **Target:** `server` and `durable`. On Cloudflare it goes in the conversation object's App, with
@@ -84,10 +89,13 @@ pi-durable keeps every message it admitted and how it ended; `agent.submissions`
   by the next reconciliation of its conversation: at start, when one of its messages is delivered
   again, or when the conversation is resumed. A batch answered together is logged as one run, never
   split;
-- **at start**, in the background, the conversations holding a message nobody answered are resumed,
-  four at a time (`RESUME_AT_ONCE` in `resume.ts`): a run the last process left open continues, and a
-  message waiting in the inbox gets a run. Start does not wait for them; stop cancels what has not
-  started. Progress and failures are logged. With `wakeups`, start asks for a wakeup instead, and its
+- **at start**, opening pi-durable resumes every run the last process left open and gives a run to
+  every message waiting in an inbox, all at once (nothing bounds how many run together). Then, in the
+  background, each conversation holding a message nobody answered is recovered (`recover`, four calls
+  in flight, `RESUME_AT_ONCE` in `resume.ts`): an unlogged run's end is logged and announced, a
+  conversation whose agent is gone or that is missing has its messages abandoned, and the call waits
+  until its messages are settled. Start does not wait for them; stop cancels what has not started.
+  Progress and failures are logged. With `wakeups`, start asks for a wakeup instead, and its
   handler resumes them ("Cloudflare" below).
 - a message nothing can answer is **abandoned**: settled unanswered in pi-durable (reason
   `abandoned`), logged and announced as `agent.failed` (code `abandoned`), so its channel asks the
@@ -120,7 +128,7 @@ has work pending. The handler:
 1. opens pi-durable if this instance has not (a new instance after an eviction): what it finds resumes,
    and a run's end an eviction left unlogged is logged;
 2. resumes the conversations holding pending messages that this App is not driving (a message it
-   never answered: as at start, four at a time, abandoned after `abandonPendingAfterHours`);
+   never answered: as at start, through `recover`, abandoned after `abandonPendingAfterHours`);
 3. waits until this App drives no run, or until its slice ends;
 4. asks again at once when runs are still going. When what is left only waits for a time (a model
    retry's backoff, a deferred response's poll), the runtime asked for a wakeup at that time
@@ -255,4 +263,4 @@ document its tool wrote, a `beforeTool` hook that blocks, a `beforeRequest` hook
 the start failures, and the extension's state across a restart.
 
 `component.json` is generated from `setup` by the CLI (`pikit registry validate`) and is not written
-by hand. Until the CLI exists, the test "what setup declares" pins it.
+by hand; the test "what setup declares" pins it.

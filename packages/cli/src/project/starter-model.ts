@@ -9,8 +9,8 @@ import type { Registry } from "./registry-source.ts";
 /**
  * The starter agent's model, by the project's target, when the preset declares none: one whose provider
  * runs there. On a server, Anthropic's (`provider-anthropic`, which the server presets install). On
- * `durable` (Cloudflare), OpenRouter's (`provider-openrouter`, with an API key): `provider-anthropic` is
- * server-only.
+ * `durable` (Cloudflare), OpenRouter's (`provider-openrouter`, with an API key): `provider-anthropic`
+ * takes only API keys there, never a Claude subscription's login.
  */
 export const STARTER_MODEL: Record<string, string> = {
   server: "anthropic/claude-sonnet-4-6",

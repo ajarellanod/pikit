@@ -16,6 +16,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { PIKIT_ROOT } from "./paths.ts";
 import { setConfigEntry } from "./project/config-file.ts";
 
 const E2E = process.env.PIKIT_E2E === "1";
@@ -76,11 +77,23 @@ test.skipIf(!E2E)(
     expect(Object.keys(manifest.components)).not.toContain("outbound-durable");
     expect(Object.values(manifest.components as Record<string, { installedFor?: string[] }>).filter((c) => c.installedFor !== undefined)).toEqual([]);
     expect(manifest.components["storage-sqlite"].installedFor).toBeUndefined();
+    // The neutral conversation registry, over the key-value store the preset names (SPEC C5).
+    expect(manifest.components["conversations-kv"].installedFor).toBeUndefined();
+    expect(manifest.components["storage-kv-sql"].installedFor).toBeUndefined();
+    expect(Object.keys(manifest.components)).not.toContain("conversations-file");
+    // tool-bash is installed, but on a server the starter agent does not name it.
+    expect(Object.keys(manifest.components)).toContain("tool-bash");
+    expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('tools: ["read","write","edit"],');
+    // The README says where pikit is.
+    expect(readFileSync(join(project, "README.md"), "utf8")).toContain(`It runs from the kit's checkout at \`${PIKIT_ROOT}\``);
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
-    // The skills for the user's AI agent come with every project.
+    // The skills for the user's AI agent come with every project, saying where the kit is.
     for (const skill of ["pikit-component", "pikit-extension"]) {
-      expect(readFileSync(join(project, ".agents", "skills", skill, "SKILL.md"), "utf8")).toContain(`name: ${skill}`);
+      const text = readFileSync(join(project, ".agents", "skills", skill, "SKILL.md"), "utf8");
+      expect(text).toContain(`name: ${skill}`);
+      expect(text).toContain(`${PIKIT_ROOT}/features/memory.md`);
+      expect(text).not.toContain("{{PIKIT_");
     }
   },
   TIMEOUT,
@@ -204,11 +217,15 @@ test.skipIf(!E2E)(
     expect((await git("add", "-A")).code).toBe(0);
     expect((await git("commit", "-qm", "new")).code).toBe(0);
 
-    // server-bun brings an npm dependency only it uses (hono); channel-http brings a variable.
-    for (const name of ["server-bun", "channel-http"]) {
-      expect((await pikit(["remove", name])).code).toBe(0);
-      await git("add", "-A");
-      await git("commit", "-qm", `without ${name}`);
+    // server-bun brings an npm dependency only it uses (hono); channel-http brings a variable. server-bun
+    // goes with channel-http out first: remove refuses to leave its route with no server.
+    for (const names of [["channel-http"], ["channel-http", "server-bun"]]) {
+      for (const name of names) {
+        expect((await pikit(["remove", name])).code).toBe(0);
+        await git("add", "-A");
+        await git("commit", "-qm", `without ${name}`);
+      }
+      const name = names.at(-1) as string;
 
       const added = await pikit(["add", name, "--yes"]);
       expect(added.code).toBe(0);
@@ -219,7 +236,7 @@ test.skipIf(!E2E)(
       expect(removed.code).toBe(0);
       expect((await git("status", "--porcelain")).out).toBe("");
       expect((await pikit(["doctor"])).code).toBe(0);
-      await git("reset", "-q", "--hard", "HEAD~1");
+      await git("reset", "-q", "--hard", `HEAD~${names.length}`);
       await sh([process.execPath, "install"]);
     }
 
@@ -243,11 +260,15 @@ test.skipIf(!E2E)(
     expect(brought.code).toBe(0);
     const components = JSON.parse(readFileSync(join(project, "pikit.json"), "utf8")).components;
     expect(components["outbound-durable"].installedFor).toEqual(["channel-telegram"]);
+    // The outbox's retries are wakeups: their server provider comes for it.
+    expect(components["wakeups-timers"].installedFor).toEqual(["outbound-durable"]);
     // The preset's storage serves the outbox too: nothing brings another.
     expect(components["storage-sqlite"].installedFor).toBeUndefined();
     const removedWith = await pikit(["remove", "channel-telegram"]);
     expect(removedWith.code).toBe(0);
     expect(removedWith.out).toContain("outbound-durable was installed for channel-telegram, and nothing uses it now");
+    // The runtime only uses wakeups if present: that does not keep the timers brought for the outbox.
+    expect(removedWith.out).toContain("wakeups-timers was installed for outbound-durable, and nothing uses it now");
     expect((await git("status", "--porcelain")).out).toBe("");
   },
   TIMEOUT,

@@ -117,10 +117,19 @@ export on its first event, never in its constructor:
   `blockConcurrencyWhile`: Cloudflare resets the object, the event that started it fails, and the
   next event starts a new App (SPEC K2). The App is never stopped otherwise: an object is evicted
   without warning (K6), and an evicted object starts its App again on its next event.
+- **The guard alarm.** Cloudflare retries an alarm that throws 6 times, from 2 s apart and doubling
+  (about 2 minutes), then drops it: a start that kept failing (a bad deploy, a secret missing) would
+  leave the object's pending runs and answers until its chat's next message. So an alarm whose start
+  failed before (Cloudflare's retry, or failed starts counted in the object's storage under
+  `pikit:start-failures`) sets the alarm again before it starts the App: 30 s ahead, twice as far at
+  each failed start in a row, up to an hour, unless a sooner alarm is set. An alarm set during a failed
+  one replaces Cloudflare's retry, so the guard is the retry, and it never runs out. Once the App
+  starts, the count is deleted and `platform-cloudflare`'s `wakeups`, the alarm's one owner, sets the
+  alarm as its rows say.
 - The start context carries `WORKERS_HOST` (`@pikit/contracts/cloudflare`): `env`, and `object` with the
   object's `id`, its `storage` (for `storage-do`), and two hooks:
-  - `onAlarm(handler)`: `alarm()` calls it. A rejection makes Cloudflare retry the alarm. An alarm
-    with no handler is logged and dropped.
+  - `onAlarm(handler)`: `alarm()` calls it. A rejection makes Cloudflare retry the alarm (6 times at
+    most; a failed start leaves the guard alarm). An alarm with no handler is logged and dropped.
   - `onDeliver(handler)`: the RPC `deliver(type, key, message)` calls it and resolves once it
     has. With no handler, `deliver` rejects, so the sender (`actor.mailbox`) rejects and its
     platform retries.

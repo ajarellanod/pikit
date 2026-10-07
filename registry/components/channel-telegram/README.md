@@ -47,7 +47,9 @@ You never look up a user id, set a webhook, open a port or buy a domain.
 - **Messages sent while the agent is working** wait, and its next run answers them together, in one
   reply.
 - **Commands:** `/new` starts a new conversation; the old one is kept. `/start` and
-  `/help` explain. Any other command goes to the agent as text.
+  `/help` explain. Any other command goes to the agent as text. A command Telegram delivers again
+  after a crash is recognised by its message id (kept in `storage.kv`, `command:<conversation>`)
+  and runs once.
 - **The way to the agent** is the inbound path every channel takes (`admitInbound`: your stages in
   `inbound.normalize`, the router, the conversation). When the agent will not answer, the chat is
   told: "I can't take that message." when a stage stops it (a policy, a routing rule), "Sorry, I
@@ -61,7 +63,12 @@ You never look up a user id, set a webhook, open a port or buy a domain.
   - A failed run says so in the chat, with its error code. A message the runtime abandoned (code
     `abandoned`) gets "Sorry, we could not answer your message. Please send it again."
 - **A message is acknowledged to Telegram only once its conversation has it.** A message delivered
-  again after a crash is recognised by its id (`telegram:<chat>:<message>`) and answered once.
+  again after a crash is recognised by its id (`telegram:<chat>:<message>`) and answered once. A
+  message its conversation cannot take (the runtime or its storage down for a while) is tried again
+  after 0.5 s, 1 s, 2 s… up to a minute apart, and the bot does not move past it meanwhile: its later
+  messages wait, in order. One that still fails after 15 minutes (`GIVE_UP_AFTER_MS` in `poller.ts`)
+  is taken for a message that can never be handled: its sender is told "Sorry, I could not take your
+  message. Please send it again in a few minutes.", and it is skipped, so it cannot stop the bot.
 - **Sending** is `startAnswerDelivery`'s (`@pikit/contracts`), the one delivery every chat
   channel shares; this channel gives it only what is Telegram's: its bots' transports, which bot a
   conversation is, its words, and its waits (`DELIVERY` in `index.ts`, yours to edit).
@@ -132,16 +139,20 @@ in health-registry's `essential`.
 
 ## Tests
 
-The tests are copied with the component and run in your project against `fake-telegram.ts`, a
-local stand-in of the Bot API: no bot, token or network needed.
+The tests are copied with the component and run in your project against
+`fake-telegram.test-support.ts`, a local stand-in of the Bot API: no bot, token or network needed.
+Only tests import it.
 - `channel-telegram.test.ts` covers the whole conversation: allowed and refused users, commands,
   "typing…", formatting and splitting, retries, a redelivered message answered once, the
   acknowledgement at stop, the lifecycle conformance suite and the start failures; answers from
   the feed, one that ended while the channel was stopped delivered at the next start (and only
   then), a failed enqueue or send tried again, a send the stop aborted sent at the next start,
   answers of other channels skipped; each bot's health reports, and down after 5 failed polls.
+- `poller.test.ts` covers the poller: a failing update tried again without moving past it, and one
+  still failing past the time budget skipped, its sender told first.
 - `conformance.test.ts` runs the channel conformance suite from `@pikit/contracts/testing`: what every
-  channel does with a message (routed, deduplicated, stopped, denied, no router), and what comes with
+  channel does with a message (routed, deduplicated, stopped, denied, no router, a transient failure
+  of admission not dropped, `/new` delivered again run once), and what comes with
   durability (an answer that ended while stopped or whose event was lost, delivered once; a failed
   send tried again in order; a send cut mid-flight resent once, marked; one chat's failures holding
   up no other), through Telegram. The delivery itself is tested in `@pikit/contracts`.

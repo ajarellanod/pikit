@@ -11,7 +11,8 @@
  *   `src/pikit/` is the one checked (two copies of one contract file that differ fail `tsc`, TS2717,
  *   and every test would run twice);
  * - the kit's skills for AI agents, `.agents/skills/` (`skillFiles`): how to write a component and an
- *   agent extension.
+ *   agent extension, with where the kit is (this CLI's checkout, and online at the project's
+ *   `kit.commit`) written in, since they cite its design notes and SPEC.
  *   They are the kit's, not a component's: no capability, nothing that runs, and every project gets
  *   them; a newer CLI's `pikit new` brings newer ones (an existing project copies them by hand).
  *
@@ -20,14 +21,17 @@
  *
  * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
  * two Apps (SPEC C1), the agent's model is one whose provider runs there (`STARTER_MODEL`, unless the
- * preset declares its `model`), and `.gitignore` and the README say so. What a component needs in
+ * preset declares its `model`), and `.gitignore` and the README say so. On a server the agent does
+ * not name `bash`, even installed (`NOT_NAMED`). What `pikit up` does is the installed deployment's
+ * (`upText`), never guessed from the target. The README says where `pikit` and the kit are
+ * (`withKitLocation`). What a component needs in
  * `package.json` (deployment-cloudflare's `wrangler`) its `component.json` declares, and `pikit add`
  * installs it: never the starter.
  */
 
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { PIKIT_ROOT } from "../paths.ts";
+import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
 import { DASHBOARD_DIR } from "../project/dashboard.ts";
 import type { ComponentEntry } from "../project/config-file.ts";
 import { starterModel } from "../project/starter-model.ts";
@@ -48,15 +52,28 @@ export const STARTER_CONFIG: Record<string, string> = {
 /** Where the skills for AI agents are, in the kit and in a project (the `.agents/skills/` convention). */
 export const SKILLS_DIR = ".agents/skills";
 
-/** The kit's skills, each file by its path in a project, sorted: what `pikit new` copies. */
-export function skillFiles(root = PIKIT_ROOT): { path: string; text: string }[] {
+/**
+ * The kit's skills, each file by its path in a project, sorted: what `pikit new` copies. Where the kit
+ * is gets written in (`withKitLocation`): `root` on this machine, online at `commit`.
+ */
+export function skillFiles(root = PIKIT_ROOT, commit?: string): { path: string; text: string }[] {
   const dir = join(root, SKILLS_DIR);
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { recursive: true, withFileTypes: true })
     .filter((entry) => entry.isFile())
     .map((entry) => join(entry.parentPath, entry.name).slice(dir.length + 1))
     .sort()
-    .map((file) => ({ path: `${SKILLS_DIR}/${file}`, text: readFileSync(join(dir, file), "utf8") }));
+    .map((file) => ({ path: `${SKILLS_DIR}/${file}`, text: withKitLocation(readFileSync(join(dir, file), "utf8"), root, commit) }));
+}
+
+/**
+ * `text` with the kit's location in place of the skills' placeholders: `{{PIKIT_ROOT}}`, the checkout
+ * at `root`; `{{PIKIT_URL}}`, the repository online at `commit` (`pikit.json`'s `kit.commit`, its
+ * `-dirty` set aside), or its default branch when there is none.
+ */
+export function withKitLocation(text: string, root: string, commit: string | undefined): string {
+  const url = commit === undefined ? KIT_REPOSITORY : `${KIT_REPOSITORY}/tree/${commit.replace(/-dirty$/, "")}`;
+  return text.replaceAll("{{PIKIT_ROOT}}", root).replaceAll("{{PIKIT_URL}}", url);
 }
 
 export function packageJson(name: string, kit: Record<string, string>): string {
@@ -227,18 +244,40 @@ export function introduction(channels: readonly StarterChannel[]): string {
   return reach.length === 0 ? "You are a helpful assistant." : `You are a helpful assistant ${reach.join(", and ")}.`;
 }
 
-export function agent(tools: string[], model = starterModel(), channels: readonly StarterChannel[] = []): string {
+/**
+ * The installed tools a target's starter agent does not name, and why: on a server, `bash` runs
+ * commands as the server's user, outside the workspace too (tool-bash's README), so an agent gets it
+ * only when you add it. On Cloudflare commands run in each conversation's sandbox (execution-do).
+ */
+export const NOT_NAMED: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  server: { bash: "it runs commands as this server's user, outside the workspace too (src/pikit/tool-bash/README.md)" },
+};
+
+/** The installed `tools` the starter agent names on `target`: all of them but those `NOT_NAMED` there. */
+export function starterTools(tools: readonly string[], target = "server"): string[] {
+  return tools.filter((tool) => !(tool in (NOT_NAMED[target] ?? {})));
+}
+
+/**
+ * The starter agent's file. It names `starterTools(installed, target)`; one installed and not named
+ * is said in its comment, with why.
+ */
+export function agent(installed: string[], model = starterModel(), channels: readonly StarterChannel[] = [], target = "server"): string {
+  const tools = starterTools(installed, target);
+  const commands = tools.includes("bash") ? ", and to run commands in it" : "";
   const workspace =
-    tools.length > 0
-      ? `\n    "You work in a workspace directory: use your tools to read, write and edit files there, and to run commands in it.",`
-      : "";
+    tools.length > 0 ? `\n    "You work in a workspace directory: use your tools to read, write and edit files there${commands}.",` : "";
+  const unnamed = installed
+    .filter((tool) => !tools.includes(tool))
+    .map((tool) => `\n *\n * \`${tool}\` is installed but not named here: ${NOT_NAMED[target]?.[tool]}. Add it to \`tools\` for an\n * agent that needs it.`)
+    .join("");
   return `import { defineAgent } from "@pikit/contracts";
 
 /**
  * Your agent. Pi runs the loop; this file says who the agent is. It names the installed tools it may
  * use (\`tool-*\` components); installing a tool gives it to no agent that does not name it.
  * Change the model, the prompt and the tools here. \`defineAgent({ state, prepare })\` changes them per
- * run.
+ * run.${unnamed}
  */
 export default defineAgent({
   name: "${STARTER_AGENT}",
@@ -267,17 +306,44 @@ export default defineComponent({
 });
 `;
 
+/** What `pikit up` does with a deployment component, for the starter's text; another one is named as it is. */
+export const DEPLOYMENT_TEXT: Readonly<Record<string, { up: string; then: string }>> = {
+  "deployment-docker": { up: "run it in Docker", then: "pikit status, logs, down" },
+  "deployment-cloudflare": { up: "deploy it to Cloudflare", then: "pikit status, logs" },
+};
+
+/** The installed deployment (`deployment-*`), which `pikit up` delegates to; undefined without one. */
+export function deploymentOf(components: readonly string[]): string | undefined {
+  return components.find((component) => component.startsWith("deployment-"));
+}
+
+/** What `pikit up` does in a project with `components` ("run it in Docker"); undefined without a deployment. */
+export function upText(components: readonly string[]): string | undefined {
+  const deployment = deploymentOf(components);
+  if (deployment === undefined) return undefined;
+  return DEPLOYMENT_TEXT[deployment]?.up ?? `deploy it with ${deployment}`;
+}
+
+/**
+ * The project's README. `{{PIKIT_ROOT}}` and `{{PIKIT_URL}}` say where `pikit` and the kit are:
+ * `pikit new` writes them in (`withKitLocation`), as in the skills.
+ */
 export function readme(name: string, components: string[], target = "server", ui = false): string {
+  const deployment = deploymentOf(components);
+  const up =
+    deployment === undefined
+      ? "# pikit up runs it elsewhere once a deployment-* component is installed: there is none"
+      : `pikit up          # or ${upText(components)} (${deployment})${DEPLOYMENT_TEXT[deployment] === undefined ? "" : `: then ${DEPLOYMENT_TEXT[deployment].then}`}`;
   const run =
     target === "durable"
       ? `pikit configure   # the variables in .env.example (they go up as the Worker's secrets), and a model API key
-pikit doctor      # the component graph; green when everything is provided and configured
-pikit dev         # run it here in workerd (wrangler dev), reloading on change
-pikit up          # or deploy it to Cloudflare (deployment-cloudflare): then pikit status, logs`
+pikit doctor      # the component graph; green when everything is provided and its variables are set
+pikit dev         # run it here in workerd (wrangler dev), reloading on change, once the model's API key is in .env
+${up}`
       : `pikit configure   # the variables in .env.example, and a model login or API key
-pikit doctor      # the component graph; green when everything is provided and configured
-pikit dev         # run it here, reloading on change
-pikit up          # or run it in Docker (deployment-docker): then pikit status, logs, down`;
+pikit doctor      # the component graph; green when everything is provided and its variables are set
+pikit dev         # run it here, reloading on change; its model login is this machine's: pikit configure --login <provider> --local
+${up}`;
   const composition =
     target === "durable"
       ? "the composition root: two Apps, the default export in each conversation's Durable Object and `worker` in the Worker, and their config values"
@@ -311,11 +377,22 @@ ${run}
 ## Change it
 
 \`\`\`sh
-pikit add <component>      # copy a component in and list it in pikit.config.ts
+pikit add <component>...   # copy components in and list them in pikit.config.ts
 pikit remove <component>   # and take it out again, leaving the rest as it was
 bun test                   # the installed components' own tests, and yours
 \`\`\`
 
 The installed files are yours: edit them. \`pikit doctor\` lists the ones you changed.
+
+## Where pikit is
+
+\`pikit\` is the CLI of the pikit kit. It runs from the kit's checkout at \`{{PIKIT_ROOT}}\`
+(\`packages/cli\`), which the installer (\`installer/install.sh\`) clones, with a \`pikit\` command in
+\`~/.pikit/bin/\` for your \`PATH\`. The same checkout holds the registry \`pikit add\` copies from, the design
+notes (\`features/\`) and \`SPEC.md\`. Online, at the kit this project was made with: {{PIKIT_URL}}.
+
+To update: run the installer again (or \`git pull\` in the checkout), then \`pikit upgrade\` here: it
+merges the registry's changes with your edits and refreshes \`vendor/\` (\`--dry-run\` shows what it
+would do first).
 `;
 }

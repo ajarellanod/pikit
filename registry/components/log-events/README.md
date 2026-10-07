@@ -68,5 +68,5 @@ runtime: it emits the events a runtime would. It covers each event's line, the d
 with no known start, the bound on the start times, usage of another shape, that no prompt, answer
 or error message reaches a line, and that a failing logger or payload cannot fail the emitter.
 
-`component.json` is generated from `setup` by the CLI and is not written by hand. Until the CLI
-exists, the test "what setup declares" pins it.
+`component.json` is generated from `setup` by `pikit registry generate` and is not written by hand;
+the test "what setup declares" pins it.

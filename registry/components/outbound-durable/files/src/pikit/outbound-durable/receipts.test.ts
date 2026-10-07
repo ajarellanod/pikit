@@ -12,7 +12,7 @@ import { DatabaseSync } from "node:sqlite";
 import { type App, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type DeliveryReceipt, type OutboundQueue } from "@pikit/contracts";
 import { createManualClock, type ManualClock } from "@pikit/core/testing";
-import { createFeedConformance } from "@pikit/contracts/testing";
+import { createFeedConformance, createMemoryWakeups } from "@pikit/contracts/testing";
 import outboundDurable from "./index.ts";
 import type { SqlDatabase, SqlStatements } from "@pikit/contracts";
 import { createStore, SCHEMA_VERSION } from "./store.ts";
@@ -42,7 +42,7 @@ async function openOutbox(database: string, clock: ManualClock) {
       return { start: () => void (queue = handle.get()) };
     },
   });
-  const app: App = await defineApp({ components: [testStorage(database), outboundDurable, observer], logger: silentLogger, clock }).create();
+  const app: App = await defineApp({ components: [testStorage(database), createMemoryWakeups(), outboundDurable, observer], logger: silentLogger, clock }).create();
   await app.start();
   if (queue === undefined) throw new Error("no queue");
   let sent = 0;
