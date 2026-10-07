@@ -147,9 +147,16 @@ test("adjust: a project pikit made becomes the template, with one place for its 
   writeFileSync(join(project, ".gitignore"), "node_modules/\n");
   for (const file of [".env.example", "bun.lock", "README.md"]) writeFileSync(join(project, file), "pikit's\n");
   mkdirSync(join(project, "node_modules", "x"), { recursive: true });
-  adjust(project, KEY, TEMPLATE);
-  expect(listFiles(project)).toEqual([".dev.vars.example", ".gitignore", "README.md", "package.json", "wrangler.jsonc"]);
+  // The skills name the kit's checkout on this machine; the template's name it online, at its commit.
+  const kitRoot = "/home/someone/.pikit/pikit";
+  writeFileSync(join(project, "pikit.json"), JSON.stringify({ version: 1, kit: { commit: "abc123-dirty" } }));
+  mkdirSync(join(project, ".agents", "skills", "pikit-component"), { recursive: true });
+  writeFileSync(join(project, ".agents", "skills", "pikit-component", "SKILL.md"), `\`${kitRoot}\` is the kit; read \`${kitRoot}/features/memory.md\`.\n`);
+  adjust(project, KEY, TEMPLATE, kitRoot);
+  expect(listFiles(project)).toEqual([".agents/skills/pikit-component/SKILL.md", ".dev.vars.example", ".gitignore", "README.md", "package.json", "pikit.json", "wrangler.jsonc"]);
   expect(readFileSync(join(project, "README.md"), "utf8")).toBe(templateReadme(KEY, TEMPLATE));
+  const online = "https://github.com/ajarellanod/pikit/tree/abc123";
+  expect(readFileSync(join(project, ".agents", "skills", "pikit-component", "SKILL.md"), "utf8")).toBe(`\`${online}\` is the kit; read \`${online}/features/memory.md\`.\n`);
 });
 
 test("mirror: the output holds exactly the template's files, keeps .git and node_modules, and a second run writes nothing", () => {

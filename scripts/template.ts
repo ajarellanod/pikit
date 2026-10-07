@@ -19,6 +19,7 @@
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
+import { KIT_REPOSITORY } from "../packages/cli/src/paths.ts";
 
 const REPO = join(import.meta.dir, "..");
 const MAIN = join(REPO, "packages", "cli", "src", "main.ts");
@@ -173,8 +174,24 @@ export function templateReadme(key: string, template: Template): string {
   return source.replaceAll("{{DEPLOY_URL}}", deployUrl(template.repo)).replaceAll("{{NAME}}", template.name).replaceAll("{{SECRETS}}", secrets);
 }
 
+/**
+ * The kit's skills (`.agents/skills/`) name where pikit is on the machine that made the project; a
+ * template's name it online instead: its repository at the kit's commit (`pikit.json`'s `kit.commit`).
+ */
+export function portableSkills(projectDir: string, kitRoot: string = REPO): void {
+  const dir = join(projectDir, ".agents", "skills");
+  if (!existsSync(dir)) return;
+  const manifest = join(projectDir, "pikit.json");
+  const commit = existsSync(manifest) ? (JSON.parse(readFileSync(manifest, "utf8")) as { kit?: { commit?: string } }).kit?.commit : undefined;
+  const online = commit === undefined ? KIT_REPOSITORY : `${KIT_REPOSITORY}/tree/${commit.replace(/-dirty$/, "")}`;
+  for (const file of listFiles(dir)) {
+    const path = join(dir, file);
+    writeFileSync(path, readFileSync(path, "utf8").replaceAll(kitRoot, online));
+  }
+}
+
 /** Applies the template's adjustments to a project `pikit new` just made. */
-export function adjust(projectDir: string, key: string, template: Template): void {
+export function adjust(projectDir: string, key: string, template: Template, kitRoot: string = REPO): void {
   const path = (file: string) => join(projectDir, file);
   const edit = (file: string, change: (text: string) => string) => writeFileSync(path(file), change(readFileSync(path(file), "utf8")));
   edit("wrangler.jsonc", (text) => nameWorker(text, template.name));
@@ -186,6 +203,7 @@ export function adjust(projectDir: string, key: string, template: Template): voi
   writeFileSync(path("README.md"), templateReadme(key, template));
   rmSync(path("bun.lock"), { force: true });
   rmSync(path("node_modules"), { recursive: true, force: true });
+  portableSkills(projectDir, kitRoot);
 }
 
 /** Every file under `dir`, relative, sorted, but for `skip`'s top-level entries. */
