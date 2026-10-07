@@ -45,7 +45,11 @@ test("served under /admin/ to anyone; pages fall back to index.html; assets/ is 
     const page = assets.serve(path);
     expect({ path, status: page.status, type: page.headers.get("content-type") }).toEqual({ path, status: 200, type: "text/html; charset=utf-8" });
   }
-  expect(index.headers.get("content-security-policy")).toContain("default-src 'self'");
+  // The policy, whole: images also `data:` (a transcript's) and `blob:` (one attached, not sent yet); nothing else loosened.
+  expect(index.headers.get("content-security-policy")).toBe(
+    "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self'; connect-src 'self'; " +
+      "object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'",
+  );
   expect(await assets.serve("/admin/").text()).toContain("id=root");
   expect(assets.serve("/admin/assets/missing.js").status).toBe(404);
   expect(assets.built()).toBe(true);

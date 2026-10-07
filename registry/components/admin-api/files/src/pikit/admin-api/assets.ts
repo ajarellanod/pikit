@@ -13,7 +13,8 @@
  *   it holds (`/admin/conversations/email%3Aana%40empresa.com~1`, an id with `.`, or `%2F`): the app's
  *   router shows it, and a reload works.
  * - Every answer has a Content-Security-Policy (`CSP`): scripts, styles, fonts, images and API calls
- *   from the same origin only, no inline script, no framing. Inline styles are allowed: the dialogs'
+ *   from the same origin only (images also `data:` and `blob:`: one in a transcript, one attached and
+ *   not sent yet), no inline script, no framing. Inline styles are allowed: the dialogs'
  *   scroll lock (Radix) sets some, and a style runs no code.
  * - Vite's hashed files (`assets/`) are cached for good; everything else is revalidated.
  */
@@ -43,7 +44,7 @@ export const CSP = [
   "default-src 'self'",
   "script-src 'self'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data:",
+  "img-src 'self' data: blob:",
   "font-src 'self'",
   "connect-src 'self'",
   "object-src 'none'",

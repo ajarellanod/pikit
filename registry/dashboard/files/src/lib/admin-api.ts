@@ -15,6 +15,7 @@
  * | Route | Answer |
  * |---|---|
  * | `GET /admin/api/app` | `ApiApp`: the composition (`APP_DESCRIPTION`, no secrets) |
+ * | `GET /admin/api/agents` | `ApiAgents`: the App's agents, their model and tools |
  * | `POST /admin/api/session` | the credential once → `200 ApiSession` and a session cookie (a browser's) |
  * | `DELETE /admin/api/session` | `204`: the session cookie cleared |
  * | `GET /admin/api/conversations?limit&cursor` | `ApiPage<ApiConversation>`, the most recently active first |
@@ -38,14 +39,58 @@ export const isDashboardKey = (key: string | undefined): boolean => key?.startsW
 /** How every message from the dashboard starts, as the agent reads it (`operatorPrompt`). */
 export const OPERATOR_NOTE = "[From the operator, in the pikit dashboard";
 
+/** The tool an agent searches the web with (`tool-websearch-brave` provides it under this name). */
+export const WEB_SEARCH_TOOL = "websearch";
+
 /**
  * `text` as the agent reads it, sent from the dashboard to the conversation `key`: a first line says it
  * comes from the operator, and, in another channel's conversation, that its user sees neither it nor
- * the answer.
+ * the answer; with `webSearch`, that the agent is to search the web for it (`WEB_SEARCH_TOOL`).
  */
-export function operatorPrompt(key: string, text: string): string {
-  const note = isDashboardKey(key) ? `${OPERATOR_NOTE}.]` : `${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it.]`;
+export function operatorPrompt(key: string, text: string, options: { webSearch?: boolean } = {}): string {
+  const asks = [
+    ...(isDashboardKey(key) ? [] : ["the user of this conversation does not see this message or your answer to it"]),
+    ...(options.webSearch === true ? [`search the web for it with the ${WEB_SEARCH_TOOL} tool before you answer`] : []),
+  ];
+  const note = asks.length === 0 ? `${OPERATOR_NOTE}.]` : `${OPERATOR_NOTE}: ${asks.join("; ")}.]`;
   return `${note}\n${text}`;
+}
+
+/** The images an operator may attach to a message: these types, `MAX_IMAGES` of `MAX_IMAGE_BYTES` at most. */
+export const IMAGE_TYPES: readonly string[] = ["image/png", "image/jpeg", "image/webp", "image/gif"];
+export const MAX_IMAGES = 4;
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+/**
+ * On Cloudflare (`ApiApp.target` `durable`), the images of one message in all: the message is stored in
+ * one Durable Object row, which holds at most 2 MB, and the images grow by a third in base64.
+ */
+export const MAX_DURABLE_IMAGE_BYTES = 1024 * 1024;
+
+/** The bytes base64 `data` decodes to. */
+export const base64Bytes = (data: string): number => Math.floor((data.length * 3) / 4) - (data.endsWith("==") ? 2 : data.endsWith("=") ? 1 : 0);
+
+const BASE64 = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/**
+ * What is wrong with a message's `attachments`, or `undefined`: too many, not an image of
+ * `IMAGE_TYPES`, or not base64 (`400`); one larger than `MAX_IMAGE_BYTES`, or on `target` `durable`
+ * more than `MAX_DURABLE_IMAGE_BYTES` in all (`413`). The dashboard checks with it before sending, and
+ * the API again.
+ */
+export function attachmentsProblem(attachments: readonly ApiAttachment[], target?: string): { status: 400 | 413; message: string } | undefined {
+  if (attachments.length > MAX_IMAGES) return { status: 400, message: `at most ${MAX_IMAGES} images a message` };
+  let total = 0;
+  for (const [i, attachment] of attachments.entries()) {
+    if (attachment.kind !== "image" || !IMAGE_TYPES.includes(attachment.mimeType)) return { status: 400, message: `attachment ${i + 1}: an image is ${IMAGE_TYPES.join(", ")}` };
+    if (attachment.data.length % 4 !== 0 || !BASE64.test(attachment.data)) return { status: 400, message: `attachment ${i + 1}: its data is not base64` };
+    const bytes = base64Bytes(attachment.data);
+    if (bytes > MAX_IMAGE_BYTES) return { status: 413, message: `attachment ${i + 1}: an image is at most ${MAX_IMAGE_BYTES / 1024 / 1024} MB` };
+    total += bytes;
+  }
+  if (target === "durable" && total > MAX_DURABLE_IMAGE_BYTES) {
+    return { status: 413, message: `on Cloudflare the images of a message are at most ${MAX_DURABLE_IMAGE_BYTES / 1024 / 1024} MB in all (a Durable Object row holds 2 MB)` };
+  }
+  return undefined;
 }
 
 /** What a conversation cost: every model call and tool summed (pi-ai's `Usage`). */
@@ -107,12 +152,48 @@ export interface ApiEvent {
   [field: string]: unknown;
 }
 
+/** One of the App's agents (`agent.definition`), as it is defined. */
+export interface ApiAgent {
+  name: string;
+  /** `provider/modelId`. */
+  model: string;
+  /**
+   * The names of the tools it is defined with (its `tools`; a tool object by its name). Not the tools
+   * its extensions bring, nor those a `prepare` gives for a state.
+   */
+  tools: string[];
+}
+
+export interface ApiAgents {
+  /** By name. */
+  items: ApiAgent[];
+}
+
+/** An image attached to a message: the model reads it with the text, and the transcript keeps it. */
+export interface ApiImageAttachment {
+  kind: "image";
+  /** One of `IMAGE_TYPES`. */
+  mimeType: string;
+  /** Its bytes, base64 (standard, padded), without a `data:` prefix: at most `MAX_IMAGE_BYTES`. */
+  data: string;
+}
+
+export type ApiAttachment = ApiImageAttachment;
+
 /**
  * A message from an operator to a conversation: a follow-up (with a run going it waits for it), whose
  * answer stays in the dashboard. The agent reads it after `operatorPrompt`'s first line.
  */
 export interface ApiSendRequest {
+  /** May be empty when it has attachments. */
   text: string;
+  /** Images, at most `MAX_IMAGES` (`attachmentsProblem`: `400`, `413`). */
+  attachments?: ApiAttachment[];
+  /**
+   * The agent is told, in the message's first line, to search the web for it. Only for an agent with
+   * the tool `WEB_SEARCH_TOOL`: another is `400`.
+   */
+  webSearch?: boolean;
   /**
    * Its identity: the same one sent again does not run again. `dashboard:` then 1 to 118 of
    * `A-Z a-z 0-9 . _ ~ : -`. Absent, admin-api makes one.
@@ -130,7 +211,10 @@ export interface ApiSendResponse {
 export interface ApiStartRequest {
   /** One of the App's agents: the keys of `agent.definition` in `ApiApp.capabilities`. */
   agent: string;
+  /** As `ApiSendRequest`'s. */
   text: string;
+  attachments?: ApiAttachment[];
+  webSearch?: boolean;
   /** As `ApiSendRequest.requestId`. */
   requestId?: string;
 }
@@ -214,8 +298,8 @@ export interface ApiApp {
 export interface ApiError {
   /**
    * `unauthorized`, `not_found`, `not_installed`, `invalid_request`, `invalid_cursor`, `no_agent`,
-   * `not_current`, `unknown_agent`; `unavailable` (503) when, on Cloudflare, a conversation's object
-   * did not answer.
+   * `not_current`, `unknown_agent`, `too_large` (413: an image, or a body, larger than the API takes);
+   * `unavailable` (503) when, on Cloudflare, a conversation's object did not answer.
    */
   error: string;
   message?: string;

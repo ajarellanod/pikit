@@ -10,8 +10,10 @@
  * - What an operator writes (`backend.ts`): a message is a follow-up whose request id starts with
  *   `dashboard:`, and a new conversation is the dashboard's own, `dashboard:<uuid>`.
  * - A backend's refusal (`ActorCallError`) is its status: `not_found` `404`; `no_agent`, `not_current`
- *   `409`; `invalid_cursor`, `invalid_request` `400`. Any other code (an object that could not be
- *   reached, a call that failed) is `503 unavailable`, logged.
+ *   `409`; `invalid_cursor`, `invalid_request`, `unknown_agent` `400`; `too_large` `413`. Any other code
+ *   (an object that could not be reached, a call that failed) is `503 unavailable`, logged.
+ * - A message's images are checked here (`attachmentsProblem`: their number and types `400`, their size
+ *   `413`), and a body larger than the most a message can be is `413` before it is read.
  * - Each action is logged with the operator's id and the conversation's key, never the message's text.
  * - Live events are server-sent events over a plain streaming response, a comment every
  *   `heartbeatMs`; the stream ends when the client goes away, the backend's events end, or the server
@@ -33,6 +35,7 @@ import Type, { type Static } from "typebox";
 import Value from "typebox/value";
 import {
   type ApiAbortResponse,
+  type ApiAgents,
   type ApiApp,
   type ApiConversation,
   type ApiError,
@@ -46,7 +49,10 @@ import {
   type ApiSession,
   type ApiStartResponse,
   type ApiTranscriptEntry,
+  attachmentsProblem,
   DASHBOARD_KEY_PREFIX,
+  MAX_IMAGE_BYTES,
+  MAX_IMAGES,
 } from "./api.ts";
 import { type Assets, BASE } from "./assets.ts";
 import type { AdminBackend } from "./backend.ts";
@@ -58,24 +64,22 @@ const MAX_LIMIT = 500;
 /** The longest message an operator may send, in characters. */
 const MAX_TEXT = 32_000;
 
-const SendBody = Type.Object(
-  {
-    text: Type.String({ minLength: 1, maxLength: MAX_TEXT }),
-    requestId: Type.Optional(Type.String({ pattern: REQUEST_ID })),
-  },
-  { additionalProperties: false },
-);
-const StartBody = Type.Object(
-  {
-    agent: Type.String({ minLength: 1, maxLength: 200 }),
-    text: Type.String({ minLength: 1, maxLength: MAX_TEXT }),
-    requestId: Type.Optional(Type.String({ pattern: REQUEST_ID })),
-  },
-  { additionalProperties: false },
-);
+/** The largest body a message can be: its images in base64, its text, and room for the rest. */
+const MAX_BODY = MAX_IMAGES * Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + MAX_TEXT * 6 + 64 * 1024;
+
+/** An attachment's shape; what it holds is `attachmentsProblem`'s to check. */
+const Attachment = Type.Object({ kind: Type.Literal("image"), mimeType: Type.String({ maxLength: 100 }), data: Type.String() }, { additionalProperties: false });
+const MessageFields = {
+  text: Type.String({ maxLength: MAX_TEXT }),
+  attachments: Type.Optional(Type.Array(Attachment)),
+  webSearch: Type.Optional(Type.Boolean()),
+  requestId: Type.Optional(Type.String({ pattern: REQUEST_ID })),
+};
+const SendBody = Type.Object(MessageFields, { additionalProperties: false });
+const StartBody = Type.Object({ agent: Type.String({ minLength: 1, maxLength: 200 }), ...MessageFields }, { additionalProperties: false });
 
 /** The status of each refusal a backend throws; any other is `503`. */
-const STATUS: Record<string, number> = { not_found: 404, no_agent: 409, not_current: 409, invalid_cursor: 400, invalid_request: 400, unknown_agent: 400 };
+const STATUS: Record<string, number> = { not_found: 404, no_agent: 409, not_current: 409, invalid_cursor: 400, invalid_request: 400, unknown_agent: 400, too_large: 413 };
 
 const json = <T>(status: number, body: T): Response => Response.json(body, { status, headers: { "cache-control": "no-store" } });
 const failure = (status: number, error: string, message?: string): Response =>
@@ -108,18 +112,36 @@ function pageOf(request: Request): PageRequest | { problem: string } {
   return page;
 }
 
-/** `request`'s JSON body, checked against `schema`, or what is wrong with it. */
-async function readBody<S extends typeof SendBody | typeof StartBody>(request: Request, schema: S): Promise<{ body: Static<S> } | { problem: string }> {
+/**
+ * `request`'s message, checked against `schema`: something written or attached, images the API takes.
+ * Or what is wrong with it, and its status.
+ */
+async function readMessage<S extends typeof SendBody | typeof StartBody>(request: Request, schema: S): Promise<{ body: Static<S> } | { status: number; error: string; problem: string }> {
+  const length = Number(request.headers.get("content-length") ?? 0);
+  if (length > MAX_BODY) return { status: 413, error: "too_large", problem: `a message is at most ${Math.round(MAX_BODY / 1024 / 1024)} MB` };
   let parsed: unknown;
   try {
     parsed = await request.json();
   } catch {
-    return { problem: "the body is not JSON" };
+    return { status: 400, error: "invalid_request", problem: "the body is not JSON" };
   }
-  if (Value.Check(schema, parsed)) return { body: parsed as Static<S> };
-  const [first] = Value.Errors(schema, parsed);
-  return { problem: `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}` };
+  if (!Value.Check(schema, parsed)) {
+    const [first] = Value.Errors(schema, parsed);
+    return { status: 400, error: "invalid_request", problem: `${first?.instancePath || "the body"}: ${first?.message ?? "is invalid"}` };
+  }
+  const body = parsed as Static<S>;
+  const attachments = body.attachments ?? [];
+  if (body.text === "" && attachments.length === 0) return { status: 400, error: "invalid_request", problem: "/text: write something, or attach an image" };
+  const wrong = attachmentsProblem(attachments);
+  if (wrong !== undefined) return { status: wrong.status, error: wrong.status === 413 ? "too_large" : "invalid_request", problem: `/attachments: ${wrong.message}` };
+  return { body };
 }
+
+/** What the log says of a message besides its text: how many images, whether it asks for a web search. */
+const facts = (message: { attachments?: unknown[]; webSearch?: boolean }) => ({
+  ...(message.attachments !== undefined && message.attachments.length > 0 && { images: message.attachments.length }),
+  ...(message.webSearch === true && { webSearch: true }),
+});
 
 /** The request id of an operator's message: the client's, or a new one. */
 const requestIdOf = (given: string | undefined): string => given ?? `${DASHBOARD_REQUEST_PREFIX}${crypto.randomUUID()}`;
@@ -227,6 +249,8 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
 
   api("GET /admin/api/app", async (_request, ctx) => json<ApiApp>(200, await backend().app(ctx)));
 
+  api("GET /admin/api/agents", async (_request, ctx) => json<ApiAgents>(200, await backend().agents(ctx)));
+
   api("GET /admin/api/conversations", async (request, ctx) => {
     const page = pageOf(request);
     if ("problem" in page) return failure(400, "invalid_request", page.problem);
@@ -244,21 +268,22 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   api("GET /admin/api/conversations/:id/events", async (request, ctx) => eventStream(await backend().live(conversationIdOf(request), ctx), options.heartbeatMs, ctx));
 
   api("POST /admin/api/conversations", async (request, ctx, operator) => {
-    const read = await readBody(request, StartBody);
-    if ("problem" in read) return failure(400, "invalid_request", read.problem);
-    const requestId = requestIdOf(read.body.requestId);
+    const read = await readMessage(request, StartBody);
+    if ("problem" in read) return failure(read.status, read.error, read.problem);
+    const { agent, requestId, ...message } = read.body;
     const key = `${DASHBOARD_KEY_PREFIX}${crypto.randomUUID()}`;
-    const started = await backend().start({ key, agent: read.body.agent, text: read.body.text, requestId }, ctx);
-    ctx.logger.info("admin-api: an operator started a conversation", { operator: operator.id, conversation: key, agent: read.body.agent, requestId });
+    const started = await backend().start({ key, agent, ...message, requestId: requestIdOf(requestId) }, ctx);
+    ctx.logger.info("admin-api: an operator started a conversation", { operator: operator.id, conversation: key, agent, requestId: started.requestId, ...facts(message) });
     return json<ApiStartResponse>(201, started);
   });
 
   api("POST /admin/api/conversations/:id/messages", async (request, ctx, operator) => {
-    const read = await readBody(request, SendBody);
-    if ("problem" in read) return failure(400, "invalid_request", read.problem);
-    const requestId = requestIdOf(read.body.requestId);
-    const sent = await backend().send(conversationIdOf(request), { text: read.body.text, requestId }, ctx);
-    ctx.logger.info("admin-api: an operator sent a message", { operator: operator.id, conversation: sent.key, requestId, admission: sent.admission });
+    const read = await readMessage(request, SendBody);
+    if ("problem" in read) return failure(read.status, read.error, read.problem);
+    const { requestId: given, ...message } = read.body;
+    const requestId = requestIdOf(given);
+    const sent = await backend().send(conversationIdOf(request), { ...message, requestId }, ctx);
+    ctx.logger.info("admin-api: an operator sent a message", { operator: operator.id, conversation: sent.key, requestId, admission: sent.admission, ...facts(message) });
     return json<ApiSendResponse>(202, { requestId: sent.requestId, admission: sent.admission });
   });
 

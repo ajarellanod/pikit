@@ -13,14 +13,28 @@
  *   `pollMs` (2 s) and yields it only when it changed, then ends after `polls` of them (the
  *   subrequests of one request are bounded). The dashboard reconnects to a stream that ended
  *   (`live.ts`). Between two snapshots it sees no text streaming, only where the run is.
- * - **The composition** is an object's App (the index object's: every object runs the same App), where
- *   the agents run.
+ * - **The composition** and **the agents** are an object's App's (the index object's: every object
+ *   runs the same App), where the agents run.
+ * - **A message's images** are at most `MAX_DURABLE_IMAGE_BYTES` in all (`413 too_large`), checked
+ *   before the call: the object stores the message in one Durable Object row (2 MB at most).
  */
 
 import type { AppContext } from "@pikit/core";
 import type { ActorMailbox, JsonValue } from "@pikit/contracts";
-import type { ApiApp, ApiConversation, ApiEvent, ApiPage, ApiResetResponse, ApiSendResponse, ApiStartResponse, ApiTranscriptEntry, ApiUsage } from "./api.ts";
-import { type AdminBackend, NOT_FOUND, qualify, refusal, unqualify } from "./backend.ts";
+import {
+  type ApiAgents,
+  type ApiApp,
+  type ApiConversation,
+  type ApiEvent,
+  type ApiPage,
+  type ApiResetResponse,
+  type ApiSendResponse,
+  type ApiStartResponse,
+  type ApiTranscriptEntry,
+  type ApiUsage,
+  attachmentsProblem,
+} from "./api.ts";
+import { type AdminBackend, type Message, NOT_FOUND, qualify, refusal, unqualify } from "./backend.ts";
 import { CALL } from "./calls.ts";
 import { INDEX_KEY, type IndexPage } from "./conversation-index.ts";
 
@@ -49,9 +63,17 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
   };
   const qualified = (key: string, conversation: ApiConversation): ApiConversation => ({ ...conversation, conversationId: qualify(key, conversation.conversationId) });
   const snapshotOf = (key: string, local: string, ctx: AppContext) => call<ApiEvent>(key, CALL.snapshot, { conversationId: local }, ctx);
+  /** `message` as a call carries it, its images within what an object stores. */
+  const sendable = (message: Message): JsonValue => {
+    const wrong = attachmentsProblem(message.attachments ?? [], "durable");
+    if (wrong !== undefined) throw refusal(wrong.status === 413 ? "too_large" : "invalid_request", wrong.message);
+    return message as unknown as JsonValue;
+  };
 
   return {
     app: (ctx) => call<ApiApp>(INDEX_KEY, CALL.app, null, ctx),
+
+    agents: (ctx) => call<ApiAgents>(INDEX_KEY, CALL.agents, null, ctx),
 
     async conversations(page, ctx) {
       const limit = Math.min(page.limit ?? CONVERSATIONS_PER_PAGE, CONVERSATIONS_PER_PAGE);
@@ -73,8 +95,8 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
     },
 
     async start(message, ctx) {
-      const { key, ...rest } = message;
-      const started = await call<ApiStartResponse>(key, CALL.start, rest, ctx);
+      const { key, agent, ...rest } = message;
+      const started = await call<ApiStartResponse>(key, CALL.start, { agent, ...(sendable(rest) as object) } as JsonValue, ctx);
       return { ...started, conversationId: qualify(key, started.conversationId) };
     },
 
@@ -107,7 +129,7 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
 
     async send(id, message, ctx) {
       const { key, local } = target(id);
-      const sent = await call<ApiSendResponse>(key, CALL.message, { conversationId: local, ...message }, ctx);
+      const sent = await call<ApiSendResponse>(key, CALL.message, { conversationId: local, ...(sendable(message) as object) } as JsonValue, ctx);
       return { key, requestId: sent.requestId, admission: sent.admission };
     },
 

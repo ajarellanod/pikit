@@ -10,10 +10,10 @@ import { type App, type ComponentDefinition, defineApp, defineComponent, silentL
 import { ADMIN_CLIENT_HEADER, type DeliveryReceipt, type OutboundQueue, type PendingPiece } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import Type from "typebox";
-import { OPERATOR_NOTE } from "./api.ts";
+import { MAX_IMAGE_BYTES, OPERATOR_NOTE } from "./api.ts";
 import { CSP } from "./assets.ts";
 import adminApi from "./index.ts";
-import { agents, AUTH, auth, Runtime, type Served, SESSION, serve, sse, ZERO } from "./runtime.test-support.ts";
+import { agents, AUTH, auth, imageOf, PIXEL, Runtime, type Served, SESSION, serve, sse, ZERO } from "./runtime.test-support.ts";
 
 type Subject = Served & { runtime: Runtime };
 
@@ -53,7 +53,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     name: "admin-api",
     provides: ["http.route"],
     requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry", "storage.sql"],
-    optional: ["outbound.queue", "actor.inbox", "actor.mailbox"],
+    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "agent.definition"],
   });
 });
 
@@ -359,6 +359,101 @@ test("sessions: a wrong credential is 401; without the client's header the sessi
     const response = await s.fetch("/admin/api/session", { method, headers: AUTH });
     expect({ method, status: response.status, cookie: response.headers.get("set-cookie") }).toEqual({ method, status: 400, cookie: null });
   }
+});
+
+test("GET /admin/api/agents: the App's agents by name, their model and the names of the tools they are defined with", async () => {
+  const s = await started();
+
+  const response = await s.fetch("/admin/api/agents", { headers: AUTH });
+
+  expect(response.status).toBe(200);
+  expect(await response.json()).toEqual({
+    items: [
+      { name: "assistant", model: "test/model", tools: [] },
+      { name: "searcher", model: "test/search", tools: ["websearch", "lookup"] },
+    ],
+  });
+});
+
+test("POST …/messages with images: they reach the agent's request after the marked text; the text may be empty; the log counts them", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "dashboard:1", agent: "assistant" });
+
+  const response = await s.fetch("/admin/api/conversations/c1/messages", post({ text: "what is this?", attachments: [{ kind: "image", mimeType: "image/png", data: PIXEL }, imageOf(10, "image/webp")] }));
+  expect(response.status).toBe(202);
+  expect(s.runtime.dispatched[0]).toMatchObject({
+    prompt: `${OPERATOR_NOTE}.]\nwhat is this?`,
+    images: [{ mimeType: "image/png", data: PIXEL }, { mimeType: "image/webp", data: imageOf(10).data }],
+  });
+  expect(s.logged.find((each) => each.message.includes("sent a message"))?.fields).toMatchObject({ images: 2 });
+  expect(JSON.stringify(s.logged)).not.toContain(PIXEL);
+
+  expect((await s.fetch("/admin/api/conversations/c1/messages", post({ text: "", attachments: [imageOf(3)] }))).status).toBe(202);
+  expect(s.runtime.dispatched[1]).toMatchObject({ prompt: `${OPERATOR_NOTE}.]\n`, images: [{ mimeType: "image/png" }] });
+  // Without images the request has none.
+  await s.fetch("/admin/api/conversations/c1/messages", post({ text: "plain" }));
+  expect(s.runtime.dispatched[2]?.images).toBeUndefined();
+
+  // A new conversation takes them too.
+  const started2 = await s.fetch("/admin/api/conversations", post({ agent: "assistant", text: "", attachments: [imageOf(3, "image/gif")] }));
+  expect(started2.status).toBe(201);
+  expect(s.runtime.dispatched[3]?.images).toEqual([{ mimeType: "image/gif", data: imageOf(3).data }]);
+});
+
+test("images are checked: more than 4, a type that is not an image the API takes, or not base64 is 400; one over 5 MB, or a larger body, 413; nothing is dispatched", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "dashboard:1", agent: "assistant" });
+  const send = (body: unknown) => s.fetch("/admin/api/conversations/c1/messages", post(body));
+
+  const cases: [unknown, number, string][] = [
+    [{ text: "" }, 400, "invalid_request"],
+    [{ text: "", attachments: [] }, 400, "invalid_request"],
+    [{ text: "hi", attachments: Array.from({ length: 5 }, () => imageOf(3)) }, 400, "invalid_request"],
+    [{ text: "hi", attachments: [imageOf(3, "image/svg+xml")] }, 400, "invalid_request"],
+    [{ text: "hi", attachments: [imageOf(3, "application/pdf")] }, 400, "invalid_request"],
+    [{ text: "hi", attachments: [{ kind: "image", mimeType: "image/png", data: "not base64!" }] }, 400, "invalid_request"],
+    [{ text: "hi", attachments: [{ kind: "file", mimeType: "image/png", data: PIXEL }] }, 400, "invalid_request"],
+    [{ text: "hi", attachments: [imageOf(MAX_IMAGE_BYTES + 1)] }, 413, "too_large"],
+  ];
+  for (const [body, status, error] of cases) {
+    const response = await send(body);
+    expect({ body: JSON.stringify(body).slice(0, 120), status: response.status, error: ((await response.json()) as { error: string }).error }).toEqual({ body: JSON.stringify(body).slice(0, 120), status, error });
+  }
+  // 4 of 5 MB each are taken.
+  expect((await send({ text: "hi", attachments: Array.from({ length: 4 }, () => imageOf(MAX_IMAGE_BYTES)) })).status).toBe(202);
+  // A body larger than any message can be is refused before it is read.
+  const huge = await s.fetch("/admin/api/conversations/c1/messages", { method: "POST", headers: { ...AUTH, "content-type": "application/json", "content-length": String(64 * 1024 * 1024) }, body: "{}" });
+  expect(huge.status).toBe(413);
+  // A new conversation is checked the same, and none is made.
+  expect((await s.fetch("/admin/api/conversations", post({ agent: "assistant", text: "hi", attachments: [imageOf(MAX_IMAGE_BYTES + 1)] }))).status).toBe(413);
+  expect(s.runtime.dispatched.length).toBe(1);
+  expect([...s.runtime.pointers.keys()]).toEqual(["dashboard:1"]);
+});
+
+test("webSearch: the agent's first line asks it to search the web, for an agent with the websearch tool; another is 400 and nothing is made", async () => {
+  const s = await started();
+  s.runtime.add({ conversationId: "c1", key: "telegram:1", agent: "searcher" });
+  s.runtime.add({ conversationId: "c2", key: "telegram:2", agent: "assistant" });
+
+  expect((await s.fetch("/admin/api/conversations/c1/messages", post({ text: "news?", webSearch: true }))).status).toBe(202);
+  expect(s.runtime.dispatched[0]?.prompt).toBe(
+    `${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it; search the web for it with the websearch tool before you answer.]\nnews?`,
+  );
+  expect(s.logged.find((each) => each.message.includes("sent a message"))?.fields).toMatchObject({ webSearch: true });
+
+  const refused = await s.fetch("/admin/api/conversations/c2/messages", post({ text: "news?", webSearch: true }));
+  expect(refused.status).toBe(400);
+  expect(await refused.json()).toMatchObject({ error: "invalid_request", message: expect.stringContaining("websearch") });
+  // `false` is a message like any other.
+  expect((await s.fetch("/admin/api/conversations/c2/messages", post({ text: "hi", webSearch: false }))).status).toBe(202);
+  expect(s.runtime.dispatched[1]?.prompt).toBe(`${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it.]\nhi`);
+
+  const own = (await (await s.fetch("/admin/api/conversations", post({ agent: "searcher", text: "find it", webSearch: true }))).json()) as { key: string };
+  expect(s.runtime.dispatched[2]?.prompt).toBe(`${OPERATOR_NOTE}: search the web for it with the websearch tool before you answer.]\nfind it`);
+  expect(s.runtime.pointers.has(own.key)).toBe(true);
+  expect((await s.fetch("/admin/api/conversations", post({ agent: "assistant", text: "find it", webSearch: true }))).status).toBe(400);
+  expect(s.runtime.pointers.size).toBe(3);
+  expect(s.runtime.dispatched.length).toBe(3);
 });
 
 test("POST …/messages: a bad body is 400 and dispatches nothing", async () => {

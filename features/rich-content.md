@@ -18,10 +18,12 @@ text where it cannot.
   `AppMessageParts`, a `fallback` text per part, `ChannelTransport.draws`, and
   `InboundMessage.replyTo`. What is not built:
   - the first part kinds (`choice`, `image`, `file`), each declared by the component that needs it;
-  - `InboundMessage.attachments` and images in `AgentRequest`, added with the first producer
-    (`packages/contracts/src/inbound.ts`: "adding one is compatible, removing one is not");
+  - `InboundMessage.attachments`, added with the first channel that downloads media
+    (`packages/contracts/src/inbound.ts`: "adding one is compatible, removing one is not"). Images in
+    `AgentRequest` are built (`AgentRequest.images`, base64 in the user message): their first producer
+    is the dashboard (admin-api's `attachments`, at most 4 images of 5 MB, 1 MB in all on Cloudflare);
   - storage of media: bytes in `storage.blob` with a reference in the transcript (R2 on Cloudflare,
-    where a SQL row is at most 2 MB, C7);
+    where a SQL row is at most 2 MB, C7). Until then an image is stored inline in the transcript;
   - a tool that produces a file as a part of the answer.
 - Absent: text only, as today; a part folds into its fallback.
 

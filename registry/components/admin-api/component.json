@@ -23,7 +23,8 @@
   "optional": {
     "capabilities": [
       "outbound.queue",
-      "actor.inbox"
+      "actor.inbox",
+      "agent.definition"
     ]
   },
   "provides": [
@@ -47,7 +48,8 @@
       "optional": [
         "outbound.queue",
         "actor.inbox",
-        "actor.mailbox"
+        "actor.mailbox",
+        "agent.definition"
       ]
     },
     "worker": {

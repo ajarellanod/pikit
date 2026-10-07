@@ -10,7 +10,7 @@ import { BACKGROUND_CONTEXT, createContextKey, defineApp, defineComponent, silen
 import { CONVERSATION, defineAgent } from "@pikit/contracts";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { createDurableRuntime } from "./runtime.ts";
-import { databaseFile, holdTool, openWorker, releasableHold, scriptedAgent, scriptedProvider, type Worker } from "./test-support.ts";
+import { databaseFile, holdTool, type ModelRequest, openWorker, releasableHold, scriptedAgent, scriptedProvider, type Worker } from "./test-support.ts";
 import { openSqliteDatabase } from "./testing/sqlite.ts";
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -54,6 +54,32 @@ describe("answers", () => {
     expect(second.messages.map((message) => message.role)).toEqual(["user", "assistant"]);
     expect(second.messages[0]).toMatchObject({ role: "user", content: "two" });
     expect(second.text).toBe("answer: two");
+  });
+
+  test("a message with images: the model's request has them after the prompt, as pi-ai's ImageContent, and the run's user message keeps them", async () => {
+    const requests: ModelRequest[] = [];
+    const w = await worker({ providers: [scriptedProvider({ onRequest: (request) => void requests.push(structuredClone(request)) })] });
+    const conversation = await w.conversation();
+    const images = [
+      { mimeType: "image/png", data: "iVBORw0KGgo=" },
+      { mimeType: "image/jpeg", data: "/9j/4AAQ" },
+    ];
+
+    await w.runtime.dispatch({ requestId: "r1", conversation, prompt: "what is in these?", images }, w.ctx);
+    const result = await w.result("r1");
+
+    const user = requests[0]?.messages.find((message) => message.role === "user");
+    expect(user?.content).toEqual([
+      { type: "text", text: "what is in these?" },
+      { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" },
+      { type: "image", mimeType: "image/jpeg", data: "/9j/4AAQ" },
+    ]);
+    expect(result.text).toBe("answer: what is in these?");
+    expect(result.messages[0]).toMatchObject({ role: "user", content: user?.content });
+    // Without images the prompt stays a string, as before.
+    await w.dispatch("r2", "and now?", conversation);
+    await w.result("r2");
+    expect(requests.at(-1)?.messages.findLast((message) => message.role === "user")?.content).toBe("and now?");
   });
 
   test("a run with a tool: the tool call, its result and the answer", async () => {

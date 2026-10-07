@@ -47,11 +47,20 @@ export const auth = defineComponent({
   },
 });
 
-/** The App's agents: `assistant` (`agent.definition`; admin-api reads only its key). */
+/** The App's agents (`agent.definition`): `assistant`, without tools; `searcher`, with `websearch` and a tool object of its own. */
 export const agents = defineComponent({
   name: "agents-test",
-  setup: (pikit) => pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "test/model" }),
+  setup: (pikit) => {
+    pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "test/model" });
+    pikit.provideKeyed("agent.definition", "searcher", { name: "searcher", model: "test/search", tools: ["websearch", { name: "lookup" } as never] });
+  },
 });
+
+/** A 1×1 PNG, base64. */
+export const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
+
+/** An image attachment of `bytes` bytes (base64 of zeros). */
+export const imageOf = (bytes: number, mimeType = "image/png") => ({ kind: "image" as const, mimeType, data: Buffer.alloc(bytes).toString("base64") });
 
 export const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as unknown as Usage;
 

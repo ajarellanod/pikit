@@ -8,7 +8,8 @@
  * resets one and is refused an action on the one left behind, while the new one takes a message at
  * once; the operator starts a conversation of the
  * dashboard's own, listed first as soon as its message is dispatched, and its agent answers there. The
- * index object, which runs the same App, holds no conversation.
+ * index object, which runs the same App, holds no conversation. And an operator's images, the most a
+ * message carries on Cloudflare (1 MB), stored in a real object's SQLite, answered, and read back.
  */
 
 import { BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
@@ -16,7 +17,7 @@ import type { ActorMailbox, AdminAuth } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { afterEach, expect, it, vi } from "vitest";
-import { OPERATOR_NOTE } from "../../../registry/components/admin-api/files/src/pikit/admin-api/api.ts";
+import { MAX_DURABLE_IMAGE_BYTES, OPERATOR_NOTE } from "../../../registry/components/admin-api/files/src/pikit/admin-api/api.ts";
 import adminApi, { worker as adminApiWorker } from "../../../registry/components/admin-api/files/src/pikit/admin-api/index.ts";
 import { INDEX_KEY } from "../../../registry/components/admin-api/files/src/pikit/admin-api/conversation-index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
@@ -174,6 +175,42 @@ it("the Worker lists the objects' conversations from the index, reads and follow
     expect(app.target).toBe("durable");
     expect(app.components.map((c) => c.name)).toEqual(expect.arrayContaining(["runtime-pi", "admin-api"]));
     await expect(worker.mailbox().call(INDEX_KEY, "admin-api.conversation", { conversationId: "1" }, worker.app.context())).rejects.toMatchObject({ code: "not_found" });
+  } finally {
+    await worker.stop();
+  }
+});
+
+it("an operator's images, 1 MB in all, are stored in the object, reach the agent and come back in the transcript; the agents are the objects' App's", async () => {
+  const answers: string[] = [];
+  composeObjects([storageDo, storageKvSql, platformCloudflare, ...model(), runtimePi, conversationsKv, auth, adminApi, channelActor(answers)]);
+  const worker = await workerApp();
+  try {
+    const agents = (await (await worker.fetch("/admin/api/agents")).json()) as { items: { name: string; tools: string[] }[] };
+    expect(agents.items.map(({ name, tools }) => ({ name, tools }))).toEqual([{ name: "scripted", tools: ["hold"] }]);
+
+    // The most a message carries on Cloudflare, in two images: a Durable Object row holds 2 MB.
+    const half = btoa("x".repeat(MAX_DURABLE_IMAGE_BYTES / 2 - 2));
+    const attachments = [
+      { kind: "image", mimeType: "image/png", data: half },
+      { kind: "image", mimeType: "image/jpeg", data: half },
+    ];
+    const started = (await (
+      await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "scripted", text: "look", attachments }) })
+    ).json()) as { key: string; conversationId: string };
+    await vi.waitFor(() => expect(answers).toContain(`${started.key}: answer: ${OPERATOR_NOTE}.]\nlook`), { timeout: 10_000 });
+
+    const transcript = (await (await worker.fetch(`/admin/api/conversations/${id(started.conversationId)}/transcript`)).json()) as {
+      items: { messages: { role: string; content: unknown }[] }[];
+    };
+    const user = transcript.items.flatMap((entry) => entry.messages).find((message) => message.role === "user");
+    expect(user?.content).toEqual([
+      { type: "text", text: `${OPERATOR_NOTE}.]\nlook` },
+      { type: "image", mimeType: "image/png", data: half },
+      { type: "image", mimeType: "image/jpeg", data: half },
+    ]);
+    // More is refused in the Worker, before any object is asked.
+    const big = await worker.fetch("/admin/api/conversations", { method: "POST", body: JSON.stringify({ agent: "scripted", text: "look", attachments: [...attachments, attachments[0]] }) });
+    expect(big.status).toBe(413);
   } finally {
     await worker.stop();
   }

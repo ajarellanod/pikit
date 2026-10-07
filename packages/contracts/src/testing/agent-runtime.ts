@@ -85,6 +85,8 @@ type Recorded = { [K in AgentEventName]: { name: K; payload: AppEvents[K] } }[Ag
 type Result = AppEvents["agent.settled"] | AppEvents["agent.failed"];
 
 const GROUP = "agent.runtime";
+/** A 1×1 transparent PNG, base64: the image of the images case. */
+const PIXEL = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=";
 
 export function createAgentRuntimeConformance(
   factory: () => AgentRuntimeFixture | Promise<AgentRuntimeFixture>,
@@ -123,6 +125,17 @@ export function createAgentRuntimeConformance(
       const result = await w.result("r1");
       expect([result.kind, result.text, result.requestIds], ["completed", "answer: hello", ["r1"]], "result");
       same(result.conversation, conversation, "result conversation");
+    }),
+
+    runtimeCase("a message with images is admitted and answered like any other (the script answers its text)", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const images = [{ mimeType: "image/png", data: PIXEL }];
+
+      const admission = await s.within(w.runtime.dispatch({ requestId: "r1", conversation, prompt: "look at this", images }, w.app.context()), "dispatch(r1)");
+      expect(admission, { kind: "started", requestId: "r1" }, "admission");
+      const result = await w.result("r1");
+      expect([result.kind, result.text, result.requestIds], ["completed", "answer: look at this", ["r1"]], "result");
     }),
 
     runtimeCase("messages to a busy conversation are queued, and the next run takes them together", async (s) => {

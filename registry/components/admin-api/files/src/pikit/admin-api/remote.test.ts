@@ -10,12 +10,13 @@ import { afterEach, expect, test } from "bun:test";
 import { type App, type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type ActorCallHandler, ActorCallError, type ActorInboxHandler, type ActorMailbox, answerCall, callResult, type JsonValue } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import { type ApiConversation, type ApiEvent, OPERATOR_NOTE } from "./api.ts";
+import { type ApiConversation, type ApiEvent, MAX_DURABLE_IMAGE_BYTES, OPERATOR_NOTE } from "./api.ts";
 import { qualify, unqualify } from "./backend.ts";
 import { INDEX_KEY } from "./conversation-index.ts";
 import adminApi, { worker } from "./index.ts";
 import { CONVERSATIONS_PER_PAGE, polled } from "./remote.ts";
-import { agents, AUTH, auth, Runtime, type Served, serve, sse } from "./runtime.test-support.ts";
+import { ANSWER_CHARS } from "./calls.ts";
+import { agents, AUTH, auth, imageOf, PIXEL, Runtime, type Served, serve, sse } from "./runtime.test-support.ts";
 
 const copy = (value: JsonValue): JsonValue => JSON.parse(JSON.stringify(value)) as JsonValue;
 
@@ -308,6 +309,66 @@ test("a conversation of the dashboard's own on the Worker: one call to the objec
   const unknown = await w.fetch("/admin/api/conversations", post({ agent: "nobody", text: "hi" }));
   expect(unknown.status).toBe(400);
   expect(await unknown.json()).toMatchObject({ error: "unknown_agent" });
+});
+
+test("the agents on the Worker are the index object's App's, one call", async () => {
+  const { platform, worker: w } = await cloud();
+
+  const response = await w.fetch("/admin/api/agents", { headers: AUTH });
+
+  expect(await response.json()).toEqual({
+    items: [
+      { name: "assistant", model: "test/model", tools: [] },
+      { name: "searcher", model: "test/search", tools: ["websearch", "lookup"] },
+    ],
+  });
+  expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.agents`]);
+});
+
+test("images and a web search cross the call to the object; images over 1 MB in all are 413 before any call; a web search the agent cannot do is the object's 400", async () => {
+  const { platform, worker: w } = await cloud();
+  const runtime = await chat(platform, "telegram:1");
+  const path = `/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/messages`;
+
+  const sent = await w.fetch(path, post({ text: "look", attachments: [{ kind: "image", mimeType: "image/png", data: PIXEL }] }));
+  expect(sent.status).toBe(202);
+  expect(runtime.dispatched[0]).toMatchObject({ prompt: `${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it.]\nlook`, images: [{ mimeType: "image/png", data: PIXEL }] });
+
+  platform.calls.length = 0;
+  const big = await w.fetch(path, post({ text: "look", attachments: [imageOf(MAX_DURABLE_IMAGE_BYTES / 2), imageOf(MAX_DURABLE_IMAGE_BYTES / 2 + 1)] }));
+  expect(big.status).toBe(413);
+  expect(await big.json()).toMatchObject({ error: "too_large", message: expect.stringContaining("Cloudflare") });
+  const started = await w.fetch("/admin/api/conversations", post({ agent: "assistant", text: "look", attachments: [imageOf(MAX_DURABLE_IMAGE_BYTES + 1)] }));
+  expect(started.status).toBe(413);
+  expect(platform.calls).toEqual([]);
+
+  const search = await w.fetch(path, post({ text: "news?", webSearch: true }));
+  expect(search.status).toBe(400);
+  expect(await search.json()).toMatchObject({ error: "invalid_request", message: expect.stringContaining("websearch") });
+  expect(runtime.dispatched.length).toBe(1);
+
+  const own = (await (await w.fetch("/admin/api/conversations", post({ agent: "searcher", text: "find it", webSearch: true, attachments: [imageOf(8, "image/jpeg")] }))).json()) as { key: string };
+  const { runtime: theirs } = await platform.object(own.key);
+  expect(theirs.dispatched[0]).toMatchObject({
+    conversation: { agent: "searcher" },
+    prompt: `${OPERATOR_NOTE}: search the web for it with the websearch tool before you answer.]\nfind it`,
+    images: [{ mimeType: "image/jpeg", data: imageOf(8).data }],
+  });
+});
+
+test("a transcript page too long for a call's answer (images inline) is answered shorter, until it fits", async () => {
+  const { platform, worker: w } = await cloud();
+  const runtime = await chat(platform, "telegram:1");
+  const image = "A".repeat(Math.ceil(ANSWER_CHARS / 2.5));
+  runtime.transcripts.set(
+    "1",
+    ["e3", "e2", "e1"].map((id) => ({ id, kind: "message", messages: [{ role: "user", content: [{ type: "image", mimeType: "image/png", data: image }] }] })),
+  );
+
+  const page = (await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/transcript?limit=4`, { headers: AUTH })).json()) as { items: { id: string }[] };
+
+  expect(page.items.map((each) => each.id)).toEqual(["e3", "e2"]);
+  expect(runtime.pages.slice(-2)).toEqual([{ limit: 4 }, { limit: 2 }]);
 });
 
 test("live events on the Worker: the object's snapshot first, as server-sent events", async () => {

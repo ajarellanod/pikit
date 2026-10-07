@@ -77,7 +77,8 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 - **Admission.** `dispatch` runs in the conversation's line: a commit looks the request id up
   (`duplicate` if pi-durable has it) and, in the same commit, applies `prepare` and records the
   admission's time (`pikit.admissions`, below); then
-  `submit({ type: "input", requestId })`. The status the creating commit published (`queued` in the
+  `submit({ type: "input", requestId })`, its content the prompt, then the request's images (pi-ai's
+  `ImageContent`) when it has some. The status the creating commit published (`queued` in the
   inbox, or `placed`) gives `queued` or `started`. An input is a **follow-up** unless the request
   steers (`whenBusy: "steer"`). Follow-ups are placed all at once (`followUpMode: "all"`): the
   messages queued while a run goes start the next run together. Its `agent.started` names the first

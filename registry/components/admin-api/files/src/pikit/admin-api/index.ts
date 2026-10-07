@@ -6,8 +6,8 @@
  *   data and are served to anyone (`assets.ts`), under a Content-Security-Policy. They are a module the
  *   dashboard's own build writes (`dashboard-files.ts`), bundled with the app: no disk.
  * - **It reads contracts, never internals:** the composition from `APP_DESCRIPTION` (K13, config
- *   values that look like secrets redacted), the runtime from `agent.observe`. Nothing it reads
- *   changes anything.
+ *   values that look like secrets redacted), the agents from `agent.definition` (name, model, the
+ *   names of their tools), the runtime from `agent.observe`. Nothing it reads changes anything.
  * - **The dashboard is a channel of its own.** It reads every conversation; it writes only into its
  *   own (`dashboard:<uuid>`, with an agent of the App) and, into another channel's, as a follow-up
  *   (never a steer) whose request id starts with `dashboard:`: a run only such messages started is
@@ -42,7 +42,7 @@
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
 import type { AgentObserver, ConversationRef } from "@pikit/contracts";
 import { createAssets } from "./assets.ts";
-import { createLocalBackend } from "./backend.ts";
+import { agentOf, createLocalBackend } from "./backend.ts";
 import { answerCalls, SEEN } from "./calls.ts";
 import { Config } from "./config.ts";
 import { createConversationIndex, INDEX_KEY, type IndexedConversation } from "./conversation-index.ts";
@@ -69,10 +69,18 @@ export default defineComponent({
     // On Cloudflare (`durable`): the Worker's calls, and the index's messages.
     const inbox = pikit.useOptional("actor.inbox");
     const mailbox = pikit.useOptional("actor.mailbox");
+    // The agents, for `GET /admin/api/agents` and a web search asked of one.
+    const definitions = pikit.useKeyed("agent.definition");
     const durable = pikit.target === "durable";
     const assets = createAssets(DASHBOARD_FILES);
     const index = createConversationIndex(() => sql.get());
-    const contracts = { observe: () => observe.get(), runtime: () => runtime.get(), registry: () => registry.get(), index: () => index };
+    const contracts = {
+      observe: () => observe.get(),
+      runtime: () => runtime.get(),
+      registry: () => registry.get(),
+      index: () => index,
+      agents: () => definitions.keys().sort().map((name) => agentOf(name, definitions.get(name))),
+    };
     // A server's: a conversation no message reached yet is its key's by the index's row (a reset's new one).
     const backend = createLocalBackend({ ...contracts, keyOf: (conversationId) => index.keyOf(conversationId) });
 

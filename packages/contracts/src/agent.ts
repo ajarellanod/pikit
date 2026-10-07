@@ -171,15 +171,34 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
 }
 
 /**
+ * An image a message carries (pi-ai's `ImageContent`): what a model that reads images sees with the
+ * prompt.
+ */
+export interface AgentImage {
+  /** Its media type: `image/png`, `image/jpeg`, `image/webp` or `image/gif`. */
+  mimeType: string;
+  /** Its bytes, base64 (standard alphabet, padded), without a `data:` prefix. */
+  data: string;
+}
+
+/**
  * One inbound message for a conversation. The agent is `conversation.agent`: a resumed run has no
- * request to carry a definition, so the name is the only truth. Images, quoted messages and
- * message prompts are added with the components that produce them.
+ * request to carry a definition, so the name is the only truth. Quoted messages and message prompts
+ * are added with the components that produce them.
  */
 export interface AgentRequest {
   /** Logical identity of the message (`InboundMessage.id`); the request id pi-durable deduplicates by. */
   requestId: string;
   conversation: ConversationRef;
   prompt: string;
+  /**
+   * Images the message carries, in order. The runtime puts them in the user message after the prompt's
+   * text, so the model reads them with it (a model that reads no images is told one was omitted), and
+   * they stay in the transcript. Whoever builds the request bounds their number
+   * and size: the runtime stores them as they are (on Cloudflare one Durable Object row holds at most
+   * 2 MB). Absent or empty: a message of text only.
+   */
+  images?: readonly AgentImage[];
   /**
    * What the message does to a conversation with a run going. `followUp` (the default): it waits for
    * that run to end, and the next run answers it. `steer`: it joins the run in progress after the

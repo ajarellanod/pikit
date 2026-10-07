@@ -9,7 +9,8 @@
  * - **`ConversationRef.conversationId` is the pi-durable conversation id** (a number, as a string).
  *   `createConversation` makes one (`conversations: "ownerless"`, a server's many conversations in one
  *   storage; `"root"`, the root conversation first, as in a per-chat Durable Object).
- * - **`dispatch`** submits the prompt as an `input` with the request id: a request id pi-durable already
+ * - **`dispatch`** submits the prompt (and its images after it, `inputOf`) as an `input` with the
+ *   request id: a request id pi-durable already
  *   holds is `duplicate`; an input it queued in the inbox (a run is going) is `queued`; an input it placed
  *   at once is `started`. An input is a follow-up unless the request steers (`whenBusy: "steer"`).
  *   Follow-ups are placed all at once (`followUpMode: "all"`): the messages queued while a run goes start
@@ -48,6 +49,7 @@ import {
   type Storage,
   type SubmissionRecord,
   type TaskInspection,
+  type UserInput,
   createRegistry,
 } from "@earendil-works/pi-durable";
 import { type AppContext, type AppEvents, withContextValue } from "@pikit/core";
@@ -848,7 +850,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           admitting.set(key, undefined);
           try {
             const whenBusy = request.whenBusy === "steer" ? ({ whenBusy: "steer" } as const) : {};
-            const submission = await conversation.submit({ type: "input", content: request.prompt, requestId, ...whenBusy }, toChord(ctx));
+            const submission = await conversation.submit({ type: "input", content: inputOf(request), requestId, ...whenBusy }, toChord(ctx));
             const status = admitting.get(key) ?? (await submission.status(toChord(ctx))).status;
             return { kind: status === "queued" ? "queued" : "started", requestId } as const;
           } catch (error) {
@@ -1050,4 +1052,14 @@ async function untilAborted(work: Promise<unknown>, signal: AbortSignal | undefi
   }
   await Promise.race(racers);
   if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+}
+
+/**
+ * What the model reads of `request`: its prompt, and its images after it as pi-ai's `ImageContent`
+ * (`AgentRequest.images`); the prompt alone when it has none.
+ */
+function inputOf(request: AgentRequest): UserInput {
+  const images = request.images ?? [];
+  if (images.length === 0) return request.prompt;
+  return [{ type: "text", text: request.prompt }, ...images.map(({ mimeType, data }) => ({ type: "image" as const, mimeType, data }))];
 }
