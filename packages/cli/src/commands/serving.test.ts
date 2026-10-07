@@ -12,6 +12,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PACKAGES_DIR } from "../paths.ts";
 import { emptyManifest, writeProjectManifest } from "../project/pikit-json.ts";
+import type { AppDescription } from "../project/probe.ts";
+import { servingGaps } from "../project/serving.ts";
 import { kitSpecifier } from "../project/vendor.ts";
 import { runCli } from "../testing/cli.ts";
 
@@ -72,6 +74,21 @@ function registry(): string {
   writeFileSync(join(root, "registry.json"), JSON.stringify({ version: 1, components: index }));
   return root;
 }
+
+test("on Cloudflare the objects' App needs no server for its routes: only the Worker's calls reach it (admin-api registers its routes in both Apps)", () => {
+  const app = (routes: string[], servers: string[] = []): AppDescription => ({
+    components: [...routes.map((name) => ({ name, provides: ["http.route"], requires: [], optional: [] })), ...servers.map((name) => ({ name, provides: [], requires: [], optional: ["http.route"] }))],
+    capabilities: { "http.route": { providers: routes } },
+    pipelines: {},
+    config: {},
+    stagesBy: {},
+  });
+  const probed = (description: AppDescription, worker?: AppDescription) => ({ ok: true as const, listed: [], agents: [], description, ...(worker !== undefined && { worker }) });
+  // A server project's App with routes and no server: a gap.
+  expect(servingGaps(probed(app(["admin-api"]))).map((gap) => gap.kind)).toEqual(["server"]);
+  // On Cloudflare: neither the objects' App nor the Worker's (whose host serves them) has one.
+  expect(servingGaps(probed(app(["admin-api"]), app(["admin-api-worker"])))).toEqual([]);
+});
 
 const NO_ROUTER = "channel-fake admits messages, but no component has a route.resolve stage: no message would be answered. Add a router (a component with a route.resolve stage)";
 const NO_SERVER = "channel-fake provides http.route, but no component serves it: no request would reach it. Add a server (a component that uses http.route)";

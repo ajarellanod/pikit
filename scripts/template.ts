@@ -2,9 +2,10 @@
  * `bun scripts/template.ts <template> <outDir> [--repo <url>]`: a "Deploy to Cloudflare" template,
  * made by pikit itself (templates/README.md).
  *
- * 1. `pikit new <name> --target <target> --preset <preset>` in a staging directory, with this
+ * 1. `pikit new <name> --target <target> --preset <preset> [--ui]` in a staging directory, with this
  *    checkout's CLI, registry and kit, exactly as a person would (no terminal: nothing is asked);
- * 2. the template's adjustments (`adjust`): the Worker's `name` in `wrangler.jsonc`, the secrets the
+ * 2. the template's adjustments (`adjust`): the Worker's `name` in `wrangler.jsonc`, and the Bun its
+ *    dashboard's build runs with (`pinBun`), the secrets the
  *    button asks for in `.dev.vars.example` and their descriptions in `package.json`'s
  *    `cloudflare.bindings`, the `deploy` script, npm's `package-lock.json` instead of `bun.lock`,
  *    `.gitignore`, and the template's README;
@@ -33,6 +34,13 @@ export interface Secret {
 export interface Template {
   preset: string;
   target: string;
+  /** Made with the dashboard (`pikit new --ui`). */
+  ui: boolean;
+  /**
+   * The Bun the dashboard's build runs with, through npx (`pinBun`): Workers Builds has an older one
+   * (1.2.15) than its lockfile needs. The installer's pin (`installer/install.sh`, `BUN_PINNED`).
+   */
+  bun: string;
   /** The project's name: `package.json`'s, and the Worker's in `wrangler.jsonc`. */
   name: string;
   description: string;
@@ -52,6 +60,8 @@ export const TEMPLATES: Record<string, Template> = {
   "telegram-cloudflare": {
     preset: "telegram-cloudflare",
     target: "durable",
+    ui: true,
+    bun: "1.4.2",
     name: "pikit-telegram-bot",
     description: "An AI agent in Telegram, on Cloudflare: a pikit project.",
     repo: "https://github.com/ajarellanod/pikit-telegram-cloudflare",
@@ -75,6 +85,11 @@ export const TEMPLATES: Record<string, Template> = {
         name: "OPENROUTER_API_KEY",
         description:
           "Your [OpenRouter API key](https://openrouter.ai/settings/keys): the model your agent runs on. You pay OpenRouter for its tokens; a credit limit on the key caps it.",
+      },
+      {
+        name: "PIKIT_ADMIN_TOKEN",
+        description:
+          "The key to your bot's dashboard (`/admin/` on your Worker's URL), where you read every conversation and can talk to the agent: **32 characters or more**. Run `openssl rand -hex 32`, or type any long random string. Keep it secret: whoever has it can read and write every conversation.",
       },
       {
         name: "BRAVE_API_KEY",
@@ -124,6 +139,24 @@ export function nameWorker(wrangler: string, name: string): string {
   return lines.join("\n");
 }
 
+/** What deployment-cloudflare's `build.command` runs for the dashboard, with the Bun on the PATH. */
+const DASHBOARD_BUILD = "cd src/dashboard && bun install --frozen-lockfile && bun run build";
+
+/**
+ * `wrangler.jsonc` whose dashboard build runs Bun `version` through npx: Workers Builds has an older
+ * Bun (1.2.15), which cannot read the dashboard's `bun.lock`, and a template cannot set the build's
+ * `BUN_VERSION`. Node and npx are there.
+ */
+export function pinBun(wrangler: string, version: string): string {
+  if (!wrangler.includes(DASHBOARD_BUILD)) throw new Error("wrangler.jsonc's build.command no longer runs `" + DASHBOARD_BUILD + "`: update scripts/template.ts's pinBun");
+  const bun = `npx -y bun@${version}`;
+  const pinned = wrangler.replace(DASHBOARD_BUILD, `cd src/dashboard && ${bun} install --frozen-lockfile && ${bun} run build`);
+  return pinned.replace(
+    /^( {2})"build": \{$/m,
+    `$1// A template's: Workers Builds' Bun (1.2.15) cannot read the dashboard's bun.lock, so Bun ${version} runs through npx.\n$1"build": {`,
+  );
+}
+
 /** `.dev.vars.example`: the secrets the button asks for (dotenv), without a value. */
 export function devVarsExample(template: Template): string {
   const header = [
@@ -153,13 +186,17 @@ export function templatePackageJson(text: string, template: Template): string {
   return `${JSON.stringify(out, null, 2)}\n`;
 }
 
-/** `.gitignore` that ships `.dev.vars.example` and keeps Bun's lockfile out (npm's is the one). */
+/**
+ * `.gitignore` that ships `.dev.vars.example` and keeps the project's Bun lockfile out (npm's is the
+ * one). The dashboard's own (`src/dashboard/bun.lock`) stays: its build installs from it.
+ */
 export function templateGitignore(text: string): string {
   return `${text}# A Deploy to Cloudflare template: the secrets' names go in the repository, and npm's lockfile is
 # the one Workers Builds installs with (after \`pikit add\` or \`bun install\`, run \`npm install\`).
+# The dashboard's bun.lock (src/dashboard/) stays: its build installs from it.
 !.dev.vars.example
-bun.lock
-bun.lockb
+/bun.lock
+/bun.lockb
 `;
 }
 
@@ -195,6 +232,7 @@ export function adjust(projectDir: string, key: string, template: Template, kitR
   const path = (file: string) => join(projectDir, file);
   const edit = (file: string, change: (text: string) => string) => writeFileSync(path(file), change(readFileSync(path(file), "utf8")));
   edit("wrangler.jsonc", (text) => nameWorker(text, template.name));
+  if (existsSync(path("src/dashboard/package.json"))) edit("wrangler.jsonc", (text) => pinBun(text, template.bun));
   edit("package.json", (text) => templatePackageJson(text, template));
   edit(".gitignore", templateGitignore);
   // One place the button reads the secrets from: pikit's `.env.example` also lists what it does not ask.
@@ -203,6 +241,9 @@ export function adjust(projectDir: string, key: string, template: Template, kitR
   writeFileSync(path("README.md"), templateReadme(key, template));
   rmSync(path("bun.lock"), { force: true });
   rmSync(path("node_modules"), { recursive: true, force: true });
+  // The dashboard's packages and build: the build makes them again.
+  rmSync(path("src/dashboard/node_modules"), { recursive: true, force: true });
+  rmSync(path("src/dashboard/dist"), { recursive: true, force: true });
   portableSkills(projectDir, kitRoot);
 }
 
@@ -281,8 +322,9 @@ export async function makeTemplate(key: string, outDir: string, options: MakeOpt
   const staging = mkdtempSync(join(tmpdir(), "pikit-template-"));
   const project = join(staging, template.name);
   try {
-    say(`pikit new ${template.name} --target ${template.target} --preset ${template.preset}`);
-    await run([process.execPath, MAIN, "new", project, "--target", template.target, "--preset", template.preset], staging, { NO_COLOR: "1" });
+    const ui = template.ui ? ["--ui"] : [];
+    say(`pikit new ${template.name} --target ${template.target} --preset ${template.preset}${template.ui ? " --ui" : ""}`);
+    await run([process.execPath, MAIN, "new", project, "--target", template.target, "--preset", template.preset, ...ui], staging, { NO_COLOR: "1" });
     adjust(project, key, template);
 
     // The kit's tarballs `outDir` has under the same name have the same files: keep their bytes, which

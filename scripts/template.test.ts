@@ -16,6 +16,7 @@ import { afterAll, expect, test } from "bun:test";
 import { chmodSync, cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { UI_COMPONENTS } from "../packages/cli/src/commands/ui.ts";
 import { DEFAULT_REGISTRY } from "../packages/cli/src/paths.ts";
 import { setConfigEntry } from "../packages/cli/src/project/config-file.ts";
 import { withOffers } from "../packages/cli/src/project/offers.ts";
@@ -30,6 +31,7 @@ import {
   makeTemplate,
   mirror,
   nameWorker,
+  pinBun,
   TEMPLATES,
   templateGitignore,
   templatePackageJson,
@@ -51,6 +53,11 @@ function temp(): string {
 }
 
 /** Telegram bot tokens and OpenRouter, Brave and Cloudflare keys, as they look. */
+/**
+ * Dummies the components' tests need shaped as real ones, removed before `TOKEN_PATTERNS` look: a
+ * Telegram token admin-api's test checks is redacted from `/admin/api/app`.
+ */
+const KNOWN_DUMMIES = ["123456789:AAEabcdefghijklmnopqrstuvwxyz012345"];
 const TOKEN_PATTERNS = [/\b\d{8,10}:[A-Za-z0-9_-]{35}\b/, /sk-or-v1-[0-9a-f]{20,}/, /\bBSA[A-Za-z0-9_-]{20,}/, /\bsk-[A-Za-z0-9]{32,}/, /CLOUDFLARE_API_TOKEN=[A-Za-z0-9_-]{30,}/];
 
 test("wrangler.jsonc: pikit's names no Worker; the template's names it, keeping the rest and its comments", () => {
@@ -70,14 +77,28 @@ test("wrangler.jsonc: pikit's names no Worker; the template's names it, keeping 
   expect(() => nameWorker(WRANGLER.replace('// No "name"', "// Nameless"), "x")).toThrow(/update scripts\/template.ts/);
 });
 
+test("the dashboard's build runs the installer's Bun through npx, the rest of wrangler.jsonc as it was", () => {
+  const installer = readFileSync(join(import.meta.dir, "..", "installer", "install.sh"), "utf8");
+  expect(TEMPLATE.bun).toBe(/BUN_PINNED="\$\{PIKIT_BUN_VERSION:-([^}]+)\}"/.exec(installer)?.[1] as string);
+  const pinned = pinBun(WRANGLER, "1.4.2");
+  const build = (Bun.JSONC.parse(pinned) as { build: { command: string } }).build.command;
+  expect(build).toBe("if [ -f src/dashboard/package.json ]; then cd src/dashboard && npx -y bun@1.4.2 install --frozen-lockfile && npx -y bun@1.4.2 run build; fi");
+  const { build: _, ...rest } = Bun.JSONC.parse(pinned) as Record<string, unknown>;
+  const { build: __, ...before } = Bun.JSONC.parse(WRANGLER) as Record<string, unknown>;
+  expect(rest).toEqual(before);
+  expect(pinned).toContain("// A template's: Workers Builds' Bun (1.2.15) cannot read the dashboard's bun.lock, so Bun 1.4.2 runs through npx.\n  \"build\": {");
+  expect(() => pinBun(pinned, "1.4.2")).toThrow(/update scripts\/template.ts's pinBun/);
+});
+
 test("the button asks for every secret the components need, and nothing else", () => {
   const registry = openRegistry(DEFAULT_REGISTRY);
-  const { order } = withOffers(registry, registry.preset(TEMPLATE.preset), [TEMPLATE.target]);
+  const components = [...registry.preset(TEMPLATE.preset), ...(TEMPLATE.ui ? UI_COMPONENTS : [])];
+  const { order } = withOffers(registry, components, [TEMPLATE.target]);
   const declared = order.flatMap((component) => registry.manifest(component).environment ?? []);
   const asked = TEMPLATE.secrets.map((secret) => secret.name);
   // Each one a component declares is asked, or said why not; and each asked is one a component reads.
   expect([...asked, ...Object.keys(TEMPLATE.notAsked)].sort()).toEqual(declared.map((variable) => variable.name).sort());
-  expect(asked).toEqual(["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "BRAVE_API_KEY"]);
+  expect(asked).toEqual(["TELEGRAM_BOT_TOKEN", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "PIKIT_ADMIN_TOKEN", "BRAVE_API_KEY"]);
   for (const variable of declared) if (asked.includes(variable.name)) expect(variable.secret).toBe(true);
 
   // .dev.vars.example (dotenv): every secret, without a value.
@@ -110,6 +131,9 @@ test("package.json: the deploy script, a description per secret and binding, the
   expect(descriptions.TELEGRAM_PASSWORD).toContain("change it to log everyone out");
   expect(descriptions.OPENROUTER_API_KEY).toContain("https://openrouter.ai/settings/keys");
   expect(descriptions.BRAVE_API_KEY).toContain("https://api-dashboard.search.brave.com");
+  // admin-auth-token does not start with a shorter one.
+  expect(descriptions.PIKIT_ADMIN_TOKEN).toContain("**32 characters or more**");
+  expect(descriptions.PIKIT_ADMIN_TOKEN).toContain("`/admin/`");
 });
 
 test(".gitignore ships .dev.vars.example and keeps secrets, state and Bun's lockfile out", () => {
@@ -120,7 +144,7 @@ test(".gitignore ships .dev.vars.example and keeps secrets, state and Bun's lock
   writeFileSync(join(repo, ".gitignore"), templateGitignore(pikits));
   const ignored = (file: string) => git("check-ignore", "-q", file).exitCode === 0;
   for (const file of [".dev.vars", ".env", ".env.local", "bun.lock", "bun.lockb", ".wrangler/state", "node_modules/x"]) expect([file, ignored(file)]).toEqual([file, true]);
-  for (const file of [".dev.vars.example", "package-lock.json", "wrangler.jsonc", "vendor/pikit-core-0.0.0-x.tgz"]) expect([file, ignored(file)]).toEqual([file, false]);
+  for (const file of [".dev.vars.example", "package-lock.json", "wrangler.jsonc", "vendor/pikit-core-0.0.0-x.tgz", "src/dashboard/bun.lock"]) expect([file, ignored(file)]).toEqual([file, false]);
 });
 
 test("the README has the button, every secret, the five steps after deploying, costs and security", () => {
@@ -187,8 +211,9 @@ const TIMEOUT = 600_000;
 const OWNER = { id: 3003, first_name: "Grace" };
 const PASSWORD = "template correct horse battery";
 const MODEL_KEY = "sk-or-template-dummy-not-a-key";
+const ADMIN_TOKEN = "template-admin-token-dummy-0123456789abcdef";
 /** This machine's variables the project reads: none may leak into the Worker. */
-const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN"];
+const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "PIKIT_ADMIN_TOKEN", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN"];
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.includes(name))) as Record<string, string>;
 
 async function run(command: string[], cwd: string, env: Record<string, string> = {}) {
@@ -216,11 +241,15 @@ test.skipIf(!E2E)(
     const files = listFiles(out);
     for (const file of [".dev.vars.example", ".gitignore", "README.md", "package-lock.json", "package.json", "pikit.config.ts", "pikit.json", "wrangler.jsonc"]) expect(files).toContain(file);
     for (const file of [".env.example", "bun.lock", ".env", ".dev.vars"]) expect(files).not.toContain(file);
+    // The dashboard's source and lockfile, never its packages or build.
+    for (const file of ["src/dashboard/package.json", "src/dashboard/bun.lock", "src/pikit/admin-api/index.ts"]) expect(files).toContain(file);
+    expect(files.filter((file) => /^src\/dashboard\/(node_modules|dist)\//.test(file))).toEqual([]);
     // Self-contained: nothing names this machine, and nothing looks like a real token.
     for (const file of files.filter((f) => !f.endsWith(".tgz"))) {
       const text = readFileSync(join(out, file), "utf8");
       for (const local of [tmpdir(), join(import.meta.dir, ".."), process.env.HOME ?? "/nowhere"]) expect([file, text.includes(local)]).toEqual([file, false]);
-      for (const pattern of TOKEN_PATTERNS) expect([file, pattern.test(text)]).toEqual([file, false]);
+      const withoutDummies = KNOWN_DUMMIES.reduce((rest, dummy) => rest.replaceAll(dummy, ""), text);
+      for (const pattern of TOKEN_PATTERNS) expect([file, pattern.test(withoutDummies)]).toEqual([file, false]);
     }
     const lock = JSON.parse(readFileSync(join(out, "package-lock.json"), "utf8"));
     expect(lock.packages["node_modules/@pikit/core"].resolved).toMatch(/^file:vendor\/pikit-core-0\.0\.0-[0-9a-f]{10}\.tgz$/);
@@ -247,7 +276,7 @@ test.skipIf(!E2E)(
     const webhookSecret = "template_webhook_secret_0123456789";
     writeFileSync(
       join(clean, ".dev.vars"),
-      `TELEGRAM_BOT_TOKEN=${telegram.token}\nTELEGRAM_WEBHOOK_SECRET=${webhookSecret}\nTELEGRAM_PASSWORD="${PASSWORD}"\nOPENROUTER_API_KEY=${MODEL_KEY}\nBRAVE_API_KEY=none\n`,
+      `TELEGRAM_BOT_TOKEN=${telegram.token}\nTELEGRAM_WEBHOOK_SECRET=${webhookSecret}\nTELEGRAM_PASSWORD="${PASSWORD}"\nOPENROUTER_API_KEY=${MODEL_KEY}\nPIKIT_ADMIN_TOKEN=${ADMIN_TOKEN}\nBRAVE_API_KEY=none\n`,
     );
     let config = readFileSync(join(clean, "pikit.config.ts"), "utf8");
     config = setConfigEntry(config, "channel-telegram-webhook", `{ apiBase: "${telegram.url}" }`);
@@ -312,9 +341,25 @@ test.skipIf(!E2E)(
         [OWNER.id, "\u2713 You're logged in: this chat can talk to the agent now. You may delete your /login message: it contains the password."],
         [OWNER.id, "answer: hello again"],
       ]);
-      expect(openrouter.requests).toHaveLength(1);
       expect(openrouter.requests[0]).toMatchObject({ model: "z-ai/glm-5.3-flash", apiKey: MODEL_KEY });
       expect(JSON.stringify(openrouter.requests)).not.toContain(PASSWORD);
+
+      // The dashboard, built by wrangler's build: its page for anyone, its API for the token only.
+      const page = await fetch(`${base}/admin/`);
+      expect([page.status, page.headers.get("content-type")?.startsWith("text/html")]).toEqual([200, true]);
+      expect(await page.text()).toContain("<div id=\"root\">");
+      expect((await fetch(`${base}/admin/api/app`)).status).toBe(401);
+      const app = await fetch(`${base}/admin/api/app`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
+      expect(app.status).toBe(200);
+      // The owner's chat reaches the conversation index in the background (a message to its object).
+      let listed = "";
+      for (let i = 0; i < 20 && !listed.includes(`telegram:${OWNER.id}`); i++) {
+        if (i > 0) await Bun.sleep(500);
+        const conversations = await fetch(`${base}/admin/api/conversations`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
+        expect(conversations.status).toBe(200);
+        listed = JSON.stringify(await conversations.json());
+      }
+      expect(listed).toContain(`telegram:${OWNER.id}`);
     } finally {
       dev.kill("SIGINT");
       const stopped = await Promise.race([dev.exited, Bun.sleep(15_000).then(() => undefined)]);
@@ -325,7 +370,7 @@ test.skipIf(!E2E)(
       await openrouter.stop();
     }
     expect(logs).toContain("pikit: Worker started");
-    for (const secret of [telegram.token, PASSWORD, webhookSecret, MODEL_KEY]) expect(logs).not.toContain(secret);
+    for (const secret of [telegram.token, PASSWORD, webhookSecret, MODEL_KEY, ADMIN_TOKEN]) expect(logs).not.toContain(secret);
   },
   TIMEOUT,
 );

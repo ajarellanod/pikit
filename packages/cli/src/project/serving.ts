@@ -7,8 +7,10 @@
  *   takes: a channel), needs a `route.resolve` stage in its App; without one, every message ends
  *   `no_route` and nobody is answered;
  * - an App whose components provide `http.route`s needs a component that serves them, one that uses
- *   `http.route` (a server); without one, no request reaches them. Not the Worker's App
- *   (`export const worker`): its host serves the routes itself, with a server it adds (C1).
+ *   `http.route` (a server); without one, no request reaches them. Not on Cloudflare (a project
+ *   with a Worker's App, `export const worker`): the Worker's host serves its routes itself, with a
+ *   server it adds, and the objects' App is reached only by the Worker's calls (C1), so the routes a
+ *   component registers there too (admin-api, which runs on a server as well) are no server's to serve.
  *
  * `doctor` reports each as a problem; `remove` refuses, unless forced, to leave one the project did
  * not have.
@@ -30,12 +32,12 @@ export interface ServingGap {
 /** Each App's gaps; `without`: as if those components were gone (the one `remove` takes out). */
 export function servingGaps(result: Extract<ProbeResult, { ok: true }>, without: (component: string) => boolean = () => false): ServingGap[] {
   return [
-    ...gapsOf(result.description, { where: "", hostServesRoutes: false, without }),
-    ...(result.worker === undefined ? [] : gapsOf(result.worker, { where: " in the Worker's App", hostServesRoutes: true, without })),
+    ...gapsOf(result.description, { where: "", needsServer: result.worker === undefined, without }),
+    ...(result.worker === undefined ? [] : gapsOf(result.worker, { where: " in the Worker's App", needsServer: false, without })),
   ];
 }
 
-function gapsOf(app: AppDescription, { where, hostServesRoutes, without }: { where: string; hostServesRoutes: boolean; without: (component: string) => boolean }): ServingGap[] {
+function gapsOf(app: AppDescription, { where, needsServer, without }: { where: string; needsServer: boolean; without: (component: string) => boolean }): ServingGap[] {
   const components = app.components.filter((c) => !without(c.name));
   const using = (capability: string) => components.filter((c) => [...c.requires, ...c.optional].includes(capability)).map((c) => c.name);
   const gaps: ServingGap[] = [];
@@ -51,7 +53,7 @@ function gapsOf(app: AppDescription, { where, hostServesRoutes, without }: { whe
   }
 
   const routes = [...new Set(app.capabilities[HTTP_ROUTE]?.providers ?? [])].filter((c) => !without(c));
-  if (!hostServesRoutes && routes.length > 0 && using(HTTP_ROUTE).length === 0) {
+  if (needsServer && routes.length > 0 && using(HTTP_ROUTE).length === 0) {
     gaps.push({
       kind: "server",
       where,

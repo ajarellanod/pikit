@@ -8,7 +8,7 @@ commit it was made from.
 
 | Template | Made from | Published at |
 |---|---|---|
-| `telegram-cloudflare` | `pikit new pikit-telegram-bot --target durable --preset telegram-cloudflare` | `github.com/ajarellanod/pikit-telegram-cloudflare` |
+| `telegram-cloudflare` | `pikit new pikit-telegram-bot --target durable --preset telegram-cloudflare --ui` | `github.com/ajarellanod/pikit-telegram-cloudflare` |
 
 ## Making one
 
@@ -24,6 +24,11 @@ It needs what `pikit new` needs (Bun >= 1.4, the npm registry) and npm. It:
    - `wrangler.jsonc` gets the Worker's `name` (`pikit-telegram-bot`), which the button's setup page
      lets its user change. Workers Builds runs wrangler without `--name`, and `deployment-cloudflare`'s
      commands use that name too, so `pikit up` from a clone deploys the same Worker;
+   - `wrangler.jsonc`'s `build.command`, which builds the dashboard before every bundle, runs Bun
+     through npx (`npx -y bun@<template's bun>`, the installer's pin): Workers Builds' own Bun
+     (1.2.15) cannot read the dashboard's `bun.lock`, and a template cannot set the build's
+     `BUN_VERSION`. The dashboard's packages and build (`src/dashboard/node_modules`, `dist`) are left
+     out: the build makes them;
    - `.dev.vars.example` lists the secrets the button asks for (no values), and `package.json`'s
      `cloudflare.bindings` describes each one, and the `CONVERSATION` Durable Object, for the setup
      page. pikit's `.env.example` is removed, so there is one list: it also names
@@ -33,7 +38,7 @@ It needs what `pikit new` needs (Bun >= 1.4, the npm registry) and npm. It:
      deploy command: `wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs`. No
      `build` script: wrangler bundles;
    - `bun.lock` is replaced by npm's `package-lock.json` (below), and `.gitignore` un-ignores
-     `.dev.vars.example` and ignores `bun.lock`;
+     `.dev.vars.example` and ignores the project's `/bun.lock` (the dashboard's stays);
    - the README is `templates/<template>/README.md`, with the button's link, the secrets' table
      (from the same descriptions) and the Worker's name filled in;
 3. makes the output directory hold exactly those files, keeping its `.git` and `node_modules`.
@@ -88,7 +93,8 @@ deploy --dry-run` (the bundle's gzip size, under the Free plan's 3 MB), and `wra
 button's secrets in `.dev.vars` against a local fake Telegram and fake OpenRouter. There the `deploy`
 script, run by a shell with a fake `wrangler deploy` that prints the local Worker's URL, has the Worker
 register its webhook, and the owner, whom nobody listed, logs in with `/login <password>` and is
-answered.
+answered; then the dashboard (built by wrangler's `build.command`) serves its page at `/admin/`, and
+its API answers only with the button's `PIKIT_ADMIN_TOKEN` and lists the owner's chat.
 Nothing is deployed and every key is a dummy. It needs Node >= 22 and npm.
 
 ## Publishing
