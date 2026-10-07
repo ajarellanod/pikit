@@ -1,3 +1,5 @@
+<p align="center"><img src="assets/banner.svg" alt="Pikit: Pi as a service. Built from parts you own." width="100%"></p>
+
 # pikit
 
 A kit to run the [Pi](https://github.com/earendil-works/pi) agent as a durable, multi-agent service:
