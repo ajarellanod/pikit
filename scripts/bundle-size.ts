@@ -1,6 +1,8 @@
 /**
  * The Cloudflare preset's Worker, measured: `pikit new --target durable --preset telegram-cloudflare`
- * in a temporary directory, then the project's own `wrangler deploy --dry-run --outdir`. Exits 1 when
+ * in a temporary directory, then the project's own `wrangler deploy --dry-run --outdir`, named as `pikit
+ * up` names it (`--name`, package.json's `name`: the generated wrangler.jsonc has none, and wrangler
+ * guesses one only when it detects an AI agent running it, never on CI). Exits 1 when
  * the uncompressed bundle (wrangler's "Total Upload") is over Cloudflare's limit. The gzip size is
  * printed for information only: Cloudflare has no compressed limit. Nothing is deployed and no account
  * is needed. CI runs it in the workerd job.
@@ -40,7 +42,7 @@ const parent = mkdtempSync(join(tmpdir(), "pikit-bundle-size-"));
 try {
   const project = join(parent, "bundle-size");
   await run([process.execPath, join(import.meta.dir, "..", "packages", "cli", "src", "main.ts"), "new", "bundle-size", "--target", "durable", "--preset", PRESET], parent);
-  const output = await run([join(project, "node_modules", ".bin", "wrangler"), "deploy", "--dry-run", "--outdir", join(parent, "dist")], project);
+  const output = await run([join(project, "node_modules", ".bin", "wrangler"), "deploy", "--dry-run", "--name", "bundle-size", "--outdir", join(parent, "dist")], project);
   const sizes = /Total Upload: ([\d.]+) KiB \/ gzip: ([\d.]+) KiB/.exec(output);
   if (!sizes) throw new Error(`wrangler printed no "Total Upload: … / gzip: …" line:\n${output}`);
   const total = Number(sizes[1]) * KIB;

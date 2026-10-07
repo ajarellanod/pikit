@@ -15,6 +15,7 @@
 - Other agents may work in this same checkout. Touch only files you created or were asked to change, and commit by explicit paths (`git add <your paths>`), never `git add -A` or `git commit -a`: once that swept another agent's draft into a commit.
 - Taking over a worktree with changes already staged (a previous agent's `git rm`): a plain `git commit` after `git add <paths>` commits everything staged, and once swept a staged deletion into an unrelated commit. Run `git diff --cached --stat` before every commit, or commit with `git commit <paths>`.
 - Working in a separate worktree (`../pikit-<branch>`): give the edit, write and read tools absolute paths into it. A relative path resolves against the session's cwd, the main checkout, where another agent may be working (it once wrote there).
+- wrangler behaves differently when it detects an AI agent running it (`detectAgent()`): with no `name` in the config it names the Worker after the project only for an agent, and fails for a person or on CI. Pass `--name` (as `pikit up` does), and reproduce a CI failure with a clean environment: `env -i PATH="$PATH" HOME="$HOME" CI=true <command>`.
 - pikit is unreleased: never add backward compatibility (aliases, old-format readers, migrations from earlier schemas, "start fresh" handling for old data). Rename and change freely; only provider names (Cloudflare, Docker…) stay as they are, because that is where it deploys.
 
 # Downloaded references
