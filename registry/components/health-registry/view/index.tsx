@@ -4,10 +4,14 @@
  * component's own route, `GET /admin/api/health-registry`, every few seconds.
  */
 
-import { Activity } from "iconoir-react";
-import { Badge } from "@/components/ui/badge";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Activity, Clock, Cube, InfoCircle, ShieldCheck } from "iconoir-react";
+import { useState } from "react";
+import { ValuePill } from "@/components/bui/Chip";
+import EmptyState from "@/components/bui/EmptyState";
+import { FilterChips, type PillTone, StatePill } from "@/components/bui/FilterTable";
+import { Page, PageLoading, Section } from "@/components/bui/Page";
+import RecordsTable, { type RecordColumn, RecordMark, RecordName } from "@/components/bui/RecordsTable";
+import { StatusPill } from "@/components/bui/StatusPill";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { useApi } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
@@ -26,66 +30,97 @@ type HealthView = {
   now: number;
 };
 
-function StatusBadge({ status }: { status: Status }) {
-  if (status === "down") return <Badge variant="destructive">down</Badge>;
-  if (status === "degraded") return <Badge variant="outline">degraded</Badge>;
-  return <Badge variant="secondary">up</Badge>;
-}
+type Row = HealthView["components"][number];
+
+const TONE: Record<Status, PillTone> = { up: "green", degraded: "orange", down: "red" };
+/** Worst first. */
+const RANK: Record<Status, number> = { down: 0, degraded: 1, up: 2 };
 
 function HealthPage() {
   const { data, error } = useApi<HealthView>("/health-registry", 5000);
-  if (error !== undefined) return <ErrorNote error={error} />;
-  if (data === undefined) return <p className="text-muted-foreground">Loading…</p>;
+  const [filter, setFilter] = useState<"all" | Status>("all");
+
+  if (error !== undefined && data === undefined) {
+    return (
+      <Page eyebrow="Health">
+        <ErrorNote error={error} title="The App's health cannot be read" />
+      </Page>
+    );
+  }
+  if (data === undefined) return <PageLoading eyebrow="Health" />;
+
+  const count = (status: Status) => data.components.filter((component) => component.status === status).length;
+  const rows = filter === "all" ? data.components : data.components.filter((component) => component.status === filter);
+  const columns: RecordColumn<Row>[] = [
+    {
+      key: "name",
+      label: "Component",
+      icon: <Cube />,
+      width: 260,
+      sort: (a, b) => a.name.localeCompare(b.name),
+      cell: (row) => (
+        <>
+          <RecordMark name={row.name} />
+          <RecordName>{row.name}</RecordName>
+          {row.essential && <ValuePill className="ml-1.5 shrink-0">essential</ValuePill>}
+        </>
+      ),
+    },
+    { key: "status", label: "Status", icon: <Activity />, width: 140, sort: (a, b) => RANK[a.status] - RANK[b.status], cell: (row) => <StatePill tone={TONE[row.status]}>{row.status}</StatePill> },
+    { key: "reason", label: "Why", icon: <InfoCircle />, width: 360, muted: (row) => row.reason === undefined, title: (row) => row.reason, cell: (row) => row.reason ?? "—" },
+    { key: "since", label: "Since", icon: <Clock />, width: 160, sort: (a, b) => a.since - b.since, cell: (row) => <span className="text-ink-2">{formatAgo(row.since, data.now)}</span> },
+  ];
 
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle className="flex items-center gap-2">
-          The App is <StatusBadge status={data.status} />
-        </CardTitle>
-        <CardDescription>
-          What each component reported last. An essential component ({data.essential.length === 0 ? "none is" : data.essential.join(", ")}) down for{" "}
-          {Math.round(data.graceMs / 1000)} s makes the App down, and its <code>/health</code> fails so that the process is restarted; anything else
-          down or degraded makes it degraded.
+    <Page
+      eyebrow="Health"
+      title={`The App is ${data.status}`}
+      aside={<StatusPill tone={data.status === "up" ? "green" : data.status === "degraded" ? "orange" : "red"}>{data.status}</StatusPill>}
+      description={
+        <>
+          What each component reported last. An essential component (
+          {data.essential.length === 0 ? "none is" : data.essential.map((name) => <ValuePill key={name}>{name}</ValuePill>)}) down for{" "}
+          <ValuePill>{Math.round(data.graceMs / 1000)} s</ValuePill> makes the App down, and its <code className="font-mono text-[12.5px]">/health</code> fails so that the process is
+          restarted; anything else down or degraded makes it degraded.
           {data.downVerdicts > 0 &&
             ` The App was found down ${data.downVerdicts} time(s) in a row and the restarts did not fix it: the grace grew, so an outage outside it restarts it less often.`}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Component</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead>Why</TableHead>
-              <TableHead>Since</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.components.map((component) => (
-              <TableRow key={component.name}>
-                <TableCell className="font-medium">
-                  {component.name}
-                  {component.essential && <span className="ml-2 text-xs text-muted-foreground">essential</span>}
-                </TableCell>
-                <TableCell>
-                  <StatusBadge status={component.status} />
-                </TableCell>
-                <TableCell className="text-muted-foreground">{component.reason ?? "—"}</TableCell>
-                <TableCell className="text-muted-foreground">{formatAgo(component.since, data.now)}</TableCell>
-              </TableRow>
-            ))}
-            {data.components.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={4} className="py-8 text-center text-muted-foreground">
-                  No component has reported yet.
-                </TableCell>
-              </TableRow>
-            )}
-          </TableBody>
-        </Table>
-      </CardContent>
-    </Card>
+        </>
+      }
+    >
+      {error !== undefined && <ErrorNote error={error} title="Not read again" />}
+      <Section
+        title="Components"
+        meta={data.components.length}
+        tools={
+          <FilterChips
+            label="Show the components that are"
+            value={filter}
+            onChange={setFilter}
+            filters={[
+              { key: "all", label: "All", count: data.components.length },
+              { key: "up", label: "Up", tone: "green", count: count("up") },
+              { key: "degraded", label: "Degraded", tone: "orange", count: count("degraded") },
+              { key: "down", label: "Down", tone: "red", count: count("down") },
+            ]}
+          />
+        }
+      >
+        <RecordsTable
+          label="The components and their health"
+          columns={columns}
+          rows={rows}
+          rowKey={(row) => row.name}
+          initialSort={{ key: "status", dir: 1 }}
+          empty={
+            data.components.length === 0 ? (
+              <EmptyState icon={<ShieldCheck />} title="No component has reported yet" hint="A component that reports its health shows here once it does." />
+            ) : (
+              <EmptyState icon={<ShieldCheck />} title={`No component is ${filter}`} hint="Pick another filter to see the others." />
+            )
+          }
+        />
+      </Section>
+    </Page>
   );
 }
 
@@ -95,5 +130,5 @@ export default defineView({
   icon: Activity,
   requires: ["health"],
   order: 20,
-  pages: [{ path: "/health-registry", component: HealthPage }],
+  pages: [{ path: "/health-registry", component: HealthPage, fill: true }],
 });

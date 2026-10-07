@@ -473,6 +473,15 @@ a:focus-visible .animated-underline::after {
   opacity: 1;
 }
 
+.sidebar-chats {
+  transition: opacity var(--sidebar-copy-duration) ease-out;
+}
+
+[data-sidebar-collapsed="true"] .sidebar-chats {
+  pointer-events: none;
+  opacity: 0;
+}
+
 [data-sidebar-collapsed="true"] .sidebar-glide-highlight {
   right: auto;
   width: 36px;
@@ -500,6 +509,315 @@ a:focus-visible .animated-underline::after {
 
 .stream-caret.is-streaming {
   animation: none;
+}
+
+/* -- RecordsTable: one quiet surface, precise rules, colour kept for meaning --
+ * The first column stays an anchor while both axes move inside the table's viewport. */
+
+.records-shell {
+  width: 100%;
+  min-width: 0;
+  overflow: hidden;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+  box-shadow: 0 1px 2px oklch(0 0 0 / 0.06);
+}
+
+.records-scroll {
+  overflow: auto;
+  overscroll-behavior: none;
+  scrollbar-color: var(--line-strong) transparent;
+}
+
+.records-scroll:focus-visible {
+  outline: 2px solid var(--accent-blue);
+  outline-offset: -2px;
+}
+
+.records-table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  table-layout: fixed;
+}
+
+.records-table th,
+.records-table td {
+  border-right: 1px solid var(--grid-line);
+  border-bottom: 1px solid var(--grid-line);
+  text-align: left;
+  vertical-align: middle;
+}
+
+.records-table tr > :last-child {
+  border-right: 0;
+}
+
+.records-table thead th {
+  position: sticky;
+  z-index: 5;
+  top: 0;
+  height: 35px;
+  padding: 0;
+  background: var(--surface);
+  color: var(--ink-2);
+  font-size: 12.5px;
+  font-weight: 500;
+}
+
+.records-table thead th.records-sticky-cell {
+  z-index: 7;
+}
+
+.records-header-button {
+  display: flex;
+  width: 100%;
+  height: 35px;
+  align-items: center;
+  gap: 8px;
+  padding: 0 12px;
+  color: var(--ink-2);
+  text-align: left;
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out;
+}
+
+button.records-header-button:hover {
+  background: var(--hover);
+  color: var(--ink);
+}
+
+.records-header-icon {
+  display: inline-flex;
+  flex-shrink: 0;
+  color: var(--ink-3);
+}
+
+.records-header-icon svg {
+  width: 15px;
+  height: 15px;
+}
+
+/* the arrow takes room only when it shows: a narrow column keeps its label */
+.records-sort {
+  display: none;
+  flex-shrink: 0;
+  margin-left: auto;
+  transition: transform 160ms var(--ease-out-strong);
+}
+
+.records-header-button:hover .records-sort,
+.records-sort.is-visible {
+  display: inline-flex;
+}
+
+.records-cell {
+  height: 35px;
+  padding: 0 8px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.records-cell.is-end {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+}
+
+.records-sticky-cell {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  background: var(--surface);
+  box-shadow: 5px 0 8px -10px oklch(0 0 0 / 0.4);
+}
+
+.records-first {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+}
+
+.records-row > .records-cell {
+  transition:
+    background-color 120ms ease-out,
+    color 120ms ease-out;
+}
+
+.records-row:hover > .records-cell {
+  background: var(--hover);
+}
+
+.records-rownum {
+  display: inline-flex;
+  width: 24px;
+  height: 24px;
+  flex: 0 0 24px;
+  align-items: center;
+  justify-content: center;
+  color: var(--ink-3);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.records-mark {
+  display: inline-flex;
+  width: 20px;
+  height: 20px;
+  flex: 0 0 20px;
+  align-items: center;
+  justify-content: center;
+  margin-right: 4px;
+  border-radius: 6px;
+  color: var(--ink-2);
+  background: var(--field);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.records-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--ink);
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.records-tags {
+  position: relative;
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 4px;
+  overflow: hidden;
+}
+
+.records-tags-measure {
+  position: absolute;
+  top: 0;
+  left: 0;
+  display: flex;
+  width: max-content;
+  gap: 4px;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+.records-tags-measure > span {
+  display: inline-flex;
+}
+
+/* a tag's colours come from one mid-lightness hue, mixed with the theme's tokens */
+.records-tag {
+  --tag-base: var(--ink-3);
+  display: inline-flex;
+  height: 23px;
+  max-width: 180px;
+  align-items: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  border: 1px solid color-mix(in srgb, var(--tag-base) 32%, var(--surface));
+  border-radius: 8px;
+  padding: 0 7px;
+  color: color-mix(in srgb, var(--tag-base) 92%, var(--ink));
+  background: color-mix(in srgb, var(--tag-base) 18%, var(--surface));
+  font-size: 13px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.records-more-tag {
+  display: inline-flex;
+  height: 23px;
+  align-items: center;
+  flex-shrink: 0;
+  border: 1px solid var(--line-strong);
+  border-radius: 6px;
+  padding: 0 7px;
+  color: var(--ink-3);
+  background: var(--inset);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.records-muted {
+  color: var(--ink-3);
+}
+
+.records-table tfoot td {
+  position: sticky;
+  z-index: 4;
+  bottom: 0;
+  height: 35px;
+  background: var(--inset);
+  color: var(--ink-2);
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+}
+
+.records-table tfoot .records-sticky-cell {
+  z-index: 6;
+}
+
+.records-count {
+  margin-right: 3px;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* touch: :hover sticks after a tap */
+@media (hover: none) {
+  .records-row:hover > .records-cell {
+    background: transparent;
+  }
+
+  button.records-header-button:hover {
+    background: transparent;
+    color: var(--ink-2);
+  }
+}
+
+/* -- FilterTable's electric status pills: the same hue-and-mix as a tag ----- */
+
+.filter-status-green {
+  --tag-base: oklch(0.652 0.131 162.865);
+}
+.filter-status-orange {
+  --tag-base: oklch(0.757 0.153 66.401);
+}
+.filter-status-blue {
+  --tag-base: oklch(0.671 0.118 219.351);
+}
+.filter-status-red {
+  --tag-base: oklch(0.64 0.19 27);
+}
+.filter-status-neutral {
+  --tag-base: var(--ink-3);
+}
+
+.filter-status {
+  border: 1px solid color-mix(in srgb, var(--tag-base) 34%, var(--surface));
+  color: color-mix(in srgb, var(--tag-base) 92%, var(--ink));
+  background: color-mix(in srgb, var(--tag-base) 20%, var(--surface));
+}
+
+/* dark: a richer same-hue fill, bright same-hue text, no visible border */
+.dark .records-tag,
+.dark .filter-status {
+  color: color-mix(in srgb, var(--tag-base) 86%, white);
+  background: color-mix(in srgb, var(--tag-base) 34%, var(--surface));
+  border-color: color-mix(in srgb, var(--tag-base) 34%, var(--surface));
 }
 
 /* -- scrollbars that do not show -------------------------------------------- */

@@ -47,9 +47,9 @@ function TabBar({ path, home, onActions }: { path: string; home: string; onActio
               /* fixed width: every close button sits in the same spot */
               className={`group/tab flex h-7 w-36 shrink-0 items-center gap-0.5 rounded-[7px] pr-0.5 pl-2.5 text-[12.5px] font-medium transition-colors duration-100 ${active ? "bg-hover-2 text-ink" : "text-ink-2 hover:bg-hover hover:text-ink"}`}
             >
-              <button type="button" aria-pressed={active} onClick={() => navigate(pagePath(CHAT, tab.id))} title={tab.title} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
+              <button type="button" aria-pressed={active} onClick={() => navigate(pagePath(CHAT, tab.id))} title={chats.tabTitle(tab)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left">
                 {busy.get(tab.id) === true && <span aria-label="Running" className="size-2.5 shrink-0 rounded-full border-[1.5px] border-line-strong border-t-ink-2" style={{ animation: "spin 700ms linear infinite" }} />}
-                <span className="block truncate">{tab.title}</span>
+                <span className="block truncate">{chats.tabTitle(tab)}</span>
               </button>
               <button
                 type="button"
@@ -127,7 +127,8 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation) => ({
     id: conversation.conversationId,
     label: chats.titleOf(conversation),
-    meta: conversation.current === false ? "reset" : channelOf(conversation.key),
+    // A conversation a reset left behind: its key's name, said to be the previous one.
+    meta: conversation.current === false ? "previous" : channelOf(conversation.key),
     busy: conversation.busy,
     active: path === pagePath(CHAT, conversation.conversationId),
     href: `${BASE}${pagePath(CHAT, conversation.conversationId)}`,

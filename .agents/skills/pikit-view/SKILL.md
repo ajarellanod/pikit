@@ -95,8 +95,14 @@ export default defineView({
   `/`); `match` decodes it.
 - The page runs under a Content-Security-Policy (`default-src 'self'`): no inline script, nothing
   from another origin (fonts, images and styles come from the build).
-- Build it from Beautiful UI's primitives in `src/components/bui/` (the dashboard's look: `StatusPill`,
-  `Button`, `TaskRows`, `ToolChips`, `LoadingState`), shadcn's in `src/components/ui/` (in the same
+- Build it from Beautiful UI's primitives in `src/components/bui/` (the dashboard's look). An
+  operator's page is `Page` / `Section` (`bui/Page`, the page `fill: true`): the view's name over what
+  it says now, then sections with `FilterChips` (a dot and a count each), a `RecordsTable` (columns
+  with a glyph, sorting, a numbered gutter, a count; `RecordMark`, `RecordTag`, `TagList` in its
+  cells), `StatePill` for a state in a cell, `EmptyState` when nothing shows, `SearchField`,
+  `CodeBlock` for JSON; health-registry's and the base `delivery` and `composition` views are
+  examples. Also `StatusPill`, `Chip`, `ValuePill`, `Button`, `TaskRows`, `ToolChips`,
+  `LoadingState`. shadcn's in `src/components/ui/` (in the same
   colours), and the pieces in `src/components/pikit/` (`ErrorNote`, `MessageView`). Use the tokens'
   classes (`bg-surface`, `text-ink-2`, `shadow-card`, `rounded-card`), not raw colours. Need another primitive: `bunx shadcn@latest add <name>` in
   `src/dashboard/`. A component's view may use only primitives the base dashboard ships, or say in its

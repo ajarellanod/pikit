@@ -247,11 +247,11 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const turns = turnsOf(messages, live);
   const runs = toolCalls(turns);
 
-  // A conversation of the dashboard's own is titled by its first message, once read.
+  // A dashboard key is titled by the first message written in it, once read (a title it has is kept).
   const firstUser = transcript.hasOlder ? undefined : turns.find((turn) => turn.kind === "user");
   const firstText = firstUser?.kind === "user" ? userText(firstUser.message).text : undefined;
   useEffect(() => {
-    if (conversation !== undefined && isDashboardKey(conversation.key) && firstText !== undefined) setTitle(conversation.conversationId, firstText);
+    if (conversation?.key !== undefined && isDashboardKey(conversation.key) && firstText !== undefined) setTitle(conversation.key, firstText);
   }, [conversation, firstText, setTitle]);
 
   useStickToBottom(scrollRef, id);

@@ -11,7 +11,7 @@ import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
 import PromptBar from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { type ApiStartResponse, post } from "@/lib/api";
-import { agentsOf, channelOf, defaultAgentOf, useChats } from "@/lib/chats";
+import { agentsOf, channelOf, defaultAgentOf, NEW_CHAT, useChats } from "@/lib/chats";
 import { Link, navigate, pagePath } from "@/lib/router";
 import { useShell } from "@/lib/shell";
 
@@ -57,7 +57,7 @@ export function HomePage() {
     setError(undefined);
     try {
       const started = await post<ApiStartResponse>("/conversations", { agent: chosen, text });
-      chats.setTitle(started.conversationId, text);
+      chats.setTitle(started.key, text);
       chats.reload();
       navigate(pagePath("/conversations", started.conversationId));
     } catch (thrown) {
@@ -72,7 +72,7 @@ export function HomePage() {
     .slice(0, 6)
     .map((conversation) => ({
       key: `chat:${conversation.conversationId}`,
-      label: `${conversation.busy ? "Follow" : "Continue"} ${chats.titleOf(conversation)}`,
+      label: `${conversation.busy ? "Follow" : "Continue"} ${chats.titleOf(conversation) === NEW_CHAT ? `the chat with ${conversation.agent ?? "the agent"}` : chats.titleOf(conversation)}`,
       meta: channelOf(conversation.key),
       icon: <ChatBubble width={15} height={15} strokeWidth={1.9} />,
       to: pagePath("/conversations", conversation.conversationId),

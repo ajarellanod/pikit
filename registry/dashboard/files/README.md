@@ -24,7 +24,10 @@ built files under `/admin/`.
   follow-up (with a run going, it waits for it) whose answer stays here. Nothing you say, nor its
   answer, is sent to that chat; the agent reads that the message is the operator's and that the user
   does not see it. A run that also answers the user's own message is delivered to the user, as always.
-- **Abort** and **reset** work on every conversation.
+- **Abort** and **reset** work on every conversation. After a reset you write on in the key's new
+  conversation at once; the one left behind stays readable, listed under the same name and tagged
+  `previous`. A chat is named by its key: a dashboard one by the first message written in it (read
+  once and kept in this browser), another channel's by the id in its key, its channel as the tag.
 
 ## Signing in
 
@@ -71,7 +74,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | Path | What |
 |---|---|
 | `src/views/<view>/index.tsx` | one view each: its pages and when it shows (below) |
-| `src/components/bui/` | Beautiful UI's primitives (the sidebar, the composer, thinking, tool chips, task rows, pills), fed by real data |
+| `src/components/bui/` | Beautiful UI's primitives (the sidebar, the composer, thinking, tool chips, task rows, pills; an operator's page, records tables, filter chips, a code block), fed by real data |
 | `src/components/ui/` | shadcn/ui primitives, copied and yours (`shadcn add` puts more here), in the same tokens |
 | `src/components/pikit/` | pieces the views share: a transcript (`turnsOf`, `Reply`, `UserBubble`, `MessageView`), an error, the sign-in |
 | `src/index.css` | the one stylesheet: Beautiful UI's tokens (light and dark), shadcn's variables mapped onto them |
@@ -80,7 +83,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/lib/admin-api.ts` | the API's JSON, typed: an identical copy of `src/pikit/admin-api/api.ts` |
 | `src/lib/views.ts` | how views are found and when they show |
 | `src/lib/router.tsx` | the pages under `/admin` |
-| `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles (`useChats`, `agentsOf`) |
+| `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles: a key's, shared by the conversations a reset left behind (`useChats`, `agentsOf`) |
 | `src/lib/shell.tsx` | what the shell gives a page: the App, the views, `TabActions`, `SidePanel` |
 | `src/lib/theme.ts`, `public/theme.js` | light, dark or the system's, before the first paint |
 | `src/lib/sounds.ts` | the interaction sounds, and their switch |
@@ -115,7 +118,8 @@ export default defineView({
 A view appears in the sidebar with its icon (iconoir, MIT; never a paid set) and its page in the main
 pane, padded and scrolling (`fill: true` on a page: it fills the pane and scrolls itself, as the chat
 does). Build it from `src/components/bui/` (Beautiful UI's look) or `src/components/ui/` (shadcn's,
-in the same colours).
+in the same colours). An operator's page as the base views are (`delivery`, `composition`): `Page`
+and `Section` (`fill: true`), `FilterChips`, a `RecordsTable`, `StatePill`, `EmptyState`, `CodeBlock`.
 
 Its data comes from admin routes its component registers through `http.route` (`GET
 /admin/api/memory/…`, asking `admin.auth`), read with `useApi` / `api` from `@/lib/api` (they send

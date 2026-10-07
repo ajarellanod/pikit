@@ -242,7 +242,8 @@ export default function SidebarNav({
           ))}
         </GlideGroup>
 
-        <div className="mt-3 min-h-0 flex-1 overflow-y-auto">
+        {/* collapsed, the chats have no icon to keep: they go, with the active one's highlight */}
+        <div className="sidebar-chats mt-3 min-h-0 flex-1 overflow-y-auto" inert={collapsed}>
           <div className="sidebar-copy relative mx-2 mb-1 h-8">
             <button
               type="button"
