@@ -14,6 +14,9 @@ export default defineConfig({
   base: "/admin/",
   plugins: [react(), tailwindcss()],
   resolve: { alias: { "@": path.resolve(import.meta.dirname, "./src") } },
+  // Every asset a file of its own: the Content-Security-Policy (`font-src 'self'`) refuses a font
+  // inlined as a data: URI.
+  build: { assetsInlineLimit: 0 },
   server: {
     proxy: { "/admin/api": { target: process.env.PIKIT_URL ?? "http://localhost:3000", changeOrigin: true } },
   },

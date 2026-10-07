@@ -21,6 +21,8 @@ export interface ViewPage {
   /** Relative to /admin, starting with the view's `/<id>`; `:name` is a parameter. */
   path: string;
   component: ComponentType<{ params: Record<string, string> }>;
+  /** The page fills the main pane and scrolls itself (a chat); otherwise it is shown in a padded, scrolling column. */
+  fill?: boolean;
 }
 
 export interface View {
@@ -30,7 +32,7 @@ export interface View {
   icon?: ComponentType<{ className?: string }>;
   /** Capabilities that must be provided in the App for the view to show. */
   requires?: string[];
-  /** Its place in the sidebar, lowest first (default 100). */
+  /** Its place in the sidebar, lowest first (default 100). `conversations` is the chat, not a sidebar item. */
   order?: number;
   /** Its pages; the first one is the sidebar's link. */
   pages: ViewPage[];

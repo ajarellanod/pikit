@@ -13,15 +13,9 @@
 import { useEffect, useReducer } from "react";
 import { useActive } from "@/lib/activity";
 import { type ApiEvent, follow } from "@/lib/api";
-import type { Message } from "@/components/pikit/message";
+import type { AssistantMessage as Assistant, Message, RunningTool } from "@/components/pikit/message";
 
-type Assistant = Extract<Message, { role: "assistant" }>;
-
-export interface RunningTool {
-  callId: string;
-  name: string;
-  output: string;
-}
+export type { RunningTool };
 
 export interface LiveState {
   connected: boolean;
@@ -135,8 +129,10 @@ export function useLive(id: string): LiveState & { paused: boolean } {
         } catch {
           // Reconnect below.
         }
+        // A stream stopped by this cleanup says nothing: the next one (another id, or a return) owns the state.
+        if (stop.signal.aborted) return;
         dispatch({ type: "disconnected" });
-        if (!stop.signal.aborted) await new Promise((resolve) => setTimeout(resolve, 2000));
+        await new Promise((resolve) => setTimeout(resolve, 2000));
       }
     })();
     return () => stop.abort();

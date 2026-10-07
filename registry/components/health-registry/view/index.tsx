@@ -4,7 +4,7 @@
  * component's own route, `GET /admin/api/health-registry`, every few seconds.
  */
 
-import { HeartPulse } from "lucide-react";
+import { Activity } from "iconoir-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -92,7 +92,7 @@ function HealthPage() {
 export default defineView({
   id: "health-registry",
   title: "Health",
-  icon: HeartPulse,
+  icon: Activity,
   requires: ["health"],
   order: 20,
   pages: [{ path: "/health-registry", component: HealthPage }],

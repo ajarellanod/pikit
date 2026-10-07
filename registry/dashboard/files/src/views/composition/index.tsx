@@ -4,7 +4,7 @@
  * reads its secrets through `secrets` and its config names them at most.
  */
 
-import { Boxes } from "lucide-react";
+import { BoxIso } from "iconoir-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -138,7 +138,7 @@ function CompositionPage() {
 export default defineView({
   id: "composition",
   title: "Composition",
-  icon: Boxes,
+  icon: BoxIso,
   order: 90,
   pages: [{ path: "/composition", component: CompositionPage }],
 });

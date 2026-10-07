@@ -4,7 +4,7 @@
  * Shown when an `outbound.queue` is installed (outbound-durable).
  */
 
-import { Send } from "lucide-react";
+import { DeliveryTruck } from "iconoir-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
@@ -185,7 +185,7 @@ function DeliveryPage() {
 export default defineView({
   id: "delivery",
   title: "Delivery",
-  icon: Send,
+  icon: DeliveryTruck,
   requires: ["outbound.queue"],
   order: 30,
   pages: [{ path: "/delivery", component: DeliveryPage }],

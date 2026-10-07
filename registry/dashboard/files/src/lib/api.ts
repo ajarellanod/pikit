@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePolling } from "./activity.ts";
-import type { ApiError, ApiEvent } from "./admin-api.ts";
+import type { ApiError, ApiEvent, ApiSession } from "./admin-api.ts";
 
 export type * from "./admin-api.ts";
 
@@ -52,13 +52,15 @@ function headers(extra?: HeadersInit): Headers {
 
 /**
  * Signs in with the operator's `token` (PIKIT_ADMIN_TOKEN with admin-auth-token): a session cookie,
- * or, without browser sessions, the token in memory. Throws an `ApiFailure` (`401`: not the token).
+ * or, without browser sessions, the token in memory. Answers the operator's id when the API names it.
+ * Throws an `ApiFailure` (`401`: not the token).
  */
-export async function signIn(token: string): Promise<void> {
+export async function signIn(token: string): Promise<string | undefined> {
   const response = await fetch(`${API}/session`, { method: "POST", headers: { [CLIENT_HEADER]: "1", authorization: `Bearer ${token}` } });
   if (response.ok) {
     memoryToken = undefined;
-    return;
+    const session = (await response.json().catch(() => undefined)) as ApiSession | undefined;
+    return typeof session?.operator === "string" ? session.operator : undefined;
   }
   const body = (await response.json().catch(() => ({ error: `http_${response.status}` }))) as ApiError;
   if (response.status !== 404 || body.error !== "not_installed") throw new ApiFailure(response.status, body);
@@ -70,6 +72,7 @@ export async function signIn(token: string): Promise<void> {
     memoryToken = undefined;
     throw error;
   }
+  return undefined;
 }
 
 /** Signs out: the session cookie cleared (and the token forgotten). */

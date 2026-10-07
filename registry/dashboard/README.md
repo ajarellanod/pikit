@@ -31,5 +31,13 @@ composition (`samples/http/test/sample.ts`) with both added.
   (`scripts/dashboard.test.ts` checks it).
 - npm packages pinned to exact versions, with `bun.lock` committed: every project builds the same
   dashboard.
-- Primitives copied from shadcn/ui (`bunx shadcn@latest add <name>` here) and attributed in `NOTICE`;
-  free icon sets only (lucide).
+- Its look is Beautiful UI's harness (https://www.beautifului.dev/harness; the source is a
+  downloaded reference, see `AGENTS.md`): its primitives copied into `src/components/bui/` and fed by
+  real data (no demo rows, no scripted timers), its tokens in `src/index.css` with shadcn's variables
+  mapped onto them. Primitives copied from shadcn/ui (`bunx shadcn@latest add <name>` here) or
+  Beautiful UI are attributed in `NOTICE`.
+- Free icon sets only: iconoir for the dashboard's own, lucide inside shadcn's primitives. Never
+  Beautiful UI's `@central-icons-react` (paid).
+- No inline script and nothing from another origin (the CSP): fonts are bundled
+  (`@fontsource-variable/*`), every asset is a file (`assetsInlineLimit: 0`), and the theme is set
+  before the first paint by `public/theme.js`.
