@@ -23,7 +23,8 @@
  * - **Delivery, when an `outbound.queue` is installed:** the pieces not delivered yet (`pending`) and
  *   those that settled (`receipts`, read after a cursor), as the queue keeps them; never their text.
  * - **Only a conversation's current one is talked to.** A message, an abort or a reset to a
- *   conversation a reset left behind is `409 not_current`.
+ *   conversation a reset left behind is `409 not_current`. A reset's new conversation is its key's
+ *   current one, with the key's agent, before any message reaches it: it is talked to at once.
  *
  * Targets: `server` and `durable`.
  * - **On a server** this export is the whole API, over the App's own contracts (`createLocalBackend`):
@@ -71,7 +72,9 @@ export default defineComponent({
     const durable = pikit.target === "durable";
     const assets = createAssets(DASHBOARD_FILES);
     const index = createConversationIndex(() => sql.get());
-    const backend = createLocalBackend({ observe: () => observe.get(), runtime: () => runtime.get(), registry: () => registry.get(), index: () => index });
+    const contracts = { observe: () => observe.get(), runtime: () => runtime.get(), registry: () => registry.get(), index: () => index };
+    // A server's: a conversation no message reached yet is its key's by the index's row (a reset's new one).
+    const backend = createLocalBackend({ ...contracts, keyOf: (conversationId) => index.keyOf(conversationId) });
 
     provideRoutes(pikit, {
       auth,
@@ -149,7 +152,8 @@ export default defineComponent({
         if (calls === undefined || missing.length > 0) {
           throw new Error(`admin-api: in a Durable Object's App it answers the Worker's calls and tells the conversation index, which needs ${missing.join(", ")}: install platform-cloudflare`);
         }
-        answerCalls(calls, backend, index);
+        // An object's conversations are all of its key.
+        answerCalls(calls, (key) => createLocalBackend({ ...contracts, keyOf: async () => key }), index);
         // This object's conversations (a few): the index learns of them even if their events were missed.
         await backfill(observe.get(), ctx).catch((error: unknown) =>
           ctx.logger.warn("admin-api: this object's conversations were not told to the index", { error: error instanceof Error ? error.message : String(error) }),

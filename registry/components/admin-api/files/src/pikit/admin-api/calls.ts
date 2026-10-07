@@ -81,26 +81,27 @@ const seenOf = (message: JsonValue): IndexedConversation[] => {
 const json = (value: unknown): JsonValue => value as JsonValue;
 
 /**
- * Registers the object's answers to the Worker's calls over `backend` (this object's own), and the
- * index's (`index`: used only in the index object, but every object can answer). Call it in `start`.
+ * Registers the object's answers to the Worker's calls over `backendOf(key)` (this object's own, `key`
+ * its key), and the index's (`index`: used only in the index object, but every object can answer).
+ * Call it in `start`.
  */
-export function answerCalls(inbox: ActorInbox, backend: AdminBackend, index: ConversationIndex): void {
+export function answerCalls(inbox: ActorInbox, backendOf: (key: string) => AdminBackend, index: ConversationIndex): void {
   const id = (message: JsonValue) => text(message, "conversationId");
 
-  inbox.answer(CALL.app, async (_key, _message, ctx) => json(await backend.app(ctx)));
-  inbox.answer(CALL.conversation, async (_key, message, ctx) => json(await backend.conversation(id(message), ctx)));
-  inbox.answer(CALL.transcript, async (_key, message, ctx) => json(await backend.transcript(id(message), pageOf(message), ctx)));
-  inbox.answer(CALL.snapshot, async (_key, message, ctx) => json(await backend.snapshot(id(message), ctx)));
-  inbox.answer(CALL.usage, async (_key, message, ctx) => json(await backend.usage(id(message), ctx)));
-  inbox.answer(CALL.message, async (_key, message, ctx) => {
-    const sent = await backend.send(id(message), { text: text(message, "text"), requestId: text(message, "requestId") }, ctx);
+  inbox.answer(CALL.app, async (key, _message, ctx) => json(await backendOf(key).app(ctx)));
+  inbox.answer(CALL.conversation, async (key, message, ctx) => json(await backendOf(key).conversation(id(message), ctx)));
+  inbox.answer(CALL.transcript, async (key, message, ctx) => json(await backendOf(key).transcript(id(message), pageOf(message), ctx)));
+  inbox.answer(CALL.snapshot, async (key, message, ctx) => json(await backendOf(key).snapshot(id(message), ctx)));
+  inbox.answer(CALL.usage, async (key, message, ctx) => json(await backendOf(key).usage(id(message), ctx)));
+  inbox.answer(CALL.message, async (key, message, ctx) => {
+    const sent = await backendOf(key).send(id(message), { text: text(message, "text"), requestId: text(message, "requestId") }, ctx);
     return { requestId: sent.requestId, admission: sent.admission };
   });
   inbox.answer(CALL.start, async (key, message, ctx) =>
-    json(await backend.start({ key, agent: text(message, "agent"), text: text(message, "text"), requestId: text(message, "requestId") }, ctx)),
+    json(await backendOf(key).start({ key, agent: text(message, "agent"), text: text(message, "text"), requestId: text(message, "requestId") }, ctx)),
   );
-  inbox.answer(CALL.abort, async (_key, message, ctx) => ({ conversationId: (await backend.abort(id(message), ctx)).conversationId }));
-  inbox.answer(CALL.reset, async (_key, message, ctx) => json(await backend.reset(id(message), ctx)));
+  inbox.answer(CALL.abort, async (key, message, ctx) => ({ conversationId: (await backendOf(key).abort(id(message), ctx)).conversationId }));
+  inbox.answer(CALL.reset, async (key, message, ctx) => json(await backendOf(key).reset(id(message), ctx)));
 
   inbox.handle(SEEN, async (_key, message) => index.seen(seenOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {

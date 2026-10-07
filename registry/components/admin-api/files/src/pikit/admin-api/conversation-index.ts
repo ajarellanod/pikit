@@ -46,6 +46,11 @@ export interface ConversationIndex {
   seen(entries: readonly IndexedConversation[]): Promise<void>;
   /** At most `limit` conversations, the most recently active first. Throws `invalid_cursor`. */
   list(page: { limit: number; cursor?: string }): Promise<IndexPage>;
+  /**
+   * The key of conversation `conversationId`, its newest row's: a server's ids are unique (on
+   * Cloudflare an object's are not, and only the index object has rows).
+   */
+  keyOf(conversationId: string): Promise<string | undefined>;
 }
 
 /** `{at}:{key}:{conversationId}` of a page's last item, the key and id URI-encoded (`:` never appears in them). */
@@ -73,6 +78,7 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
         `CREATE TABLE IF NOT EXISTS ${TABLE} (key TEXT NOT NULL, conversation TEXT NOT NULL, agent TEXT NOT NULL, at BIGINT NOT NULL, PRIMARY KEY (key, conversation))`,
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${TABLE}_at ON ${TABLE} (at, key, conversation)`);
+      await database.run(`CREATE INDEX IF NOT EXISTS ${TABLE}_conversation ON ${TABLE} (conversation)`);
     })().catch((error: unknown) => {
       ready = undefined;
       throw error;
@@ -108,6 +114,11 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
       const items = rows.slice(0, limit).map(({ key, conversation, agent, at }) => ({ key, conversationId: conversation, agent, at: Number(at) }));
       const last = items.at(-1);
       return { items, ...(rows.length > limit && last !== undefined && { next: cursorOf(last) }) };
+    },
+
+    async keyOf(conversationId) {
+      const rows = await (await db()).query<{ key: string }>(`SELECT key FROM ${TABLE} WHERE conversation = ? ORDER BY at DESC LIMIT 1`, [conversationId]);
+      return rows[0]?.key;
     },
   };
 }

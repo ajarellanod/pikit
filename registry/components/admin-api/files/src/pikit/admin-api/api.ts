@@ -65,7 +65,10 @@ export interface ApiConversation {
    * `<key>~<the object's id>` on Cloudflare, where each conversation's object numbers its own.
    */
   conversationId: string;
-  /** Its conversation key (`telegram:12345`) and agent, once a message reached it. */
+  /**
+   * Its conversation key (`telegram:12345`) and agent, once a message reached it or a reset pointed
+   * its key to it (a reset's new conversation is its key's current one, talked to at once).
+   */
   key?: string;
   agent?: string;
   /** Whether a run is going now. */
@@ -75,7 +78,7 @@ export interface ApiConversation {
   usage: ApiUsage;
   /**
    * Whether its key points to it now. `false` for a conversation a reset left behind: it can be read,
-   * not talked to. Absent when it has no key yet.
+   * not talked to. Absent when it has no key: no message reached it and no reset pointed a key to it.
    */
   current?: boolean;
 }

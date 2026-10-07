@@ -122,6 +122,12 @@ export interface LocalContracts {
   registry(): ConversationRegistry;
   /** The index the list reads (on Cloudflare only the index object's has rows, and no call lists there). */
   index(): ConversationIndex;
+  /**
+   * The key a conversation no message reached yet may be of (a reset's new one, which `agent.observe`
+   * knows no key of until a message reaches it): on a server the index's row, written when the reset
+   * pointed the key to it; in a Cloudflare object, the object's own key.
+   */
+  keyOf(conversationId: string, ctx: AppContext): Promise<string | undefined>;
 }
 
 /** The App's agents: the keys of `agent.definition`. */
@@ -131,11 +137,23 @@ export function agentsOf(description: AppDescription | undefined): string[] {
 
 /** The backend over the contracts of the App it runs in (a server's, or one Durable Object's). */
 export function createLocalBackend(contracts: LocalContracts): AdminBackend {
-  /** The conversation and whether its key points to it now. */
+  /**
+   * Its key and agent, and whether its key points to it now: `agent.observe`'s once a message reached
+   * it; before that (a reset's new conversation), the key `keyOf` knows and the agent its key has
+   * (`conversations.registry`'s `get`: a key keeps its agent through resets). Neither: none.
+   */
+  const identify = async (conversation: ObservedConversation, ctx: AppContext): Promise<{ key: string; agent: string; current: boolean } | undefined> => {
+    const key = conversation.key ?? (await contracts.keyOf(conversation.conversationId, ctx));
+    if (key === undefined) return undefined;
+    const now = await contracts.registry().get(key, ctx);
+    const agent = conversation.agent ?? now?.agent;
+    return agent === undefined ? undefined : { key, agent, current: now?.conversationId === conversation.conversationId };
+  };
+
+  /** The conversation, with its key, its agent and whether its key points to it now when it has a key. */
   const described = async (conversation: ObservedConversation, ctx: AppContext): Promise<ApiConversation> => {
-    if (conversation.key === undefined) return conversation as ApiConversation;
-    const now = await contracts.registry().get(conversation.key, ctx);
-    return { ...(conversation as ApiConversation), current: now?.conversationId === conversation.conversationId };
+    const identity = await identify(conversation, ctx);
+    return identity === undefined ? (conversation as ApiConversation) : { ...(conversation as ApiConversation), ...identity };
   };
 
   const found = async (id: string, ctx: AppContext): Promise<ObservedConversation> => {
@@ -144,17 +162,16 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
     return conversation;
   };
 
-  /** The conversation as an action takes it, or why not: no message yet, or left behind by a reset. */
+  /**
+   * The conversation as an action takes it, or why not: it has no key, or a reset left it behind. A
+   * reset's new conversation is its key's current one: it takes them before any message reached it.
+   */
   const actionable = async (id: string, ctx: AppContext): Promise<ConversationRef> => {
     const conversation = await found(id, ctx);
-    if (conversation.key === undefined || conversation.agent === undefined) {
-      throw refusal("no_agent", "no message has reached this conversation yet: it has no agent to talk to");
-    }
-    const now = await contracts.registry().get(conversation.key, ctx);
-    if (now?.conversationId !== conversation.conversationId) {
-      throw refusal("not_current", "a reset left this conversation behind: its key points to another one");
-    }
-    return { key: conversation.key, agent: conversation.agent, conversationId: conversation.conversationId };
+    const identity = await identify(conversation, ctx);
+    if (identity === undefined) throw refusal("no_agent", "no message has reached this conversation and no reset pointed a key to it: it has no agent to talk to");
+    if (!identity.current) throw refusal("not_current", "a reset left this conversation behind: its key points to another one");
+    return { key: identity.key, agent: identity.agent, conversationId: conversation.conversationId };
   };
 
   /** A read with the client's cursor: an observer refuses a cursor it did not give. */

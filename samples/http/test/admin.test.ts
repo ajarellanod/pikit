@@ -112,6 +112,12 @@ test("a reset from the dashboard: the key points to a new conversation, the old 
   expect(reset.status).toBe(200);
   expect(body).toMatchObject({ key: "http:c3", previousConversationId: old });
 
+  // Before any message reaches it, the new one is the key's current one, with its agent: the dashboard talks to it at once.
+  const fresh = (await (await admin(`/admin/api/conversations/${body.conversationId}`)).json()) as Listed["items"][number];
+  expect(fresh).toMatchObject({ key: "http:c3", agent: "scripted", current: true });
+  const continued = await admin(`/admin/api/conversations/${body.conversationId}/messages`, { method: "POST", body: JSON.stringify({ text: "after the reset" }) });
+  expect(continued.status).toBe(202);
+
   await sample.post("/v1/messages", { conversationId: "c3", text: "second", messageId: "m2" });
   const after = (await (await admin("/admin/api/conversations")).json()) as Listed;
   expect(after.items.find((each) => each.conversationId === old)).toMatchObject({ current: false });

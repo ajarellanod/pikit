@@ -5,7 +5,8 @@
  * and admin-api's default export), and the Worker's App serves admin-api's Worker half through
  * deployment-cloudflare's own server. Messages reach two chats; then the Worker lists them from the
  * index object (`admin-api:index`), reads one and its transcript, follows it live (a polled snapshot),
- * resets one and is refused an action on the one left behind; the operator starts a conversation of the
+ * resets one and is refused an action on the one left behind, while the new one takes a message at
+ * once; the operator starts a conversation of the
  * dashboard's own, listed first as soon as its message is dispatched, and its agent answers there. The
  * index object, which runs the same App, holds no conversation.
  */
@@ -146,11 +147,16 @@ it("the Worker lists the objects' conversations from the index, reads and follow
     expect(refused.status).toBe(409);
     expect(await refused.json()).toMatchObject({ error: "not_current" });
     const after = (await (await worker.fetch("/admin/api/conversations")).json()) as Listed;
-    // Listed at once, the newest activity; it has no key until a message reaches it, as on a server: its id says whose object it is in.
+    // Listed at once, the newest activity: its key's current one, with the key's agent, before any message reaches it.
     expect(after.items.filter((each) => each.conversationId.startsWith(`${a}~`)).map(({ conversationId, key, current }) => ({ conversationId, key, current }))).toEqual([
-      { conversationId: reset.conversationId, key: undefined, current: undefined },
+      { conversationId: reset.conversationId, key: a, current: true },
       { conversationId: `${a}~1`, key: a, current: false },
     ]);
+    expect(await (await worker.fetch(`/admin/api/conversations/${id(reset.conversationId)}`)).json()).toMatchObject({ key: a, agent: "scripted", current: true });
+    // Talked to at once: the operator's message runs there, and its agent answers.
+    const continued = await worker.fetch(`/admin/api/conversations/${id(reset.conversationId)}/messages`, { method: "POST", body: JSON.stringify({ text: "after the reset" }) });
+    expect(continued.status).toBe(202);
+    await vi.waitFor(() => expect(answers.some((each) => each.startsWith(`${a}: answer: `) && each.endsWith("after the reset"))).toBe(true), { timeout: 10_000 });
 
     // A conversation of the dashboard's own: its key's object, listed first once its message is dispatched; the agent answers there.
     const started = (await (

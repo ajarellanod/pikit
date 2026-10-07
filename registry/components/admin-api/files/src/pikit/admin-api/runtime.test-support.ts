@@ -141,6 +141,9 @@ export class Runtime {
     dispatch: async (request, ctx) => {
       const duplicate = this.dispatched.some((each) => each.requestId === request.requestId && each.conversation.conversationId === request.conversation.conversationId);
       this.dispatched.push(request);
+      // As runtime-pi does: a conversation knows its key and agent once a message reaches it.
+      const observed = this.conversations.get(request.conversation.conversationId);
+      if (observed !== undefined && observed.key === undefined) this.conversations.set(observed.conversationId, { ...observed, key: request.conversation.key, agent: request.conversation.agent });
       const busy = this.conversations.get(request.conversation.conversationId)?.busy === true;
       const admission = { kind: duplicate ? "duplicate" : busy ? "queued" : "started", requestId: request.requestId } as const;
       // As a runtime does, in the caller's context once the message is durable.
@@ -166,7 +169,8 @@ export class Runtime {
       if (previous === undefined) return undefined;
       const conversation = { ...previous, conversationId: this.idOf(this.next++) };
       this.pointers.set(key, conversation);
-      this.conversations.set(conversation.conversationId, { ...conversation, busy: false, usage: ZERO });
+      // As runtime-pi does: a new runtime conversation, with no key or agent until a message reaches it.
+      this.conversations.set(conversation.conversationId, { conversationId: conversation.conversationId, busy: false, usage: ZERO });
       const reset = { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
       // As conversations-kv does, once the key points to the new one.
       await ctx.emit("conversation.reset", reset);

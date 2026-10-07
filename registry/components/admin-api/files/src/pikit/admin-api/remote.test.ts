@@ -272,6 +272,15 @@ test("actions reach the object of the key, with its own id; its refusals cross t
   const reset = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~2")}/reset`, post());
   expect(await reset.json()).toEqual({ key: "telegram:1", previousConversationId: "telegram:1~2", conversationId: "telegram:1~100" });
   expect(runtime.pointers.get("telegram:1")?.conversationId).toBe("100");
+
+  // The new one: no message reached it, and it is the key's current one, with the key's agent (its object's key).
+  expect(runtime.conversations.get("100")?.key).toBeUndefined();
+  const fresh = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~100")}`, { headers: AUTH });
+  expect(await fresh.json()).toMatchObject({ conversationId: "telegram:1~100", key: "telegram:1", agent: "assistant", current: true });
+  runtime.dispatched.length = 0;
+  const again = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~100")}/messages`, post({ text: "go on", requestId: "dashboard:2" }));
+  expect(again.status).toBe(202);
+  expect(runtime.dispatched.map((each) => each.conversation)).toEqual([{ key: "telegram:1", agent: "assistant", conversationId: "100" }]);
 });
 
 test("a conversation of the dashboard's own on the Worker: one call to the object of its new key, listed first at once", async () => {

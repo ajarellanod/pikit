@@ -416,6 +416,35 @@ test("POST …/reset points the key to a new conversation through conversations.
   expect(s.runtime.pointers.get("telegram:1")?.conversationId).toBe("c100");
 });
 
+test("a reset's new conversation is its key's current one, with the key's agent, before any message reaches it: listed so, and talked to at once", async () => {
+  const runtime = new Runtime();
+  runtime.add({ conversationId: "c1", key: "dashboard:1", agent: "assistant", lastActivity: 1 });
+  const s = await started({}, [], runtime);
+  await s.fetch("/admin/api/conversations/c1/reset", post());
+  // The runtime knows no key of it yet.
+  expect(s.runtime.conversations.get("c100")?.key).toBeUndefined();
+
+  const one = await s.fetch("/admin/api/conversations/c100", { headers: AUTH });
+  expect(await one.json()).toEqual({ conversationId: "c100", key: "dashboard:1", agent: "assistant", busy: false, usage: ZERO, current: true });
+  const page = (await (await s.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: Record<string, unknown>[] };
+  expect(page.items.map(({ conversationId, key, current }) => ({ conversationId, key, current }))).toEqual([
+    { conversationId: "c100", key: "dashboard:1", current: true },
+    { conversationId: "c1", key: "dashboard:1", current: false },
+  ]);
+
+  const sent = await s.fetch("/admin/api/conversations/c100/messages", post({ text: "again", requestId: "dashboard:r1" }));
+  expect(sent.status).toBe(202);
+  expect(s.runtime.dispatched.map((each) => each.conversation)).toEqual([{ key: "dashboard:1", agent: "assistant", conversationId: "c100" }]);
+  expect((await s.fetch("/admin/api/conversations/c1/messages", post({ text: "hi" }))).status).toBe(409);
+
+  // Reset again before any message: the one in between was left behind, as any other.
+  await s.fetch("/admin/api/conversations/c100/reset", post());
+  expect((await s.fetch("/admin/api/conversations/c101/reset", post())).status).toBe(200);
+  expect(await (await s.fetch("/admin/api/conversations/c101", { headers: AUTH })).json()).toMatchObject({ key: "dashboard:1", agent: "assistant", current: false });
+  expect(await (await s.fetch("/admin/api/conversations/c101/messages", post({ text: "hi" }))).json()).toMatchObject({ error: "not_current" });
+  expect((await s.fetch("/admin/api/conversations/c102/messages", post({ text: "hi" }))).status).toBe(202);
+});
+
 test("a path under /admin/api/ that no route serves is the API's 404, never the dashboard's page", async () => {
   const s = await started();
 

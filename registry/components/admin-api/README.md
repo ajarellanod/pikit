@@ -43,7 +43,10 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 - An id is opaque: put it in a path encoded (`encodeURIComponent`). An id with `:`, `@`, `.`, `~` or
   an encoded `/` (`email:ana@empresa.com~1`) is one segment like any other.
 - A message, an abort or a reset reaches only a conversation's current one: to one a reset left
-  behind it is `409 not_current`, to one no message has reached yet `409 no_agent`.
+  behind it is `409 not_current`, to one with no key (no message reached it, no reset pointed a key to
+  it) `409 no_agent`.
+  A reset's new conversation is its key's current one, with the key's agent (`conversations.registry`'s
+  `get`), before any message reaches it: it is listed with its key and takes a message at once.
 - Live events: one JSON object per `data:` line, each with its `type`, in the runtime's own words. A
   client that falls behind gets a new `snapshot`: rebuild the view from it. A comment line every
   `heartbeatMs` keeps an idle stream open. A browser's `EventSource` cannot send a header: read the

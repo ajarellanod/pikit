@@ -50,6 +50,10 @@ test("one row per conversation: a key's conversations (a reset's) are listed eac
   await conversations.seen([row("telegram:1", 100, "1"), row("http:a", 200, "c7"), row("telegram:1", 300, "2")]);
 
   expect((await conversations.list({ limit: 10 })).items).toEqual([row("telegram:1", 300, "2"), row("http:a", 200, "c7"), row("telegram:1", 100, "1")]);
+  // A server's ids are unique: each names its key (a reset's new one, which the runtime knows no key of yet).
+  expect(await conversations.keyOf("c7")).toBe("http:a");
+  expect(await conversations.keyOf("2")).toBe("telegram:1");
+  expect(await conversations.keyOf("c9")).toBeUndefined();
 });
 
 test("list: the most recently active first (ties by key, then id), a page at a time with the next one's cursor", async () => {
