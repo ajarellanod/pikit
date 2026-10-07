@@ -4,8 +4,8 @@ Status: draft for upstream (`@earendil-works/pi-durable`, against 1.0.3). From p
 Harness per Cloudflare Durable Object. Not to be sent as its own issue: the same gap is open as
 [#10325](https://github.com/earendil-works/pi/issues/10325) (opened by another Durable Object user,
 reopened and assigned to a maintainer), whose shape, `inspect()` reporting a sleeping task with its
-time, is option A below. Pending for the owner: a comment on #10325 endorsing it, using this file as
-evidence (README.md, proposal 1).
+time, is option A below. Tracked, not commented (owner's decision, 2026-10-07); what pikit deletes
+when it ships is listed in README.md, proposal 1.
 
 ## Motivation
 

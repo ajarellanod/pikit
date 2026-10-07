@@ -9,7 +9,7 @@ here with the Pi version.
 
 | # | Package | Proposal | Hurts pikit | Priority | Status |
 |---|---|---|---|---|---|
-| 1 | pi-durable | [Next due time of sleeping work](#1-next-due-time-of-sleeping-work) | Durable Objects stall after eviction | **high** | open upstream as [#10325](https://github.com/earendil-works/pi/issues/10325) (not ours; reopened, assigned); pikit to comment there ([file](pi-durable-next-wake.md)) |
+| 1 | pi-durable | [Next due time of sleeping work](#1-next-due-time-of-sleeping-work) | Durable Objects stall after eviction | **high** | open upstream as [#10325](https://github.com/earendil-works/pi/issues/10325) (not ours; reopened, assigned); tracked, not commented ([file](pi-durable-next-wake.md)) |
 | 2 | pi-durable | [Queued inputs stuck after a failed run](#2-queued-inputs-stuck-after-a-failed-run) | A message is never answered until the user writes again | **high** | draft ([file](pi-durable-inbox-after-failure.md)) |
 | 3 | pi-durable | [Caller context values reach tools](#3-caller-context-values-reach-tools) | Multi-tenant isolation, tracing | medium (high for multi-tenant) | draft (here) |
 | 4 | pi-durable | [Several writers per storage](#4-several-writers-per-storage) | Replicas, Postgres as a shared store | medium | draft (here) |
@@ -35,9 +35,9 @@ lacks (`packages/pi-adapter/src/testing/execution.ts`), which could be offered t
 
 Re-checked against pi-durable 1.0.3 (2026-10-05): only proposal 6 is solved; 1 to 5 and 7 are not.
 
-**Pending for the owner:** comment on [#10325](https://github.com/earendil-works/pi/issues/10325)
-(proposal 1), endorsing its `inspect()`-reports-sleeping shape, in the owner's own voice. Nothing
-else is to be sent now.
+**Tracked, not commented:** [#10325](https://github.com/earendil-works/pi/issues/10325)
+(proposal 1). The owner decided (2026-10-07) not to comment; check it at each pin bump. Nothing is
+to be sent now.
 
 ## At each Pi pin bump
 When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
@@ -74,8 +74,21 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   [#10325](https://github.com/earendil-works/pi/issues/10325) ("let a host tell when a harness is
   only sleeping"); it was auto-closed, then reopened and assigned to a maintainer. Its shape,
   `inspect()` reporting a task as sleeping until a time, is option A of our file and enough for
-  pikit. So pikit does not open its own issue nor push `nextDueAt()`: the owner comments on #10325
-  endorsing that shape, with pikit's case (an alarm set from the next due time) as evidence.
+  pikit. So pikit does not open its own issue nor push `nextDueAt()`, and does not comment there
+  (owner's decision, 2026-10-07): it tracks the issue at each pin bump.
+- **To delete when it ships** (sleeping tasks reported by pi-durable with their wake time, or a
+  next-due API). Each place below reads pi-durable's private checkpoints:
+  - `packages/pi-adapter/src/wakeups.ts`: `checkpointedDue` and the header's list of built-in waits;
+    `nextWakeAtOf` reads the reported time instead. `WakeOptions.dueAt` goes too if custom task sleeps
+    are reported (nothing in the registry uses it).
+  - `packages/pi-adapter/src/runtime.ts`: `timed` and its `Checkpoint` type (the same rules, written a
+    second time); `driven` asks whether the task is sleeping.
+  - `packages/pi-adapter/src/testing/wakeups.ts`: `liveDueTimes` (reads `pi.live`), if no test still needs it.
+  - Tests that pin the checkpoint shapes: `wakeups.test.ts` (`nextWakeAtOf: the rules over an
+    inspection`, the `dueAt` case) and `pi-facts.test.ts` ("a model retry waits in-process"), which
+    becomes a fact of the new API. The workerd lane (`durable-wakeups.workerd.ts`) stays: it proves
+    the alarm still comes.
+  - This entry, `pi-durable-next-wake.md`, and the line in `features/kit-follow-ups.md` if any.
 
 ## 2. Queued inputs stuck after a failed run
 - **Problem.** Follow-ups queued while a run goes are placed only when it answers. If it ends

@@ -6,7 +6,9 @@
  *
  * Why: pi-durable 1.0 waits with in-process timers (the scheduler's `runtime.sleep`, a `setTimeout`)
  * and reports no next due time. An object evicted while a task sleeps keeps the task durably, but
- * nothing wakes the object to run it. See docs/upstream/pi-durable-next-wake.md.
+ * nothing wakes the object to run it. See docs/upstream/pi-durable-next-wake.md. Upstream:
+ * earendil-works/pi#10325; when it ships, `checkpointedDue` here and `timed` in runtime.ts go
+ * (docs/upstream/README.md, proposal 1, "To delete when it ships").
  *
  * What `nextWakeAt` reads: `harness.inspect()`, the live tasks with their records, and nothing else.
  *

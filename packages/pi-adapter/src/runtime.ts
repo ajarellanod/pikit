@@ -1010,7 +1010,11 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
 type Checkpoint = { phase?: string; until?: number; pollAt?: number } | undefined;
 
-/** Live work that waits for a time, in-process: a model retry's backoff, a deferred poll, a compaction's retry. */
+/**
+ * Live work that waits for a time, in-process: a model retry's backoff, a deferred poll, a compaction's retry.
+ * Reads pi-durable's private checkpoints, as wakeups.ts's `checkpointedDue` does; goes when
+ * earendil-works/pi#10325 ships (docs/upstream/README.md, proposal 1).
+ */
 function timed(task: TaskInspection, at: number): boolean {
   const checkpoint = (task.record.state as { checkpoint?: Checkpoint }).checkpoint;
   if (task.record.kind === "pi.generation") {
