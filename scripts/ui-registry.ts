@@ -76,7 +76,7 @@ function items(): Item[] {
   all.push({
     name: "bui",
     title: "Beautiful UI primitives",
-    description: "Beautiful UI's primitives (MIT) as pikit's dashboard has them, fed by real data: the sidebar, the composer, thinking, tool chips, task rows, pills, an operator's page, records tables, filter chips, a code block. They use the tokens and classes of the dashboard's src/index.css.",
+    description: "Beautiful UI's primitives (MIT) as pikit's dashboard has them, fed by real data: the sidebar, the composer (its plus, slash and assistant menus), thinking, tool chips, context cards, pills, an operator's page, records tables, filter chips, a code block. They use the tokens and classes of the dashboard's src/index.css.",
     sources: folder(join(DASHBOARD, "src/components/bui"), "src/components/bui"),
   });
   const views = join(DASHBOARD, "src/views");

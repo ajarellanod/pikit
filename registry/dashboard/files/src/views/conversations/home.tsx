@@ -1,23 +1,26 @@
 /**
  * The home: a new conversation of the dashboard's own. The operator picks one of the App's agents (in
- * the composer, where Beautiful UI picks a model) and writes the first message: `POST
- * /admin/api/conversations` makes `dashboard:<uuid>`, whose answers appear only here, and no other
- * channel can continue it. The suggestions below are real: the conversations last active, and the
- * views the App has.
+ * the composer, where Beautiful UI picks a model; `?agent=<name>` chooses one, as a conversation's
+ * composer does when another is picked there) and writes the first message, with images and a web
+ * search when wanted: `POST /admin/api/conversations` makes `dashboard:<uuid>`, whose answers appear
+ * only here, and no other channel can continue it. Below, the last conversations, to continue.
  */
 
-import { ChatBubble, Refresh } from "iconoir-react";
-import { type CSSProperties, type ReactNode, useEffect, useState } from "react";
-import PromptBar from "@/components/bui/PromptBar";
+import { ChatBubble } from "iconoir-react";
+import { type CSSProperties, useEffect, useState } from "react";
+import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { type ApiStartResponse, post } from "@/lib/api";
-import { agentsOf, channelOf, defaultAgentOf, NEW_CHAT, useChats } from "@/lib/chats";
+import { agentsOf, defaultAgentOf, NEW_CHAT, useChats } from "@/lib/chats";
 import { Link, navigate, pagePath } from "@/lib/router";
 import { useShell } from "@/lib/shell";
+import { attachmentsOf, composerCommands, imageLimits, webSearchOf } from "./composer";
 
 /* -- the entrance (ms after mount): hello, question, composer, suggestions -- */
 const HOME_REVEAL_TIMING = [170, 330, 400, 550];
 const HOME_REVEAL = { offsetY: 23, blur: 17, duration: 800, easing: "cubic-bezier(0.16, 1, 0.3, 1)" };
+/** The conversations suggested: the most recently active. */
+const SUGGESTED = 3;
 
 function homeRevealStyle(visible: boolean): CSSProperties {
   return {
@@ -28,36 +31,28 @@ function homeRevealStyle(visible: boolean): CSSProperties {
   };
 }
 
-interface Suggestion {
-  key: string;
-  label: string;
-  meta?: string;
-  icon: ReactNode;
-  to: string;
-}
-
 export function HomePage() {
-  const { app, views, operator } = useShell();
+  const { app, agents: described, views, operator, newChat } = useShell();
   const chats = useChats();
   const agents = agentsOf(app);
-  const [agent, setAgent] = useState<string>();
+  const [agent, setAgent] = useState<string | undefined>(() => new URLSearchParams(window.location.search).get("agent") ?? undefined);
   const [error, setError] = useState<Error>();
-  const [offset, setOffset] = useState(0);
   const [stage, setStage] = useState(0);
   const chosen = agent !== undefined && agents.includes(agent) ? agent : defaultAgentOf(app);
   const fallback = defaultAgentOf(app);
+  const webSearch = webSearchOf(described, chosen);
 
   useEffect(() => {
     const timers = HOME_REVEAL_TIMING.map((at, i) => setTimeout(() => setStage(i + 1), at));
     return () => timers.forEach(clearTimeout);
   }, []);
 
-  const start = async (text: string) => {
+  const start = async ({ text, images, webSearch: search }: ComposerMessage) => {
     if (chosen === undefined) return;
     setError(undefined);
     try {
-      const started = await post<ApiStartResponse>("/conversations", { agent: chosen, text });
-      chats.setTitle(started.key, text);
+      const started = await post<ApiStartResponse>("/conversations", { agent: chosen, text, ...(images.length > 0 && { attachments: attachmentsOf(images) }), ...(search && { webSearch: true }) });
+      if (text !== "") chats.setTitle(started.key, text);
       chats.reload();
       navigate(pagePath("/conversations", started.conversationId));
     } catch (thrown) {
@@ -66,29 +61,8 @@ export function HomePage() {
     }
   };
 
-  // The conversations last active and the App's views, taken in turn.
-  const recent: Suggestion[] = (chats.items ?? [])
-    .filter((conversation) => conversation.key !== undefined && conversation.current !== false)
-    .slice(0, 6)
-    .map((conversation) => ({
-      key: `chat:${conversation.conversationId}`,
-      label: `${conversation.busy ? "Follow" : "Continue"} ${chats.titleOf(conversation) === NEW_CHAT ? `the chat with ${conversation.agent ?? "the agent"}` : chats.titleOf(conversation)}`,
-      meta: channelOf(conversation.key),
-      icon: <ChatBubble width={15} height={15} strokeWidth={1.9} />,
-      to: pagePath("/conversations", conversation.conversationId),
-    }));
-  const pages: Suggestion[] = views
-    .filter((view) => view.id !== "conversations")
-    .map((view) => {
-      const Icon = view.icon;
-      return { key: `view:${view.id}`, label: `Open ${view.title}`, icon: Icon === undefined ? null : <Icon className="size-[15px]" />, to: view.pages[0]?.path ?? `/${view.id}` };
-    });
-  const pool: Suggestion[] = [];
-  for (let i = 0; i < Math.max(recent.length, pages.length); i++) {
-    if (recent[i] !== undefined) pool.push(recent[i] as Suggestion);
-    if (pages[i] !== undefined) pool.push(pages[i] as Suggestion);
-  }
-  const shown = pool.length <= 3 ? pool : [0, 1, 2].map((i) => pool[(offset + i) % pool.length] as Suggestion);
+  // The last conversations, to continue: one per key (a reset's previous ones are not suggested).
+  const recent = (chats.items ?? []).filter((conversation) => conversation.key !== undefined && conversation.current !== false).slice(0, SUGGESTED);
 
   return (
     <div className="min-h-0 flex-1 overflow-y-auto">
@@ -108,11 +82,14 @@ export function HomePage() {
             placeholder={chosen === undefined ? "The App has no agent to talk to" : `Ask ${chosen} anything…`}
             disabled={chosen === undefined}
             picker={{
-              label: "agent",
+              label: "assistant",
               options: agents.map((name) => ({ key: name, name, ...(name === fallback && agents.length > 1 && { tag: "default" }) })),
               value: chosen,
               onChange: setAgent,
             }}
+            images={imageLimits(app)}
+            webSearch={webSearch}
+            commands={composerCommands({ views, newChat: () => newChat(), webSearch: webSearch.available, assistants: agents.length > 1 })}
             onSend={start}
           />
           {error !== undefined && (
@@ -123,13 +100,21 @@ export function HomePage() {
         </div>
 
         <div className="home-reveal mt-6 flex flex-col" style={homeRevealStyle(stage >= 4)}>
-          {shown.map((item) => (
-            <Link key={item.key} to={item.to} className="-mx-2 flex items-center gap-3 rounded-control px-2 py-2.5 text-left text-[14px] text-ink transition-colors duration-150 hover:bg-hover">
-              <span className="flex w-[15px] shrink-0 justify-center text-ink-3">{item.icon}</span>
-              <span className="min-w-0 truncate">{item.label}</span>
-              {item.meta !== undefined && <span className="shrink-0 text-[12.5px] text-ink-3">{item.meta}</span>}
-            </Link>
-          ))}
+          {recent.map((conversation) => {
+            const title = chats.titleOf(conversation);
+            return (
+              <Link
+                key={conversation.conversationId}
+                to={pagePath("/conversations", conversation.conversationId)}
+                className="-mx-2 flex items-center gap-3 rounded-control px-2 py-2.5 text-left text-[14px] text-ink transition-colors duration-150 hover:bg-hover"
+              >
+                <span className="flex w-[15px] shrink-0 justify-center text-ink-3">
+                  <ChatBubble width={15} height={15} strokeWidth={1.9} />
+                </span>
+                <span className="min-w-0 truncate">Continue {title === NEW_CHAT ? `the chat with ${conversation.agent ?? "the assistant"}` : title}</span>
+              </Link>
+            );
+          })}
           <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-1 pl-0.5 text-[13px] text-ink-3">
             <span className="flex items-center gap-2 py-1">
               <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
@@ -139,12 +124,6 @@ export function HomePage() {
               </svg>
               Only you see this conversation and its answers
             </span>
-            {pool.length > 3 && (
-              <button type="button" onClick={() => setOffset((current) => (current + 3) % pool.length)} className="flex items-center gap-2 py-1 transition-colors duration-150 hover:text-ink">
-                <Refresh width={14} height={14} strokeWidth={2} />
-                Shuffle suggestions
-              </button>
-            )}
           </div>
         </div>
       </div>

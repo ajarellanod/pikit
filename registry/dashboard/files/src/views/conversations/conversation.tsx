@@ -1,7 +1,9 @@
 /**
  * One conversation, live: its transcript, the answer being written, the thinking and the tools
- * running, its cost; and what an operator does to it (SPEC §5): a message, a stop, a reset. The Tasks
- * panel lists its tool calls.
+ * running; and what an operator does to it (SPEC §5): a message (with images, a web search), a stop,
+ * a reset. Its top bar holds nothing but two buttons: the Context panel (the images sent in it, what
+ * its web searches and fetches found) and a menu with the reset. Its composer shows its assistant: a
+ * conversation never changes agent, so picking another starts a new chat with it.
  *
  * The dashboard is a channel of its own: a message from here is a follow-up (it waits for a run
  * going) whose answer stays here. In another channel's conversation nothing said here reaches that
@@ -9,13 +11,13 @@
  * it nor the answer); a run that also answers a user's message is delivered to the user, as always.
  */
 
-import { MoreHoriz, Refresh, TaskList } from "iconoir-react";
+import { MoreHoriz, Refresh, SidebarExpand } from "iconoir-react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
 import GlideMenu from "@/components/bui/GlideMenu";
 import { LoaderGrid } from "@/components/bui/LoadingState";
-import PromptBar from "@/components/bui/PromptBar";
+import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { type Message, Reply, toolCalls, turnsOf, UserBubble, userText } from "@/components/pikit/message";
+import { type Message, Reply, turnsOf, UserBubble, userText } from "@/components/pikit/message";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -28,15 +30,16 @@ import {
 } from "@/components/ui/alert-dialog";
 import { isDashboardKey } from "@/lib/admin-api";
 import { api, type ApiConversation, type ApiPage, type ApiResetResponse, type ApiSendResponse, type ApiTranscriptEntry, post, useApi } from "@/lib/api";
-import { useChats } from "@/lib/chats";
-import { formatCost, formatTokens } from "@/lib/format";
+import { agentsOf, useChats } from "@/lib/chats";
 import { navigate, pagePath } from "@/lib/router";
-import { SidePanel, TabActions } from "@/lib/shell";
+import { SidePanel, TabActions, useShell } from "@/lib/shell";
+import { attachmentsOf, composerCommands, imageLimits, webSearchOf } from "./composer";
+import { ContextPanel } from "./context";
 import { useLive } from "./live";
-import { TasksPanel } from "./tasks";
+import { imagesOf, sourcesOf } from "./sources";
 
 const PAGE = 50;
-const TASKS = "pikit-tasks";
+const CONTEXT = "pikit-context";
 
 /** The transcript's latest page, read again when the conversation changes, and older pages on demand. */
 function useTranscript(id: string, changes: number) {
@@ -65,19 +68,19 @@ function useTranscript(id: string, changes: number) {
   return { entries, loaded: latest.data !== undefined, error: latest.error, hasOlder: next !== undefined, loadOlder };
 }
 
-/** Whether the Tasks panel shows (remembered: the operator closed it). */
-function useTasksOpen(): [boolean, (open: boolean) => void] {
+/** Whether the Context panel shows (remembered in this browser; closed at first). */
+function useContextOpen(): [boolean, (open: boolean) => void] {
   const [open, setOpen] = useState(() => {
     try {
-      return localStorage.getItem(TASKS) !== "closed";
+      return localStorage.getItem(CONTEXT) === "open";
     } catch {
-      return true;
+      return false;
     }
   });
   const set = (next: boolean) => {
     setOpen(next);
     try {
-      localStorage.setItem(TASKS, next ? "open" : "closed");
+      localStorage.setItem(CONTEXT, next ? "open" : "closed");
     } catch {
       // Not remembered.
     }
@@ -85,39 +88,23 @@ function useTasksOpen(): [boolean, (open: boolean) => void] {
   return [open, set];
 }
 
-/** The conversation's menu: stop the run, reset (confirmed). */
-function ConversationMenu({ conversation, busy, onError }: { conversation: ApiConversation; busy: boolean; onError: (error: Error | undefined) => void }) {
+/** The conversation's menu: its reset, which `onReset` confirms first. */
+function ConversationMenu({ actionable, onReset }: { actionable: boolean; onReset: () => void }) {
   const [open, setOpen] = useState(false);
-  const [confirming, setConfirming] = useState(false);
-  const chats = useChats();
-  const path = `/conversations/${encodeURIComponent(conversation.conversationId)}`;
-  const actionable = conversation.current === true;
 
   useEffect(() => {
     if (!open) return;
     const close = (event: PointerEvent) => {
       if (!(event.target as Element).closest("[data-conversation-menu]")) setOpen(false);
     };
+    const escape = (event: KeyboardEvent) => event.key === "Escape" && setOpen(false);
     document.addEventListener("pointerdown", close);
-    return () => document.removeEventListener("pointerdown", close);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", close);
+      document.removeEventListener("keydown", escape);
+    };
   }, [open]);
-
-  const run = async (action: () => Promise<void>) => {
-    onError(undefined);
-    try {
-      await action();
-    } catch (thrown) {
-      onError(thrown instanceof Error ? thrown : new Error(String(thrown)));
-    }
-  };
-
-  const reset = () =>
-    run(async () => {
-      const done = await post<ApiResetResponse>(`${path}/reset`);
-      chats.replaced(conversation.conversationId, done.conversationId);
-      chats.reload();
-      navigate(pagePath("/conversations", done.conversationId), { replace: true });
-    });
 
   return (
     <div data-conversation-menu className="relative">
@@ -137,24 +124,9 @@ function ConversationMenu({ conversation, busy, onError }: { conversation: ApiCo
             <button
               data-menu-row
               type="button"
-              disabled={!busy}
               onClick={() => {
                 setOpen(false);
-                void run(() => post(`${path}/abort`));
-              }}
-              className="relative z-10 flex h-9 w-full items-center gap-2 rounded-[8px] px-2 text-left text-[13.5px] text-ink disabled:text-ink-3"
-            >
-              <svg width="16" height="16" viewBox="0 0 24 24" aria-hidden className="text-ink-2">
-                <rect x="6" y="6" width="12" height="12" rx="2.5" fill="currentColor" />
-              </svg>
-              Stop the run
-            </button>
-            <button
-              data-menu-row
-              type="button"
-              onClick={() => {
-                setOpen(false);
-                setConfirming(true);
+                onReset();
               }}
               className="relative z-10 flex h-9 w-full items-center gap-2 rounded-[8px] px-2 text-left text-[13.5px] text-red"
             >
@@ -164,23 +136,41 @@ function ConversationMenu({ conversation, busy, onError }: { conversation: ApiCo
           </GlideMenu>
         </div>
       )}
-      <AlertDialog open={confirming} onOpenChange={setConfirming}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Reset this conversation?</AlertDialogTitle>
-            <AlertDialogDescription>
-              {isDashboardKey(conversation.key) ? "This chat" : conversation.key} starts again with an empty history. This conversation is kept and stays readable here; a run still going finishes in it.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancel</AlertDialogCancel>
-            <AlertDialogAction className="bg-red text-white hover:bg-red/90" onClick={() => void reset()}>
-              Reset
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </div>
+  );
+}
+
+/** The reset, confirmed: the key starts again in a new conversation, which the page follows. */
+function ResetDialog({ conversation, open, onOpenChange, onError }: { conversation: ApiConversation; open: boolean; onOpenChange: (open: boolean) => void; onError: (error: Error | undefined) => void }) {
+  const chats = useChats();
+  const reset = async () => {
+    onError(undefined);
+    try {
+      const done = await post<ApiResetResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/reset`);
+      chats.replaced(conversation.conversationId, done.conversationId);
+      chats.reload();
+      navigate(pagePath("/conversations", done.conversationId), { replace: true });
+    } catch (thrown) {
+      onError(thrown instanceof Error ? thrown : new Error(String(thrown)));
+    }
+  };
+  return (
+    <AlertDialog open={open} onOpenChange={onOpenChange}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle>Reset this conversation?</AlertDialogTitle>
+          <AlertDialogDescription>
+            {isDashboardKey(conversation.key) ? "This chat" : conversation.key} starts again with an empty history. This conversation is kept and stays readable here; a run still going finishes in it.
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Cancel</AlertDialogCancel>
+          <AlertDialogAction className="bg-red text-white hover:bg-red/90" onClick={() => void reset()}>
+            Reset
+          </AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   );
 }
 
@@ -220,10 +210,13 @@ function useStickToBottom(scroller: RefObject<HTMLDivElement | null>, id: string
 export function ConversationPage({ params }: { params: Record<string, string> }) {
   const id = params.id ?? "";
   const chats = useChats();
+  const { app, agents: described, views, newChat } = useShell();
+  const agents = agentsOf(app);
   const live = useLive(id);
   const summary = useApi<ApiConversation>(`/conversations/${encodeURIComponent(id)}`);
   const transcript = useTranscript(id, live.changes);
-  const [tasksOpen, setTasksOpen] = useTasksOpen();
+  const [contextOpen, setContextOpen] = useContextOpen();
+  const [confirming, setConfirming] = useState(false);
   const [actionError, setActionError] = useState<Error>();
   const [note, setNote] = useState<string>();
   const scrollRef = useRef<HTMLDivElement>(null);
@@ -245,11 +238,9 @@ export function ConversationPage({ params }: { params: Record<string, string> })
 
   const messages = transcript.entries.flatMap((entry) => entry.messages as Message[]);
   const turns = turnsOf(messages, live);
-  const runs = toolCalls(turns);
 
-  // A dashboard key is titled by the first message written in it, once read (a title it has is kept).
-  const firstUser = transcript.hasOlder ? undefined : turns.find((turn) => turn.kind === "user");
-  const firstText = firstUser?.kind === "user" ? userText(firstUser.message).text : undefined;
+  // A dashboard key is titled by the first words written in it, once read (a title it has is kept).
+  const firstText = transcript.hasOlder ? undefined : turns.map((turn) => (turn.kind === "user" ? userText(turn.message).text.trim() : "")).find((text) => text !== "");
   useEffect(() => {
     if (conversation?.key !== undefined && isDashboardKey(conversation.key) && firstText !== undefined) setTitle(conversation.key, firstText);
   }, [conversation, firstText, setTitle]);
@@ -286,11 +277,16 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const last = turns.at(-1);
   const since = [...messages].reverse().find((message) => message.timestamp !== undefined)?.timestamp;
   const dashboardOwn = isDashboardKey(conversation?.key);
-  const toolCount = runs.reduce((sum, run) => sum + run.calls.length, 0);
-  const send = async (text: string) => {
+  const actionable = conversation?.current === true;
+  const webSearch = webSearchOf(described, conversation?.agent);
+  const send = async ({ text, images, webSearch: search }: ComposerMessage) => {
     if (conversation === undefined) return;
     try {
-      const sent = await post<ApiSendResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/messages`, { text });
+      const sent = await post<ApiSendResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/messages`, {
+        text,
+        ...(images.length > 0 && { attachments: attachmentsOf(images) }),
+        ...(search && { webSearch: true }),
+      });
       setActionError(undefined);
       setNote(sent.admission === "queued" ? "Sent: it runs once the run going ends." : sent.admission === "duplicate" ? "Already sent." : undefined);
     } catch (thrown) {
@@ -310,29 +306,20 @@ export function ConversationPage({ params }: { params: Record<string, string> })
     <div className="relative flex min-h-0 flex-1 flex-col">
       {conversation !== undefined && (
         <TabActions>
-          <span className="mr-1 hidden items-center gap-1.5 text-[12px] whitespace-nowrap text-ink-3 tabular-nums md:flex" title={`${conversation.key ?? conversation.conversationId}, conversation ${conversation.conversationId}`}>
-            <span className={`size-1.5 rounded-full ${live.paused || !live.connected ? "bg-line-strong" : live.busy ? "bg-orange" : "bg-green"}`} />
-            {live.paused ? "paused while you are away" : !live.connected ? "reconnecting" : live.busy ? "running" : "live"}
-            {conversation.agent !== undefined && <span>· {conversation.agent}</span>}
-            <span>· {formatCost(conversation.usage)}</span>
-            <span>· {formatTokens(conversation.usage.totalTokens)} tokens</span>
-          </span>
-          {toolCount > 0 && (
-            <button
-              type="button"
-              aria-label="Tasks"
-              aria-pressed={tasksOpen}
-              title="The tool calls of this conversation"
-              onClick={() => setTasksOpen(!tasksOpen)}
-              className={`hidden h-7 items-center gap-1 rounded-[7px] px-1.5 text-[12px] font-medium tabular-nums transition-colors duration-100 lg:flex ${tasksOpen ? "bg-hover-2 text-ink" : "text-ink-3 hover:bg-hover hover:text-ink"}`}
-            >
-              <TaskList width={15} height={15} strokeWidth={1.9} />
-              {toolCount}
-            </button>
-          )}
-          <ConversationMenu conversation={conversation} busy={live.busy} onError={setActionError} />
+          <button
+            type="button"
+            aria-label="Context"
+            aria-pressed={contextOpen}
+            title="Context: the images sent here, and what its web searches and fetches found"
+            onClick={() => setContextOpen(!contextOpen)}
+            className={`hidden size-7 items-center justify-center rounded-[7px] transition-colors duration-100 lg:flex ${contextOpen ? "bg-hover-2 text-ink" : "text-ink-3 hover:bg-hover hover:text-ink"}`}
+          >
+            <SidebarExpand width={16} height={16} strokeWidth={1.9} />
+          </button>
+          <ConversationMenu actionable={actionable} onReset={() => setConfirming(true)} />
         </TabActions>
       )}
+      {conversation !== undefined && <ResetDialog conversation={conversation} open={confirming} onOpenChange={setConfirming} onError={setActionError} />}
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
         <div className="flex flex-col gap-8 px-4 pt-8 sm:px-8 lg:px-12" style={{ paddingBottom: composerH + 16 }}>
@@ -387,7 +374,31 @@ export function ConversationPage({ params }: { params: Record<string, string> })
               <PromptBar
                 placeholder={live.busy ? "Reply: it runs after the run going" : "Reply"}
                 disabled={conversation === undefined}
-                picker={conversation?.agent === undefined ? undefined : { label: "agent", options: [{ key: conversation.agent, name: conversation.agent }], value: conversation.agent }}
+                picker={
+                  conversation?.agent === undefined
+                    ? undefined
+                    : {
+                        label: "assistant",
+                        options: (agents.includes(conversation.agent) ? agents : [conversation.agent, ...agents]).map((name) => ({
+                          key: name,
+                          name,
+                          ...(name !== conversation.agent && { tag: "new chat" }),
+                        })),
+                        value: conversation.agent,
+                        onChange: (agent) => newChat(agent),
+                        note: "A chat keeps its assistant: another one starts a new chat with it.",
+                      }
+                }
+                images={imageLimits(app)}
+                webSearch={webSearch}
+                commands={composerCommands({
+                  views,
+                  newChat: () => newChat(),
+                  ...(live.busy && { stop }),
+                  ...(actionable && { reset: () => setConfirming(true) }),
+                  webSearch: webSearch.available,
+                  assistants: agents.length > 1,
+                })}
                 busy={live.busy}
                 onStop={stop}
                 onSend={send}
@@ -402,9 +413,9 @@ export function ConversationPage({ params }: { params: Record<string, string> })
         </div>
       </div>
 
-      {tasksOpen && runs.length > 0 && (
+      {contextOpen && conversation !== undefined && (
         <SidePanel>
-          <TasksPanel runs={runs} onClose={() => setTasksOpen(false)} />
+          <ContextPanel images={imagesOf(messages)} sources={sourcesOf(messages)} onClose={() => setContextOpen(false)} />
         </SidePanel>
       )}
     </div>

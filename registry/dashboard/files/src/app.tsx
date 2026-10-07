@@ -1,9 +1,9 @@
 /**
  * The dashboard's shell, in Beautiful UI's harness layout: the operator signs in with the token once
  * (a session cookie, `lib/api.ts`), then a sidebar (the App's menu, New chat, Home, the views the
- * App's composition allows, every conversation), a main pane with the conversations opened as tabs,
- * and a side panel a page may fill (a conversation's tasks). A page that loads with a session still
- * open goes straight in.
+ * App's composition allows, every conversation), a main pane with the conversations opened as tabs
+ * (and the New chat's while the home shows; each one closes), and a side panel a page may fill (a
+ * conversation's Context). A page that loads with a session still open goes straight in.
  */
 
 import { EditPencil, Home, LogOut, SoundHigh, SoundOff } from "iconoir-react";
@@ -16,8 +16,8 @@ import { ErrorNote } from "@/components/pikit/error-note";
 import { Monogram, SignIn } from "@/components/pikit/sign-in";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { setTarget } from "@/lib/activity";
-import { api, type ApiApp, ApiFailure, onUnauthorized, signOut } from "@/lib/api";
-import { channelOf, ChatsProvider, useChats } from "@/lib/chats";
+import { api, type ApiAgents, type ApiApp, ApiFailure, onUnauthorized, signOut, useApi } from "@/lib/api";
+import { ChatsProvider, useChats } from "@/lib/chats";
 import { BASE, match, navigate, pagePath, usePath } from "@/lib/router";
 import { appName, ShellContext } from "@/lib/shell";
 import { setSounds, useSounds } from "@/lib/sounds";
@@ -26,14 +26,40 @@ import { visibleViews } from "@/lib/views";
 const OPERATOR = "pikit-operator";
 const CHAT = "/conversations";
 
-function TabBar({ path, home, onActions }: { path: string; home: string; onActions: (element: HTMLDivElement | null) => void }) {
+function CloseTab({ onClose }: { onClose: () => void }) {
+  return (
+    <button
+      type="button"
+      aria-label="Close tab"
+      onClick={onClose}
+      className="-my-1 flex size-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 transition-[background-color,color] duration-100 hover:bg-hover-2 hover:text-ink"
+    >
+      <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
+        <path d="M18 6L6 18M6 6l12 12" />
+      </svg>
+    </button>
+  );
+}
+
+/**
+ * The tabs: the conversations opened, then New chat while the home shows. Each one closes: the active
+ * one gives way to its neighbour, and closing the last one leaves a fresh home (`onNewChat`).
+ */
+function TabBar({ path, home, onActions, onNewChat }: { path: string; home: string; onActions: (element: HTMLDivElement | null) => void; onNewChat: () => void }) {
   const chats = useChats();
   const busy = new Map((chats.items ?? []).map((conversation) => [conversation.conversationId, conversation.busy]));
   const onHome = path === home;
 
   const close = (id: string, active: boolean) => {
     const next = chats.closeTab(id);
-    if (active) navigate(next === undefined ? home : pagePath(CHAT, next.id));
+    if (!active) return;
+    if (next === undefined) onNewChat();
+    else navigate(pagePath(CHAT, next.id));
+  };
+  const closeHome = () => {
+    const last = chats.tabs.at(-1);
+    if (last === undefined) onNewChat();
+    else navigate(pagePath(CHAT, last.id));
   };
 
   return (
@@ -51,28 +77,22 @@ function TabBar({ path, home, onActions }: { path: string; home: string; onActio
                 {busy.get(tab.id) === true && <span aria-label="Running" className="size-2.5 shrink-0 rounded-full border-[1.5px] border-line-strong border-t-ink-2" style={{ animation: "spin 700ms linear infinite" }} />}
                 <span className="block truncate">{chats.tabTitle(tab)}</span>
               </button>
-              <button
-                type="button"
-                aria-label="Close tab"
-                onClick={() => close(tab.id, active)}
-                className="-my-1 flex size-6 shrink-0 items-center justify-center rounded-[5px] text-ink-3 transition-[background-color,color] duration-100 hover:bg-hover-2 hover:text-ink"
-              >
-                <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" aria-hidden>
-                  <path d="M18 6L6 18M6 6l12 12" />
-                </svg>
-              </button>
+              <CloseTab onClose={() => close(tab.id, active)} />
             </div>
           );
         })}
         {onHome && (
-          <div className="flex h-7 w-36 shrink-0 items-center rounded-[7px] bg-hover-2 pl-2.5 text-[12.5px] font-medium text-ink">
-            <span className="block truncate">New chat</span>
+          <div className="flex h-7 w-36 shrink-0 items-center gap-0.5 rounded-[7px] bg-hover-2 pr-0.5 pl-2.5 text-[12.5px] font-medium text-ink">
+            <span aria-current="page" className="block min-w-0 flex-1 truncate">
+              New chat
+            </span>
+            <CloseTab onClose={closeHome} />
           </div>
         )}
         <button
           type="button"
           aria-label="New chat"
-          onClick={() => navigate(home)}
+          onClick={onNewChat}
           className="ml-0.5 flex size-7 shrink-0 items-center justify-center rounded-[7px] text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink"
         >
           <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" aria-hidden>
@@ -94,6 +114,15 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const chatView = views.find((view) => view.id === "conversations");
   const home = chatView?.pages[0]?.path ?? views[0]?.pages[0]?.path ?? "/";
   const [draft, setDraft] = useState(0);
+  const agents = useApi<ApiAgents>("/agents");
+  /** A fresh home (its draft empty), with `agent` chosen when given. */
+  const newChat = useCallback(
+    (agent?: string) => {
+      setDraft((n) => n + 1);
+      navigate(agent === undefined ? home : `${home}?agent=${encodeURIComponent(agent)}`);
+    },
+    [home],
+  );
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [side, setSide] = useState<HTMLDivElement | null>(null);
   const [narrow] = useState(() => !window.matchMedia("(min-width: 1024px)").matches);
@@ -109,10 +138,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       label: "New chat",
       icon: <EditPencil />,
       href: `${BASE}${home}`,
-      onSelect: () => {
-        setDraft((n) => n + 1);
-        navigate(home);
-      },
+      onSelect: () => newChat(),
     },
     { key: "home", label: "Home", icon: <Home />, active: path === home, href: `${BASE}${home}`, onSelect: () => navigate(home) },
     ...views
@@ -127,8 +153,6 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const sidebarChats: SidebarChat[] = (chats.items ?? []).map((conversation) => ({
     id: conversation.conversationId,
     label: chats.titleOf(conversation),
-    // A conversation a reset left behind: its key's name, said to be the previous one.
-    meta: conversation.current === false ? "previous" : channelOf(conversation.key),
     busy: conversation.busy,
     active: path === pagePath(CHAT, conversation.conversationId),
     href: `${BASE}${pagePath(CHAT, conversation.conversationId)}`,
@@ -150,7 +174,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
     );
 
   return (
-    <ShellContext.Provider value={{ app, views, operator, slots: { actions, side } }}>
+    <ShellContext.Provider value={{ app, ...(agents.data !== undefined && { agents: agents.data.items }), newChat, views, operator, slots: { actions, side } }}>
       <main className="flex h-[100dvh] gap-0 bg-canvas p-2.5 pl-0 text-ink">
         <SidebarNav
           defaultCollapsed={narrow}
@@ -209,7 +233,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
 
         <div className="flex min-w-0 flex-1 gap-2.5">
           <section className="flex min-w-0 flex-1 flex-col overflow-hidden rounded-window border border-line bg-page">
-            <TabBar path={path} home={home} onActions={setActions} />
+            <TabBar path={path} home={home} onActions={setActions} onNewChat={() => newChat()} />
             <div className="flex min-h-0 flex-1 flex-col">{page}</div>
           </section>
           <div ref={setSide} className="contents" />

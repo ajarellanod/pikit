@@ -25,8 +25,6 @@ export type SidebarItem = {
 export type SidebarChat = {
   id: string;
   label: string;
-  /** what it is, at the row's end: its channel */
-  meta?: string;
   busy?: boolean;
   active?: boolean;
   href?: string;
@@ -143,7 +141,7 @@ export default function SidebarNav({
   const searchRef = useRef<HTMLInputElement>(null);
 
   const needle = query.trim().toLowerCase();
-  const visibleChats = chats.filter((chat) => `${chat.label} ${chat.meta ?? ""}`.toLowerCase().includes(needle));
+  const visibleChats = chats.filter((chat) => chat.label.toLowerCase().includes(needle));
 
   useEffect(() => {
     if (!workspaceOpen) return;
@@ -316,7 +314,7 @@ export default function SidebarNav({
                   key={chat.id}
                   data-row
                   href={chat.href}
-                  title={chat.meta === undefined ? chat.label : `${chat.label} (${chat.meta})`}
+                  title={chat.label}
                   aria-current={chat.active ? "page" : undefined}
                   onClick={(event) => follow(event, () => onPickChat(chat.id))}
                   className={`sidebar-row relative z-10 mx-2 flex h-8 items-center gap-2 rounded-[8px] px-2 text-left transition-[width,background-color,color,transform] duration-150 active:scale-[0.98] ${chat.active ? "bg-hover-2 group-hover/glide:bg-transparent" : ""}`}
@@ -325,7 +323,6 @@ export default function SidebarNav({
                   {chat.busy === true && (
                     <span aria-label="Running" className="sidebar-copy size-3 shrink-0 rounded-full border-[1.5px] border-line-strong border-t-ink-2" style={{ animation: "spin 700ms linear infinite" }} />
                   )}
-                  {chat.meta !== undefined && <span className="sidebar-copy shrink-0 text-[12px] font-medium text-ink-3">{chat.meta}</span>}
                 </a>
               ))}
               {visibleChats.length === 0 && <div className="sidebar-copy mx-2 px-2 py-2 text-[12.5px] text-ink-3">{needle === "" ? chatsEmpty : "No chats found"}</div>}

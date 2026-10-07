@@ -5,8 +5,8 @@
  * order they came. System messages (instructions, tools) are folded away.
  *
  * `turnsOf` builds that from the transcript and what is live (the answer being written, the tools
- * running); `Turns` shows it; `toolCalls` lists every call, for the Tasks panel. `MessageView` shows
- * a single message the same way.
+ * running); `UserBubble` and `Reply` show it (a person's images in the bubble). `MessageView` shows a
+ * single message the same way.
  */
 
 import type { ReactNode } from "react";
@@ -144,15 +144,6 @@ export function turnsOf(messages: Message[], live: Live): Turn[] {
   return turns;
 }
 
-/** Every tool call of `turns`, by reply. */
-export function toolCalls(turns: Turn[]): { key: string; at?: number; calls: Call[] }[] {
-  return turns.flatMap((turn) => {
-    if (turn.kind !== "reply") return [];
-    const calls = turn.segments.flatMap((segment) => (segment.kind === "tools" ? segment.calls : []));
-    return calls.length === 0 ? [] : [{ key: turn.key, at: turn.at, calls }];
-  });
-}
-
 const stringArg = (args: Record<string, unknown>, ...keys: string[]): string | undefined => {
   for (const key of keys) {
     const value = args[key];
@@ -183,15 +174,6 @@ export function describeCall(name: string, args: Record<string, unknown>): Pick<
   }
 }
 
-/** A call's duration, short: `0.4s`, `12s`, `3m`. */
-export function callDuration(call: Call): string | undefined {
-  if (call.calledAt === undefined || call.doneAt === undefined) return undefined;
-  const seconds = Math.max(0, call.doneAt - call.calledAt) / 1000;
-  if (seconds < 10) return `${seconds.toFixed(1)}s`;
-  if (seconds < 120) return `${Math.round(seconds)}s`;
-  return `${Math.round(seconds / 60)}m`;
-}
-
 function toolsHeader(calls: Call[]): string {
   const count = (status: ToolStatus) => calls.filter((each) => each.status === status).length;
   const parts = [`${calls.length} tool call${calls.length === 1 ? "" : "s"}`];
@@ -215,12 +197,16 @@ export function UserBubble({ message, from }: { message: UserMessage; from?: str
   return (
     <div className="flex flex-col items-end gap-1 pl-10 sm:pl-24" style={{ animation: "fade-up 300ms cubic-bezier(0.23,1,0.32,1) both" }}>
       {!operator && from !== undefined && <span className="px-1 text-[11.5px] font-medium text-ink-3">{from}</span>}
-      <div className="max-w-full space-y-2 rounded-xl bg-field px-3.5 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-ink shadow-hairline [overflow-wrap:anywhere]">
-        {text}
-        {images.map((image, i) => (
-          <img key={i} className="max-h-64 rounded-[8px]" alt="" src={`data:${image.mimeType};base64,${image.data}`} />
-        ))}
-      </div>
+      {images.length > 0 && (
+        <div className="flex max-w-full flex-wrap justify-end gap-2">
+          {images.map((image, i) => (
+            <img key={i} className="max-h-56 max-w-[min(100%,320px)] rounded-xl object-contain shadow-hairline" alt={`Image ${i + 1}`} src={`data:${image.mimeType};base64,${image.data}`} />
+          ))}
+        </div>
+      )}
+      {text !== "" && (
+        <div className="max-w-full rounded-xl bg-field px-3.5 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-ink shadow-hairline [overflow-wrap:anywhere]">{text}</div>
+      )}
     </div>
   );
 }

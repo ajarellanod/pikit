@@ -90,9 +90,6 @@ function save(key: string, value: unknown): void {
   }
 }
 
-/** The channel of conversation `key`: `telegram`, `http`, `dashboard`. */
-export const channelOf = (key: string | undefined): string | undefined => (key === undefined ? undefined : key.split(":")[0]);
-
 /** The App's agents: the keys of `agent.definition`. */
 export const agentsOf = (app: ApiApp | undefined): string[] => Object.keys(app?.capabilities["agent.definition"]?.keys ?? {}).sort();
 

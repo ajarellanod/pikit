@@ -7,27 +7,46 @@ v4) whose source you change like any other file of the project.
 
 It looks like [Beautiful UI](https://www.beautifului.dev/harness)'s harness: a sidebar (the App's menu
 with the theme, the interaction sounds and sign out; **New chat**; **Home**; the views; every
-conversation, searchable), the conversations you opened as tabs, a chat (the transcript, the answer
-streaming in, the model's thinking, the tool calls as chips, a composer that stops a run), and a
-**Tasks** panel with the conversation's tool calls, their status and output. Light, dark, or the
-system's (the default); interaction sounds on until you turn them off. Both are kept in this browser.
+conversation by its name, searchable), the conversations you opened as tabs (New chat's too: each one
+closes, and closing the last leaves a fresh home), a chat (the transcript, the answer streaming in,
+the model's thinking, the tool calls as chips) and its composer, and a **Context** panel. Light, dark,
+or the system's (the default); interaction sounds on until you turn them off. Both are kept in this
+browser.
+
+- **The composer**: the assistant where the harness picks its model (in a new chat it chooses the
+  agent; in a conversation it shows its agent, and picking another starts a new chat with it, since a
+  conversation never changes agent); **+** with exactly two things: **Add image** (PNG, JPEG, WebP or
+  GIF, at most 4 of 5 MB each, 1 MB in all on Cloudflare; checked here and by the API; pasting one
+  works too) and **Web search** for the next message (only for an assistant with the `websearch`
+  tool); and the send button, which stops the run going when there is nothing to send.
+- **The "/" menu**: `/` at the start of the composer opens the commands, filtered as you type (arrows,
+  Enter or Tab, Escape): `/new`, `/stop` (while a run goes), `/reset` (confirmed first), `/image`,
+  `/search` (an assistant with the tool), `/assistant`, and one per view shown (`/health`,
+  `/delivery`, `/composition`, a component's view by its id).
+- **A conversation's top bar** has no figures: the **Context** button and the **…** menu (Reset,
+  confirmed). **Context** shows the images sent in the conversation and its sources (what its web
+  searches and fetches returned: title, address, snippet), as far as its transcript is read here.
+- **Tasks**: Beautiful UI's Tasks panel (`TaskRows`) is where durable tasks and subagents will show
+  (pi-durable's `taskGraph()`), once pikit builds them (`features/subagents.md`); a run's tool calls
+  are the chips in the chat.
 
 It talks only to the admin API that `admin-api` serves (`/admin/api/*`), and admin-api serves its
 built files under `/admin/`.
 
 ## A channel of its own
 
-- **New chat** (the home): pick one of the App's agents (in the composer) and write the first message.
-  It is a conversation of the dashboard's own (`dashboard:<uuid>`, labeled `dashboard`): its answers
-  appear only here, and no other channel can continue it.
+- **New chat** (the home): pick one of the App's agents (in the composer) and write the first message
+  (or send images alone). It is a conversation of the dashboard's own (`dashboard:<uuid>`): its
+  answers appear only here, and no other channel can continue it. Below the composer, the three
+  conversations last active, to continue.
 - **Another channel's conversation** (a Telegram chat, an HTTP client's): what you write is a
   follow-up (with a run going, it waits for it) whose answer stays here. Nothing you say, nor its
   answer, is sent to that chat; the agent reads that the message is the operator's and that the user
   does not see it. A run that also answers the user's own message is delivered to the user, as always.
 - **Abort** and **reset** work on every conversation. After a reset you write on in the key's new
-  conversation at once; the one left behind stays readable, listed under the same name and tagged
-  `previous`. A chat is named by its key: a dashboard one by the first message written in it (read
-  once and kept in this browser), another channel's by the id in its key, its channel as the tag.
+  conversation at once; the one left behind stays readable, listed under the same name. A chat is
+  named by its key: a dashboard one by the first words written in it (read once and kept in this
+  browser), another channel's by the id in its key. The list shows names only, no channel.
 
 ## Signing in
 
@@ -36,8 +55,9 @@ PIKIT_ADMIN_TOKEN` writes one) once, and posts it to `POST /admin/api/session`: 
 session cookie (HttpOnly, SameSite=Strict, sent to `/admin/api/` only, 12 h), never keeps the token,
 and no script can read the session. Every call also sends `x-pikit-admin: 1`, which a page of
 another site cannot. **Sign out** clears the cookie. The files are served with a Content-Security-Policy
-(`default-src 'self'`, no inline script): keep scripts in modules, and fonts, images and styles in
-the build (`src/`, `public/`), never from another origin.
+(`default-src 'self'`, no inline script; images also `data:` and `blob:`, for the transcript's and
+those attached before sending): keep scripts in modules, and fonts, images and styles in the build
+(`src/`, `public/`), never from another origin.
 
 ## Requests
 
@@ -74,7 +94,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | Path | What |
 |---|---|
 | `src/views/<view>/index.tsx` | one view each: its pages and when it shows (below) |
-| `src/components/bui/` | Beautiful UI's primitives (the sidebar, the composer, thinking, tool chips, task rows, pills; an operator's page, records tables, filter chips, a code block), fed by real data |
+| `src/components/bui/` | Beautiful UI's primitives (the sidebar, the composer with its "+", "/" and assistant menus, thinking, tool chips, context cards, pills; an operator's page, records tables, filter chips, a code block), fed by real data |
 | `src/components/ui/` | shadcn/ui primitives, copied and yours (`shadcn add` puts more here), in the same tokens |
 | `src/components/pikit/` | pieces the views share: a transcript (`turnsOf`, `Reply`, `UserBubble`, `MessageView`), an error, the sign-in |
 | `src/index.css` | the one stylesheet: Beautiful UI's tokens (light and dark), shadcn's variables mapped onto them |
@@ -83,8 +103,9 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/lib/admin-api.ts` | the API's JSON, typed: an identical copy of `src/pikit/admin-api/api.ts` |
 | `src/lib/views.ts` | how views are found and when they show |
 | `src/lib/router.tsx` | the pages under `/admin` |
+| `src/views/conversations/` | the home, a conversation, what their composers share (`composer.ts`: the image limits, web search, the "/" commands), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
 | `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles: a key's, shared by the conversations a reset left behind (`useChats`, `agentsOf`) |
-| `src/lib/shell.tsx` | what the shell gives a page: the App, the views, `TabActions`, `SidePanel` |
+| `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, the views, `newChat`, `TabActions`, `SidePanel` |
 | `src/lib/theme.ts`, `public/theme.js` | light, dark or the system's, before the first paint |
 | `src/lib/sounds.ts` | the interaction sounds, and their switch |
 | `src/app.tsx` | sign-in, the sidebar, the tabs and the page the path names |

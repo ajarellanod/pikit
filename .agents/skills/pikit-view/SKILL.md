@@ -101,8 +101,8 @@ export default defineView({
   with a glyph, sorting, a numbered gutter, a count; `RecordMark`, `RecordTag`, `TagList` in its
   cells), `StatePill` for a state in a cell, `EmptyState` when nothing shows, `SearchField`,
   `CodeBlock` for JSON; health-registry's and the base `delivery` and `composition` views are
-  examples. Also `StatusPill`, `Chip`, `ValuePill`, `Button`, `TaskRows`, `ToolChips`,
-  `LoadingState`. shadcn's in `src/components/ui/` (in the same
+  examples. Also `StatusPill`, `Chip`, `ValuePill`, `Button`, `ContextCards` (a card per
+  source: title, figure, text, a chip that opens it), `ToolChips`, `LoadingState`. shadcn's in `src/components/ui/` (in the same
   colours), and the pieces in `src/components/pikit/` (`ErrorNote`, `MessageView`). Use the tokens'
   classes (`bg-surface`, `text-ink-2`, `shadow-card`, `rounded-card`), not raw colours. Need another primitive: `bunx shadcn@latest add <name>` in
   `src/dashboard/`. A component's view may use only primitives the base dashboard ships, or say in its

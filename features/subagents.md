@@ -30,6 +30,13 @@ and aborted with their owner (`pico-v5.md` §5.4, §7.2). Pi's `subagent` exampl
 `pi` processes, which pikit cannot use (no `coding-agent`, no `child_process` on Cloudflare). So the
 in-session helper waits for `pi-durable` and reaches pikit through the adapter.
 
+## In the dashboard
+Beautiful UI's harness has a **Tasks** panel (`TaskRows`: a row per task, its status, steps and
+output) beside the chat. The dashboard dropped it while a run's tool calls are its only work (they
+are the chat's chips); it is the place for durable tasks and subagents once they are built: a
+conversation's task graph (pi-durable's `taskGraph()`), read through an admin route, each child
+conversation a row that opens it.
+
 ## Open questions
 - Is delegation a contract (two real parties: a delegating tool and the runtime), or a tool over
   `admitInbound`?

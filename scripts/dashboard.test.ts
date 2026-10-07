@@ -9,6 +9,7 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createAssets, type DashboardFiles } from "../registry/components/admin-api/files/src/pikit/admin-api/assets.ts";
+import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/views/conversations/sources.ts";
 import { generated, OUTPUT } from "./ui-registry.ts";
 
 const REPO = join(import.meta.dir, "..");
@@ -120,4 +121,31 @@ test("the @pikit shadcn registry (registry/ui/r/) is what scripts/ui-registry.ts
   for (const [name, text] of files) expect({ name, text: readFileSync(join(OUTPUT, name), "utf8") }).toEqual({ name, text });
   expect(readdirSync(OUTPUT).sort()).toEqual([...files.keys()].sort());
   expect((JSON.parse(read("components.json")) as { registries: Record<string, string> }).registries["@pikit"]).toContain("registry/ui/r/{name}.json");
+});
+
+test("the Context panel reads a transcript's sources as the websearch and fetch tools write them, and leaves out what does not parse", () => {
+  const search = [
+    "1. Bun \u2014 a fast runtime (2 days ago)\n   https://bun.sh/\n   Bun is a fast JavaScript runtime.",
+    "2. No address\n   not-a-url\n   left out",
+    "3. Cloudflare Durable Objects\n   https://developers.cloudflare.com/durable-objects/",
+  ].join("\n\n");
+  const page = "HTTP 200 OK \u00b7 text/html; charset=utf-8 \u00b7 https://example.com/\n\n# Example Domain\n\nThis domain is for examples.\n\nLinks:\n- More: https://iana.org/";
+  const messages = [
+    { role: "user", content: [{ type: "text", text: "look" }, { type: "image", mimeType: "image/png", data: "iVBORw0KGgo=" }], timestamp: 5 },
+    { role: "assistant", content: [{ type: "toolCall", id: "c1", name: "websearch", arguments: { query: "bun" } }, { type: "toolCall", id: "c2", name: "fetch", arguments: { url: "https://example.com" } }] },
+    { role: "toolResult", toolCallId: "c1", toolName: "websearch", content: [{ type: "text", text: search }] },
+    { role: "toolResult", toolCallId: "c2", toolName: "fetch", content: [{ type: "text", text: page }] },
+    // A failed call, another tool, a result that is not the tool's text: none is a source.
+    { role: "toolResult", toolCallId: "c3", toolName: "fetch", content: [{ type: "text", text: "fetch: HTTP 500" }], isError: true },
+    { role: "toolResult", toolCallId: "c4", toolName: "read", content: [{ type: "text", text: "1. a\n   https://x.test/" }] },
+    { role: "toolResult", toolCallId: "c5", toolName: "fetch", content: [{ type: "text", text: "garbage" }] },
+    { role: "toolResult", toolCallId: "c6", toolName: "websearch", content: "not a list" },
+  ];
+
+  expect(imagesOf(messages)).toEqual([{ key: "0:1", mimeType: "image/png", data: "iVBORw0KGgo=", at: 5 }]);
+  expect(sourcesOf(messages).map(({ title, href, body, badge, meta }) => ({ title, href, body, badge, meta }))).toEqual([
+    { title: "Bun \u2014 a fast runtime (2 days ago)", href: "https://bun.sh/", body: "Bun is a fast JavaScript runtime.", badge: "WEB", meta: "result 1" },
+    { title: "Cloudflare Durable Objects", href: "https://developers.cloudflare.com/durable-objects/", body: "", badge: "WEB", meta: "result 3" },
+    { title: "Example Domain", href: "https://example.com/", body: "This domain is for examples.", badge: "HTML", meta: "28 characters" },
+  ]);
 });

@@ -25,7 +25,7 @@ src/components/ui/*, src/hooks/use-mobile.ts and the theme in src/index.css
 
 src/components/bui/*, the design tokens, theme and keyframes in src/index.css, src/lib/sounds.ts
 (the interaction sounds), public/theme.js (after its theme script), and the harness's layout, tabs,
-home and thread in src/app.tsx and src/views/conversations/
+home, thread, composer menus and context pane in src/app.tsx and src/views/conversations/
   Beautiful UI — https://github.com/slev12397/beautiful-ui
   Copyright (c) 2026 Shane Levine
   Licensed under the MIT License:

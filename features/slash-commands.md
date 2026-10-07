@@ -22,6 +22,12 @@ that conversation.
 - Absent: no extension registers commands. Running Pi coding-agent extensions was dropped with the
   move to pi-durable; pi-durable's own extensions will replace it.
 
+## The dashboard's "/" menu
+The dashboard's composer has a "/" menu of its own (Beautiful UI's): `/new`, `/stop`, `/reset`,
+`/image`, `/search`, `/assistant` and one per view, all the dashboard's actions, nothing sent to the
+agent. Once a conversation can list the commands its Pi extensions registered (the runtime-side
+method above, read through an admin route), they could join that menu, run in that conversation.
+
 ## Pi first
 Pi's `registerCommand` defines the commands and their handlers; `/skill:name` loads a skill. pikit
 only routes the text to them and builds no command system of its own.
