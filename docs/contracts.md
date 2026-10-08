@@ -41,7 +41,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `http.route` | keyed | admin-api, channel-http, channel-telegram-webhook, health-registry | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, health-registry? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-cloudflare, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, tool-websearch-brave, execution-do?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
-| `github` | single | github-app | execution-do?, extension-pikit-self? | `createGitHubConformance` |
+| `github` | single | github-app, github-token | execution-do?, extension-pikit-self? | `createGitHubConformance` |
 | `health` | single | health-registry | channel-telegram?, server-bun? | `createHealthConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-faux, provider-openai-compatible, provider-openrouter | runtime-pi? | none |
@@ -452,11 +452,13 @@ interface GitHubAccess {
   with `GitHubNotConnectedError` (`code: "not_connected"`, `isGitHubNotConnected`), saying how to
   connect. A token is never logged, stored or put in an error.
 
-Provider: github-app (Cloudflare: a GitHub App the operator creates and installs from the dashboard;
-installation tokens minted with the App's JWT, its key sealed with a key derived from the admin
-token). Users: execution-do (`git`: the connected repository is a push repository, its token the only
-one), extension-pikit-self (the steward's repository). Without a provider, each falls back to a
-`GITHUB_TOKEN` secret. Suite: `createGitHubConformance` (github-app, in Bun and in workerd).
+Providers, interchangeable: github-app (Cloudflare: a GitHub App the operator creates and installs
+from the dashboard; installation tokens minted with the App's JWT, its key sealed with a key derived
+from the admin token) and github-token (both targets: a `GITHUB_TOKEN` secret and the repository, a
+setting). Users, which never branch on the provider: execution-do (`git`: the connected repository is
+the only one it pushes to, its token sent for it alone), extension-pikit-self (the steward's
+repository). Without a provider nothing is connected. Suite: `createGitHubConformance` (github-app in
+Bun and in workerd, github-token).
 
 ### `health` ([health.ts](../packages/contracts/src/health.ts))
 

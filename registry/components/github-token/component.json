@@ -1,0 +1,48 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "github-token",
+  "version": "0.0.0",
+  "title": "GitHub with a token: the project's repository and a GITHUB_TOKEN secret you made",
+  "description": "The project's GitHub access (`github`) from a fine-grained token you made, the GITHUB_TOKEN secret, and the repository, a setting changed in the dashboard's Settings → GitHub: for a project run from the CLI or on a server.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": [
+      "secrets"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "settings"
+    ]
+  },
+  "provides": [
+    "github"
+  ],
+  "apps": {
+    "worker": "default"
+  },
+  "settings": "settings",
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "GITHUB_TOKEN",
+      "secret": true,
+      "required": false,
+      "description": "A fine-grained GitHub token for the project's repository only (Contents and Pull requests read and write, Checks and Commit statuses read): how the agent pushes its proposals. https://github.com/settings/personal-access-tokens/new"
+    }
+  ]
+}

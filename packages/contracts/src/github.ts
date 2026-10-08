@@ -1,18 +1,19 @@
 /**
  * `github`: the project's own repository on GitHub, and a short-lived token for it (SPEC §6: the
  * agent proposes its changes as pull requests there, the operator approves them from the dashboard).
- * A provider connects it its own way (`github-app`: a GitHub App the operator creates and installs from
- * the dashboard, whose installation tokens the app mints itself); its consumers only ask:
+ * A provider connects it its own way, and providers are interchangeable: `github-app` (a GitHub App the
+ * operator creates and installs from the dashboard, whose installation tokens the app mints itself) or
+ * `github-token` (a `GITHUB_TOKEN` secret and a configured repository). Its consumers only ask, and
+ * never branch on which is installed:
  *
  *   const github = pikit.useOptional("github");
  *   // when used:
  *   const repository = await github.get()?.repository(ctx);   // "ana/my-bot", or undefined
  *   const token = await github.get().token(ctx);               // for that repository
  *
- * Consumers: admin-proposals (every GitHub call: reading, approving, rejecting), execution-do's `git`
- * (clone, push, pull request; the connected repository is one more it may push to), and
- * extension-pikit-self (tells the steward its repository). Without a provider each falls back to a
- * `GITHUB_TOKEN` secret and a repository it is configured with.
+ * Consumers: the proposals' GitHub provider (reading, opening, merging, closing pull requests),
+ * execution-do's `git` (clone, push: the connected repository is the only one it pushes to), and
+ * extension-pikit-self (tells the steward its repository). Without a provider, nothing is connected.
  *
  * What every provider guarantees:
  * - **`repository` is the connected one**, `owner/name` (`GITHUB_REPOSITORY`), or `undefined` while

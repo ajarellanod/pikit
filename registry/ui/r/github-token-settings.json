@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "github-token-settings",
+  "type": "registry:file",
+  "title": "github-token-settings",
+  "description": "github-token's section of the Settings dialog: The project's GitHub access (`github`) from a fine-grained token you made, the GITHUB_TOKEN secret, and the repository, a setting changed in the dashboard's Settings → GitHub: for a project run from the CLI or on a server. Its settings come with the component (pikit add github-token), stored by settings-store.",
+  "dependencies": [
+    "iconoir-react@7.12.1"
+  ],
+  "registryDependencies": [
+    "@pikit/settings"
+  ],
+  "files": [
+    {
+      "path": "registry/components/github-token/settings/index.tsx",
+      "type": "registry:file",
+      "target": "~/src/settings/github-token/index.tsx",
+      "content": "/**\n * github-token's section of the Settings dialog, GitHub: the project's repository (its setting), and\n * where its token goes (a secret, never here: a setting is shown to every operator, a secret is not).\n * For a project whose GitHub access is a token you made; github-app's section connects one in two\n * clicks instead.\n */\n\nimport { Github } from \"iconoir-react\";\nimport { SchemaSettings } from \"@/components/pikit/settings\";\nimport { defineSettings } from \"@/lib/settings\";\n\nconst Code = ({ children }: { children: string }) => <code className=\"rounded-[4px] bg-inset px-1 font-mono text-[12px] text-ink\">{children}</code>;\n\nfunction GitHubTokenSettings() {\n  return (\n    <div>\n      <p className=\"mb-6 text-[13px] leading-relaxed text-ink-2\">\n        Your agent pushes its proposals as <Code>pikit/self/…</Code> branches of this repository. Its token is the secret <Code>GITHUB_TOKEN</Code>, never typed here: a{\" \"}\n        <a className=\"underline decoration-line-strong underline-offset-2 hover:text-ink\" href=\"https://github.com/settings/personal-access-tokens/new\" target=\"_blank\" rel=\"noreferrer\">\n          fine-grained personal access token\n        </a>{\" \"}\n        for this repository only (Contents and Pull requests read and write, Checks and Commit statuses read), in <Code>.env</Code> (<Code>pikit configure</Code>) or the\n        Worker's secrets.\n      </p>\n      <SchemaSettings component=\"github-token\" />\n    </div>\n  );\n}\n\nexport default defineSettings({\n  id: \"github-token\",\n  title: \"GitHub\",\n  icon: Github,\n  group: \"Agents\",\n  order: 11,\n  requires: [\"settings\", \"github\"],\n  keywords: [\"github\", \"repository\", \"token\", \"self-improvement\", \"proposals\"],\n  component: GitHubTokenSettings,\n});\n"
+    }
+  ]
+}

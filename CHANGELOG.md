@@ -128,9 +128,14 @@ there.
   private key and secrets are sealed (AES-GCM, a key derived from `PIKIT_ADMIN_TOKEN` by HKDF:
   changing that token means connecting again); installation tokens for the repository alone are
   minted with an RS256 JWT (Web Crypto, GitHub's PKCS#1 key wrapped as PKCS#8) and kept until shortly
-  before they expire. It provides `github`: execution-do's `git` pushes the connected repository with
-  its token (and sends it for no other), extension-pikit-self tells the steward its repository.
-  Without a provider both fall back to the `GITHUB_TOKEN` secret.
+  before they expire. `github-token` (server and durable) provides the same `github` from a
+  `GITHUB_TOKEN` secret and the repository (a setting), for CLI users. execution-do's `git` and
+  extension-pikit-self use only the contract: `git` pushes only to the connected repository with its
+  token (sent for no other), and the steward is told its repository.
+- execution-do's `git` behaves as real git for its subset: `clone`, `checkout -b` / `checkout`,
+  `status`, `diff` (`--staged`), `add`, `commit -m` (what was added; `-a`), `log`,
+  `push origin <branch>`; anything else is not supported here. No pull request command: a pushed
+  `pikit/self/*` branch is the proposal.
 - `outbound-durable` implements `pending` (50 per page, at most 500); a piece cut by a crash records
   why it is sent again.
 - Serving and operating: `server-bun` (`/health` answers `{ status }`, 503 when `health` says `down`; `/ready`), `admin-auth-token` (operators by a bearer

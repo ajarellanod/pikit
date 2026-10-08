@@ -40,11 +40,10 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      steward needs what it is made of and how to change it, not how it is doing.
 2. **The workspace, a git checkout of the project**, through `execution` (no new tools: `read`,
    `write`, `edit`, `bash`):
-   - **Cloudflare:** `execution-do` already has `git clone` (GitHub over HTTPS), `commit`, `push`
-     and `pr`, pushes only to `git.pushRepositories` on branches under `pikit/self/`, and keeps the
-     token out of the shell. With `github-app` installed (below) the connected repository is one more
-     push repository and its short-lived token the only one (`github`). It cannot run `bun test` (no
-     processes): checks run in CI (below).
+   - **Cloudflare:** `execution-do`'s `git` is real git's subset (`clone` over HTTPS, `checkout -b`,
+     `status`, `diff`, `add`, `commit`, `log`, `push origin <branch>`), pushes only to `github`'s
+     connected repository (below) on branches under `pikit/self/`, with its token, and keeps the token
+     out of the shell. It cannot run `bun test` (no processes): checks run in CI (below).
    - **Server:** `execution-local` with `bash`, in a checkout under the app's volume
      (`.pikit/workspace`). Its `git` is execution-do's, copied (built): a program first on the
      commands' `PATH` asks trusted code in the app, with the same fences, and never holds the token;
@@ -104,10 +103,14 @@ installation tokens for that repository alone. **One credential, not two**: on C
 never sees a token (only trusted code asks `github`; its shell has no processes; its pushes are fenced
 to `pikit/self/*`; merging is only the operator-authenticated admin route's), so one
 repository-scoped credential is enough, and a ruleset on the default branch is an extra layer, not a
-requirement. Users of `github`: execution-do's `git` and extension-pikit-self (the steward is told
-its repository). **Left:** the proposals' GitHub calls (`proposals-github`, split out of
-admin-proposals) move onto `github` too, and `PIKIT_MERGE_TOKEN` and its "same token in both" checks
-go; on a server, `GITHUB_TOKEN` stays the fallback.
+requirement. Providers are interchangeable: `github-token` gives the same `github` from a
+`GITHUB_TOKEN` secret and a repository setting, for CLI users and servers; no consumer branches on
+which is installed. Users of `github`: execution-do's `git` (real git's subset: `clone`,
+`checkout -b`, `add`, `commit`, `push origin pikit/self/<topic>`; no `git pr`: the pushed branch is the
+proposal) and extension-pikit-self (the steward is told its repository and those steps). **Left:**
+the proposals' GitHub calls (`proposals-github`, split out of admin-proposals) move onto `github`,
+open the pull request when a `pikit/self/*` branch arrives, and `PIKIT_MERGE_TOKEN` and its "same token
+in both" checks go.
 
 **Who. Built:** the steward is the agent marked so in its `defineAgent` (`steward: true`), one per
 project: runtime-pi refuses to start with two, and extension-pikit-self refuses an agent that names

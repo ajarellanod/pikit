@@ -16,8 +16,8 @@ self-improvement (SPEC §6, `features/self-improvement.md`) uses on Cloudflare: 
   without it, its routes answer nobody).
 - **Settings:** `settings/`, the Settings dialog's GitHub: Connect, the App, its installation and the
   repository, the last token minted, Disconnect (installed to `src/dashboard/src/settings/github-app/`).
-- **Targets:** `durable`. On a server, `GITHUB_TOKEN` (a secret) is what admin-proposals and
-  execution-local's `git` read.
+- **Targets:** `durable`. On a server (or from the CLI), `github-token` provides the same `github`
+  from a `GITHUB_TOKEN` secret: the consumers never know which is installed.
 - **Installs to:** `src/pikit/github-app/`.
 - **npm dependencies:** `typebox`.
 
@@ -125,5 +125,5 @@ installation tokens on git's smart HTTP.
 ## Remove it
 
 `pikit remove github-app` takes the routes, the section and `github` away; components that used it
-fall back to the `GITHUB_TOKEN` secret. The connection's rows stay in the github-app object's tables;
+are not connected until another provider is installed (`github-token`). The connection's rows stay in the github-app object's tables;
 delete the App on GitHub.

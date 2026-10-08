@@ -94,6 +94,12 @@
       "description": "github-app's section of the Settings dialog: Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`github`), its credentials sealed at rest. No token is pasted anywhere. Its settings come with the component (pikit add github-app), stored by settings-store."
     },
     {
+      "name": "github-token-settings",
+      "type": "registry:file",
+      "title": "github-token-settings",
+      "description": "github-token's section of the Settings dialog: The project's GitHub access (`github`) from a fine-grained token you made, the GITHUB_TOKEN secret, and the repository, a setting changed in the dashboard's Settings → GitHub: for a project run from the CLI or on a server. Its settings come with the component (pikit add github-token), stored by settings-store."
+    },
+    {
       "name": "health-registry",
       "type": "registry:file",
       "title": "health-registry",
