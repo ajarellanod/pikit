@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { createAssets, type DashboardFiles } from "../registry/components/admin-api/files/src/pikit/admin-api/assets.ts";
 import { assistantName } from "../registry/dashboard/files/src/lib/names.ts";
 import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/views/conversations/sources.ts";
+import { INITIAL, type LiveState, reduce } from "../registry/dashboard/files/src/views/conversations/live-state.ts";
 import { generated, OUTPUT } from "./ui-registry.ts";
 
 const REPO = join(import.meta.dir, "..");
@@ -169,4 +170,29 @@ test('the "/" menu lists only the commands the App registered; titles are the AP
   expect(chats).not.toContain("pikit-titles");
   expect(chats).not.toContain("/transcript");
   expect(chats).toContain("conversation.title");
+});
+
+test("an answer that ended between two polled snapshots (Cloudflare) stays as last seen; one that ended with its event is its entry", () => {
+  const partial = (text: string) => ({ role: "assistant" as const, content: [{ type: "text" as const, text }], timestamp: 7 });
+  const snapshot = (fields: Record<string, unknown>) => ({ type: "event" as const, event: { type: "snapshot", ...fields } });
+  const fold = (events: Parameters<typeof reduce>[1][]): LiveState => events.reduce(reduce, INITIAL);
+
+  // Polled: the next snapshot no longer has the answer, and the transcript is not read again yet.
+  const polled = fold([snapshot({ run: {}, generation: { message: partial("Hel") } }), snapshot({})]);
+  expect(polled.busy).toBe(false);
+  expect(polled.partial).toBeUndefined();
+  expect(polled.ended).toEqual([partial("Hel")]);
+  // The same answer, still written: not ended.
+  expect(fold([snapshot({ run: {}, generation: { message: partial("Hel") } }), snapshot({ run: {}, generation: { message: partial("Hello") } })]).ended).toEqual([]);
+
+  // Streamed: its end brings the entry, as the transcript will give it.
+  const streamed = fold([
+    snapshot({ run: {} }),
+    { type: "event", event: { type: "message_start", message: partial("") } },
+    { type: "event", event: { type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: "Hello" }] } },
+    { type: "event", event: { type: "message_end", entry: { id: 12, kind: "message", model: [partial("Hello")] } } },
+  ]);
+  expect(streamed.partial).toBeUndefined();
+  expect(streamed.ended).toEqual([]);
+  expect(streamed.entries).toEqual([{ id: "12", kind: "message", messages: [partial("Hello")] }]);
 });

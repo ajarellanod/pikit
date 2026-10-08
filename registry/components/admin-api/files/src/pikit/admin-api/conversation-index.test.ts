@@ -41,7 +41,7 @@ test("seen is an upsert: a repeated or late one leaves the newest time and its a
 
   expect(await conversations.list({ limit: 10 })).toEqual({ items: [row("telegram:1", 300)] });
   // Its own tables, prefixed with the component's name.
-  expect(await sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'admin_api_%' ORDER BY name")).toEqual([{ name: "admin_api_conversations" }, { name: "admin_api_hidden" }, { name: "admin_api_titles" }]);
+  expect(await sql.query("SELECT name FROM sqlite_master WHERE type = 'table' AND name LIKE 'admin_api_%' ORDER BY name")).toEqual([{ name: "admin_api_conversation_titles" }, { name: "admin_api_conversations" }, { name: "admin_api_hidden" }]);
 });
 
 test("one row per conversation: a key's conversations (a reset's) are listed each by its own activity", async () => {
@@ -97,28 +97,30 @@ test("keys and ids with ':', '~', '/', '.' and '@' page like any others; a curso
   }
 });
 
-test("titles: a model titles a key once (one more try if that failed), from the first text it was given; the operator's replaces any, and no model replaces it", async () => {
+test("titles: a model titles a conversation once (one more try if that failed), from the first text it was given, which names it meanwhile; the operator's replaces any, and no model replaces it", async () => {
   const { index: titles } = await index();
 
-  expect(await titles.title("telegram:1")).toBeUndefined();
-  expect(await titles.titling("telegram:1", "first message")).toEqual({ input: "first message" });
-  // The first try failed: the second titles the first message too.
-  expect(await titles.titling("telegram:1", "a later message")).toEqual({ input: "first message" });
-  expect(await titles.titling("telegram:1", "later still")).toBeUndefined();
-  expect(await titles.title("telegram:1")).toBeUndefined();
+  expect(await titles.title("c1")).toEqual({});
+  expect(await titles.titling("c1", "first message")).toEqual({ input: "first message" });
+  // The first try failed: the second titles the first message too, which names it until one succeeds.
+  expect(await titles.titling("c1", "a later message")).toEqual({ input: "first message" });
+  expect(await titles.titling("c1", "later still")).toBeUndefined();
+  expect(await titles.title("c1")).toEqual({ firstMessage: "first message" });
 
-  expect(await titles.titling("http:a", "hello")).toEqual({ input: "hello" });
-  await titles.titled("http:a", "Greetings");
-  expect(await titles.title("http:a")).toBe("Greetings");
-  expect(await titles.titling("http:a", "hello again")).toBeUndefined();
+  expect(await titles.titling("c2", "hello")).toEqual({ input: "hello" });
+  await titles.titled("c2", "Greetings");
+  expect(await titles.title("c2")).toEqual({ title: "Greetings", firstMessage: "hello" });
+  expect(await titles.titling("c2", "hello again")).toBeUndefined();
+  // Another conversation (a reset's new one, of the same key) is titled on its own.
+  expect(await titles.titling("c3", "something else")).toEqual({ input: "something else" });
 
-  await titles.name("http:a", "Mine");
-  await titles.titled("http:a", "A model's");
-  expect(await titles.title("http:a")).toBe("Mine");
+  await titles.name("c2", "Mine");
+  await titles.titled("c2", "A model's");
+  expect((await titles.title("c2")).title).toBe("Mine");
   // Named before any model tried: none will.
-  await titles.name("http:b", "Named first");
-  expect(await titles.titling("http:b", "text")).toBeUndefined();
-  expect(await titles.title("http:b")).toBe("Named first");
+  await titles.name("c4", "Named first");
+  expect(await titles.titling("c4", "text")).toBeUndefined();
+  expect(await titles.title("c4")).toEqual({ title: "Named first" });
 });
 
 test("hide: archived ones are listed apart, deleted ones never; new activity lists either again, a backfill does not", async () => {

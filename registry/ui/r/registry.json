@@ -16,6 +16,18 @@
       "description": "pikit's error-note piece of the dashboard."
     },
     {
+      "name": "markdown-engine",
+      "type": "registry:file",
+      "title": "markdown-engine",
+      "description": "pikit's markdown-engine piece of the dashboard."
+    },
+    {
+      "name": "markdown",
+      "type": "registry:file",
+      "title": "markdown",
+      "description": "pikit's markdown piece of the dashboard."
+    },
+    {
       "name": "message",
       "type": "registry:file",
       "title": "message",

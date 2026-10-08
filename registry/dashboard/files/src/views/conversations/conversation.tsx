@@ -8,6 +8,10 @@
  * the operator only (no channel gets it); one that left the conversation behind (`/new`) is followed
  * to its key's new conversation, the note with it.
  *
+ * A message sent shows at once, where it goes (marked while it waits for the run going), until the
+ * transcript has it; what the live stream announces (a message written, an entry appended) shows before
+ * the transcript is read again.
+ *
  * The dashboard is a channel of its own: a message from here is a follow-up (it waits for a run
  * going) whose answer stays here. In another channel's conversation nothing said here reaches that
  * channel's chat (the agent reads that the message is the operator's, and that the user sees neither
@@ -16,10 +20,10 @@
 
 import { SidebarExpand } from "iconoir-react";
 import { type RefObject, useEffect, useLayoutEffect, useRef, useState } from "react";
-import { LoaderGrid } from "@/components/bui/LoadingState";
+import LoadingState, { LoaderGrid } from "@/components/bui/LoadingState";
 import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { type Message, Reply, turnsOf, UserBubble, userText } from "@/components/pikit/message";
+import { type Message, Reply, turnsOf, UserBubble, type UserMessage, userText } from "@/components/pikit/message";
 import {
   api,
   type ApiCommandResponse,
@@ -30,7 +34,7 @@ import {
   post,
   useApi,
 } from "@/lib/api";
-import { agentsOf, type CommandNote, useChats } from "@/lib/chats";
+import { agentsOf, type CommandNote, type SentMessage, useChats } from "@/lib/chats";
 import { navigate, pagePath } from "@/lib/router";
 import { SidePanel, TabActions, useShell } from "@/lib/shell";
 import { assistantOptions, attachmentsOf, imageLimits, webSearchOf } from "./composer";
@@ -39,6 +43,8 @@ import { useLive } from "./live";
 import { imagesOf, sourcesOf } from "./sources";
 
 const PAGE = 50;
+/** How long after a message sent from here its run is expected, before it is seen going. */
+const ANSWER_EXPECTED_MS = 30_000;
 const CONTEXT = "pikit-context";
 
 /** The transcript's latest page, read again when the conversation changes, and older pages on demand. */
@@ -65,8 +71,20 @@ function useTranscript(id: string, changes: number) {
   // Newest first from the API; shown oldest first.
   const seen = new Set<string>();
   const entries = [...(latest.data?.items ?? []), ...older].filter((entry) => !seen.has(entry.id) && seen.add(entry.id)).reverse();
-  return { entries, loaded: latest.data !== undefined, error: latest.error, hasOlder: next !== undefined, loadOlder };
+  return { entries, loaded: latest.data !== undefined, error: latest.error, hasOlder: next !== undefined, loadOlder, reload };
 }
+
+/** The transcript's entries and, after them, the ones the live stream announced it does not have yet. */
+function mergedEntries(transcript: ApiTranscriptEntry[], live: ApiTranscriptEntry[]): ApiTranscriptEntry[] {
+  const read = new Set(transcript.map((entry) => entry.id));
+  return [...transcript, ...live.filter((entry) => !read.has(entry.id))];
+}
+
+/** A message sent from here, as the transcript will have it. */
+const sentMessage = (sent: SentMessage): UserMessage => ({
+  role: "user",
+  content: [...(sent.text === "" ? [] : [{ type: "text" as const, text: sent.text }]), ...sent.images.map((image) => ({ type: "image" as const, ...image }))],
+});
 
 /** Whether the Context panel shows (remembered in this browser; closed at first). */
 function useContextOpen(): [boolean, (open: boolean) => void] {
@@ -160,13 +178,28 @@ export function ConversationPage({ params }: { params: Record<string, string> })
     if (conversation !== undefined) openTab(conversation);
   }, [conversation, openTab]);
 
-  const messages = transcript.entries.flatMap((entry) => entry.messages as Message[]);
+  const read = mergedEntries(transcript.entries, live.entries).flatMap((entry) => entry.messages as Message[]);
+  // An answer that ended (polled on Cloudflare) stays as it was last seen until the transcript has it.
+  const ended = live.ended.filter(
+    (each) => each.timestamp !== live.partial?.timestamp && !read.some((message) => message.role === "assistant" && message.timestamp === each.timestamp),
+  );
+  const messages = ended.length === 0 ? read : [...read, ...ended];
   const turns = turnsOf(messages, live);
 
-  // Until the API titles its key, a chat is named by the first words written in it, once read here.
+  // The messages sent from here the conversation does not show yet.
+  const sameText = (text: string) => messages.filter((message) => message.role === "user" && userText(message).text.trim() === text).length;
+  const allSent = chats.sentOf(id);
+  const sentShown = allSent.filter((each) => sameText(each.text) <= each.before);
+  const { updateSent } = chats;
+  const arrived = allSent.filter((each) => !sentShown.includes(each)).map((each) => each.id).join();
+  useEffect(() => {
+    for (const each of arrived.split(",")) if (each !== "") updateSent(id, Number(each), "gone");
+  }, [arrived, id, updateSent]);
+
+  // Until the API titles it, a chat is named by the first words written in it, once read here.
   const firstText = transcript.hasOlder ? undefined : turns.map((turn) => (turn.kind === "user" ? userText(turn.message).text.trim() : "")).find((text) => text !== "");
   useEffect(() => {
-    if (conversation?.key !== undefined && conversation.title === undefined && firstText !== undefined) setFirstMessage(conversation.key, firstText);
+    if (conversation !== undefined && conversation.title === undefined && firstText !== undefined) setFirstMessage(conversation.conversationId, firstText);
   }, [conversation, firstText, setFirstMessage]);
   const notes = chats.notesOf(id);
 
@@ -196,23 +229,40 @@ export function ConversationPage({ params }: { params: Record<string, string> })
     );
   }
 
-  // Waiting for the model: the run goes and nothing is being written or run.
-  const streaming = live.partial !== undefined || live.tools.length > 0;
-  const waiting = live.busy && !streaming;
+  // The run goes, said once at the thread's end until it ends, so an answer polled in parts (Cloudflare)
+  // never looks finished before it is. A message sent from here starts one at once: from the send, through
+  // its arrival in the transcript, to the run seen going (polled: up to 2 s later), it never blinks off.
   const last = turns.at(-1);
-  const since = [...messages].reverse().find((message) => message.timestamp !== undefined)?.timestamp;
+  const sentAt = chats.lastSentAt(id);
+  const answering = last?.kind === "user" && sentAt !== undefined && Date.now() - sentAt < ANSWER_EXPECTED_MS;
+  const waiting = live.busy || sentShown.some((each) => !each.queued) || answering;
+  // While the model thinks or a tool runs, its group's header says so: no second line says it again.
+  const lastPart = live.partial?.content.at(-1);
+  const activity = live.tools.length > 0 || lastPart?.type === "thinking" || lastPart?.type === "toolCall" ? undefined : lastPart?.type === "text" ? "Writing" : "Thinking";
+  // One count per answer: from the message it answers, not from each of its steps.
+  const since = sentShown.at(-1)?.at ?? (answering ? sentAt : [...messages].reverse().find((message) => message.role === "user" && message.timestamp !== undefined)?.timestamp);
   const webSearch = webSearchOf(described, conversation?.agent);
   const send = async ({ text, images, webSearch: search }: ComposerMessage) => {
     if (conversation === undefined) return;
+    const target = conversation.conversationId;
+    const sentId = chats.addSent(target, { text, images: images.map(({ mimeType, data }) => ({ mimeType, data })), before: sameText(text) });
+    // Sending follows the thread to its end, wherever the operator had scrolled.
+    requestAnimationFrame(() => scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight }));
     try {
-      const sent = await post<ApiSendResponse>(`/conversations/${encodeURIComponent(conversation.conversationId)}/messages`, {
+      const sent = await post<ApiSendResponse>(`/conversations/${encodeURIComponent(target)}/messages`, {
         text,
         ...(images.length > 0 && { attachments: attachmentsOf(images) }),
         ...(search && { webSearch: true }),
       });
       setActionError(undefined);
-      setNote(sent.admission === "queued" ? "Sent: it runs once the run going ends." : sent.admission === "duplicate" ? "Already sent." : undefined);
+      if (sent.admission === "duplicate") {
+        updateSent(target, sentId, "gone");
+        setNote("Already sent.");
+      } else if (sent.admission === "queued") updateSent(target, sentId, "queued");
+      // In case the live stream is not there to announce it.
+      transcript.reload();
     } catch (thrown) {
+      updateSent(target, sentId, "gone");
       setActionError(thrown instanceof Error ? thrown : new Error(String(thrown)));
       throw thrown;
     }
@@ -275,7 +325,8 @@ export function ConversationPage({ params }: { params: Record<string, string> })
       )}
 
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto overscroll-contain">
-        <div className="flex flex-col gap-8 px-4 pt-8 sm:px-8 lg:px-12" style={{ paddingBottom: composerH + 16 }}>
+        {/* room between the thread's end and the composer floating over it */}
+        <div className="flex flex-col gap-8 px-4 pt-8 sm:px-8 lg:px-12" style={{ paddingBottom: composerH + 56 }}>
           {transcript.hasOlder && (
             <div className="mx-auto w-full max-w-[720px]">
               <button type="button" onClick={() => void transcript.loadOlder()} className="mx-auto flex h-7 items-center rounded-full px-3 text-[12.5px] font-medium text-ink-2 shadow-btn transition-colors duration-100 hover:bg-hover">
@@ -288,7 +339,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
               <ErrorNote error={transcript.error} />
             </div>
           )}
-          {!transcript.loaded && transcript.error === undefined && (
+          {!transcript.loaded && transcript.error === undefined && sentShown.length === 0 && (
             <div className="mx-auto flex w-full max-w-[720px] items-center gap-2.5 text-[13px] text-ink-3">
               <LoaderGrid /> Loading the conversation
             </div>
@@ -303,7 +354,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
               {turn.kind === "user" ? (
                 <UserBubble message={turn.message} from={conversation?.key} />
               ) : (
-                <Reply segments={turn.segments} waiting={waiting && i === turns.length - 1} since={since} />
+                <Reply segments={turn.segments} />
               )}
             </div>
           ))}
@@ -314,12 +365,19 @@ export function ConversationPage({ params }: { params: Record<string, string> })
                 <CommandNoteRow note={note} />
               </div>
             ))}
-          {waiting && last?.kind !== "reply" && (
-            <div className="mx-auto w-full max-w-[720px]">
-              <Reply segments={[]} waiting since={since} />
+          {sentShown.map((each) => (
+            <div key={`sent-${each.id}`} className={`mx-auto flex w-full max-w-[720px] flex-col items-end gap-1 transition-opacity duration-200 ${each.queued ? "opacity-60" : ""}`}>
+              <UserBubble message={sentMessage(each)} animate />
+              {each.queued && <span className="px-1 text-[11.5px] text-ink-3">Queued: it runs once the run going ends</span>}
+            </div>
+          ))}
+          {/* one line at the end, whatever comes before it: it stays put, and never mounts again as the thread grows */}
+          {waiting && activity !== undefined && (
+            <div key="activity" className="mx-auto -mt-4 flex min-h-6 w-full max-w-[720px] items-center" style={{ animation: "fade-in 200ms ease-out both" }}>
+              <LoadingState label={activity} variant="Dots" since={since} />
             </div>
           )}
-          {transcript.loaded && turns.length === 0 && notes.length === 0 && !live.busy && <p className="mx-auto w-full max-w-[720px] text-[13.5px] text-ink-3">No messages yet.</p>}
+          {transcript.loaded && turns.length === 0 && notes.length === 0 && sentShown.length === 0 && !live.busy && <p className="mx-auto w-full max-w-[720px] text-[13.5px] text-ink-3">No messages yet.</p>}
         </div>
       </div>
 
@@ -337,6 +395,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
           ) : (
             <>
               <PromptBar
+                compact
                 placeholder={live.busy ? "Reply: it runs after the run going" : "Reply"}
                 disabled={conversation === undefined}
                 picker={

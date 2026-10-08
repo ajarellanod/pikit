@@ -6,6 +6,7 @@ import { useState, type ReactNode } from "react";
  * chip (what it was called on). Beautiful UI's primitive, fed by
  * the run: a running call spins, a failed one says so, and every
  * row expands to what the tool returned (or is returning).
+ * Without a `header` the rows stand alone, always shown.
  * --------------------------------------------------------- */
 
 const Icons: Record<string, ReactNode> = {
@@ -52,8 +53,9 @@ function Spinner() {
   return <span aria-label="Running" className="size-3 shrink-0 rounded-full border-[1.5px] border-line-strong border-t-ink-2" style={{ animation: "spin 700ms linear infinite" }} />;
 }
 
-export default function ToolChips({ steps, header, className }: { steps: ToolStep[]; header: string; className?: string }) {
-  const [open, setOpen] = useState(true);
+export default function ToolChips({ steps, header, className }: { steps: ToolStep[]; header?: string; className?: string }) {
+  const [expanded, setExpanded] = useState(true);
+  const open = header === undefined || expanded;
   const [openRows, setOpenRows] = useState<Set<string>>(new Set());
 
   const toggleRow = (id: string) =>
@@ -67,23 +69,25 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
   return (
     <div className={`w-full max-w-80 pb-1${className ? ` ${className}` : ""}`}>
       {/* collapsed run header */}
-      <button
-        type="button"
-        aria-expanded={open}
-        onClick={() => setOpen((current) => !current)}
-        className="-mx-1.5 flex w-fit items-center gap-1.5 rounded-control px-1.5 py-1 text-[12.5px] text-ink-2 transition-colors duration-100 hover:bg-hover-2"
-      >
-        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} aria-hidden>
-          <path d="M6 9l6 6 6-6" />
-        </svg>
-        <span className="tabular-nums">{header}</span>
-      </button>
+      {header !== undefined && (
+        <button
+          type="button"
+          aria-expanded={open}
+          onClick={() => setExpanded((current) => !current)}
+          className="-mx-1.5 flex w-fit items-center gap-1.5 rounded-control px-1.5 py-1 text-[12.5px] text-ink-2 transition-colors duration-100 hover:bg-hover-2"
+        >
+          <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} aria-hidden>
+            <path d="M6 9l6 6 6-6" />
+          </svg>
+          <span className="tabular-nums">{header}</span>
+        </button>
+      )}
 
       <div className="grid transition-[grid-template-rows,opacity] duration-300" style={{ gridTemplateRows: open ? "1fr" : "0fr", opacity: open ? 1 : 0 }}>
         {/* -mx-1 + px-1.5 keeps content at the same x while giving the
             row hover pills room inside this overflow-hidden clip box */}
         <div className="-mx-1 overflow-hidden px-1.5 pb-1">
-          <div className="mt-1.5 flex flex-col gap-1">
+          <div className={`flex flex-col gap-1 ${header === undefined ? "" : "mt-1.5"}`}>
             {steps.map((row) => {
               const rowOpen = openRows.has(row.id);
               const failed = row.status === "failed";

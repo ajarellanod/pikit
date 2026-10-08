@@ -279,6 +279,8 @@ by hand; the test "what setup declares" pins it.
 - **`model.complete`** asks one of the App's models for a text once (`createModelComplete` in the
   adapter: pi-ai's `completeSimple` over the same models, providers and credentials as the agents):
   no conversation, no tools, not counted in any conversation's usage. A model the providers do not
-  have, a failed call or a cancelled context is a rejection. It passes `createModelCompleteConformance`
+  have, a failed call or a cancelled context is a rejection. `maxTokens` is the answer's text: a
+  reasoning model gets 2,048 tokens more to think in, and one whose thinking cannot be turned off
+  (`openrouter/z-ai/glm-5.3-flash`) thinks at the least it allows. It passes `createModelCompleteConformance`
   (`runtime-pi.test.ts`, with the scripted faux model), and `/compact` the `agent.command` suite.
 

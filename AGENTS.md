@@ -18,8 +18,11 @@
 - wrangler behaves differently when it detects an AI agent running it (`detectAgent()`): with no `name` in the config it names the Worker after the project only for an agent, and fails for a person or on CI. Pass `--name` (as `pikit up` does), and reproduce a CI failure with a clean environment: `env -i PATH="$PATH" HOME="$HOME" CI=true <command>`.
 - pikit is unreleased: never add backward compatibility (aliases, old-format readers, migrations from earlier schemas, "start fresh" handling for old data). Rename and change freely; only provider names (Cloudflare, Docker…) stay as they are, because that is where it deploys.
 
+- The user's Cloudflare test bot is `/Users/alex/Projects/Personal/pikit-telegram-cloudflare`, deployed as the Worker `pikit-telegram-bot-dash` (its `wrangler.jsonc` says `pikit-telegram-bot`). To ship this checkout's changes there: `bun scripts/template.ts telegram-cloudflare ../pikit-telegram-cloudflare` (regenerates it, packing `vendor/*.tgz` from `packages/`: copying files is not enough for package changes), then `npm ci` and `npx wrangler deploy --name pikit-telegram-bot-dash` there. Never `npm run deploy`: it deploys another Worker name.
+
 # Downloaded references
 
 - `/Users/alex/Projects/Personal/pi` — Pi monorepo (`earendil-works/pi`); read `origin/main` (v1.0.3: `packages/durable`, `packages/chord`, `packages/server`) after `git fetch`, the local `main` checkout is stale.
 - `/Users/alex/Projects/Personal/beautiful-ui` — Beautiful UI (`slev12397/beautiful-ui`, MIT): the primitives and the harness the dashboard's look is ported from (`components/primitives`, `components/atoms`, `components/site/IceCreamHarness.tsx`, `app/globals.css`); live at https://www.beautifului.dev/harness. Its `SidebarNav` icons (`@central-icons-react`) are paid: never install them.
+- `/Users/alex/Projects/Personal/comark` — Comark (`comarkdown/comark`, MIT), the dashboard's markdown engine (`comark`, `@comark/react`, pinned 0.7.0): `docs/content/3.rendering/5.react.md`, `packages/comark-react/src/components`. `<Markdown>` is an async (server) component: in the dashboard parse with `parseMarkdown` and render `MarkdownDocument`.
 - `/Users/alex/Projects/Personal/shadcn-ui` — shadcn CLI and registry (sparse: `packages/shadcn`, `packages/registry`, `apps/v4/content/docs/registry`), checked at 4.21.1.

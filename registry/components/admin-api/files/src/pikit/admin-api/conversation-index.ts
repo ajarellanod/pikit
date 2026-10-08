@@ -25,13 +25,15 @@
  * brings no newer activity, does not. Nothing of the runtime's is deleted: pi-durable keeps every
  * conversation (docs/upstream, "Delete a conversation").
  *
- * **Titles.** A title names a key, so the conversations a reset left behind share it with the key's
- * current one: a second table of the same storage, `admin_api_titles`, holds one row per key (its
- * title, whose it is, the text a model is asked to title, the model's tries). On a server it is the
- * App's; on Cloudflare the conversation's own object's (where its runs settle and `/name` runs, and
- * whose answer the Worker's list reads): the index object holds none.
- * - A model titles a key once, after its first run (`titling` claims a try, at most `TITLE_TRIES`,
- *   and keeps the text to title; `titled` writes the answer unless the operator named it meanwhile).
+ * **Titles.** A title names one conversation: the one a reset (`/new`) starts gets its own, from its
+ * own first message. A second table of the same storage, `admin_api_conversation_titles`, holds one
+ * row per conversation (its title, whose it is, the text a model is asked to title, the model's tries).
+ * On a server it is the App's (its conversation ids are unique); on Cloudflare the conversation's own
+ * object's (where its runs settle and `/name` runs, and whose answer the Worker's list reads), by the
+ * object's own id: the index object holds none.
+ * - A model titles a conversation once, after its first run (`titling` claims a try, at most
+ *   `TITLE_TRIES`, and keeps the text to title; `titled` writes the answer unless the operator named it
+ *   meanwhile). Until it has a title, the text kept is what names it (`title`'s `firstMessage`).
  * - The operator's title (`/name`) replaces any, and a model never replaces it.
  */
 
@@ -41,12 +43,12 @@ import { refusal } from "./backend.ts";
 /** The actor that keeps the index on Cloudflare: an object of the conversations' class, never a conversation. */
 export const INDEX_KEY = "admin-api:index";
 const TABLE = "admin_api_conversations";
-const TITLES = "admin_api_titles";
+const TITLES = "admin_api_conversation_titles";
 const HIDDEN = "admin_api_hidden";
 
 /** How the operator put a conversation away. */
 export type Hidden = "archived" | "deleted";
-/** A model is asked to title a key at most this often: once, and once more if that failed. */
+/** A model is asked to title a conversation at most this often: once, and once more if that failed. */
 export const TITLE_TRIES = 2;
 
 /** One conversation the index knows. */
@@ -82,17 +84,20 @@ export interface ConversationIndex {
    * Cloudflare an object's are not, and only the index object has rows).
    */
   keyOf(conversationId: string): Promise<string | undefined>;
-  /** The title of `key`, a model's or the operator's; `undefined` until it has one. */
-  title(key: string): Promise<string | undefined>;
-  /** The operator's title for `key` (`/name`): it replaces any, and no model replaces it. */
-  name(key: string, title: string): Promise<void>;
   /**
-   * Claims a model's try at titling `key`, `input` its first message: the text to title (kept from the
-   * first claim, which a retry titles too). `undefined` when `key` has a title, or had its tries.
+   * Conversation `conversationId`'s title, a model's or the operator's (`undefined` until it has one),
+   * and its first message as a model was asked to title it (`undefined` until one was).
    */
-  titling(key: string, input: string): Promise<{ input: string } | undefined>;
-  /** A model's title for `key`: written unless it has one (the operator named it meanwhile). */
-  titled(key: string, title: string): Promise<void>;
+  title(conversationId: string): Promise<{ title?: string; firstMessage?: string }>;
+  /** The operator's title for `conversationId` (`/name`): it replaces any, and no model replaces it. */
+  name(conversationId: string, title: string): Promise<void>;
+  /**
+   * Claims a model's try at titling `conversationId`, `input` its first message: the text to title
+   * (kept from the first claim, which a retry titles too). `undefined` when it has a title, or had its tries.
+   */
+  titling(conversationId: string, input: string): Promise<{ input: string } | undefined>;
+  /** A model's title for `conversationId`: written unless it has one (the operator named it meanwhile). */
+  titled(conversationId: string, title: string): Promise<void>;
 }
 
 /** `{at}:{key}:{conversationId}` of a page's last item, the key and id URI-encoded (`:` never appears in them). */
@@ -122,7 +127,7 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
       await database.run(`CREATE INDEX IF NOT EXISTS ${TABLE}_at ON ${TABLE} (at, key, conversation)`);
       await database.run(`CREATE INDEX IF NOT EXISTS ${TABLE}_conversation ON ${TABLE} (conversation)`);
       await database.run(
-        `CREATE TABLE IF NOT EXISTS ${TITLES} (key TEXT PRIMARY KEY, title TEXT, source TEXT, input TEXT, tries INTEGER NOT NULL DEFAULT 0)`,
+        `CREATE TABLE IF NOT EXISTS ${TITLES} (conversation TEXT PRIMARY KEY, title TEXT, source TEXT, input TEXT, tries INTEGER NOT NULL DEFAULT 0)`,
       );
       await database.run(
         `CREATE TABLE IF NOT EXISTS ${HIDDEN} (key TEXT NOT NULL, conversation TEXT NOT NULL, how TEXT NOT NULL, at BIGINT NOT NULL, PRIMARY KEY (key, conversation))`,
@@ -189,33 +194,33 @@ export function createConversationIndex(sql: () => SqlDatabase): ConversationInd
       return rows[0]?.key;
     },
 
-    async title(key) {
-      const rows = await (await db()).query<{ title: string | null }>(`SELECT title FROM ${TITLES} WHERE key = ?`, [key]);
-      return rows[0]?.title ?? undefined;
+    async title(conversationId) {
+      const [row] = await (await db()).query<{ title: string | null; input: string | null }>(`SELECT title, input FROM ${TITLES} WHERE conversation = ?`, [conversationId]);
+      return { ...(row?.title != null && { title: row.title }), ...(row?.input != null && { firstMessage: row.input }) };
     },
 
-    async name(key, title) {
+    async name(conversationId, title) {
       await (await db()).run(
-        `INSERT INTO ${TITLES} (key, title, source) VALUES (?, ?, 'operator') ON CONFLICT (key) DO UPDATE SET title = excluded.title, source = 'operator'`,
-        [key, title],
+        `INSERT INTO ${TITLES} (conversation, title, source) VALUES (?, ?, 'operator') ON CONFLICT (conversation) DO UPDATE SET title = excluded.title, source = 'operator'`,
+        [conversationId, title],
       );
     },
 
-    async titling(key, input) {
+    async titling(conversationId, input) {
       const database = await db();
       return database.transaction(async (tx) => {
-        const [row] = await tx.query<{ title: string | null; input: string | null; tries: number }>(`SELECT title, input, tries FROM ${TITLES} WHERE key = ?`, [key]);
+        const [row] = await tx.query<{ title: string | null; input: string | null; tries: number }>(`SELECT title, input, tries FROM ${TITLES} WHERE conversation = ?`, [conversationId]);
         if (row !== undefined && (row.title !== null || Number(row.tries) >= TITLE_TRIES)) return undefined;
         await tx.run(
-          `INSERT INTO ${TITLES} (key, input, tries) VALUES (?, ?, 1) ON CONFLICT (key) DO UPDATE SET tries = ${TITLES}.tries + 1, input = COALESCE(${TITLES}.input, excluded.input)`,
-          [key, input],
+          `INSERT INTO ${TITLES} (conversation, input, tries) VALUES (?, ?, 1) ON CONFLICT (conversation) DO UPDATE SET tries = ${TITLES}.tries + 1, input = COALESCE(${TITLES}.input, excluded.input)`,
+          [conversationId, input],
         );
         return { input: row?.input ?? input };
       });
     },
 
-    async titled(key, title) {
-      await (await db()).run(`UPDATE ${TITLES} SET title = ?, source = 'model' WHERE key = ? AND title IS NULL`, [title, key]);
+    async titled(conversationId, title) {
+      await (await db()).run(`UPDATE ${TITLES} SET title = ?, source = 'model' WHERE conversation = ? AND title IS NULL`, [title, conversationId]);
     },
   };
 }

@@ -5,7 +5,8 @@ import { type ReactNode, useEffect, useState } from "react";
  * Beautiful UI's editor panel, fed by the app: a file's
  * name, a copy button, and its lines numbered and coloured
  * (strings and numbers orange, keywords blue, keys and
- * calls in ink). Lines wrap.
+ * calls in ink). Lines wrap. `plain`: no colours (a command's
+ * output, text in no language).
  * --------------------------------------------------------- */
 
 const KEYWORDS = new Set(["import", "from", "export", "default", "async", "function", "const", "let", "var", "await", "return", "if", "else", "for", "while", "new", "throw", "try", "catch", "null", "true", "false", "undefined"]);
@@ -52,7 +53,20 @@ function FileIcon() {
   );
 }
 
-export default function CodeBlock({ code, filename, meta, className = "" }: { code: string; filename: string; /** after the name: what the code is */ meta?: ReactNode; className?: string }) {
+export default function CodeBlock({
+  code,
+  filename,
+  meta,
+  plain = false,
+  className = "",
+}: {
+  code: string;
+  filename: string;
+  /** after the name: what the code is */
+  meta?: ReactNode;
+  plain?: boolean;
+  className?: string;
+}) {
   const [copied, setCopied] = useState(false);
   const lines = code.split("\n");
   // the gutter grows with the line numbers' digits
@@ -105,7 +119,7 @@ export default function CodeBlock({ code, filename, meta, className = "" }: { co
           {lines.map((line, i) => (
             <div key={i} className="grid items-start" style={{ gridTemplateColumns: `${gutter}px minmax(0,1fr)` }}>
               <span className="select-none text-center text-[11px] text-ink-3">{i + 1}</span>
-              <code className="pr-3 pl-2 break-words whitespace-pre-wrap">{highlight(line)}</code>
+              <code className="pr-3 pl-2 break-words whitespace-pre-wrap">{plain ? line : highlight(line)}</code>
             </div>
           ))}
         </div>

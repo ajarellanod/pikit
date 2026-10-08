@@ -11,7 +11,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
  * the send button stops it. Enter sends (or runs "/name
  * args" when it names a command), Shift+Enter breaks a line;
  * in a menu, arrows move, Enter picks (a command whose whole
- * name is typed runs), Tab completes, Escape closes.
+ * name is typed runs), Tab completes, Escape closes. A message
+ * sent leaves the composer at once (it comes back if sending
+ * fails). `compact`: a line to write in, for a thread's foot.
  * --------------------------------------------------------- */
 
 function Icon({ children, size = 15, strokeWidth = 1.8 }: { children: ReactNode; size?: number; strokeWidth?: number }) {
@@ -100,6 +102,7 @@ export default function PromptBar({
   onStop,
   disabled = false,
   autoFocus = false,
+  compact = false,
   images,
   webSearch,
   commands = [],
@@ -108,13 +111,15 @@ export default function PromptBar({
 }: {
   placeholder?: string;
   picker?: Picker;
-  /** sends the message; the draft is cleared once it resolves, kept when it throws */
+  /** sends the message; the draft is cleared at once, and back when it throws */
   onSend: (message: ComposerMessage) => Promise<void> | void;
   /** a run is going: with an empty draft, the send button stops it */
   busy?: boolean;
   onStop?: () => void;
   disabled?: boolean;
   autoFocus?: boolean;
+  /** one line to write in instead of a roomy box: below a thread */
+  compact?: boolean;
   /** "Add image" in the "+" menu; absent, the composer takes text only */
   images?: ImageLimits;
   /** "Web search" in the "+" menu: `available` when the assistant has the tool, else `unavailable` says why */
@@ -354,16 +359,23 @@ export default function PromptBar({
     setSending(true);
     setModelOpen(false);
     setPlusOpen(false);
+    // The message leaves the composer now; it comes back if sending fails.
+    const text = draft;
+    const files = attached;
+    const search = webSearchOn;
+    setDraft("");
+    setAttached([]);
+    setSearching(false);
+    setProblem(undefined);
     try {
-      const read = await Promise.all(attached.map(async ({ file }) => ({ name: file.name, mimeType: file.type, data: await base64Of(file) })));
-      await onSend({ text: draft.trim(), images: read, webSearch: webSearchOn });
-      setDraft("");
-      attached.forEach((each) => URL.revokeObjectURL(each.url));
-      setAttached([]);
-      setSearching(false);
-      setProblem(undefined);
+      const read = await Promise.all(files.map(async ({ file }) => ({ name: file.name, mimeType: file.type, data: await base64Of(file) })));
+      await onSend({ text: text.trim(), images: read, webSearch: search });
+      files.forEach((each) => URL.revokeObjectURL(each.url));
     } catch {
-      // The caller says why; the draft stays.
+      // The caller says why; the draft comes back, unless another was begun since.
+      setDraft((current) => (current === "" ? text : current));
+      setAttached((current) => [...files, ...current]);
+      setSearching(search);
     } finally {
       setSending(false);
       inputRef.current?.focus();
@@ -487,7 +499,9 @@ export default function PromptBar({
         )}
 
         {/* -- composer -- */}
-        <div className="relative isolate flex flex-col gap-2.5 overflow-hidden rounded-[22px] border border-line bg-surface p-3.5 shadow-card transition-[border-color,border-radius] duration-150 focus-within:border-line-strong">
+        <div
+          className={`relative isolate flex flex-col overflow-hidden border border-line bg-surface shadow-card transition-[border-color,border-radius] duration-150 focus-within:border-line-strong ${compact ? "gap-1.5 rounded-[18px] px-3 pt-2 pb-2.5" : "gap-2.5 rounded-[22px] p-3.5"}`}
+        >
           {attached.length > 0 && (
             <div className="flex flex-wrap gap-2 px-1 pt-0.5">
               {attached.map((each) => (
@@ -560,7 +574,7 @@ export default function PromptBar({
               }}
               placeholder={placeholder ?? "Write a message…"}
               aria-label="Message"
-              className="col-span-full col-start-1 row-start-1 min-h-[68px] w-full min-w-0 resize-none bg-transparent px-2 py-2 text-[14px] leading-5 text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3 disabled:opacity-60"
+              className={`col-span-full col-start-1 row-start-1 ${compact ? "min-h-9" : "min-h-[68px]"} w-full min-w-0 resize-none bg-transparent px-2 py-2 text-[14px] leading-5 text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3 disabled:opacity-60`}
             />
 
             {/* "+": images, web search */}

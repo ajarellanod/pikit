@@ -710,24 +710,27 @@ test("POST …/commands/:name runs a command in the conversation, as an action: 
   expect((await command(s, "c1", "name", { title: "x" })).status).toBe(400);
   expect((await command(s, "nobody", "name", { args: "x" })).status).toBe(404);
 
-  // /name: the key's title, in one conversation and in the list.
+  // /name: the conversation's title, in it and in the list.
   const named = await command(s, "c1", "name", { args: '"Trip to Lisbon."' });
   expect(await named.json()).toEqual({ text: "Titled \u201cTrip to Lisbon\u201d." });
   expect(await titleOf(s, "c1")).toBe("Trip to Lisbon");
   const page = (await (await s.fetch("/admin/api/conversations", { headers: AUTH })).json()) as { items: { conversationId: string; title?: string }[] };
   expect(page.items.find((each) => each.conversationId === "c1")?.title).toBe("Trip to Lisbon");
 
-  // /new: the key starts again in a new conversation, which keeps the key's title; the old one is behind.
+  // /new: the key starts again in a new conversation, untitled until its own first run; the old one is behind, with its title.
   const fresh = await command(s, "c1", "new");
   expect(await fresh.json()).toEqual({ text: "A new conversation started; the previous one is kept, and can be read." });
   expect(s.runtime.pointers.get("telegram:1")?.conversationId).toBe("c100");
-  expect(await (await s.fetch("/admin/api/conversations/c100", { headers: AUTH })).json()).toMatchObject({ key: "telegram:1", current: true, title: "Trip to Lisbon" });
+  const reset = (await (await s.fetch("/admin/api/conversations/c100", { headers: AUTH })).json()) as { title?: string };
+  expect(reset).toMatchObject({ key: "telegram:1", current: true });
+  expect(reset.title).toBeUndefined();
+  expect(await titleOf(s, "c1")).toBe("Trip to Lisbon");
   const behind = await command(s, "c1", "name", { args: "Too late" });
   expect(behind.status).toBe(409);
   expect(await behind.json()).toMatchObject({ error: "not_current" });
 });
 
-// admin-api's own commands pass the agent.command suite: /name titles the key, /new resets it.
+// admin-api's own commands pass the agent.command suite: /name titles the conversation, /new resets its key.
 for (const c of createAgentCommandConformance(() => {
   const runtime = new Runtime();
   let sql: SqlDatabase | undefined;
@@ -747,7 +750,7 @@ for (const c of createAgentCommandConformance(() => {
         args: "Weekend plans",
         check: async (outcome, conversation) => {
           expect(outcome.text).toBe("Titled \u201cWeekend plans\u201d.");
-          expect(await sql?.query("SELECT title FROM admin_api_titles WHERE key = ?", [conversation.key])).toEqual([{ title: "Weekend plans" }]);
+          expect(await sql?.query("SELECT title FROM admin_api_conversation_titles WHERE conversation = ?", [conversation.conversationId])).toEqual([{ title: "Weekend plans" }]);
         },
       },
       {
@@ -775,27 +778,31 @@ const settled = (key: string, id: string, text: string, requestId = "m1") => ({
   ] as never[],
 });
 
-test("a model titles a conversation's key after its first run settles, in the background, from its first message; once", async () => {
+test("a model titles a conversation after its first run settles, in the background, from its first message, which names it meanwhile; once; a reset's new one gets its own", async () => {
   let release!: () => void;
   const held = new Promise<void>((resolve) => (release = resolve));
-  const model = fakeModel(async () => (await held, 'Title: "Trip to Lisbon."\nSecond line'));
+  const model = fakeModel(async (request) => (await held, request.prompt.includes("Madrid") ? "Madrid weekend" : 'Title: "Trip to Lisbon."\nSecond line'));
   const s = await started({}, [model.component]);
   s.runtime.add({ conversationId: "c1", key: "dashboard:1", agent: "assistant" });
 
-  // The event does not wait for the model.
+  // The event does not wait for the model; until it answers, the first message names the conversation.
   await s.app.context().emit("agent.settled", settled("dashboard:1", "c1", "Plan a trip to Lisbon in May"));
   await until(() => model.asked.length === 1, "the model to be asked");
-  expect(await titleOf(s, "c1")).toBeUndefined();
+  expect(await titleOf(s, "c1")).toBe("Plan a trip to Lisbon in May");
   release();
-  await until(async () => (await titleOf(s, "c1")) !== undefined, "the title");
-
-  expect(await titleOf(s, "c1")).toBe("Trip to Lisbon");
+  await until(async () => (await titleOf(s, "c1")) === "Trip to Lisbon", "the title");
   expect(model.asked).toEqual([{ model: "test/model", system: TITLE_SYSTEM, prompt: "Plan a trip to Lisbon in May", maxTokens: TITLE_TOKENS }]);
   // Later runs leave it as it is.
   await s.app.context().emit("agent.settled", settled("dashboard:1", "c1", "And Porto?", "m2"));
   await Bun.sleep(20);
   expect(model.asked.length).toBe(1);
-  expect(s.logged.find((each) => each.message.includes("titled a conversation"))?.fields).toEqual({ conversation: "dashboard:1", model: "test/model" });
+  expect(s.logged.find((each) => each.message.includes("titled a conversation"))?.fields).toEqual({ conversation: "dashboard:1", conversationId: "c1", model: "test/model" });
+
+  // Another conversation of the key (a reset's) is titled from its own first message.
+  s.runtime.add({ conversationId: "c2", key: "dashboard:1", agent: "assistant" });
+  await s.app.context().emit("agent.settled", settled("dashboard:1", "c2", "Now a weekend in Madrid"));
+  await until(async () => (await titleOf(s, "c2")) === "Madrid weekend", "the reset's title");
+  expect(await titleOf(s, "c1")).toBe("Trip to Lisbon");
 });
 
 test("a title that failed is tried once more after a later run, from the first message, then never; titleModel names the model; /name wins over any model", async () => {
@@ -820,7 +827,8 @@ test("a title that failed is tried once more after a later run, from the first m
     ["test/titles", "first"],
     ["test/titles", "first"],
   ]);
-  expect(await titleOf(s, "c1")).toBeUndefined();
+  // No title: its first message names it.
+  expect(await titleOf(s, "c1")).toBe("First");
 
   // Named by the operator first: no model is asked.
   await command(s, "c2", "name", { args: "Mine" });
@@ -871,7 +879,7 @@ test("archive, unarchive, delete: the list only, any conversation; archived ones
   expect((await s.fetch("/admin/api/conversations/c1/delete", { method: "POST" })).status).toBe(401);
 });
 
-test("at start, the keys with no title yet are titled from their first message, the most recently active first", async () => {
+test("at start, the conversations with no title yet are titled from their first message, the most recently active first", async () => {
   const runtime = new Runtime();
   runtime.add({ conversationId: "c1", key: "telegram:1", agent: "assistant", lastActivity: 1 });
   runtime.add({ conversationId: "c2", key: "dashboard:2", agent: "assistant", lastActivity: 2 });

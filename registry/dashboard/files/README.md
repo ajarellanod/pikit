@@ -8,10 +8,11 @@ v4) whose source you change like any other file of the project.
 It looks like [Beautiful UI](https://www.beautifului.dev/harness)'s harness: a sidebar (the App's menu
 with the theme, the interaction sounds and sign out; **New chat**; **Home**; the views; every
 conversation by its name, searchable), the conversations you opened as tabs (New chat's too: each one
-closes, and closing the last leaves a fresh home), a chat (the transcript, the answer streaming in,
-the model's thinking, the tool calls as chips) and its composer, and a **Context** panel. Light, dark,
-or the system's (the default); interaction sounds on until you turn them off. Both are kept in this
-browser.
+closes, and closing the last leaves a fresh home), a chat (the transcript, the answer streaming in as
+markdown through [Comark](https://comark.dev), the model's thinking and tool calls folded together
+between two texts, a message shown the moment it is sent) and its composer, and a **Context** panel.
+Light, dark, or the system's (the default); interaction sounds on until you turn them off. Both are
+kept in this browser.
 
 - **The composer**: the assistant where the harness picks its model, always a dropdown, even with
   one (in a new chat it chooses the agent; in a conversation it shows its agent, and picking another
@@ -53,12 +54,12 @@ built files under `/admin/`.
   answer, is sent to that chat; the agent reads that the message is the operator's and that the user
   does not see it. A run that also answers the user's own message is delivered to the user, as always.
 - **Abort** and **reset** work on every conversation. After a reset you write on in the key's new
-  conversation at once; the one left behind stays readable, listed under the same name.
-- **Titles**: a chat is named by its key's title, which admin-api has a model write after its first
-  answer (`ApiConversation.title`; `/name` sets your own), everywhere it is named: the sidebar, the
-  tabs, the home. Until there is one, by the first message when the page has it (you just sent it,
-  or the open conversation shows it), else another channel's by the id in its key and the
-  dashboard's own "New chat". Nothing about names is kept in the browser. The list shows names only,
+  conversation at once; the one left behind stays readable, under its own name.
+- **Titles**: a chat is named by its title, which admin-api has a model write after its first answer
+  (`ApiConversation.title`, its first message until then; `/name` sets your own), everywhere it is
+  named: the sidebar, the tabs, the home. A reset's new chat gets its own. Until there is one, by the
+  first message when the page has it (you just sent it, or the open conversation shows it), else
+  another channel's by the id in its key and the dashboard's own "New chat". Nothing about names is kept in the browser. The list shows names only,
   no channel.
 
 ## Signing in

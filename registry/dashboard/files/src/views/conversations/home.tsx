@@ -53,7 +53,9 @@ export function HomePage() {
     setError(undefined);
     try {
       const started = await post<ApiStartResponse>("/conversations", { agent: chosen, text, ...(images.length > 0 && { attachments: attachmentsOf(images) }), ...(search && { webSearch: true }) });
-      if (text !== "") chats.setFirstMessage(started.key, text);
+      if (text !== "") chats.setFirstMessage(started.conversationId, text);
+      // The conversation shows the message at once, before its transcript is read.
+      if (started.admission !== "duplicate") chats.addSent(started.conversationId, { text, images: images.map(({ mimeType, data }) => ({ mimeType, data })), before: 0 });
       chats.reload();
       navigate(pagePath("/conversations", started.conversationId));
     } catch (thrown) {

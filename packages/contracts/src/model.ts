@@ -30,7 +30,7 @@ export interface CompletionRequest {
   system?: string;
   /** The user's text. */
   prompt: string;
-  /** The most tokens the answer may take; absent, the model's own limit. */
+  /** The most tokens the answer's text may take (a reasoning model's thinking is not counted in them); absent, the model's own limit. */
   maxTokens?: number;
 }
 

@@ -59,6 +59,7 @@ import {
   type ApiStartResponse,
   type ApiTranscriptEntry,
   type ApiUsage,
+  cleanTitle,
   isDashboardKey,
   operatorPrompt,
   WEB_SEARCH_TOOL,
@@ -208,11 +209,12 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
     return agent === undefined ? undefined : { key, agent, current: now?.conversationId === conversation.conversationId };
   };
 
-  /** The conversation, with its key, its agent, whether its key points to it now and its key's title when it has a key. */
+  /** The conversation, with its key, its agent, whether its key points to it now and its title (else its first message) when it has a key. */
   const described = async (conversation: ObservedConversation, ctx: AppContext): Promise<ApiConversation> => {
     const identity = await identify(conversation, ctx);
     if (identity === undefined) return conversation as ApiConversation;
-    const title = await contracts.index().title(identity.key);
+    const named = await contracts.index().title(conversation.conversationId);
+    const title = named.title ?? (named.firstMessage === undefined ? undefined : cleanTitle(named.firstMessage));
     return { ...(conversation as ApiConversation), ...identity, ...(title !== undefined && { title }) };
   };
 

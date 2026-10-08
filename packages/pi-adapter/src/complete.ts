@@ -8,12 +8,20 @@
  * - pi-ai's `completeSimple` never rejects for a provider's failure: its answer says so
  *   (`stopReason` `error` or `aborted`, `errorMessage`). Here that is a rejection, as the contract says.
  * - `ctx`'s signal reaches the model call; a cancelled context asks no model.
+ * - **A model that reasons**: `maxTokens` is the answer's text, and a provider counts the thinking in
+ *   it (OpenRouter does), so `REASONING_TOKENS` more are allowed for it. One whose thinking cannot be
+ *   turned off (`thinkingLevelMap.off` null: `openrouter/z-ai/glm-5.3-flash`) thinks at the least it
+ *   allows (`minimal`, which pi-ai raises to the lowest level the model has); pi-ai turns off another's.
+ *   Without that, a short answer (a title's 32 tokens) was spent thinking, and came back empty.
  */
 
 import type { Models } from "@earendil-works/pi-ai/models";
 import type { AppContext } from "@pikit/core";
 import type { CompletionRequest, ModelComplete } from "@pikit/contracts";
 import { parseModelName } from "./models.ts";
+
+/** The tokens a reasoning model may think in, besides the answer's `maxTokens`. */
+export const REASONING_TOKENS = 2_048;
 
 /** `model.complete` over `models()`, read at each call (runtime-pi makes them at start). */
 export function createModelComplete(models: () => Models): ModelComplete {
@@ -31,7 +39,8 @@ export function createModelComplete(models: () => Models): ModelComplete {
           messages: [{ role: "user", content: request.prompt, timestamp: ctx.clock.now() }],
         },
         {
-          ...(request.maxTokens !== undefined && { maxTokens: request.maxTokens }),
+          ...(request.maxTokens !== undefined && { maxTokens: request.maxTokens + (model.reasoning ? REASONING_TOKENS : 0) }),
+          ...(model.reasoning && model.thinkingLevelMap?.off === null && { reasoning: "minimal" as const }),
           ...(ctx.abortSignal !== undefined && { signal: ctx.abortSignal }),
         },
       );

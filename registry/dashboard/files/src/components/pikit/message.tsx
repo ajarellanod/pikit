@@ -1,8 +1,10 @@
 /**
  * A transcript, in pi-ai's JSON (the runtime's own words, SPEC §5), as the chat shows it: a person's
  * message is a bubble; the agent's reply (its assistant messages and tool results up to the next
- * person's message) is its text, its thinking (ThinkingState) and its tool calls (ToolChips), in the
- * order they came. System messages (instructions, tools) are folded away.
+ * person's message) is its text (markdown), its thinking and its tool calls, in the order they came:
+ * the thinking and the calls between two texts fold into one group (ThinkingState, its calls in
+ * ToolChips), folded until opened, whose header says what goes on while it does. System messages
+ * (instructions, tools) are folded away.
  *
  * `turnsOf` builds that from the transcript and what is live (the answer being written, the tools
  * running); `UserBubble` and `Reply` show it (a person's images in the bubble). `MessageView` shows a
@@ -12,32 +14,13 @@
 import type { ReactNode } from "react";
 import LoadingState from "@/components/bui/LoadingState";
 import { StatusPill } from "@/components/bui/StatusPill";
-import { StreamText } from "@/components/bui/StreamText";
 import ThinkingState from "@/components/bui/ThinkingState";
 import ToolChips, { type ToolStatus, type ToolStep } from "@/components/bui/ToolChips";
+import { Markdown } from "@/components/pikit/markdown";
 import { OPERATOR_NOTE } from "@/lib/admin-api";
+import type { AssistantMessage, Image, Message, RunningTool, Text, ToolResultMessage, UserMessage } from "@/lib/messages";
 
-type Text = { type: "text"; text: string };
-type Thinking = { type: "thinking"; thinking: string; redacted?: boolean };
-type Image = { type: "image"; mimeType: string; data: string };
-type ToolCall = { type: "toolCall"; id: string; name: string; arguments: Record<string, unknown> };
-
-export type Message =
-  | { role: "system"; content?: unknown; timestamp?: number }
-  | { role: "user"; content: string | (Text | Image)[]; timestamp?: number }
-  | { role: "assistant"; content: (Text | Thinking | ToolCall)[]; stopReason?: string; errorMessage?: string; timestamp?: number }
-  | { role: "toolResult"; toolCallId: string; toolName: string; content: (Text | Image)[]; isError?: boolean; timestamp?: number };
-
-export type UserMessage = Extract<Message, { role: "user" }>;
-export type AssistantMessage = Extract<Message, { role: "assistant" }>;
-export type ToolResultMessage = Extract<Message, { role: "toolResult" }>;
-
-/** A tool running now, from the live events (`live.ts`). */
-export interface RunningTool {
-  callId: string;
-  name: string;
-  output: string;
-}
+export type { AssistantMessage, Message, RunningTool, ToolResultMessage, UserMessage };
 
 /** One tool call of a reply, with what became of it. */
 export interface Call {
@@ -174,12 +157,59 @@ export function describeCall(name: string, args: Record<string, unknown>): Pick<
   }
 }
 
-function toolsHeader(calls: Call[]): string {
-  const count = (status: ToolStatus) => calls.filter((each) => each.status === status).length;
-  const parts = [`${calls.length} tool call${calls.length === 1 ? "" : "s"}`];
-  if (count("running") > 0) parts.push(`${count("running")} running`);
-  if (count("failed") > 0) parts.push(`${count("failed")} failed`);
-  return parts.join(", ");
+type Step = Extract<Segment, { kind: "thinking" | "tools" }>;
+type Block = Exclude<Segment, Step> | { kind: "steps"; steps: Step[] };
+
+/** The segments, the thinking and the calls between two texts (or an error) in one group. */
+function blocksOf(segments: Segment[]): Block[] {
+  const blocks: Block[] = [];
+  for (const segment of segments) {
+    if (segment.kind !== "thinking" && segment.kind !== "tools") blocks.push(segment);
+    else {
+      const last = blocks.at(-1);
+      if (last?.kind === "steps") last.steps.push(segment);
+      else blocks.push({ kind: "steps", steps: [segment] });
+    }
+  }
+  return blocks;
+}
+
+/** A group's header: what goes on now (`working`), else what was done. */
+export function stepsHeader(steps: Step[]): { working: boolean; active: string; done: string } {
+  const calls = steps.flatMap((step) => (step.kind === "tools" ? step.calls : []));
+  const thinking = steps.some((step) => step.kind === "thinking" && step.streaming);
+  const running = calls.find((each) => each.status === "running");
+  const failed = calls.filter((each) => each.status === "failed").length;
+  const done = [
+    ...(steps.some((step) => step.kind === "thinking") ? ["Thought"] : []),
+    ...(calls.length > 0 ? [`${calls.length} tool call${calls.length === 1 ? "" : "s"}`] : []),
+    ...(failed > 0 ? [`${failed} failed`] : []),
+  ].join(" · ");
+  return {
+    working: thinking || calls.some((each) => each.status === "running" || each.status === "waiting"),
+    active: running !== undefined ? `Running ${running.name}` : thinking ? "Thinking" : "Working",
+    done,
+  };
+}
+
+/** The thinking and the calls between two texts: one fold. */
+function Steps({ steps }: { steps: Step[] }) {
+  const { working, active, done } = stepsHeader(steps);
+  return (
+    <ThinkingState working={working} active={active} done={done} openWhileWorking={false}>
+      {steps.map((step, i) =>
+        step.kind === "tools" ? (
+          <ToolChips key={i} steps={step.calls.map((each) => ({ id: each.id, ...describeCall(each.name, each.arguments), status: each.status, detail: each.output }))} />
+        ) : step.redacted ? (
+          <p key={i} className="px-1.5 text-[12.5px] text-ink-3">
+            Thinking redacted by the provider
+          </p>
+        ) : step.text.trim() === "" ? null : (
+          <Markdown key={i} text={step.text} streaming={step.streaming} className="px-1.5 py-0.5 text-[12.5px] leading-relaxed text-ink-2" />
+        ),
+      )}
+    </ThinkingState>
+  );
 }
 
 /** A person's message: in one of the dashboard's own words, the operator's note line is folded away. */
@@ -191,11 +221,14 @@ export function userText(message: UserMessage): { text: string; operator: boolea
   return { text: newline === -1 ? "" : text.slice(newline + 1), operator: true, images };
 }
 
-/** A person's message, at the right. `from` names who wrote it when it was not the operator. */
-export function UserBubble({ message, from }: { message: UserMessage; from?: string }) {
+/**
+ * A person's message, at the right. `from` names who wrote it when it was not the operator; `animate`
+ * rises it in (the one just sent: the transcript's, which takes its place, does not move).
+ */
+export function UserBubble({ message, from, animate = false }: { message: UserMessage; from?: string; animate?: boolean }) {
   const { text, operator, images } = userText(message);
   return (
-    <div className="flex flex-col items-end gap-1 pl-10 sm:pl-24" style={{ animation: "fade-up 300ms cubic-bezier(0.23,1,0.32,1) both" }}>
+    <div className="flex flex-col items-end gap-1 pl-10 sm:pl-24" style={animate ? { animation: "fade-up 200ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}>
       {!operator && from !== undefined && <span className="px-1 text-[11.5px] font-medium text-ink-3">{from}</span>}
       {images.length > 0 && (
         <div className="flex max-w-full flex-wrap justify-end gap-2">
@@ -211,34 +244,18 @@ export function UserBubble({ message, from }: { message: UserMessage; from?: str
   );
 }
 
-/** The agent's reply: its segments in order; `waiting` while the run goes and nothing is being written. */
-export function Reply({ segments, waiting, since }: { segments: Segment[]; waiting?: boolean; since?: number }) {
-  const blocks: ReactNode[] = segments.map((segment, i) => {
-    switch (segment.kind) {
+/** The agent's reply: its segments in order; `waiting` while its run goes, saying what goes on (`activity`). */
+export function Reply({ segments, waiting, activity = "Thinking", since }: { segments: Segment[]; waiting?: boolean; activity?: string; since?: number }) {
+  const blocks: ReactNode[] = blocksOf(segments).map((block, i) => {
+    switch (block.kind) {
       case "text":
-        return (
-          <p key={i} className="max-w-[640px] text-[13.5px] leading-[1.65] whitespace-pre-wrap text-ink [overflow-wrap:anywhere]">
-            <StreamText text={segment.text} streaming={segment.streaming} />
-          </p>
-        );
-      case "thinking":
-        return segment.redacted ? (
-          <ThinkingState key={i} text="" working={segment.streaming} done="Thought (redacted)" />
-        ) : (
-          <ThinkingState key={i} text={segment.text} working={segment.streaming} />
-        );
-      case "tools":
-        return (
-          <ToolChips
-            key={i}
-            header={toolsHeader(segment.calls)}
-            steps={segment.calls.map((each) => ({ id: each.id, ...describeCall(each.name, each.arguments), status: each.status, detail: each.output }))}
-          />
-        );
+        return <Markdown key={i} text={block.text} streaming={block.streaming} className="max-w-[640px] text-[13.5px] leading-[1.65] text-ink" />;
+      case "steps":
+        return <Steps key={i} steps={block.steps} />;
       case "error":
         return (
           <p key={i} className="max-w-[640px] rounded-card bg-red-tint px-3 py-2 text-[13px] text-red [overflow-wrap:anywhere]">
-            {segment.text}
+            {block.text}
           </p>
         );
       case "aborted":
@@ -254,7 +271,7 @@ export function Reply({ segments, waiting, since }: { segments: Segment[]; waiti
       {blocks}
       {waiting === true && (
         <div className="flex min-h-6 items-center" style={{ animation: "fade-in 200ms ease-out both" }}>
-          <LoadingState label="Thinking" variant="Dots" since={since} />
+          <LoadingState label={activity} variant="Dots" since={since} />
         </div>
       )}
     </article>

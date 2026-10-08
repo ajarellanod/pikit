@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type CSSProperties, type MouseEvent, type ReactNode } from "react";
 import { createPortal } from "react-dom";
-import { MoreHoriz, NavArrowDown, Search, Settings, SidebarCollapse, Xmark } from "iconoir-react";
+import { MoreVert, NavArrowDown, Search, Settings, SidebarCollapse, Xmark } from "iconoir-react";
 import GlideMenu from "./GlideMenu";
 
 /* ---------------------------------------------------------
@@ -431,7 +431,7 @@ function ChatRow({ chat, menuOpen, onPick, onMenu }: { chat: SidebarChat; menuOp
           }}
           className={`sidebar-copy absolute top-1 right-3 z-20 flex size-6 items-center justify-center rounded-[6px] text-ink-3 transition-[opacity,background-color,color] duration-100 hover:bg-hover-2 hover:text-ink focus-visible:opacity-100 ${menuOpen ? "bg-hover-2 text-ink opacity-100" : "opacity-0 group-hover/chat:opacity-100"}`}
         >
-          <MoreHoriz width={16} height={16} strokeWidth={2} />
+          <MoreVert width={16} height={16} strokeWidth={2} />
         </button>
       )}
     </div>

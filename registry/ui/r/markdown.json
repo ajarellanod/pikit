@@ -1,0 +1,18 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "markdown",
+  "type": "registry:file",
+  "title": "markdown",
+  "description": "pikit's markdown piece of the dashboard.",
+  "registryDependencies": [
+    "@pikit/markdown-engine"
+  ],
+  "files": [
+    {
+      "path": "registry/dashboard/files/src/components/pikit/markdown.tsx",
+      "type": "registry:file",
+      "target": "~/src/components/pikit/markdown.tsx",
+      "content": "/**\n * A model's text as markdown (models write it). The engine (`markdown-engine.tsx`, Comark) is a chunk\n * of its own, loaded with this module, apart from the dashboard's own; until it and the text's parse are there, the text\n * shows as it is. While a message streams each new text is parsed again and the last parse shown, so\n * the newest words never wait on an animation. Parsed texts are kept, so a message shown again (a\n * page read again, a tab back) is rendered at once.\n */\n\nimport { useEffect, useRef, useState } from \"react\";\nimport type { Parsed } from \"@/components/pikit/markdown-engine\";\n\ntype Engine = typeof import(\"@/components/pikit/markdown-engine\");\n\nlet engine: Engine | undefined;\nlet loading: Promise<Engine> | undefined;\nconst load = () => (loading ??= import(\"@/components/pikit/markdown-engine\").then((loaded) => (engine = loaded)));\n// Asked for as soon as a view that shows messages loads, not when the first one shows.\nvoid load().catch(() => {});\n\n/** Parses kept, by text: the most recent last. */\nconst KEPT = 200;\nconst parsed = new Map<string, Parsed>();\nfunction keep(text: string, document: Parsed) {\n  parsed.delete(text);\n  parsed.set(text, document);\n  if (parsed.size > KEPT) parsed.delete(parsed.keys().next().value as string);\n}\n\nexport function Markdown({ text, streaming = false, className = \"\" }: { text: string; streaming?: boolean; className?: string }) {\n  const [shown, setShown] = useState<{ text: string; document: Parsed } | undefined>(() => {\n    const document = parsed.get(text);\n    return document === undefined ? undefined : { text, document };\n  });\n  // Parses can end out of order: an older one never replaces a newer one.\n  const latest = useRef(0);\n  const applied = useRef(0);\n\n  useEffect(() => {\n    const known = parsed.get(text);\n    if (known !== undefined) {\n      applied.current = ++latest.current;\n      setShown({ text, document: known });\n      return;\n    }\n    const turn = ++latest.current;\n    load()\n      .then((loaded) => loaded.parse(text))\n      .then((document) => {\n        // A message still being written is not kept: only its last text will be read again.\n        if (!streaming) keep(text, document);\n        if (turn < applied.current) return;\n        applied.current = turn;\n        setShown({ text, document });\n      })\n      .catch(() => {\n        // Shown as it is.\n      });\n  }, [text, streaming]);\n\n  if (shown === undefined || engine === undefined) return <div className={`markdown whitespace-pre-wrap ${className}`}>{text}</div>;\n  return <engine.Render document={shown.document} className={`markdown ${className}`} />;\n}\n"
+    }
+  ]
+}

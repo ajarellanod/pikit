@@ -117,16 +117,19 @@ it shows what `GET /admin/api/commands` lists, and nothing else.
 
 ### Titles
 
-A conversation key gets a title once, from a model, after its first run settles: admin-api asks
+A conversation gets a title once, from a model, after its first run settles: admin-api asks
 `model.complete` (runtime-pi's) in the background, so no request and no event waits for it, with a
 short system prompt (a title of 2 to 6 words, in the language of the message, no quotes) and the
-key's first message (the text written, the operator's note line taken off, at most 1,000
-characters; `maxTokens` 32). The model is `titleModel` when set, else the conversation's agent's. The
+conversation's first message (the text written, the operator's note line taken off, at most 1,000
+characters; `maxTokens` 32, besides what a reasoning model thinks: `model.complete` leaves it room,
+and asks one whose thinking cannot be turned off for the least). The model is `titleModel` when set, else the conversation's agent's. The
 answer is cleaned (`cleanTitle` in `api.ts`: its first line, no label, quotes or markdown, at most 60
 characters, cut at a word). A failure (a model error, an answer with no title) is logged, and tried
 once more after a later run; then never (`TITLE_TRIES`). `/name` replaces any title, and no model
-replaces the operator's. A title names a key: the conversations a reset left behind share it. Titles
-are kept with the index (below) and come with each conversation (`title`). With a fake model
+replaces the operator's. A title names one conversation: a reset (`/new`) starts one that gets its
+own from its own first message. Until a conversation has a title, its first message (cleaned the same
+way) names it, once a model was asked to title it. Titles are kept with the index (below) and come
+with each conversation (`title`). With a fake model
 (provider-faux) the title is its echo of the first message, cleaned.
 
 ### Browser sessions
@@ -155,11 +158,11 @@ A write is an upsert that keeps the newest time: told twice, or late, it changes
 conversation the runtime no longer has is left out of the page. Any conversation can always be read
 by its id.
 
-Titles are a second table of the same storage, `admin_api_titles`: one row per key (its title, a
-model's or the operator's, the first message a model titles, its tries). A title names a key, not a
-row: a reset's new conversation has it at once. On a server it is the App's `storage.sql`; on
-Cloudflare the conversation's own object's (where its runs settle and `/name` runs, and whose answer
-the list reads), not the index object's.
+Titles are a second table of the same storage, `admin_api_conversation_titles`: one row per
+conversation (its title, a model's or the operator's, the first message a model titles, its tries).
+On a server it is the App's `storage.sql` (its conversation ids are unique); on Cloudflare the
+conversation's own object's, by the object's own id (where its runs settle and `/name` runs, and
+whose answer the list reads), not the index object's.
 
 ## On a server
 

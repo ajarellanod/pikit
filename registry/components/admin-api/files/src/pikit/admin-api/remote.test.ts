@@ -492,7 +492,11 @@ test("slash commands on the Worker: listed from the index object's App, run in t
   expect(runtime.pointers.get("telegram:1")?.conversationId).toBe("100");
   const behind = await w.fetch(path("name"), post({ args: "Too late" }));
   expect({ status: behind.status, body: await behind.json() }).toMatchObject({ status: 409, body: { error: "not_current" } });
-  expect(await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~100")}`, { headers: AUTH })).json()).toMatchObject({ current: true, title: "Weekend plans" });
+  // The reset's new conversation is untitled until its own first run; the one behind keeps its title.
+  const reset = (await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~100")}`, { headers: AUTH })).json()) as ApiConversation;
+  expect(reset).toMatchObject({ current: true });
+  expect(reset.title).toBeUndefined();
+  expect(await (await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}`, { headers: AUTH })).json()).toMatchObject({ current: false, title: "Weekend plans" });
 });
 
 test("archive and delete on the Worker: one call to the index object, which lists them apart (archived) or never (deleted)", async () => {

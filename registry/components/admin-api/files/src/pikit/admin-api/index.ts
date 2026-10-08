@@ -28,9 +28,10 @@
  *   `reset`) and `/name <title>` (the conversation's title). runtime-pi registers `/compact`; a
  *   component of yours registers its own.
  * - **Titles**: after a conversation's first run settles, a model (`model.complete`, runtime-pi's;
- *   `titleModel`, else the agent's) titles its key from its first message, in the background, once
- *   (tried once more after a later run if that failed): `titles.ts`. `/name` replaces it. They are
- *   kept with the index (`conversation-index.ts`) and listed with each conversation.
+ *   `titleModel`, else the agent's) titles it from its first message, in the background, once (tried
+ *   once more after a later run if that failed): `titles.ts`. A reset's new conversation gets its own.
+ *   `/name` replaces the current one's. They are kept with the index (`conversation-index.ts`) and
+ *   listed with each conversation; one with no title yet is listed by its first message.
  * - **Only a conversation's current one is talked to.** A message, an abort or a reset to a
  *   conversation a reset left behind is `409 not_current`. A reset's new conversation is its key's
  *   current one, with the key's agent, before any message reaches it: it is talked to at once.
@@ -138,7 +139,7 @@ export default defineComponent({
       async run(conversation, args) {
         const title = cleanTitle(args);
         if (title === undefined) throw new Error("Write the title after the command: /name <title>");
-        await index.name(conversation.key, title);
+        await index.name(conversation.conversationId, title);
         return { text: `Titled \u201c${title}\u201d.` };
       },
     };
@@ -185,7 +186,7 @@ export default defineComponent({
 
     /**
      * Every conversation `observer` holds with a key, a page at a time, into the index: what events may
-     * have missed. Then the keys with no title yet are titled (`untitled`).
+     * have missed. Then the conversations with no title yet are titled (`untitled`).
      */
     const backfill = async (observer: AgentObserver, ctx: AppContext): Promise<number> => {
       let cursor: string | undefined;

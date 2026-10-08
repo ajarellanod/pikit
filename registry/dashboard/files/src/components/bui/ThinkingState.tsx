@@ -6,7 +6,9 @@ import { useLayoutEffect, useRef, useState, type ReactNode } from "react";
  * Beautiful UI's ThinkingState (Reasoning variant), driven by the
  * model's own thinking: `text` grows while `working`, the header
  * shimmers, the trace stays open; once it settles the header
- * says so and the trace folds, still expandable.
+ * says so and the trace folds, still expandable. `children`
+ * replace the text as the trace (a run's steps), and
+ * `openWhileWorking={false}` keeps it folded until opened.
  * --------------------------------------------------------- */
 
 export default function ThinkingState({
@@ -15,27 +17,40 @@ export default function ThinkingState({
   active = "Thinking",
   done = "Thought",
   icon,
+  openWhileWorking = true,
+  children,
 }: {
   /** the reasoning so far; paragraphs split on blank lines */
-  text: string;
+  text?: string;
   /** still being written */
   working: boolean;
   active?: string;
   done?: string;
   /** override the header glyph (defaults to the sparkle) */
   icon?: ReactNode;
+  /** the trace opens by itself while `working` */
+  openWhileWorking?: boolean;
+  /** the trace, instead of `text` */
+  children?: ReactNode;
 }) {
   const [manualExpanded, setManualExpanded] = useState<boolean | null>(null);
-  const expanded = manualExpanded ?? working;
-  const rows = text
+  const expanded = manualExpanded ?? (working && openWhileWorking);
+  const rows = (text ?? "")
     .split(/\n\s*\n/)
     .map((row) => row.trim())
     .filter((row) => row !== "");
   const traceRef = useRef<HTMLDivElement>(null);
   const [lineHeight, setLineHeight] = useState(0);
+  /* the rail follows the trace's height, whatever changes it (a step opening inside) */
   useLayoutEffect(() => {
-    if (traceRef.current) setLineHeight(traceRef.current.offsetHeight);
-  }, [text, expanded]);
+    const trace = traceRef.current;
+    if (!trace) return;
+    const measure = () => setLineHeight(trace.offsetHeight);
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(trace);
+    return () => observer.disconnect();
+  }, []);
 
   return (
     <div className="flex w-full max-w-[620px] flex-col">
@@ -105,7 +120,7 @@ export default function ThinkingState({
               style={{ top: -8, height: lineHeight ? lineHeight - 2 : 0, transition: "height 500ms cubic-bezier(0.23,1,0.32,1)" }}
             />
             <div ref={traceRef} className="flex flex-col gap-1 py-1">
-              {rows.map((row, i) => (
+              {children ?? rows.map((row, i) => (
                 <div key={i} className="flex min-h-7 w-full items-center gap-2 rounded-[6px] px-1.5 py-0.5 text-left" style={{ animation: "fade-up 320ms cubic-bezier(0.23,1,0.32,1) both" }}>
                   <span className="min-w-0 text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2 [overflow-wrap:anywhere]">{row}</span>
                 </div>

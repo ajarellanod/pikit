@@ -413,16 +413,6 @@ a:focus-visible .animated-underline::after {
   }
 }
 
-@keyframes caret-blink {
-  0%,
-  100% {
-    opacity: 1;
-  }
-  50% {
-    opacity: 0;
-  }
-}
-
 /* -- the home's entrance --------------------------------------------------- */
 
 .home-reveal {
@@ -512,28 +502,127 @@ a:focus-visible .animated-underline::after {
   width: 36px;
 }
 
-/* -- StreamText: the leading edge resolves out of a soft blur -------------- */
+/* -- Markdown: a model's text (components/pikit/markdown.tsx) ---------------
+ * Sizes and colour come from the element it is in; this spaces the blocks and marks the rest. */
 
-.stream-tail {
-  filter: blur(1.6px);
-  -webkit-mask-image: linear-gradient(to right, oklch(0 0 0) 20%, oklch(0 0 0 / 0.2));
-  mask-image: linear-gradient(to right, oklch(0 0 0) 20%, oklch(0 0 0 / 0.2));
+.markdown {
+  min-width: 0;
+  overflow-wrap: anywhere;
 }
 
-.stream-caret {
-  display: inline-block;
-  width: 2px;
-  height: 1.05em;
-  margin-left: 1.5px;
-  translate: 0 -0.5px;
-  border-radius: 1px;
-  background: var(--ink);
-  vertical-align: text-bottom;
-  animation: caret-blink 1s step-end infinite;
+.markdown > * + *,
+.markdown li > * + *,
+.markdown blockquote > * + * {
+  margin-top: 0.75em;
 }
 
-.stream-caret.is-streaming {
-  animation: none;
+.markdown :is(h1, h2, h3, h4, h5, h6) {
+  font-weight: 600;
+  line-height: 1.35;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+}
+
+.markdown h1 {
+  font-size: 1.3em;
+}
+
+.markdown h2 {
+  font-size: 1.18em;
+}
+
+.markdown h3 {
+  font-size: 1.06em;
+}
+
+.markdown > :is(h1, h2, h3, h4, h5, h6):not(:first-child) {
+  margin-top: 1.25em;
+}
+
+.markdown strong {
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.markdown a {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-decoration-color: color-mix(in oklch, currentColor 35%, transparent);
+  text-underline-offset: 2px;
+}
+
+.markdown a:hover {
+  text-decoration-color: currentColor;
+}
+
+.markdown :is(ul, ol) {
+  padding-left: 1.4em;
+}
+
+.markdown ul {
+  list-style: disc;
+}
+
+.markdown ol {
+  list-style: decimal;
+}
+
+.markdown li + li {
+  margin-top: 0.3em;
+}
+
+.markdown li::marker {
+  color: var(--ink-3);
+}
+
+.markdown ul.contains-task-list {
+  list-style: none;
+  padding-left: 0.2em;
+}
+
+.markdown .task-list-item-checkbox {
+  margin-right: 0.5em;
+  translate: 0 1px;
+  accent-color: var(--ink-2);
+}
+
+.markdown :where(p, li, td, th, h1, h2, h3, h4, h5, h6, blockquote, a, strong, em) > code {
+  border-radius: 5px;
+  background: var(--field);
+  box-shadow: var(--shadow-hairline);
+  padding: 0.1em 0.35em;
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+}
+
+.markdown blockquote {
+  border-left: 2px solid var(--line-strong);
+  padding-left: 0.9em;
+  color: var(--ink-2);
+}
+
+.markdown hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+}
+
+.markdown table {
+  display: block;
+  max-width: 100%;
+  overflow-x: auto;
+  border-collapse: collapse;
+  font-size: 0.93em;
+}
+
+.markdown :is(th, td) {
+  border: 1px solid var(--line);
+  padding: 0.35em 0.7em;
+  text-align: left;
+}
+
+.markdown th {
+  background: var(--inset);
+  font-weight: 600;
 }
 
 /* -- RecordsTable: one quiet surface, precise rules, colour kept for meaning --
@@ -860,16 +949,6 @@ button.records-header-button:hover {
     opacity: 1 !important;
     transform: none !important;
     filter: none !important;
-  }
-
-  .stream-caret {
-    animation: none;
-  }
-
-  .stream-tail {
-    filter: none;
-    -webkit-mask-image: none;
-    mask-image: none;
   }
 
   *,

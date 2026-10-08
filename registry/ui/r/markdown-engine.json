@@ -1,0 +1,22 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "markdown-engine",
+  "type": "registry:file",
+  "title": "markdown-engine",
+  "description": "pikit's markdown-engine piece of the dashboard.",
+  "dependencies": [
+    "@comark/react@0.7.0",
+    "comark@0.7.0"
+  ],
+  "registryDependencies": [
+    "@pikit/bui"
+  ],
+  "files": [
+    {
+      "path": "registry/dashboard/files/src/components/pikit/markdown-engine.tsx",
+      "type": "registry:file",
+      "target": "~/src/components/pikit/markdown-engine.tsx",
+      "content": "/**\n * Comark (https://comark.dev), loaded on demand by `markdown.tsx`: it parses a model's markdown into a\n * document and renders that. CommonMark and GFM (tables, task lists, links found in the text), no\n * more: without Comark's default plugins raw HTML stays text, and so do its component and attribute\n * syntaxes (`:name{…}`, `{.class}`), which a model never means. Unfinished syntax (a `**` or a code\n * fence still being written) is closed while a message streams, so its layout holds. A code block\n * is the dashboard's CodeBlock: named by its file (```ts [src/app.ts]) or its language, with a copy\n * button; one in no language is not coloured.\n */\n\nimport { MarkdownDocument } from \"@comark/react/components/MarkdownDocument\";\nimport { parseMarkdown } from \"comark\";\nimport taskList from \"comark/plugins/task-list\";\nimport type { ComponentProps } from \"react\";\nimport CodeBlock from \"@/components/bui/CodeBlock\";\n\nexport type Parsed = Awaited<ReturnType<typeof parseMarkdown>>;\n\nconst plugins = [taskList()];\n\nexport const parse = (text: string): Promise<Parsed> => parseMarkdown(text, { registerDefaultPlugins: false, plugins });\n\n/** A link leaves the dashboard for a tab of its own. */\nfunction Link(props: ComponentProps<\"a\">) {\n  return <a {...props} target=\"_blank\" rel=\"noopener noreferrer\" />;\n}\n\n/** A node's text, all of it. */\nconst textOf = (node: unknown): string => (typeof node === \"string\" ? node : Array.isArray(node) ? node.slice(2).map(textOf).join(\"\") : \"\");\n\n/** A code block, from its node (`[\"pre\", { language?, filename? }, [\"code\", {}, text]]`). */\nfunction Code({ __node: node, language, filename }: { __node?: unknown; language?: string; filename?: string }) {\n  const code = textOf(node).replace(/\\n$/, \"\");\n  return <CodeBlock code={code} filename={filename ?? language ?? \"text\"} meta={filename === undefined ? undefined : language} plain={language === undefined} />;\n}\n// Comark passes the node itself to a component that declares `__node` in its propTypes.\nCode.propTypes = { __node: () => null };\n\nconst components = { a: Link, pre: Code };\n\nexport function Render({ document, className }: { document: Parsed; className?: string }) {\n  return <MarkdownDocument value={document} components={components} className={className} />;\n}\n"
+    }
+  ]
+}
