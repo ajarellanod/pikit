@@ -7,7 +7,8 @@
  *   dashboard's own build writes (`dashboard-files.ts`), bundled with the app: no disk.
  * - **It reads contracts, never internals:** the composition from `APP_DESCRIPTION` (K13, config
  *   values that look like secrets redacted), the agents from `agent.definition` (name, model, the
- *   names of their tools), the runtime from `agent.observe`. Nothing it reads changes anything.
+ *   names of their tools) and the live ones from `agent.directory` when installed (agents-live, made
+ *   in the dashboard), the runtime from `agent.observe`. Nothing it reads changes anything.
  * - **The dashboard is a channel of its own.** It reads every conversation; it writes only into its
  *   own (`dashboard:<uuid>`, with an agent of the App) and, into another channel's, as a follow-up
  *   (never a steer) whose request id starts with `dashboard:`: a run only such messages started is
@@ -51,7 +52,7 @@
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
 import { type AgentCommand, type AgentObserver, type ConversationRef, isCommandName } from "@pikit/contracts";
-import { cleanTitle } from "./api.ts";
+import { type ApiAgent, cleanTitle } from "./api.ts";
 import { createAssets } from "./assets.ts";
 import { agentOf, createLocalBackend } from "./backend.ts";
 import { answerCalls, SEEN } from "./calls.ts";
@@ -97,6 +98,8 @@ export default defineComponent({
     const mailbox = pikit.useOptional("actor.mailbox");
     // The agents, for `GET /admin/api/agents` and a web search asked of one.
     const definitions = pikit.useKeyed("agent.definition");
+    // The live agents, made in the dashboard (agents-live), listed after the code's.
+    const directory = pikit.useOptional("agent.directory");
     // The slash commands the dashboard lists and runs: its own two below, runtime-pi's, yours.
     const commands = pikit.useKeyed("agent.command");
     // Titles: a model's text, through the runtime's models.
@@ -109,7 +112,18 @@ export default defineComponent({
       runtime: () => runtime.get(),
       registry: () => registry.get(),
       index: () => index,
-      agents: () => definitions.keys().sort().map((name) => agentOf(name, definitions.get(name))),
+      agents: async (ctx: AppContext) => [
+        ...definitions.keys().sort().map((name) => agentOf(name, definitions.get(name))),
+        ...((await directory.get()?.list(ctx)) ?? []).map((agent): ApiAgent => ({
+          name: agent.name,
+          live: true,
+          ...(agent.description !== undefined && agent.description !== "" && { description: agent.description }),
+          model: agent.model,
+          tools: agent.tools ?? [],
+          // A live agent is never the steward (agents-live refuses it).
+          steward: false,
+        })),
+      ],
       commands: () => ({ keys: () => commands.keys().filter(isCommandName), get: (name: string) => commands.get(name) }),
     };
     // A server's: a conversation no message reached yet is its key's by the index's row (a reset's new one).

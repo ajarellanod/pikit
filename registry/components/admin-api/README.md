@@ -8,7 +8,8 @@ installed; it also stands on its own, for a script or an agent that reads the se
   slash commands, `agent.command` `new` and `name` ("Slash commands" below).
 - **Requires:** `admin.auth` (who is an operator; `admin-auth-token`), `agent.observe` (runtime-pi),
   `agent.runtime`, `conversations.registry`, `storage.sql` (the conversation index); optionally
-  `agent.definition` (the agents it lists), `agent.command` (the commands it lists and runs: its own,
+  `agent.definition` (the agents it lists), `agent.directory` (the live ones, agents-live's: listed
+  after them), `agent.command` (the commands it lists and runs: its own,
   runtime-pi's `/compact`, yours) and `model.complete` (runtime-pi's: the model that titles
   conversations; without it, none is titled). A server (such as `server-bun`) serves the routes. On Cloudflare, also `actor.inbox` and `actor.mailbox`
   (platform-cloudflare).
@@ -28,7 +29,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | Route | Answer |
 |---|---|
 | `GET /admin/api/app` | the composition: components, capabilities and providers, pipelines, config (`APP_DESCRIPTION`; a value that looks like a secret is `[redacted]`) |
-| `GET /admin/api/agents` | `{ items: [{ name, model, tools, steward }] }`: the App's agents (`agent.definition`), the names of the tools each is defined with, and whether it is the steward |
+| `GET /admin/api/agents` | `{ items: [{ name, live?, description?, model, tools, steward }] }`: the App's agents (`agent.definition`), then the live ones (`agent.directory`, `live: true`, never the steward), the names of the tools each is defined with, and whether it is the steward |
 | `POST /admin/api/session` | the credential once → `200 { operator }` and a session cookie |
 | `DELETE /admin/api/session` | `204`, the session cookie cleared |
 | `GET /admin/api/conversations?limit&cursor` | a page of conversations, the most recently active first: key, agent, busy, last activity, cost, and `current` (whether its key points to it now) |
@@ -75,8 +76,8 @@ curl -N -H "Authorization: Bearer $PIKIT_ADMIN_TOKEN" http://localhost:3000/admi
 ### The dashboard is a channel of its own
 
 - **Its own conversations.** `POST /admin/api/conversations` makes a key `dashboard:<uuid>` and
-  resolves it with one of the App's agents (the keys of `agent.definition`; another is
-  `400 unknown_agent`), then dispatches the first message. Its answers appear only in the dashboard:
+  resolves it with one of the App's agents (`GET /admin/api/agents`: the code's or a live one; another
+  is `400 unknown_agent`), then dispatches the first message. Its answers appear only in the dashboard:
   no channel delivers a `dashboard:` key, and none makes one, so no other channel can continue it.
 - **Another channel's conversation.** The operator's message is a follow-up, never a steer (with a run
   going, it waits for it), and its request id starts with `dashboard:` (`DASHBOARD_REQUEST_PREFIX`; a

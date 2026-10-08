@@ -29,7 +29,7 @@
  * (`qualify`), split on the last `~`. A client treats every id as opaque.
  */
 
-import { APP_DESCRIPTION, type AppContext, type AppDescription } from "@pikit/core";
+import { APP_DESCRIPTION, type AppContext } from "@pikit/core";
 import {
   ActorCallError,
   type AgentObserver,
@@ -174,8 +174,8 @@ export interface LocalContracts {
    * pointed the key to it; in a Cloudflare object, the object's own key.
    */
   keyOf(conversationId: string, ctx: AppContext): Promise<string | undefined>;
-  /** The App's agents (`agent.definition`), by name: `agentOf` describes each. */
-  agents(): ApiAgent[];
+  /** The App's agents now: the code's (`agent.definition`, `agentOf` describes each) by name, then the live ones (`agent.directory`). */
+  agents(ctx: AppContext): Promise<ApiAgent[]>;
   /** The App's slash commands (`agent.command`). */
   commands(): CommandLookup;
 }
@@ -187,11 +187,6 @@ export function agentOf(name: string, definition: { model?: unknown; tools?: rea
     return typeof named === "string" ? [named] : [];
   });
   return { name, model: typeof definition?.model === "string" ? definition.model : "", tools, steward: definition?.steward === true };
-}
-
-/** The App's agents: the keys of `agent.definition`. */
-export function agentsOf(description: AppDescription | undefined): string[] {
-  return Object.keys(description?.capabilities["agent.definition"]?.keys ?? {}).sort();
 }
 
 /** The backend over the contracts of the App it runs in (a server's, or one Durable Object's). */
@@ -253,9 +248,9 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
   };
 
   /** Whether `message` asks for a web search; one that `agent` cannot do is refused. */
-  const searchable = (agent: string, message: Message): boolean => {
+  const searchable = async (agent: string, message: Message, ctx: AppContext): Promise<boolean> => {
     if (message.webSearch !== true) return false;
-    if (!contracts.agents().some((each) => each.name === agent && each.tools.includes(WEB_SEARCH_TOOL))) {
+    if (!(await contracts.agents(ctx)).some((each) => each.name === agent && each.tools.includes(WEB_SEARCH_TOOL))) {
       throw refusal("invalid_request", `the agent "${agent}" has no ${WEB_SEARCH_TOOL} tool: it cannot search the web`);
     }
     return true;
@@ -266,7 +261,7 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
    * images. A web search is asked only of an agent that has the tool.
    */
   const dispatch = async (conversation: ConversationRef, message: Message, ctx: AppContext) => {
-    const webSearch = searchable(conversation.agent, message);
+    const webSearch = await searchable(conversation.agent, message, ctx);
     const images = (message.attachments ?? []).map(({ mimeType, data }) => ({ mimeType, data }));
     const prompt = operatorPrompt(conversation.key, message.text, { webSearch });
     return contracts.runtime().dispatch({ requestId: message.requestId, conversation, prompt, ...(images.length > 0 && { images }), whenBusy: "followUp" }, ctx);
@@ -279,7 +274,7 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       return { ...description, config: redactSecrets(description.config) };
     },
 
-    agents: async () => ({ items: contracts.agents() }),
+    agents: async (ctx) => ({ items: await contracts.agents(ctx) }),
 
     async conversations(page, ctx, archived = false) {
       const listed = await contracts.index().list({ limit: page.limit ?? 50, archived, ...(page.cursor !== undefined && { cursor: page.cursor }) });
@@ -291,10 +286,10 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
 
     async start(message, ctx) {
       if (!isDashboardKey(message.key)) throw refusal("invalid_request", "a conversation the dashboard starts has a key of its own, dashboard:<id>");
-      const agents = agentsOf(ctx.value(APP_DESCRIPTION));
+      const agents = (await contracts.agents(ctx)).map((agent) => agent.name);
       if (!agents.includes(message.agent)) throw refusal("unknown_agent", `no agent "${message.agent}" in the App: ${agents.join(", ") || "none"}`);
       // Before the key is made: a refused message makes no conversation.
-      searchable(message.agent, message);
+      await searchable(message.agent, message, ctx);
       const conversation = await contracts.registry().resolve(message.key, message.agent, ctx);
       const admission = await dispatch(conversation, message, ctx);
       return { key: conversation.key, conversationId: conversation.conversationId, requestId: message.requestId, admission: admission.kind };

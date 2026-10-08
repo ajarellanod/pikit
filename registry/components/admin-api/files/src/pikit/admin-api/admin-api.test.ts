@@ -55,7 +55,7 @@ test("what setup declares: component.json's provides / requires / optional come 
     name: "admin-api",
     provides: ["http.route", "agent.command"],
     requires: ["admin.auth", "agent.observe", "agent.runtime", "conversations.registry", "storage.sql"],
-    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "agent.definition", "agent.command", "model.complete"],
+    optional: ["outbound.queue", "actor.inbox", "actor.mailbox", "agent.definition", "agent.directory", "agent.command", "model.complete"],
   });
 });
 
@@ -375,6 +375,28 @@ test("GET /admin/api/agents: the App's agents by name, their model, the names of
       { name: "searcher", model: "test/search", tools: ["websearch", "lookup"], steward: false },
     ],
   });
+});
+
+test("GET /admin/api/agents with agent.directory: the live agents after the code's, marked, with their description; one starts a conversation", async () => {
+  const live = defineComponent({
+    name: "directory-test",
+    setup(pikit) {
+      const support = { name: "support", description: "Answers customers", model: "test/model", tools: ["lookup"] };
+      pikit.provide("agent.directory", { list: async () => [support], get: async (name) => (name === "support" ? support : undefined) });
+    },
+  });
+  const s = await started({}, [live]);
+
+  expect(await (await s.fetch("/admin/api/agents", { headers: AUTH })).json()).toEqual({
+    items: [
+      { name: "assistant", model: "test/model", tools: [], steward: true },
+      { name: "searcher", model: "test/search", tools: ["websearch", "lookup"], steward: false },
+      { name: "support", live: true, description: "Answers customers", model: "test/model", tools: ["lookup"], steward: false },
+    ],
+  });
+  const response = await s.fetch("/admin/api/conversations", post({ agent: "support", text: "hello" }));
+  expect(response.status).toBe(201);
+  expect(s.runtime.dispatched[0]?.conversation.agent).toBe("support");
 });
 
 test("POST …/messages with images: they reach the agent's request after the marked text; the text may be empty; the log counts them", async () => {

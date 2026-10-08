@@ -25,6 +25,7 @@
       "outbound.queue",
       "actor.inbox",
       "agent.definition",
+      "agent.directory",
       "agent.command",
       "model.complete"
     ]
@@ -54,6 +55,7 @@
         "actor.inbox",
         "actor.mailbox",
         "agent.definition",
+        "agent.directory",
         "agent.command",
         "model.complete"
       ]
