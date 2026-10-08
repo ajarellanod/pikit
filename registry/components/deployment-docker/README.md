@@ -1,7 +1,9 @@
 # deployment-docker
 
 Runs a pikit project in Docker on a server: the image, the container, the process entrypoint, its
-logs, and the commands `pikit up | down | restart | logs | status` delegate to.
+logs, the commands `pikit up | down | restart | logs | status` delegate to, and the deployer on the
+host (`pikit deploy watch | install`) that deploys each merge into the main branch and rolls back
+when unhealthy.
 
 - **Provides:** nothing. It is not an app component and is not listed in `pikit.config.ts`: it runs
   the app rather than running inside it.
@@ -116,11 +118,59 @@ login lands in the volume the app reads, and `pikit up` checks there that the ap
 There is one copy of each login: the one on your machine (`.pikit/`) is for `pikit dev` only.
 Directories in `share` are mounted at the same path, read-only unless `writable`.
 
+### The deployer (`deploy.ts`): `pikit deploy watch | install`
+
+Self-improvement's last step on a server (SPEC §6): a proposal approved in the dashboard is a
+merge into the main branch on GitHub, and this deploys it from the host, outside the container (the
+app cannot run `docker`). It polls, so the host needs no inbound access.
+
+```sh
+git clone https://github.com/you/your-bot && cd your-bot   # the project's directory is a checkout
+pikit deploy install          # a systemd user service running `pikit deploy watch --interval 60`
+journalctl --user -u pikit-deploy-your-bot -f
+```
+
+Every `--interval` seconds (60), `watch` runs `git fetch` and, when the checkout's upstream
+(`origin/main`) is at a commit not deployed yet:
+1. tags the running app's image `<image>:pikit-previous` (`docker compose ps`, `docker inspect`,
+   `docker tag`);
+2. `git merge --ff-only` to that commit, then `bun install --frozen-lockfile` (the CLI loads the
+   project here);
+3. `pikit up`, in a fresh process (doctor, the credentials check, `beforeDeploy` hooks, the build,
+   Compose's wait for the healthcheck), then `GET /health` must answer 200;
+4. on any failure, it tags the previous image as the app's again, runs
+   `docker compose up --detach --no-build --force-recreate --wait`, returns the checkout to the
+   deployed commit (`git reset --keep`) and logs `pikit: <commit> failed /health: rolled back to
+   <previous>`. That commit is not tried again; the next one is.
+
+It never rolls back across a change `irreversible` names (`noneIrreversible` in `deploy.ts`: none is
+known on a server today, since both images share the `.pikit/` volume; edit it for one, such as a
+migration an older version cannot read): it says so and leaves the new version running. The first
+deploy has no previous image to return to.
+
+What it deployed and the commit that failed are kept in `.pikit/deployer.json` on the host, so a
+restarted deployer neither redeploys nor retries; its first start takes the checkout's `HEAD` as
+what runs.
+
+`install` writes `~/.config/systemd/user/pikit-deploy-<directory>.service` (`ExecStart` is this CLI,
+as it was run, with the current `PATH`), then `systemctl --user daemon-reload` and `enable --now`.
+A user service stops when its user logs out unless lingering is on: `install` says to run
+`sudo loginctl enable-linger <user>` when it is off. SIGTERM stops the deployer after the deploy in
+progress (`KillMode=mixed`, 15 minutes). Without systemd, run `pikit deploy watch` under a
+supervisor of your own. To remove it: `systemctl --user disable --now pikit-deploy-<directory>`,
+then delete the file.
+
+What the host needs: the checkout, with read access to the repository (a read-only deploy key, or
+HTTPS with a credential helper: the deployer adds no credential), kept clean (a local change stops
+the fast-forward and nothing is deployed until it is cleaned), Docker usable by its user (the
+`docker` group, or rootless Docker), Bun and the pikit CLI. Do not run `pikit up` by hand while it
+deploys.
+
 ## Removing it
 
 `pikit remove deployment-docker` deletes `src/pikit/deployment-docker/` and the three root files.
 It never touches the `pikit-state` volume: `docker compose down --volumes` deletes the conversations,
-and is yours to run.
+and is yours to run. A deployer service installed stays: disable it first.
 
 ## Tests
 
@@ -134,6 +184,10 @@ The tests are copied with the component and run in your project:
 - `commands.test.ts`: the exact `docker` argv of every command, `status`'s parsing and probes, the
   components' `beforeDeploy` hooks run before the build (their own files written once, a problem
   building nothing), with a fake runner and a fake `fetch`. No Docker needed.
+- `deploy.test.ts`: the deployer against a fake host (git, Docker, `pikit up`, `/health`): no new
+  commit does nothing; a new one is tagged, merged, installed, deployed; an unhealthy one, or a
+  failing `pikit up` or `bun install`, rolls back to the previous image and is not retried; never
+  across an irreversible change; the loop survives a failed poll; the systemd unit `install` writes.
 - `files.test.ts`: the root files keep their promises. Bun ≥ 1.4, a non-root user, no secret in the
   image, `.env` and `.pikit` ignored, a healthcheck on `/health`, and a `stop_grace_period` longer
   than the stop deadline.

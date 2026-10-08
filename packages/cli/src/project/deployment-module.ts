@@ -39,7 +39,16 @@ export interface DeploymentModule {
   dev?(args: { cwd: string }): Promise<number>;
   /** `AppExec`, where the app runs. */
   exec?(args: { cwd: string } & Parameters<AppExec>[0]): Promise<number>;
+  /**
+   * `pikit deploy watch | install`: deploys each new commit of the project's main branch on this
+   * machine (`watch`, until `signal` aborts), or installs a service that does (`install`). `cli` is how
+   * this machine runs `pikit` (the program and its first arguments).
+   */
+  deploy?(args: { cwd: string; action: DeployAction; cli: string[]; intervalSeconds?: number; signal: AbortSignal }): Promise<unknown>;
 }
+
+export const DEPLOY_ACTIONS = ["watch", "install"] as const;
+export type DeployAction = (typeof DEPLOY_ACTIONS)[number];
 
 /** Every export of `DeploymentModule`, and whether each is required; tsc keeps the two in step. */
 export const DEPLOYMENT_EXPORTS = {
@@ -50,6 +59,7 @@ export const DEPLOYMENT_EXPORTS = {
   status: "required",
   dev: "optional",
   exec: "optional",
+  deploy: "optional",
 } as const satisfies { [K in keyof DeploymentModule]-?: {} extends Pick<DeploymentModule, K> ? "optional" : "required" };
 
 /** The commands `pikit <command>` delegates to the export of the same name. */
