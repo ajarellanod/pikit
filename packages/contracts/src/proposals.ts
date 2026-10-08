@@ -14,9 +14,10 @@
  *   const { proposals: open } = await proposals.get().list(ctx);
  *   const outcome = await proposals.get().approve(id, { head, operator }, ctx);
  *
- * Its readers are the dashboard's routes (`admin-proposals`) and the steward's guide
- * (`extension-pikit-self`, through `remote`); the steward's workspace may use `remote` too, so no
- * `execution-*` knows where proposals go.
+ * Its readers are the dashboard's routes (`admin-proposals`), the steward's guide
+ * (`extension-pikit-self`, through `remote`) and the steward's workspace where its `git` is the
+ * provider's own (`execution-do`: it pushes only to `remote()`, under its `branchPrefix`, with its
+ * `authorization()`), so no `execution-*` knows where proposals go.
  *
  * What every provider guarantees:
  * - **Only proposals.** A branch outside the prefix, or anything that is not the project's own
@@ -233,7 +234,11 @@ export type ProposalsRemote =
       url: string;
       mainBranch: string;
       branchPrefix: string;
-      /** The `Authorization` header git's requests carry, read when needed; `undefined` without one. */
+      /**
+       * The `Authorization` header git's requests carry, read when needed; `undefined` when the remote
+       * takes none. Rejects when it needs one and cannot have it now (not connected, the provider
+       * failing), with a message that says why and never holds a credential.
+       */
       authorization(): Promise<string | undefined>;
     };
 

@@ -7,7 +7,7 @@
  */
 
 import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import type { AgentTool } from "@pikit/contracts";
+import type { AgentTool, Proposals } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { withWorkersHost } from "@pikit/contracts/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
@@ -25,6 +25,22 @@ import { inObject, objectHost } from "./host.ts";
 const ctx = BACKGROUND_CONTEXT;
 const TOKEN = "ghp_workerd-token";
 const realFetch = globalThis.fetch;
+
+/** A component providing `proposals` whose only part execution-do reads, `remote()`: `repository` on the fake GitHub, with `token`. */
+function proposalsTo(repository: string, token: string) {
+  const unused = async (): Promise<never> => {
+    throw new Error("not used by execution-do");
+  };
+  const proposals: Proposals = {
+    status: unused,
+    list: unused,
+    get: unused,
+    approve: unused,
+    reject: unused,
+    remote: async () => ({ kind: "https", url: `https://github.com/${repository}.git`, mainBranch: "main", branchPrefix: "pikit/self/", authorization: async () => `Basic ${btoa(`x-access-token:${token}`)}` }),
+  };
+  return defineComponent({ name: "proposals-test", setup: (pikit) => pikit.provide("proposals", proposals) });
+}
 afterEach(() => {
   globalThis.fetch = realFetch;
 });
@@ -38,14 +54,14 @@ for (const c of createDurableExecutionConformance(async () => {
 }
 
 // The steward's git flow with real git's meaning, against a fake GitHub kept in the case's object (under
-// /srv); the connected repository is private, and its token, a marker, appears nowhere the agent can read.
+// /srv); the repository proposals go to is private, and its token, a marker, appears nowhere the agent can read.
 const MARKER = "ghs_pikit-workerd-marker-51c0de";
 for (const c of createWorkspaceGitConformance(
   async (files) => {
     const host = objectHost();
     const github = await createFakeGitHub(host.object?.storage as DurableObjectFilesStorage, { "acme/app": { files, private: true } }, MARKER);
     globalThis.fetch = github.fetch as typeof fetch;
-    const connected = defineComponent({ name: "github-test", setup: (pikit) => pikit.provide("github", { repository: async () => "acme/app", token: async () => MARKER }) });
+    const connected = proposalsTo("acme/app", MARKER);
     const { app, env } = await started(host, { components: [connected] });
     return { env, remote: "https://github.com/acme/app", head: (branch) => github.branch("acme/app", branch), dispose: () => app.stop() };
   },
@@ -157,12 +173,12 @@ it("files inside .git change only through git: the file tools and the shell are 
     await app.stop();
   }));
 
-it("git clones from a fake GitHub, checks out a pikit/self/ branch, commits what was added, and pushes it with the connected repository's token, never main", () =>
+it("git clones from a fake GitHub, checks out a pikit/self/ branch, commits what was added, and pushes it where proposals go, with its credential, never main", () =>
   inObject(async (host) => {
     // The fake GitHub keeps its repositories in this object's files too, under /srv.
     const github = await createFakeGitHub(host.object?.storage as DurableObjectFilesStorage, { "acme/app": { files: { "README.md": "hello\n" } } }, TOKEN);
     globalThis.fetch = github.fetch as typeof fetch;
-    const connected = defineComponent({ name: "github-test", setup: (pikit) => pikit.provide("github", { repository: async () => "acme/app", token: async () => TOKEN }) });
+    const connected = proposalsTo("acme/app", TOKEN);
     const { app, env } = await started(host, { components: [connected] });
 
     expect((await run(env, "git clone https://github.com/acme/app")).exitCode).toBe(0);

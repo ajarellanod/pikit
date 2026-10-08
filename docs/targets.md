@@ -100,8 +100,8 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
   (Settings → GitHub) and pushes `pikit/self/<topic>` with execution-do's `git`, the same steps as on
   a server (both executions pass `createWorkspaceGitConformance`); CI checks it, the operator's
   Approve merges it, Workers Builds deploys it. **The agent never holds the GitHub credential**, a
-  rule every durable `execution` provider keeps (SPEC C7): `git` asks `github` for the token from
-  trusted code and sends it only to the connected repository; no variable, command output or
+  rule every durable `execution` provider keeps (SPEC C7): `git` asks `proposals.remote()` for its
+  `authorization()` from trusted code and sends it only to that remote; no variable, command output or
   workspace file (`.git/config` included) contains it.
 
 ## Deployment components

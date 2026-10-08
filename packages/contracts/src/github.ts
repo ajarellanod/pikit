@@ -11,9 +11,9 @@
  *   const repository = await github.get()?.repository(ctx);   // "ana/my-bot", or undefined
  *   const token = await github.get().token(ctx);               // for that repository
  *
- * Consumers: the proposals' GitHub provider (reading, opening, merging, closing pull requests),
- * execution-do's `git` (clone, push: the connected repository is the only one it pushes to), and
- * extension-pikit-self (tells the steward its repository). Without a provider, nothing is connected.
+ * Consumer: the proposals' GitHub provider (reading, opening, merging, closing pull requests, and the
+ * credential of its `remote()`, which the steward's `git` pushes to: execution-do never reads `github`).
+ * Without a provider, nothing is connected.
  *
  * What every provider guarantees:
  * - **`repository` is the connected one**, `owner/name` (`GITHUB_REPOSITORY`), or `undefined` while

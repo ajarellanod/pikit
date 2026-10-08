@@ -148,13 +148,16 @@ test("the token is github's, asked for every call and never kept; github's own f
   await app.stop();
 });
 
-test("remote: the repository's clone URL, authorized with github's token by trusted code", async () => {
-  const { github, proposals, ctx, app } = await started();
+test("remote: the repository's clone URL, authorized with github's token by trusted code; a token it cannot have rejects, saying why", async () => {
+  const { github, proposals, ctx, app, access } = await started();
   const remote = await proposals.remote(ctx);
   if (remote?.kind !== "https") throw new Error("an https remote");
   expect(remote).toMatchObject({ url: "https://github.com/ana/bot.git", branchPrefix: "pikit/self/", mainBranch: "main" });
   expect(await remote.authorization()).toBe(`Basic ${btoa(`x-access-token:${github.mergeToken}`)}`);
   expect(JSON.stringify(remote)).not.toContain(github.mergeToken);
+  access.failing = "the installation's token could not be made";
+  const error = (await remote.authorization().catch((thrown: unknown) => thrown)) as ProposalsError;
+  expect([error.code, error.message]).toEqual(["unavailable", "GitHub's access failed: the installation's token could not be made"]);
   await app.stop();
 });
 

@@ -146,7 +146,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "The project's own repository on GitHub, as connected, and a short-lived token for it: what proposals and the agent's git use.",
+    summary: "The project's own repository on GitHub, as connected, and a short-lived token for it: what the GitHub proposals provider uses (and gives its remote()).",
   },
   secrets: {
     mode: "single",

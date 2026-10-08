@@ -47,9 +47,10 @@ Three pieces, each a component or a file of the kit, each removable (P3):
    steps through the shell against a remote, with real git's meaning; on Cloudflare also that the
    token appears nowhere the agent can read (SPEC C7).
    - **Cloudflare:** `execution-do`'s `git` is real git's subset (`clone` over HTTPS, `checkout -b`,
-     `status`, `diff`, `add`, `commit`, `log`, `push origin <branch>`), pushes only to `github`'s
-     connected repository (below) on branches under `pikit/self/`, with its token, and keeps the token
-     out of the shell. It cannot run `bun test` (no processes): checks run in CI (below).
+     `status`, `diff`, `add`, `commit`, `log`, `push origin <branch>`), pushes only to
+     `proposals.remote()` (the repository `github` connects, below) on branches under its prefix
+     (`pikit/self/`), with its `authorization()`, and keeps the credential out of the shell. It cannot
+     run `bun test` (no processes): checks run in CI (below).
    - **Server: real git, no fences.** `execution-local` with `bash`, in a checkout under the app's
      volume (`.pikit/workspace`). The image has git (deployment-docker's Dockerfile, committing as
      "pikit agent") and Bun: the steward clones the proposals repository on the server, runs
@@ -109,9 +110,11 @@ to `pikit/self/*`; merging is only the operator-authenticated admin route's), so
 repository-scoped credential is enough, and a ruleset on the default branch is an extra layer, not a
 requirement. Providers are interchangeable: `github-token` gives the same `github` from a
 `GITHUB_TOKEN` secret and a repository setting, for CLI users and servers; no consumer branches on
-which is installed. Users of `github`: execution-do's `git` (real git's subset: `clone`,
-`checkout -b`, `add`, `commit`, `push origin pikit/self/<topic>`; no `git pr`: the pushed branch is the
-proposal) and proposals-github; extension-pikit-self reads `proposals.remote()`, not `github`.
+which is installed. The one user of `github` is proposals-github, which also gives its `remote()`
+the credential. execution-do's `git` (real git's subset: `clone`, `checkout -b`, `add`, `commit`,
+`push origin pikit/self/<topic>`; no `git pr`: the pushed branch is the proposal) and
+extension-pikit-self read `proposals.remote()`, never `github`: the workspace pushes where proposals
+go, under their prefix, whichever provider that is.
 `proposals-github` reads GitHub only through it (built).
 
 **Who. Built:** the steward is the agent marked so in its `defineAgent` (`steward: true`), one per

@@ -160,6 +160,11 @@ export function createProposalsConformance(factory: () => ProposalsFixture | Pro
       const status = await proposals.status(ctx);
       expect(remote?.branchPrefix, status.branchPrefix, "the remote's prefix");
       check(remote?.kind === "path" ? remote.path !== "" : remote?.kind === "https" && remote.url.startsWith("https://"), "a path, or an https URL");
+      // Connected: an https remote's credential can be had (a path takes none).
+      if (remote?.kind === "https") {
+        const authorization = await remote.authorization();
+        check(authorization === undefined || authorization !== "", "authorization to be a header or none, never empty");
+      }
     }),
   ];
 }

@@ -1,8 +1,8 @@
 # github-token
 
 The project's GitHub access from a token you made: the `GITHUB_TOKEN` secret and the project's
-repository. It provides the same `github` contract as `github-app`, so the agent's `git`
-(execution-do, execution-local) and the proposals work the same with either; use this one for a
+repository. It provides the same `github` contract as `github-app`, so the proposals
+(proposals-github, and the agent's `git` pushing to their `remote()`) work the same with either; use this one for a
 project run from the CLI or on a server, `github-app` (two clicks in the dashboard, no token to make)
 on Cloudflare.
 

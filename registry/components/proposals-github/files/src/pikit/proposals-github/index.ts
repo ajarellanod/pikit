@@ -416,10 +416,8 @@ export default defineComponent({
           url: `https://github.com/${repository}.git`,
           mainBranch: "main",
           branchPrefix: prefix,
-          authorization: async () => {
-            const token = await access.token(ctx).catch(() => undefined);
-            return token === undefined ? undefined : `Basic ${btoa(`x-access-token:${token}`)}`;
-          },
+          // `github`'s token, asked when git needs it; its refusal (not connected) says how to connect.
+          authorization: async () => `Basic ${btoa(`x-access-token:${await access.token(ctx)}`)}`,
         };
       },
     };

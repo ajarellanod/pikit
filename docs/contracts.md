@@ -41,8 +41,8 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `http.route` | keyed | admin-api, channel-http, channel-telegram-webhook, health-registry | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, health-registry? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-cloudflare, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, tool-websearch-brave, execution-do?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
-| `github` | single | github-app, github-token | execution-do?, proposals-github | `createGitHubConformance` |
-| `proposals` | single | proposals-local, proposals-github | admin-proposals, extension-pikit-self? | `createProposalsConformance` |
+| `github` | single | github-app, github-token | proposals-github | `createGitHubConformance` |
+| `proposals` | single | proposals-local, proposals-github | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, server-bun? | `createHealthConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-faux, provider-openai-compatible, provider-openrouter | runtime-pi? | none |
@@ -460,9 +460,9 @@ interface GitHubAccess {
 Providers, interchangeable: github-app (Cloudflare: a GitHub App the operator creates and installs
 from the dashboard; installation tokens minted with the App's JWT, its key sealed with a key derived
 from the admin token) and github-token (both targets: a `GITHUB_TOKEN` secret and the repository, a
-setting). Users, which never branch on the provider: execution-do (`git`: the connected repository is
-the only one it pushes to, its token sent for it alone), proposals-github (its pull requests:
-read, opened, merged, closed). Without a provider nothing is connected. Suite: `createGitHubConformance` (github-app in
+setting). User, which never branches on the provider: proposals-github (its pull requests: read,
+opened, merged, closed, and the credential of its `remote()`). The steward's workspace never reads
+`github`: execution-do pushes to `proposals.remote()`. Without a provider nothing is connected. Suite: `createGitHubConformance` (github-app in
 Bun and in workerd, github-token).
 
 ### `proposals` ([proposals.ts](../packages/contracts/src/proposals.ts))
@@ -488,11 +488,14 @@ interface Proposals {
   (the head is not the one the operator read), `checks_failing` (unless `override`), `wrong_base`,
   `not_mergeable`. A failure to reach where proposals live is `ProposalsError` with a code and an
   HTTP status (`not_connected` 503 while not set up).
+- An https remote's `authorization()` is read when git needs it, and rejects, saying why, when the
+  credential cannot be had now; trusted code sends it to that remote alone.
 - Providers, interchangeable: proposals-local (server: branches of a bare repository in the state
   volume, approvals for deployment-docker's deployer, which merges, checks, deploys and rolls back)
   and proposals-github (Cloudflare: pull requests opened for pushed branches, merged through GitHub's
   API, GitHub through `github`). Users: admin-proposals (the dashboard's routes, view and section),
-  extension-pikit-self (`remote()`, for the steward's steps). Suite: `createProposalsConformance`
+  extension-pikit-self (`remote()`, for the steward's steps), execution-do (`remote()`: the only
+  remote its `git` pushes to, under its `branchPrefix`). Suite: `createProposalsConformance`
   (both providers).
 
 ### `health` ([health.ts](../packages/contracts/src/health.ts))

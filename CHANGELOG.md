@@ -141,9 +141,10 @@ there.
   changing that token means connecting again); installation tokens for the repository alone are
   minted with an RS256 JWT (Web Crypto, GitHub's PKCS#1 key wrapped as PKCS#8) and kept until shortly
   before they expire. `github-token` (server and durable) provides the same `github` from a
-  `GITHUB_TOKEN` secret and the repository (a setting), for CLI users. execution-do's `git` and
-  proposals-github use only the contract: `git` pushes only to the connected repository with its
-  token (sent for no other). extension-pikit-self tells the steward how to propose from
+  `GITHUB_TOKEN` secret and the repository (a setting), for CLI users. proposals-github uses only the
+  contract. execution-do's `git` knows no provider: it pushes only to `proposals.remote()`, under its
+  `branchPrefix`, with its `authorization()` (sent to no other remote), which rejects, saying why,
+  when the credential cannot be had. extension-pikit-self tells the steward how to propose from
   `proposals.remote()`: the same steps on every target (clone, `git checkout -b pikit/self/<topic>`,
   commit, `git push origin pikit/self/<topic>`).
 - execution-do's `git` behaves as real git for its subset: `clone`, `checkout -b` / `checkout`,

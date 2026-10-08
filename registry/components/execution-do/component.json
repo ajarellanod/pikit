@@ -14,7 +14,7 @@
   },
   "optional": {
     "capabilities": [
-      "github"
+      "proposals"
     ]
   },
   "provides": [

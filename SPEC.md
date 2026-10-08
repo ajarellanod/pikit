@@ -323,8 +323,8 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   cannot compile at run time) as host commands. Pi's own `bash`, `read`, `write` and `edit` tools run
   on it unchanged. Files inside `.git` change only through `git`. **On the durable target the agent
   never holds the GitHub credential**, a rule every durable `execution` provider keeps: its `git` asks
-  `github` for the token from trusted code, sends it only to the connected repository, and the token
-  appears nowhere the agent can read (variables, command output, the workspace's files, `.git/config`
+  `proposals.remote()` for where proposals go and its `authorization()` from trusted code, sends it
+  only to that remote, and the credential appears nowhere the agent can read (variables, command output, the workspace's files, `.git/config`
   included); `createWorkspaceGitConformance` checks it. There are no processes or native
   binaries; a real Linux is another `execution` provider (`features/sandboxed-execution.md`), not a
   flag of this one. *Why:* the agent keeps the tools it has on a server, at no cost beyond the
@@ -537,9 +537,10 @@ shell runs in the app's container (`features/sandboxed-execution.md` for a lock)
   suite). A Cloudflare Sandbox (a Linux container, Workers Paid, billed while active) may come as
   another `execution` provider (`features/sandboxed-execution.md`): it would run real git and tests,
   in a Worker of its own (a Worker with containers gets no Previews).
-- **Credentials** never reach the agent (C7): `execution-do`'s `git` asks the `github` contract
-  (`github-app`: a GitHub App the operator connects from the dashboard, short-lived tokens for one
-  repository) and pushes only `pikit/self/*` branches of that repository. A Sandbox would keep the
+- **Credentials** never reach the agent (C7): `execution-do`'s `git` asks `proposals.remote()`
+  (proposals-github: the repository `github` connects, `github-app` a GitHub App the operator connects
+  from the dashboard, short-lived tokens for one repository) and pushes only branches under the
+  remote's prefix (`pikit/self/*`) to it. A Sandbox would keep the
   rule through its outbound handler, which injects the credential per request.
 - **The repository** is on GitHub or GitLab, which Workers Builds builds from. A branch builds a
   **Worker Preview**: its own URL, Durable Object namespace and bindings, where the change (the

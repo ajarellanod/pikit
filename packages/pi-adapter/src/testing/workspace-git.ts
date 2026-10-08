@@ -39,8 +39,8 @@ export interface WorkspaceGitFixture {
 
 export interface WorkspaceGitConformanceOptions {
   /**
-   * The credential the remote needs, which the agent must never read (a durable target: `github`'s
-   * token). Given, a case checks that it appears nowhere the agent can read.
+   * The credential the remote needs, which the agent must never read (a durable target: the
+   * `authorization()` of `proposals.remote()`). Given, a case checks that it appears nowhere the agent can read.
    */
   credential?: string;
 }
