@@ -43,9 +43,13 @@ Three pieces, each a component or a file of the kit, each removable (P3):
    - **Cloudflare:** `execution-do` already has `git clone` (GitHub over HTTPS), `commit`, `push`
      and `pr`, pushes only to `git.pushRepositories` on branches under `pikit/self/`, and keeps the
      token out of the shell. It cannot run `bun test` (no processes): checks run in CI (below).
-   - **Server:** `execution-local` with `bash`, in a checkout of the project's repository under the
-     app's volume, with `git` and Bun in the image. Checks run there (`pikit doctor`, `bun test`)
-     before it proposes, and again in CI.
+   - **Server:** `execution-local` with `bash`, in a checkout under the app's volume
+     (`.pikit/workspace`). Its `git` is execution-do's, copied (built): a program first on the
+     commands' `PATH` asks trusted code in the app, with the same fences, and never holds the token;
+     the image has no `git` binary. Bun is in the image: `bun test` runs there before it proposes,
+     and again in CI. The token is still in the app's process environment, which a shell of the same
+     user can read (`/proc/$PPID/environ`): on a server the gate holds against a careless agent, not
+     a determined one, until commands run as another user or container (execution-local's README).
 3. **The gate, out of the agent's reach:** proposals are pull requests from `pikit/self/*` to the
    main branch of the project's repository on GitHub, on both targets. One path for both, and the
    one Workers Builds already deploys from. **Built:** `admin-proposals` (server and durable; on
