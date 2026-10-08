@@ -1,0 +1,72 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "github-app",
+  "version": "0.0.0",
+  "title": "GitHub: connect the project's repository from the dashboard, as a GitHub App of your own",
+  "description": "Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`github`), its credentials sealed at rest. No token is pasted anywhere.",
+  "targets": [
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": [
+      "storage.sql",
+      "secrets",
+      "actor.inbox",
+      "actor.mailbox"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "admin.auth"
+    ]
+  },
+  "provides": [
+    "github",
+    "http.route"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "github"
+      ],
+      "requires": [
+        "storage.sql",
+        "secrets",
+        "actor.inbox",
+        "actor.mailbox"
+      ],
+      "optional": []
+    },
+    "worker": {
+      "provides": [
+        "github",
+        "http.route"
+      ],
+      "requires": [
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth"
+      ]
+    }
+  },
+  "settings": "settings",
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

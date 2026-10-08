@@ -14,7 +14,8 @@
  *   router shows it, and a reload works.
  * - Every answer has a Content-Security-Policy (`CSP`): scripts, styles, fonts, images and API calls
  *   from the same origin only (images also `data:` and `blob:`: one in a transcript, one attached and
- *   not sent yet), no inline script, no framing. Inline styles are allowed: the dialogs'
+ *   not sent yet), no inline script, no framing, forms posted only here and to GitHub (github-app's
+ *   Connect posts its manifest there). Inline styles are allowed: the dialogs'
  *   scroll lock (Radix) sets some, and a style runs no code.
  * - Vite's hashed files (`assets/`) are cached for good; everything else is revalidated.
  */
@@ -49,7 +50,8 @@ export const CSP = [
   "connect-src 'self'",
   "object-src 'none'",
   "base-uri 'self'",
-  "form-action 'self'",
+  // github-app's Connect posts its manifest to GitHub in a form (its Settings section).
+  "form-action 'self' https://github.com",
   "frame-ancestors 'none'",
 ].join("; ");
 

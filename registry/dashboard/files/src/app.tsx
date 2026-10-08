@@ -138,9 +138,23 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   );
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
+  /** The Settings section to open at: `?settings=<id>` in the page's URL (github-app's setup comes back to `/admin/?settings=github-app`). */
+  const [settingsSection, setSettingsSection] = useState<string>();
   const [side, setSide] = useState<HTMLDivElement | null>(null);
   const [narrow] = useState(() => !window.matchMedia("(min-width: 1024px)").matches);
   const name = appName(app);
+
+  // Before the redirect to the home below, which drops the query.
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const id = params.get("settings");
+    if (id === null) return;
+    params.delete("settings");
+    const rest = params.toString();
+    window.history.replaceState(null, "", `${window.location.pathname}${rest === "" ? "" : `?${rest}`}`);
+    setSettingsSection(id);
+    setSettingsOpen(true);
+  }, []);
 
   useEffect(() => {
     if (found === undefined && (path === "/" || path === "")) navigate(home, { replace: true });
@@ -286,7 +300,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           )}
         />
 
-        <SettingsDialog app={app} open={settingsOpen} onOpenChange={setSettingsOpen} />
+        <SettingsDialog app={app} open={settingsOpen} onOpenChange={(open) => (setSettingsOpen(open), !open && setSettingsSection(undefined))} section={settingsSection} />
 
         <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>
           <AlertDialogContent>

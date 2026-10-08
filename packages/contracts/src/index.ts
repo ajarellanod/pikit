@@ -48,6 +48,8 @@ export { ADMIN_CLIENT_HEADER } from "./admin.ts";
 export type { ComponentHealth, HealthRegistry, HealthReporter, HealthSnapshot, HealthStatus } from "./health.ts";
 export type { Settings, SettingsErrorCode, SettingsSchema, SettingsSection, SettingsValue } from "./settings.ts";
 export { SettingsError } from "./settings.ts";
+export type { GitHubAccess } from "./github.ts";
+export { GITHUB_REPOSITORY, GITHUB_TOKEN_MIN_LIFE_MS, GitHubNotConnectedError, isGitHubNotConnected } from "./github.ts";
 export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
 export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";

@@ -55,6 +55,9 @@ export { createSettingsConformance } from "./settings.ts";
 export type { AgentDirectoryFixture } from "./agent-directory.ts";
 export { createAgentDirectoryConformance } from "./agent-directory.ts";
 
+export type { GitHubFixture } from "./github.ts";
+export { createGitHubConformance } from "./github.ts";
+
 export type { HealthFixture, HealthPolicy } from "./health.ts";
 export { createHealthConformance } from "./health.ts";
 

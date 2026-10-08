@@ -49,6 +49,8 @@ export const KINDS: readonly string[] = [
   "settings",
   // Agents as data (`agent.directory`): `agents-live`.
   "agents",
+  // The project's repository and its tokens (`github`): `github-app`.
+  "github",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */

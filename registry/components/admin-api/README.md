@@ -228,7 +228,8 @@ still answers.
 - Every answer has a Content-Security-Policy (`CSP` in `assets.ts`): `default-src 'self'`, scripts
   only from the dashboard's own files (no inline script, no `eval`), styles from its files and inline
   (the dialogs set some), fonts from its files, images from its files, `data:` and `blob:` URLs (an
-  image in a transcript, one attached before it is sent), no framing. Vite's build, its fonts and
+  image in a transcript, one attached before it is sent), no framing, forms posted only to itself and
+  to `https://github.com` (github-app's Connect posts its manifest there). Vite's build, its fonts and
   styles work under it.
 - **Every deploy builds it.** On Cloudflare, deployment-cloudflare's `wrangler.jsonc` has a
   `build.command` that, in a project with `src/dashboard/`, runs `bun install --frozen-lockfile` and

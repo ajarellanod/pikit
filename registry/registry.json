@@ -136,6 +136,14 @@
       ],
       "path": "components/extension-pikit-self"
     },
+    "github-app": {
+      "version": "0.0.0",
+      "description": "Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`github`), its credentials sealed at rest. No token is pasted anywhere.",
+      "targets": [
+        "durable"
+      ],
+      "path": "components/github-app"
+    },
     "health-registry": {
       "version": "0.0.0",
       "description": "What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process.",

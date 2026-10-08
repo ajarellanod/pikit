@@ -88,6 +88,12 @@
       "description": "agents-live's section of the Settings dialog: Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live. Its settings come with the component (pikit add agents-live), stored by settings-store."
     },
     {
+      "name": "github-app-settings",
+      "type": "registry:file",
+      "title": "github-app-settings",
+      "description": "github-app's section of the Settings dialog: Connects the project's GitHub repository in two clicks from the dashboard's Settings → GitHub: a GitHub App created in your account from a manifest and installed on the repository, whose short-lived installation tokens the app mints itself (`github`), its credentials sealed at rest. No token is pasted anywhere. Its settings come with the component (pikit add github-app), stored by settings-store."
+    },
+    {
       "name": "health-registry",
       "type": "registry:file",
       "title": "health-registry",

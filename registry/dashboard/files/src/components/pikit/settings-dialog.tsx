@@ -4,12 +4,13 @@
  * dashboard's own, General (its theme, its sounds: this browser's, `localStorage`, nothing of the
  * service's); then one per installed component that brings one (`src/settings/<component>/`,
  * `lib/settings.ts`), shown when the App provides what it requires. A change applies to the next run.
- * A section may open another (`useOpenSettingsSection`).
+ * A section may open another (`useOpenSettingsSection`); the shell opens one by its id (`section`: the
+ * page's `?settings=<id>`).
  */
 
 import { Computer, HalfMoon, Search, Settings, SunLight, Xmark } from "iconoir-react";
 import { Dialog } from "radix-ui";
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Switch } from "@/components/bui/Switch";
 import { Segmented, SettingsHeading, SettingsRow } from "@/components/pikit/settings";
 import type { ApiApp } from "@/lib/api";
@@ -51,10 +52,16 @@ function matches(section: SettingsSectionDefinition, query: string): boolean {
   return words.every((word) => text.includes(word));
 }
 
-export function SettingsDialog({ app, open, onOpenChange }: { app: ApiApp; open: boolean; onOpenChange: (open: boolean) => void }) {
+export function SettingsDialog({ app, open, onOpenChange, section }: { app: ApiApp; open: boolean; onOpenChange: (open: boolean) => void; section?: string }) {
   const all = useMemo(() => [GENERAL, ...visibleSettings(app)], [app]);
   const [query, setQuery] = useState("");
   const [chosen, setChosen] = useState(GENERAL.id);
+  // Opened at a section by its id: chosen whenever the dialog opens with one.
+  useEffect(() => {
+    if (!open || section === undefined) return;
+    setQuery("");
+    setChosen(section);
+  }, [open, section]);
   const shown = all.filter((section) => matches(section, query));
   const current = shown.find((section) => section.id === chosen) ?? shown[0];
   const groups = [...new Set(shown.map(groupOf))];
