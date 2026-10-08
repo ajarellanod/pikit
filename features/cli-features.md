@@ -4,9 +4,9 @@
 another channel at once, a dashboard, several agents with routing rules, subagents, MCP tools.
 
 **Specified:** this note. It extends presets (`registry/schema/preset.schema.json`) and the wizard
-(`packages/cli/src/commands/wizard.ts`). **Built:** several channels, and a features step of single
-components with the dashboard (below); groups of components (`agents-live`) and features that do
-not exist yet (subagents, agents from the dashboard) are not.
+(`packages/cli/src/commands/wizard.ts`). **Built:** several channels, a features step with the dashboard (below), and features
+that are groups of components (agents from the dashboard: `agents-live` with `router-rules` and
+`settings-store`); features that do not exist yet (subagents) are not.
 
 **Needed by:** the launch.
 
@@ -19,10 +19,10 @@ not exist yet (subagents, agents from the dashboard) are not.
    (Cloudflare: the Telegram webhook) is not asked.
 2. **What it can do**: any of the features, none checked, each a line saying what it gives (its
    component's `title`): the dashboard, then the preset's `features`. Today, on a server (`http`,
-   `telegram`): routing rules (`router-rules`), MCP tools (`tool-mcp`), web pages (`tool-fetch`),
-   web search (`tool-websearch-brave`), health (`health-registry`); on Cloudflare
-   (`telegram-cloudflare`): routing rules, MCP tools, health (it installs fetch and web search
-   already).
+   `telegram`): routing rules (`router-rules`), agents from the dashboard (`agents-live`, a group),
+   MCP tools (`tool-mcp`), web pages (`tool-fetch`), web search (`tool-websearch-brave`), health
+   (`health-registry`); on Cloudflare (`telegram-cloudflare`): routing rules, agents from the
+   dashboard, MCP tools, health (it installs fetch and web search already).
 3. Then, as before, configure and start.
 
 Each answer is a component that `new` installs as `pikit add` does, with the providers it brings
@@ -71,18 +71,24 @@ Each answer is a component that `new` installs as `pikit add` does, with the pro
 - The Deploy to Cloudflare template (`scripts/template.ts`) is unchanged: it makes
   `telegram-cloudflare --ui`, no features.
 
+- **Groups are entries of a preset's `features`**, not a manifest field (a component never names
+  another, P4) nor presets of their own: an entry is a component, or a list of them, named and shown
+  by its first (`- [agents-live, router-rules, settings-store]`). `--with agents-live` installs the
+  whole group, once each (a component also in another chosen feature, or in `--ui`'s, is added once);
+  a group's other members are not names of it. `readPreset` checks each member as a feature;
+  `registry validate` composes each group as a feature. `settings-store` is in the group, although
+  the dashboard brings it, so the group composes without `--ui`: agents-live requires `settings`.
+- `pikit add agents-live` alone adds the live agents (reached from a dashboard conversation); routing
+  to them is `pikit add router-rules`, which its README says.
+
 ## Pi first
 
 Nothing of Pi's: this is pikit's CLI.
 
 ## Open questions
 
-- Groups: a feature as several components (`agents-live`: `router-rules` and `settings-store`), as
-  presets of their own (`registry/presets/features/*.yaml`) or a field in each component's manifest
-  (`feature: { group, title }`). Needed once a feature is more than one component.
-- Features that do not exist yet: agents and routing from the dashboard (`features/settings.md`),
-  subagents (`features/subagents.md`); a feature's views and settings sections installed only when
-  the dashboard is.
+- Features that do not exist yet: subagents (`features/subagents.md`); a feature's views and settings
+  sections installed only when the dashboard is.
 - Which features the launch presets offer on each target (Cloudflare has no `channel-http` yet, so
   step 1 is never asked there).
 - `pikit add` without names, in a terminal: the same step 2 for an existing project.

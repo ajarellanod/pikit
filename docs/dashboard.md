@@ -40,7 +40,7 @@ Every `/admin/api/*` route asks `admin.auth` first and answers `401` without an 
 | Route | What |
 |---|---|
 | `GET /admin/api/app` | the composition (`APP_DESCRIPTION`, config redacted) |
-| `GET /admin/api/agents` | the agents: name, model, tools, whether it is the steward |
+| `GET /admin/api/agents` | the agents: name, model, tools, whether it is the steward; then the live ones (`agent.directory`: `live: true`, `description`) |
 | `POST`, `DELETE /admin/api/session` | open or close a browser session |
 | `GET /admin/api/conversations?limit&cursor` | conversations, most recently active first |
 | `POST /admin/api/conversations` | a new conversation of the dashboard's own (`dashboard:<uuid>`) with its first message |
@@ -138,3 +138,20 @@ route, in the component that owns the data, asking `admin.auth` first.
 How to add one: [.agents/skills/pikit-view/SKILL.md](../.agents/skills/pikit-view/SKILL.md), and the
 dashboard's own guide, [registry/dashboard/files/README.md](../registry/dashboard/files/README.md).
 Prefer a new view over editing a base one: `pikit upgrade` merges the kit's changes into base files.
+
+## Settings sections
+
+The Settings dialog (opened from the sidebar's foot) has the dashboard's own section, General, and one
+per installed component with `"settings": "settings"` in `component.json`, copied to
+`src/dashboard/src/settings/<name>/` as a view is (`defineSettings`, `src/lib/settings.ts`), shown when
+its `requires` are provided. Its values are the component's settings (settings-store's
+`/admin/api/settings/:component`). A section may open another (`useOpenSettingsSection`).
+
+| Section | Component | `requires` | What |
+|---|---|---|---|
+| Agent | router-basic | `settings` | the default agent; any code agent's prompt, model and tools (runtime-pi's overrides) |
+| Agents | agents-live | `settings`, `agent.directory` | create, edit, remove live agents; the code's listed read-only, linking to Agent |
+| Routing | router-rules | `settings` | the ordered rules: channel, chat, sender; an agent (the code's or a live one) or deny with a reason |
+
+A change in Agents reads `/admin/api/agents` again, so the new-conversation picker offers a new live
+agent at once.

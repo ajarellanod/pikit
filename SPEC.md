@@ -445,7 +445,8 @@ pikit has no code hot reload: a reload is a restart, and since pi-durable checkp
 restart loses nothing (K6). What changes live is data: the conversation state its agent's `prepare`
 reads (a mode, a phase), settings read when used (`settings`: a component declares them, an operator
 changes them from the dashboard, runtime-pi applies an agent's overrides over its definition at every
-admission; `features/settings.md`), skills and memory kept as documents or files. Code
+admission; `features/settings.md`), agents that are data (`agent.directory`, below), skills and
+memory kept as documents or files. Code
 changes only through the path below (`features/kit-follow-ups.md`, "No code hot reload").
 
 **The definition owns the agent.** A conversation's `pi.agent` (model, instructions, tools,
@@ -456,6 +457,15 @@ A live change goes through the state or data the definition reads. *Why:* one so
 conversation runs, so a restart, a reopened Harness and an evicted object build the same agent.
 Writing only when the definition itself changed (so a direct `configure()` lasts) is a later change,
 made if users need it.
+
+**Agents as data: `agent.directory`.** `agent.definition` is keyed, its keys fixed at setup. An agent
+an operator makes in the dashboard is a name no component provided: the optional capability
+`agent.directory` (`packages/contracts/src/agent-directory.ts`, with its suite; provider
+`agents-live`, from its settings) holds such agents as data (name, description, prompt, a model,
+installed tools and extensions by name), never a code agent's name and never the steward. The runtime
+resolves a name from `agent.definition` first, then the directory, and checks a live agent when used,
+not at start: one that cannot run fails that admission, saying why. Its definition is that data, so the
+rule above holds for it too.
 
 **Who.** One agent per project is the steward: the main agent, declared so in its `defineAgent`.
 Only it gets the self-knowledge and the self-change tools. Only senders trusted as its operators may

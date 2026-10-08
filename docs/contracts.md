@@ -26,7 +26,8 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
 | `agent.submissions` | single | runtime-pi | channel-http?, channel-telegram, channel-telegram-webhook | `createSubmissionsConformance`, `createFeedConformance` |
 | `agent.observe` | single | runtime-pi | admin-api | `createAgentObserveConformance` |
-| `agent.definition` | keyed | the project | admin-api?, router-basic?, router-rules?, runtime-pi? | none (`defineAgent` validates) |
+| `agent.definition` | keyed | the project | admin-api?, agents-live?, router-basic?, router-rules?, runtime-pi? | none (`defineAgent` validates) |
+| `agent.directory` | single | agents-live | admin-api?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-bash, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | runtime-pi? | none |
 | `agent.extension` | keyed | extension-house-rules | runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
@@ -106,6 +107,18 @@ keys or holds tool objects; `extensions` names `agent.extension` keys. An agent 
 names. `prepare` is pure and synchronous: from the conversation's state it returns the fields that
 change for this run. The project provides agents (`src/extensions/agents.ts`); runtime-pi refuses to
 start when an agent names a model, tool or extension nothing provides.
+
+### `agent.directory` ([agent-directory.ts](../packages/contracts/src/agent-directory.ts), optional)
+
+Agents that are data: names no component provided at setup (an operator's, made in the dashboard).
+`list(ctx)` (by name) and `get(name, ctx)` of `DirectoryAgent`s, JSON: `{ name, description?, model,
+systemPrompt?, tools?, extensions? }`, each one `defineAgent` accepts. Never an `agent.definition`
+key, never the steward (no `steward` field, no `pikit-self`); answers are copies; a change applies to
+the next read. runtime-pi resolves a name from `agent.definition` first, then here, and checks a live
+agent when used (a model, installed tools and extensions), failing that admission otherwise;
+router-rules checks a rule's agent here when a message matches it; admin-api lists them (`live:
+true`). Provider: agents-live (its settings). Suite: `createAgentDirectoryConformance` (agents-live,
+and in workerd over settings-store on storage-do).
 
 ### `agent.state` and `CONVERSATION` (context keys, not capabilities)
 

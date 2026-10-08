@@ -113,7 +113,7 @@ A name is `<kind>-<rest>`, and the kind must be one the kit knows (`KINDS` in
 
 `channel`, `router`, `storage`, `workspace`, `execution`, `scheduler`, `deployment`, `tool`, `policy`,
 `admin`, `inbound`, `outbound`, `log`, `conversations`, `credentials`, `provider`, `runtime`,
-`secrets`, `server`, `mailbox`, `wakeups`, `platform`, `extension`, `health`.
+`secrets`, `server`, `mailbox`, `wakeups`, `platform`, `extension`, `health`, `settings`, `agents`.
 
 The kind carries rules: only `admin-*` may read `APP_DESCRIPTION`, only `deployment-*` is delegated
 `up`/`down`/`logs`/`status` and is never listed in `pikit.config.ts`.
@@ -205,5 +205,6 @@ was installed for it goes too, unless something else uses it.
 
 A preset ([registry/presets](../registry/presets)) is a YAML list of `pikit add` calls, with optional
 `choose` (a question answered by every component of a kind, `--with` answers it), `model` (the
-starter agent's), or `extends` + `with` (an alias). `pikit new --preset` runs them; nothing reads the
-preset's name.
+starter agent's), `features` (what `pikit new` offers to add: a component, or a group of them named by
+its first, `[agents-live, router-rules, settings-store]`), or `extends` + `with` (an alias). `pikit new
+--preset` runs them; nothing reads the preset's name.

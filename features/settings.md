@@ -6,8 +6,9 @@ settings, and only those.
 
 **Specified:** yes: the `settings` contract, its suite, its provider `settings-store` (both targets),
 the dashboard's Settings dialog and router-basic's Agent section (with runtime-pi's live overrides)
-are built ("What is built", below); multi-agent and the open questions at the end are not. SPEC §5
-and §6 name it.
+are built ("What is built", below), and so is multi-agent (agents-live, `agent.directory`, router-rules'
+rules from settings: "Multi-agent", below); the open questions at the end are not. SPEC §5 and §6 name
+it.
 
 **Needed by:** the launch (the agent's prompt from the dashboard); multi-agent (agents and rules from
 the dashboard).
@@ -136,6 +137,58 @@ A feature component (`agents-live`, with `router-rules`), offered by `pikit new`
   config; its config keeps the rules a project deploys with.
 - **Subagents** (`features/subagents.md`) fit here: one agent delegating to another, by name.
 
+### What is built
+
+- **The contract `agent.directory`** (`packages/contracts/src/agent-directory.ts`, optional, single;
+  suite `createAgentDirectoryConformance`; catalogue entry, experimental): `list(ctx)` and `get(name,
+  ctx)` of `DirectoryAgent`s, JSON (`name`, `description?`, `model`, `systemPrompt?`, `tools?`,
+  `extensions?`). Never a code agent's name, never the steward (no `steward` field, no `pikit-self`),
+  each one `defineAgent` accepts; answers are copies; a change applies to the next read.
+- **agents-live** (`registry/components/agents-live/`, the kind `agents`, both targets): its settings
+  are one key per agent, its schema declared at start from the App (the installed providers' models,
+  tools, extensions but `pikit-self`, and `propertyNames` refusing the code's agents); it provides them
+  as `agent.directory`, read when used. Its Settings section, **Agents**: create, edit, remove live
+  agents; the code's listed read-only, each with a link to Agent (router-basic's section, where its
+  overrides are).
+- **runtime-pi** resolves a conversation's agent from `agent.definition`, else the directory, read
+  with the overrides (every admission, resume, `/compact`, driving wakeup) and checked then: a model a
+  provider has, installed tools (and an execution for the file tools) and extensions, never the
+  steward. A message to no agent, or to a live one that cannot run, fails its admission saying why.
+  Live agents get the overrides (with a directory, runtime-pi's schema takes an override for any other
+  name). Until the directory was read once, a conversation of a name the code lacks is not resumed.
+- **router-rules**: its rules are also its settings (the config's the default, an operator's replacing
+  them whole, validated as the config's: without a directory only the code's agents). With a
+  directory, the config's rules may name a live agent (not checked at start), and a rule's agent is
+  checked when a message matches it: no agent halts the message, logged. Its section, **Routing**: the
+  ordered rules (channel, chat, sender; an agent or deny with a reason), "Use the config's rules".
+- **admin-api**: `GET /admin/api/agents` lists the live agents after the code's (`live: true`,
+  `description`, `steward: false`); a dashboard conversation may start with one, and the new-conversation
+  picker offers them (read again after a change in Agents).
+- **The CLI**: a preset's feature may be a group; `http` and `telegram-cloudflare` offer
+  `[agents-live, router-rules, settings-store]` ("Agents from the dashboard").
+- **Tests**: the directory suite on agents-live (a settings double; and in workerd over settings-store
+  on storage-do), runtime-pi's `live-agents.test.ts`, router-rules from settings and with a directory,
+  admin-api's list, the presets' groups, and in workerd an operator's agent and rule set through the
+  Worker routing a sender's next message to the live agent.
+
+### Decisions taken while building it
+
+- **An optional capability, not one definition standing for every live agent**: a runtime asks the
+  directory for a name its definitions lack; the code's agents are untouched and win a name.
+- **Live agents are checked when used, never at start**, by the runtime (and when saved, by
+  agents-live's schema): a deploy may take a model away, which drops that agent from the directory
+  (settings-store leaves an invalid key out, logged) until an operator saves it again.
+- **A rule naming no agent halts the message** (`halted`, the channel says it cannot take it) rather
+  than throwing (a platform would retry it forever) or falling through to the default agent (a typo
+  would route silently).
+- **Live agents are the directory read last**: one call per admission at most on Cloudflare (the same
+  settings cache as the overrides); a failed read keeps what was read.
+- **router-basic's default agent stays one of the code's**: its schema is fixed at start, and the
+  default answers when nothing else does; a live agent is reached by a rule or a dashboard conversation.
+- **Groups in presets** (`features/cli-features.md`): agents-live does not bring router-rules by
+  itself (a component never names another, P4): `pikit add agents-live` adds live agents only, reached
+  from the dashboard; the features step's group adds the rules and settings-store with it.
+
 ## Pi first
 
 Pi has settings files and `/reload`; neither applies to a service of many conversations and
@@ -144,17 +197,11 @@ processes. Nothing of Pi's is replaced: the overrides become the agent's `TurnCo
 
 ## Open questions
 
-- **Not built yet:** `agents-live`, agents created at run time, router-rules' rules from settings
-  (the multi-agent feature above).
+- router-basic's default agent among the live agents too (its schema would have to follow the
+  directory).
 - A section for a declared component that brings none (an automatic one from its schema), or none,
   as now.
 
-- **Agents created at run time.** `agent.definition` is keyed, and keys are fixed at setup; an agent
-  made in the dashboard is a name no component provided. Either an optional capability the runtime
-  asks for names it does not have (`agent.directory`), or `agents-live` provides one definition that
-  stands for every live agent. The first is a contract change: proposed in `SPEC.md` first.
-  router-rules and runtime-pi check names at start; a live agent is checked when a rule or a message
-  names it.
 - On Cloudflare, a conversation already running keeps the agent it was admitted with until its next
   admission: is that enough, or does a change ping the objects?
 - History: keep each setting's previous values (who, when), to undo from the dashboard.
