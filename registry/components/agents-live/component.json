@@ -1,0 +1,41 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "agents-live",
+  "version": "0.0.0",
+  "title": "Agents from the dashboard: create and edit agents, and route to them, live",
+  "description": "Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": [
+      "settings"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "agent.definition",
+      "model.provider",
+      "agent.tool",
+      "agent.extension"
+    ]
+  },
+  "provides": [
+    "agent.directory"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

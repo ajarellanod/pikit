@@ -28,6 +28,15 @@
       ],
       "path": "components/admin-proposals"
     },
+    "agents-live": {
+      "version": "0.0.0",
+      "description": "Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/agents-live"
+    },
     "channel-http": {
       "version": "0.0.0",
       "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",

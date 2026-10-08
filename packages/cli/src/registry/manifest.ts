@@ -47,6 +47,8 @@ export const KINDS: readonly string[] = [
   "health",
   // Values an operator changes live (`settings`): `settings-store`.
   "settings",
+  // Agents as data (`agent.directory`): `agents-live`.
+  "agents",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */

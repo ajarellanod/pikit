@@ -105,6 +105,12 @@ export const CAPABILITIES: Catalogue = {
     // Provided by the runtime (runtime-pi reads it from pi-durable), so never offered.
     summary: "What an operator sees of the runtime, read-only: its conversations (agent, busy, cost), a transcript, a live event stream, usage.",
   },
+  "agent.directory": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Agents that are data (an operator's, made in the dashboard), by name: what a runtime asks for a name no agent.definition has.",
+  },
   "admin.auth": {
     mode: "single",
     definedIn: "@pikit/contracts",

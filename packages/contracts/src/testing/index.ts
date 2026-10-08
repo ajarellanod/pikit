@@ -52,6 +52,9 @@ export { createAdminAuthConformance } from "./admin.ts";
 export type { SettingsFixture } from "./settings.ts";
 export { createSettingsConformance } from "./settings.ts";
 
+export type { AgentDirectoryFixture } from "./agent-directory.ts";
+export { createAgentDirectoryConformance } from "./agent-directory.ts";
+
 export type { HealthFixture, HealthPolicy } from "./health.ts";
 export { createHealthConformance } from "./health.ts";
 

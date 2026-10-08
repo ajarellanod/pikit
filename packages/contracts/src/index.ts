@@ -25,6 +25,8 @@ export type {
   Usage,
 } from "./agent.ts";
 
+export type { AgentDirectory, DirectoryAgent } from "./agent-directory.ts";
+
 export type { AgentCommand, CommandInfo, CommandLookup, CommandOutcome } from "./command.ts";
 export { COMMAND_NAME, commandProblem, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
 export type { CompletionRequest, ModelComplete } from "./model.ts";
