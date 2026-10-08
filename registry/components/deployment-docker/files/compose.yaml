@@ -42,5 +42,31 @@ services:
         max-size: 10m
         max-file: "5"
 
+
+  # Self-improvement's deployer (src/pikit/deployment-docker/deployer.ts): it deploys what an operator
+  # approves in the dashboard (proposals-local), and rolls back when unhealthy. On only with the
+  # profile, which `pikit up` enables when proposals-local is installed. The only service with the
+  # Docker socket: the app never gets it. It reads the project's directory (it merges into its main
+  # branch, as the directory's owner) and the app's state (the proposals repository, the approvals).
+  deployer:
+    build:
+      context: .
+      target: deployer
+    profiles: ["self-improvement"]
+    restart: unless-stopped
+    init: true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - .:/project
+      - pikit-state:/state
+      - pikit-checks:/checks
+    logging:
+      driver: json-file
+      options:
+        max-size: 10m
+        max-file: "5"
+
 volumes:
   pikit-state:
+  # The deployer's clone of the project and its checks' packages.
+  pikit-checks:

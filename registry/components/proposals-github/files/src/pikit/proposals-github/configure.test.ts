@@ -1,5 +1,5 @@
 /**
- * admin-proposals' step of `pikit configure`, with a scripted person at the terminal, a `.env` and a
+ * proposals-github's step of `pikit configure`, with a scripted person at the terminal, a `.env` and a
  * config entry in memory: optional, asked only in a terminal and only when wanted, the repository from
  * the git remote by default, the tokens never shown and never the same.
  */

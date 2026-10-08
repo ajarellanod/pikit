@@ -1,8 +1,9 @@
 /**
- * One proposal: the agent's description (markdown), its checks, its diff file by file, and Approve /
- * Reject, each behind a confirmation. Approve sends the head commit the page shows, so a branch the
- * agent pushed again since is not merged unread; when the checks do not pass, the confirmation says
- * so and approves anyway (`override`).
+ * One proposal: the agent's description (markdown), its checks, its deploy, its diff file by file, and
+ * Approve / Reject, each behind a confirmation. Approve sends the head commit the page shows, so a
+ * branch the agent pushed again since is not approved unread. Where checks run before an approval
+ * (CI) and do not pass, the confirmation says so and approves anyway (`override`); where they run
+ * after (the deployer), it says what the deployer does.
  */
 
 import { Activity, GitPullRequest, InfoCircle, OpenNewWindow } from "iconoir-react";
@@ -29,7 +30,7 @@ import { post, useApi } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
 import { Link } from "@/lib/router";
 import { BASE, ChecksLabel, StateLabel } from "./labels";
-import type { ApproveRequest, ProposalCheck, ProposalDetail, ProposalFile, RejectRequest } from "./types";
+import type { ApproveBody, ApproveResponse, ProposalCheck, ProposalDetail, ProposalFile, RejectBody, RejectResponse } from "./types";
 
 const CHECK_TONE = { passing: "green", failing: "red", pending: "orange", skipped: "neutral" } as const;
 /** A file this long (lines changed) starts folded. */
@@ -59,7 +60,7 @@ function FileDiff({ file }: { file: ProposalFile }) {
       </summary>
       {file.patch === undefined ? (
         <p className="px-4 py-3 text-[12.5px] text-ink-3">
-          {file.truncated ? "Not shown: the diff is too large for this page. Read it on GitHub." : "No diff to show: a binary file, or one GitHub does not diff."}
+          {file.truncated ? "Not shown: the diff is too large for this page." : "No diff to show: a binary file."}
         </p>
       ) : (
         <div className="overflow-x-auto py-2 font-mono text-[12px] leading-[1.6]">
@@ -68,7 +69,7 @@ function FileDiff({ file }: { file: ProposalFile }) {
               {line === "" ? " " : line}
             </div>
           ))}
-          {file.truncated && <div className="px-4 pt-2 font-sans text-[12.5px] text-ink-3">Cut here: the rest is on GitHub.</div>}
+          {file.truncated && <div className="px-4 pt-2 font-sans text-[12.5px] text-ink-3">Cut here: the rest is too large for this page.</div>}
         </div>
       )}
     </details>
@@ -105,11 +106,11 @@ type Dialog = "approve" | "reject" | undefined;
 
 export function ProposalPage({ params }: { params: Record<string, string> }) {
   // Its own state per proposal: another proposal's page starts afresh.
-  return <Proposal key={params.number} number={params.number ?? ""} />;
+  return <Proposal key={params.id} id={params.id ?? ""} />;
 }
 
-function Proposal({ number }: { number: string }) {
-  const path = `${BASE}/${encodeURIComponent(number)}`;
+function Proposal({ id }: { id: string }) {
+  const path = `${BASE}/${encodeURIComponent(id)}`;
   const { data, error, reload } = useApi<ProposalDetail>(path, every(60_000));
   const [dialog, setDialog] = useState<Dialog>();
   const [comment, setComment] = useState("");
@@ -119,7 +120,7 @@ function Proposal({ number }: { number: string }) {
 
   if (error !== undefined && data === undefined) {
     return (
-      <Page eyebrow={`Proposal #${number}`}>
+      <Page eyebrow={`Proposal ${id}`}>
         <ErrorNote error={error} title="This proposal cannot be read" />
         <Link to={BASE} className="text-[13px] text-ink-2 underline underline-offset-2">
           Back to the proposals
@@ -127,21 +128,24 @@ function Proposal({ number }: { number: string }) {
       </Page>
     );
   }
-  if (data === undefined) return <PageLoading eyebrow={`Proposal #${number}`} />;
+  if (data === undefined) return <PageLoading eyebrow={`Proposal ${id}`} />;
 
-  const passing = data.checks.state === "passing";
+  const name = data.number === undefined ? data.id : `#${data.number}`;
+  const after = data.checksRun === "after-approval";
+  // Checks that run after an approval are the deployer's: nothing to override.
+  const passing = after || data.checks.state === "passing";
   const act = async (action: "approve" | "reject") => {
     setBusy(true);
     setActionError(undefined);
     try {
       if (action === "approve") {
-        const body: ApproveRequest = { sha: data.headSha, ...(!passing && { override: true }) };
-        await post(`${path}/approve`, body);
-        setDone("Approved: merged into the default branch. The deploy follows.");
+        const body: ApproveBody = { head: data.head, ...(!passing && { override: true }) };
+        const answer = await post<ApproveResponse>(`${path}/approve`, body);
+        setDone(answer.message);
       } else {
-        const body: RejectRequest = comment.trim() === "" ? {} : { comment: comment.trim() };
-        await post(`${path}/reject`, body);
-        setDone("Rejected: the pull request is closed.");
+        const body: RejectBody = comment.trim() === "" ? {} : { comment: comment.trim() };
+        const answer = await post<RejectResponse>(`${path}/reject`, body);
+        setDone(answer.message);
         setComment("");
       }
       reload();
@@ -158,7 +162,7 @@ function Proposal({ number }: { number: string }) {
 
   return (
     <Page
-      eyebrow={`Proposal #${data.number}`}
+      eyebrow={`Proposal ${name}`}
       title={data.title}
       aside={
         <>
@@ -179,10 +183,15 @@ function Proposal({ number }: { number: string }) {
         <>
           <span className="text-ink">{data.author}</span> proposes <ValuePill>{data.branch}</ValuePill> into <ValuePill>{data.base}</ValuePill>, updated{" "}
           {formatAgo(Date.parse(data.updatedAt))}: <span className="font-mono text-green">+{data.additions}</span> <span className="font-mono text-red">-{data.deletions}</span> in{" "}
-          {data.changedFiles} {data.changedFiles === 1 ? "file" : "files"}.{" "}
-          <a className={linkClass} href={data.url} target="_blank" rel="noreferrer">
-            On GitHub <OpenNewWindow width={12} height={12} />
-          </a>
+          {data.changedFiles} {data.changedFiles === 1 ? "file" : "files"}.
+          {data.url !== undefined && (
+            <>
+              {" "}
+              <a className={linkClass} href={data.url} target="_blank" rel="noreferrer">
+                Elsewhere <OpenNewWindow width={12} height={12} />
+              </a>
+            </>
+          )}
           {data.previewUrl !== undefined && (
             <>
               {" · "}
@@ -207,7 +216,12 @@ function Proposal({ number }: { number: string }) {
         </p>
       )}
       {data.state === "open" && data.mergeable === false && (
-        <p className="rounded-card bg-orange-tint px-3 py-2.5 text-[13px] text-orange">GitHub cannot merge it as it is ({data.mergeableState}): ask the agent to bring it up to date.</p>
+        <p className="rounded-card bg-orange-tint px-3 py-2.5 text-[13px] text-orange">It cannot be merged as it is ({data.mergeableState}): ask the agent to bring it up to date.</p>
+      )}
+      {data.deploy !== undefined && (
+        <p className={`rounded-card px-3 py-2.5 text-[13px] ${data.deploy.outcome === "deployed" ? "bg-green-tint text-green" : data.deploy.outcome === "rolled back" || data.deploy.outcome === "failed" ? "bg-red-tint text-red" : "bg-orange-tint text-orange"}`}>
+          Deploy: {data.deploy.outcome}, {formatAgo(Date.parse(data.deploy.at))}. {data.deploy.message}
+        </p>
       )}
 
       <Section title="Description" meta="the agent's">
@@ -222,7 +236,13 @@ function Proposal({ number }: { number: string }) {
           columns={checkColumns}
           rows={data.checks.items}
           rowKey={(check) => `${check.name}#${check.url ?? ""}#${check.detail}`}
-          empty={<EmptyState icon={<Activity />} title="No check ran" hint="The project's workflow (.github/workflows/pikit-checks.yml) runs on every pull request." />}
+          empty={
+            <EmptyState
+              icon={<Activity />}
+              title="No check ran"
+              hint={after ? "The deployer runs the checks once you approve it, before it deploys: install, typecheck, tests." : "The project's workflow (.github/workflows/pikit-checks.yml) runs on every pull request."}
+            />
+          }
         />
       </Section>
 
@@ -243,17 +263,19 @@ function Proposal({ number }: { number: string }) {
       <AlertDialog open={dialog === "approve"} onOpenChange={(open) => !open && setDialog(undefined)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>{passing ? `Approve #${data.number}?` : `Approve #${data.number} anyway?`}</AlertDialogTitle>
+            <AlertDialogTitle>{passing ? `Approve ${name}?` : `Approve ${name} anyway?`}</AlertDialogTitle>
             <AlertDialogDescription>
-              {passing
-                ? `It is squash-merged into ${data.base}, and the deploy follows.`
-                : `Its checks did not pass (${checksWord}). Merged into ${data.base} as it is, it deploys untested: approve it only if you read the change.`}
+              {after
+                ? `The deployer merges it into ${data.base}, runs the checks, rebuilds and restarts the app, and rolls back if it is unhealthy.`
+                : passing
+                  ? `It is merged into ${data.base}, and the deploy follows.`
+                  : `Its checks did not pass (${checksWord}). Merged into ${data.base} as it is, it deploys untested: approve it only if you read the change.`}
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancel</AlertDialogCancel>
             <AlertDialogAction className={passing ? undefined : "bg-red text-white hover:bg-red/90"} onClick={() => void act("approve")}>
-              {passing ? "Approve and merge" : "Approve anyway"}
+              {after ? "Approve" : passing ? "Approve and merge" : "Approve anyway"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -262,8 +284,8 @@ function Proposal({ number }: { number: string }) {
       <AlertDialog open={dialog === "reject"} onOpenChange={(open) => !open && setDialog(undefined)}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Reject #{data.number}?</AlertDialogTitle>
-            <AlertDialogDescription>The pull request is closed, unmerged. A comment, if you write one, is left on it for the agent to read.</AlertDialogDescription>
+            <AlertDialogTitle>Reject {name}?</AlertDialogTitle>
+            <AlertDialogDescription>It is closed, never deployed. A comment, if you write one, is kept with it for the agent to read.</AlertDialogDescription>
           </AlertDialogHeader>
           <textarea
             value={comment}

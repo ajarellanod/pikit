@@ -7,8 +7,12 @@ It is SPEC §6's self-knowledge (`features/self-improvement.md`, piece 1). It ha
 agent is doing (health, deliveries, proposals) is the operator's, in the dashboard.
 
 - **Provides:** `agent.extension`, under the key `pikit-self`.
-- **Requires:** nothing; it reads the agents (`agent.definition`) when there are some, and the
-  project's repository (`github`, github-app's) when a provider is installed.
+- **Requires:** nothing; it reads the agents (`agent.definition`) when there are some, and
+  `proposals` when installed: the section ends with how the steward proposes a change here, the same
+  steps on every target from `proposals.remote()` (clone it, `git checkout -b pikit/self/<topic>`,
+  change, commit, `git push origin pikit/self/<topic>`; the operator approves in the dashboard), read
+  at each request since the repository may be a setting. Without a provider it says to tell the
+  operator what to change; before one is set up, to finish it in Settings → Self-improvement.
 - **Targets:** `server` and `durable`. On Cloudflare it is in the objects' App, where agents run.
 - **Installs to:** `src/pikit/extension-pikit-self/` (`index.ts`, `pikit-self.md`, `markdown.d.ts`,
   `extension-pikit-self.test.ts`).

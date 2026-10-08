@@ -5,11 +5,11 @@ import type { ProposalChecks, ProposalState } from "./types";
 
 export const BASE = "/admin-proposals";
 
-export const STATE_TONE: Record<ProposalState, PillTone> = { open: "blue", merged: "green", closed: "neutral" };
-const STATE_LABEL: Record<ProposalState, string> = { open: "open", merged: "merged", closed: "rejected" };
+export const STATE_TONE: Record<ProposalState, PillTone> = { open: "blue", approved: "orange", merged: "green", failed: "red", closed: "neutral" };
+const STATE_LABEL: Record<ProposalState, string> = { open: "open", approved: "approved", merged: "merged", failed: "failed", closed: "rejected" };
 export const CHECKS_TONE: Record<ProposalChecks["state"], PillTone> = { passing: "green", failing: "red", pending: "orange", none: "neutral" };
 
-/** A state as the view says it: a closed proposal was rejected. */
+/** A state as the view says it: a closed proposal was rejected; an approved one waits for its deploy. */
 export function StateLabel({ state, draft = false }: { state: ProposalState; draft?: boolean }) {
   return (
     <StatePill tone={STATE_TONE[state]}>

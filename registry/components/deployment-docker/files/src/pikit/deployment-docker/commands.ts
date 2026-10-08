@@ -7,6 +7,10 @@
  * the image then carries): each one is named in its `component.json`'s `hooks`, and `pikit add`
  * records its file in `pikit.json`.
  *
+ * With self-improvement on a server (`proposals-local` installed), every command also enables
+ * compose.yaml's `self-improvement` profile: the deployer next to the app (`deployer.ts`), which the
+ * same `up` builds and starts.
+ *
  * Every command goes through a `Runner`, so tests check the exact `docker` argv without Docker.
  */
 
@@ -45,7 +49,7 @@ export interface UpOptions extends CommandOptions {
  * waits until their healthcheck passes. A hook's problem stops it before the build.
  */
 export async function up(options: UpOptions = {}): Promise<void> {
-  await beforeDeploy(options.cwd ?? process.cwd(), options.say ?? ((line) => console.log(line)));
+  await runBeforeDeployHooks(options.cwd ?? process.cwd(), options.say ?? ((line) => console.log(line)));
   // `--wait` makes `up` fail when the app never becomes healthy, instead of reporting success for
   // a container that is crash-looping.
   await compose(["up", "--detach", "--build", "--wait"], options);
@@ -79,8 +83,11 @@ export function beforeDeployHooks(cwd: string): { component: string; file: strin
   });
 }
 
-/** Runs every hook, then fails with all their problems: nothing is built. */
-async function beforeDeploy(cwd: string, say: (line: string) => void): Promise<void> {
+/**
+ * Runs every hook, then fails with all their problems: nothing is built. The deployer runs it too, in
+ * a container of its own, on the commit it deploys (`before-deploy.ts`).
+ */
+export async function runBeforeDeployHooks(cwd: string, say: (line: string) => void): Promise<void> {
   const hooks = beforeDeployHooks(cwd);
   if (hooks.length === 0) return;
   const configPath = join(cwd, "pikit.config.ts");
@@ -268,8 +275,21 @@ export function parseContainers(output: string): ContainerState[] {
   });
 }
 
+/** The compose profile of self-improvement's deployer (compose.yaml's `deployer` service). */
+export const SELF_IMPROVEMENT_PROFILE = "self-improvement";
+/** The component whose approvals the deployer deploys: with it installed, the profile is on. */
+export const DEPLOYED_FOR = "proposals-local";
+
+/** `--profile self-improvement` when the project has self-improvement on a server (`proposals-local` in pikit.json). */
+export function profileArgs(cwd: string): string[] {
+  const path = join(cwd, "pikit.json");
+  if (!existsSync(path)) return [];
+  const { components } = JSON.parse(readFileSync(path, "utf8")) as { components?: Record<string, unknown> };
+  return components?.[DEPLOYED_FOR] === undefined ? [] : ["--profile", SELF_IMPROVEMENT_PROFILE];
+}
+
 async function compose(args: string[], options: CommandOptions, capture = false): Promise<RunResult> {
-  const command = ["docker", "compose", ...args];
+  const command = ["docker", "compose", ...profileArgs(options.cwd ?? process.cwd()), ...args];
   const run = options.run ?? spawnRunner;
   const result = await run(command, { cwd: options.cwd ?? process.cwd(), capture });
   if (result.code !== 0) throw new Error(`\`${command.join(" ")}\` exited with code ${result.code}`);

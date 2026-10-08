@@ -8,10 +8,10 @@
 
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDefinition, defineAgent, type GitHubAccess } from "@pikit/contracts";
+import { type AgentDefinition, defineAgent, type Proposals, type ProposalsRemote } from "@pikit/contracts";
 import type { Extension } from "@pikit/pi-adapter/extensions";
 import Type from "typebox";
-import pikitSelf, { agentSummary, KIT_REPOSITORY, kitUrl, PIKIT_SELF, pikitSelfText, stewardProblem } from "./index.ts";
+import pikitSelf, { agentSummary, KIT_REPOSITORY, kitUrl, PIKIT_SELF, pikitSelfText, proposingText, stewardProblem } from "./index.ts";
 
 const TELEGRAM_TOKEN = "123456789:AAEabcdefghijklmnopqrstuvwxyz012345";
 
@@ -26,7 +26,7 @@ const leaky = defineComponent({
 });
 
 /** An App with the component, started; its `agent.extension` under `pikit-self`, and the section's text. */
-async function sectionOf(list: AgentDefinition[], target: "server" | "durable" = "server", github?: GitHubAccess) {
+async function sectionOf(list: AgentDefinition[], target: "server" | "durable" = "server", proposals?: Proposals) {
   let extension: Extension | undefined;
   const reader = defineComponent({
     name: "reader",
@@ -36,8 +36,8 @@ async function sectionOf(list: AgentDefinition[], target: "server" | "durable" =
     },
   });
   const config = { "tool-leaky": { botToken: TELEGRAM_TOKEN, tokenSecret: "TELEGRAM_BOT_TOKEN", retries: 3 } };
-  const access = defineComponent({ name: "github-test", setup: (pikit) => void (github !== undefined && pikit.provide("github", github)) });
-  const app = await defineApp({ components: [agents(list), leaky, access, pikitSelf, reader], config, target, logger: silentLogger }).create();
+  const provider = defineComponent({ name: "proposals-test", setup: (pikit) => void (proposals !== undefined && pikit.provide("proposals", proposals)) });
+  const app = await defineApp({ components: [agents(list), leaky, provider, pikitSelf, reader], config, target, logger: silentLogger }).create();
   await app.start();
   const section = extension?.sections?.[0];
   const text = await section?.render({} as never, {} as never);
@@ -53,7 +53,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "extension-pikit-self")).toMatchObject({
     provides: ["agent.extension"],
     requires: [],
-    optional: ["agent.definition", "github"],
+    optional: ["agent.definition", "proposals"],
   });
   expect(app.describe().capabilities["agent.extension"]?.keys).toEqual({ [PIKIT_SELF]: "extension-pikit-self" });
 });
@@ -134,23 +134,48 @@ test("only the steward may name it: the App does not start with another agent th
   expect(stewardProblem([agentSummary("assistant", assistant), agentSummary("triage", { model: "x/y" })])).toBeUndefined();
 });
 
-test("its repository: with a github provider the section says where it is and how a change reaches it, read at each request", async () => {
-  let connected: string | undefined;
-  const github: GitHubAccess = {
-    repository: async () => connected,
-    token: async () => {
-      throw new Error("the section never asks for a token");
+/** A `proposals` whose remote is `remote()`'s, read at each call; nothing else is asked. */
+const proposalsAt = (remote: () => ProposalsRemote | undefined): Proposals => ({ remote: async () => remote() }) as unknown as Proposals;
+
+test("how it proposes: the same steps from proposals' remote on every target, the path on a server, the repository's URL on Cloudflare", async () => {
+  const local = await sectionOf([assistant], "server", proposalsAt(() => ({ kind: "path", path: "/app/.pikit/self/project.git", mainBranch: "main", branchPrefix: "pikit/self/" })));
+  expect(local.text).toContain(
+    [
+      "## How you propose a change here",
+      "With git in your shell, from /app/.pikit/self/project.git, never pushing main:",
+      "1. `git clone /app/.pikit/self/project.git project`: a fresh clone for each change, so it starts from the latest main.",
+      "2. `cd project && git checkout -b pikit/self/<topic>`, a short topic (`calendar-tool`).",
+    ].join("\n"),
+  );
+  expect(local.text).toContain("5. `git push origin pikit/self/<topic>`: the pushed branch is the proposal");
+  expect(local.text).toEndWith("rolled back if it is unhealthy.");
+
+  // On Cloudflare the repository is a setting: the section reads it at each request.
+  let repository: string | undefined;
+  const github = proposalsAt(() => (repository === undefined ? undefined : { kind: "https", url: `https://github.com/${repository}.git`, mainBranch: "main", branchPrefix: "pikit/self/", authorization: async () => "Basic c2VjcmV0LXRva2Vu" }));
+  let extension: Extension | undefined;
+  const reader = defineComponent({
+    name: "reader",
+    setup(pikit) {
+      const extensions = pikit.useKeyed("agent.extension");
+      return { start: () => void (extension = extensions.get(PIKIT_SELF) as Extension | undefined) };
     },
-  };
-  const before = (await sectionOf([assistant], "durable", github)).text ?? "";
-  expect(before).toContain("GitHub is not connected yet");
-  connected = "ana/my-bot";
-  const after = (await sectionOf([assistant], "durable", github)).text ?? "";
-  expect(after).toContain("Your project's source is https://github.com/ana/my-bot");
-  expect(after).toContain("git clone https://github.com/ana/my-bot");
-  expect(after).toContain("git checkout -b pikit/self/<topic>");
-  expect(after).toContain("git push origin pikit/self/<topic>");
-  expect(after).not.toContain("git pr");
-  // Without a provider, nothing about a repository.
-  expect((await sectionOf([assistant])).text).not.toContain("## Your repository");
+  });
+  const provider = defineComponent({ name: "proposals-test", setup: (pikit) => pikit.provide("proposals", github) });
+  const app = await defineApp({ components: [agents([assistant]), provider, pikitSelf, reader], target: "durable", logger: silentLogger }).create();
+  await app.start();
+  const render = async () => String(await extension?.sections?.[0]?.render({} as never, {} as never));
+  expect(await render()).toContain("Proposals are not set up yet: tell the operator to finish it in the dashboard's Settings → Self-improvement");
+  repository = "ana/bot";
+  const connected = await render();
+  expect(connected).toContain("1. `git clone https://github.com/ana/bot.git project`");
+  expect(connected).toContain("5. `git push origin pikit/self/<topic>`");
+  expect(connected).not.toContain("Basic");
+  await app.stop();
+});
+
+test("without proposals it says to tell the operator what to change", async () => {
+  const { text } = await sectionOf([assistant]);
+  expect(text).toEndWith(proposingText("none"));
+  expect(proposingText("none")).toContain("This project has no proposals: tell the operator what to change, file by file.");
 });

@@ -8,8 +8,9 @@
  * - the commands the CLI delegates to (`up`, `down`, `restart`, `logs`, `status`), each one
  *   `docker compose …` over the project's `Dockerfile` and `compose.yaml`, and `exec`, which runs a
  *   one-off command where the app runs (`pikit configure` logs in to a model provider with it);
- * - the deployer on the host (`deploy`: `pikit deploy watch | install`), which deploys each new commit
- *   of the project's main branch with `pikit up` and rolls back to the previous image when unhealthy.
+ * - self-improvement's deployer (`deployer.ts`), compose.yaml's `deployer` service, started by the same
+ *   `pikit up` when `proposals-local` is installed: it merges, checks and deploys what an operator
+ *   approves, and rolls back to the previous image when unhealthy.
  *
  * Target: `server` (it uses `node:child_process` and the process's signals).
  */
@@ -18,6 +19,9 @@ export { runEntrypoint, START_DEADLINE_MS, STOP_DEADLINE_MS, type EntrypointOpti
 export { createJsonLogger, type JsonLoggerOptions, type LogLevel } from "./logger.ts";
 export {
   up,
+  runBeforeDeployHooks,
+  profileArgs,
+  SELF_IMPROVEMENT_PROFILE,
   down,
   restart,
   logs,
@@ -37,17 +41,16 @@ export {
   type StatusOptions,
 } from "./commands.ts";
 export {
-  deploy,
-  deployOnce,
-  watch,
-  install,
+  createDeployer,
+  runDeployer,
+  discover,
+  ownerCommand,
   probeHealth,
-  systemdUnit,
-  serviceName,
-  noneIrreversible,
-  DEFAULT_INTERVAL_SECONDS,
-  type DeployOptions,
-  type WatchOptions,
-  type InstallOptions,
+  DEFAULT_INTERVAL_MS,
+  FENCED,
+  type DeployerOptions,
+  type DeployerState,
+  type DeployerCheck,
+  type DockerSetup,
   type Outcome,
-} from "./deploy.ts";
+} from "./deployer.ts";

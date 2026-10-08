@@ -1,4 +1,4 @@
-# The project's checks on every pull request (admin-proposals, SPEC §6): what the dashboard's
+# The project's checks on every pull request (proposals-github, SPEC §6): what the dashboard's
 # Proposals view shows, and what Approve waits for. It runs the change the agent proposed, so it gets
 # no secret and a read-only token: `pull_request`, never `pull_request_target`.
 #

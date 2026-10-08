@@ -50,6 +50,28 @@ export type { Settings, SettingsErrorCode, SettingsSchema, SettingsSection, Sett
 export { SettingsError } from "./settings.ts";
 export type { GitHubAccess } from "./github.ts";
 export { GITHUB_REPOSITORY, GITHUB_TOKEN_MIN_LIFE_MS, GitHubNotConnectedError, isGitHubNotConnected } from "./github.ts";
+export type {
+  ActionRefusal,
+  ApproveOutcome,
+  ApproveRequest,
+  DeployRecord,
+  ProposalCheck,
+  ProposalChecks,
+  ProposalDeploy,
+  ProposalDetail,
+  ProposalFile,
+  ProposalList,
+  Proposals,
+  ProposalsCheck,
+  ProposalsErrorCode,
+  ProposalsRemote,
+  ProposalsStatus,
+  ProposalState,
+  ProposalSummary,
+  RejectOutcome,
+  RejectRequest,
+} from "./proposals.ts";
+export { ProposalsError } from "./proposals.ts";
 export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
 export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";

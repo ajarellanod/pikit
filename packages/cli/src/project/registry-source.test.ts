@@ -275,7 +275,7 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   // Several channels at once; the features each target offers, none installed already.
   expect(r.slots("telegram")[0]).toMatchObject({ multiple: true, defaults: ["channel-telegram"] });
   expect(r.preset("telegram", ["channel-telegram", "channel-http"]).filter((c) => c.startsWith("channel-"))).toEqual(["channel-telegram", "channel-http"]);
-  expect(r.features("telegram", ["server"]).map((f) => f.name)).toEqual(["router-rules", "agents-live", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"]);
+  expect(r.features("telegram", ["server"]).map((f) => f.name)).toEqual(["router-rules", "agents-live", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry", "admin-proposals"]);
   expect(r.features("telegram-cloudflare", ["durable"]).map((f) => f.name)).toEqual(["router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"]);
   // Agents from the dashboard is a group: the live agents, the rules that route to them, and the settings they are.
   expect(r.features("telegram-cloudflare", ["durable"]).find((f) => f.name === "agents-live")?.components).toEqual(["agents-live", "router-rules", "settings-store"]);

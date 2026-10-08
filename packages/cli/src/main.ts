@@ -11,8 +11,7 @@ import { parseArgs } from "node:util";
 import { add } from "./commands/add.ts";
 import { newWizard } from "./commands/wizard.ts";
 import { configure, LOGIN_METHODS, type LoginMethod } from "./commands/configure.ts";
-import { DEPLOYMENT_COMMANDS, type DeploymentCommand, deployCommand, deployment, dev } from "./commands/deployment.ts";
-import { DEPLOY_ACTIONS, type DeployAction } from "./project/deployment-module.ts";
+import { DEPLOYMENT_COMMANDS, type DeploymentCommand, deployment, dev } from "./commands/deployment.ts";
 import { doctor } from "./commands/doctor.ts";
 import { newProject } from "./commands/new.ts";
 import { registryCommand } from "./commands/registry.ts";
@@ -36,7 +35,6 @@ Usage:
   pikit dev                           run the project here, reloading on change (on Cloudflare: wrangler dev)
   pikit up | down | restart | status  delegate to the installed deployment-* component
   pikit logs [--follow] [--tail <n>]
-  pikit deploy watch | install [--interval <seconds>]   on a server: deploy each merge into the main branch, rolling back when unhealthy (install: as a systemd user service)
   pikit registry validate | generate | capabilities [<registry-root>]
   pikit --version
 
@@ -81,7 +79,6 @@ async function main(argv: string[]): Promise<number> {
       local: { type: "boolean" },
       follow: { type: "boolean", short: "f" },
       tail: { type: "string" },
-      interval: { type: "string" },
       version: { type: "boolean", short: "v" },
       help: { type: "boolean", short: "h" },
     },
@@ -164,14 +161,6 @@ async function main(argv: string[]): Promise<number> {
     }
     case "dev":
       return await dev(cwd);
-    case "deploy": {
-      const action = one(DEPLOY_ACTIONS.join("|"));
-      if (!(DEPLOY_ACTIONS as readonly string[]).includes(action)) throw new CliError(`usage: pikit deploy ${DEPLOY_ACTIONS.join(" | ")} [--interval <seconds>]`, 2);
-      const interval = values.interval === undefined ? undefined : Number(values.interval);
-      if (interval !== undefined && !(Number.isInteger(interval) && interval > 0)) throw new CliError("--interval takes a number of seconds", 2);
-      await deployCommand(cwd, action as DeployAction, interval === undefined ? {} : { intervalSeconds: interval });
-      return 0;
-    }
     case "registry":
       return await registryCommand(rest[0], rest[1]);
   }

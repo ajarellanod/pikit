@@ -1,5 +1,5 @@
 /**
- * admin-proposals' step of `pikit configure`: connecting self-improvement, which is optional. The CLI
+ * proposals-github's step of `pikit configure`: connecting self-improvement, which is optional. The CLI
  * finds this file in an installed component and calls `configure(io)`; it knows nothing about GitHub.
  *
  * - **Already connected** (a repository in pikit.config.ts, both tokens set): it says so and asks
@@ -10,9 +10,9 @@
  *   permissions it needs, written to `.env` (which `pikit up` sends to the Worker on Cloudflare, and a
  *   server reads); and how to create the ruleset on GitHub.
  * - **Without a terminal** it asks nothing, and nothing is missing: it stays dormant until connected,
- *   here or from the dashboard's Settings → Self-improvement.
+ *   here or from the dashboard's Settings → Self-improvement on GitHub.
  *
- * It never prints a token, and never calls GitHub: the dashboard's Settings → Self-improvement checks
+ * It never prints a token, and never calls GitHub: the dashboard's Settings → Self-improvement on GitHub checks
  * the connection live. The CLI runs it on this machine, in the project's directory, never in the app.
  */
 
@@ -71,9 +71,9 @@ export async function configure(io: ConfigureIO, origin: () => string | undefine
 
   io.say("\nSelf-improvement (optional): your agent proposes changes to itself as pull requests on the project's GitHub repository,");
   io.say("  which you approve or reject in the dashboard's Proposals. It stays off until it is connected (here, or later from the");
-  io.say("  dashboard's Settings → Self-improvement): a repository, two GitHub tokens, and a ruleset on GitHub.");
+  io.say("  dashboard's Settings → Self-improvement on GitHub): a repository, two GitHub tokens, and a ruleset on GitHub.");
   if (!(await io.confirm("Connect self-improvement now?", false))) {
-    io.say("  Skipped: connect it later with `pikit configure`, or from the dashboard's Settings → Self-improvement");
+    io.say("  Skipped: connect it later with `pikit configure`, or from the dashboard's Settings → Self-improvement on GitHub");
     return [];
   }
 
@@ -120,7 +120,7 @@ export async function configure(io: ConfigureIO, origin: () => string | undefine
   io.say(`\nProtect the default branch: https://github.com/${repository}/settings/rules → New ruleset → New branch ruleset:`);
   io.say("  Enforcement Active, target the default branch, Require a pull request before merging, Require status checks to pass");
   io.say("  (`checks`, from .github/workflows/pikit-checks.yml), Block force pushes.");
-  io.say("  On Cloudflare the agent pushes only where its workspace allows (execution-do's git.pushRepositories, or the dashboard's Settings → Self-improvement).");
-  io.say("  The tokens reach the app with the next `pikit up` (or `pikit dev`); the dashboard's Settings → Self-improvement checks the connection.");
+  io.say("  On Cloudflare the agent pushes only where its workspace allows (execution-do's git.pushRepositories, or the dashboard's Settings → Self-improvement on GitHub).");
+  io.say("  The tokens reach the app with the next `pikit up` (or `pikit dev`); the dashboard's Settings → Self-improvement on GitHub checks the connection.");
   return [];
 }

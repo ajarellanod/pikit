@@ -1,5 +1,5 @@
 /**
- * The few GitHub REST API calls admin-proposals makes (https://docs.github.com/rest), over `fetch`, so
+ * The few GitHub REST API calls proposals-github makes (https://docs.github.com/rest), over `fetch`, so
  * the same code runs on a server and in a Worker. A thin client of our own: a handful of endpoints.
  *
  * Each call is given its token: the read token for reads, the merge token for the merge, the comment
@@ -7,7 +7,7 @@
  * `apiBase`; `GitHubError` carries GitHub's status and message, never a header or a token.
  */
 
-import type { ProposalCheck, ProposalChecks } from "./api.ts";
+import type { ProposalCheck, ProposalChecks } from "@pikit/contracts";
 
 /** How long one call to GitHub may take. */
 const TIMEOUT_MS = 15_000;
@@ -101,6 +101,14 @@ export interface GitHubClient {
   /** The rules the repository's rulesets apply to `branch` (not a classic branch protection's). */
   branchRules(token: string, branch: string, signal?: AbortSignal): Promise<GitHubBranchRule[]>;
   pulls(token: string, state: "open" | "closed", perPage: number, signal?: AbortSignal): Promise<GitHubPull[]>;
+  /** The pull requests whose head is `branch` of the repository itself, newest first (open and closed). */
+  pullsOf(token: string, branch: string, signal?: AbortSignal): Promise<GitHubPull[]>;
+  /** The branches starting with `prefix`, with their head commits. */
+  branches(token: string, prefix: string, signal?: AbortSignal): Promise<{ branch: string; sha: string }[]>;
+  /** A commit's message. */
+  message(token: string, sha: string, signal?: AbortSignal): Promise<string>;
+  /** Opens a pull request from `head` into `base`. */
+  open(token: string, input: { head: string; base: string; title: string; body: string }, signal?: AbortSignal): Promise<GitHubPull>;
   pull(token: string, number: number, signal?: AbortSignal): Promise<GitHubPull>;
   files(token: string, number: number, signal?: AbortSignal): Promise<GitHubFile[]>;
   checks(token: string, sha: string, signal?: AbortSignal): Promise<HeadChecks>;
@@ -181,7 +189,7 @@ export function createGitHub(repository: string, apiBase: string, now: () => num
           authorization: `Bearer ${token}`,
           accept: "application/vnd.github+json",
           "x-github-api-version": "2022-11-28",
-          "user-agent": "pikit-admin-proposals",
+          "user-agent": "pikit-proposals-github",
           ...(body !== undefined && { "content-type": "application/json" }),
         },
         ...(body !== undefined && { body: JSON.stringify(body) }),
@@ -201,6 +209,14 @@ export function createGitHub(repository: string, apiBase: string, now: () => num
     pulls: (token, state, perPage, signal) =>
       call<GitHubPull[]>(token, "GET", `/pulls?state=${state}&sort=${state === "open" ? "created" : "updated"}&direction=desc&per_page=${perPage}`, undefined, signal),
     pull: (token, number, signal) => call<GitHubPull>(token, "GET", `/pulls/${number}`, undefined, signal),
+    pullsOf: (token, branch, signal) =>
+      call<GitHubPull[]>(token, "GET", `/pulls?state=all&head=${encodeURIComponent(`${repository.split("/")[0]}:${branch}`)}&sort=created&direction=desc&per_page=10`, undefined, signal),
+    async branches(token, prefix, signal) {
+      const refs = await call<{ ref: string; object: { sha: string } }[]>(token, "GET", `/git/matching-refs/heads/${prefix.split("/").map(encodeURIComponent).join("/")}`, undefined, signal);
+      return refs.map((ref) => ({ branch: ref.ref.replace(/^refs\/heads\//, ""), sha: ref.object.sha }));
+    },
+    message: async (token, sha, signal) => (await call<{ message: string }>(token, "GET", `/git/commits/${sha}`, undefined, signal)).message,
+    open: (token, input, signal) => call<GitHubPull>(token, "POST", "/pulls", input, signal),
     files: (token, number, signal) => call<GitHubFile[]>(token, "GET", `/pulls/${number}/files?per_page=100`, undefined, signal),
     async checks(token, sha, signal) {
       const [runs, combined] = await Promise.all([

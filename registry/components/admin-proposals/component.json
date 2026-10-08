@@ -3,7 +3,7 @@
   "name": "admin-proposals",
   "version": "0.0.0",
   "title": "Self-improvement: approve the agent's changes to itself from the dashboard",
-  "description": "The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow. Dormant until connected, after deploying: the repository from the dashboard's Settings, the two tokens as secrets.",
+  "description": "The dashboard's side of the agent's changes to itself: the proposals that `proposals` holds (proposals-local on a server, proposals-github on Cloudflare) listed with their diff and checks, approved or rejected there by an operator; and a Settings section saying whether they can be made and approved now, with the deploys that follow.",
   "targets": [
     "server",
     "durable"
@@ -12,13 +12,12 @@
     "pikit": "0.0.0",
     "contracts": "0.0.0",
     "capabilities": [
-      "secrets"
+      "proposals"
     ]
   },
   "optional": {
     "capabilities": [
-      "admin.auth",
-      "settings"
+      "admin.auth"
     ]
   },
   "provides": [
@@ -30,31 +29,12 @@
   "view": "view",
   "settings": "settings",
   "dependencies": {
-    "@pikit/contracts": "0.0.0",
-    "typebox": "1.3.27"
+    "@pikit/contracts": "0.0.0"
   },
   "files": [
     {
       "source": "files/src",
       "target": "src"
-    },
-    {
-      "source": "files/.github/workflows/pikit-checks.yml",
-      "target": ".github/workflows/pikit-checks.yml"
-    }
-  ],
-  "environment": [
-    {
-      "name": "GITHUB_TOKEN",
-      "secret": true,
-      "required": false,
-      "description": "Connects self-improvement (optional: set it after deploying). A fine-grained GitHub token for the project's repository only, the agent's: Contents and Pull requests read and write (it pushes pikit/self/* branches and opens pull requests), Checks and Commit statuses read. admin-proposals reads proposals with it; it never merges."
-    },
-    {
-      "name": "PIKIT_MERGE_TOKEN",
-      "secret": true,
-      "required": false,
-      "description": "Connects self-improvement (optional: set it after deploying). Another fine-grained GitHub token for the same repository only, never the agent's: Contents and Pull requests read and write. It merges and closes the agent's pull requests when you approve or reject them in the dashboard."
     }
   ]
 }

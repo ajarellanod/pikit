@@ -7,7 +7,11 @@
  * the preset's own, with the providers it brings (`withOffers`).
  *
  * `--ui` gives it a UI (SPEC §5, `ui.ts`): the dashboard's files in `src/dashboard/` and the components
- * it needs, installed with the preset's; its own `bun install` runs after the project's.
+ * it needs, installed with the preset's; its own `bun install` runs after the project's. A feature
+ * reached only from the dashboard (`NEEDS_DASHBOARD`: self-improvement) brings it too.
+ *
+ * On a server the new project is a git repository on `main`, everything committed (`initRepository`):
+ * self-improvement's deployer merges approved proposals there. Without git it says so and goes on.
  *
  * It writes the project's own part (`starter.ts`), vendors the kit packages into `vendor/`, adds
  * every component of the preset through the same install flow as `pikit add`, runs
@@ -38,6 +42,7 @@ import { withOffers } from "../project/offers.ts";
 import { starterModelProblem } from "../project/starter-model.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { isPortable, recordedLocation } from "../project/registry-location.ts";
+import { initRepository } from "../project/git.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
 import { kindOf, TARGETS } from "../registry/manifest.ts";
 import { CliError, log } from "../ui.ts";
@@ -106,9 +111,11 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   // storage: an offer needs the registry's only provider, which a second one would take away
   // (`registry validate` checks that each preset composes, `checkPresets`).
   // A UI is the dashboard's files and what they need, added like the preset's own.
-  const dashboard = options.ui === true ? dashboardFiles(registry) : undefined;
-  if (options.ui === true && dashboard === undefined) throw new CliError(`the registry ${registry.root} has no dashboard (dashboard/files/)`);
-  const asked = options.ui === true ? [...chosen, ...UI_COMPONENTS.filter((c) => !chosen.includes(c))] : chosen;
+  // A feature reached only from the dashboard (self-improvement's Proposals) brings it, as `--ui` does.
+  const ui = options.ui === true || chosen.some((component) => starter.NEEDS_DASHBOARD.includes(component));
+  const dashboard = ui ? dashboardFiles(registry) : undefined;
+  if (ui && dashboard === undefined) throw new CliError(`the registry ${registry.root} has no dashboard (dashboard/files/)`);
+  const asked = ui ? [...chosen, ...UI_COMPONENTS.filter((c) => !chosen.includes(c))] : chosen;
   const { order: components, installedFor } = withOffers(registry, asked, targets);
   warnUnchosen(registry, chosen, [], targets);
   // Each component is installed after the project's files are written: refuse one that cannot be first.
@@ -146,7 +153,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write(CONFIG_FILE, starter.configFile(target));
     // Its prompt says where people reach it: the channels being installed.
     const channels = components.filter((c) => kindOf(c) === "channel").map((c) => ({ name: c, title: registry.manifest(c).title }));
-    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels, target, starter.starterExtensions(components)));
+    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels, target, starter.starterExtensions(components), components));
     write("src/extensions/agents.ts", starter.AGENTS);
     // The kit's skills for AI agents: how to write a component for this project, and where the kit is.
     for (const skill of starter.skillFiles(PIKIT_ROOT, commit)) {
@@ -201,6 +208,12 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     throw error;
   }
   rmSync(join(projectDir, UNFINISHED));
+  // On a server the project is a git repository: self-improvement's deployer merges into its main branch.
+  if (target === "server") {
+    const repository = await initRepository(projectDir, `pikit new ${name}`);
+    if (repository.made) step(`git: a repository on main, everything committed (${repository.commit.slice(0, 7)})`);
+    else log.warn(`not a git repository (${repository.why}): self-improvement needs one; \`git init\` and commit the project to have it`);
+  }
   if (options.quiet !== true) log.ok(`created ${name} with ${installed.length} component(s); the app composes`);
   if (options.next === false) return;
   // What `pikit up` does is the installed deployment's: nothing is said of one that is not there.

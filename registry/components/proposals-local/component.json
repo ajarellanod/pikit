@@ -1,0 +1,33 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "proposals-local",
+  "version": "0.0.0",
+  "title": "Self-improvement on this server: the agent's changes as local branches",
+  "description": "proposals on a server, with nothing to set up: branches pikit/self/* of a git repository in the app's state volume, which the steward clones and pushes to with plain git; an approval is recorded for the deployer next to the app (deployment-docker), which merges, checks, deploys and rolls back.",
+  "targets": [
+    "server"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "proposals"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "diff": "8.0.4",
+    "isomorphic-git": "1.42.3",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

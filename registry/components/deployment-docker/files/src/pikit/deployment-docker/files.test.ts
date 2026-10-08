@@ -125,3 +125,27 @@ test("compose.yaml: restarts, secrets from .env at run time, .pikit/ on a volume
   expect(compose.some((line) => /^\s+- "127\.0\.0\.1:3000:3000"$/.test(line))).toBe(true);
   expect(compose.filter((line) => /(TOKEN|API_KEY|SECRET)\s*[:=]/.test(line))).toEqual([]);
 });
+
+test("compose.yaml: only the deployer has the Docker socket, behind the self-improvement profile; the app never does", () => {
+  const compose = lines("compose.yaml");
+  const deployer = compose.findIndex((line) => line === "  deployer:");
+  expect(deployer).toBeGreaterThan(-1);
+  const socket = compose.findIndex((line) => line.includes("/var/run/docker.sock"));
+  expect(socket).toBeGreaterThan(deployer);
+  expect(compose.filter((line) => line.includes("docker.sock"))).toHaveLength(1);
+  const service = compose.slice(deployer, compose.findIndex((line, i) => i > deployer && /^\S/.test(line)));
+  expect(service.join("\n")).toContain('profiles: ["self-improvement"]');
+  expect(service.join("\n")).toContain("target: deployer");
+  for (const mount of ["- .:/project", "- pikit-state:/state", "- pikit-checks:/checks"]) expect(service.map((line) => line.trim())).toContain(mount);
+});
+
+test("Dockerfile: git in the stage the app and the deployer share, the app the last stage, the deployer its own", () => {
+  const dockerfile = lines("Dockerfile");
+  const base = dockerfile.findIndex((line) => /^FROM oven\/bun:\S+ AS base$/.test(line));
+  expect(base).toBeGreaterThan(-1);
+  expect(dockerfile.slice(base).join("\n")).toMatch(/apt-get install --yes --no-install-recommends git/);
+  expect(dockerfile.findLast((line) => line.startsWith("FROM "))).toBe("FROM base");
+  const deployer = dockerfile.findIndex((line) => line === "FROM base AS deployer");
+  expect(deployer).toBeGreaterThan(base);
+  expect(dockerfile.slice(deployer).find((line) => line.startsWith("CMD"))).toBe('CMD ["bun", "src/pikit/deployment-docker/deployer-main.ts"]');
+});

@@ -17,12 +17,14 @@
  * that knows what the project is made of is the one its operators ask to change it. `start` refuses an
  * agent that names it and is not the steward; runtime-pi refuses two stewards.
  *
- * 3. **Its repository**, when a `github` provider is installed (github-app: connected from the
- *    dashboard's Settings → GitHub): read through the contract at each request (connecting applies at
- *    once), so the steward knows where to clone, push and propose, or that GitHub is not connected yet.
+ * 3. **How it proposes a change here**, from `proposals` when installed (`remote()`: where to clone
+ *    from and push to), the same steps on every target: clone, `git checkout -b pikit/self/<topic>`,
+ *    change, commit, `git push origin pikit/self/<topic>`; the operator approves in the dashboard.
+ *    Read at each request (the repository is a setting on Cloudflare), the same text while it does not
+ *    change.
  *
- * The rest of the text is built once, in `start`, so the section is the same on every request and the
- * provider's prompt cache stays warm. Live state (health, deliveries, proposals) is not in it: that is the
+ * The rest is built once, in `start`, so the section is the same on every request and the provider's
+ * prompt cache stays warm. Live state (health, deliveries, proposals) is not in it: that is the
  * operator's, in the dashboard.
  *
  * Targets: `server` and `durable`. On Cloudflare it belongs in the objects' App, where agents run; the
@@ -30,7 +32,7 @@
  */
 
 import { APP_DESCRIPTION, type AppContext, type AppDescription, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type GitHubAccess, redactSecrets } from "@pikit/contracts";
+import { type ProposalsRemote, redactSecrets } from "@pikit/contracts";
 import { defineExtension, type Extension, section } from "@pikit/pi-adapter/extensions";
 import GUIDE from "./pikit-self.md" with { type: "text" };
 
@@ -150,42 +152,44 @@ export function pikitSelfText(commit: string | undefined, composition: string | 
 }
 
 /**
- * What the section says of the project's repository (`github`'s): where it is and how a change
- * reaches it, the same steps on every target, or that GitHub is not connected yet.
+ * How the steward proposes a change here: from `proposals`' `remote()` (`undefined` while it is not
+ * set up), or `"none"` when no component provides `proposals`. The same steps on every target.
  */
-// TODO: once the `proposals` contract is in this branch, read the remote from `proposals.remote()`
-// (a server's local remote, or GitHub's), and `github.repository()` only through it.
-export function repositoryText(repository: string | undefined): string {
-  if (repository === undefined) {
-    return "## Your repository\nGitHub is not connected yet: you cannot propose a change until an operator connects it (the dashboard's Settings → GitHub). Say so if asked for a change.";
+export function proposingText(remote: ProposalsRemote | undefined | "none"): string {
+  const title = "## How you propose a change here";
+  if (remote === "none") {
+    return `${title}\nThis project has no proposals: tell the operator what to change, file by file. Self-improvement adds them (\`pikit add admin-proposals\` with \`proposals-local\` on a server, \`proposals-github\` on Cloudflare).`;
   }
+  if (remote === undefined) {
+    return `${title}\nProposals are not set up yet: tell the operator to finish it in the dashboard's Settings → Self-improvement, and until then what to change, file by file.`;
+  }
+  const from = remote.kind === "path" ? remote.path : remote.url;
+  const branch = `${remote.branchPrefix}<topic>`;
   return [
-    "## Your repository",
-    `Your project's source is https://github.com/${repository} (connected in the dashboard's Settings → GitHub).`,
-    `To propose a change: \`git clone https://github.com/${repository}\`, \`git checkout -b pikit/self/<topic>\`, change the files, \`git add\` them and \`git commit -m <what and why>\`, then \`git push origin pikit/self/<topic>\`. The pushed branch is the proposal: the operator reads and approves it in the dashboard's Proposals. You never hold a token.`,
+    title,
+    `With git in your shell, from ${from}, never pushing ${remote.mainBranch}:`,
+    `1. \`git clone ${from} project\`: a fresh clone for each change, so it starts from the latest ${remote.mainBranch}.`,
+    `2. \`cd project && git checkout -b ${branch}\`, a short topic (\`calendar-tool\`).`,
+    "3. Make the change; run `bun install` and `bun test` there where you can.",
+    '4. `git add -A && git commit -m "<title>" -m "<description>"`: the first line is the proposal\'s title, the rest its description (what, why, what you checked).',
+    `5. \`git push origin ${branch}\`: the pushed branch is the proposal; pushing it again replaces it.`,
+    "The operator reads it in the dashboard's Proposals and approves or rejects it; an approved change is deployed, and rolled back if it is unhealthy.",
   ].join("\n");
 }
 
-/** The repository's part of the section, read at each request: `undefined` without a provider, or when it cannot be read. */
-async function repositoryPart(github: GitHubAccess | undefined, ctx: AppContext | undefined): Promise<string | undefined> {
-  if (github === undefined || ctx === undefined) return undefined;
-  try {
-    return repositoryText(await github.repository(ctx));
-  } catch {
-    return undefined;
-  }
-}
-
-/** The extension, whose section is `text()` (`undefined`, before the App starts, leaves it out), then `extra()` when it says something. */
-export function createPikitSelf(text: () => string | undefined, extra: () => Promise<string | undefined> = async () => undefined): Extension {
+/**
+ * The extension, whose section is `text()` then `proposing()`: `undefined` (before the App starts)
+ * leaves it out.
+ */
+export function createPikitSelf(text: () => string | undefined, proposing: () => Promise<string | undefined> = async () => undefined): Extension {
   return defineExtension({
     name: PIKIT_SELF,
     sections: [
       section(PIKIT_SELF, async () => {
-        const built = text();
-        if (built === undefined) return undefined;
-        const more = await extra();
-        return more === undefined ? built : `${built}\n\n${more}`;
+        const known = text();
+        if (known === undefined) return undefined;
+        const how = await proposing();
+        return how === undefined ? known : `${known}\n\n${how}`;
       }),
     ],
   });
@@ -196,27 +200,26 @@ export default defineComponent({
   setup(pikit) {
     // The agents, for what each is (model, tools, extensions): the description has only their names.
     const definitions = pikit.useKeyed("agent.definition");
-    // The project's repository, when a provider is installed (github-app).
-    const github = pikit.useOptional("github");
+    // Where the steward clones from and pushes to: the contract's, whichever provider (P4).
+    const proposals = pikit.useOptional("proposals");
     let text: string | undefined;
     let background: AppContext | undefined;
-    pikit.provideKeyed(
-      "agent.extension",
-      PIKIT_SELF,
-      createPikitSelf(
-        () => text,
-        () => repositoryPart(github.get(), background),
-      ),
-    );
+    const proposing = async () => {
+      const provider = proposals.get();
+      if (provider === undefined) return proposingText("none");
+      if (background === undefined) return undefined;
+      return proposingText(await provider.remote(background).catch(() => undefined));
+    };
+    pikit.provideKeyed("agent.extension", PIKIT_SELF, createPikitSelf(() => text, proposing));
     return {
       async start(ctx) {
-        background = ctx.derive(() => BACKGROUND_CONTEXT);
         const agents = definitions
           .keys()
           .sort()
           .map((name) => agentSummary(name, definitions.get(name)));
         const problem = stewardProblem(agents);
         if (problem !== undefined) throw new Error(problem);
+        background = ctx.derive(() => BACKGROUND_CONTEXT);
         const description = ctx.value(APP_DESCRIPTION);
         text = pikitSelfText(await projectKitCommit(), description === undefined ? undefined : compositionText(description, agents));
       },

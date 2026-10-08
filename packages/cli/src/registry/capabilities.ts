@@ -123,6 +123,13 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "What is up, degraded or down: components report their own state, and /health fails when an essential one stays down.",
   },
+  proposals: {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Where proposals live is a choice per target (proposals-local, proposals-github): never offered.
+    summary: "The agent's changes to itself waiting for an operator: list, read, approve or reject them, and where the steward clones from and pushes its branches to.",
+  },
   settings: {
     mode: "single",
     definedIn: "@pikit/contracts",

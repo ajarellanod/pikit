@@ -18,9 +18,34 @@ RUN mkdir -p out && if [ -f src/dashboard/package.json ]; then \
       fi; \
     fi
 
-# Bun >= 1.4: older Bun never fires an `AbortSignal.timeout()` whose last listener was removed
-# (oven-sh/bun#37666), so a stop deadline would hang instead of firing.
-FROM oven/bun:1.4-slim
+# What the app and the deployer share: Bun >= 1.4 (older Bun never fires an `AbortSignal.timeout()`
+# whose last listener was removed, oven-sh/bun#37666, so a stop deadline would hang instead of firing)
+# and git. The agent's shell runs plain git (self-improvement: it clones the proposals repository and
+# pushes its branches there), committing as "pikit agent".
+FROM oven/bun:1.4-slim AS base
+RUN apt-get update \
+ && apt-get install --yes --no-install-recommends git ca-certificates \
+ && rm -rf /var/lib/apt/lists/* \
+ && git config --system user.name "pikit agent" \
+ && git config --system user.email "agent@pikit.invalid" \
+ && git config --system init.defaultBranch main
+
+# Self-improvement's deployer (compose.yaml's `deployer` service, profile `self-improvement`): git,
+# Bun and Docker's CLI with Compose and buildx, and deployment-docker's own files, nothing else of the
+# project. It runs as root, for the Docker socket; it runs the project's checks in containers of
+# this same image without the socket, as the checks volume's owner. Never the app's image.
+FROM docker:28-cli AS docker-cli
+FROM base AS deployer
+COPY --from=docker-cli /usr/local/bin/docker /usr/local/bin/docker
+COPY --from=docker-cli /usr/local/libexec/docker/cli-plugins/ /usr/local/libexec/docker/cli-plugins/
+WORKDIR /deployer
+COPY src/pikit/deployment-docker/ ./src/pikit/deployment-docker/
+# Its volume (/checks) is the bun user's, as its checks are.
+RUN mkdir -p /checks && chown bun:bun /checks
+CMD ["bun", "src/pikit/deployment-docker/deployer-main.ts"]
+
+# The app: the last stage, which `docker build` and compose's `app` build.
+FROM base
 
 WORKDIR /app
 ENV NODE_ENV=production

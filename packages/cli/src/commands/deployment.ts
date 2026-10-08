@@ -1,5 +1,5 @@
 /**
- * `pikit up | down | restart | logs | status`, `pikit deploy watch | install` and `pikit dev`.
+ * `pikit up | down | restart | logs | status` and `pikit dev`.
  *
  * The CLI only delegates `[decision]`: `up`, `down`, `restart`, `logs` and `status` are the functions
  * of the same names that the installed `deployment-*` component exports from
@@ -10,10 +10,6 @@
  * it builds, `hooks.afterDeploy` once the new version answers, as `pikit.json` records them); the CLI
  * runs only their `hooks.doctor`, through `pikit doctor`, first.
  *
- * `pikit deploy watch | install` is the deployment's optional `deploy`: on a server, the deployer that
- * deploys each merge into the main branch (deployment-docker: `git fetch`, then `pikit up`, rolling
- * back when unhealthy). It runs `pikit up` as this CLI, so the CLI tells it how to run itself.
- *
  * `pikit dev` runs the app locally: the deployment component's `dev` when it exports one
  * (`deployment-cloudflare`: `wrangler dev`), or else its process entrypoint, `src/pikit/<name>/main.ts`,
  * with Bun's `--watch` and `.env` loaded (`deployment-docker`).
@@ -22,7 +18,6 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import {
-  type DeployAction,
   DEPLOYMENT_COMMANDS,
   type DeploymentCommand,
   type DeploymentStatus,
@@ -117,35 +112,6 @@ export async function deployment(projectDir: string, command: DeploymentCommand,
   const result: unknown = await run(args);
   if (command === "status") printStatus(result);
   else if (command !== "logs") log.ok(`${command}: done${deployedAt(result)}`);
-}
-
-/**
- * `pikit deploy <action>`: the deployment's `deploy`. `watch` runs until SIGTERM or SIGINT, which
- * stop it once the deploy in progress is done.
- */
-export async function deployCommand(projectDir: string, action: DeployAction, options: { intervalSeconds?: number } = {}): Promise<void> {
-  const { name, module } = await loadDeployment(projectDir);
-  const run = module.deploy;
-  if (typeof run !== "function") {
-    throw new CliError(`${name} does not export deploy() from src/pikit/${name}/index.ts: it has no deployer to run here`);
-  }
-  const controller = new AbortController();
-  const stop = () => controller.abort();
-  process.on("SIGTERM", stop);
-  process.on("SIGINT", stop);
-  try {
-    await (run as (args: Record<string, unknown>) => Promise<unknown>)({
-      cwd: projectDir,
-      action,
-      // This CLI, as this machine runs it: the deployer's `pikit up`, and the service's ExecStart.
-      cli: [process.execPath, join(import.meta.dir, "..", "main.ts")],
-      ...(options.intervalSeconds !== undefined && { intervalSeconds: options.intervalSeconds }),
-      signal: controller.signal,
-    });
-  } finally {
-    process.off("SIGTERM", stop);
-    process.off("SIGINT", stop);
-  }
 }
 
 /** What `up` says it deployed, when it says (`deployment-cloudflare`: the version, answering at its URL). */

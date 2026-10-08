@@ -51,6 +51,8 @@ export const KINDS: readonly string[] = [
   "agents",
   // The project's repository and its tokens (`github`): `github-app`.
   "github",
+  // The agent's changes to itself, waiting for an operator (`proposals`): `proposals-local`, `proposals-github`.
+  "proposals",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */

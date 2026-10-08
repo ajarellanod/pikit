@@ -22,7 +22,7 @@
  * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
  * two Apps (SPEC C1), the agent's model is one whose provider runs there (`STARTER_MODEL`, unless the
  * preset declares its `model`), and `.gitignore` and the README say so. On a server the agent does
- * not name `bash`, even installed (`NOT_NAMED`). What `pikit up` does is the installed deployment's
+ * not name `bash`, even installed (`NOT_NAMED`), unless self-improvement needs it (`NAMED_FOR`). What `pikit up` does is the installed deployment's
  * (`upText`), never guessed from the target. The README says where `pikit` and the kit are
  * (`withKitLocation`). What a component needs in
  * `package.json` (deployment-cloudflare's `wrangler`) its `component.json` declares, and `pikit add`
@@ -266,18 +266,44 @@ export function starterExtensions(components: readonly string[]): string[] {
   return components.flatMap((component) => (STARTER_EXTENSIONS[component] === undefined ? [] : [STARTER_EXTENSIONS[component]]));
 }
 
-/** The installed `tools` the starter agent names on `target`: all of them but those `NOT_NAMED` there. */
-export function starterTools(tools: readonly string[], target = "server"): string[] {
-  return tools.filter((tool) => !(tool in (NOT_NAMED[target] ?? {})));
+/**
+ * Tools the starter agent names on a target although `NOT_NAMED` there, because an installed component
+ * needs them: self-improvement on a server (`proposals-local`) needs a shell, where the steward runs
+ * git and the tests of what it proposes.
+ */
+export const NAMED_FOR: Readonly<Record<string, Readonly<Record<string, readonly string[]>>>> = {
+  server: { "proposals-local": ["bash"] },
+};
+
+/**
+ * Features reached only from the dashboard: choosing one gives the project its UI, as `--ui` does
+ * (the Proposals view, and Settings → Self-improvement).
+ */
+export const NEEDS_DASHBOARD: readonly string[] = ["admin-proposals"];
+
+/**
+ * The installed `tools` the starter agent names on `target`: all of them but those `NOT_NAMED` there,
+ * unless one of `components` needs it (`NAMED_FOR`).
+ */
+export function starterTools(tools: readonly string[], target = "server", components: readonly string[] = []): string[] {
+  const needed = new Set(components.flatMap((component) => NAMED_FOR[target]?.[component] ?? []));
+  return tools.filter((tool) => needed.has(tool) || !(tool in (NOT_NAMED[target] ?? {})));
 }
 
 /**
- * The starter agent's file. It names `starterTools(installed, target)`; one installed and not named
- * is said in its comment, with why. It names `extensions` (`starterExtensions`) when there are some.
- * It is the steward (SPEC §6), so it may name `pikit-self`.
+ * The starter agent's file. It names `starterTools(installed, target, components)`; one installed and
+ * not named is said in its comment, with why. It names `extensions` (`starterExtensions`) when there
+ * are some. It is the steward (SPEC §6), so it may name `pikit-self`.
  */
-export function agent(installed: string[], model = starterModel(), channels: readonly StarterChannel[] = [], target = "server", extensions: readonly string[] = []): string {
-  const tools = starterTools(installed, target);
+export function agent(
+  installed: string[],
+  model = starterModel(),
+  channels: readonly StarterChannel[] = [],
+  target = "server",
+  extensions: readonly string[] = [],
+  components: readonly string[] = [],
+): string {
+  const tools = starterTools(installed, target, components);
   const commands = tools.includes("bash") ? ", and to run commands in it" : "";
   const workspace =
     tools.length > 0 ? `\n    "You work in a workspace directory: use your tools to read, write and edit files there${commands}.",` : "";

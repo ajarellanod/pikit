@@ -62,3 +62,8 @@ features:
   - tool-fetch
   - tool-websearch-brave
   - health-registry
+  # Self-improvement, a group: the agent proposes changes to itself as branches of a repository on
+  # this server (proposals-local), and you approve them in the dashboard (admin-proposals, which brings
+  # the dashboard); the deployer next to the app (deployment-docker) merges, checks and deploys them.
+  # The starter agent then names bash: it runs git and the tests there.
+  - [admin-proposals, proposals-local]

@@ -73,13 +73,13 @@
       "name": "admin-proposals-settings",
       "type": "registry:file",
       "title": "admin-proposals-settings",
-      "description": "admin-proposals's section of the Settings dialog: The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow. Dormant until connected, after deploying: the repository from the dashboard's Settings, the two tokens as secrets. Its settings come with the component (pikit add admin-proposals), stored by settings-store."
+      "description": "admin-proposals's section of the Settings dialog: The dashboard's side of the agent's changes to itself: the proposals that `proposals` holds (proposals-local on a server, proposals-github on Cloudflare) listed with their diff and checks, approved or rejected there by an operator; and a Settings section saying whether they can be made and approved now, with the deploys that follow. Its settings come with the component (pikit add admin-proposals), stored by settings-store."
     },
     {
       "name": "admin-proposals",
       "type": "registry:file",
       "title": "admin-proposals",
-      "description": "admin-proposals's view: The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow. Dormant until connected, after deploying: the repository from the dashboard's Settings, the two tokens as secrets. Its admin API routes come with the component (pikit add admin-proposals)."
+      "description": "admin-proposals's view: The dashboard's side of the agent's changes to itself: the proposals that `proposals` holds (proposals-local on a server, proposals-github on Cloudflare) listed with their diff and checks, approved or rejected there by an operator; and a Settings section saying whether they can be made and approved now, with the deploys that follow. Its admin API routes come with the component (pikit add admin-proposals)."
     },
     {
       "name": "agents-live-settings",
@@ -104,6 +104,12 @@
       "type": "registry:file",
       "title": "health-registry",
       "description": "health-registry's view: What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process. Its admin API routes come with the component (pikit add health-registry)."
+    },
+    {
+      "name": "proposals-github-settings",
+      "type": "registry:file",
+      "title": "proposals-github-settings",
+      "description": "proposals-github's section of the Settings dialog: proposals as GitHub pull requests from pikit/self/* (Cloudflare): read with the agent's token, merged or closed with a token the agent never holds when an operator approves or rejects them in the dashboard; and the project's CI workflow. Dormant until connected, after deploying: the repository from the dashboard's Settings, the two tokens as secrets. Its settings come with the component (pikit add proposals-github), stored by settings-store."
     },
     {
       "name": "router-basic-settings",

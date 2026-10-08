@@ -1,9 +1,9 @@
 # deployment-docker
 
 Runs a pikit project in Docker on a server: the image, the container, the process entrypoint, its
-logs, the commands `pikit up | down | restart | logs | status` delegate to, and the deployer on the
-host (`pikit deploy watch | install`) that deploys each merge into the main branch and rolls back
-when unhealthy.
+logs, the commands `pikit up | down | restart | logs | status` delegate to, and self-improvement's
+deployer, a second service started by the same `pikit up`, which deploys what an operator approves
+and rolls back when unhealthy.
 
 - **Provides:** nothing. It is not an app component and is not listed in `pikit.config.ts`: it runs
   the app rather than running inside it.
@@ -61,8 +61,9 @@ Docker rotates the log files (5 × 10 MB). Read them with `pikit logs`, or
 
 ### The image and the container (`Dockerfile`, `compose.yaml`, `.dockerignore`)
 
-- `oven/bun:1.4-slim`, dependencies installed from `bun.lock` with `--production`, running as the
-  unprivileged user `bun`.
+- `oven/bun:1.4-slim` with git (the agent's shell runs plain git, committing as "pikit agent"),
+  dependencies installed from `bun.lock` with `--production`, running as the unprivileged user `bun`.
+  The app is the Dockerfile's last stage; the `deployer` stage is the deployer's image.
 - A project with a UI (`src/dashboard/`, `pikit ui on`) gets its dashboard built in a stage of its own
   (`bun install --frozen-lockfile` and its `build`, from its own `bun.lock`), whose last step writes
   the built files into admin-api as a module (`src/pikit/admin-api/dashboard-files.ts`): only that
@@ -88,7 +89,8 @@ them, and the tests below keep checking what matters.
 ### The commands (`commands.ts`)
 
 The CLI delegates to these functions; you can call them from a script too. Each one runs
-`docker compose …` in the project's directory (`cwd`), without a shell:
+`docker compose …` in the project's directory (`cwd`), without a shell, with `--profile
+self-improvement` when `proposals-local` is installed (so `up` starts the deployer too):
 
 | Function | Runs |
 |---|---|
@@ -118,59 +120,58 @@ login lands in the volume the app reads, and `pikit up` checks there that the ap
 There is one copy of each login: the one on your machine (`.pikit/`) is for `pikit dev` only.
 Directories in `share` are mounted at the same path, read-only unless `writable`.
 
-### The deployer (`deploy.ts`): `pikit deploy watch | install`
+### The deployer (`deployer.ts`): self-improvement on a server
 
-Self-improvement's last step on a server (SPEC §6): a proposal approved in the dashboard is a
-merge into the main branch on GitHub, and this deploys it from the host, outside the container (the
-app cannot run `docker`). It polls, so the host needs no inbound access.
+Self-improvement's last step (SPEC §6, `proposals-local`): a proposal an operator approves in the
+dashboard is deployed by a second compose service, `deployer`, next to the app. Nothing to set up and
+no extra command: `pikit up` builds and starts it when `proposals-local` is installed (every command
+then passes `--profile self-improvement`), and Docker restarts it with the app. It has the Docker
+socket, the project's directory at `/project`, the app's state volume at `/state`, and a volume of
+its own, `pikit-checks`, at `/checks`. The app never gets the socket.
 
-```sh
-git clone https://github.com/you/your-bot && cd your-bot   # the project's directory is a checkout
-pikit deploy install          # a systemd user service running `pikit deploy watch --interval 60`
-journalctl --user -u pikit-deploy-your-bot -f
-```
+What it shares with the app is `.pikit/self/` in the state volume: the proposals repository
+(`project.git`, which it makes from the project's `main` and keeps at it), the approvals
+proposals-local writes (`decisions.json`: all it takes from the app is "this head of this branch was
+approved"), and what it writes back (`deployer.json`: a heartbeat, each approved head's outcome with
+its checks, the last deploy, rollback and failure, which the dashboard shows).
 
-Every `--interval` seconds (60), `watch` runs `git fetch` and, when the checkout's upstream
-(`origin/main`) is at a commit not deployed yet:
-1. tags the running app's image `<image>:pikit-previous` (`docker compose ps`, `docker inspect`,
-   `docker tag`);
-2. `git merge --ff-only` to that commit, then `bun install --frozen-lockfile` (the CLI loads the
-   project here);
-3. `pikit up`, in a fresh process (doctor, the credentials check, `beforeDeploy` hooks, the build,
-   Compose's wait for the healthcheck), then `GET /health` must answer 200;
-4. on any failure, it tags the previous image as the app's again, runs
-   `docker compose up --detach --no-build --force-recreate --wait`, returns the checkout to the
-   deployed commit (`git reset --keep`) and logs `pikit: <commit> failed /health: rolled back to
-   <previous>`. That commit is not tried again; the next one is.
+Every 10 s it writes its heartbeat, keeps the proposals repository's `main` at the project's, and
+deploys the oldest approved head without an outcome:
+1. **The project** must be a git repository on `main` with nothing uncommitted (a deploy builds
+   `main` plus the proposal: an edit not committed would be lost). Otherwise the approval waits, and
+   the dashboard says why.
+2. **The merge**, in its own clone (`/checks/repo`): the branch must still be at the approved head; a
+   change of the deployment's own files (`compose.yaml`, `Dockerfile`, `.dockerignore`,
+   `src/pikit/deployment-docker/`) is refused; then a fast-forward when it can, else a merge commit; a
+   conflict fails it.
+3. **The checks**, each in a throwaway container of its image with no socket and no secret, as the
+   volume's owner: `bun install --frozen-lockfile`, `bun run typecheck` when package.json has it,
+   `bun test`; then the components' `beforeDeploy` hooks (`before-deploy.ts`, with `.env`). The
+   agent's code runs only there. `pikit doctor` is not run: the CLI is not in the project.
+4. **The deploy:** it tags the running app's image `<image>:pikit-previous`, builds the merge
+   (`docker build`), recreates `app` (`docker compose up --no-build --force-recreate --no-deps --wait
+   app`), and `GET http://app:3000/health` must answer 200.
+5. **Deployed:** the project's `main` is fast-forwarded to it (as the directory's owner, through
+   `setpriv`, so its files keep their owner), and so is the proposals repository's. A failure before
+   step 4 changes nothing; one after it puts the previous image back (`rolled back`). `main` never
+   moves for a failed deploy.
 
-It never rolls back across a change `irreversible` names (`noneIrreversible` in `deploy.ts`: none is
-known on a server today, since both images share the `.pikit/` volume; edit it for one, such as a
-migration an older version cannot read): it says so and leaves the new version running. The first
-deploy has no previous image to return to.
+Read its log with `pikit logs` (or `docker compose logs deployer`).
 
-What it deployed and the commit that failed are kept in `.pikit/deployer.json` on the host, so a
-restarted deployer neither redeploys nor retries; its first start takes the checkout's `HEAD` as
-what runs.
+**What it trusts.** On a server the agent's shell runs in the app's container, as the app's user: it
+can write the proposals repository and `decisions.json`, so it could forge an approval. The approval
+is the operator's decision, not a lock. The deployer takes nothing else from the app, refuses changes
+of the deployment, runs the agent's code only in containers without the socket, and always checks,
+waits for `/health` and rolls back. A real lock needs the agent's commands to run elsewhere
+(`features/sandboxed-execution.md`).
 
-`install` writes `~/.config/systemd/user/pikit-deploy-<directory>.service` (`ExecStart` is this CLI,
-as it was run, with the current `PATH`), then `systemctl --user daemon-reload` and `enable --now`.
-A user service stops when its user logs out unless lingering is on: `install` says to run
-`sudo loginctl enable-linger <user>` when it is off. SIGTERM stops the deployer after the deploy in
-progress (`KillMode=mixed`, 15 minutes). Without systemd, run `pikit deploy watch` under a
-supervisor of your own. To remove it: `systemctl --user disable --now pikit-deploy-<directory>`,
-then delete the file.
-
-What the host needs: the checkout, with read access to the repository (a read-only deploy key, or
-HTTPS with a credential helper: the deployer adds no credential), kept clean (a local change stops
-the fast-forward and nothing is deployed until it is cleaned), Docker usable by its user (the
-`docker` group, or rootless Docker), Bun and the pikit CLI. Do not run `pikit up` by hand while it
-deploys.
+**Rootless Docker**, or a socket elsewhere: change the socket's path in compose.yaml's `deployer`.
 
 ## Removing it
 
 `pikit remove deployment-docker` deletes `src/pikit/deployment-docker/` and the three root files.
 It never touches the `pikit-state` volume: `docker compose down --volumes` deletes the conversations,
-and is yours to run. A deployer service installed stays: disable it first.
+and is yours to run.
 
 ## Tests
 
@@ -184,13 +185,16 @@ The tests are copied with the component and run in your project:
 - `commands.test.ts`: the exact `docker` argv of every command, `status`'s parsing and probes, the
   components' `beforeDeploy` hooks run before the build (their own files written once, a problem
   building nothing), with a fake runner and a fake `fetch`. No Docker needed.
-- `deploy.test.ts`: the deployer against a fake host (git, Docker, `pikit up`, `/health`): no new
-  commit does nothing; a new one is tagged, merged, installed, deployed; an unhealthy one, or a
-  failing `pikit up` or `bun install`, rolls back to the previous image and is not retried; never
-  across an irreversible change; the loop survives a failed poll; the systemd unit `install` writes.
+- `deployer.test.ts`: the deployer with real git (a project, the proposals repository, the agent's
+  clone) and a fake Docker: the proposals repository made and kept at `main`; an approved branch
+  merged, checked in sandboxes, built, recreated, healthy, deployed, `main` following; failing tests
+  building nothing; an unhealthy one rolled back; a merge commit when `main` moved, a conflict failed;
+  a change of the deployment refused, a branch moved after its approval refused; uncommitted changes
+  holding the approval until committed; the loop surviving a failed pass.
 - `files.test.ts`: the root files keep their promises. Bun ≥ 1.4, a non-root user, no secret in the
-  image, `.env` and `.pikit` ignored, a healthcheck on `/health`, and a `stop_grace_period` longer
-  than the stop deadline.
+  image, `.env` and `.pikit` ignored, a healthcheck on `/health`, a `stop_grace_period` longer
+  than the stop deadline, git in the stage the app and the deployer share, the app the last stage, and
+  the Docker socket only in the deployer, behind its profile.
 
 `component.json` is generated, not written by hand. With no `setup`, it provides and requires
 nothing. Its `files` maps `files/src` to `src` and names each root file.

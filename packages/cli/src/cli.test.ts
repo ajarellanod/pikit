@@ -5,7 +5,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { UNFINISHED } from "./commands/new.ts";
@@ -68,26 +68,6 @@ test("project commands outside a project, and up with no deployment component, s
   const up = await runCli(["up"], tinyProject());
   expect(up.code).toBe(1);
   expect(up.err).toContain("no deployment-* component is installed");
-});
-
-test("pikit deploy watch | install delegates to the deployment's deploy, telling it how to run this CLI", async () => {
-  const dir = tinyProject();
-  expect((await runCli(["deploy", "bogus"], dir)).code).toBe(2);
-  expect((await runCli(["deploy", "watch", "--interval", "0"], dir)).code).toBe(2);
-  expect((await runCli(["deploy", "watch"], dir)).err).toContain("no deployment-* component is installed");
-
-  const manifest = JSON.parse(readFileSync(join(dir, "pikit.json"), "utf8")) as { components: Record<string, unknown> };
-  manifest.components["deployment-fake"] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
-  writeFileSync(join(dir, "pikit.json"), JSON.stringify(manifest));
-  mkdirSync(join(dir, "src", "pikit", "deployment-fake"), { recursive: true });
-  const entry = join(dir, "src", "pikit", "deployment-fake", "index.ts");
-  writeFileSync(entry, "export async function up() {}\n");
-  expect((await runCli(["deploy", "install"], dir)).err).toContain("deployment-fake does not export deploy()");
-
-  writeFileSync(entry, 'export async function deploy(args: Record<string, unknown>) {\n  await Bun.write("deploy-args.json", JSON.stringify({ ...args, signal: args.signal instanceof AbortSignal }));\n}\n');
-  const run = await runCli(["deploy", "install", "--interval", "30"], dir);
-  expect(run.code).toBe(0);
-  expect(JSON.parse(readFileSync(join(dir, "deploy-args.json"), "utf8"))).toEqual({ cwd: realpathSync(dir), action: "install", cli: [process.execPath, MAIN], intervalSeconds: 30, signal: true });
 });
 
 test("new with no directory asks only on a terminal; the presets it offers have titles", async () => {

@@ -29,6 +29,21 @@ test("up builds, starts detached and waits for the healthcheck", async () => {
   expect(calls).toEqual([{ command: ["docker", "compose", "up", "--detach", "--build", "--wait"], cwd: "/srv/my-agent", capture: false }]);
 });
 
+test("with self-improvement on a server (proposals-local installed), every command enables the deployer's profile", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "pikit-commands-"));
+  dirs.push(dir);
+  writeFileSync(join(dir, "pikit.json"), JSON.stringify({ components: { "proposals-local": {} } }));
+  const { calls, run } = recorder();
+  await up({ cwd: dir, run });
+  await down({ cwd: dir, run });
+  await logs({ cwd: dir, run });
+  expect(calls.map((call) => call.command.join(" "))).toEqual([
+    "docker compose --profile self-improvement up --detach --build --wait",
+    "docker compose --profile self-improvement down",
+    "docker compose --profile self-improvement logs --no-log-prefix",
+  ]);
+});
+
 /**
  * A project whose `tool-a` has a before-deploy hook, as `pikit add` records it in pikit.json: it writes
  * `seed.ts` in its own directory from its config and `.env`, or reports `TOOL_A_PROBLEM` when set.

@@ -24,10 +24,34 @@ test("the dashboard's copy of the admin API's types is admin-api's api.ts, byte 
   expect(read("src/lib/admin-api.ts")).toBe(original);
 });
 
-test("admin-proposals' view keeps its component's api.ts as its types.ts, byte for byte", () => {
-  const component = join(REPO, "registry/components/admin-proposals");
+/** Each `export interface` / `export type` of `text` by name, its comments left out and its spacing normalized. */
+function declarations(text: string): Map<string, string> {
+  const code = text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+  const found = new Map<string, string>();
+  for (const match of code.matchAll(/export (interface|type) (\w+)/g)) {
+    let depth = 0;
+    let end = match.index;
+    for (; end < code.length; end++) {
+      const char = code[end];
+      if (char === "{") depth++;
+      else if (char === "}" && --depth === 0 && match[1] === "interface") break;
+      else if (char === ";" && depth === 0 && match[1] === "type") break;
+    }
+    found.set(match[2] as string, code.slice(match.index, end + 1).replace(/\s+/g, " ").replace(/;\s*}/g, " }").replace(/{\s+/g, "{ "));
+  }
+  return found;
+}
 
-  expect(readFileSync(join(component, "view/types.ts"), "utf8")).toBe(readFileSync(join(component, "files/src/pikit/admin-proposals/api.ts"), "utf8"));
+test("admin-proposals' view keeps the proposals contract's shapes and its api.ts' bodies as its types.ts", () => {
+  const component = join(REPO, "registry/components/admin-proposals");
+  const sources = new Map([
+    ...declarations(readFileSync(join(REPO, "packages/contracts/src/proposals.ts"), "utf8")),
+    ...declarations(readFileSync(join(component, "files/src/pikit/admin-proposals/api.ts"), "utf8")),
+  ]);
+  const copy = declarations(readFileSync(join(component, "view/types.ts"), "utf8"));
+
+  for (const name of ["ProposalList", "ProposalDetail", "ProposalsStatus", "ApproveBody", "ApproveResponse"]) expect(copy.has(name)).toBe(true);
+  for (const [name, declaration] of copy) expect([name, declaration]).toEqual([name, sources.get(name) ?? "missing"]);
 });
 
 test("its npm packages are pinned to exact versions, so every project builds the same dashboard", () => {

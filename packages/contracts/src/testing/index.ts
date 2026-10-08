@@ -66,3 +66,6 @@ export { createAgentCommandConformance } from "./agent-command.ts";
 
 export type { ModelCompleteFixture } from "./model-complete.ts";
 export { createModelCompleteConformance } from "./model-complete.ts";
+
+export type { ProposalsFixture } from "./proposals.ts";
+export { createProposalsConformance } from "./proposals.ts";

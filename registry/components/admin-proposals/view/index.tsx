@@ -1,11 +1,12 @@
 /**
- * admin-proposals' view (SPEC §6): the changes the agent proposes to itself, as pull requests from
- * `pikit/self/*`, open first with their checks, then the last merged or rejected; and a page per
- * proposal (`proposal.tsx`) to read it and approve or reject it. It reads the component's own routes,
- * `/admin/api/admin-proposals/*`, slowly: each read asks GitHub.
+ * admin-proposals' view (SPEC §6): the changes the agent proposes to itself, branches under
+ * `pikit/self/`, open first with their checks, then the last approved, merged, failed or rejected; and a
+ * page per proposal (`proposal.tsx`) to read it and approve or reject it. It reads the component's own
+ * routes, `/admin/api/admin-proposals/*`, slowly: each read may ask GitHub. Where proposals live (a
+ * repository on GitHub, or on this server) is the `proposals` provider's, which the list names.
  *
- * Until self-improvement is connected (no repository, or no read token: `503 not_connected`), the page
- * says what is missing and how to connect it, which the Settings dialog's Self-improvement does.
+ * Until self-improvement is set up (`503 not_connected`), the page says what is missing, and the
+ * Settings dialog's Self-improvement shows each part.
  */
 
 import { Activity, Clock, GitBranch, GitPullRequest, User } from "iconoir-react";
@@ -27,34 +28,19 @@ import type { ProposalList, ProposalState, ProposalSummary } from "./types";
 
 type Filter = "all" | ProposalState;
 
-/** What the page shows before self-improvement is connected: what is missing, and the steps. */
+/** What the page shows before self-improvement is set up: what is missing, and where to see each part. */
 function ConnectState({ missing }: { missing: string }) {
-  const steps = [
-    ["The repository", "Open Settings (the sidebar's foot) → Self-improvement, and set your project's GitHub repository, owner/name."],
-    ["Two GitHub tokens, as secrets", "GITHUB_TOKEN for the agent, PIKIT_MERGE_TOKEN for your approvals: fine-grained, this repository only. Self-improvement lists their permissions and where to add them (on Cloudflare, the Worker's Variables and Secrets)."],
-    ["A ruleset on GitHub", "Protect the default branch: a pull request required, the checks required, no force push."],
-  ];
   return (
     <Page
       eyebrow="Proposals"
-      title="Connect self-improvement"
-      description="Your agent can propose changes to itself as GitHub pull requests, which you approve or reject here. It is off until it is connected to your project's repository."
+      title="Set up self-improvement"
+      description="Your agent can propose changes to itself, which you approve or reject here. It is off until it is set up."
     >
       <Section title="What is missing">
         <p className="text-[13px] text-ink-2 [overflow-wrap:anywhere]">{missing}</p>
       </Section>
-      <Section title="How to connect it">
-        <ol className="flex flex-col gap-3">
-          {steps.map(([title, text], i) => (
-            <li key={title} className="flex gap-3">
-              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-inset font-mono text-[12px] text-ink-2">{i + 1}</span>
-              <div className="min-w-0 text-[13px] leading-relaxed text-ink-2">
-                <div className="text-[14px] text-ink">{title}</div>
-                {text}
-              </div>
-            </li>
-          ))}
-        </ol>
+      <Section title="Where to see each part">
+        <p className="text-[13px] leading-relaxed text-ink-2">Open Settings (the sidebar's foot) → Self-improvement: it checks each part now and says what to do.</p>
       </Section>
     </Page>
   );
@@ -88,8 +74,8 @@ function ProposalsPage() {
       title: (row) => row.title,
       cell: (row) => (
         <>
-          <span className="mr-1.5 shrink-0 font-mono text-[12px] text-ink-3">#{row.number}</span>
-          <Link to={pagePath(BASE, String(row.number))} className="records-name hover:underline">
+          {row.number !== undefined && <span className="mr-1.5 shrink-0 font-mono text-[12px] text-ink-3">#{row.number}</span>}
+          <Link to={pagePath(BASE, row.id)} className="records-name hover:underline">
             {row.title}
           </Link>
         </>
@@ -122,11 +108,18 @@ function ProposalsPage() {
       title={open === 0 ? "Nothing waiting for you" : `${open} ${open === 1 ? "change waits" : "changes wait"} for you`}
       description={
         <>
-          The changes your agent proposes to itself: pull requests from <ValuePill>{data.branchPrefix}…</ValuePill> on{" "}
-          <a className="underline decoration-line-strong underline-offset-2 hover:text-ink" href={`https://github.com/${data.repository}/pulls`} target="_blank" rel="noreferrer">
-            {data.repository}
-          </a>
-          . Open one to read its description, its diff and its checks, then approve it (merged, then deployed) or reject it (closed).
+          The changes your agent proposes to itself: branches <ValuePill>{data.branchPrefix}…</ValuePill> of{" "}
+          {data.url === undefined ? (
+            data.where
+          ) : (
+            <a className="underline decoration-line-strong underline-offset-2 hover:text-ink" href={data.url} target="_blank" rel="noreferrer">
+              {data.where}
+            </a>
+          )}
+          .{" "}
+          {data.checksRun === "before-approval"
+            ? "Open one to read its description, its diff and its checks, then approve it (merged, then deployed) or reject it."
+            : "Open one to read its description and its diff, then approve it (the deployer merges it, runs the checks, deploys it and rolls back if it is unhealthy) or reject it."}
         </>
       }
     >
@@ -141,7 +134,9 @@ function ProposalsPage() {
             onChange={setFilter}
             filters={[
               { key: "open", label: "Open", tone: "blue", count: open },
+              { key: "approved", label: "Approved", tone: "orange", count: count("approved") },
               { key: "merged", label: "Merged", tone: "green", count: count("merged") },
+              { key: "failed", label: "Failed", tone: "red", count: count("failed") },
               { key: "closed", label: "Rejected", tone: "neutral", count: count("closed") },
               { key: "all", label: "All", count: data.proposals.length },
             ]}
@@ -152,13 +147,13 @@ function ProposalsPage() {
           label="The agent's proposals"
           columns={columns}
           rows={rows}
-          rowKey={(row) => String(row.number)}
+          rowKey={(row) => `${row.id}#${row.state}`}
           empty={
             data.proposals.length === 0 ? (
               <EmptyState
                 icon={<GitPullRequest />}
                 title="No proposal yet"
-                hint={`Ask your agent for a change to itself: it proposes it as a pull request from a branch ${data.branchPrefix}…, which shows here.`}
+                hint={`Ask your agent for a change to itself: it proposes it as a branch ${data.branchPrefix}…, which shows here.`}
               />
             ) : (
               <EmptyState icon={<GitPullRequest />} title={`No proposal is ${filter === "closed" ? "rejected" : filter}`} hint="Pick another filter to see the others." />
@@ -177,6 +172,6 @@ export default defineView({
   order: 40,
   pages: [
     { path: BASE, component: ProposalsPage, fill: true },
-    { path: `${BASE}/:number`, component: ProposalPage, fill: true },
+    { path: `${BASE}/:id`, component: ProposalPage, fill: true },
   ],
 });
