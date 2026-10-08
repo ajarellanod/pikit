@@ -41,8 +41,9 @@ choose:
     multiple: true
 # What `pikit new` offers to add, several at once, with the dashboard (`--ui`): each by its `title`,
 # `--with <component>` in a script. tool-fetch and tool-websearch-brave are installed above already.
-# admin-proposals (self-improvement) starts dormant: it is connected after deploying, from the
-# dashboard's Settings → Self-improvement or `pikit configure`.
+# admin-proposals (self-improvement) starts dormant: it is connected after deploying, with github-app
+# (its group): the dashboard's Settings → GitHub → Connect creates a GitHub App in the operator's
+# account and installs it on the repository, and the app mints its own tokens.
 features:
   - router-rules
   # A group: agents made and edited in the dashboard, and the routing rules that send a channel, chat or
@@ -51,4 +52,4 @@ features:
   - [agents-live, router-rules, settings-store]
   - tool-mcp
   - health-registry
-  - admin-proposals
+  - [admin-proposals, github-app]

@@ -63,7 +63,8 @@ export const TEMPLATES: Record<string, Template> = {
     preset: "telegram-cloudflare",
     target: "durable",
     ui: true,
-    // Self-improvement, dormant: connected after deploying, from the dashboard's Settings, never in the form.
+    // Self-improvement, dormant (the group admin-proposals and github-app): connected after deploying,
+    // from the dashboard's Settings → GitHub, never in the form.
     with: ["admin-proposals"],
     bun: "1.4.2",
     name: "pikit-telegram-bot",
@@ -103,8 +104,8 @@ export const TEMPLATES: Record<string, Template> = {
     ],
     notAsked: {
       TELEGRAM_ALLOWED_USERS: "nobody knows their Telegram user id before deploying: the owner logs in with TELEGRAM_PASSWORD instead",
-      GITHUB_TOKEN: "self-improvement is connected after deploying, from the dashboard's Settings → Self-improvement (the repository the button made is not known before)",
-      PIKIT_MERGE_TOKEN: "self-improvement is connected after deploying, from the dashboard's Settings → Self-improvement",
+      GITHUB_TOKEN: "never needed here: GitHub is connected after deploying, from the dashboard's Settings → GitHub (github-app mints its own tokens)",
+      PIKIT_MERGE_TOKEN: "never needed here: GitHub is connected after deploying, from the dashboard's Settings → GitHub",
     },
     bindings: {
       CONVERSATION: "One Durable Object per Telegram chat, SQLite-backed: its conversations (pi-durable) and the agent's workspace. Nothing to set.",

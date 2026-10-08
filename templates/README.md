@@ -33,7 +33,8 @@ It needs what `pikit new` needs (Bun >= 1.4, the npm registry) and npm. It:
      `cloudflare.bindings` describes each one, and the `CONVERSATION` Durable Object, for the setup
      page. pikit's `.env.example` is removed, so there is one list: it also names
      `TELEGRAM_ALLOWED_USERS`, which the button does not ask (the owner logs in with the password
-     instead), and `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` (self-improvement, connected later);
+     instead), and `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` (never needed: GitHub is connected from
+     the dashboard);
    - `package.json` gets a `description` and the `deploy` script, which the button pre-fills as the
      deploy command: `node src/pikit/deployment-cloudflare/deploy.mjs
      src/pikit/channel-telegram-webhook/setup-webhook.mjs`. No `build` script: wrangler bundles;
@@ -88,13 +89,14 @@ its webhook with its own secret (the build has none). Besides, each version chec
 first HTTPS request (`channel-telegram-webhook`'s README, "Registering the webhook"), and the
 template's README tells its user to open `/telegram/setup` if the build did not.
 
-**Self-improvement, connected after deploying.** The template has `admin-proposals` (the preset's
-feature, `--with`), dormant: the button cannot know the repository it is about to create, and its two
-GitHub tokens are not something to ask of a person deploying a bot for the first time. So the form
-stays short (`notAsked` says why for each token), the App starts without them, and the operator
-connects it from the dashboard's Settings → Self-improvement: the repository as a setting, the
-tokens as Worker secrets, the ruleset on GitHub, each checked live. A CLI user does the same with
-`pikit configure`.
+**Self-improvement, connected after deploying.** The template has `admin-proposals` and `github-app`
+(the preset's feature group, `--with admin-proposals`), dormant: the button cannot know the repository
+it is about to create, and a GitHub token is not something to ask of a person deploying a bot for the
+first time. So the form stays short (`notAsked` says why for each token) and the App starts without
+them. The operator connects GitHub from the dashboard's Settings → GitHub in two clicks: a GitHub App
+created in their account from a manifest, installed on the repository the button made; the app then
+mints its own short-lived tokens (github-app's README). Workers Builds exposes no GitHub token of its
+own (its GitHub App is Cloudflare's), so the bot needs its own access.
 
 ## Checking one
 
