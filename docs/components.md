@@ -113,7 +113,8 @@ A name is `<kind>-<rest>`, and the kind must be one the kit knows (`KINDS` in
 
 `channel`, `router`, `storage`, `workspace`, `execution`, `scheduler`, `deployment`, `tool`, `policy`,
 `admin`, `inbound`, `outbound`, `log`, `conversations`, `credentials`, `provider`, `runtime`,
-`secrets`, `server`, `mailbox`, `wakeups`, `platform`, `extension`, `health`, `settings`, `agents`.
+`secrets`, `server`, `mailbox`, `wakeups`, `platform`, `extension`, `health`, `settings`, `agents`,
+`github`.
 
 The kind carries rules: only `admin-*` may read `APP_DESCRIPTION`, only `deployment-*` is delegated
 `up`/`down`/`logs`/`status` and is never listed in `pikit.config.ts`.

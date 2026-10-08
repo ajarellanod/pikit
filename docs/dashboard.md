@@ -106,7 +106,8 @@ rebuild after a change; `bun run dev` in `src/dashboard/` serves it with hot rel
 `http://localhost:5173/admin/` against `PIKIT_URL`.
 
 Every response of the files carries a Content-Security-Policy (`default-src 'self'`, no inline
-script; images also `data:` and `blob:`).
+script; images also `data:` and `blob:`; forms post only to itself and to `https://github.com`, where
+github-app's Connect sends its manifest).
 
 ## Views
 
@@ -145,13 +146,16 @@ The Settings dialog (opened from the sidebar's foot) has the dashboard's own sec
 per installed component with `"settings": "settings"` in `component.json`, copied to
 `src/dashboard/src/settings/<name>/` as a view is (`defineSettings`, `src/lib/settings.ts`), shown when
 its `requires` are provided. Its values are the component's settings (settings-store's
-`/admin/api/settings/:component`). A section may open another (`useOpenSettingsSection`).
+`/admin/api/settings/:component`), or its own routes. A section may open another
+(`useOpenSettingsSection`), and the page's URL may name one: `/admin/?settings=<id>` opens the dialog
+at it (github-app's setup comes back to `/admin/?settings=github-app`).
 
 | Section | Component | `requires` | What |
 |---|---|---|---|
 | Agent | router-basic | `settings` | the default agent; any code agent's prompt, model and tools (runtime-pi's overrides) |
 | Agents | agents-live | `settings`, `agent.directory` | create, edit, remove live agents; the code's listed read-only, linking to Agent |
 | Routing | router-rules | `settings` | the ordered rules: channel, chat, sender; an agent (the code's or a live one) or deny with a reason |
+| GitHub | github-app | `github` | Connect GitHub (a GitHub App created from a manifest and installed on the repository), the App, its installation and repository, the last token minted, Disconnect; its own routes (`/admin/api/github-app/*`), not settings |
 
 A change in Agents reads `/admin/api/agents` again, so the new-conversation picker offers a new live
 agent at once.

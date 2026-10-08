@@ -42,7 +42,9 @@ Three pieces, each a component or a file of the kit, each removable (P3):
    `write`, `edit`, `bash`):
    - **Cloudflare:** `execution-do` already has `git clone` (GitHub over HTTPS), `commit`, `push`
      and `pr`, pushes only to `git.pushRepositories` on branches under `pikit/self/`, and keeps the
-     token out of the shell. It cannot run `bun test` (no processes): checks run in CI (below).
+     token out of the shell. With `github-app` installed (below) the connected repository is one more
+     push repository and its short-lived token the only one (`github`). It cannot run `bun test` (no
+     processes): checks run in CI (below).
    - **Server:** `execution-local` with `bash`, in a checkout under the app's volume
      (`.pikit/workspace`). Its `git` is execution-do's, copied (built): a program first on the
      commands' `PATH` asks trusted code in the app, with the same fences, and never holds the token;
@@ -91,6 +93,22 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      origin` written to the config, the tokens to `.env`, the ruleset explained), through a new
      `io.setConfig`.
 
+**GitHub on Cloudflare: a GitHub App, one credential. Built:** `github-app` and the `github`
+contract (the connected repository, a short-lived token for it). Workers Builds exposes no GitHub
+token (its GitHub App is Cloudflare's), so the bot needs its own access, and pasting tokens into
+Cloudflare is the step operators get wrong. The dashboard's Settings → GitHub → Connect creates a
+GitHub App in the operator's own account from a manifest (private, no webhook; contents and pull
+requests write, checks and statuses read) and installs it on the bot's repository: two clicks. The
+app stores its private key sealed (a key derived from `PIKIT_ADMIN_TOKEN`) in one object, and mints
+installation tokens for that repository alone. **One credential, not two**: on Cloudflare the agent
+never sees a token (only trusted code asks `github`; its shell has no processes; its pushes are fenced
+to `pikit/self/*`; merging is only the operator-authenticated admin route's), so one
+repository-scoped credential is enough, and a ruleset on the default branch is an extra layer, not a
+requirement. Users of `github`: execution-do's `git` and extension-pikit-self (the steward is told
+its repository). **Left:** the proposals' GitHub calls (`proposals-github`, split out of
+admin-proposals) move onto `github` too, and `PIKIT_MERGE_TOKEN` and its "same token in both" checks
+go; on a server, `GITHUB_TOKEN` stays the fallback.
+
 **Who. Built:** the steward is the agent marked so in its `defineAgent` (`steward: true`), one per
 project: runtime-pi refuses to start with two, and extension-pikit-self refuses an agent that names
 `pikit-self` and is not the steward. The starter agent is the steward, and the dashboard marks it
@@ -126,8 +144,9 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 2. Proposals on Cloudflare: the project's CI workflow, the Proposals view and its Approve and
    Reject routes (**built**: `admin-proposals`, which works on a server too), and connecting them
    after deploying (**built**: the Settings section, the status route, the `pikit configure` step).
-   The template has `admin-proposals` (the `telegram-cloudflare` preset's feature, `--with`),
-   dormant: the button's form is unchanged, `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` are `notAsked`.
+   The template has `admin-proposals` with `github-app` (the `telegram-cloudflare` preset's feature
+   group, `--with admin-proposals`), dormant: the button's form is unchanged, `GITHUB_TOKEN` and
+   `PIKIT_MERGE_TOKEN` are `notAsked`, and GitHub is connected from Settings → GitHub.
    Left: the ruleset, which the operator creates on GitHub (the section says how).
 3. Rollback on Cloudflare (**built**): every deploy, Workers Builds' (the template's deploy command,
    `deployment-cloudflare`'s `deploy.mjs`) and `pikit up`'s, waits for `/health` from the new
