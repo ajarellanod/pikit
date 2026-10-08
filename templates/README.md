@@ -33,8 +33,7 @@ It needs what `pikit new` needs (Bun >= 1.4, the npm registry) and npm. It:
      `cloudflare.bindings` describes each one, and the `CONVERSATION` Durable Object, for the setup
      page. pikit's `.env.example` is removed, so there is one list: it also names
      `TELEGRAM_ALLOWED_USERS`, which the button does not ask (the owner logs in with the password
-     instead), and `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` (never needed: GitHub is connected from
-     the dashboard);
+     instead);
    - `package.json` gets a `description` and the `deploy` script, which the button pre-fills as the
      deploy command: `node src/pikit/deployment-cloudflare/deploy.mjs
      src/pikit/channel-telegram-webhook/setup-webhook.mjs`. No `build` script: wrangler bundles;
