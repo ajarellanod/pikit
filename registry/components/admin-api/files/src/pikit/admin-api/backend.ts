@@ -180,13 +180,13 @@ export interface LocalContracts {
   commands(): CommandLookup;
 }
 
-/** An agent definition as the API says it: its name, its model, the names of the tools it is defined with. */
-export function agentOf(name: string, definition: { model?: unknown; tools?: readonly unknown[] } | undefined): ApiAgent {
+/** An agent definition as the API says it: its name, its model, the names of the tools it is defined with, whether it is the steward. */
+export function agentOf(name: string, definition: { model?: unknown; tools?: readonly unknown[]; steward?: unknown } | undefined): ApiAgent {
   const tools = (definition?.tools ?? []).flatMap((tool) => {
     const named = typeof tool === "string" ? tool : (tool as { name?: unknown } | null)?.name;
     return typeof named === "string" ? [named] : [];
   });
-  return { name, model: typeof definition?.model === "string" ? definition.model : "", tools };
+  return { name, model: typeof definition?.model === "string" ? definition.model : "", tools, steward: definition?.steward === true };
 }
 
 /** The App's agents: the keys of `agent.definition`. */

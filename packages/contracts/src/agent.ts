@@ -97,6 +97,13 @@ export interface AgentDefinition<S extends object = object> {
   name: string;
   /** `provider/modelId`. */
   model: string;
+  /**
+   * Whether it is the project's steward (SPEC §6): its main agent, the only one that knows what the
+   * project is made of (the `pikit-self` extension) and may be asked, by its operators, to change it.
+   * At most one agent of an App is: runtime-pi refuses to start with two, and extension-pikit-self
+   * refuses an agent that names `pikit-self` and is not the steward. Absent: `false`.
+   */
+  steward?: boolean;
   systemPrompt?: string;
   /**
    * The agent's tools, and only these. A string names a tool that a `tool-*` component provides
@@ -150,6 +157,9 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
   }
   if (!MODEL.test(definition.model)) {
     throw new Error(`agent "${definition.name}": model "${definition.model}" must be "provider/modelId"`);
+  }
+  if (definition.steward !== undefined && typeof definition.steward !== "boolean") {
+    throw new Error(`agent "${definition.name}": steward must be true or false`);
   }
   const named = (definition.tools ?? []).filter((tool): tool is string => typeof tool === "string");
   for (const [index, name] of named.entries()) {

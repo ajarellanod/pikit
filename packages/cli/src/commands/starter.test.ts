@@ -33,6 +33,11 @@ test("the starter agent's file carries that prompt, quoted for TypeScript", () =
   expect(file).not.toContain("HTTP API");
 });
 
+test("the starter agent is the project's steward, with pikit-self or without it", () => {
+  expect(agent([], "faux/echo")).toContain('  model: "faux/echo",\n  steward: true,\n');
+  expect(agent(["read"], "faux/echo", [], "server", ["pikit-self"])).toContain("  steward: true,\n");
+});
+
 test("the starter agent names pikit-self when extension-pikit-self is installed, and no extension otherwise", () => {
   expect(starterExtensions(["runtime-pi", "extension-pikit-self", "extension-house-rules"])).toEqual(["pikit-self"]);
   expect(starterExtensions(["runtime-pi"])).toEqual([]);

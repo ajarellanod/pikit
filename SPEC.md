@@ -459,7 +459,9 @@ made if users need it.
 
 **Who.** One agent per project is the steward: the main agent, declared so in its `defineAgent`.
 Only it gets the self-knowledge and the self-change tools. Only senders trusted as its operators may
-ask it to change itself.
+ask it to change itself: those who reach it through a door that admits only the project's owners
+(the dashboard, a channel's allowed users or token); a channel that serves others routes them to
+another agent.
 
 **Knowing itself.**
 - `pikit-self`, an agent extension (`extension-pikit-self`), gives the agents that name it one

@@ -13,6 +13,10 @@
  *    extensions). It reads them to describe them, never to decide anything: K13 lets only the
  *    dashboard's components and this one read the description.
  *
+ * Only the steward names it (SPEC §6: `steward: true` in its `defineAgent`, one per project): the agent
+ * that knows what the project is made of is the one its operators ask to change it. `start` refuses an
+ * agent that names it and is not the steward; runtime-pi refuses two stewards.
+ *
  * The text is built once, in `start`, so the section is the same on every request and the provider's
  * prompt cache stays warm. Live state (health, deliveries, proposals) is not in it: that is the
  * operator's, in the dashboard.
@@ -56,22 +60,40 @@ export async function projectKitCommit(): Promise<string | undefined> {
   }
 }
 
-/** An agent as the section says it: its name, its model, the names of its tools and extensions. */
+/** An agent as the section says it: its name, its model, the names of its tools and extensions, whether it is the steward. */
 export interface AgentSummary {
   name: string;
   model: string;
   tools: string[];
   extensions: string[];
+  steward: boolean;
 }
 
 /** `definition` (an `agent.definition`) as the section says it. */
-export function agentSummary(name: string, definition: { model?: unknown; tools?: readonly unknown[]; extensions?: readonly unknown[] } | undefined): AgentSummary {
+export function agentSummary(
+  name: string,
+  definition: { model?: unknown; tools?: readonly unknown[]; extensions?: readonly unknown[]; steward?: unknown } | undefined,
+): AgentSummary {
   const tools = (definition?.tools ?? []).flatMap((tool) => {
     const named = typeof tool === "string" ? tool : (tool as { name?: unknown } | null)?.name;
     return typeof named === "string" ? [named] : [];
   });
   const extensions = (definition?.extensions ?? []).filter((extension): extension is string => typeof extension === "string");
-  return { name, model: typeof definition?.model === "string" ? definition.model : "", tools, extensions };
+  return { name, model: typeof definition?.model === "string" ? definition.model : "", tools, extensions, steward: definition?.steward === true };
+}
+
+/**
+ * Why `agents` may not start with `pikit-self`, or `undefined`: an agent names it and is not the
+ * steward. The section is the steward's: what the project is made of and how it is changed, for the
+ * agent its operators ask to change it.
+ */
+export function stewardProblem(agents: readonly AgentSummary[]): string | undefined {
+  const agent = agents.find((each) => !each.steward && each.extensions.includes(PIKIT_SELF));
+  if (agent === undefined) return undefined;
+  return (
+    `extension-pikit-self: agent "${agent.name}" names "${PIKIT_SELF}" and is not the steward; only the steward ` +
+    `(\`steward: true\` in its defineAgent, one per project) knows itself: mark it so, or take "${PIKIT_SELF}" out of its extensions`
+  );
 }
 
 /** What runs now: the App's components, pipelines and config (secrets redacted), and its agents. */
@@ -101,7 +123,7 @@ export function compositionText(description: AppDescription, agents: readonly Ag
   for (const agent of agents) {
     const tools = agent.tools.length > 0 ? agent.tools.join(", ") : "none";
     const extensions = agent.extensions.length > 0 ? `; extensions ${agent.extensions.join(", ")}` : "";
-    lines.push(`- ${agent.name}: model ${agent.model}; tools ${tools}${extensions}`);
+    lines.push(`- ${agent.name}${agent.steward ? " (the steward)" : ""}: model ${agent.model}; tools ${tools}${extensions}`);
   }
 
   // Config holds no secret (K13); one put there by mistake is still never shown.
@@ -141,6 +163,8 @@ export default defineComponent({
           .keys()
           .sort()
           .map((name) => agentSummary(name, definitions.get(name)));
+        const problem = stewardProblem(agents);
+        if (problem !== undefined) throw new Error(problem);
         const description = ctx.value(APP_DESCRIPTION);
         text = pikitSelfText(await projectKitCommit(), description === undefined ? undefined : compositionText(description, agents));
       },

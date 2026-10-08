@@ -274,6 +274,7 @@ export function starterTools(tools: readonly string[], target = "server"): strin
 /**
  * The starter agent's file. It names `starterTools(installed, target)`; one installed and not named
  * is said in its comment, with why. It names `extensions` (`starterExtensions`) when there are some.
+ * It is the steward (SPEC §6), so it may name `pikit-self`.
  */
 export function agent(installed: string[], model = starterModel(), channels: readonly StarterChannel[] = [], target = "server", extensions: readonly string[] = []): string {
   const tools = starterTools(installed, target);
@@ -290,11 +291,14 @@ export function agent(installed: string[], model = starterModel(), channels: rea
  * Your agent. Pi runs the loop; this file says who the agent is. It names the installed tools it may
  * use (\`tool-*\` components) and the agent extensions it runs with (\`extension-*\`); installing either
  * gives it to no agent that does not name it. Change the model, the prompt, the tools and the
- * extensions here. \`defineAgent({ state, prepare })\` changes them per run.${unnamed}
+ * extensions here. \`defineAgent({ state, prepare })\` changes them per run. It is the project's
+ * steward (\`steward: true\`, one per project): the agent that may know itself (\`pikit-self\`) and that
+ * its operators ask to change the project.${unnamed}
  */
 export default defineAgent({
   name: "${STARTER_AGENT}",
   model: "${model}",
+  steward: true,
   systemPrompt: [
     ${JSON.stringify(`${introduction(channels)} Answer briefly and plainly.`)},${workspace}
   ].join(" "),

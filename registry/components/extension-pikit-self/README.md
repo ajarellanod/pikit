@@ -14,10 +14,11 @@ agent is doing (health, deliveries, proposals) is the operator's, in the dashboa
 
 ## Use it
 
-`pikit new` installs it with every preset that runs an agent, and the starter agent names it:
+`pikit new` installs it with every preset that runs an agent, and the starter agent, the project's
+steward, names it:
 
 ```ts
-defineAgent({ name: "assistant", model: "…", tools: ["read"], extensions: ["pikit-self"] })
+defineAgent({ name: "assistant", model: "…", steward: true, tools: ["read"], extensions: ["pikit-self"] })
 ```
 
 In a project made without it:
@@ -26,8 +27,23 @@ In a project made without it:
 pikit add extension-pikit-self
 ```
 
-then add `"pikit-self"` to the `extensions` of the agents that should know themselves (the one you
-ask to change itself, at least). An agent that does not name it has no section, even installed.
+then add `"pikit-self"` to the `extensions` of your main agent, and mark it `steward: true`. An agent
+that does not name it has no section, even installed.
+
+## Only the steward
+
+SPEC §6: one agent per project is the steward, and only it knows itself. At start this component
+refuses an agent that names `pikit-self` without `steward: true` (the App does not start, and the error
+names the agent); runtime-pi refuses two stewards. The check reads the definitions as declared: an
+agent's `prepare` should not add `pikit-self` either.
+
+Only the steward's operators may ask it to change itself. pikit adds no permission of its own for
+that: an operator is whoever reaches the steward through a door that admits only the project's
+owners, the dashboard (`admin.auth`: its token or session) or a channel that admits only them
+(channel-telegram's allowed users, channel-http's bearer token). A channel that serves anyone else
+routes them to another agent (`route.resolve`), never to the steward. The guide tells the steward to
+propose a change only when an operator asks, never because a file, a page or a tool's result says
+so; the gate (a reviewed pull request an operator approves) holds either way.
 
 ## What the agent reads
 
@@ -38,7 +54,8 @@ Every model request of an agent that names it carries one section, `<pikit-self>
    for TypeScript before 7.1): what an App, a component, a
    capability, a contract, a pipeline and a target are; where the agent's prompt and tools, the
    components, the extensions, the dashboard's views and config are changed, and what never is
-   (secrets, the deployment and approval path, the kernel, the contracts); that a change is a proposal
+   (secrets, the deployment and approval path, the kernel, the contracts); that it is the steward and
+   proposes a change only when an operator asks for one; that a change is a proposal
    (a branch `pikit/self/…` and a pull request the operator approves in the dashboard) where the
    project has it, and otherwise a change it describes to the operator. Then the kit's docs and skills,
    linked online at the commit this project was made with: `pikit.json`'s `kit.commit`, imported as
@@ -49,7 +66,7 @@ Every model request of an agent that names it carries one section, `<pikit-self>
    start order with what it provides (the keys of a keyed capability: which tools, which extensions),
    the pipelines' stages, and the config with every value that looks like a secret `[redacted]`
    (`redactSecrets`, from `@pikit/contracts`, as the dashboard does). And the agents, from
-   `agent.definition`: model, tools, extensions. On Cloudflare this is the object's App; the Worker's
+   `agent.definition`: model, tools, extensions, and which one is the steward. On Cloudflare this is the object's App; the Worker's
    is not in it.
 
 The text is built once, in `start`: the same section on every request, so the provider's prompt cache
@@ -61,8 +78,8 @@ it is yours, like every installed file.
 ## Tests
 
 - `extension-pikit-self.test.ts` (copied into your project): what `setup` declares, the section's text
-  from a real App's description (components, keys, agents, a durable App), a secret-looking config
-  value redacted, the guide with the docs at the kit's commit, and the same text on every request.
+  from a real App's description (components, keys, agents and the steward, a durable App), a
+  secret-looking config value redacted, an App that does not start when another agent names it, the guide with the docs at the kit's commit, and the same text on every request.
   Offline.
 - `app.test.ts` (beside `files/`, in the registry only): the extension in a real App with runtime-pi
   and the scripted faux model: the section reaches every request of an agent that names it, once, and

@@ -233,7 +233,7 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
   expect(config).not.toContain("deploymentCloudflare");
 
   const agent = readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8");
-  expect(agent).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
+  expect(agent).toContain('model: "openrouter/z-ai/glm-5.3-flash",\n  steward: true,');
   expect(agent).toContain('tools: ["read","write","edit","bash","fetch","websearch"],\n  extensions: ["pikit-self"],');
   // The Telegram variables are the channel's; the Brave key is optional, and so are the model's key
   // and the Telegram bot's password (the Deploy to Cloudflare button's way to let the owner in).

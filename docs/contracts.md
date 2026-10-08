@@ -97,8 +97,11 @@ Durable Object, the object's root conversation first).
 
 ### `agent.definition` (keyed, provided by the project)
 
-One `AgentDefinition` per agent name: `{ name, model: "provider/modelId", systemPrompt?, tools?,
-extensions?, state?, prepare?(state, ctx) }`, checked by `defineAgent`. `tools` names `agent.tool`
+One `AgentDefinition` per agent name: `{ name, model: "provider/modelId", steward?, systemPrompt?,
+tools?, extensions?, state?, prepare?(state, ctx) }`, checked by `defineAgent`. `steward: true` marks
+the project's main agent, the one its operators may ask to change it (SPEC §6): at most one per App
+(runtime-pi refuses to start with two), and only it may name `pikit-self` (extension-pikit-self
+refuses to start otherwise). `tools` names `agent.tool`
 keys or holds tool objects; `extensions` names `agent.extension` keys. An agent gets only what it
 names. `prepare` is pure and synchronous: from the conversation's state it returns the fields that
 change for this run. The project provides agents (`src/extensions/agents.ts`); runtime-pi refuses to

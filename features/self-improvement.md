@@ -71,9 +71,15 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      the server with the previous image. A change of Durable Object classes is marked as not
      reversible and needs its own approval.
 
-**Who.** The steward is the agent marked so in its `defineAgent` (`steward: true`, one per project).
-Only it is given `pikit-self` and the git workspace. Only operators (the dashboard's,
-or a chat's owner the channel trusts as one) may ask it to change itself.
+**Who. Built:** the steward is the agent marked so in its `defineAgent` (`steward: true`), one per
+project: runtime-pi refuses to start with two, and extension-pikit-self refuses an agent that names
+`pikit-self` and is not the steward. The starter agent is the steward, and the dashboard marks it
+(`/admin/api/agents`' `steward`, the Composition view's Agents). The git workspace's tools are the
+steward's by its definition naming them, not by a check. Only operators may ask it to change
+itself, with no permission of pikit's own: whoever reaches it through a door that admits only the
+project's owners (the dashboard's `admin.auth`, a channel's allowed users or bearer token); a
+channel that serves others routes them to another agent. Its guide (`pikit-self.md`) tells it to
+propose a change only when an operator asks.
 
 **What it may change.** SPEC §6: its definition (prompt, tools, skills), extensions, components in
 `src/pikit/`, the dashboard, config values. Never secrets, the deployment and approval path, the

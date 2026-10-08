@@ -47,11 +47,11 @@ export const auth = defineComponent({
   },
 });
 
-/** The App's agents (`agent.definition`): `assistant`, without tools; `searcher`, with `websearch` and a tool object of its own. */
+/** The App's agents (`agent.definition`): `assistant`, the steward, without tools; `searcher`, with `websearch` and a tool object of its own. */
 export const agents = defineComponent({
   name: "agents-test",
   setup: (pikit) => {
-    pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "test/model" });
+    pikit.provideKeyed("agent.definition", "assistant", { name: "assistant", model: "test/model", steward: true });
     pikit.provideKeyed("agent.definition", "searcher", { name: "searcher", model: "test/search", tools: ["websearch", { name: "lookup" } as never] });
   },
 });

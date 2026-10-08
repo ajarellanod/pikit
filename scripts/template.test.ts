@@ -351,7 +351,7 @@ test.skipIf(!E2E)(
       expect(prompt).toContain(`https://github.com/ajarellanod/pikit/tree/${commit}/docs/concepts.md`);
       expect(prompt).toContain("Target: durable.");
       expect(prompt).toContain("- channel-telegram-webhook: ");
-      expect(prompt).toContain("- assistant: model openrouter/z-ai/glm-5.3-flash; tools read, write, edit, bash, fetch, websearch; extensions pikit-self");
+      expect(prompt).toContain("- assistant (the steward): model openrouter/z-ai/glm-5.3-flash; tools read, write, edit, bash, fetch, websearch; extensions pikit-self");
 
       // The dashboard, built by wrangler's build: its page for anyone, its API for the token only.
       const page = await fetch(`${base}/admin/`);

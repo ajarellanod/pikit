@@ -40,7 +40,7 @@ Every `/admin/api/*` route asks `admin.auth` first and answers `401` without an 
 | Route | What |
 |---|---|
 | `GET /admin/api/app` | the composition (`APP_DESCRIPTION`, config redacted) |
-| `GET /admin/api/agents` | the agents: name, model, tools |
+| `GET /admin/api/agents` | the agents: name, model, tools, whether it is the steward |
 | `POST`, `DELETE /admin/api/session` | open or close a browser session |
 | `GET /admin/api/conversations?limit&cursor` | conversations, most recently active first |
 | `POST /admin/api/conversations` | a new conversation of the dashboard's own (`dashboard:<uuid>`) with its first message |

@@ -34,6 +34,12 @@ test("an agent names the extensions it runs with, once each", () => {
   expect(() => defineAgent({ name: "a", model: "x/y", extensions: ["plan mode"] })).toThrow("must be a non-empty name without spaces");
 });
 
+test("an agent is the steward when it says so, and only with true or false", () => {
+  expect(defineAgent({ name: "a", model: "x/y", steward: true }).steward).toBe(true);
+  expect(defineAgent({ name: "a", model: "x/y" }).steward).toBeUndefined();
+  expect(() => defineAgent({ name: "a", model: "x/y", steward: "yes" as unknown as boolean })).toThrow('agent "a": steward must be true or false');
+});
+
 test("prepare is a plain function from state to what changes for the run", () => {
   const deploy = { name: "deploy" } as unknown as AgentTool;
   const release = defineAgent({

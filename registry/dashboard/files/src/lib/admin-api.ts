@@ -15,7 +15,7 @@
  * | Route | Answer |
  * |---|---|
  * | `GET /admin/api/app` | `ApiApp`: the composition (`APP_DESCRIPTION`, no secrets) |
- * | `GET /admin/api/agents` | `ApiAgents`: the App's agents, their model and tools |
+ * | `GET /admin/api/agents` | `ApiAgents`: the App's agents, their model and tools, and which is the steward |
  * | `POST /admin/api/session` | the credential once → `200 ApiSession` and a session cookie (a browser's) |
  * | `DELETE /admin/api/session` | `204`: the session cookie cleared |
  * | `GET /admin/api/conversations?limit&cursor&archived` | `ApiPage<ApiConversation>`, the most recently active first: those listed, or with `archived=1` those archived |
@@ -200,6 +200,8 @@ export interface ApiAgent {
    * its extensions bring, nor those a `prepare` gives for a state.
    */
   tools: string[];
+  /** Whether it is the project's steward (`steward: true` in its `defineAgent`, SPEC §6): at most one is. */
+  steward: boolean;
 }
 
 export interface ApiAgents {

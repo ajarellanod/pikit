@@ -1,12 +1,14 @@
 /**
  * What the App is made of (`APP_DESCRIPTION`, SPEC K13): its components in start order, who provides
- * each capability, its pipelines' stages, and its config, each searchable. The config holds no
+ * each capability, its agents (the steward marked), its pipelines' stages, and its config, each
+ * searchable. The config holds no
  * secret: a component reads its secrets through `secrets` and its config names them at most, and the
  * API redacts a value that looks like one.
  */
 
-import { BoxIso, Code, Cube, DataTransferBoth, KeyframesCouple, Puzzle } from "iconoir-react";
+import { BoxIso, Code, Cpu, Cube, DataTransferBoth, KeyframesCouple, Puzzle, User } from "iconoir-react";
 import { useState } from "react";
+import { ValuePill } from "@/components/bui/Chip";
 import CodeBlock from "@/components/bui/CodeBlock";
 import EmptyState from "@/components/bui/EmptyState";
 import { FilterChips } from "@/components/bui/FilterTable";
@@ -14,10 +16,11 @@ import { Page, PageLoading, Section } from "@/components/bui/Page";
 import RecordsTable, { type RecordColumn, RecordMark, RecordName, RecordTag, TagList, tagHue } from "@/components/bui/RecordsTable";
 import SearchField from "@/components/bui/SearchField";
 import { ErrorNote } from "@/components/pikit/error-note";
-import { type ApiApp, useApi } from "@/lib/api";
+import { type ApiAgent, type ApiApp, useApi } from "@/lib/api";
+import { useShell } from "@/lib/shell";
 import { defineView } from "@/lib/views";
 
-type Part = "components" | "capabilities" | "pipelines" | "config";
+type Part = "components" | "capabilities" | "agents" | "pipelines" | "config";
 type Component = ApiApp["components"][number];
 type Capability = { name: string } & ApiApp["capabilities"][string];
 
@@ -30,6 +33,7 @@ const capabilityTag = (name: string) => (
 
 function CompositionPage() {
   const { data: app, error } = useApi<ApiApp>("/app");
+  const shell = useShell();
   const [part, setPart] = useState<Part>("components");
   const [query, setQuery] = useState("");
 
@@ -51,6 +55,7 @@ function CompositionPage() {
     .map(([name, capability]) => ({ name, ...capability }))
     .sort((a, b) => a.name.localeCompare(b.name))
     .filter((capability) => matches(capability.name, ...capability.providers, ...Object.keys(capability.keys ?? {})));
+  const agents = (shell.agents ?? []).filter((agent) => matches(agent.name, agent.model, ...agent.tools, ...(agent.steward ? ["steward"] : [])));
   const pipelines = Object.entries(app.pipelines).filter(([name, stages]) => matches(name, JSON.stringify(stages)));
   const config = Object.fromEntries(Object.entries(app.config).filter(([name]) => matches(name)));
 
@@ -98,14 +103,38 @@ function CompositionPage() {
     },
   ];
 
+  // The steward (SPEC §6) is the agent its operators ask to change the project: one at most.
+  const agentColumns: RecordColumn<ApiAgent>[] = [
+    {
+      key: "name",
+      label: "Agent",
+      icon: <User />,
+      width: 250,
+      sort: (a, b) => a.name.localeCompare(b.name),
+      cell: (agent) => (
+        <>
+          <RecordMark name={agent.name} />
+          <RecordName>{agent.name}</RecordName>
+          {agent.steward && (
+            <span className="ml-1.5 shrink-0" title="The project's steward: it knows what the project is made of, and operators ask it to change it">
+              <ValuePill tone="accent">steward</ValuePill>
+            </span>
+          )}
+        </>
+      ),
+    },
+    { key: "model", label: "Model", icon: <Cpu />, width: 260, title: (agent) => agent.model, cell: (agent) => <RecordTag mono title={agent.model}>{agent.model}</RecordTag> },
+    { key: "tools", label: "Tools", icon: <Puzzle />, width: 320, cell: (agent) => <TagList tags={agent.tools} render={(tool) => <RecordTag title={tool}>{tool}</RecordTag>} empty="none" /> },
+  ];
+
   return (
     <Page
       eyebrow="Composition"
       title={`${app.components.length} components, ${app.target} target`}
-      description="What this App runs: its components in start order, who provides each capability, its pipelines and its config. A config value that looks like a secret is never sent here."
+      description="What this App runs: its components in start order, who provides each capability, its agents, its pipelines and its config. A config value that looks like a secret is never sent here."
     >
       <Section
-        title={part === "components" ? "Components" : part === "capabilities" ? "Capabilities" : part === "pipelines" ? "Pipelines" : "Config"}
+        title={{ components: "Components", capabilities: "Capabilities", agents: "Agents", pipelines: "Pipelines", config: "Config" }[part]}
         tools={
           <>
             <FilterChips
@@ -115,6 +144,7 @@ function CompositionPage() {
               filters={[
                 { key: "components", label: "Components", count: components.length },
                 { key: "capabilities", label: "Capabilities", count: capabilities.length },
+                { key: "agents", label: "Agents", count: agents.length },
                 { key: "pipelines", label: "Pipelines", count: pipelines.length },
                 { key: "config", label: "Config", count: Object.keys(config).length },
               ]}
@@ -129,6 +159,10 @@ function CompositionPage() {
 
         {part === "capabilities" && (
           <RecordsTable label="The App's capabilities and their providers" columns={capabilityColumns} rows={capabilities} rowKey={(capability) => capability.name} maxHeight={640} empty={nothingFound} />
+        )}
+
+        {part === "agents" && (
+          <RecordsTable label="The App's agents and the steward" columns={agentColumns} rows={agents} rowKey={(agent) => agent.name} maxHeight={640} empty={shell.agents === undefined ? <EmptyState title="Reading the agents" /> : nothingFound} />
         )}
 
         {part === "pipelines" &&

@@ -28,7 +28,7 @@ dashboard keeps an identical copy (`src/dashboard/src/lib/admin-api.ts`); an err
 | Route | Answer |
 |---|---|
 | `GET /admin/api/app` | the composition: components, capabilities and providers, pipelines, config (`APP_DESCRIPTION`; a value that looks like a secret is `[redacted]`) |
-| `GET /admin/api/agents` | `{ items: [{ name, model, tools }] }`: the App's agents (`agent.definition`), the names of the tools each is defined with |
+| `GET /admin/api/agents` | `{ items: [{ name, model, tools, steward }] }`: the App's agents (`agent.definition`), the names of the tools each is defined with, and whether it is the steward |
 | `POST /admin/api/session` | the credential once → `200 { operator }` and a session cookie |
 | `DELETE /admin/api/session` | `204`, the session cookie cleared |
 | `GET /admin/api/conversations?limit&cursor` | a page of conversations, the most recently active first: key, agent, busy, last activity, cost, and `current` (whether its key points to it now) |

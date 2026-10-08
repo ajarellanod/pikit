@@ -318,8 +318,8 @@ test("the agents on the Worker are the index object's App's, one call", async ()
 
   expect(await response.json()).toEqual({
     items: [
-      { name: "assistant", model: "test/model", tools: [] },
-      { name: "searcher", model: "test/search", tools: ["websearch", "lookup"] },
+      { name: "assistant", model: "test/model", tools: [], steward: true },
+      { name: "searcher", model: "test/search", tools: ["websearch", "lookup"], steward: false },
     ],
   });
   expect(platform.calls).toEqual([`${INDEX_KEY} admin-api.agents`]);

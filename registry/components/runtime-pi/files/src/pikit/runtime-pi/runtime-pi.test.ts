@@ -380,6 +380,19 @@ test("it refuses to start without an agent", async () => {
   expect(await startFailure(app)).toContain("no agent.definition");
 });
 
+test("it refuses to start with two stewards, naming both", async () => {
+  const { storage, agents, provider } = testComponents({
+    agents: [
+      defineAgent({ name: "support", model: "faux/scripted", steward: true }),
+      defineAgent({ name: "assistant", model: "faux/scripted", steward: true }),
+      defineAgent({ name: "triage", model: "faux/scripted" }),
+    ],
+  });
+  const app = await defineApp({ components: [storage, agents, provider, runtimePi], logger: silentLogger }).create();
+
+  expect(await startFailure(app)).toContain('agents "assistant" and "support" are each marked `steward: true`');
+});
+
 test("it refuses to start when an agent names a model no provider has", async () => {
   const { storage, agents, provider } = testComponents({
     agents: [defineAgent({ name: "support", model: "anthropic/claude-sonnet" })],

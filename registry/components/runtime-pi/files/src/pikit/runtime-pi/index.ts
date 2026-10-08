@@ -16,7 +16,8 @@
  * It uses:
  * - `storage.sql`: where pi-durable keeps every conversation (its tables, unprefixed: one runtime per
  *   database) and the answers log. On a server that is storage-sqlite, in a Cloudflare object storage-do;
- * - `agent.definition`: your agents, one per name (a project component provides them);
+ * - `agent.definition`: your agents, one per name (a project component provides them), at most one of
+ *   them the steward (`steward: true`, SPEC §6);
  * - `model.provider`: the model providers your agents name as `provider/modelId`;
  * - `agent.tool`: the installed tools (`tool-*` components) that agents name in their `tools`;
  * - `agent.extension`: the installed agent extensions (Pi's `defineExtension`: prompt sections, hooks,
@@ -218,6 +219,16 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           models = made;
           // Fail at start, not at the first message: an agent that cannot run is a broken deployment.
           if (agents.keys().length === 0) throw new Error("runtime-pi: no agent.definition is provided");
+          // One steward at most (SPEC §6): the agent its operators ask to change the project.
+          const stewards = agents
+            .keys()
+            .sort()
+            .filter((name) => agents.get(name)?.steward === true);
+          if (stewards.length > 1) {
+            throw new Error(
+              `runtime-pi: agents ${stewards.map((name) => `"${name}"`).join(" and ")} are each marked \`steward: true\`; a project has one steward, its main agent: take it off the others`,
+            );
+          }
           for (const key of tools.keys()) {
             const tool = tools.get(key);
             if (tool !== undefined && tool.name !== key) {

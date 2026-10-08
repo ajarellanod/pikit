@@ -363,7 +363,7 @@ test("sessions: a wrong credential is 401; without the client's header the sessi
   }
 });
 
-test("GET /admin/api/agents: the App's agents by name, their model and the names of the tools they are defined with", async () => {
+test("GET /admin/api/agents: the App's agents by name, their model, the names of the tools they are defined with, and which is the steward", async () => {
   const s = await started();
 
   const response = await s.fetch("/admin/api/agents", { headers: AUTH });
@@ -371,8 +371,8 @@ test("GET /admin/api/agents: the App's agents by name, their model and the names
   expect(response.status).toBe(200);
   expect(await response.json()).toEqual({
     items: [
-      { name: "assistant", model: "test/model", tools: [] },
-      { name: "searcher", model: "test/search", tools: ["websearch", "lookup"] },
+      { name: "assistant", model: "test/model", tools: [], steward: true },
+      { name: "searcher", model: "test/search", tools: ["websearch", "lookup"], steward: false },
     ],
   });
 });

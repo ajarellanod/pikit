@@ -87,7 +87,7 @@ async function start(agents: AgentDefinition[]) {
 }
 
 const agents = [
-  defineAgent({ name: "steward", model: "faux/scripted", extensions: ["pikit-self"] }),
+  defineAgent({ name: "steward", model: "faux/scripted", steward: true, extensions: ["pikit-self"] }),
   defineAgent({ name: "plain", model: "faux/scripted" }),
 ];
 
@@ -102,7 +102,7 @@ test("an agent that names pikit-self gets the guide and what runs now in every r
   expect(text).toContain("https://github.com/ajarellanod/pikit/tree/main/docs/concepts.md");
   expect(text).toContain("- runtime-pi: ");
   expect(text).toContain("- extension-pikit-self: agent.extension (pikit-self)");
-  expect(text).toContain("Agents:\n- plain: model faux/scripted; tools none\n- steward: model faux/scripted; tools none; extensions pikit-self");
+  expect(text).toContain("Agents:\n- plain: model faux/scripted; tools none\n- steward (the steward): model faux/scripted; tools none; extensions pikit-self");
   for (const request of requests) expect(sections(request)["pikit-self"]).toBe(text);
   const sent = requests.at(-1)?.messages.filter((message) => message.role === "system" && message.sections?.["pikit-self"] !== undefined) ?? [];
   expect(sent).toHaveLength(1);

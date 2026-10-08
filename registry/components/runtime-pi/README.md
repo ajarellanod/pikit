@@ -34,7 +34,8 @@ it into the app.
     prompt, model and tools per agent, set from the dashboard ("Live overrides" below). Without it,
     every agent is its definition.
 
-  It refuses to start without an agent, when an agent names a model no provider has, when an agent
+  It refuses to start without an agent, with two stewards (`steward: true`: a project has one, SPEC
+  §6), when an agent names a model no provider has, when an agent
   names a tool or an extension no component provides (`pikit doctor` names the registry component that
   provides a missing tool), when an agent names `read`, `write`, `edit` or `bash` and neither
   `execution` nor `workspace` is installed (the tools that work on files and commands:

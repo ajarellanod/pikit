@@ -11,7 +11,7 @@ import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type AgentDefinition, defineAgent } from "@pikit/contracts";
 import type { Extension } from "@pikit/pi-adapter/extensions";
 import Type from "typebox";
-import pikitSelf, { agentSummary, KIT_REPOSITORY, kitUrl, PIKIT_SELF, pikitSelfText } from "./index.ts";
+import pikitSelf, { agentSummary, KIT_REPOSITORY, kitUrl, PIKIT_SELF, pikitSelfText, stewardProblem } from "./index.ts";
 
 const TELEGRAM_TOKEN = "123456789:AAEabcdefghijklmnopqrstuvwxyz012345";
 
@@ -44,7 +44,7 @@ async function sectionOf(list: AgentDefinition[], target: "server" | "durable" =
   return { app, extension, text: typeof text === "string" ? text : undefined };
 }
 
-const assistant = defineAgent({ name: "assistant", model: "faux/scripted", tools: ["read", "leak"], extensions: [PIKIT_SELF] });
+const assistant = defineAgent({ name: "assistant", model: "faux/scripted", steward: true, tools: ["read", "leak"], extensions: [PIKIT_SELF] });
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const { app } = await sectionOf([assistant]);
@@ -72,7 +72,7 @@ test("the section says what runs: the target, each component and what it provide
   expect(text).toContain("## What runs now\nTarget: server.");
   expect(text).toContain("Components, in start order, with what each provides:\n- agents: agent.definition (assistant, triage)\n- tool-leaky: agent.tool (leak)\n");
   expect(text).toContain("- extension-pikit-self: agent.extension (pikit-self)");
-  expect(text).toContain("Agents:\n- assistant: model faux/scripted; tools read, leak; extensions pikit-self\n- triage: model faux/echo; tools none");
+  expect(text).toContain("Agents:\n- assistant (the steward): model faux/scripted; tools read, leak; extensions pikit-self\n- triage: model faux/echo; tools none");
   expect(text).not.toContain("the Worker's App");
 });
 
@@ -113,6 +113,22 @@ test("the section is the same text on every request: it is built once, when the 
 });
 
 test("an agent is said by its model and the names of its tools, its own tool objects included", () => {
-  expect(agentSummary("a", { model: "x/y", tools: ["read", { name: "mine" }, 3], extensions: ["memory"] })).toEqual({ name: "a", model: "x/y", tools: ["read", "mine"], extensions: ["memory"] });
-  expect(agentSummary("b", undefined)).toEqual({ name: "b", model: "", tools: [], extensions: [] });
+  expect(agentSummary("a", { model: "x/y", tools: ["read", { name: "mine" }, 3], extensions: ["memory"] })).toEqual({ name: "a", model: "x/y", tools: ["read", "mine"], extensions: ["memory"], steward: false });
+  expect(agentSummary("b", undefined)).toEqual({ name: "b", model: "", tools: [], extensions: [], steward: false });
+  expect(agentSummary("c", { model: "x/y", steward: true }).steward).toBe(true);
+});
+
+test("only the steward may name it: the App does not start with another agent that does", async () => {
+  const helper = defineAgent({ name: "helper", model: "faux/scripted", extensions: [PIKIT_SELF] });
+  const app = await defineApp({ components: [agents([assistant, helper]), pikitSelf], logger: silentLogger }).create();
+
+  const error = await app.start().then(
+    () => undefined,
+    (thrown: unknown) => thrown,
+  );
+
+  expect(error instanceof Error ? String(error.cause instanceof Error ? error.cause.message : error.cause) : "started").toContain(
+    'extension-pikit-self: agent "helper" names "pikit-self" and is not the steward',
+  );
+  expect(stewardProblem([agentSummary("assistant", assistant), agentSummary("triage", { model: "x/y" })])).toBeUndefined();
 });
