@@ -13,10 +13,14 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import definition from "../pikit.config.ts";
 
-/** The preset's `components:` list. It is one name per line, so no YAML parser is needed. */
+/**
+ * The preset's `components:` list, not its `features:` (opt-in, asked by `pikit new`). One name per
+ * line, so no YAML parser is needed.
+ */
 function preset(): string[] {
   const text = readFileSync(new URL("../../../registry/presets/http.yaml", import.meta.url), "utf8");
-  return [...text.matchAll(/^\s+-\s+([a-z0-9-]+)\s*$/gm)].map(([, name]) => name ?? "");
+  const components = /^components:\n((?:(?:\s+-\s+[a-z0-9-]+|\s*#.*|\s*)\n)*)/m.exec(text)?.[1] ?? "";
+  return [...components.matchAll(/^\s+-\s+([a-z0-9-]+)\s*$/gm)].map(([, name]) => name ?? "");
 }
 
 /** Components this sample defines itself, which a project keeps in `src/extensions/`. */
