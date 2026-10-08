@@ -6,7 +6,7 @@
  * conversation's Context). A page that loads with a session still open goes straight in.
  */
 
-import { Archive, EditPencil, Home, LogOut, SoundHigh, SoundOff, Trash, Undo } from "iconoir-react";
+import { Archive, EditPencil, Home, LogOut, Settings, SoundHigh, SoundOff, Trash, Undo } from "iconoir-react";
 import { useCallback, useEffect, useState } from "react";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem } from "@/components/bui/SidebarNav";
@@ -14,6 +14,7 @@ import { Switch } from "@/components/bui/Switch";
 import { ThemeToggle } from "@/components/bui/ThemeToggle";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Mark } from "@/components/pikit/mark";
+import { SettingsDialog } from "@/components/pikit/settings-dialog";
 import { SignIn } from "@/components/pikit/sign-in";
 import {
   AlertDialog,
@@ -136,6 +137,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
     [home],
   );
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [side, setSide] = useState<HTMLDivElement | null>(null);
   const [narrow] = useState(() => !window.matchMedia("(min-width: 1024px)").matches);
   const name = appName(app);
@@ -245,6 +247,16 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
           }
           menu={(close) => (
             <>
+              <MenuRow
+                icon={<Settings />}
+                onClick={() => {
+                  close();
+                  setSettingsOpen(true);
+                }}
+              >
+                Settings
+              </MenuRow>
+              <MenuSeparator />
               <div className="flex h-10 items-center gap-1.5 px-2">
                 <span className="min-w-0 flex-1 text-[13.5px] text-ink">Theme</span>
                 <ThemeToggle />
@@ -273,6 +285,8 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
             </>
           )}
         />
+
+        <SettingsDialog app={app} open={settingsOpen} onOpenChange={setSettingsOpen} />
 
         <AlertDialog open={deleting !== undefined} onOpenChange={(open) => !open && setDeleting(undefined)}>
           <AlertDialogContent>

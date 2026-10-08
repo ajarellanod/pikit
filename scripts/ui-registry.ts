@@ -12,7 +12,8 @@
  * - the shared pieces of `src/components/pikit/`, one item each (`message`, `error-note`);
  * - `bui`: Beautiful UI's primitives as the dashboard has them (`src/components/bui/`);
  * - the base views of `src/views/` (`conversations`, `composition`);
- * - every registry component's view (its manifest's `view`), named after the component.
+ * - every registry component's view (its manifest's `view`), named after the component, and its section
+ *   of the Settings dialog (its manifest's `settings`), `<component>-settings`.
  * Imports decide the rest: `@/components/ui/<x>` is the shadcn primitive `x` (`registryDependencies`),
  * `@/components/pikit/<x>` and `@/lib/<x>` are `@pikit` items, `@/components/bui/<x>` is `@pikit/bui`,
  * a bare package is an npm dependency at the version the dashboard pins.
@@ -87,7 +88,15 @@ function items(): Item[] {
   for (const component of readdirSync(COMPONENTS).sort()) {
     const manifestPath = join(COMPONENTS, component, "component.json");
     if (!existsSync(manifestPath)) continue;
-    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { view?: string; description: string };
+    const manifest = JSON.parse(readFileSync(manifestPath, "utf8")) as { view?: string; settings?: string; description: string };
+    if (manifest.settings !== undefined) {
+      all.push({
+        name: `${component}-settings`,
+        title: `${component}-settings`,
+        description: `${component}'s section of the Settings dialog: ${manifest.description} Its settings come with the component (pikit add ${component}), stored by settings-store.`,
+        sources: folder(join(COMPONENTS, component, manifest.settings), `src/settings/${component}`),
+      });
+    }
     if (manifest.view === undefined) continue;
     all.push({
       name: component,

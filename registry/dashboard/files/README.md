@@ -6,7 +6,7 @@ reset, the cost, and what the App is made of. It is yours: a shadcn/ui project (
 v4) whose source you change like any other file of the project.
 
 It looks like [Beautiful UI](https://www.beautifului.dev/harness)'s harness: a sidebar (the App's menu
-with the theme, the interaction sounds and sign out; **New chat**; **Home**; the views; every
+with **Settings**, the theme, the interaction sounds and sign out; **New chat**; **Home**; the views; every
 conversation by its name, searchable), the conversations you opened as tabs (New chat's too: each one
 closes, and closing the last leaves a fresh home), a chat (the transcript, the answer streaming in as
 markdown through [Comark](https://comark.dev), the model's thinking and tool calls folded together
@@ -42,6 +42,21 @@ kept in this browser.
 
 It talks only to the admin API that `admin-api` serves (`/admin/api/*`), and admin-api serves its
 built files under `/admin/`.
+
+## Settings
+
+**Settings** (the sidebar's foot, then Settings) opens a large dialog: a search box and the sections,
+grouped, on the left; the chosen section's rows on the right, each a label, a line saying what it
+does and its control (a segmented choice, a select, a switch, a text, a prompt editor). Choices,
+switches and selects save at once; a text or a prompt with its own Save.
+
+- **General** (Dashboard) is the dashboard's own: the theme and the interaction sounds, kept in this
+  browser. Nothing of the service changes.
+- **One section per installed component that brings one** (`src/settings/<component>/`, installed
+  with it by `pikit add`), shown when the App provides what it requires: router-basic's **Agent**
+  (which agent answers by default, and that agent's system prompt, model and tools). Their values
+  are the components' settings, kept by `settings-store` (`/admin/api/settings`, installed with the
+  dashboard): a change applies to the next run, with no deploy and no restart.
 
 ## A channel of its own
 
@@ -118,6 +133,9 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/lib/activity.ts` | whether you are there: `useActive`, `usePolling`, `every` (slower on Cloudflare) |
 | `src/lib/admin-api.ts` | the API's JSON, typed: an identical copy of `src/pikit/admin-api/api.ts` |
 | `src/lib/views.ts` | how views are found and when they show |
+| `src/settings/<component>/index.tsx` | a component's section of the Settings dialog (below) |
+| `src/lib/settings.ts` | how sections are found and when they show (`defineSettings`), a component's settings (`useSettings`) |
+| `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General; its rows and controls (`SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`), and `SchemaSettings` |
 | `src/lib/router.tsx` | the pages under `/admin` |
 | `src/views/conversations/` | the home, a conversation (its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
 | `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles (the API's: a key's, shared by the conversations a reset left behind), the commands' notes (`useChats`, `agentsOf`) |
@@ -167,6 +185,38 @@ More primitives: `bunx shadcn@latest add dialog` (from this folder). pikit's own
 shadcn items too: `bunx shadcn@latest add @pikit/<item>` (`components.json` names the registry; its
 list is `registry/ui/r/registry.json` in the pikit repository). A component with a view installs it
 here itself (`pikit add`). The skill `pikit-view` (`.agents/skills/`) teaches an AI agent all of this.
+
+## Add a settings section
+
+A section is a folder of `src/settings/`, named after the component whose settings it shows, found
+when the dashboard is built. The component declares its settings in its `start` (a TypeBox schema
+and defaults, `settings.declare`, settings-store's README); its section reads and saves them with
+`useSettings("<component>")`. A simple one renders from the schema alone:
+
+```tsx
+// src/settings/my-component/index.tsx
+import { Tools } from "iconoir-react";
+import { SchemaSettings } from "@/components/pikit/settings";
+import { defineSettings } from "@/lib/settings";
+
+export default defineSettings({
+  id: "my-component",               // the folder's name: the component's
+  title: "My component",
+  icon: Tools,
+  group: "Components",              // the heading it is listed under (Dashboard, Agents, Components, or yours)
+  requires: ["settings"],           // shown only while these capabilities are provided
+  keywords: ["tone"],               // what the search finds it by, besides its title
+  component: () => <SchemaSettings component="my-component" />,
+});
+```
+
+`SchemaSettings` shows a switch for a boolean, a segmented choice for up to three options and a
+select past them, a prompt editor for a long text, a text otherwise, a switch per option for a list
+of options; each label and line is the schema's `title` and `description`. A custom section places
+its own rows (`SettingsHeading`, `SettingsRow`, the controls) and saves the component's whole value
+(`save`; `storedOf` keeps only what differs from the defaults). A component with a section installs
+it here itself (`pikit add`, its `component.json`'s `settings`); `shadcn add @pikit/<component>-settings`
+installs it alone.
 
 ## Add a command
 

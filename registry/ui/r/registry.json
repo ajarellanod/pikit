@@ -34,6 +34,18 @@
       "description": "pikit's message piece of the dashboard."
     },
     {
+      "name": "settings-dialog",
+      "type": "registry:file",
+      "title": "settings-dialog",
+      "description": "pikit's settings-dialog piece of the dashboard."
+    },
+    {
+      "name": "settings",
+      "type": "registry:file",
+      "title": "settings",
+      "description": "pikit's settings piece of the dashboard."
+    },
+    {
       "name": "bui",
       "type": "registry:file",
       "title": "Beautiful UI primitives",
