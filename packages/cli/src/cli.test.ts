@@ -95,10 +95,10 @@ test("new refuses a non-empty directory and an unknown preset before writing any
 
   const notAsked = await runCli(["new", "fresh", "--preset", "http", "--with", "tool-bash"], parent);
   expect(notAsked.code).toBe(1);
-  expect(notAsked.err).toContain("has no choice of tool-* components; add tool-bash after");
+  expect(notAsked.err).toContain("has no choice of tool-* components and does not offer tool-bash; add it after, with `pikit add tool-bash`");
   const noPreset = await runCli(["new", "fresh", "--with", "channel-telegram"], parent);
   expect(noPreset.code).toBe(1);
-  expect(noPreset.err).toContain("--with answers a preset's questions: it needs --preset");
+  expect(noPreset.err).toContain("--with answers a preset's questions and adds its features: it needs --preset");
   expect(existsSync(join(parent, "fresh"))).toBe(false);
 });
 

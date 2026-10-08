@@ -274,6 +274,31 @@ test.skipIf(!E2E)(
   TIMEOUT,
 );
 
+test.skipIf(!E2E)(
+  "pikit new with two channels, every feature the preset offers and the dashboard: doctor is green once configured",
+  async () => {
+    const features = ["router-rules", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"];
+    const args = ["new", "many", "--preset", "telegram", "--with", "channel-telegram", "--with", "channel-http", ...features.flatMap((f) => ["--with", f]), "--ui"];
+    const created = await pikit(args, { cwd: parent });
+    expect(created.err).not.toContain("✗");
+    expect(created.code).toBe(0);
+    const many = join(parent, "many");
+    const components = Object.keys(JSON.parse(readFileSync(join(many, "pikit.json"), "utf8")).components);
+    for (const name of ["channel-telegram", "channel-http", "server-bun", "admin-api", ...features]) expect(components).toContain(name);
+    // Telegram's durable delivery comes with it, as with `pikit add`.
+    expect(components).toContain("outbound-durable");
+
+    writeFileSync(
+      join(many, ".env"),
+      [`PIKIT_HTTP_TOKEN=${"a".repeat(64)}`, `PIKIT_ADMIN_TOKEN=${"b".repeat(64)}`, "TELEGRAM_BOT_TOKEN=123:not-a-token", "TELEGRAM_ALLOWED_USERS=1", `ANTHROPIC_API_KEY=${DUMMY_KEY}`, ""].join("\n"),
+    );
+    const doctor = await pikit(["doctor"], { cwd: many });
+    expect(doctor.err).not.toContain("✗");
+    expect(doctor.out).toContain("pikit doctor: green");
+  },
+  TIMEOUT,
+);
+
 test.skipIf(!DOCKER)(
   "pikit up, status and down delegate to deployment-docker; credentials are checked where the app runs",
   async () => {

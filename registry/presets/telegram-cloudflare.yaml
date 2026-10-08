@@ -31,3 +31,15 @@ components:
   - tool-fetch
   - tool-websearch-brave
   - deployment-cloudflare
+# Asked only once Cloudflare has a second channel: the webhook is its only one, and one answer is
+# not a question. Then several at once, as on a server.
+choose:
+  - kind: channel
+    question: "Where do you want to talk to your agent?"
+    multiple: true
+# What `pikit new` offers to add, several at once, with the dashboard (`--ui`): each by its `title`,
+# `--with <component>` in a script. tool-fetch and tool-websearch-brave are installed above already.
+features:
+  - router-rules
+  - tool-mcp
+  - health-registry

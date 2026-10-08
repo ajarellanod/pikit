@@ -4,17 +4,19 @@
  *
  * It asks, in order: the agent's name (its folder), where it runs (its target, only when the registry
  * has presets for several), the preset to start from (only when several base presets run there), each
- * of that preset's questions (`choose`: where to talk to the agent is "which channel-* component",
- * answered by every one in the registry, by its `title`), whether it gets a dashboard (on a server;
- * `--ui` answers it), then runs `new`, `configure` (each
- * component's own step, then the model's login) and `up` or `dev`: the same functions the commands
- * run, nothing of its own. It knows nothing about Telegram, any channel or any platform: the choices
+ * of that preset's questions (`choose`: where to talk to the agent is "which channel-* components",
+ * several at once, answered by every one in the registry that runs there, by its `title`), what it can
+ * do (several at once: the dashboard and the preset's `features`, each by its `title`), then runs
+ * `new`, `configure` (each component's own step, then the model's login) and `up` or `dev`: the same
+ * functions the commands run, nothing of its own. Each answer is a component `new` installs as
+ * `pikit add` does, with the providers it brings. It knows nothing about Telegram, any channel or any platform: the choices
  * come from the registry, the questions from the components, and `up` is the deployment component's
  * (on Cloudflare it logs in to the account itself). It prints the `pikit new` command that makes the
  * same project without a terminal.
  *
- * `--target`, `--preset` and `--with` answer their questions: the installer's `--durable` runs
- * `pikit new --target durable --preset telegram-cloudflare`, which asks only the name.
+ * `--target`, `--preset` and `--with` answer their questions (a `--with` of a feature, or `--ui`, answers
+ * "what can it do?"): the installer's `--durable` runs `pikit new --target durable --preset
+ * telegram-cloudflare`, which asks only the name and what it can do.
  *
  * It offers presets that make an agent you talk to, those with a channel-* component, when a target
  * has any: `cloudflare-minimal`, storage only, is for `pikit new <dir> --preset`.
@@ -31,8 +33,9 @@ import { join, resolve } from "node:path";
 import { DEFAULT_REGISTRY } from "../paths.ts";
 import { NEW_PROJECT_TARGETS, readProjectManifest } from "../project/pikit-json.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
+import { dashboardFiles } from "../project/dashboard.ts";
 import { kindOf, TARGETS } from "../registry/manifest.ts";
-import { ask, beginGuided, Cancelled, CliError, choose, confirm, intro, log, outro, spinner } from "../ui.ts";
+import { ask, beginGuided, Cancelled, CliError, choose, chooseSeveral, confirm, intro, log, outro, spinner } from "../ui.ts";
 import { configure } from "./configure.ts";
 import { deployment, dev } from "./deployment.ts";
 import { checkTarget, newProject, UNFINISHED, validProjectName } from "./new.ts";
@@ -76,17 +79,20 @@ export interface WizardOptions {
   target?: string;
   /** Answers "which preset?" (`--preset`). */
   preset?: string;
-  /** Answers the preset's questions of their kinds (`--with`). */
+  /** Answers the preset's questions of their kinds, and "what can it do?" for its features (`--with`). */
   with?: readonly string[];
-  /** Answers "add a dashboard?" (`--ui`). */
+  /** Answers "what can it do?": with the dashboard (`--ui`). */
   ui?: boolean;
 }
+
+/** The dashboard's answer to "what can it do?": not a component (`ui.ts`), so the flag's name. */
+const DASHBOARD = "--ui";
 
 export async function newWizard(parentDir: string, options: WizardOptions = {}): Promise<number> {
   const registryPath = options.registry ?? DEFAULT_REGISTRY;
   // A flag that cannot be used is refused before the first question.
   if (options.target !== undefined) checkTarget(options.target);
-  if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions: it needs --preset", 2);
+  if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions and adds its features: it needs --preset", 2);
   beginGuided();
   intro("pikit: a new agent");
   log.info("Ctrl-C stops at any question; `pikit new` continues where you left off.");
@@ -102,10 +108,9 @@ export async function newWizard(parentDir: string, options: WizardOptions = {}):
       const registry = openRegistry(registryPath);
       target = options.target ?? (await chooseTarget(registry, options.preset));
       const preset = options.preset ?? (await choosePreset(registry, target));
-      const choices = await answerSlots(registry, preset, target, options.with ?? []);
-      // On Cloudflare the question is not asked, so the installer's `--durable` asks only the name:
-      // `--ui`, or `pikit ui on` later, gives it a dashboard (`ui.ts`).
-      const ui = options.ui ?? (target === "durable" ? false : await confirm("Add a dashboard? (a web UI at /admin/ to follow, steer and stop conversations)", false));
+      const answers = await answerSlots(registry, preset, target, options.with ?? []);
+      const { features, ui } = await chooseFeatures(registry, preset, target, answers, options.ui);
+      const choices = [...answers, ...features];
       const creating = spinner(`Creating ${name}: its components, then \`bun install\``);
       try {
         await newProject(project.dir, { preset, with: choices, registry: registryPath, target, next: false, quiet: true, ui });
@@ -194,8 +199,9 @@ function runsOn(registry: Registry, preset: string, target: string): boolean {
 }
 
 /**
- * The preset's questions, each answered by a component of its kind, but those `--with` answers; returns
- * the answers that differ from the preset's own, `--with`'s first.
+ * The preset's questions, each answered by a component of its kind (or several, `multiple`), but those
+ * `--with` answers; returns the answers that differ from the preset's own, `--with`'s first. A
+ * `multiple` question is answered by one at least: an agent nobody can talk to is not a start.
  */
 async function answerSlots(registry: Registry, preset: string, target: string, given: readonly string[]): Promise<string[]> {
   const choices = [...given];
@@ -203,10 +209,30 @@ async function answerSlots(registry: Registry, preset: string, target: string, g
   // Only answers the new project can install: a component for another target would fail in `new`.
   for (const slot of registry.slots(preset, [target])) {
     if (slot.options.length < 2 || answered.has(slot.kind)) continue;
-    const answer = await choose(slot.question, slot.options.map((o) => option(o.name, o.title)), slot.default);
-    if (answer !== slot.default) choices.push(answer);
+    const options = slot.options.map((o) => option(o.name, o.title));
+    const picked = slot.multiple ? await chooseSeveral(slot.question, options, slot.defaults, true) : [await choose(slot.question, options, slot.defaults[0])];
+    // In the menu's order, whatever order they were checked in: the same answers print the same command.
+    const answers = slot.options.map((o) => o.name).filter((name) => picked.includes(name));
+    // Any other answer replaces the preset's own, so all of them are named (`registry.preset`).
+    if (answers.length !== slot.defaults.length || answers.some((a) => !slot.defaults.includes(a))) choices.push(...answers);
   }
   return choices;
+}
+
+/**
+ * What it can do, several at once, none checked: the dashboard (when the registry has one) and the
+ * preset's features that run on the target. `--ui`, or a `--with` that names a feature, answers it.
+ */
+async function chooseFeatures(registry: Registry, preset: string, target: string, given: readonly string[], ui: boolean | undefined): Promise<{ features: string[]; ui: boolean }> {
+  const features = registry.features(preset, [target]);
+  if (ui !== undefined || features.some((f) => given.includes(f.name))) return { features: [], ui: ui === true };
+  const options = [
+    ...(dashboardFiles(registry) === undefined ? [] : [{ value: DASHBOARD, label: "Dashboard", hint: "a web UI at /admin/ to follow, steer and stop conversations" }]),
+    ...features.map((f) => option(f.name, f.title)),
+  ];
+  if (options.length === 0) return { features: [], ui: false };
+  const answer = await chooseSeveral("What can it do? (any, or none: `pikit add` adds one later)", options);
+  return { features: features.map((f) => f.name).filter((name) => answer.includes(name)), ui: answer.includes(DASHBOARD) };
 }
 
 /** A title is "Name: what it is"; the part after the colon is the option's hint. */

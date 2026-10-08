@@ -2,6 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "tool-websearch-brave",
   "version": "0.0.0",
+  "title": "Web search: your agent searches the web with Brave Search (needs an API key)",
   "description": "The `websearch` tool, for the agents that name it: searches the web with the Brave Search API, whose key the model never sees.",
   "targets": [
     "server",

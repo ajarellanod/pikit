@@ -59,6 +59,15 @@ export async function choose<T extends string>(message: string, choices: Choice<
   return answered(await clack.select<T>({ message, options: options as Parameters<typeof clack.select<T>>[0]["options"], ...(initialValue !== undefined && { initialValue }) }));
 }
 
+/**
+ * Any of `choices`, several at once: Space checks or unchecks one, Enter answers (the keys are shown
+ * under the list). `initialValues` start checked; `required`, at least one must be.
+ */
+export async function chooseSeveral<T extends string>(message: string, choices: Choice<T>[], initialValues: T[] = [], required = false): Promise<T[]> {
+  const options = choices.map((c) => ({ value: c.value, label: c.label, ...(c.hint !== undefined && { hint: c.hint }) }));
+  return answered(await clack.multiselect<T>({ message, options: options as Parameters<typeof clack.multiselect<T>>[0]["options"], initialValues, required }));
+}
+
 /** Yes or no; Enter gives `initialValue`. */
 export async function confirm(message: string, initialValue = false): Promise<boolean> {
   return answered(await clack.confirm({ message, initialValue }));

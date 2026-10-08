@@ -2,6 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "health-registry",
   "version": "0.0.0",
+  "title": "Health: restart it when an essential part stays down, and a Health page in the dashboard",
   "description": "What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process.",
   "targets": [
     "server",

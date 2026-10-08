@@ -1,9 +1,10 @@
 /**
  * The guided path, in a real pseudo-terminal, as the installer runs it: `pikit new` with no
- * arguments asks the agent's name, where it runs, and where to talk to it (the registry's channel-* components), writes the
- * project, then runs the channel's own setup and the model's step, and offers to start it.
+ * arguments asks the agent's name, where it runs, where to talk to it (the registry's channel-*
+ * components, several at once) and what it can do (the dashboard and the preset's features), writes
+ * the project, then runs the channel's own setup and the model's step, and offers to start it.
  * On Cloudflare, chosen in the menu or with the installer's `--target durable --preset
- * telegram-cloudflare`, it asks only the name before writing the bot.
+ * telegram-cloudflare`, it asks only the name and what it can do before writing the bot.
  *
  * Telegram is channel-telegram's `fake-telegram.test-support.ts`. Ctrl-C stops the wizard with nothing written;
  * `pikit new` with the same name continues with the project already there. The model key is a
@@ -65,6 +66,7 @@ function wizard(env: Record<string, string> = {}, args: string[] = []) {
 
 const DOWN = "\x1b[B";
 const RIGHT = "\x1b[C";
+const SPACE = " ";
 
 /** Answers "Where should it run?" with the target at `down` arrows from the first, the server. */
 async function runOn(w: ReturnType<typeof wizard>, down: number): Promise<void> {
@@ -77,21 +79,32 @@ async function runOn(w: ReturnType<typeof wizard>, down: number): Promise<void> 
   w.type("\r");
 }
 
-/** Answers the name and the server, then picks Telegram in the menu with the arrow keys. */
+/** Answers the keys one by one, as a person types them: a prompt redraws between two. */
+async function keys(w: ReturnType<typeof wizard>, ...typed: string[]): Promise<void> {
+  for (const key of typed) {
+    await Bun.sleep(100);
+    w.type(key);
+  }
+}
+
+/**
+ * Answers the name and the server, then in the channels (several at once, HTTP checked) unchecks HTTP
+ * and checks Telegram, and adds nothing in "What can it do?".
+ */
 async function nameAndTelegram(w: ReturnType<typeof wizard>): Promise<void> {
   await w.waitFor("Name of your agent");
   w.type("my-bot\r");
   await runOn(w, 0);
   await w.waitFor("Where do you want to talk to your agent?");
-  const [channels] = openRegistry(DEFAULT_REGISTRY).slots("http");
+  const [channels] = openRegistry(DEFAULT_REGISTRY).slots("http", ["server"]);
   const telegramAt = channels?.options.findIndex((o) => o.name === "channel-telegram") ?? -1;
-  const defaultAt = channels?.options.findIndex((o) => o.name === channels.default) ?? -1;
   expect(telegramAt).toBeGreaterThanOrEqual(0);
-  expect(defaultAt).toBe(0); // the menu starts on the default, so the arrow count is from the top
-  await Bun.sleep(100);
-  w.type(DOWN.repeat(telegramAt));
-  await Bun.sleep(100);
-  w.type("\r");
+  expect(channels?.options[0]?.name).toBe("channel-http"); // the cursor starts on the first, checked: the preset's
+  await keys(w, SPACE, DOWN.repeat(telegramAt), SPACE, "\r");
+  await w.waitFor("What can it do?");
+  await w.waitFor("Dashboard");
+  expect(w.text()).toContain("MCP tools");
+  await keys(w, "\r");
 }
 
 test.skipIf(!E2E)(
@@ -184,9 +197,42 @@ test.skipIf(!E2E)(
   TIMEOUT,
 );
 
-/** Declines "Configure it now?" once the bot is written; returns what the wizard printed. */
+test.skipIf(!E2E)(
+  "several channels and a feature: each is installed, and the same command names them all",
+  async () => {
+    const w = wizard();
+    await w.waitFor("Name of your agent");
+    w.type("two-bot\r");
+    await runOn(w, 0);
+    await w.waitFor("Where do you want to talk to your agent?");
+    // HTTP stays checked; Telegram, the next one, is checked too.
+    await keys(w, DOWN, SPACE, "\r");
+    await w.waitFor("What can it do?");
+    const features = openRegistry(DEFAULT_REGISTRY).features("http", ["server"]).map((f) => f.name);
+    // After the dashboard, the first option.
+    await keys(w, DOWN.repeat(1 + features.indexOf("tool-mcp")), SPACE, "\r");
+    await w.waitFor("Created two-bot in");
+    await w.waitFor("The same, in a script: pikit new two-bot --preset http --with channel-http --with channel-telegram --with tool-mcp\n");
+    await w.waitFor("Configure it now?");
+    await keys(w, RIGHT, "\r");
+    expect(await w.exited).toBe(0);
+    const components = Object.keys(JSON.parse(readFileSync(join(parent, "two-bot", "pikit.json"), "utf8")).components);
+    for (const name of ["channel-http", "channel-telegram", "tool-mcp"]) expect(components).toContain(name);
+    expect(components).not.toContain("admin-api");
+  },
+  TIMEOUT,
+);
+
+/**
+ * Adds the dashboard in "What can it do?", then declines "Configure it now?" once the bot is written;
+ * returns what the wizard printed.
+ */
 async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string): Promise<string> {
-  await w.waitFor(`Created ${name} in`);
+  await w.waitFor("What can it do?");
+  await w.waitFor("Dashboard");
+  // The cursor starts on the first, the dashboard.
+  await keys(w, SPACE, "\r");
+  await w.waitFor(`Created ${name} in`, 0, 180_000);
   await w.waitFor("Configure it now?");
   await Bun.sleep(100);
   w.type(RIGHT);
@@ -197,6 +243,7 @@ async function writtenNotConfigured(w: ReturnType<typeof wizard>, name: string):
   expect(pikitJson.targets).toEqual(["durable"]);
   expect(Object.keys(pikitJson.components)).toContain("channel-telegram-webhook");
   expect(Object.keys(pikitJson.components)).toContain("deployment-cloudflare");
+  expect(Object.keys(pikitJson.components)).toContain("admin-api");
   return w.text();
 }
 
@@ -210,21 +257,22 @@ test.skipIf(!E2E)(
     const text = await writtenNotConfigured(w, "cf-bot");
     // One preset runs on Cloudflare and makes an agent you talk to: no question of presets.
     expect(text).not.toContain("Which preset do you start from?");
-    expect(text).toContain("The same, in a script: pikit new cf-bot --target durable --preset telegram-cloudflare");
+    expect(text).not.toContain("Where do you want to talk to your agent?"); // Cloudflare's one channel
+    expect(text).toContain("The same, in a script: pikit new cf-bot --target durable --preset telegram-cloudflare --ui");
     expect(text).toContain("Later: cd cf-bot && pikit configure && pikit up");
   },
   TIMEOUT,
 );
 
 test.skipIf(!E2E)(
-  "the installer's --durable: pikit new --target durable --preset telegram-cloudflare asks only the name",
+  "the installer's --durable: pikit new --target durable --preset telegram-cloudflare asks only the name and what it can do",
   async () => {
     const w = wizard({}, ["--target", "durable", "--preset", "telegram-cloudflare"]);
     await w.waitFor("Name of your agent");
     w.type("flag-bot\r");
     const text = await writtenNotConfigured(w, "flag-bot");
     expect(text).not.toContain("Where should it run?");
-    expect(text).toContain("The same, in a script: pikit new flag-bot --target durable --preset telegram-cloudflare");
+    expect(text).toContain("The same, in a script: pikit new flag-bot --target durable --preset telegram-cloudflare --ui");
   },
   TIMEOUT,
 );

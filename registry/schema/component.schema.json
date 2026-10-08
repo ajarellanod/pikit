@@ -30,7 +30,7 @@
     "title": {
       "type": "string",
       "pattern": "\\S",
-      "description": "What `pikit new` shows when the component answers a preset's question (`choose`): \"Name: what it is\". Required for those components."
+      "description": "What `pikit new` shows when the component answers a preset's question (`choose`) or is one of its `features`: \"Name: what it is\". Required for those components."
     },
     "description": {
       "type": "string",

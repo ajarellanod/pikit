@@ -1,6 +1,6 @@
 /**
- * Presets: a base lists components and may `choose` one per kind; an alias `extends` a
- * base and answers with `with`, exactly as `--with` does. Built on throwaway registries, plus the
+ * Presets: a base lists components, may `choose` one per kind (or several, `multiple`) and offer
+ * `features`; an alias `extends` a base and answers with `with`, exactly as `--with` does. Built on throwaway registries, plus the
  * repository's own, which must keep resolving.
  */
 
@@ -64,13 +64,37 @@ test("a choice replaces the preset's component of its kind, in place; an alias i
 test("slots offer every component of the kind, by title, with the preset's own answer as default", () => {
   const r = openRegistry(registry(COMPONENTS, { base: BASE, b: "extends: base\nwith: [channel-b]\n" }));
   const options = [{ name: "channel-a", title: "A: the first" }, { name: "channel-b", title: "B: the second" }];
-  expect(r.slots("base")).toEqual([{ kind: "channel", question: "Where?", default: "channel-a", options }]);
-  expect(r.slots("b")[0]?.default).toBe("channel-b");
+  expect(r.slots("base")).toEqual([{ kind: "channel", question: "Where?", multiple: false, defaults: ["channel-a"], options }]);
+  expect(r.slots("b")[0]?.defaults).toEqual(["channel-b"]);
 });
 
-test("choices the preset does not ask for are refused, with what to do instead", () => {
+const SEVERAL = "components: [secrets-env, channel-a, server-bun]\nchoose:\n  - kind: channel\n    multiple: true\nfeatures: [tool-x, router-y]\n";
+const FEATURES = { ...COMPONENTS, "tool-x": "X: a tool", "router-y": "Y: rules", "tool-edge": { title: "Edge", targets: ["durable" as const] } };
+
+test("a multiple question takes several answers, all of them in place of the preset's own", () => {
+  const r = openRegistry(registry(COMPONENTS, { base: SEVERAL, b: "extends: base\nwith: [channel-a, channel-b]\n" }));
+  expect(r.preset("base", ["channel-b", "channel-a"])).toEqual(["secrets-env", "channel-b", "channel-a", "server-bun"]);
+  // One answer replaces the preset's own, as with a single question: --with channel-b is not "also B".
+  expect(r.preset("base", ["channel-b"])).toEqual(["secrets-env", "channel-b", "server-bun"]);
+  expect(r.preset("base", ["channel-b", "channel-b"])).toEqual(["secrets-env", "channel-b", "server-bun"]);
+  // An alias answers with several; the command line answers again, all of them.
+  expect(r.slots("b")[0]).toMatchObject({ multiple: true, defaults: ["channel-a", "channel-b"] });
+  expect(r.preset("b", ["channel-b"])).toEqual(["secrets-env", "channel-b", "server-bun"]);
+});
+
+test("a preset's features are offered by title, and --with adds them after its components", () => {
+  const r = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[tool-x, router-y, tool-edge]"), b: "extends: base\nwith: [tool-x]\n" }));
+  expect(r.features("base")).toEqual([{ name: "tool-x", title: "X: a tool" }, { name: "router-y", title: "Y: rules" }, { name: "tool-edge", title: "Edge" }]);
+  expect(r.features("base", ["server"]).map((f) => f.name)).toEqual(["tool-x", "router-y"]);
+  expect(r.preset("base", ["router-y", "channel-b", "tool-x"])).toEqual(["secrets-env", "channel-b", "server-bun", "router-y", "tool-x"]);
+  // An alias that adds one: installed by the preset, so no longer offered.
+  expect(r.preset("b")).toEqual(["secrets-env", "channel-a", "server-bun", "tool-x"]);
+  expect(r.features("b").map((f) => f.name)).toEqual(["router-y", "tool-edge"]);
+});
+
+test("choices the preset does not ask for or offer are refused, with what to do instead", () => {
   const r = openRegistry(registry(COMPONENTS, { base: BASE }));
-  expect(() => r.preset("base", ["server-bun"])).toThrow('the preset "base" has no choice of server-* components; add server-bun after');
+  expect(() => r.preset("base", ["server-bun"])).toThrow('the preset "base" has no choice of server-* components and does not offer server-bun; add it after, with `pikit add server-bun`');
   expect(() => r.preset("base", ["channel-z"])).toThrow('has no component "channel-z"');
   expect(() => r.preset("base", ["channel-a", "channel-b"])).toThrow("--with names two channel-* components");
 });
@@ -83,9 +107,12 @@ test("malformed presets are refused when read", () => {
     "an alias with components": "extends: base\nwith: [channel-b]\ncomponents: [secrets-env]\n",
     "an alias that chooses nothing": "extends: base\n",
     "with but no extends": "components: [channel-a]\nwith: [channel-b]\n",
+    "a feature installed already": "components: [secrets-env]\nfeatures: [secrets-env]\n",
+    "a feature of a chosen kind": "components: [channel-a]\nchoose:\n  - kind: channel\nfeatures: [channel-b]\n",
+    "a feature twice": "components: [secrets-env]\nfeatures: [tool-x, tool-x]\n",
   };
   for (const [what, yaml] of Object.entries(cases)) {
-    const r = openRegistry(registry(COMPONENTS, { base: BASE, bad: yaml }));
+    const r = openRegistry(registry(FEATURES, { base: BASE, bad: yaml }));
     expect(() => r.preset("bad"), what).toThrow();
   }
   const chained = openRegistry(registry(COMPONENTS, { base: BASE, b: "extends: base\nwith: [channel-b]\n", c: "extends: b\nwith: [channel-a]\n" }));
@@ -121,6 +148,8 @@ test("registry validate reports unknown components, duplicates and answers with 
   const problems = checkPresets(root);
   expect(problems).toContain('presets/base.yaml: channel-c answers "Where?" but its component.json has no title to show');
   expect(problems).toContain("presets/twice.yaml: lists a component twice");
+  const offered = checkPresets(registry({ ...COMPONENTS, "tool-bare": undefined, "tool-edge": { title: "Edge", targets: ["durable"] } }, { base: "components: [secrets-env]\nfeatures: [tool-bare, tool-edge]\n" }));
+  expect(offered).toEqual(["presets/base.yaml: offers tool-bare, but its component.json has no title to show", "presets/base.yaml: offers tool-edge, which runs on none of its targets"]);
   expect(problems.some((p) => p.startsWith('presets/ghost.yaml: the registry') && p.includes('no component "nope-x"'))).toBe(true);
 });
 
@@ -150,6 +179,20 @@ test("registry validate reports a preset that does not compose on its target, an
     "presets/nowhere.yaml: no target runs all its components (not on server: channel-edge; not on durable: secrets-env)",
     'presets/twice.yaml: on server, "secrets" takes one provider, and secrets-env and secrets-file each provide it',
   ]);
+});
+
+test("registry validate reports a preset whose answers and features compose alone but not all at once", () => {
+  const root = registry(
+    {
+      "secrets-env": { provides: ["secrets"] },
+      "channel-a": "A",
+      // Each provides `secrets` too: alone it replaces nothing that does; with the other, two do.
+      "channel-b": { title: "B", provides: ["secrets"] },
+      "tool-x": { title: "X", provides: ["secrets"] },
+    },
+    { several: "components: [channel-a]\nchoose:\n  - kind: channel\n    multiple: true\nfeatures: [tool-x]\n" },
+  );
+  expect(checkPresets(root)).toEqual(['presets/several.yaml: with channel-a and channel-b and tool-x, on server, "secrets" takes one provider, and channel-b and tool-x each provide it']);
 });
 
 /** The repository's registry, component.json files only, plus `extra` components: enough to check presets. */
@@ -209,6 +252,11 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   // A server project is not offered the webhook; Cloudflare has neither the poller nor an HTTP Worker half.
   expect(r.slots("http", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram"]);
   expect(r.slots("http", ["durable"])[0]?.options.map((o) => o.name)).toEqual(["channel-telegram-webhook"]);
+  // Several channels at once; the features each target offers, none installed already.
+  expect(r.slots("telegram")[0]).toMatchObject({ multiple: true, defaults: ["channel-telegram"] });
+  expect(r.preset("telegram", ["channel-telegram", "channel-http"]).filter((c) => c.startsWith("channel-"))).toEqual(["channel-telegram", "channel-http"]);
+  expect(r.features("telegram", ["server"]).map((f) => f.name)).toEqual(["router-rules", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"]);
+  expect(r.features("telegram-cloudflare", ["durable"]).map((f) => f.name)).toEqual(["router-rules", "tool-mcp", "health-registry"]);
 });
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {

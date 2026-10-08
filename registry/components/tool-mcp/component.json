@@ -2,6 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "tool-mcp",
   "version": "0.0.0",
+  "title": "MCP tools: give your agents the tools of remote MCP servers",
   "description": "The tools of remote MCP servers (Streamable HTTP), for the agents that name them: each tool named in config becomes the agent tool <server>_<tool>.",
   "targets": [
     "server",

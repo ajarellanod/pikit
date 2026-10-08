@@ -348,12 +348,15 @@ export function generateCommand(root: string): string {
 
 /**
  * Every preset resolves: its components exist, once each; an alias extends a base and chooses what
- * that base lets it choose; and every answer to a question resolves too and has a `title` to show.
+ * that base lets it choose; and every answer to a question, and every feature, resolves too and has a
+ * `title` to show.
  *
  * And composes, as `pikit new` would make it: on each target all its components run on (one at
- * least), with what they bring (`withOffers`), and each answer on each of those targets it runs on
- * (the answers `pikit new` offers there). An offer needs the registry's only provider, so a preset
- * that leaned on one breaks when a second provider lands: this says so before a project is written.
+ * least), with what they bring (`withOffers`), and each answer and each feature on each of those
+ * targets it runs on (what `pikit new` offers there); and with everything it offers there at once,
+ * every answer of a `multiple` question (Telegram and HTTP) and every feature. An offer needs the
+ * registry's only provider, so a preset that leaned on one breaks when a second provider lands: this
+ * says so before a project is written.
  */
 export function checkPresets(root: string, catalogue: RegistryCatalogue = registryCatalogue(readManifests(root)).catalogue): string[] {
   const dir = join(root, "presets");
@@ -388,13 +391,21 @@ export function checkPresets(root: string, catalogue: RegistryCatalogue = regist
           }
         }
       }
+      for (const feature of isAlias ? [] : registry.features(name)) {
+        if (registry.manifest(feature.name).title === undefined) report(`offers ${feature.name}, but its component.json has no title to show`);
+        if (!targets.some((target) => registry.manifest(feature.name).targets.includes(target))) report(`offers ${feature.name}, which runs on none of its targets`);
+      }
       for (const target of isAlias ? [] : targets) {
-        for (const slot of registry.slots(name, [target])) {
-          for (const option of slot.options.filter((o) => o.name !== slot.default)) {
-            const chosen = registry.preset(name, [option.name]);
-            compositionProblems(registry, chosen, target, catalogue).forEach((p) => report(`with ${option.name}, on ${target}, ${p}`));
-          }
+        const composes = (choices: string[]) =>
+          compositionProblems(registry, registry.preset(name, choices), target, catalogue).forEach((p) => report(`with ${choices.join(" and ")}, on ${target}, ${p}`));
+        const slots = registry.slots(name, [target]);
+        const features = registry.features(name, [target]).map((f) => f.name);
+        for (const slot of slots) {
+          for (const option of slot.options.filter((o) => !slot.defaults.includes(o.name))) composes([option.name]);
         }
+        for (const feature of features) composes([feature]);
+        const everything = [...slots.flatMap((slot) => (slot.multiple ? slot.options.map((o) => o.name) : [])), ...features];
+        if (everything.length > 1) composes(everything);
       }
     } catch (error) {
       report(error instanceof Error ? error.message : String(error));

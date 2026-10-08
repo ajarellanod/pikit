@@ -41,6 +41,17 @@ components:
 # One question of `pikit new` per entry: every registry component of that kind is an answer (its
 # `title` in component.json is the label), and the one listed above is the default. A new channel-*
 # component is an answer without touching this file. `--with <component>` answers it in a script.
+# `multiple`: several channels at once (`--with channel-telegram --with channel-http`), all of them
+# in place of channel-http; HTTP is served by server-bun, Telegram's polling needs no server.
 choose:
   - kind: channel
     question: "Where do you want to talk to your agent?"
+    multiple: true
+# What `pikit new` offers to add, several at once, with the dashboard (`--ui`): each by its `title`,
+# `--with <component>` in a script. Each brings what it needs, as `pikit add` would.
+features:
+  - router-rules
+  - tool-mcp
+  - tool-fetch
+  - tool-websearch-brave
+  - health-registry

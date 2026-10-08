@@ -2,6 +2,7 @@
   "$schema": "../../schema/component.schema.json",
   "name": "router-rules",
   "version": "0.0.0",
+  "title": "Routing rules: send each conversation to an agent by channel, chat or sender",
   "description": "Each conversation goes to the agent of the first rule in config it matches.",
   "targets": [
     "server",

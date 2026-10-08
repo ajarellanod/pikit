@@ -38,12 +38,26 @@
                 "type": "string",
                 "pattern": "\\S",
                 "description": "What `pikit new` asks. Default: \"Which <kind>?\"."
+              },
+              "multiple": {
+                "type": "boolean",
+                "description": "Several answers at once (a channel: any of them; a router: one), all of them replacing the listed one. Default: false."
               }
             },
             "additionalProperties": false
           },
           "minItems": 1,
           "description": "One question of `pikit new` per entry; `--with <component>` answers it in a script."
+        },
+        "features": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+          },
+          "minItems": 1,
+          "uniqueItems": true,
+          "description": "The components `pikit new` offers to add, several at once, each shown by its component.json `title` (with the dashboard, which `--ui` adds); `--with <component>` adds one in a script. Not in `components`, and of no kind the preset `choose`s."
         },
         "model": {
           "type": "string",

@@ -25,7 +25,7 @@ const USAGE = `pikit: a kit for Pi.
 
 Usage:
   pikit new [--target <t>] [--preset <p>]   a new agent, step by step (in a terminal); flags answer its questions
-  pikit new <dir> [--target server|durable] [--preset <name> [--with <component>]...] [--ui] [--registry <path>]   a new project (--ui: with the dashboard)
+  pikit new <dir> [--target server|durable] [--preset <name> [--with <component>]...] [--ui] [--registry <path>]   a new project (--with: a channel or a feature the preset offers; --ui: with the dashboard)
   pikit add <component>... [--registry <path>] [--force] [--yes]   several at once: one transaction, one install
   pikit remove <component> [--force]
   pikit upgrade [<component>...] [--dry-run] [--force] [--yes]   take the registry's version, merging your edits (without names, the dashboard too)

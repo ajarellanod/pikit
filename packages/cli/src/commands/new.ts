@@ -2,6 +2,10 @@
  * `pikit new <dir> [--target <server|durable>] [--preset <name> [--with <component>]...] [--ui] [--registry <path>]`:
  * a new project.
  *
+ * `--with` answers the preset's questions (several channels: `--with channel-telegram --with
+ * channel-http`) and adds the features it offers (`--with tool-mcp`): each a component, installed like
+ * the preset's own, with the providers it brings (`withOffers`).
+ *
  * `--ui` gives it a UI (SPEC §5, `ui.ts`): the dashboard's files in `src/dashboard/` and the components
  * it needs, installed with the preset's; its own `bun install` runs after the project's.
  *
@@ -47,7 +51,10 @@ import { installDashboardPackages, UI_COMPONENTS, uiNext, writeDashboard } from 
 
 export interface NewOptions {
   preset?: string;
-  /** Answers to the preset's questions (`choose`): each replaces the preset's component of its kind. */
+  /**
+   * Answers to the preset's questions (`choose`): they replace the preset's component of their kind
+   * (several of a `multiple` kind: Telegram and HTTP). And the preset's features to add (`features`).
+   */
   with?: readonly string[];
   registry?: string;
   /** Print what to run next. Default: true; the guided path (`wizard.ts`) runs it instead. */
@@ -92,7 +99,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
   checkTarget(target);
   const targets = [target];
   const registry = openRegistry(options.registry ?? DEFAULT_REGISTRY);
-  if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions: it needs --preset");
+  if (options.preset === undefined && (options.with?.length ?? 0) > 0) throw new CliError("--with answers a preset's questions and adds its features: it needs --preset");
   const chosen = options.preset === undefined ? [] : registry.preset(options.preset, options.with ?? []);
   // What the chosen components bring (offered providers, `offers.ts`): durable delivery for a chat
   // channel, and what it needs. A preset lists only what every project of it uses, and names its
