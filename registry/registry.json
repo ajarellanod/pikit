@@ -103,7 +103,7 @@
     },
     "execution-local": {
       "version": "0.0.0",
-      "description": "The agent's tools work on this server: its filesystem and its shell.",
+      "description": "The agent's tools work on this server: its filesystem and its shell, with a git whose pushes are fenced and whose token the shell never sees.",
       "targets": [
         "server"
       ],

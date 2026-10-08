@@ -13,6 +13,11 @@
  * `gh`) is in every command's environment. `workspace-local` builds on this environment: its agents'
  * directories are inside `root`, and their commands get these `variables`.
  *
+ * `git` in a command is this component's own (`git.ts`), run by the server: clone, status, diff,
+ * commit, log, push and pr, pushing only to `git.pushRepositories` on branches under
+ * `git.branchPrefix`, with the GitHub token read through `secrets` and never given to the shell.
+ * The shell reaches it through a `git` program first on its `PATH` (`shim.ts`).
+ *
  * NOT A SANDBOX. Commands run as the server's OS user and can read and change whatever that user
  * can, outside the working directory too: other projects, `~/.ssh`, this app's credentials file.
  * Paths are not confined, because a shell would step outside anyway. For isolation, run commands
@@ -22,12 +27,16 @@
  * Target: `server`.
  */
 
-import { mkdir, access, constants } from "node:fs/promises";
-import { resolve } from "node:path";
+import { randomUUID } from "node:crypto";
+import { access, constants, mkdir } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { delimiter, join, resolve } from "node:path";
 import { defineComponent } from "@pikit/core";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
 import Type from "typebox";
+import { createGit } from "./git.ts";
+import { createGitShim } from "./shim.ts";
 
 /** What common tools need to run, and nothing that is usually a secret. */
 export const DEFAULT_VARIABLES = ["HOME", "LANG", "LC_ALL", "PATH", "SHELL", "TERM", "TMPDIR", "TZ", "USER"];
@@ -37,27 +46,59 @@ const Config = Type.Object({
   root: Type.String({ minLength: 1, default: ".pikit/workspace" }),
   /** The server's variables a command starts with; every other one is left out. */
   variables: Type.Array(Type.String({ pattern: "^[A-Za-z_][A-Za-z0-9_]*$" }), { default: DEFAULT_VARIABLES }),
+  git: Type.Object(
+    {
+      /** The secret holding the GitHub token, read through `secrets`. Without it, public clones only. */
+      tokenSecret: Type.String({ minLength: 1, default: "GITHUB_TOKEN" }),
+      /** `owner/name`: the only repositories `git push` and `git pr` may reach. */
+      pushRepositories: Type.Array(Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }), { default: [] }),
+      /** What a pushed branch must start with: the agent never pushes `main`. */
+      branchPrefix: Type.String({ minLength: 1, default: "pikit/self/" }),
+    },
+    { default: {} },
+  ),
 });
 
 export default defineComponent({
   name: "execution-local",
   config: Config,
   setup(pikit, config) {
-    // Building the environment acquires nothing: no directory is made and no process runs until
-    // start and the first command. One environment serves both capabilities.
-    const env: ExecutionEnv = createLocalExecution({ cwd: resolve(config.root), env: pick(process.env, config.variables) });
+    if (config.variables.includes(config.git.tokenSecret)) {
+      throw new Error(`execution-local: variables lists ${config.git.tokenSecret}, the GitHub token: only git may read it, never a command`);
+    }
+    const secrets = pikit.useOptional("secrets");
+    const root = resolve(config.root);
+    // Building the environment acquires nothing: no directory is made, no port opened and no process
+    // runs until start and the first command. The `git` program's directory is chosen now, because
+    // the commands' variables are.
+    const shimDir = join(tmpdir(), `pikit-git-${randomUUID()}`);
+    const variables = pick(process.env, config.variables);
+    variables.PATH = variables.PATH === undefined ? shimDir : `${shimDir}${delimiter}${variables.PATH}`;
+    const env: ExecutionEnv = createLocalExecution({ cwd: root, env: variables });
     pikit.provide("execution", env);
     pikit.provide("execution.shell", env);
+
+    const git = createGit({
+      token: async () => (await secrets.get()?.get(config.git.tokenSecret)) || undefined,
+      pushRepositories: config.git.pushRepositories,
+      branchPrefix: config.git.branchPrefix,
+    });
+    const shim = createGitShim({ dir: shimDir, root, run: git.run });
 
     return {
       async start() {
         // Fail at start: tools with nowhere to work are a broken deployment.
         await mkdir(env.cwd, { recursive: true });
         await access(env.cwd, constants.R_OK | constants.W_OK);
+        await shim.start();
       },
       async stop(ctx) {
         // Kill the commands still running, so none outlives the app.
-        await env.cleanup(ctx);
+        try {
+          await env.cleanup(ctx);
+        } finally {
+          await shim.stop();
+        }
       },
     };
   },
