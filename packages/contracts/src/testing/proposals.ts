@@ -7,8 +7,9 @@
  *
  * Making a proposal is the fixture's (a branch pushed to a repository on this machine, a pull request
  * on a fake GitHub), and so is moving its head (the agent pushing again): the suite checks what every
- * provider then says and refuses. Approvals pass `override`: a provider whose checks run before an
- * approval is not asked to run them here.
+ * provider then says and refuses. Approvals pass `override`, but in the case of checks: a provider whose
+ * checks run before an approval makes a head's checks fail (`failChecks`), and is held to
+ * `checks_failing`; one whose checks run after approves without `override`.
  */
 
 import { type AppContext, type ComponentDefinition, defineApp, defineComponent, type Handle, silentLogger, type Target } from "@pikit/core";
@@ -32,6 +33,11 @@ export interface ProposalsFixture {
   pushAgain(id: string): Promise<string>;
   /** Makes a branch outside the prefix, which is never a proposal. */
   other(branch: string): Promise<void>;
+  /**
+   * Makes the checks of proposal `id` at `head` fail (a CI run that failed). Required of a provider
+   * whose checks run before an approval (`checksRun: "before-approval"`).
+   */
+  failChecks?(id: string, head: string): Promise<void>;
   dispose?(): Promise<void>;
 }
 
@@ -101,6 +107,8 @@ export function createProposalsConformance(factory: () => ProposalsFixture | Pro
       expect(found?.title, "Say hello", "its title");
       check(found?.branch.startsWith(list.branchPrefix) === true, "its branch to be under the prefix");
       check(!list.proposals.some((each) => each.branch === "feature/not-a-proposal"), "a branch outside the prefix not to be listed");
+      // The id is the branch's topic, as the provider lists it (never one the fixture made up).
+      expect(list.proposals.find((each) => each.branch === `${list.branchPrefix}greeting`)?.id, "greeting", "the id of the branch <prefix>greeting");
       check(list.checksRun === "before-approval" || list.checksRun === "after-approval", "checksRun to be said");
     }),
 
@@ -145,6 +153,36 @@ export function createProposalsConformance(factory: () => ProposalsFixture | Pro
       expect(await stateOf(running, made.id), "closed", "its state after");
       const approve = await proposals.approve(made.id, { head: made.head, override: true, operator: OPERATOR }, ctx);
       expect(approve.ok ? "approved" : approve.code, "not_open", "approving it after");
+    }),
+
+    proposalsCase("a branch outside the prefix is never read, approved or rejected, whatever id names it", async ({ proposals, ctx, fixture }) => {
+      await fixture.other("feature/not-a-proposal");
+      for (const id of ["feature/not-a-proposal", "../feature/not-a-proposal", "../../feature/not-a-proposal", "../../../refs/heads/feature/not-a-proposal"]) {
+        expect(await codeOf(proposals.get(id, ctx)), "not_found", `get(${JSON.stringify(id)})`);
+        const approve = await proposals.approve(id, { override: true, operator: OPERATOR }, ctx);
+        expect(approve.ok ? "approved" : approve.code, "not_found", `approve(${JSON.stringify(id)})`);
+        const reject = await proposals.reject(id, { operator: OPERATOR }, ctx);
+        expect(reject.ok ? "rejected" : reject.code, "not_found", `reject(${JSON.stringify(id)})`);
+      }
+    }),
+
+    proposalsCase("checks that run before an approval hold it: failing is checks_failing, and changes nothing, unless override", async (running) => {
+      const { proposals, ctx, fixture } = running;
+      const made = await fixture.propose({ topic: "checked", title: "Checked", body: "", file: "c.txt", text: "c\n" });
+      const { checksRun } = await proposals.list(ctx);
+      if (checksRun === "after-approval") {
+        // Nothing runs before: an approval is not held by checks.
+        const outcome = await proposals.approve(made.id, { head: made.head, operator: OPERATOR }, ctx);
+        check(outcome.ok, `an approval without override to succeed where checks run after it (${JSON.stringify(outcome)})`);
+        return;
+      }
+      if (fixture.failChecks === undefined) throw new Error(`${GROUP}: a provider whose checks run before an approval needs a fixture with failChecks`);
+      await fixture.failChecks(made.id, made.head);
+      const held = await proposals.approve(made.id, { head: made.head, operator: OPERATOR }, ctx);
+      expect(held.ok ? "approved" : held.code, "checks_failing", "approving with failing checks");
+      expect(await stateOf(running, made.id), "open", "its state after the refusal");
+      const overridden = await proposals.approve(made.id, { head: made.head, override: true, operator: OPERATOR }, ctx);
+      check(overridden.ok, `override to approve it anyway (${JSON.stringify(overridden)})`);
     }),
 
     proposalsCase("approving or rejecting what is not a proposal is not_found", async ({ proposals, ctx }) => {

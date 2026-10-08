@@ -57,7 +57,9 @@ there.
 - `proposals`: the agent's changes to itself waiting for an operator (`status`, `list`, `get`,
   `approve`, `reject` with typed refusals, `remote()`: where the steward clones from and pushes
   `pikit/self/<topic>` to); an id is the branch's topic, and providers are interchangeable; suite
-  `createProposalsConformance`.
+  `createProposalsConformance` (the id as the provider lists it, no id reaching a branch outside the
+  prefix, `checks_failing` held unless `override` where checks run before an approval, through the
+  fixture's `failChecks`).
 
 ### Pi adapter (`@pikit/pi-adapter`, the only package that imports Pi)
 - On `@earendil-works/pi-durable` 1.1.0 (with `chord`, `pi-ai` and `pi-mcp` 1.1.0, exact pins):

@@ -67,6 +67,9 @@ for (const c of createProposalsConformance(() => {
     async other(branch) {
       github.addBranch(branch, hex(commits++), "Not a proposal");
     },
+    async failChecks(_id, head) {
+      github.setChecks(head, [{ name: "checks", status: "completed", conclusion: "failure" }]);
+    },
     dispose: () => github.stop(),
   };
 })) {
