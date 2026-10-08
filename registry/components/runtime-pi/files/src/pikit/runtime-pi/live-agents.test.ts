@@ -7,7 +7,18 @@
 
 import { expect, test } from "bun:test";
 import { type AppContext, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentRuntime, type AgentTool, type ConversationRef, defineAgent, type DirectoryAgent, type Settings, SettingsError, type SettingsValue } from "@pikit/contracts";
+import {
+  type AgentRuntime,
+  type AgentTool,
+  type AgentUnavailableError,
+  type ConversationRef,
+  defineAgent,
+  type DirectoryAgent,
+  isAgentUnavailable,
+  type Settings,
+  SettingsError,
+  type SettingsValue,
+} from "@pikit/contracts";
 import { type ModelRequest, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
@@ -168,6 +179,35 @@ test("a live agent gets the operator's overrides, as a code agent does", async (
   // An override's fields are checked against the App, a live agent's too.
   await expect(settings.provider.set("runtime-pi", { support: { model: "gone/model" } }, { id: "ops" }, ctx)).rejects.toThrow(SettingsError);
   await app.stop();
+}, 30_000);
+
+test("a live agent deleted is gone for good (AgentUnavailableError); a directory never read is not (a plain error: try again)", async () => {
+  const parts = project();
+  parts.agents.push({ name: "support", model: "faux/scripted" });
+  const { app, conversation, dispatch, ask } = await started([parts.component]);
+  const support = await conversation("support");
+  await ask(support, "r1", "hello");
+  parts.agents.length = 0;
+  const gone = await dispatch(support, "r2", "still there?").then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(isAgentUnavailable(gone)).toBe(true);
+  expect((gone as AgentUnavailableError).agent).toBe("support");
+  await app.stop();
+
+  // A new App whose directory cannot be read: the agent may be live, so it is not gone.
+  parts.agents.push({ name: "support", model: "faux/scripted" });
+  parts.fail(true);
+  const second = await started([parts.component]);
+  const unread = await second.dispatch(await second.conversation("support"), "r3", "hi").then(
+    () => undefined,
+    (error: unknown) => error,
+  );
+  expect(unread).toBeInstanceOf(Error);
+  expect(isAgentUnavailable(unread)).toBe(false);
+  expect((unread as Error).message).toContain("could not be read yet");
+  await second.app.stop();
 }, 30_000);
 
 test("a directory that cannot be read keeps the agents read last", async () => {

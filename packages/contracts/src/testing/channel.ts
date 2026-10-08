@@ -25,6 +25,10 @@
  * - a message whose admission fails for a while (the runtime cannot take it) is never dropped in
  *   silence: the platform or the sender delivers it again, and it reaches the agent once the failure
  *   passes, answered once;
+ * - a message to a conversation whose agent is gone for good (removed: the runtime rejects it with
+ *   `AgentUnavailableError`) is handled once, never delivered again and again: answered by the agent
+ *   routed now in a new conversation of its key, or, when routing names the gone agent, refused with
+ *   its sender told;
  * - a command to start over (`resetCommand`) that the platform delivers again, as after a crash
  *   before the channel acknowledged it, starts over once and is answered once;
  * - durability comes with the contracts: an answer that ends while the channel is stopped, or whose
@@ -43,6 +47,7 @@
 import type { Admission, AgentRequest, AgentResult, AgentRuntime, ConversationRef } from "../agent.ts";
 import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, halt, type Logger, silentLogger } from "@pikit/core";
 import type { ConversationRegistry } from "../conversations.ts";
+import { AgentUnavailableError } from "../inbound.ts";
 import { DASHBOARD_REQUEST_PREFIX } from "../delivery.ts";
 import type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "../submissions.ts";
 import { checker } from "./assert.ts";
@@ -131,6 +136,8 @@ export interface ChannelConformanceOptions {
 export const CONFORMANCE_ANSWER = "conformance: the agent's answer";
 /** The agent the suite's router sends every message to. */
 export const CONFORMANCE_AGENT = "conformance-agent";
+/** The agent the router sends to once a case changed it (`routeTo`). */
+const OTHER_AGENT = "conformance-other-agent";
 
 /** Words in a message's text that make the suite's stages act on it. */
 const HALT_NORMALIZE = "[halt at normalize]";
@@ -278,6 +285,29 @@ export function createChannelConformance(
       check(s.started === 1, `one run, got ${s.started}`);
     }),
 
+    channelCase("a message to a conversation whose agent is gone is answered once by the agent routed now, in a new conversation of its key", async (s) => {
+      await s.fixture.deliver({ id: "m1", conversation: "alpha", text: "hello" });
+      await toldExactly(s, "alpha", 1, "the answer before the agent is removed");
+      // An operator deleted the live agent; routing now names another.
+      s.removeAgent(CONFORMANCE_AGENT);
+      s.routeTo(OTHER_AGENT);
+      await s.fixture.deliver({ id: "m2", conversation: "alpha", text: "still there?" });
+      await toldExactly(s, "alpha", 2, "the answer of the agent routed now");
+      const last = s.dispatched.at(-1);
+      check(last?.conversation.agent === OTHER_AGENT && last.requestId.length > 0, `the message dispatched to "${OTHER_AGENT}", got ${JSON.stringify(last?.conversation)}`);
+      check(s.resets === 1 && s.unavailable === 1, `the key moved once, and the gone agent asked once, got ${s.resets} reset(s), ${s.unavailable} refusal(s)`);
+    }),
+
+    channelCase("a message routed to an agent that is gone is refused once, its sender told, never delivered again", async (s) => {
+      s.removeAgent(CONFORMANCE_AGENT);
+      await s.fixture.deliver({ id: "m1", conversation: "alpha", text: "hello" });
+      await s.eventually(async () => ((await s.fixture.told("alpha")).length > 0 ? true : undefined), "the sender to be told the message was not taken");
+      await s.quiet();
+      await s.quiet();
+      check(!(await s.fixture.told("alpha")).some((line) => line.includes(CONFORMANCE_ANSWER)), "no agent's answer");
+      check(s.unavailable === 1, `the gone agent asked once (the platform not delivering it again), got ${s.unavailable}`);
+    }),
+
     channelCase("a stage that moves a message to another conversation does not get it dispatched", async (s) => {
       await s.fixture.deliver({ id: "m1", conversation: "alpha", text: `hijack ${MOVE}` });
       await s.quiet();
@@ -383,8 +413,14 @@ interface Subject {
   readonly held: number;
   /** Conversations started over (`conversations.registry`'s `reset`). */
   readonly resets: number;
+  /** Dispatches the runtime refused because their agent is gone (`removeAgent`). */
+  readonly unavailable: number;
   /** Errors the apps logged. */
   errors: string[];
+  /** From now on `agent` is no agent: a dispatch to a conversation of it rejects with `AgentUnavailableError`. */
+  removeAgent(agent: string): void;
+  /** From now on the router sends every message to `agent`. */
+  routeTo(agent: string): void;
   /** From now on a run does not end until `settleHeld`. */
   holdRuns(): void;
   /** Dispatches `request` to the suite's runtime, as another producer (admin-api, a scheduler) would. */
@@ -429,6 +465,11 @@ interface Durable {
   conversations: Map<string, ConversationRef>;
   /** The request the next run starts with, before the one dispatched (`joinNextRun`). */
   joinNext: string | undefined;
+  /** Agents that are gone (`removeAgent`), and the dispatches refused for them. */
+  gone: Set<string>;
+  unavailable: number;
+  /** The router's agent. */
+  routed: string;
 }
 
 async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeoutMs: number, quietMs: number): Promise<Subject> {
@@ -447,6 +488,9 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
     answers: createMemoryFeed<RunSettlement>(),
     conversations: new Map(),
     joinNext: undefined,
+    gone: new Set(),
+    unavailable: 0,
+    routed: CONFORMANCE_AGENT,
   };
   const kv = createMemoryKeyValueStorage();
   const definition = defineApp({
@@ -458,7 +502,7 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
       defineComponent({ name: "conformance-storage-kv", setup: (pikit) => pikit.provide("storage.kv", kv) }),
       createMemoryWakeups({ durable: true, retryMs: 50 }),
       stages(),
-      ...(withRouter ? [router()] : []),
+      ...(withRouter ? [router(durable)] : []),
     ],
     ...(fixture.config !== undefined && { config: fixture.config }),
     logger,
@@ -482,7 +526,16 @@ async function createSubject(fixture: ChannelFixture, withRouter: boolean, timeo
     get resets() {
       return durable.resets.length;
     },
+    get unavailable() {
+      return durable.unavailable;
+    },
     errors,
+    removeAgent(agent) {
+      durable.gone.add(agent);
+    },
+    routeTo(agent) {
+      durable.routed = agent;
+    },
     holdRuns() {
       durable.hold = true;
     },
@@ -553,10 +606,10 @@ function fakeConversations(durable: Durable): ComponentDefinition {
           return conversation;
         },
         get: async (key) => known.get(key),
-        async reset(key) {
+        async reset(key, _ctx, agent) {
           const previous = known.get(key);
           if (previous === undefined) return undefined;
-          const conversation = { ...previous, conversationId: `${previous.conversationId}-reset-${durable.resets.length + 1}` };
+          const conversation = { ...previous, ...(agent !== undefined && { agent }), conversationId: `${previous.conversationId}-reset-${durable.resets.length + 1}` };
           known.set(key, conversation);
           durable.resets.push(key);
           return { conversation, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
@@ -648,12 +701,12 @@ function stages(): ComponentDefinition {
   });
 }
 
-/** Every message no rule decided goes to `CONFORMANCE_AGENT`. */
-function router(): ComponentDefinition {
+/** Every message no rule decided goes to `CONFORMANCE_AGENT`, or the agent a case routes to (`routeTo`). */
+function router(durable: Durable): ComponentDefinition {
   return defineComponent({
     name: "conformance-router",
     setup(pikit) {
-      pikit.pipeline("route.resolve", (value) => (value.decision !== undefined ? value : { ...value, decision: { agent: CONFORMANCE_AGENT, access: "allow" } }), {
+      pikit.pipeline("route.resolve", (value) => (value.decision !== undefined ? value : { ...value, decision: { agent: durable.routed, access: "allow" } }), {
         id: "conformance-router",
       });
     },
@@ -665,6 +718,10 @@ async function dispatchFake(durable: Durable, request: AgentRequest): Promise<Ad
   if (durable.failAdmissions > 0) {
     durable.failAdmissions--;
     throw new Error("conformance: the runtime cannot take messages for a while");
+  }
+  if (durable.gone.has(request.conversation.agent)) {
+    durable.unavailable++;
+    throw new AgentUnavailableError(request.conversation.agent, `conformance: no agent "${request.conversation.agent}" now`);
   }
   const duplicate = durable.dispatched.some((d) => d.requestId === request.requestId && d.conversation.key === request.conversation.key);
   durable.dispatched.push(request);

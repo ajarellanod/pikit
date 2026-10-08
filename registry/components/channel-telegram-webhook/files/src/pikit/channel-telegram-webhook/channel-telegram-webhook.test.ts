@@ -7,7 +7,7 @@
  * `wakeups`, `storage.kv` and `agent.submissions` from `@pikit/contracts/testing`, and here secrets, a
  * conversation registry, a router stage and an agent runtime whose runs answer `answer: <message>`
  * (`hold` waits to be released, `fail` fails, `long` answers 9000 characters, `throw` cannot be
- * dispatched). Most tests run both halves in one App, as on a server; one runs them in two Apps, as on
+ * dispatched, `gone` finds its agent gone for good). Most tests run both halves in one App, as on a server; one runs them in two Apps, as on
  * Cloudflare.
  */
 
@@ -16,6 +16,7 @@ import { join } from "node:path";
 import { type App, type AppContext, BACKGROUND_CONTEXT, type Clock, type ComponentDefinition, defineApp, defineComponent, type Logger, silentLogger } from "@pikit/core";
 import {
   type ActorMailbox,
+  AgentUnavailableError,
   type AgentRuntime,
   type AgentSubmissions,
   type ChannelTransport,
@@ -109,6 +110,7 @@ function scriptedRuntime(submissions: RecordingSubmissions, seen: Set<string> = 
       const runtime: AgentRuntime = {
         async dispatch({ requestId, conversation, prompt }) {
           if (prompt === "throw") throw new Error("the session store is down");
+          if (prompt === "gone") throw new AgentUnavailableError(conversation.agent, `no agent "${conversation.agent}" now`);
           dispatched.push({ requestId, key: conversation.key, prompt });
           if (seen.has(requestId)) return { kind: "duplicate", requestId };
           seen.add(requestId);
@@ -485,6 +487,14 @@ test("an update the conversation could not take is 500, so Telegram delivers it 
 
   expect((await s.telegram.write(OWNER, "throw")).status).toBe(500);
   expect(s.telegram.sent).toEqual([]);
+});
+
+test("an update whose agent is gone for good (a live agent deleted) is 200, its sender told once: Telegram never delivers it again", async () => {
+  const s = await started();
+
+  expect((await s.telegram.write(OWNER, "gone")).status).toBe(200);
+  await s.telegram.sentCount(1);
+  expect(s.telegram.sent.map((each) => each.text)).toEqual(["Sorry, I can't answer that here."]);
 });
 
 // ---------------------------------------------------------------------------------------------

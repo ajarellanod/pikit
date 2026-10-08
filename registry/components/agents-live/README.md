@@ -35,13 +35,20 @@ are listed there too, read-only: their prompt, model and tools are changed in **
   or sender goes to a live agent. `pikit new`'s features step installs both ("Agents from the
   dashboard"); after `pikit add agents-live`, add `router-rules` for routing.
 
-A conversation keeps the agent it was created with. Removing a live agent keeps its conversations'
-history; their next message fails until the key is reset (`/new`) or the agent is made again.
+A conversation keeps the agent it was created with, while that agent exists. **Removing a live agent**
+(or one becoming unable to run, its model gone) is permanent, and handled once per message, never
+retried: the runtime rejects its conversations' next message with `AgentUnavailableError`, and
+`admitInbound` moves the key to a new conversation of the agent routed now (a rule's, or router-basic's
+default), keeps the old one, logs a warning naming both, and the message goes there. A rule that still
+names the removed agent halts its messages (the channel says it cannot take them; Telegram gets its
+`200`). Only while the directory was never read (it cannot be read yet) is a missing name a failure
+for a while: the platform delivers the message again. Agents warns of this when you remove one.
 
 ## Removing it
 
 `pikit remove agents-live`: the live agents are no agents any more (their settings stay stored,
-unused); conversations of theirs fail their next message, and router-rules' rules naming them halt.
+unused); conversations of theirs move to the agent routed now at their next message, and router-rules'
+rules naming them halt.
 
 ## Tests
 

@@ -175,7 +175,8 @@ interface ConversationRegistry {
 - The pointer is a record, never memory. Concurrent first resolves of one key make one conversation.
 - A conversation keeps the agent it was created with.
 - `reset` points the key to a new conversation, keeps the old one, and emits `conversation.reset`
-  once the pointer is durable. No pointer is ever deleted.
+  once the pointer is durable. No pointer is ever deleted. `reset(key, ctx, agent)` gives the new
+  conversation another agent: what `admitInbound` does when the key's agent is gone (below).
 
 Providers: conversations-kv (on `storage.kv`, both targets), conversations-file (a JSON file, server).
 Both use `agent.conversations`, so the runtime starts first.
@@ -187,7 +188,10 @@ Not a capability: a function and two pipelines every channel shares. `admitInbou
 then `conversations.resolve(key, agent)`, then `runtime.dispatch`, and returns an `InboundOutcome`:
 `admitted`, `duplicate`, `halted` (a stage halted), `denied` (the router said deny) or `no_route` (no
 stage decided). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
-when a capability fails. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text,
+when a capability fails. A dispatch rejected with `AgentUnavailableError` (the conversation's agent
+is gone for good: removed, a live agent deleted) is not thrown: the key moves to a new conversation of
+the agent routed now and the message goes there, or, when routing names the gone agent, it is
+`denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text,
 raw, receivedAt }`; its `id` becomes the request id. See [pipelines.md](pipelines.md).
 
 Authentication is not here: each channel proves its senders its own way.

@@ -37,6 +37,7 @@ import {
   type CommandLookup,
   type ConversationRef,
   type ConversationRegistry,
+  isAgentUnavailable,
   type ObservedConversation,
   type PageRequest,
   listAgentCommands,
@@ -264,7 +265,14 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
     const webSearch = await searchable(conversation.agent, message, ctx);
     const images = (message.attachments ?? []).map(({ mimeType, data }) => ({ mimeType, data }));
     const prompt = operatorPrompt(conversation.key, message.text, { webSearch });
-    return contracts.runtime().dispatch({ requestId: message.requestId, conversation, prompt, ...(images.length > 0 && { images }), whenBusy: "followUp" }, ctx);
+    try {
+      return await contracts.runtime().dispatch({ requestId: message.requestId, conversation, prompt, ...(images.length > 0 && { images }), whenBusy: "followUp" }, ctx);
+    } catch (error) {
+      // Its agent is gone for good (removed, a live agent deleted): a refusal, not a failure. A message
+      // from its channel moves the key to the agent routed now; `/new` here keeps the agent.
+      if (isAgentUnavailable(error)) throw refusal("no_agent", `this conversation's agent "${conversation.agent}" is no agent now: ${error.message}`);
+      throw error;
+    }
   };
 
   return {

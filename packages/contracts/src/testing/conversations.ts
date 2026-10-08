@@ -147,6 +147,20 @@ export function createConversationRegistryConformance(
       }
     }),
 
+    registryCase("reset with an agent points the key to a new conversation of that agent (its own was removed); without one, the key keeps it", async (s) => {
+      const w = await s.worker();
+      const created = await w.registry.resolve("test:moved", "retired", w.ctx);
+
+      const reset = await w.registry.reset("test:moved", w.ctx, "support");
+
+      if (reset === undefined) throw new Error(`${GROUP}: reset of a known key returned undefined`);
+      check(reset.newConversationId !== created.conversationId, "a new runtime conversation");
+      expect([reset.conversation.key, reset.conversation.agent], ["test:moved", "support"], "the conversation after a reset with an agent");
+      same(await w.registry.resolve("test:moved", "retired", w.ctx), reset.conversation, "resolve after it: the new agent kept");
+      const again = await w.registry.reset("test:moved", w.ctx);
+      expect(again?.conversation.agent, "support", "the agent after a reset without one");
+    }),
+
     registryCase("reset of an unknown key is undefined and emits nothing", async (s) => {
       const w = await s.worker();
 

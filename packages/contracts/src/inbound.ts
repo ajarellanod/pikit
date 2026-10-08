@@ -78,6 +78,30 @@ export type InboundOutcome =
   /** No stage of `route.resolve` decided: no router is installed. Logged as an error. */
   | { kind: "no_route"; message: InboundMessage };
 
+/**
+ * What `AgentRuntime.dispatch` rejects with when the conversation's agent is no agent now, for good: a
+ * code agent a deploy removed, a live agent (`agent.directory`) an operator deleted, or one that cannot
+ * run here any more (its model gone). Permanent, unlike a runtime that cannot take messages for a while
+ * (a plain error: the platform delivers the message again). `admitInbound` moves the key to a new
+ * conversation of the agent routed now, once; a producer never retries it. Told apart by `code`, so a
+ * second copy of the contracts still recognizes it.
+ */
+export class AgentUnavailableError extends Error {
+  readonly code = "agent_unavailable";
+  /** The agent that is no agent now. */
+  readonly agent: string;
+  constructor(agent: string, message: string) {
+    super(message);
+    this.name = "AgentUnavailableError";
+    this.agent = agent;
+  }
+}
+
+/** Whether `error` is an `AgentUnavailableError` (by its `code`). */
+export function isAgentUnavailable(error: unknown): error is AgentUnavailableError {
+  return typeof error === "object" && error !== null && (error as { code?: unknown }).code === "agent_unavailable";
+}
+
 export interface AdmitOptions {
   conversations: ConversationRegistry;
   runtime: AgentRuntime;
@@ -85,8 +109,10 @@ export interface AdmitOptions {
   key: string;
   /**
    * Called with the conversation once it resolved, right before `dispatch`: the last moment to start
-   * waiting for the run's events (`agent.settled`), which may arrive before `dispatch` returns.
-   * Whatever it starts, the caller ends when the outcome is not `admitted` or `admitInbound` throws.
+   * waiting for the run's events (`agent.settled`), which may arrive before `dispatch` returns. Called
+   * again, with the new conversation, when the first one's agent is gone (below): a later call replaces
+   * what an earlier one started. Whatever it starts, the caller ends when the outcome is not `admitted`
+   * or `admitInbound` throws.
    */
   beforeDispatch?(conversation: ConversationRef): void;
 }
@@ -96,6 +122,12 @@ export interface AdmitOptions {
  * conversation, `dispatch`. Resolves once the message is durable (the ack point) or stopped; throws
  * when a stage breaks the path's rules (it changed which message or conversation this is) or when a
  * capability fails, as the channel's own code would.
+ *
+ * **A conversation whose agent is gone** (`dispatch` rejects with `AgentUnavailableError`: removed by a
+ * deploy, a live agent deleted) is permanent, so it never throws: the key moves to a new conversation
+ * of the agent routed now (`conversations.reset(key, ctx, agent)`, the old one kept, a warning logged
+ * naming both), and the message goes there. When routing names the gone agent itself, the message is
+ * `denied` with why: its sender is told once, and the platform is acknowledged.
  */
 export async function admitInbound(ctx: AppContext, message: InboundMessage, options: AdmitOptions): Promise<InboundOutcome> {
   const normalized = await ctx.run("inbound.normalize", message);
@@ -116,9 +148,41 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
   }
   if (decision.access === "deny") return { kind: "denied", message: normalized, ...(decision.reason !== undefined && { reason: decision.reason }) };
 
-  const conversation = await options.conversations.resolve(options.key, decision.agent, ctx);
-  options.beforeDispatch?.(conversation);
-  const admission = await options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text }, ctx);
+  const dispatch = async (conversation: ConversationRef) => {
+    options.beforeDispatch?.(conversation);
+    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text }, ctx);
+  };
+  const gone = (error: AgentUnavailableError): InboundOutcome => {
+    ctx.logger.warn("admitInbound: the message's agent is no agent now, and routing names it: denied", { key: options.key, agent: error.agent });
+    return { kind: "denied", message: normalized, reason: `the agent "${error.agent}" is no agent now` };
+  };
+  let conversation = await options.conversations.resolve(options.key, decision.agent, ctx);
+  let admission: Admission;
+  try {
+    admission = await dispatch(conversation);
+  } catch (error) {
+    if (!isAgentUnavailable(error)) throw error;
+    if (conversation.agent === decision.agent) return gone(error);
+    // Moved already (a message before this one did it): the key's conversation now; else a new one.
+    const now = await options.conversations.get(options.key, ctx);
+    const moved =
+      now !== undefined && now.conversationId !== conversation.conversationId ? now : (await options.conversations.reset(options.key, ctx, decision.agent))?.conversation;
+    if (moved === undefined) throw error;
+    ctx.logger.warn("admitInbound: the conversation's agent is no agent now; its key moves to a new conversation of the agent routed now", {
+      key: options.key,
+      agent: conversation.agent,
+      routed: moved.agent,
+      previousConversationId: conversation.conversationId,
+      conversationId: moved.conversationId,
+    });
+    conversation = moved;
+    try {
+      admission = await dispatch(conversation);
+    } catch (again) {
+      if (isAgentUnavailable(again)) return gone(again);
+      throw again;
+    }
+  }
   if (admission.kind === "duplicate") return { kind: "duplicate", message: normalized, conversation };
   return { kind: "admitted", message: normalized, conversation, admission };
 }

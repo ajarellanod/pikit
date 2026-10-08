@@ -7,7 +7,7 @@ import { expect, test } from "bun:test";
 import type { AgentRequest, AgentRuntime, ConversationRef } from "./agent.ts";
 import { type ComponentDefinition, defineApp, defineComponent, halt, type Logger, silentLogger } from "@pikit/core";
 import type { ConversationRegistry } from "./conversations.ts";
-import { admitInbound, type InboundMessage } from "./inbound.ts";
+import { AgentUnavailableError, admitInbound, type InboundMessage } from "./inbound.ts";
 
 const message: InboundMessage = {
   id: "m1",
@@ -146,3 +146,63 @@ test("admitInbound: beforeDispatch sees the conversation after it resolves and b
   expect(seen?.conversationId).toBe("conversation-of-test:c1");
 });
 
+
+/** A registry of one key whose conversation's agent is `retired`, and a runtime for which `retired` (and `gone`) are gone for good. */
+function goneEnds(routed: string) {
+  const warnings: string[] = [];
+  let pointer: ConversationRef = { key: "test:c1", agent: "retired", conversationId: "c-1" };
+  const dispatched: ConversationRef[] = [];
+  const conversations: ConversationRegistry = {
+    resolve: async () => pointer,
+    get: async () => pointer,
+    async reset(key, _ctx, agent) {
+      const previous = pointer;
+      pointer = { key, agent: agent ?? previous.agent, conversationId: `${previous.conversationId}+` };
+      return { conversation: pointer, previousConversationId: previous.conversationId, newConversationId: pointer.conversationId };
+    },
+  };
+  const runtime: AgentRuntime = {
+    async dispatch(request) {
+      if (["retired", "gone"].includes(request.conversation.agent)) throw new AgentUnavailableError(request.conversation.agent, "no such agent now");
+      dispatched.push(request.conversation);
+      return { kind: "started", requestId: request.requestId };
+    },
+    abort: async () => {},
+    resume: async () => {},
+  };
+  const router = defineComponent({
+    name: "router-test",
+    setup: (pikit) => pikit.pipeline("route.resolve", (value) => ({ ...value, decision: { agent: routed, access: "allow" } })),
+  });
+  const logger: Logger = { ...silentLogger, warn: (line) => void warnings.push(line) };
+  return { warnings, dispatched, conversations, runtime, router, logger, pointer: () => pointer };
+}
+
+test("a conversation whose agent is gone for good: the key moves to a new conversation of the agent routed now, and the message goes there", async () => {
+  const e = goneEnds("support");
+  const app = await defineApp({ components: [e.router], logger: e.logger }).create();
+  const outcome = await admitInbound(app.context(), message, { conversations: e.conversations, runtime: e.runtime, key: "test:c1" });
+  expect(outcome).toMatchObject({ kind: "admitted", conversation: { key: "test:c1", agent: "support", conversationId: "c-1+" } });
+  expect(e.dispatched).toEqual([{ key: "test:c1", agent: "support", conversationId: "c-1+" }]);
+  expect(e.warnings).toEqual(["admitInbound: the conversation's agent is no agent now; its key moves to a new conversation of the agent routed now"]);
+});
+
+test("a conversation whose agent is gone, routed to that agent still (or to another gone one): denied once, never thrown", async () => {
+  for (const routed of ["retired", "gone"]) {
+    const e = goneEnds(routed);
+    const app = await defineApp({ components: [e.router], logger: e.logger }).create();
+    const outcome = await admitInbound(app.context(), message, { conversations: e.conversations, runtime: e.runtime, key: "test:c1" });
+    expect(outcome).toMatchObject({ kind: "denied", reason: expect.stringContaining("is no agent now") });
+    expect(e.dispatched).toEqual([]);
+  }
+});
+
+test("a plain dispatch failure (for a while) still throws: the platform delivers the message again", async () => {
+  const e = goneEnds("support");
+  e.runtime.dispatch = async () => {
+    throw new Error("the store is down");
+  };
+  const app = await defineApp({ components: [e.router], logger: e.logger }).create();
+  await expect(admitInbound(app.context(), message, { conversations: e.conversations, runtime: e.runtime, key: "test:c1" })).rejects.toThrow("the store is down");
+  expect(e.pointer().conversationId).toBe("c-1");
+});

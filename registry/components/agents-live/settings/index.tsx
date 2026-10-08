@@ -186,7 +186,7 @@ function AgentsSettings() {
           <SettingsRow
             key={name}
             label={assistantName(name)}
-            description={removing === name ? "Its conversations keep their history; no new message reaches it, and rules naming it stop matching." : [stored[name]?.description, stored[name]?.model].filter(Boolean).join(" · ")}
+            description={removing === name ? "Its conversations keep their history; at their next message each moves to the agent routed now (a rule's, or the default agent), in a new conversation. A rule naming it refuses its messages until changed." : [stored[name]?.description, stored[name]?.model].filter(Boolean).join(" · ")}
           >
             {removing === name ? (
               <div className="flex gap-1">

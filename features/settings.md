@@ -178,6 +178,18 @@ A feature component (`agents-live`, with `router-rules`), offered by `pikit new`
 - **Live agents are checked when used, never at start**, by the runtime (and when saved, by
   agents-live's schema): a deploy may take a model away, which drops that agent from the directory
   (settings-store leaves an invalid key out, logged) until an operator saves it again.
+- **A conversation whose agent is gone moves, once** (a live agent deleted or made invalid, a code agent
+  a deploy removed). It is permanent, not transient: runtime-pi rejects the dispatch with
+  `AgentUnavailableError` (contracts, `inbound.ts`), and `admitInbound` moves the key to a new
+  conversation of the agent routed now (`conversations.registry.reset(key, ctx, agent)`, a new optional
+  argument; the old conversation kept, a warning logged), as a reset would, and dispatches the message
+  there. If routing still names the gone agent, the message is `denied` (its sender told once, the
+  platform acknowledged: Telegram's `200`), never a `500` that Telegram would deliver again and again.
+  The transient case stays transient: while the directory was never read in this App, a missing name is
+  a plain error, and the platform delivers the message again. The channel suite checks both (every
+  channel); the dashboard's follow-up to such a conversation is `409 no_agent`. Agents says, when one is
+  removed, that its conversations move to the agent routed now (counting them would read every
+  conversation's pointer: not done).
 - **A rule naming no agent halts the message** (`halted`, the channel says it cannot take it) rather
   than throwing (a platform would retry it forever) or falling through to the default agent (a typo
   would route silently).

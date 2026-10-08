@@ -160,6 +160,8 @@ export default defineComponent({
         runtime: runtime.get(),
         key: conversationKey(conversationId),
         beforeDispatch: (conversation) => {
+          // Called again when the key moved to a new conversation (its agent gone): the last one counts.
+          waiter?.cancel();
           waiter = replies.expect(conversation.conversationId, requestId);
         },
       }).catch((error: unknown) => {

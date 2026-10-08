@@ -24,9 +24,11 @@ export interface ConversationRegistry {
   /**
    * Point `key` to a new runtime conversation, keep the previous one, and emit `conversation.reset`
    * once the new pointer is durable. `undefined`, with no event, when `key` has no conversation. A
-   * run still going on the previous conversation finishes there.
+   * run still going on the previous conversation finishes there. The new conversation keeps the key's
+   * agent, unless `agent` names another: what `admitInbound` gives when the key's agent is no agent
+   * now (removed), the agent routing chooses now.
    */
-  reset(key: string, ctx: AppContext): Promise<ConversationReset | undefined>;
+  reset(key: string, ctx: AppContext, agent?: string): Promise<ConversationReset | undefined>;
 }
 
 /** What a reset did: the payload of `conversation.reset`. */

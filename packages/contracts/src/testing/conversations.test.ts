@@ -40,10 +40,10 @@ function memoryRegistry(records: Records) {
           const ref = records.pointers.get(key);
           return ref === undefined ? undefined : { ...ref };
         },
-        async reset(key, ctx) {
+        async reset(key, ctx, agent) {
           const previous = records.pointers.get(key);
           if (previous === undefined) return undefined;
-          const conversation = { ...previous, conversationId: newSession() };
+          const conversation = { ...previous, ...(agent !== undefined && { agent }), conversationId: newSession() };
           records.pointers.set(key, conversation);
           const reset = { conversation: { ...conversation }, previousConversationId: previous.conversationId, newConversationId: conversation.conversationId };
           await ctx.emit("conversation.reset", reset);

@@ -42,8 +42,8 @@
  *   `agent.definition` does not have is looked up there, read with the overrides (at every admission,
  *   resume, compaction and driving wakeup) and checked when used, not at start: a model an installed
  *   provider has, installed tools and extensions. A message to an agent that is neither, or to a live
- *   one that does not check, fails its admission with why; the code's agents are checked at start as
- *   before. A live agent gets the overrides as any agent does. Until the directory was read once, the
+ *   one that does not check, fails its admission with why (`AgentUnavailableError`: for good, so the
+ *   key moves to the agent routed now, `admitInbound`); the code's agents are checked at start as before. A live agent gets the overrides as any agent does. Until the directory was read once, the
  *   conversations of an agent it may hold are not resumed (nor abandoned as having no agent).
  *
  * In a Cloudflare object's App (`WORKERS_HOST` has an `object`) the object is one chat: its first
@@ -68,6 +68,7 @@ import {
   type AgentDefinition,
   type AgentRuntime,
   type AgentSubmissions,
+  AgentUnavailableError,
   type ConversationRef,
   defineAgent,
   type Wakeups,
@@ -222,13 +223,22 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           ctx.logger.warn("runtime-pi: the live agents (agent.directory) could not be read; the ones read last apply", { error: error instanceof Error ? error.message : String(error) });
         }
       };
-      /** Throws, saying why, unless `name` is an agent that runs here: the code's, or a live one that checks. */
+      /**
+       * Throws, saying why, unless `name` is an agent that runs here: the code's, or a live one that
+       * checks. For good (`AgentUnavailableError`: `admitInbound` moves the key to the agent routed now)
+       * once the directory was read; while it never was (it cannot be read yet), a plain error: the
+       * agent may be live, and the message is delivered again.
+       */
       const runnable = (name: string): void => {
         if (agents.get(name) !== undefined || live.has(name)) return;
+        if (directory.get() !== undefined && !liveRead) {
+          throw new Error(`runtime-pi: the live agents (agent.directory) could not be read yet, and "${name}" is no agent.definition: try again`);
+        }
         const problem = liveProblems.get(name);
-        if (problem !== undefined) throw new Error(`runtime-pi: ${problem}`);
+        if (problem !== undefined) throw new AgentUnavailableError(name, `runtime-pi: ${problem}`);
         const known = [...agents.keys(), ...live.keys()].sort().map((each) => `"${each}"`).join(", ") || "none";
-        throw new Error(
+        throw new AgentUnavailableError(
+          name,
           directory.get() === undefined
             ? `runtime-pi: no agent "${name}": it is no agent.definition (agents: ${known})`
             : `runtime-pi: no agent "${name}": it is no agent.definition, nor a live agent of agent.directory (agents: ${known})`,

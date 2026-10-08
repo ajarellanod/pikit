@@ -119,13 +119,15 @@ export default defineComponent({
         return found === undefined ? undefined : ref(key, found);
       },
 
-      async reset(key, ctx) {
+      async reset(key, ctx, agent) {
         const reset = await inLine(key, async (): Promise<ConversationReset | undefined> => {
           const from = running();
           const previous = await current(from, key);
           if (previous === undefined) return undefined;
           const pointer: Pointer = {
             ...previous,
+            // Another agent only when asked: the key's own is gone (`admitInbound`).
+            ...(agent !== undefined && { agent }),
             conversationId: await newConversation(ctx),
             previousConversationIds: [...previous.previousConversationIds, previous.conversationId],
             updatedAt: ctx.clock.now(),

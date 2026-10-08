@@ -31,7 +31,7 @@ export type { AgentCommand, CommandInfo, CommandLookup, CommandOutcome } from ".
 export { COMMAND_NAME, commandProblem, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
 export type { CompletionRequest, ModelComplete } from "./model.ts";
 
-export { admitInbound } from "./inbound.ts";
+export { AgentUnavailableError, admitInbound, isAgentUnavailable } from "./inbound.ts";
 export type { AdmitOptions, InboundMessage, InboundOutcome, RouteDecision } from "./inbound.ts";
 
 export type { AgentState } from "./agent-state.ts";
