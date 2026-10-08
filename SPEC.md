@@ -144,8 +144,8 @@ plain structural `io` (the component's config in `pikit.config.ts`, a reader of 
 `.env`) and gets back its problems, one line each, never a secret's value (a `doctor` check may also
 give notes, which stop nothing). These files run on the machine that configures or deploys, never in
 the app:
-- `configure.ts` exports `configure(io)`, the component's step of `pikit configure` (it may ask, and
-  write `.env`). It is found by its path, as it was before the hooks; declaring it like them is the same
+- `configure.ts` exports `configure(io)`, the component's step of `pikit configure` (it may ask,
+  write `.env`, and set a key of its own config entry). It is found by its path, as it was before the hooks; declaring it like them is the same
   change, not made yet.
 - `component.json`'s `hooks` declare the others, each a file exporting a function of the hook's name;
   `pikit add` records them in `pikit.json` by project path, only what is recorded runs, and `registry

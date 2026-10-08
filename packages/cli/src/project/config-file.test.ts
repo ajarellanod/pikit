@@ -5,7 +5,7 @@
 
 import { expect, test } from "bun:test";
 import { CLOUDFLARE_CONFIG } from "../commands/starter.ts";
-import { addComponent, boundNames, identifierFor, removeComponent, removeConfigEntry, setConfigEntry, setWorkerWiring } from "./config-file.ts";
+import { addComponent, boundNames, identifierFor, removeComponent, removeConfigEntry, setConfigEntry, setConfigValue, setWorkerWiring } from "./config-file.ts";
 
 const BASE = `import { defineApp } from "@pikit/core";
 import agents from "./src/extensions/agents.ts";
@@ -164,4 +164,25 @@ test("an upgrade moves a component's Worker wiring as its new version says, and 
   expect(setWorkerWiring(CLOUDFLARE_CONFIG, "channel-x", half)).toBe(CLOUDFLARE_CONFIG);
   const own = addComponent(CLOUDFLARE_CONFIG, { name: "channel-x", importClause: "{ createX }", entry: "createX()" });
   expect(() => setWorkerWiring(own, "channel-x", half)).toThrow(/"channel-x" is imported as \{ createX \}, which pikit did not write/);
+});
+
+test("setConfigValue sets one key of an entry: replaced, put first, or the entry added; the rest as it was", () => {
+  const added = setConfigValue(BASE, "admin-proposals", "repository", '"ana/bot"');
+  expect(added).toContain('export const config = {\n  "admin-proposals": { repository: "ana/bot" },\n};');
+  expect(setConfigValue(added, "admin-proposals", "repository", '"ana/other"')).toContain('"admin-proposals": { repository: "ana/other" },');
+
+  const written = BASE.replace(
+    "export const config = {};",
+    'export const config = {\n  "admin-proposals": {\n    // where its pull requests are\n    repository: "",\n    branchPrefix: "pikit/self/",\n  },\n  "router-basic": { defaultAgent: "assistant" },\n};',
+  );
+  const replaced = setConfigValue(written, "admin-proposals", "repository", '"ana/bot"');
+  expect(replaced).toBe(written.replace('repository: "",', 'repository: "ana/bot",'));
+  const first = setConfigValue(written, "router-basic", "titleModel", '"x"');
+  expect(first).toContain('"router-basic": { titleModel: "x", defaultAgent: "assistant" },');
+  const multiline = setConfigValue(written, "admin-proposals", "apiBase", '"https://example.test"');
+  expect(multiline).toContain('"admin-proposals": {\n    apiBase: "https://example.test",\n    // where its pull requests are\n');
+  expect(setConfigValue(BASE.replace("{};", '{ "x": {} };'), "x", "a", "1")).toContain('{ "x": { a: 1 } }');
+
+  expect(() => setConfigValue(BASE.replace("{};", '{ "x": makeConfig() };'), "x", "a", "1")).toThrow("not an object literal");
+  expect(() => setConfigValue(BASE, "x", "a", "1", "workerConfig")).toThrow("workerConfig");
 });

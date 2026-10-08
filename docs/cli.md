@@ -121,7 +121,8 @@ pikit configure [--yes] [--generate <NAME>]... [--login <provider> [--login-meth
 ```
 
 Writes `.env` (mode 0600). In order: each component's own step (`src/pikit/<name>/configure.ts`:
-checks a token, discovers an id), then the other `environment` variables the components declare (a
+checks a token, discovers an id, connects admin-proposals' self-improvement; a step may also set a key
+of its own entry in `pikit.config.ts`), then the other `environment` variables the components declare (a
 secret is asked without echo; a required `*_TOKEN` can be generated), then model credentials for each
 provider an agent names that has none: an OAuth login (stored by `credentials-file`) or the API key in
 the variable the provider's component declares first.

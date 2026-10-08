@@ -23,10 +23,13 @@ const forTests = (file: string): boolean => TEST.test(file) || TEST_SUPPORT.test
  * deploys, loaded by the CLI under Bun, never in the app: `deployment-cloudflare`'s spawn
  * `wrangler` with `node:child_process` while its entrypoint runs in workerd. So do its plain Node
  * scripts (`*.mjs`: `deployment-cloudflare`'s `deploy.mjs`, a build's deploy command, and the
- * `rollout.mjs` both share). Like tests, those files are not held to the component's targets (SPEC §4).
+ * `rollout.mjs` both share), and a component's step of `pikit configure`
+ * (`src/pikit/<name>/configure.ts`, which admin-proposals' reads the git remote with). Like tests,
+ * those files are not held to the component's targets (SPEC §4).
  */
 const forMachine = (file: string, name: string): boolean =>
-  name.startsWith("deployment-") && (file === `src/pikit/${name}/commands.ts` || (file.startsWith(`src/pikit/${name}/`) && file.endsWith(".mjs")));
+  (name.startsWith("deployment-") && (file === `src/pikit/${name}/commands.ts` || (file.startsWith(`src/pikit/${name}/`) && file.endsWith(".mjs")))) ||
+  file === `src/pikit/${name}/configure.ts`;
 
 /** Packages that are the kit itself: `requires.pikit` covers them, so `dependencies` does not. */
 const KIT_PACKAGES = new Set(["@pikit/core"]);

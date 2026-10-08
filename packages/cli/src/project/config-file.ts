@@ -200,6 +200,35 @@ export function setConfigEntry(text: string, name: string, value: string, object
 }
 
 /**
+ * Sets `key` of `config["<name>"]` to `value` (TypeScript source): the key's value replaced when the
+ * entry has it, the key put first when it has not, and the entry added (`{ key: value }`) when there is
+ * none. `objectName` names another config object (`workerConfig`). The rest of the file, comments
+ * included, stays as it is.
+ */
+export function setConfigValue(text: string, name: string, key: string, value: string, objectName = "config"): string {
+  const object = configObject(text, objectName);
+  if (object === undefined) throw new ShapeError(`it has no \`const ${objectName} = { … }\``);
+  const entry = findConfigKey(text, object, name);
+  if (entry === undefined) return setConfigEntry(text, name, `{ ${key}: ${value} }`, objectName);
+  const open = skipSpaces(text, entry.valueStart);
+  if (text[open] !== "{") throw new ShapeError(`${objectName}["${name}"] is not an object literal`);
+  const inner = { open, close: matchClose(text, open) };
+  const found = findConfigKey(text, inner, key);
+  if (found !== undefined) {
+    const start = skipSpaces(text, found.valueStart);
+    let end = skipValue(text, start);
+    while (end > start && /\s/.test(text[end - 1] as string)) end--;
+    return text.slice(0, start) + value + text.slice(end);
+  }
+  const body = text.slice(inner.open + 1, inner.close);
+  if (body.trim() === "") return `${text.slice(0, inner.open + 1)} ${key}: ${value} ${text.slice(inner.close)}`;
+  const indent = /\n([ \t]+)\S/.exec(body)?.[1];
+  // First, so the comma it needs is its own.
+  const line = indent === undefined ? ` ${key}: ${value},` : `\n${indent}${key}: ${value},`;
+  return text.slice(0, inner.open + 1) + line + text.slice(inner.open + 1);
+}
+
+/**
  * Removes `config["<name>"]`, however many lines its value takes; `object` names another config
  * object (`workerConfig`). No key, or no such object, no change.
  */

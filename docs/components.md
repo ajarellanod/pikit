@@ -33,7 +33,9 @@ there, and no `package.json` with `scripts` anywhere in the folder (`checkLayout
   `app.describe()` for it. A test that needs another component (runtime-pi) is the project's, never the
   component's.
 - **`configure.ts`** (optional) exports `configure(io)`: the component's step of `pikit configure`. It
-  is found by its path, not declared.
+  is found by its path, not declared. It may ask, write `.env`, and set a key of its own config entry
+  (`io.setConfig`, in both Apps' configs for a component in both). It runs on the machine, so it may
+  import `node:*` whatever the component's targets.
 - **Config** is a TypeBox schema in `defineComponent({ config })`, with defaults. A component whose
   declarations depend on its config (tool-mcp provides one tool per configured server tool) lists
   configs in the root schema's `examples`, so `generate` can see what it may provide.
