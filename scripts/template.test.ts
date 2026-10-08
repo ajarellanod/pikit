@@ -220,7 +220,7 @@ const PASSWORD = "template correct horse battery";
 const MODEL_KEY = "sk-or-template-dummy-not-a-key";
 const ADMIN_TOKEN = "template-admin-token-dummy-0123456789abcdef";
 /** This machine's variables the project reads: none may leak into the Worker. */
-const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "PIKIT_ADMIN_TOKEN", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN", "PIKIT_MERGE_TOKEN"];
+const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "PIKIT_ADMIN_TOKEN", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN"];
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.includes(name))) as Record<string, string>;
 
 async function run(command: string[], cwd: string, env: Record<string, string> = {}) {

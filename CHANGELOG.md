@@ -71,6 +71,10 @@ there.
 - `createDurableExecutionConformance` runs pi-durable's `ExecutionEnv` suite (readers, `watch`, argv
   `exec`, output streams) and then pikit's cases it lacks; `watch: false` and `shell: false` leave out
   what an environment does not have.
+- `createWorkspaceGitConformance` (`@pikit/pi-adapter/execution/testing`): the steward's git steps
+  through an environment's shell against a remote, with real git's meaning; given the remote's
+  credential, that it appears nowhere the agent can read. execution-local (the machine's git) and
+  execution-do (bun and workerd) pass it.
 - `agent.extension` (keyed): a component adds agent behaviour as a pi-durable extension (system
   prompt sections, hooks, tool wraps, tasks), from `@pikit/pi-adapter/extensions`; agents select
   them by name.
@@ -142,8 +146,8 @@ there.
   `proposals.remote()`: the same steps on every target (clone, `git checkout -b pikit/self/<topic>`,
   commit, `git push origin pikit/self/<topic>`).
 - execution-do's `git` behaves as real git for its subset: `clone`, `checkout -b` / `checkout`,
-  `status`, `diff` (`--staged`), `add`, `commit -m` (what was added; `-a`), `log`,
-  `push origin <branch>`; anything else is not supported here. No pull request command: a pushed
+  `status`, `diff` (`--staged`), `add`, `commit -m` (what was added; `-a`), `log` (real git's
+  format, the whole message; `--oneline`), `push origin <branch>`; anything else is not supported here. No pull request command: a pushed
   `pikit/self/*` branch is the proposal.
 - `outbound-durable` implements `pending` (50 per page, at most 500); a piece cut by a crash records
   why it is sent again.

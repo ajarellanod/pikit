@@ -321,7 +321,11 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   (binary files in chunks: a row holds at most 2 MB): a simulated shell (just-bash) with `git`
   (isomorphic-git), `curl` (`fetch`) and `node` (QuickJS compiled to WebAssembly, bundled: a Worker
   cannot compile at run time) as host commands. Pi's own `bash`, `read`, `write` and `edit` tools run
-  on it unchanged. Files inside `.git` change only through `git`. There are no processes or native
+  on it unchanged. Files inside `.git` change only through `git`. **On the durable target the agent
+  never holds the GitHub credential**, a rule every durable `execution` provider keeps: its `git` asks
+  `github` for the token from trusted code, sends it only to the connected repository, and the token
+  appears nowhere the agent can read (variables, command output, the workspace's files, `.git/config`
+  included); `createWorkspaceGitConformance` checks it. There are no processes or native
   binaries; a real Linux is another `execution` provider (`features/sandboxed-execution.md`), not a
   flag of this one. *Why:* the agent keeps the tools it has on a server, at no cost beyond the
   object's own, within C4's budgets.

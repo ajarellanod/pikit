@@ -42,7 +42,10 @@ Three pieces, each a component or a file of the kit, each removable (P3):
    `write`, `edit`, `bash`). The steward proposes the same way on every target, from
    `proposals.remote()` (below): `git clone <remote>`, `git checkout -b pikit/self/<topic>`, the
    change, `git commit`, `git push origin pikit/self/<topic>`. The pushed branch is the proposal;
-   pikit-self tells it these steps with its remote. No `git pr` anywhere.
+   pikit-self tells it these steps with its remote. No `git pr` anywhere. One suite holds both
+   executions to it (`createWorkspaceGitConformance`, `@pikit/pi-adapter/execution/testing`): the
+   steps through the shell against a remote, with real git's meaning; on Cloudflare also that the
+   token appears nowhere the agent can read (SPEC C7).
    - **Cloudflare:** `execution-do`'s `git` is real git's subset (`clone` over HTTPS, `checkout -b`,
      `status`, `diff`, `add`, `commit`, `log`, `push origin <branch>`), pushes only to `github`'s
      connected repository (below) on branches under `pikit/self/`, with its token, and keeps the token
@@ -108,8 +111,8 @@ requirement. Providers are interchangeable: `github-token` gives the same `githu
 `GITHUB_TOKEN` secret and a repository setting, for CLI users and servers; no consumer branches on
 which is installed. Users of `github`: execution-do's `git` (real git's subset: `clone`,
 `checkout -b`, `add`, `commit`, `push origin pikit/self/<topic>`; no `git pr`: the pushed branch is the
-proposal) and proposals-github; extension-pikit-self reads `proposals.remote()`, not `github`. `proposals-github` reads GitHub only through it (built): `PIKIT_MERGE_TOKEN` and its "same token
-in both" checks are gone, and so is its own repository setting.
+proposal) and proposals-github; extension-pikit-self reads `proposals.remote()`, not `github`.
+`proposals-github` reads GitHub only through it (built).
 
 **Who. Built:** the steward is the agent marked so in its `defineAgent` (`steward: true`), one per
 project: runtime-pi refuses to start with two, and extension-pikit-self refuses an agent that names
@@ -158,8 +161,7 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
    committed; without git it says so and goes on). In `pikit new`, the http preset's feature
    "Self-improvement" (`--with admin-proposals`: the group `[admin-proposals, proposals-local]`)
    brings the dashboard (`NEEDS_DASHBOARD`) and makes the starter agent name `bash` (`NAMED_FOR`):
-   the steward needs a shell for git and the tests. `pikit up` then starts the deployer. `pikit
-   deploy watch | install` and the systemd unit are gone.
+   the steward needs a shell for git and the tests. `pikit up` then starts the deployer.
 
 ## Open questions
 - The template's repository: decided, connected after the deploy (Settings → GitHub), not a variable

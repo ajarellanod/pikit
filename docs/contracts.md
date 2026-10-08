@@ -425,7 +425,11 @@ Providers: execution-local (server: the machine's filesystem and shell), executi
 files in the object's SQL, a simulated shell with `git`, `curl`, `node` as host commands, C7),
 workspace-local (server: one directory per agent, inside `execution`). Suites:
 `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`),
-`createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`).
+`createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`), and for a shell with `git`,
+`createWorkspaceGitConformance` (`@pikit/pi-adapter/execution/testing`): the steward's steps
+(`clone`, `checkout -b`, `status`, `diff`, `add`, `commit -m`, `log`, `push origin <branch>`) through
+the shell against a remote, with real git's meaning, and given the remote's credential, that it
+appears nowhere the agent can read (every durable provider's rule, SPEC C7).
 
 ## Platform
 
