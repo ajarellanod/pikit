@@ -124,6 +124,7 @@ App's composition (`visibleViews`, read from `GET /admin/api/app`).
 | `composition` | none | the dashboard |
 | `delivery` | `outbound.queue` | the dashboard |
 | `health-registry` | `health` | health-registry's `view/` |
+| `admin-proposals` | none (its routes need `proposals`) | admin-proposals' `view/`: the proposals, a page per proposal with its diff, checks and deploy, Approve / Reject |
 
 A component brings a view with `"view": "view"` in `component.json`: `pikit add` (or `pikit ui on`
 later) copies it to `src/dashboard/src/views/<component name>/`, recorded as the component's files, so
@@ -157,6 +158,7 @@ at it (github-app's setup comes back to `/admin/?settings=github-app`).
 | Routing | router-rules | `settings` | the ordered rules: channel, chat, sender; an agent (the code's or a live one) or deny with a reason |
 | GitHub | github-token | `settings`, `github` | the repository (the token is the `GITHUB_TOKEN` secret, never here) |
 | GitHub | github-app | `github` | Connect GitHub (a GitHub App created from a manifest and installed on the repository), the App, its installation and repository, the last token minted, Disconnect; its own routes (`/admin/api/github-app/*`), not settings |
+| Self-improvement | admin-proposals | `proposals` | each part the provider checks (server: the proposals repository, the deployer, the project's checkout; GitHub: the repository, the token, a ruleset advised), the last deploy, rollback and failure, a link to where it is set up (GitHub's section) |
 
 A change in Agents reads `/admin/api/agents` again, so the new-conversation picker offers a new live
 agent at once.

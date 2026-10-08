@@ -2,7 +2,7 @@
  * A fake GitHub REST API for proposals-github's tests, served on a free local port: no token or network
  * needed. It keeps one repository's branches (their head commit and its message), pull requests, their
  * files, comments and checks, with GitHub's shapes for what the component reads, and two tokens:
- * `readToken` may read and open pull requests (as the agent's fine-grained token), `mergeToken` may
+ * `readToken` may read and open pull requests (a token without the merge permission), `mergeToken` may
  * also merge, comment and close. An open pull request's head follows its branch, as GitHub's does.
  * Every request is recorded with the token it carried.
  *

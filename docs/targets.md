@@ -50,11 +50,14 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
 - **Limits.** One process per storage: conversations-kv's guarantees across two processes are weaker
   (one replica is the supported setup). Tools run as the server's user: `tool-bash` is a real shell.
 - **Dev.** `pikit dev` runs `main.ts` with `bun --watch` and `.env` loaded.
-- **Self-improvement.** The steward's checkout is in `.pikit/workspace` (the volume), with
-  execution-local's own `git` (fenced pushes, the token never in the shell; on a server the shell can
-  still read the process's environment: its README says what that means). Approved proposals are
-  merges, deployed from the host by `pikit deploy watch` (a systemd user service, `pikit deploy
-  install`): `git fetch`, `pikit up`, back to the previous image when unhealthy.
+- **Self-improvement** (`proposals-local`): the project is a git repository (`pikit new` makes it
+  one); proposals are branches `pikit/self/<topic>` of a bare repository in the volume
+  (`.pikit/self/project.git`), which the steward clones into `.pikit/workspace` and pushes to with
+  the image's plain git. An approval in the dashboard is recorded there; the deployer, a second
+  compose service `pikit up` starts with the app (profile `self-improvement`, the only one with the
+  Docker socket), merges it into `main`, runs the checks in containers without the socket, rebuilds
+  and restarts `app`, waits for `/health`, and rolls back on any failure (deployment-docker's
+  README). The approval is the operator's decision, not a lock: the agent's shell could forge one.
 
 ## durable (Cloudflare)
 
@@ -100,7 +103,7 @@ A `deployment-*` component runs the App instead of running in it: no default exp
 `pikit.config.ts`. The CLI delegates `pikit up | down | restart | logs | status` to the functions its
 `src/pikit/<name>/index.ts` exports (`DeploymentModule`,
 [deployment-module.ts](../packages/cli/src/project/deployment-module.ts)); `dev` and `exec` are
-optional exports, and so is `deploy` (`pikit deploy watch | install`). A project has exactly one.
+optional exports. A project has exactly one.
 
 | Function | deployment-docker | deployment-cloudflare |
 |---|---|---|
@@ -111,7 +114,6 @@ optional exports, and so is `deploy` (`pikit deploy watch | install`). A project
 | `status` | containers, `/health`, `/ready` | `wrangler deployments list`, `/health` |
 | `dev` | not exported (the CLI runs `main.ts --watch`) | `wrangler dev` |
 | `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | not exported |
-| `deploy` | the host deployer: polls the main branch, `pikit up` each new commit, back to the previous image when unhealthy; `install`: a systemd user service | not exported (Workers Builds deploys a merge) |
 
 The dashboard is built by every deploy of a project with `src/dashboard/`: in a stage of the Docker
 image, or by `wrangler.jsonc`'s `build.command` ([dashboard.md](dashboard.md)).

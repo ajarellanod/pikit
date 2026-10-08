@@ -22,8 +22,9 @@ The steward proposes the same way on both: it pushes the branch to `proposals.re
   (the Self-improvement feature) gives the project its UI.
 - **Settings:** `settings/`, the Settings dialog's Self-improvement: each part the provider checks
   (on a server: the proposals repository, the deployer running, the project's checkout; on GitHub: the
-  repository, the tokens, the ruleset), the last deploy, rollback and failure when the provider knows
-  them, and a link to the provider's own section when it has one (Self-improvement on GitHub).
+  repository readable, the token accepted, a ruleset advised), the last deploy, rollback and failure
+  when the provider knows them, and a link to where it is set up when a component brings a section for
+  it (Settings → GitHub, on Cloudflare).
 - **Targets:** `server` and `durable`. On Cloudflare it goes in both Apps (`apps.worker: "default"`):
   the Worker's App serves the routes, the objects' copy is never reached (as admin-api's).
 - **Installs to:** `src/pikit/admin-proposals/`.
@@ -64,8 +65,9 @@ diff file by file, and Approve / Reject behind a confirmation; Approve sends the
 
 ## Security
 
-What an approval is worth is the provider's. On Cloudflare (`proposals-github`) the merge token never
-reaches the agent and a ruleset protects the default branch. On a server (`proposals-local`) an
+What an approval is worth is the provider's. On Cloudflare (`proposals-github`) no tool gives the agent
+GitHub's token (execution-do's git only pushes branches under the prefix), and a ruleset can protect
+the default branch. On a server (`proposals-local`) an
 approval is the operator's decision, not a lock: the agent's shell runs in the app's container and
 could forge one; the deployer checks, waits for `/health` and rolls back whatever it deploys
 (proposals-local's README; `features/sandboxed-execution.md` for a real lock).

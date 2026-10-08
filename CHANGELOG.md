@@ -53,6 +53,10 @@ there.
 - `github`: the project's own repository on GitHub, as connected (`repository`, `owner/name` or
   none), and a short-lived token for it (`token`, at least five minutes left;
   `GitHubNotConnectedError` while none is), never logged; suite `createGitHubConformance`.
+- `proposals`: the agent's changes to itself waiting for an operator (`status`, `list`, `get`,
+  `approve`, `reject` with typed refusals, `remote()`: where the steward clones from and pushes
+  `pikit/self/<topic>` to); an id is the branch's topic, and providers are interchangeable; suite
+  `createProposalsConformance`.
 
 ### Pi adapter (`@pikit/pi-adapter`, the only package that imports Pi)
 - On `@earendil-works/pi-durable` 1.1.0 (with `chord`, `pi-ai` and `pi-mcp` 1.1.0, exact pins):
@@ -101,7 +105,8 @@ there.
 - Tools and execution: `tool-read`, `tool-write`, `tool-edit`, `tool-bash` (Pi's own), `tool-fetch`
   and `tool-websearch-brave` (their source in the component: the references for writing a tool),
   `tool-mcp` (remote MCP servers, with a deploy-time seed); each tool's `replay` is in its own source
-  and a tool on `api.env` uses `execution` (checked by `registry validate`). `execution-local`,
+  and a tool on `api.env` uses `execution` (checked by `registry validate`). `execution-local` (its
+  commands run the image's plain git: no built-in, no token),
   `workspace-local` (a directory per agent under `execution`'s, with its variables and shell),
   `execution-do` (files in the object's SQL, a shell without processes, `git`, `node` in QuickJS;
   pi-durable 1.0.3's environment: positional and directory readers, argv `exec`, no `watch`).
@@ -111,15 +116,17 @@ there.
   `storage.kv`), which starts over after a calm period. Mark essential only what a restart can fix. It brings the dashboard's Health view (`view/`, the reference component with a view) and its
   route. `channel-telegram`'s bots report their polling: `degraded` after a failed `getUpdates`,
   `down` after 5 in a row.
-- Self-improvement's gate: `admin-proposals` (server and durable; on Cloudflare in both Apps): the
-  agent's pull requests from `pikit/self/*` of the project's repository in the dashboard's Proposals
-  view (state, checks, preview URL; a page per proposal with its description, diff and checks),
-  approved (squash-merged at the head the operator read, into the default branch) or rejected
-  (commented and closed) with `PIKIT_MERGE_TOKEN`, which only those routes read; reads with
-  `GITHUB_TOKEN`; failing, pending or missing checks refuse Approve unless overridden. It installs
-  the project's CI, `.github/workflows/pikit-checks.yml` (typecheck, `bun test`, the Worker's
-  dry-run bundle). `pikit doctor` no longer calls a component whose only use is its routes unused on
-  Cloudflare, where the Worker's host serves them.
+- Self-improvement's gate, over `proposals`: `admin-proposals` (server and durable; on Cloudflare in
+  both Apps), target-agnostic: the dashboard's Proposals view (state, checks, deploy; a page per
+  proposal with its description, diff, checks and deploy; Approve at the head the operator read, Reject
+  with a comment) and Settings → Self-improvement (each part the provider checks, the last deploy and
+  rollback). `proposals-github` (durable): a pushed `pikit/self/*` branch's pull request opened for
+  it, squash-merged or closed through GitHub's API, GitHub only through `github`; failing, pending or
+  missing checks refuse Approve unless overridden; it installs the project's CI,
+  `.github/workflows/pikit-checks.yml` (typecheck, `bun test`, the Worker's dry-run bundle).
+  `proposals-local` (server, nothing to set up): branches of a bare repository in the state volume,
+  approvals recorded for deployment-docker's deployer. `pikit doctor` no longer calls a component
+  whose only use is its routes unused on Cloudflare, where the Worker's host serves them.
 - GitHub on Cloudflare: `github-app` (durable; both Apps, its connection in one object): the
   dashboard's Settings → GitHub creates a GitHub App in the operator's account from a manifest
   (private, no webhook; contents and pull requests write, checks and statuses read) and installs it on
@@ -130,8 +137,10 @@ there.
   minted with an RS256 JWT (Web Crypto, GitHub's PKCS#1 key wrapped as PKCS#8) and kept until shortly
   before they expire. `github-token` (server and durable) provides the same `github` from a
   `GITHUB_TOKEN` secret and the repository (a setting), for CLI users. execution-do's `git` and
-  extension-pikit-self use only the contract: `git` pushes only to the connected repository with its
-  token (sent for no other), and the steward is told its repository.
+  proposals-github use only the contract: `git` pushes only to the connected repository with its
+  token (sent for no other). extension-pikit-self tells the steward how to propose from
+  `proposals.remote()`: the same steps on every target (clone, `git checkout -b pikit/self/<topic>`,
+  commit, `git push origin pikit/self/<topic>`).
 - execution-do's `git` behaves as real git for its subset: `clone`, `checkout -b` / `checkout`,
   `status`, `diff` (`--staged`), `add`, `commit -m` (what was added; `-a`), `log`,
   `push origin <branch>`; anything else is not supported here. No pull request command: a pushed
@@ -157,7 +166,11 @@ there.
   `kit.commit`, and what runs now, read in-process from `APP_DESCRIPTION` (K13, which exempts it) and
   `agent.definition`, config secrets redacted; no tool. Only the steward may name it: the App does not
   start with another agent that does, nor (runtime-pi) with two stewards.
-- Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`) and
+- Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`; git in its image; with
+  `proposals-local`, self-improvement's deployer as a second compose service started by the same
+  `pikit up`, the only one with the Docker socket: it merges an approved head into `main`, runs the
+  checks in containers without the socket, rebuilds and restarts the app, waits for `/health`, rolls
+  back, and records each outcome; an approval on a server is the operator's decision, not a lock) and
   `deployment-cloudflare` (the Worker and one Durable Object per conversation running the project's
   two Apps; `up` waits for the new version on `/health`, then runs `afterDeploy` hooks, C8; while an
   object's App cannot start, a guard alarm wakes it again, from 30 s doubling up to 1 h, past
@@ -186,7 +199,11 @@ there.
   `storage-kv-sql`), `telegram-cloudflare` and `cloudflare-minimal` (`--target durable`). A preset is a
   list of `pikit add`s; its `choose` questions pick a channel (`multiple`: several at once), and its
   `features` are the components `pikit new` offers to add. The starter agent's prompt says where
-  it is reached, and its model is one the preset installs; on a server it does not name `bash`.
+  it is reached, and its model is one the preset installs; on a server it does not name `bash`,
+  unless self-improvement is installed (`proposals-local`: the steward runs git and the tests).
+  Self-improvement is a feature group on both targets (`--with admin-proposals`): with
+  `proposals-local` on a server, with `proposals-github` and `github-app` on Cloudflare; it brings the
+  dashboard.
   Every preset that runs an agent installs `extension-pikit-self`, and the starter agent, the
   project's steward (`steward: true`), names it.
 
@@ -218,6 +235,8 @@ there.
 - `configure` and `up` check credentials only for the model providers the agents name, and reach
   the deployment (Docker) only when one is missing here; `dev` checks this machine's. A provider's key
   name comes from its component's manifest, and a login is offered only where pi-ai has one.
+- `pikit new` on a server makes the project a git repository on `main`, everything committed (without
+  git it says so and goes on).
 - `pikit new` copies the skills for AI agents (`.agents/skills/`) into every project, with where the
   kit is written in (this machine's checkout, and GitHub at the project's kit commit; the project's
   README says so too), and leaves a
@@ -233,7 +252,8 @@ there.
 ### Installer and templates
 - `installer/install.sh`: from an empty server to a running agent (Docker), or `--durable` for
   Cloudflare. `scripts/template.ts` makes the "Deploy to Cloudflare" Telegram template from
-  `pikit new` itself, with self-improvement dormant (`admin-proposals` and `github-app`): GitHub is
+  `pikit new` itself, with self-improvement dormant (`admin-proposals`, `proposals-github` and
+  `github-app`): GitHub is
   connected after deploying from the dashboard's Settings → GitHub, never in the button's form.
 
 ### Docs and verification

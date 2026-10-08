@@ -28,7 +28,9 @@ pikit new <dir> [--target server|durable] [--preset <name> [--with <component>].
   the agent `src/agents/assistant/agent.ts` provided by `src/extensions/agents.ts`, `package.json`,
   `tsconfig.json`, `bunfig.toml`, `.gitignore`, `.gitattributes`, a README, the skills in
   `.agents/skills/`), vendors the kit packages into `vendor/` as tarballs, adds every component of the
-  preset as `pikit add` does, runs `bun install` once, and ends with `pikit doctor`.
+  preset as `pikit add` does, runs `bun install` once, and ends with `pikit doctor`. On `server` it
+  then makes the project a git repository on `main`, everything committed (self-improvement's deployer
+  merges there); without git it says so and goes on.
 - `--target` is recorded in `pikit.json` (`server` by default). A preset for another target is refused.
 - `--with` answers both steps. For a kind the preset asks with `multiple: true` (channels), the
   `--with`s of that kind are the whole answer: `--preset http --with channel-telegram` is Telegram
@@ -36,8 +38,11 @@ pikit new <dir> [--target server|durable] [--preset <name> [--with <component>].
   preset's component of that kind; a feature's `--with` adds it. `--ui` adds the dashboard
   ([dashboard.md](dashboard.md)). `--registry` uses another registry folder.
 - A preset's `features` ([features/cli-features.md](../features/cli-features.md)) are opt-in
-  components: on `http`, `router-rules`, `tool-mcp`, `tool-fetch`, `tool-websearch-brave`,
-  `health-registry`; on `telegram-cloudflare`, `router-rules`, `tool-mcp`, `health-registry`.
+  components or groups: on `http`, `router-rules`, `tool-mcp`, `tool-fetch`, `tool-websearch-brave`,
+  `health-registry` and Self-improvement (`--with admin-proposals`: with `proposals-local`); on
+  `telegram-cloudflare`, `router-rules`, `tool-mcp`, `health-registry` and Self-improvement (with
+  `proposals-github` and `github-app`). Self-improvement brings the dashboard (as `--ui`), and on a
+  server the starter agent names `bash` (the steward runs git and the tests in its shell).
   `registry validate` checks each one composes alone and all together.
 - Everything refusable is refused before the first write. A failure after it leaves the directory
   marked `UNFINISHED`.
@@ -121,7 +126,7 @@ pikit configure [--yes] [--generate <NAME>]... [--login <provider> [--login-meth
 ```
 
 Writes `.env` (mode 0600). In order: each component's own step (`src/pikit/<name>/configure.ts`:
-checks a token, discovers an id, connects admin-proposals' self-improvement; a step may also set a key
+checks a token, discovers an id, connects GitHub; a step may also set a key
 of its own entry in `pikit.config.ts`), then the other `environment` variables the components declare (a
 secret is asked without echo; a required `*_TOKEN` can be generated), then model credentials for each
 provider an agent names that has none: an OAuth login (stored by `credentials-file`) or the API key in
@@ -153,21 +158,10 @@ Delegated to the installed `deployment-*` component's exported functions
 ([deployment.ts](../packages/cli/src/commands/deployment.ts); see [targets.md](targets.md#deployment-components)).
 `up` first runs `doctor` (skipping the `doctor` hook of a component that has a `beforeDeploy`, which
 `up` runs right before the build) and checks model credentials where the app runs. `restart` exists
-only where the deployment exports it (Docker).
-
-## pikit deploy watch | install
-
-```
-pikit deploy watch | install [--interval <seconds>]
-```
-
-The deployment's optional `deploy` export, given this CLI as it was run (`cli`) and stopped by
-SIGTERM or SIGINT. deployment-docker's is the deployer on the host for self-improvement: `watch`
-polls the checkout's upstream every `--interval` seconds (60) and deploys each new commit with
-`pikit up`, rolling back to the previous image when it fails or `/health` does not answer;
-`install` writes and enables a systemd user service that runs `watch`
-([its README](../registry/components/deployment-docker/README.md#the-deployer-deployts-pikit-deploy-watch--install)).
-On Cloudflare there is none (Workers Builds deploys a merge).
+only where the deployment exports it (Docker). With self-improvement on a server (`proposals-local`),
+deployment-docker's commands enable compose's `self-improvement` profile: `up` also builds and starts
+the deployer next to the app, which deploys what an operator approves (no other command, no host
+service).
 
 ## pikit registry
 

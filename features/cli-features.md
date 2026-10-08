@@ -21,8 +21,10 @@ that are groups of components (agents from the dashboard: `agents-live` with `ro
    component's `title`): the dashboard, then the preset's `features`. Today, on a server (`http`,
    `telegram`): routing rules (`router-rules`), agents from the dashboard (`agents-live`, a group),
    MCP tools (`tool-mcp`), web pages (`tool-fetch`), web search (`tool-websearch-brave`), health
-   (`health-registry`); on Cloudflare (`telegram-cloudflare`): routing rules, agents from the
-   dashboard, MCP tools, health (it installs fetch and web search already).
+   (`health-registry`), self-improvement (`admin-proposals` with `proposals-local`); on Cloudflare
+   (`telegram-cloudflare`): routing rules, agents from the dashboard, MCP tools, health,
+   self-improvement (with `proposals-github` and `github-app`) (it installs fetch and web search
+   already).
 3. Then, as before, configure and start.
 
 Each answer is a component that `new` installs as `pikit add` does, with the providers it brings
@@ -78,6 +80,10 @@ Each answer is a component that `new` installs as `pikit add` does, with the pro
   a group's other members are not names of it. `readPreset` checks each member as a feature;
   `registry validate` composes each group as a feature. `settings-store` is in the group, although
   the dashboard brings it, so the group composes without `--ui`: agents-live requires `settings`.
+- **A feature reached only from the dashboard brings it** (`NEEDS_DASHBOARD` in `starter.ts`:
+  self-improvement, whose Proposals and Settings are the dashboard's): choosing it is `--ui` too, so
+  the wizard need not say it needs one. On a server, self-improvement also makes the starter agent
+  name `bash` (`NAMED_FOR`): the steward runs git and the tests in its shell.
 - `pikit add agents-live` alone adds the live agents (reached from a dashboard conversation); routing
   to them is `pikit add router-rules`, which its README says.
 

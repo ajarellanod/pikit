@@ -7,15 +7,11 @@ away from it). This component opens the branch's pull request itself, the first 
 reads it (its head commit's first line the title, the rest the description); the operator reads it in
 the dashboard (`admin-proposals`: the description, the diff, the checks, a preview) and approves it,
 which squash-merges it, or rejects it, which closes it. Workers Builds deploys the merge. It is
-**dormant until connected**: it starts without a repository or a token, and is connected after
-deploying ("Connect it" below).
+**dormant until GitHub is connected**, after deploying ("Connect it" below).
 
 - **Provides:** `proposals`.
-- **Requires:** `secrets` (the two tokens). **Uses, if installed:** `settings` (the repository, live;
-  `settings-store`).
-- **Settings:** `settings/`, the Settings dialog's Self-improvement on GitHub: the repository, the
-  connection checked live, and the steps (installed to `src/dashboard/src/settings/proposals-github/`).
-  admin-proposals' Self-improvement links to it.
+- **Requires:** `github`: the repository and a short-lived token, from `github-app` (a GitHub App
+  created and installed from the dashboard's Settings → GitHub) or `github-token` (a token you made).
 - **Target:** `durable`. It goes in both Apps (`apps.worker: "default"`), with its config in both: the
   Worker's App answers the dashboard's routes, the objects' App the steward's guide (`remote`).
 - **Installs to:** `src/pikit/proposals-github/`, and `.github/workflows/pikit-checks.yml`, the
@@ -23,71 +19,41 @@ deploying ("Connect it" below).
 - **npm dependencies:** `typebox`.
 
 ```sh
-pikit add admin-proposals proposals-github   # or: pikit new --target durable --preset telegram-cloudflare --with admin-proposals
+pikit add admin-proposals proposals-github github-app   # or: pikit new --target durable --preset telegram-cloudflare --with admin-proposals
 ```
 
 ## GitHub access, in one module
 
-`github-access.ts` is the only file that knows where the repository and the tokens come from: today
-the repository setting and two secrets. The rest asks it, so moving GitHub access onto a contract (a
-GitHub App, a token provider) changes that file only.
+`github-access.ts` is the only file that reaches GitHub's access: the `github` contract, whichever
+provider connects it. The repository is `github.repository(ctx)`, read at each call; the token is
+`github.token(ctx)`, asked for every call to GitHub and never kept (the provider caches it if it
+wants). Until GitHub is connected, everything but `status` is `not_connected` (503), pointing to the
+dashboard's Settings → GitHub.
 
 ## Connect it
 
-Three things, each checked live by `status()` (Settings → Self-improvement, and Self-improvement on
-GitHub):
+On Cloudflare, with `github-app` (the template's): the dashboard's Settings → GitHub → Connect creates
+a GitHub App in your account from a manifest and installs it on the repository; the app mints its own
+tokens. With `github-token`: a fine-grained token for the repository (Contents and Pull requests read
+and write, Checks and Commit statuses read) as the `GITHUB_TOKEN` secret, and the repository as its
+setting. `status()` (Settings → Self-improvement) checks the repository is readable and the token
+accepted, and whether a ruleset protects the default branch.
 
-1. **The repository**, `owner/name`: a setting, set in Settings → Self-improvement on GitHub (saved
-   with execution-do's own, where the agent may push), applied at the next call; its default is the
-   config's `repository` (which `pikit configure` writes). The Deploy to Cloudflare button's repository
-   is not known before deploying, so the template leaves it empty.
-2. **The two tokens** ("Tokens" below), as secrets, never typed into the dashboard: in the Worker's
-   Variables and Secrets (they apply at once and stay through deploys).
-3. **A ruleset** on the default branch ("Protect the default branch" below): best effort, the status
-   reads the rules GitHub applies to it with the read token.
-
-Until the repository and the read token are there, everything but `status` is `not_connected` (503),
-saying what is missing; Approve and Reject also need the merge token.
-
-`pikit configure` (`configure.ts`) offers the same in a terminal: the repository (`git remote
-get-url origin`'s by default) written to `pikit.config.ts` (both Apps' configs), the two tokens asked
-without echo into `.env`, and how to create the ruleset. Without a terminal it asks nothing, and
-nothing is missing.
+**A ruleset is advised** (Settings → Rules on GitHub): a pull request required, the `checks` status
+required, no force push. One token reads, opens and merges here: what keeps the agent from merging is
+that no tool reads `github` for it (execution-do's git only clones and pushes branches under the
+prefix); the ruleset holds even if a token leaks.
 
 ## Configure
 
 ```ts
 "proposals-github": {
-  repository: "ana/my-bot",              // default "": the setting's default (empty: not connected)
-  branchPrefix: "pikit/self/",           // default: execution-do's git.branchPrefix
-  tokenSecret: "GITHUB_TOKEN",           // default: the token that reads and opens pull requests
-  mergeTokenSecret: "PIKIT_MERGE_TOKEN", // default: the token that merges and closes
+  branchPrefix: "pikit/self/",           // default
   apiBase: "https://api.github.com",     // default: GitHub's API (GitHub Enterprise Server, a test double)
 }
 ```
 
 The same entry goes in `config` and in `workerConfig`.
-
-## Tokens
-
-Two secrets, read through `secrets` at each call, never in config, a log line or an answer:
-
-| Secret | Used for | Fine-grained token, this repository only |
-|---|---|---|
-| `GITHUB_TOKEN` (`tokenSecret`) | listing branches and pull requests, their files, comments and checks; opening a pushed branch's pull request; the status; `remote()`'s authorization | Contents and Pull requests: read and write; Checks and Commit statuses: read. The agent's own token (execution-do's) does. |
-| `PIKIT_MERGE_TOKEN` (`mergeTokenSecret`) | Approve (squash merge), Reject (comment and close) | Contents and Pull requests: read and write. Nothing else holds it. |
-
-The merge token is read only by `approve` and `reject`, which only admin-proposals' operator routes
-call: no tool, no agent code reaches it. Both secrets holding the same token is refused
-(`not_configured`), and so is a config naming one secret for both (the App does not start). On
-Cloudflare every secret is a binding the objects' App could read too: what keeps the agent from it is
-that no tool reads `secrets` for it.
-
-**Protect the default branch** with a ruleset (Settings → Rules): a pull request required, no direct
-push, no force push, status check `checks` (this workflow's job) required, and nobody bypasses it but
-the merge token's account if you choose so. The gate then holds even if the agent's token leaks. A
-CODEOWNERS on `.github/`, `src/pikit/proposals-github/` and the deployment's files makes "the agent
-never changes its gate" checkable.
 
 ## What it does
 
@@ -95,7 +61,7 @@ never changes its gate" checkable.
   (`pikit/self/<topic>`), and its pull request (`number`). A fork's branch with the same name, or a
   person's pull request, is not one: not listed, `not_found` to read or act on.
 - **Opening:** a pushed branch with no pull request, nor one closed at its head, gets one into the
-  default branch, opened with the read token (at most 5 per call). A rejected or merged branch the agent
+  default branch (at most 5 per call). A rejected or merged branch the agent
   pushes again (a new head) gets a new one.
 - **Approve refuses**, before anything is written: a pull request already merged or closed
   (`not_open`); a base other than the default branch (`wrong_base`); a head other than the one the
@@ -110,7 +76,7 @@ never changes its gate" checkable.
   past 400,000 in all.
 - **GitHub's errors:** its rate limit is `rate_limited` (429) with `retryAfter`; a refused token is
   `unauthorized` or `forbidden` (502), a repository the token cannot see `missing_repository` (502),
-  GitHub down or slow (15 s) `unavailable` (502). Messages name the secret, never hold it.
+  GitHub down or slow (15 s), or `github` failing to make a token, `unavailable` (502). Never a token.
 - **Preview:** best effort, a `https://….workers.dev` URL in the head's check runs (Workers Builds')
   or the pull request's comments.
 
@@ -126,16 +92,15 @@ dependency of the project nor on npm yet.
 ## Tests
 
 `proposals-github.test.ts` runs the `proposals` conformance suite, then the component against a fake
-GitHub on a local port (`fake-github.test-support.ts`, a read token that cannot merge and a merge token
-that can): dormant without a repository; the repository read from the setting at each call; the status
-of each part, the merge token never sent; `remote()` authorized by trusted code; a pushed branch's pull
-request opened once, titled from its head commit, never reopened at a closed head; the list keeps only
-the prefix's branches of the repository itself; a page's patches bounded; approve refused for failing,
-pending or missing checks unless overridden, for a non-proposal, a fork, another base, a closed one, a
-moved head, GitHub's own refusals; the merge done with the merge token alone, logged with the
-operator; reject comments and closes with the merge token; a missing token, the same token twice, a
-rate limit, a refused token, GitHub down, none holding a token. `configure.test.ts` runs the
-`pikit configure` step with a scripted terminal.
+GitHub on a local port (`fake-github.test-support.ts`) and a `github` in memory: dormant until GitHub
+is connected, and the next call once it is; the token asked for every call, a rotated or refused one
+and `github`'s own failure said, never a token; `remote()` authorized by trusted code; the status of
+each part; a pushed branch's pull request opened once, titled from its head commit, never reopened at a
+closed head; the list keeps only the prefix's branches of the repository itself; a page's patches
+bounded; approve refused for failing, pending or missing checks unless overridden, for a non-proposal,
+a fork, another base, a closed one, a moved head, GitHub's own refusals; the merge logged with the
+operator; reject comments and closes; a rate limit, a refused token, GitHub down, a token that cannot
+merge.
 
 ## Remove it
 

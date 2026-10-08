@@ -87,9 +87,9 @@ Cloudflare dashboard (Workers & Pages → your Worker → Logs).
 ## Let it improve itself (optional)
 
 The agent can change itself (a tool, its prompt, a view of the dashboard) by proposing the change as
-a branch it pushes to the repository the button made, whose pull request is opened for it; you read the diff and its checks in the dashboard's
-**Proposals** and approve it (merged, then Workers Builds deploys it) or reject it. It is off until you
-connect GitHub, after deploying, in two clicks:
+a branch it pushes to the repository the button made, whose pull request is opened for it; you read
+the diff and its checks in the dashboard's **Proposals** and approve it (merged, then Workers Builds
+deploys it) or reject it. It is off until you connect GitHub, after deploying, in two clicks:
 
 1. In the dashboard, **Settings → GitHub → Connect GitHub**. GitHub opens with a GitHub App ready to
    create in your account (private, no webhook): click **Create GitHub App**.

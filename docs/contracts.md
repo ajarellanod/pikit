@@ -41,7 +41,8 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `http.route` | keyed | admin-api, channel-http, channel-telegram-webhook, health-registry | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, health-registry? | `createAdminAuthConformance` |
 | `secrets` | single | secrets-cloudflare, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, tool-websearch-brave, execution-do?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
-| `github` | single | github-app, github-token | execution-do?, extension-pikit-self? | `createGitHubConformance` |
+| `github` | single | github-app, github-token | execution-do?, proposals-github | `createGitHubConformance` |
+| `proposals` | single | proposals-local, proposals-github | admin-proposals, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, server-bun? | `createHealthConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-faux, provider-openai-compatible, provider-openrouter | runtime-pi? | none |
@@ -456,9 +457,39 @@ Providers, interchangeable: github-app (Cloudflare: a GitHub App the operator cr
 from the dashboard; installation tokens minted with the App's JWT, its key sealed with a key derived
 from the admin token) and github-token (both targets: a `GITHUB_TOKEN` secret and the repository, a
 setting). Users, which never branch on the provider: execution-do (`git`: the connected repository is
-the only one it pushes to, its token sent for it alone), extension-pikit-self (the steward's
-repository). Without a provider nothing is connected. Suite: `createGitHubConformance` (github-app in
+the only one it pushes to, its token sent for it alone), proposals-github (its pull requests:
+read, opened, merged, closed). Without a provider nothing is connected. Suite: `createGitHubConformance` (github-app in
 Bun and in workerd, github-token).
+
+### `proposals` ([proposals.ts](../packages/contracts/src/proposals.ts))
+
+The agent's changes to itself, waiting for an operator (SPEC §6). The steward proposes the same way
+whatever the provider: it clones `remote()`, commits on `pikit/self/<topic>` and pushes it; the
+pushed branch is the proposal (its head commit's first line the title, the rest the description).
+
+```ts
+interface Proposals {
+  status(ctx): Promise<ProposalsStatus>;   // ready or not, part by part; the deploys when known
+  list(ctx): Promise<ProposalList>;        // where they live, checks before or after approval, open then closed
+  get(id, ctx): Promise<ProposalDetail>;   // description, files with patches, checks, deploy
+  approve(id, { head?, override?, operator }, ctx): Promise<ApproveOutcome>;
+  reject(id, { comment?, operator }, ctx): Promise<RejectOutcome>;
+  remote(ctx): Promise<ProposalsRemote | undefined>; // a path, or an https URL with authorization() for trusted code
+}
+```
+
+- An id is the branch's topic. Only branches under the prefix of the project's own repository are
+  proposals: anything else is `not_found`.
+- An action is refused as an outcome, before anything is written: `not_found`, `not_open`, `moved`
+  (the head is not the one the operator read), `checks_failing` (unless `override`), `wrong_base`,
+  `not_mergeable`. A failure to reach where proposals live is `ProposalsError` with a code and an
+  HTTP status (`not_connected` 503 while not set up).
+- Providers, interchangeable: proposals-local (server: branches of a bare repository in the state
+  volume, approvals for deployment-docker's deployer, which merges, checks, deploys and rolls back)
+  and proposals-github (Cloudflare: pull requests opened for pushed branches, merged through GitHub's
+  API, GitHub through `github`). Users: admin-proposals (the dashboard's routes, view and section),
+  extension-pikit-self (`remote()`, for the steward's steps). Suite: `createProposalsConformance`
+  (both providers).
 
 ### `health` ([health.ts](../packages/contracts/src/health.ts))
 

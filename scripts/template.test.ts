@@ -99,7 +99,6 @@ test("the button asks for every secret the components need, and nothing else", (
   expect(components).toContain("admin-proposals");
   expect(components).toContain("proposals-github");
   expect(components).toContain("github-app");
-  for (const name of ["GITHUB_TOKEN", "PIKIT_MERGE_TOKEN"]) expect(TEMPLATE.notAsked[name]).toContain("Settings → GitHub");
   const { order } = withOffers(registry, components, [TEMPLATE.target]);
   const declared = order.flatMap((component) => registry.manifest(component).environment ?? []);
   const asked = TEMPLATE.secrets.map((secret) => secret.name);
@@ -420,22 +419,13 @@ test.skipIf(!E2E)(
       // Self-improvement is there, dormant: the Proposals view says what to connect, and the status what is missing.
       const proposals = await fetch(`${base}/admin/api/admin-proposals`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
       expect([proposals.status, ((await proposals.json()) as { error?: string }).error]).toEqual([503, "not_connected"]);
-      const status = (await (await fetch(`${base}/admin/api/admin-proposals/status`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } })).json()) as { connected: boolean; checks: { id: string; state: string }[] };
-      const part = (id: string) => status.checks.find((check) => check.id === id)?.state;
-      expect([status.connected, part("repository"), part("readToken")]).toEqual([false, "missing", "missing"]);
-      // The repository set in the Settings dialog (settings-store's route) reaches the Worker that serves the routes.
-      const set = await fetch(`${base}/admin/api/settings/proposals-github`, {
-        method: "PUT",
-        headers: { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" },
-        body: JSON.stringify({ repository: "grace/pikit-telegram-bot" }),
-      });
-      expect(set.status).toBe(200);
-      let where = "";
-      for (let i = 0; i < 10 && !where.startsWith("grace/"); i++) {
-        if (i > 0) await Bun.sleep(500);
-        where = ((await (await fetch(`${base}/admin/api/admin-proposals/status`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } })).json()) as { where: string }).where;
-      }
-      expect(where).toBe("grace/pikit-telegram-bot on GitHub");
+      // Through github (github-app, not connected yet): the status says where to connect it.
+      const status = (await (await fetch(`${base}/admin/api/admin-proposals/status`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } })).json()) as {
+        connected: boolean;
+        checks: { id: string; state: string; message: string }[];
+      };
+      expect([status.connected, ...status.checks.map((check) => `${check.id} ${check.state}`)]).toEqual([false, "repository missing", "token unknown", "ruleset unknown"]);
+      expect(status.checks[0]?.message).toContain("Settings → GitHub");
     } finally {
       dev.kill("SIGINT");
       const stopped = await Promise.race([dev.exited, Bun.sleep(15_000).then(() => undefined)]);

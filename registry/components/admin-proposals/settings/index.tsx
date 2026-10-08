@@ -3,8 +3,8 @@
  * changes to itself and an operator approve them now, part by part, as the `proposals` provider checks
  * them (`GET /admin/api/admin-proposals/status`), and the deploys that follow approvals when the
  * provider runs them (the deployer on a server: running or not, the last deploy, the last rollback).
- * What is set up where is the provider's: a provider with settings of its own brings its own section
- * (proposals-github: Self-improvement on GitHub), which this one opens.
+ * What is set up where is the provider's: a component with settings of its own for it brings its own
+ * section (GitHub's, github-app's or github-token's, on Cloudflare), which this one opens.
  */
 
 import { GitPullRequest, Refresh } from "iconoir-react";
@@ -52,8 +52,8 @@ function SelfImprovementSettings() {
   const status = useApi<ProposalsStatus>("/admin-proposals/status");
   const open = useOpenSettingsSection();
   const known = status.data;
-  // A provider's own section, when its component brings one (`proposals-*`): where it is set up.
-  const providers = settingsSections.filter((section) => section.id.startsWith("proposals-"));
+  // Where it is set up, when a component brings a section for it: a proposals provider's, or GitHub's (`github-*`).
+  const providers = settingsSections.filter((section) => section.id.startsWith("proposals-") || section.id.startsWith("github-"));
 
   return (
     <div>

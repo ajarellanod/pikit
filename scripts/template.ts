@@ -104,8 +104,6 @@ export const TEMPLATES: Record<string, Template> = {
     ],
     notAsked: {
       TELEGRAM_ALLOWED_USERS: "nobody knows their Telegram user id before deploying: the owner logs in with TELEGRAM_PASSWORD instead",
-      GITHUB_TOKEN: "never needed here: GitHub is connected after deploying, from the dashboard's Settings → GitHub (github-app mints its own tokens)",
-      PIKIT_MERGE_TOKEN: "never needed here: GitHub is connected after deploying, from the dashboard's Settings → GitHub",
     },
     bindings: {
       CONVERSATION: "One Durable Object per Telegram chat, SQLite-backed: its conversations (pi-durable) and the agent's workspace. Nothing to set.",

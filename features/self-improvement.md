@@ -39,58 +39,59 @@ Three pieces, each a component or a file of the kit, each removable (P3):
    - **Live state is the operator's**, in the dashboard (health, deliveries, proposals): the
      steward needs what it is made of and how to change it, not how it is doing.
 2. **The workspace, a git checkout of the project**, through `execution` (no new tools: `read`,
-   `write`, `edit`, `bash`):
+   `write`, `edit`, `bash`). The steward proposes the same way on every target, from
+   `proposals.remote()` (below): `git clone <remote>`, `git checkout -b pikit/self/<topic>`, the
+   change, `git commit`, `git push origin pikit/self/<topic>`. The pushed branch is the proposal;
+   pikit-self tells it these steps with its remote. No `git pr` anywhere.
    - **Cloudflare:** `execution-do`'s `git` is real git's subset (`clone` over HTTPS, `checkout -b`,
      `status`, `diff`, `add`, `commit`, `log`, `push origin <branch>`), pushes only to `github`'s
      connected repository (below) on branches under `pikit/self/`, with its token, and keeps the token
      out of the shell. It cannot run `bun test` (no processes): checks run in CI (below).
-   - **Server:** `execution-local` with `bash`, in a checkout under the app's volume
-     (`.pikit/workspace`). Its `git` is execution-do's, copied (built): a program first on the
-     commands' `PATH` asks trusted code in the app, with the same fences, and never holds the token;
-     the image has no `git` binary. Bun is in the image: `bun test` runs there before it proposes,
-     and again in CI. The token is still in the app's process environment, which a shell of the same
-     user can read (`/proc/$PPID/environ`): on a server the gate holds against a careless agent, not
-     a determined one, until commands run as another user or container (execution-local's README).
-3. **The gate, out of the agent's reach:** proposals are pull requests from `pikit/self/*` to the
-   main branch of the project's repository on GitHub, on both targets. One path for both, and the
-   one Workers Builds already deploys from. **Built:** `admin-proposals` (server and durable; on
-   Cloudflare in both Apps, the Worker's serving its routes).
-   - **Approve in the dashboard:** its "Proposals" view lists them (state, checks, preview URL) and
-     shows each (the agent's description, the diff per file, the checks), with Approve and Reject
-     behind a confirmation. Approve squash-merges through GitHub's API with a merge token
-     (`PIKIT_MERGE_TOKEN`) that only its operator routes read; reads use `GITHUB_TOKEN`, which may
-     be the agent's (push branches, open PRs, never merge); the same token in both is refused. Only
-     a branch under the prefix of the repository itself is a proposal (never a fork's), into the
-     default branch, at the head the operator read. A ruleset on the main branch (no direct push, PR
-     required, the `checks` status required) holds even if the agent's token leaks.
-   - **Checks:** a GitHub Actions workflow the component installs
-     (`.github/workflows/pikit-checks.yml`: install by the project's lockfile, `typecheck`,
-     `bun test`, `wrangler deploy --dry-run` on Cloudflare), whose status the view shows; Approve is
-     refused while they fail, run or never ran, unless the operator overrides it. `pikit doctor` is
-     not in it: the CLI is not a project dependency nor on npm yet.
-   - **Deploy:** Cloudflare: Workers Builds deploys the merge (a branch's push already builds a
-     Preview). Server: a deployer on the host, outside the container (the app cannot run `docker`
-     without root), pulls the main branch and runs `pikit up`; it keeps the previous image.
-   - **Rollback:** after a deploy, `/health` from the new version; if it fails, Cloudflare goes back
-     with `wrangler rollback` (deployment-cloudflare's `deploy.mjs` and `pikit up`, built), the
-     server with the previous image (`pikit deploy watch`, built). A change of Durable Object
-     classes is never rolled back; marking such a proposal for an approval of its own is not built.
-   - **Connected after deploying, built.** `admin-proposals` is dormant until connected: it starts
-     without a repository or a token, its routes answer `503 not_connected` saying what is
-     missing, and the Proposals view shows "Connect self-improvement" with the steps. The
-     repository is a setting (its default the config's `repository`), read at each request; the
-     dashboard's Settings → Self-improvement (admin-proposals' `settings/`) sets it, saved with
-     execution-do's own `repository` setting (one more push repository, read at each push): each
-     component reads only its own (P4), the section writes both. It checks the connection live
-     (`GET /admin/api/admin-proposals/status`: the repository reachable with `GITHUB_TOKEN`, the
-     merge token set and different, a ruleset requiring a pull request on the default branch,
-     through GitHub's rules for a branch, best effort) and says how to add the two tokens as
-     secrets, with their fine-grained permissions, and how to create the ruleset. Tokens are never
-     typed into the dashboard. On Cloudflare the Worker serves the routes, so settings-store's
-     Worker half now provides `settings` to the Worker's App too. `pikit configure` does the same
-     from a terminal (admin-proposals' `configure.ts`: the repository from `git remote get-url
-     origin` written to the config, the tokens to `.env`, the ruleset explained), through a new
-     `io.setConfig`.
+   - **Server: real git, no fences.** `execution-local` with `bash`, in a checkout under the app's
+     volume (`.pikit/workspace`). The image has git (deployment-docker's Dockerfile, committing as
+     "pikit agent") and Bun: the steward clones the proposals repository on the server, runs
+     `bun install` and `bun test`, and pushes its branch there. No token, and no fenced built-in:
+     the shell runs as the app's user and can write that repository anyway, so a fence would protect
+     nothing; the deployer's checks, `/health` and rollback are what hold (3, below).
+3. **The gate: `proposals`, a contract** (`@pikit/contracts`' proposals.ts, with a conformance
+   suite): `status`, `list`, `get`, `approve`, `reject`, and `remote()` (where the workspace clones
+   from and pushes to). A proposal's id is its branch's topic. Its providers are interchangeable, and
+   the agent, the dashboard and pikit-self's instructions do not change with one. **Built:**
+   - **`admin-proposals`**, target-agnostic: its routes, its Proposals view (state, checks, deploy,
+     diff per file, Approve / Reject behind a confirmation; Approve sends the head the operator read)
+     and its Settings → Self-improvement (each part the provider checks, the last deploy and
+     rollback), over `proposals` only. No GitHub or git code in it.
+   - **`proposals-github`** (Cloudflare): a pushed `pikit/self/*` branch gets its pull request,
+     opened by the provider the first time it lists or reads it (the head commit's first line the
+     title, the rest the description); Approve squash-merges through GitHub's API, Reject comments and
+     closes. GitHub through the `github` contract (below), in one module (`github-access.ts`): the
+     repository and a token asked for every call. Its checks are CI's: a GitHub Actions workflow it
+     installs (`.github/workflows/pikit-checks.yml`: install by the lockfile, `typecheck`, `bun test`,
+     `wrangler deploy --dry-run`); Approve is refused while they fail, run or never ran, unless the
+     operator overrides it. Workers Builds deploys the merge; a failing `/health` rolls it back
+     (deployment-cloudflare's `deploy.mjs`).
+   - **`proposals-local`** (server): proposals are branches of a bare repository in the app's state
+     volume (`.pikit/self/project.git`); Approve records the head and the operator in
+     `.pikit/self/decisions.json`; Reject keeps the head under `refs/pikit/rejected/<topic>` and
+     deletes the branch. Nothing to set up: no GitHub, no token, no CI, no systemd.
+   - **The server's deployer** (deployment-docker's `deployer.ts`): a second compose service,
+     `deployer`, built and started by the same `pikit up` when `proposals-local` is installed (the
+     `self-improvement` profile), restarted by Docker with the app. Only it has the Docker socket; it
+     mounts the project's directory and the state volume. Every 10 s it keeps the proposals
+     repository's `main` at the project's, and deploys the oldest approval: the project must be a
+     clean git repository on `main` (else the approval waits, saying why); in its own clone, the
+     approved head merged into `main` (fast-forward, else a merge commit; a conflict fails it); a
+     change of the deployment's own files refused; `bun install --frozen-lockfile`,
+     `bun run typecheck`, `bun test` and the `beforeDeploy` hooks, each in a container of its image
+     without the socket; the running image tagged `pikit-previous`, the merge built, `app`
+     recreated, `/health` awaited; on any failure the previous image back and `main` unmoved. It
+     writes each outcome, with its checks, to `.pikit/self/deployer.json`, which proposals-local reads.
+     After a deploy the project's `main` (as its owner) and the proposals repository's follow.
+   - **On a server an approval is a decision, not a lock.** The agent's shell runs in the app's
+     container: it can write the proposals repository and `decisions.json`, so it could forge an
+     approval. The deployer trusts the app for nothing but "this head was approved", and always checks,
+     waits for `/health` and rolls back. A real lock needs the agent's commands elsewhere
+     (features/sandboxed-execution.md). Chosen for less friction on servers.
 
 **GitHub on Cloudflare: a GitHub App, one credential. Built:** `github-app` and the `github`
 contract (the connected repository, a short-lived token for it). Workers Builds exposes no GitHub
@@ -107,10 +108,8 @@ requirement. Providers are interchangeable: `github-token` gives the same `githu
 `GITHUB_TOKEN` secret and a repository setting, for CLI users and servers; no consumer branches on
 which is installed. Users of `github`: execution-do's `git` (real git's subset: `clone`,
 `checkout -b`, `add`, `commit`, `push origin pikit/self/<topic>`; no `git pr`: the pushed branch is the
-proposal) and extension-pikit-self (the steward is told its repository and those steps). **Left:**
-the proposals' GitHub calls (`proposals-github`, split out of admin-proposals) move onto `github`,
-open the pull request when a `pikit/self/*` branch arrives, and `PIKIT_MERGE_TOKEN` and its "same token
-in both" checks go.
+proposal) and proposals-github; extension-pikit-self reads `proposals.remote()`, not `github`. `proposals-github` reads GitHub only through it (built): `PIKIT_MERGE_TOKEN` and its "same token
+in both" checks are gone, and so is its own repository setting.
 
 **Who. Built:** the steward is the agent marked so in its `defineAgent` (`steward: true`), one per
 project: runtime-pi refuses to start with two, and extension-pikit-self refuses an agent that names
@@ -136,63 +135,48 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 
 ## In the dashboard
 
-- **Proposals** (`admin-proposals`' view, built): open, merged, rejected; each with its diff
-  (files, lines), the agent's description, checks, the preview URL, and Approve / Reject.
+- **Proposals** (`admin-proposals`' view, built): open, approved, merged, failed, rejected; each
+  with its diff (files, lines), the agent's description, checks, its deploy, the preview URL, and
+  Approve / Reject. Settings → Self-improvement: each part, the last deploy and rollback.
 - **The agent shown to itself**: the composition view already exists, from the same description
   `pikit-self` reads.
 
 ## Order
 
 1. `pikit-self`, with the docs (`docs/`): cheap, and everything else uses them. Built.
-2. Proposals on Cloudflare: the project's CI workflow, the Proposals view and its Approve and
-   Reject routes (**built**: `admin-proposals`, which works on a server too), and connecting them
-   after deploying (**built**: the Settings section, the status route, the `pikit configure` step).
-   The template has `admin-proposals` with `github-app` (the `telegram-cloudflare` preset's feature
-   group, `--with admin-proposals`), dormant: the button's form is unchanged, `GITHUB_TOKEN` and
-   `PIKIT_MERGE_TOKEN` are `notAsked`, and GitHub is connected from Settings → GitHub.
-   Left: the ruleset, which the operator creates on GitHub (the section says how).
+2. Proposals on Cloudflare (**built**): `admin-proposals` with `proposals-github` and `github-app`
+   (the `telegram-cloudflare` preset's feature group, `--with admin-proposals`), dormant: the
+   button's form asks no GitHub token, and GitHub is connected from Settings → GitHub. Left: the
+   ruleset, advised, which the operator creates on GitHub (the status says whether one applies).
 3. Rollback on Cloudflare (**built**): every deploy, Workers Builds' (the template's deploy command,
    `deployment-cloudflare`'s `deploy.mjs`) and `pikit up`'s, waits for `/health` from the new
    version and rolls one that fails it or never answers back to the previous version, failing the
    build (`pikit: <version> failed /health: rolled back to <previous>`). Never one whose deploy
    changed the Durable Object classes: each version is tagged with its last migration tag, and a
    different one fails the deploy without a rollback (deployment-cloudflare's README, "Rolling back").
-4. The server: **built**, `pikit configure`'s part included (admin-proposals' step: the repository
-   and the tokens).
-   - **git:** `execution-local` has execution-do's `git` (isomorphic-git, run by the server; the
-     shell reaches it through a `git` program on its `PATH`): same commands, same fences, the token
-     read through `secrets` and never a command's variable. So the image needs no `git` binary; Bun
-     is already there for `bun install` and `bun test` in the checkout. Not protected: a command can
-     read the process's environment (`/proc/<pid>/environ`), both GitHub tokens included
-     (execution-local's README).
-   - **The checkout** is in `.pikit/workspace` (the `pikit-state` volume).
-   - **The deployer:** `pikit deploy watch` (deployment-docker's `deploy`), as a systemd user
-     service (`pikit deploy install`). It polls (`git fetch`, every 60 s), keeps the running image
-     as `<image>:pikit-previous`, fast-forwards, `bun install`, `pikit up`, checks `/health`; on a
-     failure it runs the previous image again, returns the checkout, and does not retry that
-     commit. A hook (`irreversible`) can forbid a rollback; none is known on a server.
+4. The server (**built**): `pikit new` makes the project a git repository (`main`, everything
+   committed; without git it says so and goes on). In `pikit new`, the http preset's feature
+   "Self-improvement" (`--with admin-proposals`: the group `[admin-proposals, proposals-local]`)
+   brings the dashboard (`NEEDS_DASHBOARD`) and makes the starter agent name `bash` (`NAMED_FOR`):
+   the steward needs a shell for git and the tests. `pikit up` then starts the deployer. `pikit
+   deploy watch | install` and the systemd unit are gone.
 
 ## Open questions
-- The template's repository: decided, a setting set after the deploy (Settings →
-  Self-improvement), not a variable the button asks: the button's form stays short, and the
-  repository it creates is not known before.
-- The ruleset cannot be made by the button: the Settings section and `pikit configure` say how,
-  and the status checks it (best effort: a classic branch protection is not seen). Making it (with
-  `gh`, or the merge token given the Administration permission, which it should not need otherwise)
-  is not built.
-- Only admin-proposals' section sets execution-do's `repository`: a CLI-only project on Cloudflare
-  (no dashboard) adds the repository to execution-do's `git.pushRepositories` by hand, which
-  `pikit configure` says.
+- The template's repository: decided, connected after the deploy (Settings → GitHub), not a variable
+  the button asks: the button's form stays short, and the repository it creates is not known before.
+- The ruleset cannot be made by the button: advised, and the status says whether one applies.
 - A merge that adds a Durable Object migration is never rolled back (Cloudflare cannot): its build
   fails and it stays until a fix is merged. Marking such a proposal as not reversible, for an
   approval of its own, is not built. A bad merge that passes `/health` is not rolled back either:
   reverting it on GitHub (Workers Builds deploys the revert), or `wrangler rollback` by hand.
-- The host deployer: decided, `pikit deploy watch`, polling, as a systemd user service (no inbound
-  access, no webhook). Left: a GitHub Action over SSH for hosts that prefer a push; and real
-  isolation of the agent's commands from the app's environment on a server (another user or
-  another container, features/sandboxed-execution.md), which the tokens' safety there waits for.
-- A project made by `pikit new` has no GitHub repository: `pikit configure` could create one
-  (`gh repo create`), or self-improvement stays off until the operator connects one.
-- Preview on the server: none for now (the diff and the checks only).
+- The server's deployer: decided, a compose service with the socket (no host process, no systemd).
+  Not tried against a real Docker daemon here: compose's project name and the volume are found by
+  inspecting its own container, `docker build` builds the merge from its clone (compose.yaml's build
+  options beyond `build: .` are not read), and a rootless Docker needs the socket's path changed in
+  compose.yaml. `pikit doctor` is not among its checks (the CLI is not in the project).
+- A real lock on a server: the agent's commands as another user or in another container
+  (features/sandboxed-execution.md); then the proposals repository and the approvals can be out of
+  its reach.
+- Preview on the server: none for now (the diff and the deployer's checks only).
 - Levels of autonomy (a prompt change merged without approval): later, as a policy component (SPEC
   §6); never for code.

@@ -106,12 +106,6 @@
       "description": "health-registry's view: What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process. Its admin API routes come with the component (pikit add health-registry)."
     },
     {
-      "name": "proposals-github-settings",
-      "type": "registry:file",
-      "title": "proposals-github-settings",
-      "description": "proposals-github's section of the Settings dialog: proposals as GitHub pull requests from pikit/self/* (Cloudflare): read with the agent's token, merged or closed with a token the agent never holds when an operator approves or rejects them in the dashboard; and the project's CI workflow. Dormant until connected, after deploying: the repository from the dashboard's Settings, the two tokens as secrets. Its settings come with the component (pikit add proposals-github), stored by settings-store."
-    },
-    {
       "name": "router-basic-settings",
       "type": "registry:file",
       "title": "router-basic-settings",
