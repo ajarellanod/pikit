@@ -525,17 +525,22 @@ same way: adding shadcn/ui primitives (`shadcn add`) or new views, through the s
 branch, preview, approval and deploy. The dashboard also shows the agent to itself: its composition,
 its runs, its proposals and their state.
 
-**On the server.** The workspace is a local checkout; `deployment-docker` rebuilds and restarts; a
-rollback returns to the previous image.
+**On the server.** The workspace is a local checkout, with the real `git`; proposals are branches of
+a repository in the app's volume (`proposals-local`); a deployer next to the app (deployment-docker's
+`deployer` service) merges what the operator approved, checks, rebuilds and restarts; a rollback
+returns to the previous image. There an approval is the operator's decision, not a lock: the agent's
+shell runs in the app's container (`features/sandboxed-execution.md` for a lock).
 
 **On Cloudflare** (checked against Cloudflare's documentation, August 2026):
-- **The workspace** is a Cloudflare Sandbox (a Linux container started on demand, asleep when idle,
-  billed while active), behind pikit's `execution` capability (`execution-cloudflare-sandbox`), so
-  the agent uses the same tools. It lives in a Worker of its own, apart from the app: a Worker with
-  containers gets no Previews, and its images update only on a production deploy. The Sandbox SDK
-  is moving to 1.0, which is one more reason to keep it behind the capability.
-- **Credentials** reach the repository through the Sandbox's outbound handler, which injects them
-  per request; the sandbox never sees them. Its egress is deny-by-default.
+- **The workspace** is `execution-do`: each conversation's Durable Object, on the Free plan, with a
+  shell without processes and its own `git` (the steward's subset, as real git; the workspace-git
+  suite). A Cloudflare Sandbox (a Linux container, Workers Paid, billed while active) may come as
+  another `execution` provider (`features/sandboxed-execution.md`): it would run real git and tests,
+  in a Worker of its own (a Worker with containers gets no Previews).
+- **Credentials** never reach the agent (C7): `execution-do`'s `git` asks the `github` contract
+  (`github-app`: a GitHub App the operator connects from the dashboard, short-lived tokens for one
+  repository) and pushes only `pikit/self/*` branches of that repository. A Sandbox would keep the
+  rule through its outbound handler, which injects the credential per request.
 - **The repository** is on GitHub or GitLab, which Workers Builds builds from. A branch builds a
   **Worker Preview**: its own URL, Durable Object namespace and bindings, where the change (the
   dashboard included) runs before anyone approves it. Merging to the protected main branch deploys.
