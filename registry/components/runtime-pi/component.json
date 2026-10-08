@@ -26,7 +26,8 @@
       "execution",
       "workspace",
       "wakeups",
-      "settings"
+      "settings",
+      "agent.directory"
     ]
   },
   "provides": [

@@ -46,8 +46,10 @@ const choice = (values: readonly string[], options: Record<string, unknown>): TS
 /**
  * The schema of runtime-pi's settings in this App: one optional object per agent, whose `default`s are
  * its definition's (what the dashboard shows when nothing is overridden; never applied as values).
+ * With `live` (an `agent.directory` is installed), any other agent's name may hold an override too, as
+ * a live agent's: among the models and the installed tools, since what it names is known only when used.
  */
-export function overridesSchema(agents: readonly AgentDefinition[], models: readonly string[]): TSchema {
+export function overridesSchema(agents: readonly AgentDefinition[], models: readonly string[], live?: { tools: readonly string[] }): TSchema {
   const properties: Record<string, TSchema> = {};
   for (const agent of [...agents].sort((a, b) => a.name.localeCompare(b.name))) {
     const tools = toolNames(agent);
@@ -64,7 +66,18 @@ export function overridesSchema(agents: readonly AgentDefinition[], models: read
       ),
     );
   }
-  return Type.Object(properties, { additionalProperties: false });
+  const other =
+    live === undefined
+      ? false
+      : Type.Object(
+          {
+            systemPrompt: Type.Optional(Type.String({ maxLength: MAX_PROMPT })),
+            model: Type.Optional(choice([...models].sort(), {})),
+            tools: Type.Optional(Type.Array(choice([...live.tools].sort(), {}), { uniqueItems: true })),
+          },
+          { additionalProperties: false },
+        );
+  return Type.Object(properties, { additionalProperties: other });
 }
 
 /** `agent` with `override` over what its `prepare` returns; `agent` itself with no override. */

@@ -32,7 +32,9 @@ it into the app.
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes;
   - `settings`, if installed (`settings-store`): the agents' live overrides, an operator's system
     prompt, model and tools per agent, set from the dashboard ("Live overrides" below). Without it,
-    every agent is its definition.
+    every agent is its definition;
+  - `agent.directory`, if installed (`agents-live`): agents that are data, an operator's, for a name
+    no `agent.definition` has ("Live agents" below).
 
   It refuses to start without an agent, with two stewards (`steward: true`: a project has one, SPEC
   §6), when an agent names a model no provider has, when an agent
@@ -247,6 +249,23 @@ overrides are data over it (`overrides.ts`).
 - **Failing safe**: an override the runtime cannot resolve makes the run use the definition, logged as
   `prepare`'s failures are; settings that cannot be read keep the ones read last, logged.
 
+## Live agents
+
+With `agent.directory` installed (`agents-live`: agents an operator creates in the dashboard), a
+conversation's agent is its `agent.definition`, else the directory's agent of that name.
+
+- **Read** with the overrides (before every admission, resume, `/compact` and driving wakeup; on a
+  server also at start), so a new agent answers its first message with no restart and a change applies
+  to the next run. A directory that cannot be read keeps the agents read last, logged.
+- **Checked when used, not at start**: a live agent must name a model an installed provider has, and
+  installed tools and extensions (`read`, `write`, `edit`, `bash` with an execution), as the code's
+  agents must at start. A message to an agent that is neither the code's nor a live one that checks
+  fails its admission (`dispatch` rejects), saying why.
+- **Overrides** apply to a live agent as to any: with a directory, runtime-pi's settings accept an
+  override for any other agent name, among the installed models and tools.
+- Until the directory was read once in this App, a conversation of a name the code does not have is not
+  resumed at start, nor abandoned as having no agent: its agent may be live.
+
 ## Agent extensions
 
 What an agent does besides its model, prompt and tools is a Pi extension (`defineExtension` from
@@ -288,6 +307,10 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
 run's system prompt, model and tools, the same agent after a restart, and the definition again once it
 is taken away; the declared schema (the providers' models, the definition's tools); an override over
 what `prepare` gives.
+
+`live-agents.test.ts` covers the live agents (with a directory double): one made after start answering
+its first message, a change applying to the next run, a name that is no agent and live agents that
+cannot run here failing their admission, a live agent's override, a directory that cannot be read.
 
 `extensions.test.ts` takes an agent extension through a real App: an async section reading a
 document its tool wrote, a `beforeTool` hook that blocks, a `beforeRequest` hook, per-agent selection,

@@ -38,6 +38,13 @@
  *   is pending resumes (in a Durable Object's start it is not: the object cannot call while it starts,
  *   and the first wakeup reads them before it opens anything). What was read last applies until the
  *   next read; one that fails keeps it, logged. Without `settings`, every agent is its definition.
+ * - `agent.directory`, if installed (agents-live): the agents that are data, an operator's. A name
+ *   `agent.definition` does not have is looked up there, read with the overrides (at every admission,
+ *   resume, compaction and driving wakeup) and checked when used, not at start: a model an installed
+ *   provider has, installed tools and extensions. A message to an agent that is neither, or to a live
+ *   one that does not check, fails its admission with why; the code's agents are checked at start as
+ *   before. A live agent gets the overrides as any agent does. Until the directory was read once, the
+ *   conversations of an agent it may hold are not resumed (nor abandoned as having no agent).
  *
  * In a Cloudflare object's App (`WORKERS_HOST` has an `object`) the object is one chat: its first
  * conversation is pi-durable's root, and pi-durable's clock is the app's (workerd freezes `Date.now()`).
@@ -55,7 +62,16 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import type { AgentCommand, AgentConversations, AgentRuntime, AgentSubmissions, ConversationRef, Wakeups } from "@pikit/contracts";
+import {
+  type AgentCommand,
+  type AgentConversations,
+  type AgentDefinition,
+  type AgentRuntime,
+  type AgentSubmissions,
+  type ConversationRef,
+  defineAgent,
+  type Wakeups,
+} from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import {
   createDurableRuntime,
@@ -115,6 +131,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
     name: "runtime-pi",
     config: Config,
     setup(pikit, config) {
+      // The App's models, from start (a conversation's title too, through model.complete).
+      let models: Models | undefined;
       const sql = pikit.use("storage.sql");
       const agents = pikit.useKeyed("agent.definition");
       const providers = pikit.useKeyed("model.provider");
@@ -128,12 +146,93 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const wakeupsHandle = pikit.useOptional("wakeups");
       // Optional: the agents' live overrides, an operator's (`overrides.ts`).
       const settings = pikit.useOptional("settings");
+      // Optional: the agents that are data (agents-live), for a name no agent.definition has.
+      const directory = pikit.useOptional("agent.directory");
+
+      /** Whether an `execution` or a `workspace` is installed: tools that work on files and commands need one. */
+      let environment = false;
+      /** Why `agent` cannot run in this App (a model, tool or extension nothing provides), or `undefined`. */
+      const problemOf = (agent: AgentDefinition): string | undefined => {
+        for (const tool of agent.tools ?? []) {
+          if (typeof tool === "string" && tools.get(tool) === undefined) {
+            return (
+              `agent "${agent.name}" names the tool "${tool}", which no agent.tool provides: ` +
+              `install the component that provides it (\`pikit doctor\` names it from the registry), or take "${tool}" out of the agent's tools`
+            );
+          }
+          if (typeof tool === "string" && !environment && ENVIRONMENT_TOOLS.has(tool)) {
+            return (
+              `agent "${agent.name}" names the tool "${tool}", which works on files and commands, and no execution is installed: ` +
+              `install one (execution-local on a server, execution-do on Cloudflare), or take "${tool}" out of the agent's tools`
+            );
+          }
+        }
+        for (const extension of agent.extensions ?? []) {
+          if (extensions.get(extension) === undefined) return `agent "${agent.name}" names the extension "${extension}", which no agent.extension provides`;
+        }
+        const ref = parseModelName(agent.model);
+        if (ref === undefined || models?.getModel(ref.provider, ref.modelId) === undefined) return `agent "${agent.name}" names model "${agent.model}", which no model.provider provides`;
+        return undefined;
+      };
+
+      /** The live agents read last (`agent.directory`) that can run here, by name; and why the others cannot. */
+      let live = new Map<string, AgentDefinition>();
+      let liveProblems = new Map<string, string>();
+      /** Whether the directory was read in this App: until then, a name the code does not have may be live. */
+      let liveRead = false;
+      /** Reads the directory again; a failure keeps what was read last. */
+      const refreshLive = async (ctx: AppContext): Promise<void> => {
+        const source = directory.get();
+        if (source === undefined || models === undefined) return;
+        try {
+          const found = new Map<string, AgentDefinition>();
+          const problems = new Map<string, string>();
+          for (const agent of await source.list(ctx)) {
+            if (agents.get(agent.name) !== undefined) continue;
+            let problem: string | undefined;
+            try {
+              const definition = defineAgent({
+                name: agent.name,
+                model: agent.model,
+                ...(agent.systemPrompt !== undefined && { systemPrompt: agent.systemPrompt }),
+                ...(agent.tools !== undefined && { tools: agent.tools }),
+                ...(agent.extensions !== undefined && { extensions: agent.extensions }),
+              });
+              problem = problemOf(definition);
+              if (problem === undefined) found.set(agent.name, definition);
+            } catch (error) {
+              problem = error instanceof Error ? error.message : String(error);
+            }
+            if (problem !== undefined) problems.set(agent.name, `live ${problem}`);
+          }
+          live = found;
+          liveProblems = problems;
+          liveRead = true;
+        } catch (error) {
+          ctx.logger.warn("runtime-pi: the live agents (agent.directory) could not be read; the ones read last apply", { error: error instanceof Error ? error.message : String(error) });
+        }
+      };
+      /** Throws, saying why, unless `name` is an agent that runs here: the code's, or a live one that checks. */
+      const runnable = (name: string): void => {
+        if (agents.get(name) !== undefined || live.has(name)) return;
+        const problem = liveProblems.get(name);
+        if (problem !== undefined) throw new Error(`runtime-pi: ${problem}`);
+        const known = [...agents.keys(), ...live.keys()].sort().map((each) => `"${each}"`).join(", ") || "none";
+        throw new Error(
+          directory.get() === undefined
+            ? `runtime-pi: no agent "${name}": it is no agent.definition (agents: ${known})`
+            : `runtime-pi: no agent "${name}": it is no agent.definition, nor a live agent of agent.directory (agents: ${known})`,
+        );
+      };
+      /** While the directory was never read, a conversation of a name the code does not have waits: its agent may be live. */
+      const unread = (conversation: ConversationRef): boolean => directory.get() !== undefined && !liveRead && agents.get(conversation.agent) === undefined;
 
       /** The overrides read last, by agent; none until read. */
       let overrides: AgentOverrides = {};
       let declared = false;
-      /** Reads the overrides again; a failure keeps the ones read last. */
+      /** Reads the overrides and the live agents again; a failure keeps the ones read last. */
       const refresh = async (ctx: AppContext): Promise<void> => {
+        await refreshLive(ctx);
         const store = settings.get();
         if (store === undefined || !declared) return;
         try {
@@ -142,8 +241,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           ctx.logger.warn("runtime-pi: the agents' settings could not be read; the ones read last apply", { error: error instanceof Error ? error.message : String(error) });
         }
       };
-      /** An agent as it runs now: its definition, with the operator's override over what `prepare` gives. */
-      const definition = (name: string) => withOverride(agents.get(name), overrides[name]);
+      /** An agent as it runs now: its definition (the code's, else a live one), with the operator's override over what `prepare` gives. */
+      const definition = (name: string) => withOverride(agents.get(name) ?? live.get(name), overrides[name]);
 
       // Created in start, when the capabilities can be read; consumers start after this component.
       let runtime: DurableRuntime | undefined;
@@ -164,6 +263,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         async dispatch(request, ctx) {
           // The agent this admission builds is the definition with the overrides as they are now.
           await refresh(ctx);
+          runnable(request.conversation.agent);
           const admission = await current().dispatch(request, ctx);
           // Asked before the dispatch resolves: a channel acknowledges its platform only once a wakeup
           // will drive the run. If asking fails, so does the dispatch; the platform sends it again.
@@ -188,8 +288,6 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       pikit.provide("agent.submissions", submissions);
       // What an operator sees of the runtime (the dashboard), read-only, from pi-durable's records.
       pikit.provide("agent.observe", createObserver(current));
-      // A text from one of the models, once (a conversation's title): the models the agents run on.
-      let models: Models | undefined;
       pikit.provide(
         "model.complete",
         createModelComplete(() => {
@@ -242,32 +340,13 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             }
             if (key.startsWith("pikit.")) throw new Error(`runtime-pi: the agent.extension "${key}" has a reserved name (pikit.*: the runtime's own)`);
           }
-          const environment = execution.get() !== undefined || workspace.get() !== undefined;
+          environment = execution.get() !== undefined || workspace.get() !== undefined;
           for (const name of agents.keys()) {
-            for (const tool of agents.get(name)?.tools ?? []) {
-              if (typeof tool === "string" && tools.get(tool) === undefined) {
-                throw new Error(
-                  `runtime-pi: agent "${name}" names the tool "${tool}", which no agent.tool provides: ` +
-                    `install the component that provides it (\`pikit doctor\` names it from the registry), or take "${tool}" out of the agent's tools`,
-                );
-              }
-              if (typeof tool === "string" && !environment && ENVIRONMENT_TOOLS.has(tool)) {
-                throw new Error(
-                  `runtime-pi: agent "${name}" names the tool "${tool}", which works on files and commands, and no execution is installed: ` +
-                    `install one (execution-local on a server, execution-do on Cloudflare), or take "${tool}" out of the agent's tools`,
-                );
-              }
-            }
-            for (const extension of agents.get(name)?.extensions ?? []) {
-              if (extensions.get(extension) === undefined) {
-                throw new Error(`runtime-pi: agent "${name}" names the extension "${extension}", which no agent.extension provides`);
-              }
-            }
             const model = agents.get(name)?.model ?? "";
+            const problem = problemOf({ ...agents.get(name), name, model });
+            if (problem !== undefined) throw new Error(`runtime-pi: ${problem}`);
             const ref = parseModelName(model);
-            if (ref === undefined || made.getModel(ref.provider, ref.modelId) === undefined) {
-              throw new Error(`runtime-pi: agent "${name}" names model "${model}", which no model.provider provides`);
-            }
+            if (ref === undefined) throw new Error(`runtime-pi: agent "${name}" names model "${model}", which no model.provider provides`);
             // Checked without a network call or an OAuth refresh: is anything configured at all?
             if ((await made.checkAuth(ref.provider, ctx.abortSignal ? { signal: ctx.abortSignal } : {})) === undefined) {
               throw new Error(
@@ -280,7 +359,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           const store = settings.get();
           if (store !== undefined) {
             const modelNames = made.getModels().map((model) => `${model.provider}/${model.id}`);
-            store.declare("runtime-pi", overridesSchema(agents.keys().flatMap((name) => agents.get(name) ?? []), modelNames), {});
+            const live = directory.get() === undefined ? undefined : { tools: tools.keys() };
+            store.declare("runtime-pi", overridesSchema(agents.keys().flatMap((name) => agents.get(name) ?? []), modelNames, live), {});
             declared = true;
           }
           // A Cloudflare object is one chat: its storage holds that chat's conversations, the root first.
@@ -291,7 +371,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           // Runs outlive the calls that admit them; never keep start's context (its deadline).
           const background = ctx.derive(() => BACKGROUND_CONTEXT);
           const now = () => background.clock.now();
-          const resumeOptions = { abandonAfterMs: config.abandonPendingAfterHours * 60 * 60 * 1_000 };
+          const resumeOptions: ResumeOptions = { abandonAfterMs: config.abandonPendingAfterHours * 60 * 60 * 1_000, skip: unread };
           const drives = wakeups === undefined ? undefined : createDriver(wakeups, background, resumeOptions, refresh);
           const db = sql.get();
           const created = createDurableRuntime({
@@ -334,6 +414,9 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           // Runs in progress stay pending in pi-durable; the next process resumes them.
           declared = false;
           overrides = {};
+          live = new Map();
+          liveProblems = new Map();
+          liveRead = false;
           const stopping = runtime;
           runtime = undefined;
           const resumed = resuming;
@@ -428,7 +511,7 @@ function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: R
     }
     if (!signal.aborted) {
       // What this worker drives needs no resuming (a run going, or waiting out a retry).
-      await resumePending(runtime, runtime.submissions, ctx, { ...resumeOptions, skip: (conversation) => runtime.holds(conversation) });
+      await resumePending(runtime, runtime.submissions, ctx, { ...resumeOptions, skip: (conversation) => runtime.holds(conversation) || resumeOptions.skip?.(conversation) === true });
     }
     const idle = await runtime.whenIdle(ctx);
     if (!idle) {
