@@ -71,9 +71,9 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      Preview). Server: a deployer on the host, outside the container (the app cannot run `docker`
      without root), pulls the main branch and runs `pikit up`; it keeps the previous image.
    - **Rollback:** after a deploy, `/health` from the new version; if it fails, Cloudflare goes back
-     with `wrangler rollback` (in the deploy script, as `setup-webhook.mjs` waits for health today),
-     the server with the previous image. A change of Durable Object classes is marked as not
-     reversible and needs its own approval.
+     with `wrangler rollback` (deployment-cloudflare's `deploy.mjs` and `pikit up`, built), the
+     server with the previous image (`pikit deploy watch`, built). A change of Durable Object
+     classes is never rolled back; marking such a proposal for an approval of its own is not built.
 
 **Who. Built:** the steward is the agent marked so in its `defineAgent` (`steward: true`), one per
 project: runtime-pi refuses to start with two, and extension-pikit-self refuses an agent that names
@@ -112,7 +112,12 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
    (the component in the preset, `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` asked by the button,
    execution-do's `git.pushRepositories` set to the repository) and the ruleset, which the
    operator sets on GitHub.
-3. Rollback on Cloudflare (`wrangler rollback` after a failed health check).
+3. Rollback on Cloudflare (**built**): every deploy, Workers Builds' (the template's deploy command,
+   `deployment-cloudflare`'s `deploy.mjs`) and `pikit up`'s, waits for `/health` from the new
+   version and rolls one that fails it or never answers back to the previous version, failing the
+   build (`pikit: <version> failed /health: rolled back to <previous>`). Never one whose deploy
+   changed the Durable Object classes: each version is tagged with its last migration tag, and a
+   different one fails the deploy without a rollback (deployment-cloudflare's README, "Rolling back").
 4. The server: **built**, but for `pikit configure`'s part (the repository and the tokens, being
    built there).
    - **git:** `execution-local` has execution-do's `git` (isomorphic-git, run by the server; the
@@ -137,8 +142,10 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 - The ruleset cannot be made by the button: a setup page (or `pikit configure`) says how, or
   makes it with the merge token if that token is given the Administration permission (it should
   not need it otherwise).
-- Rollback after an approved deploy (Order 3) is not built: until it is, a bad merge is undone by
-  reverting it on GitHub (Workers Builds deploys the revert) or `wrangler rollback` by hand.
+- A merge that adds a Durable Object migration is never rolled back (Cloudflare cannot): its build
+  fails and it stays until a fix is merged. Marking such a proposal as not reversible, for an
+  approval of its own, is not built. A bad merge that passes `/health` is not rolled back either:
+  reverting it on GitHub (Workers Builds deploys the revert), or `wrangler rollback` by hand.
 - The host deployer: decided, `pikit deploy watch`, polling, as a systemd user service (no inbound
   access, no webhook). Left: a GitHub Action over SSH for hosts that prefer a push; and real
   isolation of the agent's commands from the app's environment on a server (another user or

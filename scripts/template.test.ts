@@ -5,8 +5,9 @@
  * whole template is made twice (the second run changes nothing), then checked as Workers Builds would
  * take it, in a clean copy: `npm ci` from scratch (only the npm registry is reached), `wrangler deploy
  * --dry-run`, and `wrangler dev` with the button's secrets in `.dev.vars` against a local fake Telegram
- * and fake OpenRouter: the `deploy` script, run with a fake `wrangler deploy` that answers the local
- * Worker's URL, has the Worker register its webhook, and the owner logs in with the password and is answered.
+ * and fake OpenRouter: the `deploy` script, run with a fake `wrangler` whose deploy answers the local
+ * Worker's URL, rolls back a version that never answers `/health` (a fake `wrangler rollback`), and
+ * has the Worker register its webhook once one does; the owner logs in with the password and is answered.
  * Nothing is deployed, and every key is a dummy. Slow, and needs Node (wrangler runs on it) and npm:
  *
  *   PIKIT_E2E=1 bun test scripts/template.test.ts
@@ -112,9 +113,10 @@ test("package.json: the deploy script, a description per secret and binding, the
   const pkg = JSON.parse(templatePackageJson(JSON.stringify(made), TEMPLATE));
   expect(Object.keys(pkg)).toEqual(["name", "version", "description", "private", "scripts", "dependencies", "overrides", "cloudflare"]);
   expect(pkg).toMatchObject({ ...made, scripts: { test: "bun test", deploy: TEMPLATE.deploy } });
-  // No build script: wrangler bundles. Deploy, then register the webhook with the URL wrangler printed.
+  // No build script: wrangler bundles. Deploy (rolled back unless /health answers), then register the webhook.
   expect(pkg.scripts.build).toBeUndefined();
-  expect(TEMPLATE.deploy).toBe("wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs");
+  expect(TEMPLATE.deploy).toBe("node src/pikit/deployment-cloudflare/deploy.mjs src/pikit/channel-telegram-webhook/setup-webhook.mjs");
+  expect(existsSync(join(REGISTRY, "components", "deployment-cloudflare", "files", "src", "pikit", "deployment-cloudflare", "deploy.mjs"))).toBe(true);
   expect(existsSync(join(REGISTRY, "components", "channel-telegram-webhook", "files", "src", "pikit", "channel-telegram-webhook", "setup-webhook.mjs"))).toBe(true);
   expect(Object.keys(pkg.cloudflare.bindings)).toEqual([...TEMPLATE.secrets.map((secret) => secret.name), "CONVERSATION"]);
   // Each binding described is one wrangler.jsonc has.
@@ -317,17 +319,53 @@ test.skipIf(!E2E)(
       expect(typeof version).toBe("string");
 
       // Workers Builds' deploy command is package.json's deploy script, run by a shell: here with a
-      // `wrangler` that prints what `wrangler deploy` prints, naming the local Worker.
+      // `wrangler` that prints what `wrangler deploy` prints and writes its output file, naming the
+      // local Worker and the version FAKE_VERSION; lists the deployments (the running version, then
+      // FAKE_VERSION), tags versions with the template's migrations, and rolls back. It notes each command.
       const fakeBin = join(temp(), "bin");
       mkdirSync(fakeBin);
-      const printed = ["Uploaded pikit-telegram-bot (1.20 sec)", "Deployed pikit-telegram-bot triggers (0.31 sec)", `  ${base}`, `Current Version ID: ${version}`];
-      writeFileSync(join(fakeBin, "wrangler"), `#!/bin/sh\n[ "$1" = deploy ] || exit 3\n${printed.map((line) => `echo "${line}"`).join("\n")}\n`);
+      const commands = join(fakeBin, "commands.log");
+      const printed = (deployed: string) => ["Uploaded pikit-telegram-bot (1.20 sec)", "Deployed pikit-telegram-bot triggers (0.31 sec)", `  ${base}`, `Current Version ID: ${deployed}`];
+      const deployments = JSON.stringify([
+        { id: "d1", created_on: "2026-09-01T10:00:00Z", versions: [{ version_id: version, percentage: 100 }] },
+        { id: "d2", created_on: "2026-09-02T10:00:00Z", versions: [{ version_id: "FAKE_VERSION", percentage: 100 }] },
+      ]);
+      writeFileSync(
+        join(fakeBin, "wrangler"),
+        [
+          "#!/bin/sh",
+          `echo "$*" >> "${commands}"`,
+          'case "$1" in',
+          `  deploy) ${printed("$FAKE_VERSION").map((line) => `echo "${line}"`).join("; ")}`,
+          `    printf '{"type":"deploy","version_id":"%s","targets":["${base}"]}\\n' "$FAKE_VERSION" >> "$WRANGLER_OUTPUT_FILE_PATH" ;;`,
+          `  deployments) printf '%s' '${deployments}' | sed "s/FAKE_VERSION/$FAKE_VERSION/" ;;`,
+          `  versions) printf '{"id":"%s","annotations":{"workers/tag":"migrations:v1"}}' "$3" ;;`,
+          '  rollback) echo "Current Version ID: $2" ;;',
+          "  *) exit 3 ;;",
+          "esac",
+          "",
+        ].join("\n"),
+      );
       chmodSync(join(fakeBin, "wrangler"), 0o755);
       const pkg = JSON.parse(readFileSync(join(clean, "package.json"), "utf8"));
-      const deployed = await run(["sh", "-c", pkg.scripts.deploy], clean, { PATH: `${fakeBin}:${process.env.PATH}` });
+      const deploy = (deployed: string) =>
+        run(["sh", "-c", pkg.scripts.deploy], clean, { PATH: `${fakeBin}:${process.env.PATH}`, FAKE_VERSION: deployed, PIKIT_HEALTH_WAIT_MS: "3000", PIKIT_HEALTH_INTERVAL_MS: "200" });
+
+      // A version that never answers /health is rolled back to the one before, the build fails, and no webhook is set.
+      const broken = await deploy("broken-version");
+      expect(broken.code).toBe(1);
+      expect(broken.err).toContain(`pikit: broken-version did not answer ${base}/health within 3 s (last: HTTP 200 from version ${version})\n`);
+      expect(broken.err).toContain(`pikit: broken-version failed /health: rolled back to ${version}\n`);
+      expect(readFileSync(commands, "utf8")).toBe(
+        ["deploy --tag migrations:v1", "deployments list --json", `versions view ${version} --json`, `rollback ${version} --message pikit: broken-version failed /health --yes`, ""].join("\n"),
+      );
+      expect(telegram.webhooksSet).toBe(0);
+
+      // The version that answers: deployed, then the Worker registers its webhook.
+      const deployed = await deploy(version as string);
       expect(deployed.err).toBe("");
       expect(deployed.code).toBe(0);
-      expect(deployed.out).toBe(`${printed.join("\n")}\n\u2713 Telegram telegram: webhook ${base}/telegram\n`);
+      expect(deployed.out).toBe(`${printed(version as string).join("\n")}\npikit: ${version} answers ${base}/health\n\u2713 Telegram telegram: webhook ${base}/telegram\n`);
       expect([telegram.webhookUrl, telegram.webhookSecret, telegram.allowedUpdates]).toEqual([`${base}/telegram`, webhookSecret, ["message"]]);
 
       // Nobody is listed: the owner is told /login, logs in, and is answered.

@@ -122,18 +122,20 @@ There is no `pikit configure` and no `pikit up`, so the template does three thin
 
 2. **The webhook registers itself.** The new version checks its webhook as it starts, on its first
    request ("Registering the webhook"). So that the first deploy needs no visit, the template's deploy
-   command runs `setup-webhook.mjs` after `wrangler deploy`; the button pre-fills the deploy command
-   from `package.json`'s `deploy` script:
+   command runs `setup-webhook.mjs` once the new version answers; the button pre-fills the deploy
+   command from `package.json`'s `deploy` script:
 
    ```json
-   "scripts": { "deploy": "wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs" }
+   "scripts": { "deploy": "node src/pikit/deployment-cloudflare/deploy.mjs src/pikit/channel-telegram-webhook/setup-webhook.mjs" }
    ```
 
-   It passes wrangler's output through, reads the Worker's URL and the version deployed from it,
-   waits until `/health` answers that version (C8), then calls `GET /telegram/setup`, prints one line
-   per bot and fails the build when a bot could not be registered (the version stays deployed). The
-   build has no runtime secrets, and needs none: the Worker registers itself with its own. Given the
-   URL instead (`node …/setup-webhook.mjs https://my-bot.acme.workers.dev`), it does the same by hand.
+   `deployment-cloudflare`'s `deploy.mjs` deploys, waits until `/health` answers from the new version
+   (C8), rolls back one that does not (its README, "Rolling back"), and then runs this script with
+   the Worker's URL and that version. It calls `GET /telegram/setup`, prints one line per bot and
+   fails the build when a bot could not be registered (the version stays deployed). The build has no
+   runtime secrets, and needs none: the Worker registers itself with its own. Given the URL by hand
+   (`node …/setup-webhook.mjs https://my-bot.acme.workers.dev [<version>]`), it waits for that
+   version and does the same; piped after `wrangler deploy`, it reads both from wrangler's output.
 
    The template's `wrangler.jsonc` also names the Worker (`"name"`): pikit's leaves it out, since its
    commands pass `--name`, and Workers Builds runs wrangler without them. With one, pikit's commands
@@ -269,7 +271,7 @@ Three ways, all idempotent, all with `<origin>/telegram[/<name>]`, the bot's sec
 |---|---|---|
 | `pikit up` (`afterDeploy`) | once `/health` answers the new version | `setWebhook`, `getWebhookInfo` |
 | the Worker, as its App starts on Cloudflare | once per isolate: its first request, `/health` included | `getWebhookInfo`; `setWebhook` and `getWebhookInfo` only when Telegram has another URL or other updates |
-| `GET /telegram/setup` (a person, a build's `setup-webhook.mjs`) | when asked | `setWebhook`, `getWebhookInfo` |
+| `GET /telegram/setup` (a person, `setup-webhook.mjs` after a build's deploy) | when asked | `setWebhook`, `getWebhookInfo` |
 
 **The Worker registering itself** (`webhook.ts`) is what makes a deploy without `pikit up` work. Its
 App starts on its first request, so a new version checks once in each isolate: one subrequest when all

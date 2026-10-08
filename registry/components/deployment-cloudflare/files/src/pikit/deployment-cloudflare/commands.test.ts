@@ -39,7 +39,7 @@ function fakeWrangler(
   options: {
     version?: string;
     code?: (command: readonly string[]) => number;
-    stdout?: string;
+    stdout?: string | ((command: readonly string[]) => string);
     loggedIn?: boolean;
     loginWorks?: boolean;
     whoami?: { code: number; stdout: string };
@@ -72,7 +72,8 @@ function fakeWrangler(
     if (command[1] === "deploy" && output !== undefined) {
       writeFileSync(output, `${JSON.stringify({ type: "wrangler-session" })}\n${JSON.stringify({ type: "deploy", version_id: options.version ?? "v2", targets: ["https://my-bot-v2.acme.workers.dev", "example.com/*"] })}\n`);
     }
-    return { code: options.code?.(command) ?? 0, stdout: capture ? (options.stdout ?? "") : "" };
+    const stdout = typeof options.stdout === "function" ? options.stdout(command) : (options.stdout ?? "");
+    return { code: options.code?.(command) ?? 0, stdout: capture ? stdout : "" };
   };
   return { calls, all, run };
 }
@@ -119,26 +120,74 @@ test("up passes no secrets file without a .env, and asks /health at the URL it i
   expect(health.urls).toEqual(["https://bot.example.com/health"]);
 });
 
+/** A wrangler whose deployments are v1's then v2's, and whose versions are tagged `tag` (`migrations:…`). */
+function deployedTwice(tag = "migrations:v1") {
+  return fakeWrangler({
+    version: "v2",
+    stdout: (command) => (command[1] === "deployments" ? DEPLOYMENTS : JSON.stringify({ id: command[3], annotations: { "workers/tag": tag } })),
+  });
+}
+
+/** A project whose wrangler.jsonc has these migrations' tags. */
+function projectWithMigrations(...tags: string[]): string {
+  const cwd = project();
+  const migrations = tags.map((tag) => ({ tag, new_sqlite_classes: [`Class${tag}`] }));
+  writeFileSync(join(cwd, "wrangler.jsonc"), `{\n  // Durable Objects\n  "migrations": ${JSON.stringify(migrations)},\n}\n`);
+  return cwd;
+}
+
+const ROLLED_BACK = [
+  { command: ["wrangler", "deployments", "list", "--name", "my-bot-v2", "--json"], capture: true },
+  { command: ["wrangler", "rollback", "v1", "--name", "my-bot-v2", "--message", "pikit: v2 failed /health", "--yes"], capture: false },
+];
+
 test("up rolls back a new version whose App does not start, and says so", async () => {
-  const wrangler = fakeWrangler({ version: "v2" });
+  const wrangler = deployedTwice();
   const health = fakeHealth({ ok: false, version: "v2", error: "the object's App did not start" });
   const failure = up({ cwd: project(), run: wrangler.run, fetch: health.fetcher, intervalMs: 1 });
-  await expect(failure).rejects.toThrow(/the new version v2 answers .* its App does not start \(the object's App did not start\); it was rolled back/);
-  expect(wrangler.calls[1]?.command).toEqual(["wrangler", "rollback", "--name", "my-bot-v2", "--message", "pikit up: v2 failed /health", "--yes"]);
+  await expect(failure).rejects.toThrow(
+    "the new version v2 answers https://my-bot-v2.acme.workers.dev/health that its App does not start (the object's App did not start)\npikit: v2 failed /health: rolled back to v1\n",
+  );
+  expect(wrangler.calls.slice(1)).toEqual(ROLLED_BACK);
 });
 
-test("up without rollback leaves a failing version; one that never answers is left too, and named", async () => {
+test("up rolls back a new version that never answers, too", async () => {
+  const wrangler = deployedTwice();
+  const failure = up({ cwd: project(), run: wrangler.run, fetch: fakeHealth({ ok: true, version: "v1" }).fetcher, waitMs: 20, intervalMs: 5 });
+  await expect(failure).rejects.toThrow(/did not answer .* within 0 s \(last: HTTP 200 from version v1\)\npikit: v2 failed \/health: rolled back to v1\n/);
+  expect(wrangler.calls.slice(1)).toEqual(ROLLED_BACK);
+});
+
+test("up tags each version with its migrations, and never rolls back one whose deploy changed the Durable Object classes", async () => {
+  const same = deployedTwice("migrations:v1");
+  await expect(up({ cwd: projectWithMigrations("v1"), run: same.run, fetch: fakeHealth({ ok: false, version: "v2" }).fetcher })).rejects.toThrow(/rolled back to v1/);
+  expect(same.calls.map((call) => call.command.slice(1).join(" "))).toEqual([
+    "deploy --name my-bot-v2 --tag migrations:v1",
+    "deployments list --name my-bot-v2 --json",
+    "versions view v1 --name my-bot-v2 --json",
+    "rollback v1 --name my-bot-v2 --message pikit: v2 failed /health --yes",
+  ]);
+
+  const migrated = deployedTwice("migrations:v1");
+  const failure = up({ cwd: projectWithMigrations("v1", "v2"), run: migrated.run, fetch: fakeHealth({ ok: false, version: "v2" }).fetcher });
+  await expect(failure).rejects.toThrow(
+    "pikit: v2 failed /health and was NOT rolled back: this deploy changed the Durable Object classes (migrations:v2; the previous version v1 has migrations:v1)",
+  );
+  expect(migrated.calls.map((call) => call.command[1])).toEqual(["deploy", "deployments", "versions"]);
+});
+
+test("up without rollback leaves a failing version; a first deploy has nothing to go back to", async () => {
   const kept = fakeWrangler();
   await expect(
     up({ cwd: project(), run: kept.run, fetch: fakeHealth({ ok: false, version: "v2" }).fetcher, rollback: false }),
   ).rejects.toThrow(/it is still deployed/);
   expect(kept.calls).toHaveLength(1);
 
-  const silent = fakeWrangler();
-  await expect(
-    up({ cwd: project(), run: silent.run, fetch: fakeHealth({ ok: true, version: "v1" }).fetcher, waitMs: 20, intervalMs: 5 }),
-  ).rejects.toThrow(/did not answer .* within 0 s \(last: HTTP 200 from version v1\); it is deployed/);
-  expect(silent.calls).toHaveLength(1);
+  const first = fakeWrangler({ stdout: JSON.stringify([{ id: "d1", created_on: "2026-09-01T10:00:00Z", versions: [{ version_id: "v2", percentage: 100 }] }]) });
+  await expect(up({ cwd: project(), run: first.run, fetch: fakeHealth({ ok: false, version: "v2" }).fetcher })).rejects.toThrow(
+    "pikit: v2 failed /health and was not rolled back: there is no earlier version to go back to",
+  );
+  expect(first.calls.map((call) => call.command[1])).toEqual(["deploy", "deployments"]);
 });
 
 test("up fails when wrangler deploy fails, before any probe", async () => {

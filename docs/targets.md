@@ -104,7 +104,7 @@ optional exports, and so is `deploy` (`pikit deploy watch | install`). A project
 
 | Function | deployment-docker | deployment-cloudflare |
 |---|---|---|
-| `up` | `beforeDeploy` hooks, `docker compose up --detach --build --wait` | login check, `beforeDeploy` hooks, `wrangler deploy --secrets-file` (`.env`), wait until `/health` answers from the new version (3 min), roll back if it says its App does not start, then `afterDeploy` hooks |
+| `up` | `beforeDeploy` hooks, `docker compose up --detach --build --wait` | login check, `beforeDeploy` hooks, `wrangler deploy --tag migrations:<last tag> --secrets-file` (`.env`), wait until `/health` answers from the new version (3 min), roll back if it says its App does not start or never answers (not across a Durable Object migration), then `afterDeploy` hooks |
 | `down` | `docker compose down` (the volume stays) | `wrangler delete` (deletes every object's data; only at a terminal) |
 | `restart` | `docker compose restart` | not exported |
 | `logs` | `docker compose logs [--follow] [--tail N]` | `wrangler tail` (always follows) |
@@ -115,6 +115,14 @@ optional exports, and so is `deploy` (`pikit deploy watch | install`). A project
 
 The dashboard is built by every deploy of a project with `src/dashboard/`: in a stage of the Docker
 image, or by `wrangler.jsonc`'s `build.command` ([dashboard.md](dashboard.md)).
+
+On Cloudflare, a deploy without pikit's CLI (a Deploy to Cloudflare template's Workers Builds, which
+deploys every merge) runs `node src/pikit/deployment-cloudflare/deploy.mjs` instead of `pikit up`: the
+same wait for `/health` and the same rollback, from the same file (`rollout.mjs`), with only Node;
+then the after-deploy scripts it is given (the Telegram webhook's). A rollback is one line in the log,
+`pikit: <version> failed /health: rolled back to <previous>`. A deploy that changed the Durable Object
+classes (a new `migrations` tag) is never rolled back: Cloudflare cannot, and the deploy fails saying
+so. deployment-cloudflare's README has the rules ("Rolling back").
 
 ## What each target cannot do
 

@@ -196,10 +196,11 @@ test("imports: a server-only kit export (@pikit/pi-adapter/node) needs targets [
 const deploymentIndex = (...names: string[]) => names.map((name) => `export async function ${name}(): Promise<void> {}\n`).join("");
 const DEPLOYMENT_INDEX = deploymentIndex("up", "down", "logs", "status");
 
-test("imports: a deployment component's commands.ts runs on the deploying machine, so it may import node:* on any target (SPEC §4)", async () => {
+test("imports: a deployment component's commands.ts and Node scripts run on the deploying machine, so they may import node:* on any target (SPEC §4)", async () => {
   const f = await fixture({ name: "deployment-sample", index: DEPLOYMENT_INDEX });
   f.writeManifest({ ...f.manifest(), targets: ["durable"] });
   writeFileSync(join(f.own, "commands.ts"), `import "node:child_process";\n`);
+  writeFileSync(join(f.own, "deploy.mjs"), `import "node:child_process";\n`);
   await generate(f.root);
   expect((await validate(f.root)).problems).toEqual([]);
 

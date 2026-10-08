@@ -85,12 +85,19 @@ Cloudflare dashboard (Workers & Pages → your Worker → Logs).
 
 ## How it works
 
-- **The webhook registers itself.** The deploy command (`npm run deploy`, the `deploy` script in
-  `package.json`) runs `wrangler deploy`, then `src/pikit/channel-telegram-webhook/setup-webhook.mjs`,
-  which reads the Worker's URL and version from wrangler's output, waits until `/health` answers from
-  that version, and asks the Worker to register its webhook (`GET /telegram/setup`). The build has no
-  secrets and needs none: the Worker registers itself with its own. Besides, each new version checks
-  its webhook on its first HTTPS request and fixes it if Telegram has another URL.
+- **Every deploy is checked, and rolled back if it breaks.** Each push to the main branch is built and
+  deployed by the deploy command (`npm run deploy`, the `deploy` script in `package.json`):
+  `src/pikit/deployment-cloudflare/deploy.mjs` runs `wrangler deploy`, then waits until `/health`
+  answers from the new version (3 minutes at most). If the new version says its agent does not start,
+  or never answers, it goes back to the previous version (`wrangler rollback`) and the build fails,
+  saying so in its log (`pikit: <version> failed /health: rolled back to <previous>`). Not when the
+  deploy changed the Durable Object classes (a new tag in `wrangler.jsonc`'s `migrations`): Cloudflare
+  cannot undo that, so the build fails, the new version stays, and you fix it with another push.
+- **The webhook registers itself.** Once the new version answers, the deploy command runs
+  `src/pikit/channel-telegram-webhook/setup-webhook.mjs`, which asks the Worker to register its
+  webhook (`GET /telegram/setup`). The build has no secrets and needs none: the Worker registers
+  itself with its own. Besides, each new version checks its webhook on its first HTTPS request and
+  fixes it if Telegram has another URL.
 - **Messages.** Telegram posts each message to `POST /telegram` with the webhook secret. The Worker
   checks the secret and who wrote, and hands the message to that chat's Durable Object, which runs the
   agent and sends the answer back. A message is acknowledged once it is stored, never after the run.

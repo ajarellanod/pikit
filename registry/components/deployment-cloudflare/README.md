@@ -8,8 +8,9 @@ objects running the project's two Apps, `wrangler.jsonc`, and the commands
   the Apps rather than running inside them.
 - **Requires:** nothing. It runs whatever `pikit.config.ts` composes: its default export in each
   Durable Object, and `export const worker` in the Worker.
-- **Target:** `durable`. Only `entrypoint.ts` imports `cloudflare:workers`; only `commands.ts`,
-  which runs on your machine, imports `node:*`.
+- **Target:** `durable`. Only `entrypoint.ts` imports `cloudflare:workers`; only what runs where
+  the deploy runs imports `node:*`: `commands.ts` on your machine, and `rollout.mjs` and `deploy.mjs`,
+  plain JavaScript for Node, there and in a build without pikit (Workers Builds).
 - **Installs to:** `src/pikit/deployment-cloudflare/`, plus `wrangler.jsonc` at the project's root.
 - **npm dependencies:** `@pikit/contracts`; and `wrangler` 4.143.0 as a dev dependency
   (`component.json`'s `devDependencies`): `pikit add` puts it in the project's `package.json`
@@ -196,7 +197,7 @@ project's `node_modules/.bin/wrangler` in the project's directory, without a she
 | Function | Runs |
 |---|---|
 | `login()` | Nothing with a `CLOUDFLARE_API_TOKEN`; else `wrangler whoami --json`, and at a terminal `wrangler login` if it is not logged in. `up`, `down`, `logs` and `status` run it first |
-| `up({ url })` | The components' `beforeDeploy` hooks, then `wrangler deploy --secrets-file <.env's secrets>`, then `GET /health` every 2 s until it answers ok from the version it deployed (3 min at most), then the components' `afterDeploy` hooks. Resolves with `{ version, url }` |
+| `up({ url })` | The components' `beforeDeploy` hooks, then `wrangler deploy --tag migrations:<last tag> --secrets-file <.env's secrets>`, then `GET /health` every 2 s until it answers ok from the version it deployed (3 min at most), then the components' `afterDeploy` hooks; or the rollback below. Resolves with `{ version, url }` |
 | `down()` | `wrangler delete`, only at a terminal (see below) |
 | `logs()` | `wrangler tail`: live, until Ctrl-C |
 | `status({ url })` | `wrangler deployments list --json`, plus `GET /health` |
@@ -212,10 +213,54 @@ written in a private temporary directory and deleted after.
 **`up` waits for the new version (C8).** A new version takes seconds to reach every request. `up`
 resolves only once `/health` answers ok from the version it deployed, so whatever registers against
 the Worker next (a Telegram webhook) reaches it. If that version answers that its App does not start,
-`up` rolls back to the previous version (`wrangler rollback`) and fails, pointing at the logs
-(`rollback: false` keeps it). If it never answers in time, `up` fails and leaves it: whether to roll
-back is yours. `/health` is asked at the `workers.dev` URL wrangler reports; pass `url` for a custom
-domain. `up` notes the version and URL in `.pikit/deployment-cloudflare.json` for `status`.
+or never answers in time, `up` rolls it back and fails, pointing at the logs ("Rolling back" below;
+`rollback: false` keeps it). `/health` is asked at the `workers.dev` URL wrangler reports; pass `url`
+for a custom domain. `up` notes the version and URL in `.pikit/deployment-cloudflare.json` for `status`.
+
+### Rolling back (`rollout.mjs`)
+
+Every deploy, `pikit up`'s and a build's (`deploy.mjs`, below), follows the same rules, from one
+file, `rollout.mjs`: plain JavaScript, so Node runs it where pikit is not installed (its types are
+in `rollout.d.mts`).
+
+- A new version that answers `/health` that its App does not start, or does not answer it within
+  3 minutes, is rolled back to the version deployed before it: `wrangler deployments list`, then
+  `wrangler rollback <that version> --message "pikit: <version> failed /health" --yes`. The log
+  says so in one line: `pikit: v2 failed /health: rolled back to v1`. The deploy fails all the same.
+- **Not reversible: a Durable Object migration.** Cloudflare cannot roll back across a change of
+  Durable Object classes (a new tag in `wrangler.jsonc`'s `migrations`), and the change stays
+  applied. So each version is tagged with the last migration tag it was deployed with
+  (`wrangler deploy --tag migrations:v1`, shown as its Tag in the dashboard), and before rolling
+  back, the previous version's tag is read (`wrangler versions view --json`). When they differ, this
+  deploy migrated: nothing is rolled back, and the deploy fails saying so (`pikit: v2 failed /health
+  and was NOT rolled back: this deploy changed the Durable Object classes …`). Fix it forward: a
+  version that keeps the migration and starts. Its logs say why it does not (`pikit logs`, Workers
+  Logs).
+- A previous version without such a tag (deployed another way, or before pikit tagged) is rolled
+  back to: if a migration lies between, Cloudflare refuses, and the deploy fails saying that rolling
+  back failed. A first deploy has nothing to go back to.
+- A version that answers, but whose after-deploy hooks fail, is never rolled back: what failed is
+  outside it.
+
+### Deploying without pikit (`deploy.mjs`)
+
+Where `pikit up` does not run (a "Deploy to Cloudflare" template's Workers Builds, which deploys
+every merge to the main branch, an approved self-improvement proposal included), the deploy command
+is this script, with only Node:
+
+```sh
+node src/pikit/deployment-cloudflare/deploy.mjs [<after-deploy script>…]
+```
+
+It runs `wrangler deploy --tag migrations:<last tag>` (wrangler from the PATH, else the project's;
+where the build wants wrangler's output file, `WRANGLER_OUTPUT_FILE_PATH` or
+`WRANGLER_OUTPUT_FILE_DIRECTORY`, it stays there), waits for `/health` from the version deployed,
+and rolls back by the rules above, with the credentials wrangler deployed with; a failure exits 1,
+so the build is marked failed. Once the version answers, it runs each after-deploy script given, in
+order, with Node: `node <script> <url> <version>` (`channel-telegram-webhook`'s `setup-webhook.mjs`
+registers the bot's webhook). One that fails fails the build; the version stays.
+`PIKIT_HEALTH_WAIT_MS` and `PIKIT_HEALTH_INTERVAL_MS` change how long it waits and how often it asks.
+The template's `package.json` names it as its `deploy` script (`templates/README.md`).
 
 A deploy cuts the alarms in progress; Cloudflare retries them, and runs resume (C4).
 
@@ -284,10 +329,15 @@ The tests are copied with the component and run in your project:
 - `commands.test.ts`: the exact `wrangler` argv of every command, the secrets file, the wait for the
   new version, the components' hooks run before it (writing only their own files, once; a problem
   deploying nothing) and after it (with their URL, config and secrets, their problems failing `up`,
-  none for a version that does not answer), the rollback and `status`, the login each
+  none for a version that does not answer), the rollback (a failing version, one that never answers,
+  one whose deploy migrated, a first deploy) and `status`, the login each
   command checks first (a token, `whoami`, `wrangler login` offered at a terminal, what to do without
   one, no Node.js), and a first deploy without a `workers.dev` subdomain, with a fake runner and a
   fake `fetch`. No wrangler, no account.
+- `deploy.test.ts`: `deploy.mjs` run by Node against a fake `wrangler` and a fake `/health`: a
+  version that answers (tagged, waited for, then the after-deploy scripts), one that fails or never
+  answers (rolled back), one whose deploy migrated (not rolled back), a failed deploy, a failed
+  after-deploy script, and a build's own output directory.
 - `bundle.test.ts`: `wrangler deploy --dry-run` bundles `worker.ts` with a two-App `pikit.config.ts`
   and exports `Conversation`, and the commands never reach the bundle. Uploads nothing.
 - `files.test.ts`: `wrangler.jsonc` keeps its promises, and only `entrypoint.ts` imports `cloudflare:*`.

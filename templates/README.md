@@ -35,8 +35,8 @@ It needs what `pikit new` needs (Bun >= 1.4, the npm registry) and npm. It:
      `TELEGRAM_ALLOWED_USERS`, which the button does not ask (the owner logs in with the password
      instead);
    - `package.json` gets a `description` and the `deploy` script, which the button pre-fills as the
-     deploy command: `wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs`. No
-     `build` script: wrangler bundles;
+     deploy command: `node src/pikit/deployment-cloudflare/deploy.mjs
+     src/pikit/channel-telegram-webhook/setup-webhook.mjs`. No `build` script: wrangler bundles;
    - `bun.lock` is replaced by npm's `package-lock.json` (below), and `.gitignore` un-ignores
      `.dev.vars.example` and ignores the project's `/bun.lock` (the dashboard's stays);
    - the README is `templates/<template>/README.md`, with the button's link, the secrets' table
@@ -73,12 +73,20 @@ deploying, so the form asks for a password (`TELEGRAM_PASSWORD`) instead of `TEL
 logs everyone out. The template's README says so for its users ("Your bot's password"), and
 `channel-telegram-webhook`'s README has the details ("The password").
 
-**How the webhook gets registered, without `pikit up`.** The `deploy` script pipes `wrangler deploy`
-into `setup-webhook.mjs`, which reads the workers.dev URL and version from wrangler's output, waits
-until `/health` answers from that version, and calls `GET /telegram/setup`: the Worker sets its webhook
-with its own secret (the build has none). Besides, each version checks its webhook on its first HTTPS
-request (`channel-telegram-webhook`'s README, "Registering the webhook"), and the template's README
-tells its user to open `/telegram/setup` if the build did not.
+**How a deploy is checked and rolled back, without `pikit up`.** Workers Builds deploys every merge
+to the main branch (an approved self-improvement proposal included), with the `deploy` script:
+`deployment-cloudflare`'s `deploy.mjs` runs `wrangler deploy`, waits until `/health` answers from the
+new version (3 minutes), and rolls back to the previous version one that answers that its App does
+not start or does not answer, failing the build (`pikit: <version> failed /health: rolled back to
+<previous>`); never one whose deploy changed the Durable Object classes, which Cloudflare cannot roll
+back (`deployment-cloudflare`'s README, "Rolling back"). The same rules as `pikit up`, from the same
+file.
+
+**How the webhook gets registered, without `pikit up`.** Once the new version answers, `deploy.mjs`
+runs `setup-webhook.mjs` with its URL and version, which calls `GET /telegram/setup`: the Worker sets
+its webhook with its own secret (the build has none). Besides, each version checks its webhook on its
+first HTTPS request (`channel-telegram-webhook`'s README, "Registering the webhook"), and the
+template's README tells its user to open `/telegram/setup` if the build did not.
 
 ## Checking one
 

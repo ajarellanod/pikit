@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 /**
- * channel-telegram-webhook: registers the Telegram webhook after `wrangler deploy`, where no `pikit up`
- * runs (a "Deploy to Cloudflare" button's Workers Builds, a deploy by hand). No dependency, no import:
- * Node 18 or later, or Bun. It needs no secret either (a build has none): it asks the deployed Worker,
- * which registers itself with its own.
+ * channel-telegram-webhook: registers the Telegram webhook after a deploy where no `pikit up` runs (a
+ * "Deploy to Cloudflare" button's Workers Builds, a deploy by hand). No dependency, no import: Node 18
+ * or later, or Bun. It needs no secret either (a build has none): it asks the deployed Worker, which
+ * registers itself with its own.
  *
- *   wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs
+ *   node src/pikit/deployment-cloudflare/deploy.mjs src/pikit/channel-telegram-webhook/setup-webhook.mjs
  *   node src/pikit/channel-telegram-webhook/setup-webhook.mjs https://my-bot.acme.workers.dev [<version id>]
+ *   wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs
+ *
+ * The template's deploy command is the first: deployment-cloudflare's `deploy.mjs` deploys, rolls back a
+ * version that fails `/health`, and runs this once the new one answers, given its URL and version.
  *
  * Piped, it passes wrangler's output through, and reads from it the Worker's URL (the first one listed
  * under `Deployed <name> triggers`: its workers.dev URL) and the version deployed (`Current Version ID:

@@ -103,7 +103,7 @@ export const TEMPLATES: Record<string, Template> = {
     bindings: {
       CONVERSATION: "One Durable Object per Telegram chat, SQLite-backed: its conversations (pi-durable) and the agent's workspace. Nothing to set.",
     },
-    deploy: "wrangler deploy | node src/pikit/channel-telegram-webhook/setup-webhook.mjs",
+    deploy: "node src/pikit/deployment-cloudflare/deploy.mjs src/pikit/channel-telegram-webhook/setup-webhook.mjs",
   },
 };
 

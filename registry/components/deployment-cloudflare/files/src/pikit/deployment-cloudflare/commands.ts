@@ -15,6 +15,9 @@
  * the bundle carries); after the deploy answers, their `afterDeploy` hooks (C8). Each one is named in
  * its `component.json`'s `hooks`, and `pikit add` records its file in `pikit.json`.
  *
+ * What follows the deploy (wait for `/health`, roll back) is `rollout.mjs`'s, which a build without
+ * pikit runs too (`deploy.mjs`): both deploy by the same rules.
+ *
  * `up`, `down`, `logs` and `status` reach the Cloudflare account, so each first checks that wrangler
  * can (`login`): a `CLOUDFLARE_API_TOKEN`, or wrangler's own login. At a terminal it offers
  * `wrangler login`; without one it says what to set.
@@ -27,6 +30,9 @@ import { dirname, join } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { pathToFileURL } from "node:url";
 import { parseEnv } from "node:util";
+import { type Deployed, type Deployment, healthFailure, parseDeployments, parseJsonc, probeHealth, readDeployOutput, readMigrationsMark, rollBack, rollbackLine, WAIT_MS, waitForVersion } from "./rollout.mjs";
+
+export { type Deployed, type Deployment, parseDeployments, parseJsonc, readDeployOutput } from "./rollout.mjs";
 
 export interface RunResult {
   code: number;
@@ -123,14 +129,6 @@ async function askAtTerminal(question: string): Promise<boolean> {
   }
 }
 
-/** What `up` deployed, and where it answers. */
-export interface Deployed {
-  /** The Worker version wrangler uploaded, as `/health` reports it. */
-  version: string;
-  /** Where `/health` was asked: the `workers.dev` URL wrangler reported, or `url`. */
-  url: string;
-}
-
 export interface UpOptions extends AccountOptions {
   /** Where the Worker answers. Default: the `https://…workers.dev` URL wrangler reports. */
   url?: string | URL;
@@ -140,7 +138,10 @@ export interface UpOptions extends AccountOptions {
   waitMs?: number;
   /** Between two probes. Default: 2000 ms. */
   intervalMs?: number;
-  /** Roll back (`wrangler rollback`) when the new version answers that its App does not start. Default: true. */
+  /**
+   * Roll back (`wrangler rollback`) when the new version answers that its App does not start, or never
+   * answers; never when the deploy changed the Durable Object classes. Default: true.
+   */
   rollback?: boolean;
   /** Where the components' deploy hooks' lines go. Default: `console.log`. */
   say?: (line: string) => void;
@@ -170,8 +171,10 @@ export interface AfterDeployIO {
  * secrets with old code. Wrangler adds them to the ones already set and deletes none. Variables named
  * `CLOUDFLARE_*` stay on this machine: they are wrangler's own credentials, never the Worker's.
  *
- * If the new version answers that its App does not start, it is rolled back to the previous one and
- * `up` rejects. If it never answers, `up` rejects and leaves it: whether to roll back is yours.
+ * If the new version answers that its App does not start, or does not answer in time, it is rolled
+ * back to the previous one and `up` rejects (`rollout.mjs`). Not when the deploy changed the Durable
+ * Object classes: Cloudflare cannot roll back across a migration, so `up` rejects and leaves it. Each
+ * version is tagged with its migrations (`--tag migrations:<last tag>`) to tell.
  */
 export async function up(options: UpOptions = {}): Promise<Deployed> {
   const cwd = options.cwd ?? process.cwd();
@@ -182,7 +185,8 @@ export async function up(options: UpOptions = {}): Promise<Deployed> {
   const work = mkdtempSync(join(tmpdir(), "pikit-cloudflare-"));
   try {
     const output = join(work, "wrangler-output.jsonl");
-    const args = ["deploy", "--name", name];
+    const mark = readMigrationsMark(cwd);
+    const args = ["deploy", "--name", name, ...(mark === undefined ? [] : ["--tag", mark])];
     const secrets = deploySecrets(cwd);
     if (Object.keys(secrets).length > 0) {
       const file = join(work, "secrets.json");
@@ -199,19 +203,10 @@ export async function up(options: UpOptions = {}): Promise<Deployed> {
       await afterDeploy(cwd, deployed, options.say ?? ((line) => console.log(line)));
       return deployed;
     }
-    if (outcome.kind === "failing" && options.rollback !== false) {
-      const rolledBack = await run(["wrangler", "rollback", "--name", name, "--message", `pikit up: ${deployed.version} failed /health`, "--yes"], options, false);
-      throw new Error(
-        `the new version ${deployed.version} answers ${deployed.url}/health that its App does not start (${outcome.detail}); ` +
-          (rolledBack.code === 0 ? "it was rolled back to the previous version" : "rolling it back failed: run `wrangler rollback`") +
-          ". Its logs say why: `pikit logs`, or Workers Logs in the dashboard",
-      );
-    }
-    throw new Error(
-      outcome.kind === "failing"
-        ? `the new version ${deployed.version} answers ${deployed.url}/health that its App does not start (${outcome.detail}); it is still deployed`
-        : `the new version ${deployed.version} did not answer ${deployed.url}/health within ${Math.round((options.waitMs ?? 180_000) / 1000)} s (last: ${outcome.detail}); it is deployed: check \`pikit status\`, and \`wrangler rollback --name ${name}\` if it is broken`,
-    );
+    const failed = `the new version ${healthFailure(deployed, outcome, options.waitMs ?? WAIT_MS)}`;
+    if (options.rollback === false) throw new Error(`${failed}; it is still deployed: \`wrangler rollback --name ${name}\` if it is broken`);
+    const result = await rollBack({ wrangler: (args, capture) => run(["wrangler", ...args], options, capture), name, deployed, mark });
+    throw new Error(`${failed}\n${rollbackLine(deployed.version, result)}\nIts logs say why: \`pikit logs\`, or Workers Logs in the dashboard`);
   } finally {
     rmSync(work, { recursive: true, force: true });
   }
@@ -423,14 +418,6 @@ export async function logs(options: LogsOptions = {}): Promise<void> {
   await wrangler(["tail", name], options);
 }
 
-/** One deployment: which versions serve, and how much of the traffic each one gets. */
-export interface Deployment {
-  id: string;
-  created: string;
-  message?: string;
-  versions: { id: string; percentage: number }[];
-}
-
 /** A probe's HTTP status, `"unreachable"` when nothing answered, `"unknown"` without a URL. */
 export type Probe = number | "unreachable" | "unknown";
 
@@ -478,25 +465,6 @@ function withLines(status: Omit<Status, "lines">): Status {
   return { ...status, lines };
 }
 
-/** `wrangler deployments list --json`: an array, oldest first. */
-export function parseDeployments(output: string): Deployment[] {
-  const text = output.trim();
-  if (text === "") return [];
-  const raw = JSON.parse(text) as unknown;
-  if (!Array.isArray(raw)) throw new Error("`wrangler deployments list --json` did not print an array");
-  return raw.map((entry) => {
-    const item = (entry ?? {}) as { id?: unknown; created_on?: unknown; annotations?: Record<string, unknown>; versions?: unknown };
-    const message = item.annotations?.["workers/message"];
-    const versions = Array.isArray(item.versions) ? (item.versions as { version_id?: unknown; percentage?: unknown }[]) : [];
-    return {
-      id: String(item.id ?? ""),
-      created: String(item.created_on ?? ""),
-      ...(typeof message === "string" && { message }),
-      versions: versions.map((v) => ({ id: String(v.version_id ?? ""), percentage: Number(v.percentage ?? 0) })),
-    };
-  });
-}
-
 /**
  * `pikit dev`: the Worker and its objects locally in workerd (`wrangler dev`), reloading on change,
  * with `.env` as its secrets. Resolves with wrangler's exit code.
@@ -539,31 +507,6 @@ function wranglerName(cwd: string): string | undefined {
   }
 }
 
-/** JSON with comments and trailing commas, as wrangler reads it. */
-export function parseJsonc(text: string): unknown {
-  let out = "";
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i] as string;
-    if (c === '"') {
-      const start = i;
-      for (i++; i < text.length && text[i] !== '"'; i++) if (text[i] === "\\") i++;
-      out += text.slice(start, i + 1);
-    } else if (c === "/" && text[i + 1] === "/") {
-      while (i < text.length && text[i] !== "\n") i++;
-      out += "\n";
-    } else if (c === "/" && text[i + 1] === "*") {
-      const end = text.indexOf("*/", i + 2);
-      if (end < 0) throw new Error("an unterminated /* comment");
-      i = end + 1;
-    } else if (c === "}" || c === "]") {
-      out = `${out.replace(/,\s*$/, "")}${c}`;
-    } else {
-      out += c;
-    }
-  }
-  return JSON.parse(out);
-}
-
 /** `.env`'s values for the Worker: set, and not wrangler's own `CLOUDFLARE_*` credentials. */
 export function deploySecrets(cwd: string): Record<string, string> {
   const secrets: Record<string, string> = {};
@@ -572,61 +515,6 @@ export function deploySecrets(cwd: string): Record<string, string> {
     secrets[name] = value;
   }
   return secrets;
-}
-
-/** The version and URL of `wrangler deploy`'s output file (`WRANGLER_OUTPUT_FILE_PATH`, one JSON object per line). */
-export function readDeployOutput(path: string, url?: string | URL): Deployed {
-  const lines = existsSync(path) ? readFileSync(path, "utf8").split("\n").filter((line) => line.trim() !== "") : [];
-  const entry = lines
-    .map((line) => JSON.parse(line) as { type?: unknown; version_id?: unknown; targets?: unknown })
-    .filter((item) => item.type === "deploy")
-    .at(-1);
-  if (typeof entry?.version_id !== "string") throw new Error("`wrangler deploy` succeeded but reported no version id");
-  const targets = Array.isArray(entry.targets) ? entry.targets.filter((t): t is string => typeof t === "string") : [];
-  const found = url?.toString() ?? targets.find((t) => t.startsWith("https://"));
-  if (found === undefined) {
-    throw new Error(`the Worker has no workers.dev URL to check /health on (targets: ${targets.join(", ") || "none"}): pass its URL`);
-  }
-  return { version: entry.version_id, url: found.replace(/\/+$/, "") };
-}
-
-type Outcome = { kind: "ok" } | { kind: "failing"; detail: string } | { kind: "timeout"; detail: string };
-
-/** Probes `/health` until the deployed version answers it. */
-async function waitForVersion(deployed: Deployed, options: UpOptions): Promise<Outcome> {
-  const fetcher = options.fetch ?? fetch;
-  const deadline = Date.now() + (options.waitMs ?? 180_000);
-  let last = "no answer yet";
-  for (;;) {
-    const seen = await probeHealth(deployed.url, fetcher, 30_000);
-    if (seen.version === deployed.version) {
-      if (seen.ok) return { kind: "ok" };
-      return { kind: "failing", detail: seen.error ?? `HTTP ${String(seen.status)}` };
-    }
-    last = seen.status === "unreachable" ? "unreachable" : `HTTP ${seen.status} from version ${seen.version ?? "unknown"}`;
-    if (Date.now() >= deadline) return { kind: "timeout", detail: last };
-    await new Promise((resolve) => setTimeout(resolve, options.intervalMs ?? 2_000));
-  }
-}
-
-async function probeHealth(
-  url: string,
-  fetcher: typeof fetch,
-  timeoutMs: number,
-): Promise<{ status: number | "unreachable"; ok?: boolean; version?: string | null; error?: string }> {
-  let response: Response;
-  try {
-    response = await fetcher(new URL("/health", url), { signal: AbortSignal.timeout(timeoutMs), headers: { "cache-control": "no-cache" } });
-  } catch {
-    return { status: "unreachable" };
-  }
-  const body = (await response.json().catch(() => undefined)) as { ok?: unknown; version?: unknown; error?: unknown } | undefined;
-  return {
-    status: response.status,
-    ok: body?.ok === true,
-    ...(body !== undefined && { version: typeof body.version === "string" ? body.version : null }),
-    ...(typeof body?.error === "string" && { error: body.error }),
-  };
 }
 
 /** Where `up` notes what it deployed, for `status`: `.pikit/`, this machine's state, never committed. */
