@@ -54,6 +54,10 @@ choose:
 # `--with <component>` in a script. Each brings what it needs, as `pikit add` would.
 features:
   - router-rules
+  # A group: agents made and edited in the dashboard, and the routing rules that send a channel, chat or
+  # person to one (both live, as settings), offered as agents-live's title. settings-store comes with the
+  # dashboard; listed so the group composes without one (`pikit ui on` adds the rest later).
+  - [agents-live, router-rules, settings-store]
   - tool-mcp
   - tool-fetch
   - tool-websearch-brave

@@ -52,12 +52,26 @@
         "features": {
           "type": "array",
           "items": {
-            "type": "string",
-            "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+            "anyOf": [
+              {
+                "type": "string",
+                "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+              },
+              {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^[a-z][a-z0-9]*(-[a-z0-9]+)*$"
+                },
+                "minItems": 2,
+                "uniqueItems": true,
+                "description": "A group: one feature of several components, offered by the first's `title` and named by it (`--with <first>`); choosing it installs them all."
+              }
+            ]
           },
           "minItems": 1,
           "uniqueItems": true,
-          "description": "The components `pikit new` offers to add, several at once, each shown by its component.json `title` (with the dashboard, which `--ui` adds); `--with <component>` adds one in a script. Not in `components`, and of no kind the preset `choose`s."
+          "description": "What `pikit new` offers to add, several at once, each shown by its component.json `title` (with the dashboard, which `--ui` adds); `--with <component>` adds one in a script. Each is a component, or a group of them (a list, named by its first). None in `components`, and of no kind the preset `choose`s."
         },
         "model": {
           "type": "string",

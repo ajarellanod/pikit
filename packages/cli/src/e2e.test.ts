@@ -13,7 +13,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { PIKIT_ROOT } from "./paths.ts";
@@ -277,7 +277,7 @@ test.skipIf(!E2E)(
 test.skipIf(!E2E)(
   "pikit new with two channels, every feature the preset offers and the dashboard: doctor is green once configured",
   async () => {
-    const features = ["router-rules", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"];
+    const features = ["router-rules", "agents-live", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"];
     const args = ["new", "many", "--preset", "telegram", "--with", "channel-telegram", "--with", "channel-http", ...features.flatMap((f) => ["--with", f]), "--ui"];
     const created = await pikit(args, { cwd: parent });
     expect(created.err).not.toContain("✗");
@@ -285,6 +285,9 @@ test.skipIf(!E2E)(
     const many = join(parent, "many");
     const components = Object.keys(JSON.parse(readFileSync(join(many, "pikit.json"), "utf8")).components);
     for (const name of ["channel-telegram", "channel-http", "server-bun", "admin-api", ...features]) expect(components).toContain(name);
+    // A group: agents from the dashboard brings its routing rules and settings, and its two Settings sections.
+    expect(components).toContain("settings-store");
+    for (const section of ["agents-live", "router-rules"]) expect(existsSync(join(many, "src/dashboard/src/settings", section, "index.tsx"))).toBe(true);
     // Telegram's durable delivery comes with it, as with `pikit add`.
     expect(components).toContain("outbound-durable");
 

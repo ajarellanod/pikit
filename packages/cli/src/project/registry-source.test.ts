@@ -84,12 +84,32 @@ test("a multiple question takes several answers, all of them in place of the pre
 
 test("a preset's features are offered by title, and --with adds them after its components", () => {
   const r = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[tool-x, router-y, tool-edge]"), b: "extends: base\nwith: [tool-x]\n" }));
-  expect(r.features("base")).toEqual([{ name: "tool-x", title: "X: a tool" }, { name: "router-y", title: "Y: rules" }, { name: "tool-edge", title: "Edge" }]);
+  expect(r.features("base")).toEqual([
+    { name: "tool-x", title: "X: a tool", components: ["tool-x"] },
+    { name: "router-y", title: "Y: rules", components: ["router-y"] },
+    { name: "tool-edge", title: "Edge", components: ["tool-edge"] },
+  ]);
   expect(r.features("base", ["server"]).map((f) => f.name)).toEqual(["tool-x", "router-y"]);
   expect(r.preset("base", ["router-y", "channel-b", "tool-x"])).toEqual(["secrets-env", "channel-b", "server-bun", "router-y", "tool-x"]);
   // An alias that adds one: installed by the preset, so no longer offered.
   expect(r.preset("b")).toEqual(["secrets-env", "channel-a", "server-bun", "tool-x"]);
   expect(r.features("b").map((f) => f.name)).toEqual(["router-y", "tool-edge"]);
+});
+
+test("a feature may be a group of components: offered by its first's title, and --with of it adds them all, once", () => {
+  const r = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[router-y, [tool-x, router-y]]") }));
+  expect(r.features("base")).toEqual([
+    { name: "router-y", title: "Y: rules", components: ["router-y"] },
+    { name: "tool-x", title: "X: a tool", components: ["tool-x", "router-y"] },
+  ]);
+  expect(r.preset("base", ["tool-x"])).toEqual(["secrets-env", "channel-a", "server-bun", "tool-x", "router-y"]);
+  expect(r.preset("base", ["router-y", "tool-x"])).toEqual(["secrets-env", "channel-a", "server-bun", "router-y", "tool-x"]);
+  // A group is named by its first only.
+  const grouped = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[[tool-x, router-y]]") }));
+  expect(() => grouped.preset("base", ["router-y"])).toThrow("does not offer router-y");
+  // A group's components are checked as a feature's: none installed already.
+  const installed = openRegistry(registry(FEATURES, { base: SEVERAL.replace("[tool-x, router-y]", "[[tool-x, server-bun]]") }));
+  expect(() => installed.preset("base")).toThrow("`features` lists server-bun, which `components` installs already");
 });
 
 test("choices the preset does not ask for or offer are refused, with what to do instead", () => {
@@ -255,8 +275,11 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   // Several channels at once; the features each target offers, none installed already.
   expect(r.slots("telegram")[0]).toMatchObject({ multiple: true, defaults: ["channel-telegram"] });
   expect(r.preset("telegram", ["channel-telegram", "channel-http"]).filter((c) => c.startsWith("channel-"))).toEqual(["channel-telegram", "channel-http"]);
-  expect(r.features("telegram", ["server"]).map((f) => f.name)).toEqual(["router-rules", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"]);
-  expect(r.features("telegram-cloudflare", ["durable"]).map((f) => f.name)).toEqual(["router-rules", "tool-mcp", "health-registry", "admin-proposals"]);
+  expect(r.features("telegram", ["server"]).map((f) => f.name)).toEqual(["router-rules", "agents-live", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"]);
+  expect(r.features("telegram-cloudflare", ["durable"]).map((f) => f.name)).toEqual(["router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"]);
+  // Agents from the dashboard is a group: the live agents, the rules that route to them, and the settings they are.
+  expect(r.features("telegram-cloudflare", ["durable"]).find((f) => f.name === "agents-live")?.components).toEqual(["agents-live", "router-rules", "settings-store"]);
+  expect(r.preset("telegram", ["agents-live"]).slice(-3)).toEqual(["agents-live", "router-rules", "settings-store"]);
 });
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {

@@ -43,7 +43,8 @@ export interface Registry {
   /**
    * The preset's component names, in order, with `choices` (`--with`): those of a kind the preset
    * `choose`s replace its component of that kind (all of them together, for a `multiple` kind); a
-   * feature the preset offers is added after its components. Anything else is refused: `pikit add` it after.
+   * feature the preset offers (by its first component) is added after its components, with every
+   * component of its group. Anything else is refused: `pikit add` it after.
    */
   preset(name: string, choices?: readonly string[]): string[];
   /** Every preset, with the `title` `pikit new` shows for it, by name. An alias names its base in `extends`. */
@@ -56,10 +57,12 @@ export interface Registry {
    */
   slots(name: string, targets?: readonly string[]): PresetSlot[];
   /**
-   * The preset's features (its base's, for an alias), by `title`: the components `pikit new` offers to
-   * add, but those the preset installs already. With `targets`, only those that run on all of them.
+   * The preset's features (its base's, for an alias), by `title`: what `pikit new` offers to add, but
+   * those the preset installs already. A feature is named by its first component, whose `title` is
+   * shown; `components` is every component it installs (a group: `agents-live` with `router-rules`).
+   * With `targets`, only those whose components all run on all of them.
    */
-  features(name: string, targets?: readonly string[]): { name: string; title: string }[];
+  features(name: string, targets?: readonly string[]): { name: string; title: string; components: string[] }[];
   /**
    * Every file a component installs: project-relative target → absolute source. Its README
    * (`README.md` at its root) goes beside its code, as `src/pikit/<name>/README.md`.
@@ -117,10 +120,11 @@ export function openRegistry(path: string): Registry {
           const kind = kindOf(choice);
           const slot = slots.get(kind);
           if (slot === undefined) {
-            if (!(base.features ?? []).includes(choice)) {
+            const group = featureGroups(base).find((each) => each[0] === choice);
+            if (group === undefined) {
               throw new Error(`the preset "${name}" has no choice of ${kind}-* components and does not offer ${choice}; add it after, with \`pikit add ${choice}\``);
             }
-            if (!features.includes(choice)) features.push(choice);
+            for (const component of group) if (!features.includes(component)) features.push(component);
             continue;
           }
           const kindAnswers = fresh.get(kind) ?? [];
@@ -134,7 +138,7 @@ export function openRegistry(path: string): Registry {
       apply(choices);
       // `readPreset` checked that each chosen kind has exactly one component in the list: its place.
       const components = base.components.flatMap((c) => answers.get(kindOf(c)) ?? [c]);
-      return [...components, ...features];
+      return [...components, ...features.filter((c) => !components.includes(c))];
     },
     presets() {
       const dir = confinedPath(root, "presets");
@@ -167,9 +171,10 @@ export function openRegistry(path: string): Registry {
     },
     features(name, targets = []) {
       const installed = this.preset(name);
-      return (presetBase(root, name).base.features ?? [])
-        .filter((c) => !installed.includes(c) && targets.every((target) => this.manifest(c).targets.includes(target)))
-        .map((c) => ({ name: c, title: this.manifest(c).title ?? c }));
+      return featureGroups(presetBase(root, name).base)
+        .filter(([head]) => head !== undefined && !installed.includes(head))
+        .filter((group) => group.every((c) => targets.every((target) => this.manifest(c).targets.includes(target))))
+        .map((group) => ({ name: group[0] as string, title: this.manifest(group[0] as string).title ?? (group[0] as string), components: group }));
     },
     files(name) {
       const componentDir = dir(name);
@@ -265,12 +270,22 @@ const BasePresetSchema = Type.Object(
       ),
     ),
     features: Type.Optional(
-      Type.Array(Type.String({ pattern: KEBAB }), {
-        minItems: 1,
-        uniqueItems: true,
-        description:
-          "The components `pikit new` offers to add, several at once, each shown by its component.json `title` (with the dashboard, which `--ui` adds); `--with <component>` adds one in a script. Not in `components`, and of no kind the preset `choose`s.",
-      }),
+      Type.Array(
+        Type.Union([
+          Type.String({ pattern: KEBAB }),
+          Type.Array(Type.String({ pattern: KEBAB }), {
+            minItems: 2,
+            uniqueItems: true,
+            description: "A group: one feature of several components, offered by the first's `title` and named by it (`--with <first>`); choosing it installs them all.",
+          }),
+        ]),
+        {
+          minItems: 1,
+          uniqueItems: true,
+          description:
+            "What `pikit new` offers to add, several at once, each shown by its component.json `title` (with the dashboard, which `--ui` adds); `--with <component>` adds one in a script. Each is a component, or a group of them (a list, named by its first). None in `components`, and of no kind the preset `choose`s.",
+        },
+      ),
     ),
     model: Type.Optional(
       Type.String({
@@ -297,7 +312,7 @@ const AliasPresetSchema = Type.Object(
  * question. Nothing reads which preset a project came from. YAML 1.2. Either:
  * - a base: `components`, and optionally `choose`, one question per kind whose answers are every
  *   registry component of that kind (the listed one is the default; `multiple`: several of them),
- *   `features`, the components offered to add, and `model`, the starter agent's; or
+ *   `features`, the components (or groups of them) offered to add, and `model`, the starter agent's; or
  * - an alias: `extends` a base and answers some of its questions with `with`, as `--with` does.
  */
 export const PresetSchema = Type.Union([BasePresetSchema, AliasPresetSchema], {
@@ -333,12 +348,17 @@ export function readPreset(root: string, name: string): Preset {
     const listed = preset.components.filter((c) => kindOf(c) === kind);
     if (listed.length !== 1) throw new Error(`${at}: \`choose\` kind "${kind}" needs exactly one ${kind}-* component in \`components\`, found ${listed.length}`);
   }
-  for (const feature of preset.features ?? []) {
+  for (const feature of featureGroups(preset).flat()) {
     // Offered is not installed already; and `--with` of a chosen kind answers the question, not this.
     if (preset.components.includes(feature)) throw new Error(`${at}: \`features\` lists ${feature}, which \`components\` installs already`);
     if (kinds.includes(kindOf(feature))) throw new Error(`${at}: \`features\` lists ${feature}, of the kind "${kindOf(feature)}" \`choose\` asks for`);
   }
   return preset;
+}
+
+/** A preset's features, each as the components it installs, its name first (a single component: a group of one). */
+function featureGroups(preset: Pick<Preset, "features">): string[][] {
+  return (preset.features ?? []).map((feature) => (typeof feature === "string" ? [feature] : [...feature]));
 }
 
 /** The base preset behind `name`, and the choices an alias makes. One level: a base extends nothing. */
