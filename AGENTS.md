@@ -19,6 +19,7 @@
 - pikit is unreleased: never add backward compatibility (aliases, old-format readers, migrations from earlier schemas, "start fresh" handling for old data). Rename and change freely; only provider names (Cloudflare, Docker…) stay as they are, because that is where it deploys.
 
 - The user's Cloudflare test bot is `/Users/alex/Projects/Personal/pikit-telegram-cloudflare`, deployed as the Worker `pikit-telegram-bot-dash` (its `wrangler.jsonc` says `pikit-telegram-bot`). To ship this checkout's changes there: `bun scripts/template.ts telegram-cloudflare ../pikit-telegram-cloudflare` (regenerates it, packing `vendor/*.tgz` from `packages/`: copying files is not enough for package changes), then `npm ci` and `npx wrangler deploy --name pikit-telegram-bot-dash` there. Never `npm run deploy`: it deploys another Worker name.
+- To repair a stray six-character `\u00a7` from `js_exec`, never write it as a string literal there: a `'\\u00a7'` in the code arrives unescaped (it is `§`) and matches nothing. Build it: `String.fromCharCode(92) + "u00a7"`, check the match count, replace, then `grep -c u00a7` the files.
 
 # Downloaded references
 

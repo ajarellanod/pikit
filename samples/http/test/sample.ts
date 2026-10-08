@@ -24,6 +24,7 @@ import toolBash from "../../../registry/components/tool-bash/files/src/pikit/too
 import toolEdit from "../../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
 import toolRead from "../../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
 import toolWrite from "../../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
+import extensionPikitSelf from "../../../registry/components/extension-pikit-self/files/src/pikit/extension-pikit-self/index.ts";
 
 export const TOKEN = "sample-test-token-0123456789abcdef";
 /** The operators' token (`PIKIT_ADMIN_TOKEN`), for tests that add admin-auth-token. */
@@ -76,6 +77,7 @@ export async function createSample(options: SampleOptions): Promise<Sample> {
       toolWrite,
       toolEdit,
       toolBash,
+      extensionPikitSelf,
       storageSqlite,
       createRuntimePi(),
       routerBasic,

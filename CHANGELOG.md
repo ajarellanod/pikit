@@ -123,6 +123,10 @@ there.
   (`DASHBOARD_REQUEST_PREFIX`); a run that also took a user's message is delivered.
 - Agent behaviour: `extension-house-rules` (rules from config as a system prompt section, listed tools
   refused by a `beforeTool` hook; the reference agent extension), of the kind `extension-`.
+  `extension-pikit-self` (SPEC §6's self-knowledge, `pikit-self`): a section with a short guide to
+  pikit and how each part of the agent is changed, the kit's docs linked at the project's
+  `kit.commit`, and what runs now, read in-process from `APP_DESCRIPTION` (K13, which exempts it) and
+  `agent.definition`, config secrets redacted; no tool.
 - Deployment: `deployment-docker` (`up`, `down`, `restart`, `status`, `logs`) and
   `deployment-cloudflare` (the Worker and one Durable Object per conversation running the project's
   two Apps; `up` waits for the new version on `/health`, then runs `afterDeploy` hooks, C8; while an
@@ -151,6 +155,7 @@ there.
   list of `pikit add`s; its `choose` questions pick a channel (`multiple`: several at once), and its
   `features` are the components `pikit new` offers to add. The starter agent's prompt says where
   it is reached, and its model is one the preset installs; on a server it does not name `bash`.
+  Every preset that runs an agent installs `extension-pikit-self`, and the starter agent names it.
 
 ### CLI (`pikit`)
 - `new` (guided in a terminal: target, preset, channels, several at once, then what it can do: the

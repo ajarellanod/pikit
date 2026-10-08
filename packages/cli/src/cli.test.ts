@@ -214,6 +214,7 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
     "tool-bash",
     "tool-fetch",
     "tool-websearch-brave",
+    "extension-pikit-self",
     "deployment-cloudflare",
   ].sort());
   expect(manifest.components["outbound-durable"].installedFor).toEqual(["channel-telegram-webhook"]);
@@ -226,14 +227,14 @@ test("new --target durable --preset telegram-cloudflare: a whole bot, each half 
   );
   // The object owns the conversation: everything else, and the router sends every message to the agent.
   expect(config).toContain(
-    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n  ],",
+    "export default defineApp({\n  components: [\n    agents,\n    secretsCloudflare,\n    platformCloudflare,\n    storageDo,\n    storageKvSql,\n    providerOpenrouter,\n    runtimePi,\n    conversationsKv,\n    routerBasic,\n    outboundDurable,\n    channelTelegramWebhook,\n    executionDo,\n    toolRead,\n    toolWrite,\n    toolEdit,\n    toolBash,\n    toolFetch,\n    toolWebsearchBrave,\n    extensionPikitSelf,\n  ],",
   );
   expect(config).toContain('"router-basic": { defaultAgent: "assistant" },');
   expect(config).not.toContain("deploymentCloudflare");
 
   const agent = readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8");
   expect(agent).toContain('model: "openrouter/z-ai/glm-5.3-flash",');
-  expect(agent).toContain('tools: ["read","write","edit","bash","fetch","websearch"],');
+  expect(agent).toContain('tools: ["read","write","edit","bash","fetch","websearch"],\n  extensions: ["pikit-self"],');
   // The Telegram variables are the channel's; the Brave key is optional, and so are the model's key
   // and the Telegram bot's password (the Deploy to Cloudflare button's way to let the owner in).
   const optional = Object.values(manifest.components as Record<string, { environment: { name: string; required: boolean }[] }>)

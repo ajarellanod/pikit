@@ -146,7 +146,7 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     write(CONFIG_FILE, starter.configFile(target));
     // Its prompt says where people reach it: the channels being installed.
     const channels = components.filter((c) => kindOf(c) === "channel").map((c) => ({ name: c, title: registry.manifest(c).title }));
-    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels, target));
+    write(`src/agents/${starter.STARTER_AGENT}/agent.ts`, starter.agent(tools, model, channels, target, starter.starterExtensions(components)));
     write("src/extensions/agents.ts", starter.AGENTS);
     // The kit's skills for AI agents: how to write a component for this project, and where the kit is.
     for (const skill of starter.skillFiles(PIKIT_ROOT, commit)) {

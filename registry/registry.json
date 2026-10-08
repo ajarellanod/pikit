@@ -109,6 +109,15 @@
       ],
       "path": "components/extension-house-rules"
     },
+    "extension-pikit-self": {
+      "version": "0.0.0",
+      "description": "The agents that name it know what they are: a system prompt section with how pikit works, how each part of them is changed and where the docs are, and what runs now, read from the running App.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/extension-pikit-self"
+    },
     "health-registry": {
       "version": "0.0.0",
       "description": "What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process.",

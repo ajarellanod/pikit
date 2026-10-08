@@ -19,6 +19,7 @@ keeps `conversations-file`, the registry's other provider, so that both run end 
 | `src/extensions/agents.ts` | your agents (`src/agents/assistant/agent.ts`) |
 | `execution-local` | the workspace `.pikit/workspace/`: this machine's files and shell |
 | `tool-read`, `tool-write`, `tool-edit`, `tool-bash` | pi-durable's tools; `assistant` names all four |
+| `extension-pikit-self` | what the agent is made of and how each part is changed, in its system prompt; `assistant` names it |
 | `storage-sqlite` | `.pikit/pikit.db`: the conversations (pi-durable's tables) and the answers log |
 | `runtime-pi` | Pi (pi-durable) runs the agents, and says what became of each message (`agent.submissions`) |
 | `router-basic` | every message goes to `assistant` |

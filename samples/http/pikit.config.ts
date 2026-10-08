@@ -21,6 +21,7 @@ import secretsEnv from "../../registry/components/secrets-env/files/src/pikit/se
 import serverBun from "../../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
 import storageSqlite from "../../registry/components/storage-sqlite/files/src/pikit/storage-sqlite/index.ts";
 import toolBash from "../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
+import extensionPikitSelf from "../../registry/components/extension-pikit-self/files/src/pikit/extension-pikit-self/index.ts";
 import toolEdit from "../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
 import toolRead from "../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
 import toolWrite from "../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
@@ -53,6 +54,8 @@ export default defineApp({
     toolWrite,
     toolEdit,
     toolBash,
+    // What the agent is made of and how each part is changed: `assistant` names it.
+    extensionPikitSelf,
     // The storage the http preset names. runtime-pi keeps its conversations and its record of
     // submissions there: no accepted message goes unanswered across restarts, and a POST that
     // answered 202 reads its answer with GET.

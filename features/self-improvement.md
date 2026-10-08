@@ -21,18 +21,21 @@ is missing, in which order.
 
 Three pieces, each a component or a file of the kit, each removable (P3):
 
-1. **`pikit-self`, the skill** (data, never code), and nothing else to know itself: no tool. What
-   pikit is, how each part is changed, and where to read more. Built from the same sources as the
-   docs (`docs/`, the components' READMEs) and the skills a project already ships
-   (`.agents/skills/pikit-component`, `pikit-view`, `pikit-extension`), so the docs, the coding
-   agents' skills and the steward's self-knowledge are one text. Given to the steward as a system
-   prompt section (an `agent.extension`) listing what exists, and read on demand with its file
-   tools.
-   - **Its own composition is in the skill**, written when the project is built (from `pikit.json`
-     and the App's description: components, what each provides, its agents, config with secrets
-     redacted), because on Cloudflare the steward has no project files until it clones its
-     repository. Bundled with the App, as the dashboard's files are; never read from the running
-     App.
+1. **`pikit-self`, built** (`extension-pikit-self`): data, never code, and nothing else to know
+   itself: no tool. An agent extension whose system prompt section starts with a short guide
+   bundled with the component (`pikit-self.md`, imported as text): what pikit is, how the agent is
+   put together, how each part is changed, and where to read more, linked online at the project's
+   `kit.commit` (the kit's `docs/`, and the skills a project already ships,
+   `.agents/skills/pikit-component`, `pikit-view`, `pikit-extension`, read on demand with its file
+   tools), so the docs, the coding agents' skills and the steward's self-knowledge stay one text and
+   the section stays a map. Every preset that runs an agent installs it, and the starter agent names
+   it.
+   - **Its own composition is read in-process**, from the running App when it starts: the App's
+     description (`APP_DESCRIPTION`, which K13 lets this component read: components and what each
+     provides, pipelines, config with values that look like secrets redacted) and its agents
+     (`agent.definition`: models, tools, extensions). It needs no project files (on Cloudflare the
+     steward has none until it clones its repository) and no build step: on Cloudflare it is the
+     objects' App, where agents run. Built once, so the section is the same on every request.
    - **Live state is the operator's**, in the dashboard (health, deliveries, proposals): the
      steward needs what it is made of and how to change it, not how it is doing.
 2. **The workspace, a git checkout of the project**, through `execution` (no new tools: `read`,
@@ -82,12 +85,12 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 
 - **Proposals** (a view of the self-change component): open, merged, rejected; each with its diff
   (files, lines), the agent's description, checks, the preview URL, and Approve / Reject.
-- **The agent shown to itself**: the composition view already exists, from the same description the
-  skill is written from.
+- **The agent shown to itself**: the composition view already exists, from the same description
+  `pikit-self` reads.
 
 ## Order
 
-1. `pikit-self`, with the docs (`docs/`): cheap, and everything else uses them.
+1. `pikit-self`, with the docs (`docs/`): cheap, and everything else uses them. Built.
 2. Proposals on Cloudflare: `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` asked by the button, the
    project's CI workflow and ruleset, the Proposals view and its Approve route.
 3. Rollback on Cloudflare (`wrangler rollback` after a failed health check).
@@ -95,8 +98,6 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 
 ## Open questions
 
-- SPEC §6 still names a `pikit_self` tool: it is replaced by the composition written into the skill
-  (this note), and §6 changes with the first piece built.
 - The host deployer: a `pikit deploy-watch` systemd unit (polls GitHub, or a webhook through the
   same tunnel), or a GitHub Action that reaches the host over SSH. The first needs no inbound
   access.

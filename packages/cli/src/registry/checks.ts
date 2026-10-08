@@ -235,19 +235,22 @@ export function checkImports(componentDir: string, name: string, targets: readon
   return { problems, packages, testPackages };
 }
 
+/** The self-knowledge component (SPEC §6), which describes the App to its agents. */
+export const SELF_KNOWLEDGE = "extension-pikit-self";
+
 /**
- * Only a component named `admin-*` reads `APP_DESCRIPTION` (SPEC K13): no other one's shipped files
- * name it, outside comments. Its tests may, as they may import anything.
+ * Only a component named `admin-*`, and the self-knowledge one, read `APP_DESCRIPTION` (SPEC K13): no
+ * other one's shipped files name it, outside comments. Its tests may, as they may import anything.
  */
 export function checkDescriptionReaders(componentDir: string, name: string): string[] {
-  if (name.startsWith("admin-")) return [];
+  if (name.startsWith("admin-") || name === SELF_KNOWLEDGE) return [];
   const filesDir = join(componentDir, "files");
   return listFiles(filesDir)
     .filter((file) => SOURCE.test(file) && !forTests(file))
     .filter((file) => /\bAPP_DESCRIPTION\b/.test(stripComments(readFileSync(join(filesDir, file), "utf8"))))
     .map(
       (file) =>
-        `files/${file} reads APP_DESCRIPTION, which only admin-* components may (SPEC K13): ` +
+        `files/${file} reads APP_DESCRIPTION, which only admin-* components and ${SELF_KNOWLEDGE} may (SPEC K13): ` +
         "a component never changes what it does by what else is installed; use useOptional for that",
     );
 }

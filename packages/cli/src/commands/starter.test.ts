@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
-import { agent, BUNFIG, introduction, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
+import { agent, BUNFIG, introduction, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterExtensions, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
 
 test("a project is ready for a registry of its own and a dashboard: tsc and bun test leave registry/ and src/dashboard/ out, and its lib has ES2023", () => {
   const config = JSON.parse(tsconfig()) as { compilerOptions: { lib: string[] }; exclude: string[] };
@@ -31,6 +31,15 @@ test("the starter agent's file carries that prompt, quoted for TypeScript", () =
   expect(file).toContain(`"You are a helpful assistant that people talk to in Telegram chats. Answer briefly and plainly.",`);
   expect(file).toContain(`model: "faux/echo"`);
   expect(file).not.toContain("HTTP API");
+});
+
+test("the starter agent names pikit-self when extension-pikit-self is installed, and no extension otherwise", () => {
+  expect(starterExtensions(["runtime-pi", "extension-pikit-self", "extension-house-rules"])).toEqual(["pikit-self"]);
+  expect(starterExtensions(["runtime-pi"])).toEqual([]);
+
+  const named = agent(["read"], "faux/echo", [], "server", starterExtensions(["extension-pikit-self"]));
+  expect(named).toContain('  tools: ["read"],\n  extensions: ["pikit-self"],\n});');
+  expect(agent(["read"], "faux/echo")).not.toContain("extensions:");
 });
 
 test("the kit's skills for AI agents are what pikit new copies, by their path in the project", () => {

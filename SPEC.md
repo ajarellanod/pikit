@@ -121,7 +121,7 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   resolved pipelines and the config. `AppDescription` carries a `version` and changes additively.
   Only `admin-*` components (the dashboard, §5) and the self-knowledge component (§6) may read it,
   and `registry validate` rejects any other component whose shipped files name it (the self-knowledge
-  component gets its exemption there when it is built): a component never changes its
+  component, `extension-pikit-self`, is exempt there by name): a component never changes its
   behavior by looking at what else is installed (that is `useOptional`'s job). What the app does not
   know (installed versions, modified files, bases) stays in `pikit.json`, read from the project.
   *Why:* it is the truth of what runs, on both targets and for each App (K7), with no build step and
@@ -458,13 +458,18 @@ Only it gets the self-knowledge and the self-change tools. Only senders trusted 
 ask it to change itself.
 
 **Knowing itself.**
-- A skill, `pikit-self`, tells it what it is and how each part of it is changed, built from this
-  file, its components' READMEs and `pikit.json`. pi-durable has no skills, so a skill is data: a
-  `SKILL.md` file in the project that the agent loads on demand (a read tool, or a system prompt
-  section listing what exists), never code (`features/learned-skills.md`).
-- A read-only tool, `pikit_self` (`replay: "safe"`), returns the live state: the composition
-  (`APP_DESCRIPTION`, K13), its agents, health, and the messages waiting or unanswered. The dashboard
-  reads the same sources.
+- `pikit-self`, an agent extension (`extension-pikit-self`), gives the agents that name it one
+  system prompt section. First a short guide bundled with the component (a Markdown file imported
+  as text): what pikit is, how the agent is put together, how each part of it is changed and what
+  never is, that a change is a proposal, and where to read more (the kit's `docs/` and the skills a
+  project ships in `.agents/skills/`, linked online at the project's `kit.commit`). Then its
+  composition, read in-process from the running App when it starts: `APP_DESCRIPTION` (K13: the
+  components and what each provides, the pipelines, the config with values that look like secrets
+  redacted) and its agents from `agent.definition` (models, tools, extensions). Every preset that runs
+  an agent installs it, and the starter agent names it.
+- It is data, never a tool: no `pikit_self`. The docs and skills are read on demand with the agent's
+  file and fetch tools. Live state (health, deliveries, proposals) is the operator's, in the
+  dashboard, which reads the same description.
 
 **Improving itself: git is the path of change, on both targets.** The agent never edits what runs.
 It changes the source of its own project, as a person would:

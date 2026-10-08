@@ -343,6 +343,15 @@ test.skipIf(!E2E)(
       ]);
       expect(openrouter.requests[0]).toMatchObject({ model: "z-ai/glm-5.3-flash", apiKey: MODEL_KEY });
       expect(JSON.stringify(openrouter.requests)).not.toContain(PASSWORD);
+      // The agent knows itself (extension-pikit-self): the guide, the docs at the template's kit commit,
+      // and what runs in its object, read from the running App.
+      const commit = String(JSON.parse(readFileSync(join(clean, "pikit.json"), "utf8")).kit.commit).replace(/-dirty$/, "");
+      const prompt = JSON.stringify(openrouter.requests[0]?.messages);
+      expect(prompt).toContain("<pikit-self>");
+      expect(prompt).toContain(`https://github.com/ajarellanod/pikit/tree/${commit}/docs/concepts.md`);
+      expect(prompt).toContain("Target: durable.");
+      expect(prompt).toContain("- channel-telegram-webhook: ");
+      expect(prompt).toContain("- assistant: model openrouter/z-ai/glm-5.3-flash; tools read, write, edit, bash, fetch, websearch; extensions pikit-self");
 
       // The dashboard, built by wrangler's build: its page for anyone, its API for the token only.
       const page = await fetch(`${base}/admin/`);

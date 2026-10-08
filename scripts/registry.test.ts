@@ -300,7 +300,7 @@ test("files: only files/src maps as a directory; a file outside src is listed on
   expect(await problems(f)).toBe("");
 });
 
-test("K13: only admin-* components read APP_DESCRIPTION; comments and tests may name it", async () => {
+test("K13: only admin-* components and the self-knowledge one read APP_DESCRIPTION; comments and tests may name it", async () => {
   const reader = 'import { APP_DESCRIPTION, type AppContext } from "@pikit/core";\n\nexport const composition = (ctx: AppContext) => ctx.value(APP_DESCRIPTION);\n';
   const f = await fixture();
   f.append("index.ts", "// Not APP_DESCRIPTION: that is the dashboard's.");
@@ -309,13 +309,17 @@ test("K13: only admin-* components read APP_DESCRIPTION; comments and tests may 
 
   writeFileSync(join(f.own, "composition.ts"), reader);
   expect(await problems(f)).toBe(
-    "conversations-sample: files/src/pikit/conversations-sample/composition.ts reads APP_DESCRIPTION, which only admin-* components may (SPEC K13): " +
+    "conversations-sample: files/src/pikit/conversations-sample/composition.ts reads APP_DESCRIPTION, which only admin-* components and extension-pikit-self may (SPEC K13): " +
       "a component never changes what it does by what else is installed; use useOptional for that",
   );
 
   const admin = await fixture({ name: "admin-sample" });
   writeFileSync(join(admin.own, "composition.ts"), reader);
   expect(await problems(admin)).toBe("");
+
+  const self = await fixture({ name: "extension-pikit-self" });
+  writeFileSync(join(self.own, "composition.ts"), reader);
+  expect(await problems(self)).toBe("");
 });
 
 test("a component working on a tool call's environment declares execution (I4)", async () => {

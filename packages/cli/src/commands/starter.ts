@@ -16,8 +16,8 @@
  *   They are the kit's, not a component's: no capability, nothing that runs, and every project gets
  *   them; a newer CLI's `pikit new` brings newer ones (an existing project copies them by hand).
  *
- * One line depends on what gets installed, and only on that: `router-basic` sends every message to
- * `assistant`.
+ * A few lines depend on what gets installed, and only on that: `router-basic` sends every message to
+ * `assistant`, which names the installed tools and the starter's extensions (`STARTER_EXTENSIONS`).
  *
  * A few depend on the project's target (`pikit new --target`): on Cloudflare, `pikit.config.ts` has
  * two Apps (SPEC C1), the agent's model is one whose provider runs there (`STARTER_MODEL`, unless the
@@ -253,6 +253,19 @@ export const NOT_NAMED: Readonly<Record<string, Readonly<Record<string, string>>
   server: { bash: "it runs commands as this server's user, outside the workspace too (src/pikit/tool-bash/README.md)" },
 };
 
+/**
+ * The agent extensions the starter agent names, by the component that provides each: only when it is
+ * installed. `pikit-self` tells the agent what it is made of and how each part is changed (SPEC §6).
+ */
+export const STARTER_EXTENSIONS: Readonly<Record<string, string>> = {
+  "extension-pikit-self": "pikit-self",
+};
+
+/** The extensions the starter agent names, of those `components` provide (`STARTER_EXTENSIONS`). */
+export function starterExtensions(components: readonly string[]): string[] {
+  return components.flatMap((component) => (STARTER_EXTENSIONS[component] === undefined ? [] : [STARTER_EXTENSIONS[component]]));
+}
+
 /** The installed `tools` the starter agent names on `target`: all of them but those `NOT_NAMED` there. */
 export function starterTools(tools: readonly string[], target = "server"): string[] {
   return tools.filter((tool) => !(tool in (NOT_NAMED[target] ?? {})));
@@ -260,9 +273,9 @@ export function starterTools(tools: readonly string[], target = "server"): strin
 
 /**
  * The starter agent's file. It names `starterTools(installed, target)`; one installed and not named
- * is said in its comment, with why.
+ * is said in its comment, with why. It names `extensions` (`starterExtensions`) when there are some.
  */
-export function agent(installed: string[], model = starterModel(), channels: readonly StarterChannel[] = [], target = "server"): string {
+export function agent(installed: string[], model = starterModel(), channels: readonly StarterChannel[] = [], target = "server", extensions: readonly string[] = []): string {
   const tools = starterTools(installed, target);
   const commands = tools.includes("bash") ? ", and to run commands in it" : "";
   const workspace =
@@ -275,9 +288,9 @@ export function agent(installed: string[], model = starterModel(), channels: rea
 
 /**
  * Your agent. Pi runs the loop; this file says who the agent is. It names the installed tools it may
- * use (\`tool-*\` components); installing a tool gives it to no agent that does not name it.
- * Change the model, the prompt and the tools here. \`defineAgent({ state, prepare })\` changes them per
- * run.${unnamed}
+ * use (\`tool-*\` components) and the agent extensions it runs with (\`extension-*\`); installing either
+ * gives it to no agent that does not name it. Change the model, the prompt, the tools and the
+ * extensions here. \`defineAgent({ state, prepare })\` changes them per run.${unnamed}
  */
 export default defineAgent({
   name: "${STARTER_AGENT}",
@@ -285,7 +298,7 @@ export default defineAgent({
   systemPrompt: [
     ${JSON.stringify(`${introduction(channels)} Answer briefly and plainly.`)},${workspace}
   ].join(" "),
-  tools: ${JSON.stringify(tools)},
+  tools: ${JSON.stringify(tools)},${extensions.length > 0 ? `\n  extensions: ${JSON.stringify(extensions)},` : ""}
 });
 `;
 }
