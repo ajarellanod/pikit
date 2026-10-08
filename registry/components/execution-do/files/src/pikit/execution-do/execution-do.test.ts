@@ -12,7 +12,7 @@ import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { withWorkersHost } from "@pikit/contracts/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
-import { createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
+import { createDurableExecutionConformance, createWorkspaceGitConformance } from "@pikit/pi-adapter/execution/testing";
 import { fakeDurableObjectStorage, fakeObjectHost } from "./durable-object.test-support.ts";
 import { createFiles, type DurableObjectFilesStorage } from "./files.ts";
 import { branchAllowed, githubRepository } from "./git.ts";
@@ -76,6 +76,21 @@ for (const c of createDurableExecutionConformance(async () => {
   const { app, env } = await started();
   return { env, dispose: () => app.stop() };
 }, { expect, watch: false })) {
+  test(`execution-do ${c.group}: ${c.name}`, () => c.run());
+}
+
+// The steward's git flow with real git's meaning, against a fake GitHub whose private repository is the
+// connected one; its token, a marker, must appear nowhere the agent can read.
+const MARKER = "ghs_pikit-conformance-marker-7f3a9c";
+for (const c of createWorkspaceGitConformance(
+  async (files) => {
+    const github = await createFakeGitHub(fakeDurableObjectStorage(), { "acme/app": { files, private: true } }, MARKER);
+    globalThis.fetch = github.fetch as typeof fetch;
+    const { app, env } = await started({ github: { repository: async () => "acme/app", token: async () => MARKER } });
+    return { env, remote: "https://github.com/acme/app", head: (branch) => github.branch("acme/app", branch), dispose: () => app.stop() };
+  },
+  { credential: MARKER },
+)) {
   test(`execution-do ${c.group}: ${c.name}`, () => c.run());
 }
 
@@ -236,7 +251,8 @@ test("git as real git: clone, checkout -b, status, diff, add, commit, log, push;
   const clone = await run(env, "git clone https://github.com/acme/app");
   expect(clone.output).toContain("you may push branches pikit/self/");
   // Shallow: only the latest commit came.
-  expect((await run(env, "git log", "app")).output).toBe(`${(await github.head("acme/app")).slice(0, 7)} second commit (fake github)\n`);
+  expect((await run(env, "git log --oneline", "app")).output).toBe(`${(await github.head("acme/app")).slice(0, 7)} second commit\n`);
+  expect((await run(env, "git log -n 1", "app")).output).toBe(`commit ${await github.head("acme/app")}\nAuthor: fake github <fake@github.invalid>\nDate:   Tue Nov 14 22:14:20 2023 +0000\n\n    second commit\n`);
   expect((await run(env, "git checkout -b pikit/self/explain-more", "app")).output).toBe("Switched to a new branch 'pikit/self/explain-more'\n");
   await env.appendFile("app/README.md", "more\n", ctx);
   await env.writeFile("app/src/b.ts", "export const b = 2;\n", ctx);
@@ -255,7 +271,7 @@ test("git as real git: clone, checkout -b, status, diff, add, commit, log, push;
   const push = await run(env, "git push origin pikit/self/explain-more", "app");
   expect(push.exitCode).toBe(0);
   expect(push.output).toContain("The operator sees it as a proposal in the dashboard.");
-  const [committed] = (await run(env, "git log -n 1", "app")).output.split(" ");
+  const [committed] = (await run(env, "git log --oneline -n 1", "app")).output.split(" ");
   expect(github.pushes.map((pushed) => [pushed.repository, pushed.ref, pushed.oid.slice(0, 7)])).toEqual([["acme/app", "refs/heads/pikit/self/explain-more", committed ?? ""]]);
   expect(github.pushes[0]?.packBytes).toBeGreaterThan(100);
   // Back to main, whose files are as they were; HEAD as the branch to push works too.

@@ -23,7 +23,7 @@ gives components Pi's tools, models, MCP client and execution environments by su
 | `./testing` | `testing/index.ts` | `./testing/neutral`, plus `createPiRuntimeFixture` (a SQLite file), `sqliteStorage`, `openSqliteDatabase`, `testComponents` with a `storage.sql` in memory | server |
 | `./testing/neutral` | `testing/neutral.ts` | the scripted model and agent (`scriptedProvider`, `scriptedAgent`, `holdTool`, `recordingBash`), `createRuntimeFixture`, `interruptRun`, `testComponents`, `fakeConversations`, the `workspace` and `model.credentials` conformance suites | every |
 | `./testing/harness` | `testing/harness.ts` | a pi-durable `Harness` smoke over `storage.sql`, in phases, and pi-durable's storage conformance | every |
-| `./execution/testing` | `testing/execution.ts` | `createDurableExecutionConformance` (pi-durable's `createEnvConformance`, then the cases it lacks); `callTool`; `runToolCalls` (a Harness with the faux model) | every |
+| `./execution/testing` | `testing/execution.ts` | `createDurableExecutionConformance` (pi-durable's `createEnvConformance`, then the cases it lacks); `createWorkspaceGitConformance` (the steward's git steps through the shell, real git's meaning; a credential the agent never reads); `callTool`; `runToolCalls` (a Harness with the faux model) | every |
 | `./mcp/testing` | `testing/mcp.ts` | a fake Streamable HTTP MCP server as a `fetch` handler | every |
 | `./wakeups/testing` | `testing/wakeups.ts` | a Harness on an injected clock, and readers of what a run left | every |
 

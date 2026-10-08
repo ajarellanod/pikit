@@ -4,7 +4,8 @@
  * protocol (v1, side-band-64k, shallow) as far as isomorphic-git uses it. Its repositories are real
  * ones, made with isomorphic-git in `storage`'s files under `/srv/github`.
  *
- * It records what reached it, so a test can check where the token went.
+ * It records what reached it, so a test can check where the token went, and keeps what is pushed:
+ * the pushed branch points to the pushed commit.
  */
 
 import git from "isomorphic-git";
@@ -26,6 +27,8 @@ export interface FakeGitHub {
   pushes: { repository: string; ref: string; oid: string; packBytes: number }[];
   /** The latest commit of `owner/name`'s `main`. */
   head(repository: string): Promise<string>;
+  /** The commit `owner/name`'s `branch` points to; `undefined` when it has none. */
+  branch(repository: string, branch: string): Promise<string | undefined>;
 }
 
 const encoder = new TextEncoder();
@@ -84,6 +87,7 @@ export async function createFakeGitHub(storage: DurableObjectFilesStorage, repos
     requests: [],
     pushes: [],
     head: (repository) => git.resolveRef({ fs, dir: dirOf(repository), ref: "refs/heads/main" }),
+    branch: (repository, branch) => git.resolveRef({ fs, dir: dirOf(repository), ref: `refs/heads/${branch}` }).catch(() => undefined),
     async fetch(input, init) {
       const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
       const authorization = request.headers.get("authorization");
@@ -145,7 +149,16 @@ export async function createFakeGitHub(storage: DurableObjectFilesStorage, repos
       // git-receive-pack: the first line is `<old> <new> <ref>\0<caps>`, then a flush, then the packfile.
       const length = Number.parseInt(decoder.decode(sent.subarray(0, 4)), 16);
       const [, oid = "", ref = ""] = decoder.decode(sent.subarray(4, length)).split("\0")[0]?.trim().split(" ") ?? [];
-      fake.pushes.push({ repository, ref, oid, packBytes: sent.length - length - 4 });
+      const pack = sent.subarray(length + 4);
+      fake.pushes.push({ repository, ref, oid, packBytes: pack.length });
+      // Kept as GitHub keeps it: the pack indexed into the repository, the branch moved to the commit.
+      if (pack.length > 0) {
+        const name = `pack-${[...pack.subarray(pack.length - 20)].map((byte) => byte.toString(16).padStart(2, "0")).join("")}.pack`;
+        files.mkdirp(`${dir}/.git/objects/pack`);
+        files.write(`${dir}/.git/objects/pack/${name}`, pack.slice());
+        await git.indexPack({ fs, dir, filepath: `.git/objects/pack/${name}` });
+      }
+      await git.writeRef({ fs, dir, ref, value: oid, force: true });
       const report = concat([pkt("unpack ok\n"), pkt(`ok ${ref}\n`), FLUSH]);
       return new Response(concat([...band(report), FLUSH]), { headers: { "content-type": "application/x-git-receive-pack-result" } });
     },

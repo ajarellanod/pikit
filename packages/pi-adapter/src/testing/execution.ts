@@ -14,6 +14,8 @@
  *   when it returns no content, an error result when it throws).
  * - `runToolCalls`: a real `Harness` (memory storage, pi-ai 1.0's faux model) whose model calls the
  *   tools one per turn, so arguments are validated and each call runs as its own durable task.
+ * - `createWorkspaceGitConformance` (`workspace-git.ts`): the steward's git flow through an
+ *   environment's shell against a remote, with real git's meaning, on every `execution` provider.
  */
 
 import type { Context } from "@earendil-works/chord";
@@ -34,6 +36,13 @@ import type { ConformanceCase } from "@pikit/core/testing";
 import type { ToolCall } from "@earendil-works/pi-ai";
 import { createModels } from "@earendil-works/pi-ai/models";
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai/providers/faux";
+
+export {
+  createWorkspaceGitConformance,
+  WORKSPACE_GIT_FILES,
+  type WorkspaceGitConformanceOptions,
+  type WorkspaceGitFixture,
+} from "./workspace-git.ts";
 
 /** An environment built for one case. */
 export interface DurableExecutionFixture {

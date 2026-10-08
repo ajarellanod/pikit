@@ -76,6 +76,9 @@ What protects you:
 directories. It covers:
 - the `execution` conformance suite from `@pikit/pi-adapter/testing`, with a shell;
 - the lifecycle conformance suite;
+- the workspace git suite (`createWorkspaceGitConformance`, the one execution-do passes): the
+  steward's steps with the machine's `git` against a bare repository, as proposals-local's (skipped,
+  saying so, where `git` is not installed);
 - the allowlist (the server's variables unseen, allowed ones seen);
 - commands killed at stop, and the start failure.
 

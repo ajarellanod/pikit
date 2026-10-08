@@ -39,7 +39,8 @@ context, and refuses to start without it, or on an object without SQLite.
   same on every target: `clone` (GitHub over HTTPS, latest commit only), `checkout -b <branch>` and
   `checkout <branch>`, `status` (short codes: `M `, ` M`, `A `, `D `, `??`), `diff` (unstaged; `--staged`
   for what is added), `add <path>…` / `add -A`, `commit -m` (what was added; `-a` adds the tracked
-  changes first, never an untracked file), `log`, `push origin <branch>` (or `HEAD`). Anything else
+  changes first, never an untracked file), `log` (real git's format; `--oneline`, `-n <count>`),
+  `push origin <branch>` (or `HEAD`). Anything else
   (`pull`, `merge`, `reset`, `switch`, restoring files) says it is not supported here. There is no pull
   request command: a pushed `pikit/self/*` branch is the proposal, which the proposals' provider shows
   the operator.
@@ -128,7 +129,10 @@ deleted: they are your data.
 Copied with the component, they run in your project under `bun test`, over a double of a Durable
 Object's storage (`node:sqlite`) and a fake GitHub reached through `fetch` (no network): Pi's
 `ExecutionEnv` suite with a shell, the lifecycle suite, files in chunks surviving a restart, the
-shell, `node` and its limits, `curl`, the `.git` fence, and `git` from clone to pull request with
-every fence (the connected repository only, its token for it alone, not connected, no provider), and
-what real git does with `add` and `commit`. pikit also runs the component in workerd on a real SQLite-backed Durable Object, with
-Pi's own tools through the `tool-*` components (`tests/workerd`).
+shell, `node` and its limits, `curl`, the `.git` fence, and `git` from clone to push with every fence
+(the connected repository only, its token for it alone, not connected, no provider), and what real
+git does with `add` and `commit`. The workspace git suite (`createWorkspaceGitConformance`, the one
+execution-local passes with the machine's git) runs the steward's steps against the fake GitHub, and
+checks that its token, a marker, appears nowhere the agent can read (variables, outputs, every file
+of the workspace, `.git/config` included). pikit also runs the component in workerd on a real
+SQLite-backed Durable Object, with Pi's own tools through the `tool-*` components (`tests/workerd`).

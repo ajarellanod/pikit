@@ -47,7 +47,7 @@ export interface CommandResult {
 
 const AUTHOR = { name: "pikit agent", email: "agent@pikit.invalid" };
 const USAGE =
-  "usage: git clone <https://github.com/owner/repo> [dir] | checkout -b <branch> | checkout <branch> | status | diff [--staged] [path] | add <path>... | -A | commit [-a] -m <message> | log [-n N] | push origin <branch>\n";
+  "usage: git clone <https://github.com/owner/repo> [dir] | checkout -b <branch> | checkout <branch> | status | diff [--staged] [path] | add <path>... | -A | commit [-a] -m <message> | log [-n N] [--oneline] | push origin <branch>\n";
 const SUPPORTED = ["status", "diff", "add", "commit", "log", "push", "checkout"];
 const NOT_CONNECTED = "GitHub is not connected: an operator connects it in the dashboard's Settings → GitHub";
 const encoder = new TextEncoder();
@@ -110,6 +110,17 @@ export function gitFs(files: Files) {
   };
 }
 
+
+/** A date as git prints it: `Tue Nov 14 22:13:20 2023 +0000`, in the commit's own offset (isomorphic-git's is minutes behind UTC). */
+function gitDate(timestamp: number, timezoneOffset: number): string {
+  const local = new Date((timestamp - timezoneOffset * 60) * 1000);
+  const day = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][local.getUTCDay()];
+  const month = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"][local.getUTCMonth()];
+  const two = (n: number) => String(n).padStart(2, "0");
+  const offset = Math.abs(timezoneOffset);
+  const zone = `${timezoneOffset <= 0 ? "+" : "-"}${two(Math.floor(offset / 60))}${two(offset % 60)}`;
+  return `${day} ${month} ${local.getUTCDate()} ${two(local.getUTCHours())}:${two(local.getUTCMinutes())}:${two(local.getUTCSeconds())} ${local.getUTCFullYear()} ${zone}`;
+}
 
 /** The `git` command: `run(args, cwd)` answers as a process would, with output and an exit code. */
 export function createGit(options: GitOptions) {
@@ -352,16 +363,28 @@ export function createGit(options: GitOptions) {
     return ok(`[${branch} ${oid.slice(0, 7)}] ${messages[0]}\n ${toCommit.length} file(s) changed: ${toCommit.map(([file]) => file).join(", ")}`);
   }
 
+  /** As real git's: `log` in its default format (the whole message), `--oneline` one line per commit. */
   async function log(dir: string, args: string[]): Promise<CommandResult> {
     let count = 10;
+    let oneline = false;
     for (let i = 0; i < args.length; i++) {
       const arg = args[i] ?? "";
       if (arg === "-n") count = Number(args[++i]);
       else if (/^-\d+$/.test(arg)) count = Number(arg.slice(1));
       else if (arg.startsWith("--max-count=")) count = Number(arg.slice("--max-count=".length));
+      else if (arg === "--oneline") oneline = true;
+      else return fail(`error: git log here takes -n <count> and --oneline, not '${arg}'`, 129);
     }
     const entries = await git.log({ fs, dir, depth: Math.min(Math.max(Number.isFinite(count) ? count : 10, 1), 100) });
-    return ok(entries.map((entry) => `${entry.oid.slice(0, 7)} ${entry.commit.message.split("\n")[0]} (${entry.commit.author.name})`).join("\n"));
+    if (oneline) return ok(entries.map((entry) => `${entry.oid.slice(0, 7)} ${entry.commit.message.split("\n")[0]}`).join("\n"));
+    return ok(
+      entries
+        .map(({ oid, commit }) => {
+          const message = commit.message.replace(/\n+$/, "").split("\n").map((line) => (line === "" ? "" : `    ${line}`));
+          return `commit ${oid}\nAuthor: ${commit.author.name} <${commit.author.email}>\nDate:   ${gitDate(commit.author.timestamp, commit.author.timezoneOffset)}\n\n${message.join("\n")}\n`;
+        })
+        .join("\n"),
+    );
   }
 
   async function push(dir: string, args: string[]): Promise<CommandResult> {

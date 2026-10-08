@@ -11,7 +11,7 @@ import type { AgentTool } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { withWorkersHost } from "@pikit/contracts/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
-import { callTool, createDurableExecutionConformance } from "@pikit/pi-adapter/execution/testing";
+import { callTool, createDurableExecutionConformance, createWorkspaceGitConformance } from "@pikit/pi-adapter/execution/testing";
 import { afterEach, expect, it } from "vitest";
 import executionDo from "../../../registry/components/execution-do/files/src/pikit/execution-do/index.ts";
 import { createFiles, type DurableObjectFilesStorage } from "../../../registry/components/execution-do/files/src/pikit/execution-do/files.ts";
@@ -34,6 +34,23 @@ for (const c of createDurableExecutionConformance(async () => {
   const { app, env } = await started(objectHost());
   return { env, dispose: () => app.stop() };
 }, { expect, watch: false })) {
+  it(`execution-do ${c.group}: ${c.name}`, () => inObject(c));
+}
+
+// The steward's git flow with real git's meaning, against a fake GitHub kept in the case's object (under
+// /srv); the connected repository is private, and its token, a marker, appears nowhere the agent can read.
+const MARKER = "ghs_pikit-workerd-marker-51c0de";
+for (const c of createWorkspaceGitConformance(
+  async (files) => {
+    const host = objectHost();
+    const github = await createFakeGitHub(host.object?.storage as DurableObjectFilesStorage, { "acme/app": { files, private: true } }, MARKER);
+    globalThis.fetch = github.fetch as typeof fetch;
+    const connected = defineComponent({ name: "github-test", setup: (pikit) => pikit.provide("github", { repository: async () => "acme/app", token: async () => MARKER }) });
+    const { app, env } = await started(host, { components: [connected] });
+    return { env, remote: "https://github.com/acme/app", head: (branch) => github.branch("acme/app", branch), dispose: () => app.stop() };
+  },
+  { credential: MARKER },
+)) {
   it(`execution-do ${c.group}: ${c.name}`, () => inObject(c));
 }
 
@@ -149,8 +166,8 @@ it("git clones from a fake GitHub, checks out a pikit/self/ branch, commits what
     const { app, env } = await started(host, { components: [connected] });
 
     expect((await run(env, "git clone https://github.com/acme/app")).exitCode).toBe(0);
-    expect((await run(env, "git checkout -b pikit/self/more && echo more >> README.md && git status && git add README.md && git commit -m 'More' && git log", "app")).output).toMatch(
-      /^Switched to a new branch 'pikit\/self\/more'\nOn branch pikit\/self\/more\n M README\.md\n\[pikit\/self\/more [0-9a-f]{7}\] More\n 1 file\(s\) changed: README\.md\n[0-9a-f]{7} More \(pikit agent\)\n[0-9a-f]{7} second commit \(fake github\)\n$/,
+    expect((await run(env, "git checkout -b pikit/self/more && echo more >> README.md && git status && git add README.md && git commit -m 'More' && git log --oneline", "app")).output).toMatch(
+      /^Switched to a new branch 'pikit\/self\/more'\nOn branch pikit\/self\/more\n M README\.md\n\[pikit\/self\/more [0-9a-f]{7}\] More\n 1 file\(s\) changed: README\.md\n[0-9a-f]{7} More\n[0-9a-f]{7} second commit\n$/,
     );
     expect((await run(env, "git push origin main", "app")).exitCode).toBe(1);
     expect((await run(env, "git push origin pikit/self/more", "app")).exitCode).toBe(0);
