@@ -34,12 +34,15 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [channel-email](channel-email.md) | ⭐ | An address for the agent; replies in the thread | No |
 | [channel-slack](channel-slack.md) | ⭐ | A Slack app, by Events API or Socket Mode | No |
 | [channel-whatsapp](channel-whatsapp.md) | ⭐ | WhatsApp, by the Cloud API or a linked device | No |
+| [cli-features](cli-features.md) | ⭐ | `pikit new` with several channels and a step of features (dashboard, multi-agent, subagents, MCP…) | Yes: the launch |
 | [import-from-openclaw-hermes](import-from-openclaw-hermes.md) | ⭐ | `pikit import`: persona, skills, memories, channels from an existing setup | No |
 | [learned-skills](learned-skills.md) | ⭐ | Skills the agent writes from experience, through the self-change gate | No; builds on SPEC §6 |
 | [memory](memory.md) | ⭐ | Memory and user profiles across conversations and channels; written as a build guide | No |
 | [pairing](pairing.md) | ⭐ | Unknown senders approved by the owner from the chat | No |
 | [rich-content](rich-content.md) | ⭐ | Images, files and buttons; the shape is decided, kept in its file | No |
 | [sandboxed-execution](sandboxed-execution.md) | ⭐ | Commands in a container, VM or remote host | Partly: SPEC §6 requires `execution-cloudflare-sandbox`, specified there |
+| [self-improvement](self-improvement.md) | ⭐ | SPEC §6 built: the `pikit-self` skill, proposals as pull requests approved in the dashboard, deploy and rollback, on both targets | Yes: SPEC §6, the launch |
+| [settings](settings.md) | ⭐ | A Settings dialog, a section per installed component, live values: the agent's prompt and model, agents and routing as data | Yes: the launch |
 | [scheduler](scheduler.md) | ⭐ | Scheduled prompts and file-defined routines, answered in the chat | No |
 | [skills-hub](skills-hub.md) | ⭐ | Install shared skills as owned source | No |
 | [streaming-replies](streaming-replies.md) | ⭐ | A preview message edited as the answer is written | No |
