@@ -346,8 +346,10 @@ status, approval cards) may come from [Beautiful UI](https://github.com/slev1239
 
 **What the base ships** (the first version): conversations, the most recently active first; one
 conversation live (its transcript, the tools running); abort and reset; cost per conversation;
-health, once a `health` provider is installed (`features/health.md`). The rest below comes as the
-components it needs are installed.
+health, once a `health` provider is installed (`features/health.md`); a Settings dialog (the
+dashboard's own preferences, kept in the browser, and a section per installed component that brings
+one, its values the `settings` contract's, which `settings-store` keeps and the UI installs:
+`features/settings.md`). The rest below comes as the components it needs are installed.
 
 **The dashboard is a channel of its own.** The operator starts conversations of the dashboard's own
 (key `dashboard:<uuid>`, with one of the App's agents), whose answers appear only there and which no
@@ -441,7 +443,9 @@ which pikit it runs in, and change, test, approve, deploy and roll back that ser
 
 pikit has no code hot reload: a reload is a restart, and since pi-durable checkpoints every step, a
 restart loses nothing (K6). What changes live is data: the conversation state its agent's `prepare`
-reads (a mode, a phase), settings read when used, skills and memory kept as documents or files. Code
+reads (a mode, a phase), settings read when used (`settings`: a component declares them, an operator
+changes them from the dashboard, runtime-pi applies an agent's overrides over its definition at every
+admission; `features/settings.md`), skills and memory kept as documents or files. Code
 changes only through the path below (`features/kit-follow-ups.md`, "No code hot reload").
 
 **The definition owns the agent.** A conversation's `pi.agent` (model, instructions, tools,
