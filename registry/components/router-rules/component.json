@@ -3,7 +3,7 @@
   "name": "router-rules",
   "version": "0.0.0",
   "title": "Routing rules: send each conversation to an agent by channel, chat or sender",
-  "description": "Each conversation goes to the agent of the first rule in config it matches.",
+  "description": "Each conversation goes to the agent of the first rule it matches: rules in config, edited live from the dashboard.",
   "targets": [
     "server",
     "durable"
@@ -15,7 +15,9 @@
   },
   "optional": {
     "capabilities": [
-      "agent.definition"
+      "agent.definition",
+      "settings",
+      "agent.directory"
     ]
   },
   "provides": [],
