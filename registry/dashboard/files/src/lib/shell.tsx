@@ -14,6 +14,8 @@ export interface ShellState {
   app: ApiApp;
   /** The App's agents (`GET /admin/api/agents`), by name; undefined until read. */
   agents?: ApiAgent[];
+  /** Reads the agents again: after an operator made, changed or removed a live one. */
+  reloadAgents(): void;
   /** The App's slash commands (`GET /admin/api/commands`), by name; undefined until read. */
   commands?: ApiCommand[];
   /** Opens a new chat (the home, its draft empty), with `agent` chosen when given. */

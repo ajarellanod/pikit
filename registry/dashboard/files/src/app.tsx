@@ -227,7 +227,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
 
   return (
     <ShellContext.Provider
-      value={{ app, ...(agents.data !== undefined && { agents: agents.data.items }), ...(commands.data !== undefined && { commands: commands.data.items }), newChat, views, operator, slots: { actions, side } }}
+      value={{ app, ...(agents.data !== undefined && { agents: agents.data.items }), reloadAgents: agents.reload, ...(commands.data !== undefined && { commands: commands.data.items }), newChat, views, operator, slots: { actions, side } }}
     >
       <main className="flex h-[100dvh] gap-0 bg-canvas p-2.5 pl-0 text-ink">
         <SidebarNav

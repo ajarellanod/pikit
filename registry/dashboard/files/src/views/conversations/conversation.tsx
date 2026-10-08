@@ -154,7 +154,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const id = params.id ?? "";
   const chats = useChats();
   const { app, agents: described, commands, newChat } = useShell();
-  const agents = agentsOf(app);
+  const agents = agentsOf(app, described);
   const live = useLive(id);
   const summary = useApi<ApiConversation>(`/conversations/${encodeURIComponent(id)}`);
   const transcript = useTranscript(id, live.changes);

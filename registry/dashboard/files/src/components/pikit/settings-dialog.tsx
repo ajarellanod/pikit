@@ -4,6 +4,7 @@
  * dashboard's own, General (its theme, its sounds: this browser's, `localStorage`, nothing of the
  * service's); then one per installed component that brings one (`src/settings/<component>/`,
  * `lib/settings.ts`), shown when the App provides what it requires. A change applies to the next run.
+ * A section may open another (`useOpenSettingsSection`).
  */
 
 import { Computer, HalfMoon, Search, Settings, SunLight, Xmark } from "iconoir-react";
@@ -12,7 +13,7 @@ import { useMemo, useState } from "react";
 import { Switch } from "@/components/bui/Switch";
 import { Segmented, SettingsHeading, SettingsRow } from "@/components/pikit/settings";
 import type { ApiApp } from "@/lib/api";
-import { groupOf, type SettingsSectionDefinition, visibleSettings } from "@/lib/settings";
+import { groupOf, type SettingsSectionDefinition, SettingsNavigation, visibleSettings } from "@/lib/settings";
 import { setSounds, useSounds } from "@/lib/sounds";
 import { setTheme, type Theme, useTheme } from "@/lib/theme";
 
@@ -58,6 +59,11 @@ export function SettingsDialog({ app, open, onOpenChange }: { app: ApiApp; open:
   const current = shown.find((section) => section.id === chosen) ?? shown[0];
   const groups = [...new Set(shown.map(groupOf))];
   const Section = current?.component;
+  /** A section's link to another: shown whatever the search. */
+  const openSection = (id: string) => {
+    setQuery("");
+    setChosen(id);
+  };
 
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
@@ -116,7 +122,9 @@ export function SettingsDialog({ app, open, onOpenChange }: { app: ApiApp; open:
               {current !== undefined && Section !== undefined && (
                 <>
                   <h2 className="mb-6 text-[19px] font-semibold text-ink">{current.title}</h2>
-                  <Section key={current.id} />
+                  <SettingsNavigation.Provider value={openSection}>
+                    <Section key={current.id} />
+                  </SettingsNavigation.Provider>
                 </>
               )}
             </div>

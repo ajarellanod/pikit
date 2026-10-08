@@ -82,6 +82,12 @@
       "description": "admin-proposals's view: The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow. Dormant until connected, after deploying: the repository from the dashboard's Settings, the two tokens as secrets. Its admin API routes come with the component (pikit add admin-proposals)."
     },
     {
+      "name": "agents-live-settings",
+      "type": "registry:file",
+      "title": "agents-live-settings",
+      "description": "agents-live's section of the Settings dialog: Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live. Its settings come with the component (pikit add agents-live), stored by settings-store."
+    },
+    {
       "name": "health-registry",
       "type": "registry:file",
       "title": "health-registry",
@@ -92,6 +98,12 @@
       "type": "registry:file",
       "title": "router-basic-settings",
       "description": "router-basic's section of the Settings dialog: Every message goes to one agent: `defaultAgent`. Its settings come with the component (pikit add router-basic), stored by settings-store."
+    },
+    {
+      "name": "router-rules-settings",
+      "type": "registry:file",
+      "title": "router-rules-settings",
+      "description": "router-rules's section of the Settings dialog: Each conversation goes to the agent of the first rule it matches: rules in config, edited live from the dashboard. Its settings come with the component (pikit add router-rules), stored by settings-store."
     }
   ]
 }

@@ -35,7 +35,7 @@ function homeRevealStyle(visible: boolean): CSSProperties {
 export function HomePage() {
   const { app, agents: described, commands, operator } = useShell();
   const chats = useChats();
-  const agents = agentsOf(app);
+  const agents = agentsOf(app, described);
   const [agent, setAgent] = useState<string | undefined>(() => new URLSearchParams(window.location.search).get("agent") ?? undefined);
   const [error, setError] = useState<Error>();
   const [stage, setStage] = useState(0);

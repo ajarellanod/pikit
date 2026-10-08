@@ -21,7 +21,7 @@
 import { createContext, type ReactNode, useCallback, useContext, useEffect, useMemo, useState } from "react";
 import { every, usePolling } from "./activity.ts";
 import { cleanTitle, isDashboardKey } from "./admin-api.ts";
-import { api, type ApiApp, type ApiConversation, type ApiPage, post } from "./api.ts";
+import { type ApiAgent, api, type ApiApp, type ApiConversation, type ApiPage, post } from "./api.ts";
 
 const PAGE = 50;
 const TABS = "pikit-tabs";
@@ -79,8 +79,12 @@ function save(key: string, value: unknown): void {
   }
 }
 
-/** The App's agents: the keys of `agent.definition`. */
-export const agentsOf = (app: ApiApp | undefined): string[] => Object.keys(app?.capabilities["agent.definition"]?.keys ?? {}).sort();
+/**
+ * The App's agents: those `GET /admin/api/agents` listed (`described`: the code's, then the live ones),
+ * else, until it answered, the keys of `agent.definition`.
+ */
+export const agentsOf = (app: ApiApp | undefined, described?: readonly ApiAgent[]): string[] =>
+  described !== undefined ? described.map((agent) => agent.name) : Object.keys(app?.capabilities["agent.definition"]?.keys ?? {}).sort();
 
 /** The agent the App answers with when none is named (router-basic's `defaultAgent`), if it is one of `agents`. */
 export function defaultAgentOf(app: ApiApp | undefined): string | undefined {

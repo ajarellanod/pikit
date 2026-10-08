@@ -20,7 +20,7 @@
  * alone (`SchemaSettings`, `components/pikit/settings.tsx`); a custom one places its own controls.
  */
 
-import { type ComponentType, useCallback, useEffect, useState } from "react";
+import { type ComponentType, createContext, useCallback, useContext, useEffect, useState } from "react";
 import { type ApiApp, api } from "./api.ts";
 
 export interface SettingsSectionDefinition {
@@ -41,6 +41,14 @@ export interface SettingsSectionDefinition {
 
 export function defineSettings(section: SettingsSectionDefinition): SettingsSectionDefinition {
   return section;
+}
+
+/** Opens a section of the dialog by its id: a section linking to another's (the dialog provides it). */
+export const SettingsNavigation = createContext<(id: string) => void>(() => {});
+
+/** The dialog's way to open another section, by its id (`"router-basic"`). */
+export function useOpenSettingsSection(): (id: string) => void {
+  return useContext(SettingsNavigation);
 }
 
 /** The groups listed first, in this order; any other after them, by name. */
