@@ -246,6 +246,13 @@ export const ManifestSchema = Type.Object(
           "A folder of the component holding its dashboard view (SPEC §5): its index.tsx default-exports defineView({ id: <component name>, … }). `pikit add` copies it to src/dashboard/src/views/<name>/ when the project has a UI (`pikit ui on`), recorded as the component's files.",
       }),
     ),
+    settings: Type.Optional(
+      Type.String({
+        pattern: "^[a-z0-9][a-z0-9-]*$",
+        description:
+          "A folder of the component holding its section of the dashboard's Settings dialog (features/settings.md): its index.tsx default-exports defineSettings({ id: <component name>, … }). `pikit add` copies it to src/dashboard/src/settings/<name>/ when the project has a UI (`pikit ui on`), recorded as the component's files.",
+      }),
+    ),
     replay: Type.Optional(
       Type.Object(
         {

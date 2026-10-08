@@ -24,7 +24,7 @@
 
 import { copyFileSync, existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { basePath, unreferencedBases } from "../project/bases.ts";
-import { DASHBOARD_DIR, DASHBOARD_GENERATED, dashboardFiles, dashboardRecord, recordDashboard, unrecordedDashboardFiles, viewFiles } from "../project/dashboard.ts";
+import { DASHBOARD_DIR, DASHBOARD_GENERATED, componentUiFiles, dashboardFiles, dashboardRecord, recordDashboard, unrecordedDashboardFiles } from "../project/dashboard.ts";
 import { assertNoIncompleteOperation, beginOperation, finishOperation } from "../project/operation.ts";
 import { confinedPath } from "../project/paths.ts";
 import { hashFile, type InstalledDashboard, modifiedFiles, PIKIT_JSON, type ProjectManifest, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
@@ -37,8 +37,12 @@ import { bunInstall } from "./install.ts";
 import { remove } from "./remove.ts";
 import { type FileChanges, mergeShipped, type UpgradeOptions } from "./upgrade.ts";
 
-/** What the dashboard needs, providers first: the order `on` installs them in. */
-export const UI_COMPONENTS = ["admin-auth-token", "admin-api"] as const;
+/**
+ * What the dashboard needs, providers first: the order `on` installs them in. settings-store comes
+ * with it: the Settings dialog is the dashboard's, and the sections the installed components bring
+ * (router-basic's Agent) read and write through it; it needs nothing admin-api does not.
+ */
+export const UI_COMPONENTS = ["admin-auth-token", "admin-api", "settings-store"] as const;
 
 export interface UiOptions {
   /** Skip the confirmation. */
@@ -82,7 +86,8 @@ export function writeDashboard(projectDir: string, project: ProjectManifest, reg
     copyFileSync(source, undo.mkdirFor(base));
   }
   project.dashboard = recordDashboard(registry, registryName, files, components);
-  // The views of the components already installed (their manifest's `view`), recorded as theirs.
+  // The views and Settings sections of the components already installed (their manifest's `view`,
+  // `settings`), recorded as theirs.
   const registries = new Map<string, Registry>();
   for (const [name, component] of Object.entries(project.components)) {
     const location = project.registries[component.registry];
@@ -90,7 +95,7 @@ export function writeDashboard(projectDir: string, project: ProjectManifest, reg
     const from = registries.get(component.registry) ?? (component.registry === registryName ? registry : openRegistry(registryPath(projectDir, location)));
     registries.set(component.registry, from);
     if (!from.names().includes(name)) continue;
-    for (const [target, source] of viewFiles(from, name)) {
+    for (const [target, source] of componentUiFiles(from, name)) {
       undo.keep(target);
       copyFileSync(source, undo.mkdirFor(target));
       const hash = hashFile(source);
@@ -137,7 +142,7 @@ export async function uiOn(projectDir: string, options: UiOptions = {}): Promise
   if (files !== undefined) checkDashboardFree(projectDir, project, options.force === true);
   const missing = UI_COMPONENTS.filter((component) => !(component in project.components));
   if (files === undefined && missing.length === 0) {
-    log.ok(`the project has a UI: ${DASHBOARD_DIR}/, with ${UI_COMPONENTS.join(" and ")}`);
+    log.ok(`the project has a UI: ${DASHBOARD_DIR}/, with ${UI_COMPONENTS.join(", ")}`);
     return;
   }
 
@@ -190,7 +195,7 @@ export async function uiOff(projectDir: string, options: UiOptions = {}): Promis
     return;
   }
   const force = options.force === true;
-  // The components' views go with it: they are in src/dashboard/.
+  // The components' views and Settings sections go with it: they are in src/dashboard/.
   const views = (files: Record<string, { hash: string }>) => Object.fromEntries(Object.entries(files).filter(([file]) => file.startsWith(`${DASHBOARD_DIR}/`)));
   const modified = [
     ...modifiedFiles(projectDir, dashboardRecord(dashboard)),

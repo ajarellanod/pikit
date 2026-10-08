@@ -42,7 +42,7 @@ import { adapterVersion, contractsVersion, coreVersion } from "../registry/comma
 import { BOTH_APPS, HOOKS, type Manifest } from "../registry/manifest.ts";
 import { APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { BASES_DIR, basePath, unreferencedBases } from "../project/bases.ts";
-import { viewDir, viewFiles } from "../project/dashboard.ts";
+import { componentUiFiles, settingsDir, viewDir } from "../project/dashboard.ts";
 import { addComponent, CONFIG_FILE, type ComponentEntry, identifierFor } from "../project/config-file.ts";
 import { ENV_EXAMPLE, exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
 import {
@@ -550,11 +550,12 @@ async function confirmPlans(plans: readonly Plan[], options: AddOptions): Promis
 
 /**
  * Every file the component installs in this project: its files, and its view when the project has a
- * UI (`viewFiles`, `src/dashboard/src/views/<name>/`).
+ * UI (`componentUiFiles`: its view in `src/dashboard/src/views/<name>/`, its section of the Settings
+ * dialog in `src/dashboard/src/settings/<name>/`).
  */
 export function componentFiles(registry: Registry, name: string, project: ProjectManifest): Map<string, string> {
   const files = registry.files(name);
-  if (project.dashboard !== undefined) for (const [target, source] of viewFiles(registry, name)) files.set(target, source);
+  if (project.dashboard !== undefined) for (const [target, source] of componentUiFiles(registry, name)) files.set(target, source);
   return files;
 }
 
@@ -570,7 +571,7 @@ export function ownDir(name: string): string {
 
 /** The targets outside the component's own directory, sorted (so grouped by directory). */
 function outside(name: string, files: Map<string, unknown>): string[] {
-  return [...files.keys()].filter((target) => !target.startsWith(ownDir(name)) && !target.startsWith(viewDir(name))).sort();
+  return [...files.keys()].filter((target) => !target.startsWith(ownDir(name)) && !target.startsWith(viewDir(name)) && !target.startsWith(settingsDir(name))).sort();
 }
 
 /** What a confirmation adds when the component writes outside its directory: the files, by name. */

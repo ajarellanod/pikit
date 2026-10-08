@@ -167,6 +167,20 @@ export function checkView(componentDir: string, name: string, manifest: Manifest
   return [];
 }
 
+/**
+ * A component's section of the Settings dialog (its manifest's `settings`, features/settings.md): a
+ * folder whose `index.tsx` default-exports `defineSettings({ id: "<name>", … })`, as a view does.
+ */
+export function checkSettingsSection(componentDir: string, name: string, manifest: Manifest): string[] {
+  if (manifest.settings === undefined) return [];
+  const dir = join(componentDir, manifest.settings);
+  if (!isDirectory(dir)) return [`its settings folder "${manifest.settings}/" is missing`];
+  const index = join(dir, "index.tsx");
+  if (!existsSync(index)) return [`${manifest.settings}/index.tsx is missing: a section default-exports defineSettings({ id: "${name}", … })`];
+  if (!readFileSync(index, "utf8").includes(`id: "${name}"`)) return [`${manifest.settings}/index.tsx must define its section under the component's name: defineSettings({ id: "${name}", … })`];
+  return [];
+}
+
 export interface ImportScan {
   problems: string[];
   /** npm packages the shipped files import (tests aside), excluding the kit itself: its `dependencies`. */

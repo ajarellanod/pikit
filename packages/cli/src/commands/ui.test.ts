@@ -26,32 +26,38 @@ const lines = (edits: Record<number, string> = {}) => `${LINES.map((line, i) => 
 
 /** The view `log-viewer` ships (its manifest's `view`). */
 const VIEW = 'export default { id: "log-viewer", title: "Logs", pages: [] };\n';
+/** The section of the Settings dialog `log-viewer` ships (its manifest's `settings`). */
+const SECTION = 'export default { id: "log-viewer", title: "Logs", component: () => null };\n';
 
-/** admin-api's stand-in has a Worker half, as the real one: on Cloudflare `add` puts it in `export const worker`. */
-const WORKER_HALF = 'export const worker = defineComponent({\n  name: "admin-api-worker",\n  setup() {},\n});\n';
+/** admin-api's and settings-store's stand-ins have a Worker half, as the real ones: on Cloudflare `add` puts it in `export const worker`. */
+const WORKER_HALF = (name: string) => `export const worker = defineComponent({\n  name: "${name}-worker",\n  setup() {},\n});\n`;
 const NOTHING = { provides: [], requires: [], optional: [] };
 /** How each stand-in goes in a Cloudflare project's Apps, as the real ones' manifests say. */
 const APPS: Record<string, Record<string, unknown>> = {
   "admin-auth-token": { apps: { worker: "default" } },
   "admin-api": { apps: { worker: "worker" }, halves: { default: NOTHING, worker: NOTHING } },
+  "settings-store": { apps: { worker: "worker" }, halves: { default: NOTHING, worker: NOTHING } },
 };
 
 /**
- * A registry with stand-ins for admin-auth-token and admin-api (on both targets, each in its Apps on
- * Cloudflare), `log-viewer` (a component with a view), and a dashboard of `files`.
+ * A registry with stand-ins for admin-auth-token, admin-api and settings-store (on both targets, each
+ * in its Apps on Cloudflare), `log-viewer` (a component with a view and a Settings section), and a
+ * dashboard of `files`.
  */
 function registry(files: Record<string, string>): string {
   const root = temp();
   const index: { version: 1; components: Record<string, unknown> } = { version: 1, components: {} };
   const targets = ["server", "durable"];
-  for (const name of ["admin-auth-token", "admin-api", "log-viewer"]) {
+  for (const name of ["admin-auth-token", "admin-api", "settings-store", "log-viewer"]) {
     const dir = join(root, "components", name);
     mkdirSync(join(dir, "files", "src", "pikit", name), { recursive: true });
-    writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), `${INDEX(name)}${name === "admin-api" ? `\n${WORKER_HALF}` : ""}`);
-    const view = name === "log-viewer" ? { view: "view" } : {};
+    writeFileSync(join(dir, "files", "src", "pikit", name, "index.ts"), `${INDEX(name)}${APPS[name]?.halves !== undefined ? `\n${WORKER_HALF(name)}` : ""}`);
+    const view = name === "log-viewer" ? { view: "view", settings: "settings" } : {};
     if (name === "log-viewer") {
       mkdirSync(join(dir, "view"));
       writeFileSync(join(dir, "view", "index.tsx"), VIEW);
+      mkdirSync(join(dir, "settings"));
+      writeFileSync(join(dir, "settings", "index.tsx"), SECTION);
     }
     writeFileSync(
       join(dir, "component.json"),
@@ -124,8 +130,8 @@ test("ui on: the components it needs, then src/dashboard/ with its bases and its
 
   for (const [file, text] of Object.entries(DASHBOARD)) expect(read(dir, `src/dashboard/${file}`)).toBe(text);
   const project = manifest(dir);
-  expect(Object.keys(project.components).sort()).toEqual(["admin-api", "admin-auth-token"]);
-  expect(project.dashboard.components).toEqual(["admin-auth-token", "admin-api"]);
+  expect(Object.keys(project.components).sort()).toEqual(["admin-api", "admin-auth-token", "settings-store"]);
+  expect(project.dashboard.components).toEqual(["admin-auth-token", "admin-api", "settings-store"]);
   expect(project.dashboard.files).toEqual(Object.fromEntries(Object.entries(DASHBOARD).map(([file, text]) => [`src/dashboard/${file}`, { hash: hashOf(text) }])));
   for (const text of Object.values(DASHBOARD)) expect(bases(dir)).toContain(baseOf(text));
   expect(read(dir, "pikit.config.ts")).toContain('"./src/pikit/admin-api/index.ts"');
@@ -184,17 +190,18 @@ test("ui on refuses a src/dashboard/ that is not pikit's (unless --force)", asyn
   expect(manifest(dir).components).toEqual({});
 });
 
-test("ui on, on Cloudflare: admin-auth-token in both Apps, admin-api's object half in the default App and its Worker half in the Worker's", async () => {
+test("ui on, on Cloudflare: admin-auth-token in both Apps, admin-api's and settings-store's object halves in the default App and their Worker halves in the Worker's", async () => {
   const dir = project(registry(DASHBOARD), ["durable"]);
 
   const on = await runCli(["ui", "on", "--yes"], dir);
 
   expect(on.code).toBe(0);
-  expect(manifest(dir).dashboard.components).toEqual(["admin-auth-token", "admin-api"]);
+  expect(manifest(dir).dashboard.components).toEqual(["admin-auth-token", "admin-api", "settings-store"]);
   const config = read(dir, "pikit.config.ts");
   expect(config).toContain('import adminApi, { worker as adminApiWorker } from "./src/pikit/admin-api/index.ts";');
-  expect(config).toContain("export default defineApp({\n  components: [\n    adminAuthToken,\n    adminApi,\n  ],");
-  expect(config).toContain("export const worker = defineApp({\n  components: [\n    adminAuthToken,\n    adminApiWorker,\n  ],");
+  expect(config).toContain('import settingsStore, { worker as settingsStoreWorker } from "./src/pikit/settings-store/index.ts";');
+  expect(config).toContain("export default defineApp({\n  components: [\n    adminAuthToken,\n    adminApi,\n    settingsStore,\n  ],");
+  expect(config).toContain("export const worker = defineApp({\n  components: [\n    adminAuthToken,\n    adminApiWorker,\n    settingsStoreWorker,\n  ],");
 });
 
 test("pikit upgrade merges the dashboard's new version with your edits, adds new files, deletes those no longer shipped", async () => {
@@ -253,35 +260,61 @@ test("pikit doctor names the dashboard's edited and deleted files; a lockfile it
   expect(off.err).not.toContain("bun.lock");
 });
 
-test("a component's view goes to src/dashboard/src/views/<name>/ when the project has a UI, recorded as its own, and leaves with it", async () => {
+test("a component's view goes to src/dashboard/src/views/<name>/ and its Settings section to src/dashboard/src/settings/<name>/ when the project has a UI, recorded as its own, and leave with it", async () => {
   const { dir } = await withUi();
   const view = "src/dashboard/src/views/log-viewer/index.tsx";
+  const section = "src/dashboard/src/settings/log-viewer/index.tsx";
 
   const add = await runCli(["add", "log-viewer", "--yes"], dir);
   expect(add.code).toBe(0);
   expect(add.out).not.toContain("It also writes");
   expect(read(dir, view)).toBe(VIEW);
+  expect(read(dir, section)).toBe(SECTION);
   expect(manifest(dir).components["log-viewer"].files[view]).toEqual({ hash: hashOf(VIEW) });
+  expect(manifest(dir).components["log-viewer"].files[section]).toEqual({ hash: hashOf(SECTION) });
 
   const remove = await runCli(["remove", "log-viewer"], dir);
   expect(remove.code).toBe(0);
   expect(existsSync(join(dir, view))).toBe(false);
+  expect(existsSync(join(dir, "src/dashboard/src/settings/log-viewer"))).toBe(false);
+});
+
+test("pikit upgrade merges a component's new Settings section with your edits", async () => {
+  const { dir, root } = await withUi();
+  const section = "src/dashboard/src/settings/log-viewer/index.tsx";
+  expect((await runCli(["add", "log-viewer", "--yes"], dir)).code).toBe(0);
+  writeFileSync(join(dir, section), `// mine\n${SECTION}`);
+  writeFileSync(join(root, "components/log-viewer/settings/index.tsx"), `${SECTION}// theirs\n`);
+  const shipped = JSON.parse(read(root, "components/log-viewer/component.json"));
+  writeFileSync(join(root, "components/log-viewer/component.json"), JSON.stringify({ ...shipped, version: "0.2.0" }));
+  const index = JSON.parse(read(root, "registry.json"));
+  index.components["log-viewer"].version = "0.2.0";
+  writeFileSync(join(root, "registry.json"), JSON.stringify(index));
+
+  const run = await runCli(["upgrade", "log-viewer", "--yes"], dir);
+
+  expect(run.code).toBe(0);
+  expect(read(dir, section)).toBe(`// mine\n${SECTION}// theirs\n`);
 });
 
 test("without a UI a component's view is not installed; ui on adds it, ui off takes it back out", async () => {
   const root = registry(DASHBOARD);
   const dir = project(root);
   const view = "src/dashboard/src/views/log-viewer/index.tsx";
+  const section = "src/dashboard/src/settings/log-viewer/index.tsx";
   expect((await runCli(["add", "log-viewer", "--yes"], dir)).code).toBe(0);
   expect(existsSync(join(dir, "src/dashboard"))).toBe(false);
   const before = snapshot(dir);
 
   expect((await runCli(["ui", "on", "--yes"], dir)).code).toBe(0);
   expect(read(dir, view)).toBe(VIEW);
+  expect(read(dir, section)).toBe(SECTION);
   expect(manifest(dir).components["log-viewer"].files[view]).toEqual({ hash: hashOf(VIEW) });
+  expect(manifest(dir).components["log-viewer"].files[section]).toEqual({ hash: hashOf(SECTION) });
   // Its view is the component's, not yours: `ui off` is not held up by it.
   const off = await runCli(["ui", "off", "--yes"], dir);
   expect(off.code).toBe(0);
   expect(manifest(dir).components["log-viewer"].files[view]).toBeUndefined();
+  expect(manifest(dir).components["log-viewer"].files[section]).toBeUndefined();
   expect(snapshot(dir)).toEqual(before);
 });

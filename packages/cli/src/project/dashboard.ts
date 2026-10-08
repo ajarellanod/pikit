@@ -28,16 +28,29 @@ export function viewDir(component: string): string {
   return `${DASHBOARD_DIR}/src/views/${component}/`;
 }
 
+/** Where a component's section of the Settings dialog goes: `src/dashboard/src/settings/<component>/`. */
+export function settingsDir(component: string): string {
+  return `${DASHBOARD_DIR}/src/settings/${component}/`;
+}
+
 /**
- * The view a component ships (its manifest's `view`, a folder of the component), project-relative
- * target → absolute source; empty when it has none.
+ * What a component ships into the dashboard: its view (its manifest's `view`, to `viewDir`) and its
+ * section of the Settings dialog (`settings`, to `settingsDir`), each a folder of the component;
+ * project-relative target → absolute source, empty when it has neither.
  */
-export function viewFiles(registry: Registry, component: string): Map<string, string> {
-  const folder = registry.manifest(component).view;
-  if (folder === undefined) return new Map();
-  const root = confinedPath(registry.dir(component), folder);
-  if (!existsSync(root)) throw new Error(`${component}: its view folder "${folder}" is missing`);
-  return new Map(listSource(root).map((file) => [`${viewDir(component)}${file}`, confinedPath(root, file)]));
+export function componentUiFiles(registry: Registry, component: string): Map<string, string> {
+  const manifest = registry.manifest(component);
+  const files = new Map<string, string>();
+  for (const [folder, dir] of [
+    [manifest.view, viewDir(component)],
+    [manifest.settings, settingsDir(component)],
+  ] as const) {
+    if (folder === undefined) continue;
+    const root = confinedPath(registry.dir(component), folder);
+    if (!existsSync(root)) throw new Error(`${component}: its ${dir === viewDir(component) ? "view" : "settings"} folder "${folder}" is missing`);
+    for (const file of listSource(root)) files.set(`${dir}${file}`, confinedPath(root, file));
+  }
+  return files;
 }
 
 /** What the registry ships: project-relative target → absolute source; `undefined` when it has no dashboard. */

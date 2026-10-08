@@ -25,6 +25,7 @@ import {
   checkLayout,
   checkManifest,
   checkNaming,
+  checkSettingsSection,
   checkView,
 } from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
@@ -290,6 +291,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     checkDependencies(manifest, scan).forEach(report);
     checkDevDependencies(manifest).forEach(report);
     checkView(dir, name, manifest).forEach(report);
+    checkSettingsSection(dir, name, manifest).forEach(report);
 
     checkDescriptionReaders(dir, name).forEach(report);
 
