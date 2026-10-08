@@ -1,9 +1,8 @@
 /**
  * For the tests only: a fake GitHub, reached through a `fetch` the test puts in place of the global
- * one, so `git clone`, `git push` and `git pr` run end to end with no network. It speaks git's smart
- * HTTP protocol (v1, side-band-64k, shallow) as far as isomorphic-git uses it, and the two API calls of
- * `git pr`. Its repositories are real ones, made with isomorphic-git in `storage`'s files under
- * `/srv/github`.
+ * one, so `git clone` and `git push` run end to end with no network. It speaks git's smart HTTP
+ * protocol (v1, side-band-64k, shallow) as far as isomorphic-git uses it. Its repositories are real
+ * ones, made with isomorphic-git in `storage`'s files under `/srv/github`.
  *
  * It records what reached it, so a test can check where the token went.
  */
@@ -25,7 +24,6 @@ export interface FakeGitHub {
   /** Every request, and the `Authorization` it carried. */
   requests: { method: string; url: string; authorization: string | null }[];
   pushes: { repository: string; ref: string; oid: string; packBytes: number }[];
-  pulls: { repository: string; head: string; base: string; title: string; body: string }[];
   /** The latest commit of `owner/name`'s `main`. */
   head(repository: string): Promise<string>;
 }
@@ -85,24 +83,13 @@ export async function createFakeGitHub(storage: DurableObjectFilesStorage, repos
   const fake: FakeGitHub = {
     requests: [],
     pushes: [],
-    pulls: [],
     head: (repository) => git.resolveRef({ fs, dir: dirOf(repository), ref: "refs/heads/main" }),
     async fetch(input, init) {
       const request = input instanceof Request ? new Request(input, init) : new Request(String(input), init);
       const authorization = request.headers.get("authorization");
       fake.requests.push({ method: request.method, url: request.url, authorization });
       const url = new URL(request.url);
-      const authorized = expected !== undefined && (authorization === expected || authorization === `Bearer ${token}`);
-
-      if (url.host === "api.github.com") {
-        const [, , owner, name, pulls] = url.pathname.split("/");
-        const repository = `${owner}/${name}`;
-        if (!authorized) return Response.json({ message: "Bad credentials" }, { status: 401 });
-        if (pulls === undefined) return Response.json({ default_branch: "main" });
-        const pull = (await request.json()) as { head: string; base: string; title: string; body: string };
-        fake.pulls.push({ repository, ...pull });
-        return Response.json({ html_url: `https://github.com/${repository}/pull/${fake.pulls.length}` }, { status: 201 });
-      }
+      const authorized = expected !== undefined && authorization === expected;
 
       const match = /^\/([^/]+)\/([^/]+?)(?:\.git)?\/(info\/refs|git-upload-pack|git-receive-pack)$/.exec(url.pathname);
       const repository = match === null ? undefined : `${match[1]}/${match[2]}`;

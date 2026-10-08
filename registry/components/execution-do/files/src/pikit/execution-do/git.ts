@@ -1,15 +1,19 @@
 /**
- * `git` for the agent's shell: isomorphic-git over the workspace, as a trusted host command. It covers
- * what an agent needs to change a repository and propose the change: `clone`, `status`, `diff`, `add`,
- * `commit`, `log`, `push`, and `pr` (a pull request, through GitHub's API).
+ * `git` for the agent's shell: isomorphic-git over the workspace, as a trusted host command. It behaves
+ * as real git for the subset an agent needs to change a repository and propose the change, so the
+ * steward's steps are the same wherever it runs: `clone`, `checkout -b <branch>` and
+ * `checkout <branch>`, `status`, `diff` (`--staged`), `add`, `commit -m` (what was added; `-a` adds the
+ * tracked changes first), `log`, `push origin <branch>`. Anything else says it is not supported here.
+ * There is no pull request command: a pushed `pikit/self/*` branch is the proposal, which the
+ * proposals' provider shows the operator.
  *
  * The fences are code, not a prompt:
- * - **Push only to allowed repositories, only to branches under the prefix** (`pikit/self/` by
- *   default), never to `main`. A pull request is opened from such a branch, for a person to review.
- * - **The token never reaches the shell.** It is asked for when a command needs it (`token`: the
- *   `github` capability's for its repository, or a secret), and sent only to github.com: in the headers of git's requests (GitHub rate-limits anonymous git
- *   traffic per IP, and Cloudflare's are shared), in `onAuth`, and to GitHub's API for `pr`. No token
- *   means public clones only.
+ * - **Push only to the connected repository, only branches under the prefix** (`pikit/self/` by
+ *   default), never `main`. The connected repository is the `github` capability's (`repository`):
+ *   none connected, nothing is pushed.
+ * - **The token never reaches the shell.** It is asked for (`token`: `github`'s, for the connected
+ *   repository) when a command needs it, and sent only to github.com for that repository: in the
+ *   headers of git's requests and in `onAuth`. Other repositories are cloned without one (public only).
  * - **Only `git` writes inside `.git`**: this is the one caller of the filesystem that is not fenced
  *   (`files.refuseGit`).
  * - **A failed clone leaves nothing** behind, and a 429 or 5xx from GitHub is retried twice.
@@ -25,10 +29,10 @@ import { type Files, fsError, type Node, normalize, resolvePath } from "./files.
 
 export interface GitOptions {
   files: Files;
-  /** The GitHub token for `repository`, read at each command that needs it; `undefined` without one. */
-  token(repository: { owner: string; name: string }): Promise<string | undefined>;
-  /** `owner/name`: the only repositories a push or a pull request may go to, read at each command that needs them. */
-  pushRepositories(): Promise<readonly string[]>;
+  /** The connected repository, `owner/name`, read at each command that needs it; `undefined` while none is. */
+  repository(): Promise<string | undefined>;
+  /** A token for the connected repository; rejects (saying how to connect) while none is. */
+  token(): Promise<string>;
   /** What every pushed branch starts with. */
   branchPrefix: string;
   /** Who commits. */
@@ -42,7 +46,10 @@ export interface CommandResult {
 }
 
 const AUTHOR = { name: "pikit agent", email: "agent@pikit.invalid" };
-const USAGE = "usage: git clone <https://github.com/owner/repo> [dir] | status | diff [path] | add | commit -m <message> | log [-n N] | push origin <branch> | pr <branch> <title> [-b <body>]\n";
+const USAGE =
+  "usage: git clone <https://github.com/owner/repo> [dir] | checkout -b <branch> | checkout <branch> | status | diff [--staged] [path] | add <path>... | -A | commit [-a] -m <message> | log [-n N] | push origin <branch>\n";
+const SUPPORTED = ["status", "diff", "add", "commit", "log", "push", "checkout"];
+const NOT_CONNECTED = "GitHub is not connected: an operator connects it in the dashboard's Settings → GitHub";
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
@@ -103,13 +110,18 @@ export function gitFs(files: Files) {
   };
 }
 
+
 /** The `git` command: `run(args, cwd)` answers as a process would, with output and an exit code. */
 export function createGit(options: GitOptions) {
   const { files } = options;
   const fs = gitFs(files);
   const author = options.author ?? AUTHOR;
-  const allowed = async (repository: { owner: string; name: string }) =>
-    (await options.pushRepositories()).some((entry) => entry.toLowerCase() === `${repository.owner}/${repository.name}`.toLowerCase());
+  const same = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
+  /** Whether `repository` is the connected one. */
+  const connected = async (repository: { owner: string; name: string }) => {
+    const current = await options.repository();
+    return current !== undefined && same(current, `${repository.owner}/${repository.name}`);
+  };
   const ok = (stdout: string): CommandResult => ({ stdout: stdout === "" || stdout.endsWith("\n") ? stdout : `${stdout}\n`, stderr: "", exitCode: 0 });
   const fail = (message: string, exitCode = 1): CommandResult => ({ stdout: "", stderr: `${message}\n`, exitCode });
   /** Every request to github.com carries the token, when there is one (the key isomorphic-git's `onAuth` sets too). */
@@ -131,11 +143,30 @@ export function createGit(options: GitOptions) {
     return { url, ...repository };
   };
 
-  // statusMatrix rows: [file, HEAD (0 absent, 1 present), workdir (0 absent, 1 as HEAD, 2 changed), stage].
-  const changes = async (dir: string) =>
-    (await git.statusMatrix({ fs, dir }))
-      .filter(([, head, work]) => !(head === 1 && work === 1) && !(head === 0 && work === 0))
-      .map(([file, head, work]) => ({ file, kind: head === 0 ? ("new" as const) : work === 0 ? ("deleted" as const) : ("modified" as const) }));
+  /**
+   * statusMatrix's rows: [file, HEAD (0 absent, 1 present), WORKDIR (0 absent, 1 as HEAD, 2 changed),
+   * STAGE (0 absent, 1 as HEAD, 2 as WORKDIR, 3 neither)], the files that differ anywhere.
+   */
+  const matrix = async (dir: string) => (await git.statusMatrix({ fs, dir })).filter(([, head, work, stage]) => !(head === 1 && work === 1 && stage === 1));
+  /** Whether the index differs from HEAD for a row: a change to be committed. */
+  const staged = (head: number, stage: number) => (head === 0 ? stage !== 0 : stage !== 1);
+  /** Whether the working tree differs from the index for a row (an untracked file is not a change of the index). */
+  const unstaged = (head: number, work: number, stage: number) => (stage === 0 ? head === 1 && work !== 0 : work === 0 || stage === 3 || (stage === 1 && work === 2));
+
+  /** The index's blob ids, by path. */
+  const indexOids = async (dir: string): Promise<Map<string, string>> => {
+    const oids = new Map<string, string>();
+    await git.walk({
+      fs,
+      dir,
+      trees: [git.STAGE()],
+      map: async (filepath, [entry]) => {
+        if (entry !== null && entry !== undefined && filepath !== "." && (await entry.type()) === "blob") oids.set(filepath, (await entry.oid()) as string);
+        return undefined;
+      },
+    });
+    return oids;
+  };
 
   const repositoryAt = async (cwd: string) => {
     try {
@@ -144,6 +175,14 @@ export function createGit(options: GitOptions) {
       return undefined;
     }
   };
+
+  /** `path` (as typed in `cwd`) relative to the repository at `dir`: `""` for all of it, `undefined` outside it. */
+  const inRepository = (dir: string, cwd: string, path: string): string | undefined => {
+    const absolute = resolvePath(cwd, path);
+    if (absolute === dir) return "";
+    return absolute.startsWith(`${dir}/`) ? absolute.slice(dir.length + 1) : undefined;
+  };
+  const under = (file: string, spec: string) => spec === "" || file === spec || file.startsWith(`${spec}/`);
 
   /** Runs `attempt`, again after a 429 or a 5xx from GitHub (twice, after 4 s then 8 s). */
   const retrying = async <T>(attempt: () => Promise<T>, cleanup: () => void): Promise<T> => {
@@ -169,9 +208,10 @@ export function createGit(options: GitOptions) {
     if (existing !== undefined && (existing.kind !== "dir" || files.list(dir).length > 0)) {
       return fail(`fatal: destination path '${target ?? repository.name}' already exists and is not an empty directory`, 128);
     }
-    const token = await options.token(repository);
-    const pushable = token !== undefined && (await allowed(repository));
-    const onAuth = pushable ? () => ({ username: "x-access-token", password: token }) : undefined;
+    // The connected repository's token for the connected repository only: any other is cloned without one.
+    const pushable = await connected(repository);
+    const token = pushable ? await options.token() : undefined;
+    const onAuth = token === undefined ? undefined : () => ({ username: "x-access-token", password: token });
     try {
       await retrying(
         () => git.clone({ fs, http, dir, url, depth: 1, singleBranch: true, headers: headersFor(token), ...(onAuth !== undefined && { onAuth }) }),
@@ -183,52 +223,133 @@ export function createGit(options: GitOptions) {
     }
     const branch = await git.currentBranch({ fs, dir });
     const count = (await git.listFiles({ fs, dir })).length;
-    const push = pushable ? `you may push branches ${options.branchPrefix}… to it` : "read-only: pushing to it is not allowed here";
+    const push = pushable ? `you may push branches ${options.branchPrefix}… to it` : "read-only: it is not the connected repository, so nothing is pushed to it";
     return ok(`Cloned ${url} into ${dir} (branch ${branch}, ${count} files, latest commit only); ${push}.`);
+  }
+
+  async function checkout(dir: string, args: string[]): Promise<CommandResult> {
+    const create = args[0] === "-b" || args[0] === "-B";
+    const names = (create ? args.slice(1) : args).filter((arg) => arg !== "--");
+    const [name, start] = names;
+    if (name === undefined || start !== undefined || name.startsWith("-")) return fail("git checkout here: git checkout -b <new-branch>, or git checkout <branch> (restoring files is not supported here)", 129);
+    const branches = await git.listBranches({ fs, dir });
+    if (create) {
+      if (branches.includes(name) && args[0] === "-b") return fail(`fatal: a branch named '${name}' already exists`, 128);
+      // As `git checkout -b`: a branch at HEAD, the index and the working tree kept as they are.
+      await git.branch({ fs, dir, ref: name, checkout: true, force: args[0] === "-B" });
+      return ok(`Switched to a new branch '${name}'`);
+    }
+    if (!branches.includes(name)) return fail(`error: pathspec '${name}' did not match any branch known to git (restoring files is not supported here)`);
+    await git.checkout({ fs, dir, ref: name });
+    return ok(`Switched to branch '${name}'`);
   }
 
   async function status(dir: string): Promise<CommandResult> {
     const branch = await git.currentBranch({ fs, dir });
-    const changed = await changes(dir);
-    const marks = { new: "??", modified: " M", deleted: " D" };
-    const lines = changed.map((change) => `${marks[change.kind]} ${change.file}`);
+    const lines = (await matrix(dir)).flatMap(([file, head, work, stage]) => {
+      if (head === 0 && stage === 0) return work === 0 ? [] : [`?? ${file}`];
+      const x = !staged(head, stage) ? " " : head === 0 ? "A" : stage === 0 ? "D" : "M";
+      const y = !unstaged(head, work, stage) ? " " : work === 0 ? "D" : "M";
+      return x === " " && y === " " ? [] : [`${x}${y} ${file}`];
+    });
     return ok(`On branch ${branch}\n${lines.length === 0 ? "nothing to commit, working tree clean" : lines.join("\n")}`);
   }
 
-  async function diff(dir: string, paths: string[]): Promise<CommandResult> {
+  async function diff(dir: string, cwd: string, args: string[]): Promise<CommandResult> {
+    const cached = args.includes("--staged") || args.includes("--cached");
+    const specs: string[] = [];
+    for (const path of args.filter((arg) => !arg.startsWith("-"))) {
+      const spec = inRepository(dir, cwd, path);
+      if (spec === undefined) return fail(`fatal: ${path}: '${path}' is outside repository`, 128);
+      specs.push(spec);
+    }
+    const index = await indexOids(dir);
     const head = await git.resolveRef({ fs, dir, ref: "HEAD" });
+    const blob = async (oid: string | undefined) => (oid === undefined ? new Uint8Array() : (await git.readBlob({ fs, dir, oid })).blob);
+    const atHead = async (file: string) => (await git.readBlob({ fs, dir, oid: head, filepath: file })).blob;
     const patches: string[] = [];
-    for (const change of await changes(dir)) {
-      if (paths.length > 0 && !paths.some((path) => change.file === path || change.file.startsWith(`${path.replace(/\/$/, "")}/`))) continue;
-      const before = change.kind === "new" ? new Uint8Array() : (await git.readBlob({ fs, dir, oid: head, filepath: change.file })).blob;
-      const after = change.kind === "deleted" ? new Uint8Array() : files.read(`${dir}/${change.file}`);
+    for (const [file, inHead, work, stage] of await matrix(dir)) {
+      if (specs.length > 0 && !specs.some((spec) => under(file, spec))) continue;
+      let before: Uint8Array;
+      let after: Uint8Array;
+      if (cached) {
+        // What a commit would take: HEAD against the index.
+        if (!staged(inHead, stage)) continue;
+        before = inHead === 1 ? await atHead(file) : new Uint8Array();
+        after = await blob(index.get(file));
+      } else {
+        // What is not added yet: the index against the working tree.
+        if (!unstaged(inHead, work, stage) || stage === 0) continue;
+        before = await blob(index.get(file));
+        after = work === 0 ? new Uint8Array() : files.read(`${dir}/${file}`);
+      }
       if (before.includes(0) || after.includes(0)) {
-        patches.push(`Binary files a/${change.file} and b/${change.file} differ\n`);
+        patches.push(`Binary files a/${file} and b/${file} differ\n`);
         continue;
       }
-      patches.push(createTwoFilesPatch(`a/${change.file}`, `b/${change.file}`, decoder.decode(before), decoder.decode(after), "", "", { context: 3 }));
+      patches.push(createTwoFilesPatch(`a/${file}`, `b/${file}`, decoder.decode(before), decoder.decode(after), "", "", { context: 3 }));
     }
     return ok(patches.join(""));
   }
 
+  /** Stages the changes of `rows` (an addition, a change, a removal). */
+  const stage = async (dir: string, rows: Awaited<ReturnType<typeof matrix>>) => {
+    for (const [file, , work] of rows) {
+      if (work === 0) await git.remove({ fs, dir, filepath: file });
+      else await git.add({ fs, dir, filepath: file });
+    }
+  };
+
+  async function add(dir: string, cwd: string, args: string[]): Promise<CommandResult> {
+    const all = args.includes("-A") || args.includes("--all");
+    const paths = args.filter((arg) => !arg.startsWith("-"));
+    if (!all && paths.length === 0) return ok("Nothing specified, nothing added.");
+    const rows = (await matrix(dir)).filter(([, head, work, stage]) => unstaged(head, work, stage) || (head === 0 && stage === 0 && work !== 0));
+    const specs = all && paths.length === 0 ? [""] : [];
+    for (const path of paths) {
+      const spec = inRepository(dir, cwd, path);
+      if (spec === undefined) return fail(`fatal: ${path}: '${path}' is outside repository`, 128);
+      const known = files.lstat(resolvePath(cwd, path)) !== undefined || (await git.listFiles({ fs, dir })).some((file) => under(file, spec));
+      if (!known) return fail(`fatal: pathspec '${path}' did not match any files`, 128);
+      specs.push(spec);
+    }
+    await stage(
+      dir,
+      rows.filter(([file]) => specs.some((spec) => under(file, spec))),
+    );
+    return ok("");
+  }
+
   async function commit(dir: string, args: string[]): Promise<CommandResult> {
     const messages: string[] = [];
+    let all = false;
     for (let i = 0; i < args.length; i++) {
       const arg = args[i] ?? "";
-      if (arg === "-m" || arg === "-am" || arg === "--message") messages.push(args[++i] ?? "");
-      else if (arg.startsWith("--message=")) messages.push(arg.slice("--message=".length));
+      if (arg === "-m" || arg === "--message") messages.push(args[++i] ?? "");
+      else if (arg === "-am" || arg === "-a" || arg === "--all") {
+        all = true;
+        if (arg === "-am") messages.push(args[++i] ?? "");
+      } else if (arg.startsWith("--message=")) messages.push(arg.slice("--message=".length));
+      else return fail(`error: git commit here takes -m <message> and -a, not '${arg}'`, 129);
     }
     if (messages.length === 0 || messages.every((message) => message.trim() === "")) return fail("error: git commit here needs a message: git commit -m <message>");
-    const changed = await changes(dir);
-    if (changed.length === 0) return ok("nothing to commit, working tree clean");
-    // Every change is committed, as `git add -A && git commit` would.
-    for (const change of changed) {
-      if (change.kind === "deleted") await git.remove({ fs, dir, filepath: change.file });
-      else await git.add({ fs, dir, filepath: change.file });
+    // `-a`: the tracked files' changes first, as real git (never an untracked file).
+    if (all) await stage(dir, (await matrix(dir)).filter(([, head, work, stage]) => head === 1 && unstaged(head, work, stage)));
+    const rows = await matrix(dir);
+    const toCommit = rows.filter(([, head, , stage]) => staged(head, stage));
+    const branch = await git.currentBranch({ fs, dir });
+    if (toCommit.length === 0) {
+      const untracked = rows.some(([, head, work, stage]) => head === 0 && stage === 0 && work !== 0);
+      const changed = rows.some(([, head, work, stage]) => unstaged(head, work, stage));
+      const why = changed
+        ? 'no changes added to commit (use "git add" and/or "git commit -a")'
+        : untracked
+          ? 'nothing added to commit but untracked files present (use "git add" to track)'
+          : "nothing to commit, working tree clean";
+      return { stdout: `On branch ${branch}\n${why}\n`, stderr: "", exitCode: 1 };
     }
     const oid = await git.commit({ fs, dir, message: messages.join("\n\n"), author });
-    const branch = await git.currentBranch({ fs, dir });
-    return ok(`[${branch} ${oid.slice(0, 7)}] ${messages[0]}\n ${changed.length} file(s) changed: ${changed.map((change) => change.file).join(", ")}`);
+    return ok(`[${branch} ${oid.slice(0, 7)}] ${messages[0]}\n ${toCommit.length} file(s) changed: ${toCommit.map(([file]) => file).join(", ")}`);
   }
 
   async function log(dir: string, args: string[]): Promise<CommandResult> {
@@ -244,17 +365,19 @@ export function createGit(options: GitOptions) {
   }
 
   async function push(dir: string, args: string[]): Promise<CommandResult> {
-    const branch = args.filter((arg) => !arg.startsWith("-") && arg !== "origin")[0];
-    if (branch === undefined) return fail(`usage: git push origin ${options.branchPrefix}<topic>`);
-    if (!branchAllowed(branch, options.branchPrefix)) {
-      return fail(`fatal: pushing is allowed only to new branches ${options.branchPrefix}<topic> (letters, digits, . _ / -), not '${branch}'`);
+    const [remote, named, extra] = args.filter((arg) => !arg.startsWith("-"));
+    if (remote !== "origin" || named === undefined || extra !== undefined) return fail(`usage: git push origin ${options.branchPrefix}<topic>`, 129);
+    const branch = named === "HEAD" ? await git.currentBranch({ fs, dir }) : named;
+    if (branch === undefined || branch === null || !branchAllowed(branch, options.branchPrefix)) {
+      return fail(`fatal: pushing is allowed only to branches ${options.branchPrefix}<topic> (letters, digits, . _ / -), not '${named}'`);
     }
     if (!(await isClone(dir))) return fail(`fatal: ${dir} is not a complete clone: clone it again`);
+    if (!(await git.listBranches({ fs, dir })).includes(branch)) return fail(`error: src refspec ${branch} does not match any (create it first: git checkout -b ${branch})`);
     const origin = await originOf(dir);
-    if (!(await allowed(origin))) return fail(`fatal: pushing to ${origin.owner}/${origin.name} is not allowed here`);
-    const token = await options.token(origin);
-    if (token === undefined) return fail("fatal: there is no GitHub token here, so nothing can be pushed");
-    await git.branch({ fs, dir, ref: branch, force: true });
+    const current = await options.repository();
+    if (current === undefined) return fail(`fatal: ${NOT_CONNECTED}`);
+    if (!same(current, `${origin.owner}/${origin.name}`)) return fail(`fatal: pushing to ${origin.owner}/${origin.name} is not allowed here: only to ${current}, the connected repository`);
+    const token = await options.token();
     const result = await git.push({
       fs,
       http,
@@ -268,34 +391,7 @@ export function createGit(options: GitOptions) {
       onAuth: () => ({ username: "x-access-token", password: token }),
     });
     if (!result.ok) return fail(`fatal: the push was rejected: ${result.error ?? JSON.stringify(result.refs)}`);
-    return ok(`To https://github.com/${origin.owner}/${origin.name}\n * ${branch} -> ${branch}\nCompare: https://github.com/${origin.owner}/${origin.name}/compare/${branch}?expand=1`);
-  }
-
-  async function pullRequest(dir: string, args: string[]): Promise<CommandResult> {
-    let body = "";
-    const positional: string[] = [];
-    for (let i = 0; i < args.length; i++) {
-      if (args[i] === "-b" || args[i] === "--body") body = args[++i] ?? "";
-      else positional.push(args[i] ?? "");
-    }
-    const [branch, ...title] = positional;
-    if (branch === undefined || title.length === 0) return fail(`usage: git pr ${options.branchPrefix}<topic> <title> [-b <body>]`);
-    if (!branchAllowed(branch, options.branchPrefix)) return fail(`fatal: pull requests are opened only from branches ${options.branchPrefix}<topic>`);
-    const origin = await originOf(dir);
-    if (!(await allowed(origin))) return fail(`fatal: opening pull requests on ${origin.owner}/${origin.name} is not allowed here`);
-    const token = await options.token(origin);
-    if (token === undefined) return fail("fatal: there is no GitHub token here, so no pull request can be opened");
-    const api = `https://api.github.com/repos/${origin.owner}/${origin.name}`;
-    const headers = { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "pikit-execution-do" };
-    const repository = (await (await fetch(api, { headers })).json()) as { default_branch?: string };
-    const response = await fetch(`${api}/pulls`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify({ title: title.join(" "), body, head: branch, base: repository.default_branch ?? "main" }),
-    });
-    const answer = (await response.json()) as { html_url?: string; message?: string };
-    if (!response.ok) return fail(`fatal: GitHub answered ${response.status}: ${answer.message ?? ""}`);
-    return ok(`Pull request opened: ${answer.html_url}`);
+    return ok(`To https://github.com/${origin.owner}/${origin.name}\n * ${branch} -> ${branch}\nThe operator sees it as a proposal in the dashboard.`);
   }
 
   return {
@@ -305,27 +401,24 @@ export function createGit(options: GitOptions) {
       try {
         if (command === undefined || command === "help" || command === "--help") return ok(USAGE);
         if (command === "clone") return await clone(rest, cwd);
-        if (!["status", "diff", "add", "commit", "log", "push", "pr"].includes(command)) {
-          return fail(`git: '${command}' is not supported here.\n${USAGE}`);
-        }
+        if (!SUPPORTED.includes(command)) return fail(`git: '${command}' is not supported here.\n${USAGE}`);
         const dir = await repositoryAt(cwd);
         if (dir === undefined) return fail("fatal: not a git repository (or any of the parent directories): .git", 128);
         switch (command) {
           case "status":
             return await status(dir);
           case "diff":
-            return await diff(dir, rest.filter((arg) => !arg.startsWith("-")));
+            return await diff(dir, cwd, rest);
           case "add":
-            // `commit` takes every change: nothing to stage by hand.
-            return ok("");
+            return await add(dir, cwd, rest);
           case "commit":
             return await commit(dir, rest);
           case "log":
             return await log(dir, rest);
-          case "push":
-            return await push(dir, rest);
+          case "checkout":
+            return await checkout(dir, rest);
           default:
-            return await pullRequest(dir, rest);
+            return await push(dir, rest);
         }
       } catch (error) {
         return fail(`git ${command}: ${error instanceof Error ? error.message : String(error)}`);

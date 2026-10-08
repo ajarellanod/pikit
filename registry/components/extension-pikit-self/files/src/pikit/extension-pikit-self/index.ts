@@ -151,8 +151,10 @@ export function pikitSelfText(commit: string | undefined, composition: string | 
 
 /**
  * What the section says of the project's repository (`github`'s): where it is and how a change
- * reaches it, or that GitHub is not connected yet.
+ * reaches it, the same steps on every target, or that GitHub is not connected yet.
  */
+// TODO: once the `proposals` contract is in this branch, read the remote from `proposals.remote()`
+// (a server's local remote, or GitHub's), and `github.repository()` only through it.
 export function repositoryText(repository: string | undefined): string {
   if (repository === undefined) {
     return "## Your repository\nGitHub is not connected yet: you cannot propose a change until an operator connects it (the dashboard's Settings → GitHub). Say so if asked for a change.";
@@ -160,7 +162,7 @@ export function repositoryText(repository: string | undefined): string {
   return [
     "## Your repository",
     `Your project's source is https://github.com/${repository} (connected in the dashboard's Settings → GitHub).`,
-    `To change yourself: \`git clone https://github.com/${repository}\`, commit on a branch \`pikit/self/<topic>\`, \`git push origin pikit/self/<topic>\`, then \`git pr pikit/self/<topic> <title> -b <description>\`. The operator approves it in the dashboard's Proposals; you never hold a token.`,
+    `To propose a change: \`git clone https://github.com/${repository}\`, \`git checkout -b pikit/self/<topic>\`, change the files, \`git add\` them and \`git commit -m <what and why>\`, then \`git push origin pikit/self/<topic>\`. The pushed branch is the proposal: the operator reads and approves it in the dashboard's Proposals. You never hold a token.`,
   ].join("\n");
 }
 

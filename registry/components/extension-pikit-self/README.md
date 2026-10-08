@@ -70,8 +70,10 @@ Every model request of an agent that names it carries one section, `<pikit-self>
    `agent.definition`: model, tools, extensions, and which one is the steward. On Cloudflare this is the object's App; the Worker's
    is not in it.
 3. **Its repository**, only with a `github` provider (github-app, connected from the dashboard's
-   Settings → GitHub): where the project's source is and how a change reaches it (`git clone`, a
-   `pikit/self/<topic>` branch, `git push`, `git pr`), or that GitHub is not connected yet. Read
+   Settings → GitHub): where the project's source is and how a change reaches it, the same steps on
+   every target (`git clone`, `git checkout -b pikit/self/<topic>`, `git add`, `git commit`,
+   `git push origin pikit/self/<topic>`: the pushed branch is the proposal), or that GitHub is not
+   connected yet. Read
    through the contract at each request, so connecting applies at once; never a token.
 
 The text of the first two parts is built once, in `start`: the same section on every request, so the provider's prompt cache

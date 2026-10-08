@@ -148,6 +148,9 @@ test("its repository: with a github provider the section says where it is and ho
   const after = (await sectionOf([assistant], "durable", github)).text ?? "";
   expect(after).toContain("Your project's source is https://github.com/ana/my-bot");
   expect(after).toContain("git clone https://github.com/ana/my-bot");
+  expect(after).toContain("git checkout -b pikit/self/<topic>");
+  expect(after).toContain("git push origin pikit/self/<topic>");
+  expect(after).not.toContain("git pr");
   // Without a provider, nothing about a repository.
   expect((await sectionOf([assistant])).text).not.toContain("## Your repository");
 });

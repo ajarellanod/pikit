@@ -7,7 +7,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type GitHubAccess, GitHubNotConnectedError, type Settings, type SettingsValue } from "@pikit/contracts";
+import { type GitHubAccess, GitHubNotConnectedError } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { withWorkersHost } from "@pikit/contracts/testing";
@@ -26,8 +26,22 @@ afterEach(() => {
   globalThis.fetch = realFetch;
 });
 
-/** A started app with this component over `storage`, a `secrets` holding `secrets`, and its environments. */
-async function started(options: { storage?: DurableObjectFilesStorage; config?: Record<string, unknown>; secrets?: Record<string, string>; settings?: Settings; github?: GitHubAccess } = {}) {
+/** A `github` double: the connected repository (none at first) and its token. */
+function githubDouble(connected?: string) {
+  const state = { connected, asked: 0 };
+  const access: GitHubAccess = {
+    repository: async () => state.connected,
+    async token() {
+      state.asked++;
+      if (state.connected === undefined) throw new GitHubNotConnectedError("GitHub is not connected: connect it in the dashboard's Settings → GitHub");
+      return TOKEN;
+    },
+  };
+  return { state, access };
+}
+
+/** A started app with this component over `storage`, a `github` when given, and its environments. */
+async function started(options: { storage?: DurableObjectFilesStorage; config?: Record<string, unknown>; github?: GitHubAccess } = {}) {
   const storage = options.storage ?? fakeDurableObjectStorage();
   let found: { files: ExecutionEnv; shell: ExecutionEnv } | undefined;
   const reader = defineComponent({
@@ -38,14 +52,9 @@ async function started(options: { storage?: DurableObjectFilesStorage; config?: 
       return { start: () => void (found = { files: files.get(), shell: shell.get() }) };
     },
   });
-  const secrets = defineComponent({
-    name: "secrets-test",
-    setup: (pikit) => pikit.provide("secrets", { get: async (name: string) => options.secrets?.[name] }),
-  });
-  const store = defineComponent({ name: "settings-test", setup: (pikit) => void (options.settings !== undefined && pikit.provide("settings", options.settings)) });
   const github = defineComponent({ name: "github-test", setup: (pikit) => void (options.github !== undefined && pikit.provide("github", options.github)) });
   const app = await defineApp({
-    components: [...(options.secrets === undefined ? [] : [secrets]), store, github, executionDo, reader],
+    components: [github, executionDo, reader],
     config: { "execution-do": options.config ?? {} },
     logger: silentLogger,
   }).create();
@@ -78,7 +87,7 @@ for (const c of createLifecycleConformance(() => ({ component: hosted }))) {
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [executionDo], logger: silentLogger }).create();
-  expect(app.describe().components).toEqual([{ name: "execution-do", provides: ["execution", "execution.shell"], requires: [], optional: ["secrets", "settings", "github"] }]);
+  expect(app.describe().components).toEqual([{ name: "execution-do", provides: ["execution", "execution.shell"], requires: [], optional: ["github"] }]);
 });
 
 /** The reason `app.start` fails with, when the host in its context is `host`. */
@@ -219,92 +228,98 @@ async function fakeGitHub(): Promise<FakeGitHub> {
   return github;
 }
 
-test("git: clone, status, diff, commit, log, push and a pull request, with the token only on GitHub's requests", async () => {
+test("git as real git: clone, checkout -b, status, diff, add, commit, log, push; the token only for the connected repository", async () => {
   const github = await fakeGitHub();
-  const { app, env } = await started({ secrets: { GITHUB_TOKEN: TOKEN }, config: { git: { pushRepositories: ["acme/app"] } } });
+  const { access } = githubDouble("acme/app");
+  const { app, env } = await started({ github: access });
 
   const clone = await run(env, "git clone https://github.com/acme/app");
   expect(clone.output).toContain("you may push branches pikit/self/");
   // Shallow: only the latest commit came.
   expect((await run(env, "git log", "app")).output).toBe(`${(await github.head("acme/app")).slice(0, 7)} second commit (fake github)\n`);
+  expect((await run(env, "git checkout -b pikit/self/explain-more", "app")).output).toBe("Switched to a new branch 'pikit/self/explain-more'\n");
   await env.appendFile("app/README.md", "more\n", ctx);
   await env.writeFile("app/src/b.ts", "export const b = 2;\n", ctx);
-  expect((await run(env, "git status", "app/src")).output).toBe("On branch main\n M README.md\n?? src/b.ts\n");
+  expect((await run(env, "git status", "app/src")).output).toBe("On branch pikit/self/explain-more\n M README.md\n?? src/b.ts\n");
   expect((await run(env, "git diff README.md", "app")).output).toContain("+more\n");
-  expect((await run(env, "git add . && git commit -m 'Explain more'", "app")).output).toMatch(/^\[main [0-9a-f]{7}\] Explain more\n 2 file\(s\) changed: README.md, src\/b.ts\n$/);
-  expect((await run(env, "git status", "app")).output).toBe("On branch main\nnothing to commit, working tree clean\n");
+  expect((await run(env, "git diff --staged", "app")).output).toBe("");
+  // Only what was added is committed, as real git.
+  expect((await run(env, "git add README.md && git status", "app")).output).toBe("On branch pikit/self/explain-more\nM  README.md\n?? src/b.ts\n");
+  expect((await run(env, "git diff --staged", "app")).output).toContain("+more\n");
+  expect((await run(env, "git diff", "app")).output).toBe("");
+  expect((await run(env, "git commit -m 'Explain more'", "app")).output).toMatch(/^\[pikit\/self\/explain-more [0-9a-f]{7}\] Explain more\n 1 file\(s\) changed: README.md\n$/);
+  expect((await run(env, "git status", "app")).output).toBe("On branch pikit/self/explain-more\n?? src/b.ts\n");
+  expect((await run(env, "git add . && git commit -m 'Add b'", "app")).exitCode).toBe(0);
+  expect((await run(env, "git status", "app")).output).toBe("On branch pikit/self/explain-more\nnothing to commit, working tree clean\n");
 
-  const push = await run(env, "git push origin pikit/self/explain-more && git pr pikit/self/explain-more 'Explain more' -b 'Why: clarity'", "app");
+  const push = await run(env, "git push origin pikit/self/explain-more", "app");
   expect(push.exitCode).toBe(0);
-  expect(push.output).toContain("Pull request opened: https://github.com/acme/app/pull/1");
+  expect(push.output).toContain("The operator sees it as a proposal in the dashboard.");
   const [committed] = (await run(env, "git log -n 1", "app")).output.split(" ");
   expect(github.pushes.map((pushed) => [pushed.repository, pushed.ref, pushed.oid.slice(0, 7)])).toEqual([["acme/app", "refs/heads/pikit/self/explain-more", committed ?? ""]]);
   expect(github.pushes[0]?.packBytes).toBeGreaterThan(100);
-  expect(github.pulls).toEqual([{ repository: "acme/app", head: "pikit/self/explain-more", base: "main", title: "Explain more", body: "Why: clarity" }]);
-  // The token went to GitHub, and never to the shell.
+  // Back to main, whose files are as they were; HEAD as the branch to push works too.
+  expect((await run(env, "git checkout main && cat src/b.ts", "app")).output).toContain("No such file");
+  expect((await run(env, "git checkout pikit/self/explain-more && git push origin HEAD", "app")).exitCode).toBe(0);
+  // The token went to GitHub for the connected repository, and never to the shell.
   expect(github.requests.every((request) => request.authorization !== null)).toBe(true);
   expect((await run(env, "env; set")).output).not.toContain(TOKEN);
   await app.stop();
 });
 
-test("git push and pr are fenced: the branch prefix, the allowed repositories, a token", async () => {
-  const github = await fakeGitHub();
-  const allowed = await started({ secrets: { GITHUB_TOKEN: TOKEN }, config: { git: { pushRepositories: ["acme/app"] } } });
-  await run(allowed.env, "git clone https://github.com/acme/app && cd app && echo x >> README.md && git commit -m change");
-  expect(await run(allowed.env, "git push origin main", "app")).toEqual({ exitCode: 1, output: expect.stringContaining("only to new branches pikit/self/<topic>") });
-  expect((await run(allowed.env, "git push origin feature/x", "app")).exitCode).toBe(1);
-  expect((await run(allowed.env, "git pr main 'title'", "app")).exitCode).toBe(1);
-
-  const otherRepository = await started({ secrets: { GITHUB_TOKEN: TOKEN }, config: { git: { pushRepositories: ["acme/other"] } } });
-  await run(otherRepository.env, "git clone https://github.com/acme/app && cd app && echo x >> README.md && git commit -m change");
-  expect((await run(otherRepository.env, "git push origin pikit/self/x", "app")).output).toContain("pushing to acme/app is not allowed here");
-
-  const noToken = await started({ config: { git: { pushRepositories: ["acme/app"] } } });
-  expect((await run(noToken.env, "git clone https://github.com/acme/app")).output).toContain("read-only");
-  expect((await run(noToken.env, "git push origin pikit/self/x", "app")).output).toContain("there is no GitHub token here");
-  expect(github.pushes).toEqual([]);
-  expect(github.pulls).toEqual([]);
-  for (const started of [allowed, otherRepository, noToken]) await started.app.stop();
-});
-
-/** A `settings` in memory: the stored value over the defaults, set whole. */
-function memorySettings() {
-  const declared = new Map<string, SettingsValue>();
-  const stored = new Map<string, SettingsValue>();
-  const settings: Settings = {
-    declare: (component, _schema, defaults) => void declared.set(component, defaults),
-    get: async <T extends SettingsValue>(component: string) => ({ ...declared.get(component), ...stored.get(component) }) as T,
-    set: async (component, value) => {
-      stored.set(component, value);
-      return { ...declared.get(component), ...value };
-    },
-    sections: async () => [],
-  };
-  return { settings, declared };
-}
-
-test("git push and pr also reach the repository set from the dashboard (its setting), read at each push", async () => {
-  const github = await fakeGitHub();
-  const { settings, declared } = memorySettings();
-  const { app, env } = await started({ secrets: { GITHUB_TOKEN: TOKEN }, settings });
-  expect(declared.get("execution-do")).toEqual({ repository: "" });
-  const clone = await run(env, "git clone https://github.com/acme/app && cd app && echo x >> README.md && git commit -m change");
-  expect(clone.output).toContain("read-only");
-  expect((await run(env, "git push origin pikit/self/x", "app")).output).toContain("pushing to acme/app is not allowed here");
-
-  await settings.set("execution-do", { repository: "acme/app" }, { id: "ops" }, app.context());
-  const pushed = await run(env, "git push origin pikit/self/x && git pr pikit/self/x 'A change'", "app");
-  expect(pushed.exitCode).toBe(0);
-  expect(github.pushes.map((push) => push.repository)).toEqual(["acme/app"]);
-  expect(github.pulls.map((pull) => pull.head)).toEqual(["pikit/self/x"]);
-
-  await settings.set("execution-do", { repository: "" }, { id: "ops" }, app.context());
-  expect((await run(env, "git push origin pikit/self/y", "app")).output).toContain("not allowed here");
-  expect(github.pushes.length).toBe(1);
+test("commit takes what was added (-a: the tracked changes); add says when a path matches nothing; the rest is not supported here, git pr included", async () => {
+  await fakeGitHub();
+  const { app, env } = await started({ github: githubDouble("acme/app").access });
+  await run(env, "git clone https://github.com/acme/app");
+  await env.appendFile("app/README.md", "more\n", ctx);
+  await env.writeFile("app/new.txt", "new\n", ctx);
+  const nothing = await run(env, "git commit -m 'Nothing added'", "app");
+  expect(nothing).toEqual({ exitCode: 1, output: 'On branch main\nno changes added to commit (use "git add" and/or "git commit -a")\n' });
+  expect((await run(env, "git commit -a -m 'Tracked only'", "app")).output).toContain("1 file(s) changed: README.md");
+  expect((await run(env, "git status", "app")).output).toBe("On branch main\n?? new.txt\n");
+  expect((await run(env, "git commit -m 'Untracked only'", "app")).output).toContain("nothing added to commit but untracked files present");
+  expect(await run(env, "git add missing.txt", "app")).toEqual({ exitCode: 128, output: "fatal: pathspec 'missing.txt' did not match any files\n" });
+  // A deletion is added too.
+  expect((await run(env, "rm src/a.ts && git add -A && git status", "app")).output).toBe("On branch main\nA  new.txt\nD  src/a.ts\n");
+  expect((await run(env, "git checkout -b pikit/self/x && git checkout -b pikit/self/x", "app")).output).toContain("a branch named 'pikit/self/x' already exists");
+  for (const command of ["git pr pikit/self/x 'A title'", "git pull", "git merge main", "git rebase main", "git reset --hard", "git switch main"]) {
+    const answer = await run(env, command, "app");
+    expect([command, answer.exitCode, answer.output.split("\n")[0]]).toEqual([command, 1, `git: '${command.split(" ")[1]}' is not supported here.`]);
+  }
+  expect((await run(env, "git checkout -- README.md", "app")).output).toContain("restoring files is not supported here");
   await app.stop();
 });
 
-test("git clone: GitHub over HTTPS only, a private repository needs the token, and a failed clone leaves nothing", async () => {
+test("git push is fenced: the branch prefix, a branch that exists, the connected repository only, GitHub connected", async () => {
+  const github = await fakeGitHub();
+  const { state, access } = githubDouble();
+  const { app, env } = await started({ github: access });
+  // Not connected: clones are public and read-only, and a push says how to connect.
+  expect((await run(env, "git clone https://github.com/acme/app")).output).toContain("read-only");
+  await run(env, "git checkout -b pikit/self/x && echo x >> README.md && git commit -am change", "app");
+  expect((await run(env, "git push origin pikit/self/x", "app")).output).toContain("GitHub is not connected: an operator connects it in the dashboard's Settings → GitHub");
+  expect(state.asked).toBe(0);
+
+  state.connected = "acme/other";
+  expect((await run(env, "git push origin pikit/self/x", "app")).output).toContain("pushing to acme/app is not allowed here: only to acme/other, the connected repository");
+  // Connected now: read at the next push, no restart.
+  state.connected = "acme/app";
+  expect(await run(env, "git push origin main", "app")).toEqual({ exitCode: 1, output: expect.stringContaining("only to branches pikit/self/<topic>") });
+  expect((await run(env, "git push origin feature/x", "app")).exitCode).toBe(1);
+  expect((await run(env, "git push origin pikit/self/missing", "app")).output).toContain("src refspec pikit/self/missing does not match any");
+  expect((await run(env, "git push origin pikit/self/x", "app")).exitCode).toBe(0);
+  expect(github.pushes.map((push) => push.repository)).toEqual(["acme/app"]);
+
+  // No github provider at all: the same as not connected.
+  const without = await started();
+  await run(without.env, "git clone https://github.com/acme/app && cd app && git checkout -b pikit/self/y && echo y >> README.md && git commit -am y");
+  expect((await run(without.env, "git push origin pikit/self/y", "app")).output).toContain("GitHub is not connected");
+  expect(github.pushes.length).toBe(1);
+  await app.stop();
+  await without.app.stop();
+});
+
+test("git clone: GitHub over HTTPS only, a private repository needs to be the connected one, and a failed clone leaves nothing", async () => {
   const github = await fakeGitHub();
   const { app, env } = await started();
   expect((await run(env, "git clone https://gitlab.com/acme/app")).exitCode).toBe(128);
@@ -317,42 +332,14 @@ test("git clone: GitHub over HTTPS only, a private repository needs the token, a
   expect((await run(env, "git clone https://github.com/acme/app")).exitCode).toBe(128);
   expect(await run(env, "ls")).toEqual({ exitCode: 0, output: "" });
 
-  const withToken = await started({ secrets: { GITHUB_TOKEN: TOKEN } });
+  // Connected to acme/secret: its token for it; another repository is cloned without one.
+  const connected = await started({ github: githubDouble("acme/secret").access });
   globalThis.fetch = github.fetch as typeof fetch;
-  expect((await run(withToken.env, "git clone https://github.com/acme/secret && cat secret/README.md")).output).toContain("secret\n(second commit)\n");
-  expect((await run(withToken.env, "git clone https://github.com/acme/secret")).output).toContain("already exists");
-  await app.stop();
-  await withToken.app.stop();
-});
-
-test("with a github provider: the connected repository is one more push repository, with its token alone; other clones go without one", async () => {
-  const github = await fakeGitHub();
-  let connected: string | undefined;
-  const asked: string[] = [];
-  const access: GitHubAccess = {
-    repository: async () => connected,
-    async token() {
-      asked.push(connected ?? "none");
-      if (connected === undefined) throw new GitHubNotConnectedError("connect GitHub from the dashboard's Settings → GitHub");
-      return TOKEN;
-    },
-  };
-  // A GITHUB_TOKEN secret is set too: with a provider, it is never read.
-  const { app, env } = await started({ github: access, secrets: { GITHUB_TOKEN: "ghp_never-used-with-a-provider" } });
-  expect((await run(env, "git clone https://github.com/acme/app && cd app && echo x >> README.md && git commit -m change")).output).toContain("read-only");
-  expect((await run(env, "git push origin pikit/self/x", "app")).output).toContain("pushing to acme/app is not allowed here");
-
-  connected = "acme/app";
-  const pushed = await run(env, "git push origin pikit/self/x && git pr pikit/self/x 'A change'", "app");
-  expect(pushed.exitCode).toBe(0);
-  expect(github.pushes.map((push) => push.repository)).toEqual(["acme/app"]);
-  expect(github.pulls.map((pull) => pull.head)).toEqual(["pikit/self/x"]);
-
-  // Another repository: cloned without the connected one's token, and not pushable.
+  expect((await run(connected.env, "git clone https://github.com/acme/secret && cat secret/README.md")).output).toContain("secret\n(second commit)\n");
+  expect((await run(connected.env, "git clone https://github.com/acme/secret")).output).toContain("already exists");
   const before = github.requests.length;
-  expect((await run(env, "git clone https://github.com/acme/secret")).exitCode).toBe(128);
+  expect((await run(connected.env, "git clone https://github.com/acme/app")).exitCode).toBe(0);
   expect(github.requests.slice(before).every((request) => request.authorization === null)).toBe(true);
-  expect(JSON.stringify(github.requests)).not.toContain("never-used");
-  expect((await run(env, "env; set")).output).not.toContain(TOKEN);
   await app.stop();
+  await connected.app.stop();
 });

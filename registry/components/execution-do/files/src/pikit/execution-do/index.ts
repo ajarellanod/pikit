@@ -8,18 +8,12 @@
  *   (`files.ts`). They survive evictions and deploys, as the object's storage does.
  * - **The shell** is just-bash, a bash interpreter in TypeScript, with `git` (isomorphic-git, fenced),
  *   `node` (QuickJS in WebAssembly) and `curl` as host commands (`shell.ts`). There are no processes.
- * - **Only `git` changes files inside `.git`.** Pushes go only to the repositories in
- *   `git.pushRepositories`, on branches under `git.branchPrefix`, and never reach the shell's view of
- *   a token. With a `github` provider (github-app: the GitHub App connected from the dashboard), the
- *   connected repository is one more push repository, and its token (short-lived, minted when asked)
- *   is the only one, sent for that repository alone: other clones are anonymous. Without one, the
- *   token is the secret named `git.tokenSecret`, read through `secrets`. Without either, clones are
- *   public and read-only.
- * - **One more push repository is a setting** (`settings`, when a provider is installed): `repository`,
- *   the project's own, which the dashboard's Settings → Self-improvement (admin-proposals' section)
- *   sets with admin-proposals' own. It is read at each `git` command that pushes or opens a pull
- *   request, so connecting self-improvement after deploying needs no deploy. When the settings cannot
- *   be read, `git.pushRepositories` alone applies (logged).
+ * - **Only `git` changes files inside `.git`**, and it pushes only to the connected repository
+ *   (`github`: github-app, connected from the dashboard, or github-token), on branches under
+ *   `git.branchPrefix`. The repository and its short-lived token are asked of `github` at each command
+ *   that needs them, so connecting after deploying needs no deploy; the token is sent for that
+ *   repository alone and never reaches the shell. Not connected (or no provider installed): clones
+ *   are public and read-only, and a push says to connect GitHub in the dashboard's Settings → GitHub.
  *
  * It refuses to start outside a Durable Object's App, or on an object without SQLite. It reads the
  * object from `WORKERS_HOST`, which `deployment-cloudflare` puts in the start context; it imports
@@ -30,7 +24,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { isGitHubNotConnected } from "@pikit/contracts";
+import { GitHubNotConnectedError } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import Type from "typebox";
 import { createDurableExecutionEnv } from "./env.ts";
@@ -40,21 +34,6 @@ import { createShell } from "./shell.ts";
 import { createShellFs } from "./shell-fs.ts";
 
 const NAME = "execution-do";
-const REPOSITORY = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$";
-
-/** Its settings: one more repository `git push` and `git pr` may reach (empty: none). */
-export type WorkspaceSettings = { repository: string };
-
-const SettingsSchema = Type.Object(
-  {
-    repository: Type.String({
-      pattern: `^$|${REPOSITORY}`,
-      title: "Repository",
-      description: "The project's repository on GitHub, owner/name: git push and git pr may reach it too, besides git.pushRepositories.",
-    }),
-  },
-  { additionalProperties: false },
-);
 
 const Config = Type.Object({
   /** The agent's working directory, and the shell's `HOME`. */
@@ -81,10 +60,6 @@ const Config = Type.Object({
   ),
   git: Type.Object(
     {
-      /** The secret holding the GitHub token, read through `secrets`. Without it, public clones only. */
-      tokenSecret: Type.String({ minLength: 1, default: "GITHUB_TOKEN" }),
-      /** `owner/name`: the only repositories `git push` and `git pr` may reach. */
-      pushRepositories: Type.Array(Type.String({ pattern: REPOSITORY }), { default: [] }),
       /** What a pushed branch must start with: the agent never pushes to `main`. */
       branchPrefix: Type.String({ minLength: 1, default: "pikit/self/" }),
     },
@@ -106,44 +81,20 @@ export default defineComponent({
   name: NAME,
   config: Config,
   setup(pikit, config) {
-    const secrets = pikit.useOptional("secrets");
-    const settings = pikit.useOptional("settings");
-    // The connected repository and its token, when a provider is installed (github-app).
+    // The connected repository and its token (github-app, github-token): the only one `git push` reaches.
     const github = pikit.useOptional("github");
-    // A context of its own for reading the settings from a command: never start's.
+    // A context of its own for asking `github` from a command: never start's.
     let background: AppContext | undefined;
-    let declared = false;
+    const notConnected = () => new GitHubNotConnectedError("GitHub is not connected: an operator connects it in the dashboard's Settings → GitHub");
 
-    /** The repositories a push may reach now: the config's, the setting's when it names one, and the connected one. */
-    const pushRepositories = async (): Promise<readonly string[]> => {
-      const connected = github.get() === undefined || background === undefined ? undefined : await github.get()?.repository(background);
-      const listed = await configuredRepositories();
-      return connected === undefined ? listed : [...listed, connected];
-    };
-    /** The token for `repository`: the connected one's from `github` (none for others), else the secret. */
-    const token = async (repository: { owner: string; name: string }): Promise<string | undefined> => {
+    const repository = async (): Promise<string | undefined> => {
       const access = github.get();
-      if (access === undefined) return secrets.get()?.get(config.git.tokenSecret);
-      if (background === undefined) return undefined;
-      const connected = await access.repository(background);
-      if (connected === undefined || connected.toLowerCase() !== `${repository.owner}/${repository.name}`.toLowerCase()) return undefined;
-      try {
-        return await access.token(background);
-      } catch (error) {
-        if (isGitHubNotConnected(error)) return undefined;
-        throw error;
-      }
+      return access === undefined || background === undefined ? undefined : access.repository(background);
     };
-    const configuredRepositories = async (): Promise<readonly string[]> => {
-      const store = settings.get();
-      if (store === undefined || !declared || background === undefined) return config.git.pushRepositories;
-      try {
-        const { repository } = await store.get<WorkspaceSettings>(NAME, background);
-        return repository === "" ? config.git.pushRepositories : [...config.git.pushRepositories, repository];
-      } catch (error) {
-        background.logger.warn("execution-do: its settings could not be read; git.pushRepositories alone applies", { error: error instanceof Error ? error.message : String(error) });
-        return config.git.pushRepositories;
-      }
+    const token = async (): Promise<string> => {
+      const access = github.get();
+      if (access === undefined || background === undefined) throw notConnected();
+      return access.token(background);
     };
     // Everything is built now; only the object's storage arrives at `start`. Used before or after,
     // the files answer that the app is not running.
@@ -154,8 +105,8 @@ export default defineComponent({
     });
     const git = createGit({
       files,
+      repository,
       token,
-      pushRepositories,
       branchPrefix: config.git.branchPrefix,
     });
     const shell = createShell({
@@ -192,14 +143,8 @@ export default defineComponent({
         files.migrate();
         files.mkdirp(config.root);
         background = ctx.derive(() => BACKGROUND_CONTEXT);
-        const store = settings.get();
-        if (store !== undefined) {
-          store.declare(NAME, SettingsSchema, { repository: "" });
-          declared = true;
-        }
       },
       stop() {
-        declared = false;
         // Nothing to close: the files are the object's, and no process outlives a command. A command
         // still running ends with its run, whose context the runtime cancels.
         storage = undefined;

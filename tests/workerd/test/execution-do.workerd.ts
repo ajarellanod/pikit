@@ -140,17 +140,17 @@ it("files inside .git change only through git: the file tools and the shell are 
     await app.stop();
   }));
 
-it("git clones from a fake GitHub, commits, and pushes a pikit/self/ branch with the token, never to main", () =>
+it("git clones from a fake GitHub, checks out a pikit/self/ branch, commits what was added, and pushes it with the connected repository's token, never main", () =>
   inObject(async (host) => {
     // The fake GitHub keeps its repositories in this object's files too, under /srv.
     const github = await createFakeGitHub(host.object?.storage as DurableObjectFilesStorage, { "acme/app": { files: { "README.md": "hello\n" } } }, TOKEN);
     globalThis.fetch = github.fetch as typeof fetch;
-    const secrets = defineComponent({ name: "secrets-test", setup: (pikit) => pikit.provide("secrets", { get: async (name) => (name === "GITHUB_TOKEN" ? TOKEN : undefined) }) });
-    const { app, env } = await started(host, { components: [secrets], config: { git: { pushRepositories: ["acme/app"] } } });
+    const connected = defineComponent({ name: "github-test", setup: (pikit) => pikit.provide("github", { repository: async () => "acme/app", token: async () => TOKEN }) });
+    const { app, env } = await started(host, { components: [connected] });
 
     expect((await run(env, "git clone https://github.com/acme/app")).exitCode).toBe(0);
-    expect((await run(env, "echo more >> README.md && git status && git commit -m 'More' && git log", "app")).output).toMatch(
-      /^On branch main\n M README\.md\n\[main [0-9a-f]{7}\] More\n 1 file\(s\) changed: README\.md\n[0-9a-f]{7} More \(pikit agent\)\n[0-9a-f]{7} second commit \(fake github\)\n$/,
+    expect((await run(env, "git checkout -b pikit/self/more && echo more >> README.md && git status && git add README.md && git commit -m 'More' && git log", "app")).output).toMatch(
+      /^Switched to a new branch 'pikit\/self\/more'\nOn branch pikit\/self\/more\n M README\.md\n\[pikit\/self\/more [0-9a-f]{7}\] More\n 1 file\(s\) changed: README\.md\n[0-9a-f]{7} More \(pikit agent\)\n[0-9a-f]{7} second commit \(fake github\)\n$/,
     );
     expect((await run(env, "git push origin main", "app")).exitCode).toBe(1);
     expect((await run(env, "git push origin pikit/self/more", "app")).exitCode).toBe(0);
