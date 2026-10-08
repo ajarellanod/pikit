@@ -26,7 +26,8 @@ there.
   (read-only: `pending`, `get` and the `answers` feed), `agent.state`,
   `agent.observe` (conversations with agent, busy state and cost; a transcript; a live event stream;
   usage), `agent.tool`, `agent.definition`.
-- Inbound and outbound: `admitInbound` (`inbound.normalize`, `route.resolve`) and its outbound
+- Inbound and outbound: `admitInbound` (`inbound.normalize`, `route.resolve`; it refuses a message
+  whose id starts with `dashboard:`, the operator's, which channel-http answers `400`) and its outbound
   counterpart `startAnswerDelivery` (a channel's answers from the `answers` feed and its own cursor,
   one ordered lane per conversation, retries with the channel's own waits, idempotency keys, a crash
   resends at most the piece in flight, marked; on `wakeups` in slices or a timer in the process; its

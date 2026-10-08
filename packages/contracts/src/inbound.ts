@@ -23,12 +23,14 @@
 import { type AppContext, Halt } from "@pikit/core";
 import type { Admission, AgentRuntime, ConversationRef } from "./agent.ts";
 import type { ConversationRegistry } from "./conversations.ts";
+import { DASHBOARD_REQUEST_PREFIX, isDashboardRequest } from "./delivery.ts";
 
 /** One message from a channel, whatever the platform. */
 export interface InboundMessage {
   /**
    * The message's identity: the platform's delivery id, or the client's own message id. It becomes
-   * `AgentRequest.requestId`, so a message delivered twice is the same request.
+   * `AgentRequest.requestId`, so a message delivered twice is the same request. Never one that starts
+   * with `DASHBOARD_REQUEST_PREFIX`: those are the operator's, and `admitInbound` refuses them.
    */
   id: string;
   /** The channel it came from (`http`, `telegram`): the component's channel name. */
@@ -120,8 +122,9 @@ export interface AdmitOptions {
 /**
  * The inbound path after authentication: `inbound.normalize`, `route.resolve`, the
  * conversation, `dispatch`. Resolves once the message is durable (the ack point) or stopped; throws
- * when a stage breaks the path's rules (it changed which message or conversation this is) or when a
- * capability fails, as the channel's own code would.
+ * when the message's id is the dashboard's (`DASHBOARD_REQUEST_PREFIX`: a channel that takes ids from
+ * its clients refuses those first), when a stage breaks the path's rules (it changed which message or
+ * conversation this is), or when a capability fails, as the channel's own code would.
  *
  * **A conversation whose agent is gone** (`dispatch` rejects with `AgentUnavailableError`: removed by a
  * deploy, a live agent deleted) is permanent, so it never throws: the key moves to a new conversation
@@ -130,6 +133,11 @@ export interface AdmitOptions {
  * `denied` with why: its sender is told once, and the platform is acknowledged.
  */
 export async function admitInbound(ctx: AppContext, message: InboundMessage, options: AdmitOptions): Promise<InboundOutcome> {
+  // The operator's request ids are reserved: a channel's message with one would be passed over by
+  // answer delivery, and taken for the operator's in the dashboard.
+  if (isDashboardRequest(message.id)) {
+    throw new Error(`admitInbound: the message id "${message.id}" starts with "${DASHBOARD_REQUEST_PREFIX}", which only the dashboard's own messages may; a channel never admits one`);
+  }
   const normalized = await ctx.run("inbound.normalize", message);
   if (normalized instanceof Halt) return halted("inbound.normalize", normalized);
   // A stage may rewrite the text or enrich the message; which message and conversation it is stays.

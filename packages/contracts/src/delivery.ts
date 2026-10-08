@@ -83,7 +83,8 @@ import type { Wakeups } from "./wakeups.ts";
  * `dashboard:<uuid>`. Such a message enters its conversation (the agent has it in its context) as a
  * follow-up, and its answer is the dashboard's: `startAnswerDelivery` never delivers a run whose every
  * request is one (`isDashboardRequest`), and a channel that answers its senders by request id
- * (channel-http) never has one waiting. A channel's own request ids never start with it.
+ * (channel-http) never has one waiting. A channel's own request ids never start with it: `admitInbound`
+ * refuses a message whose id does.
  */
 export const DASHBOARD_REQUEST_PREFIX = "dashboard:";
 

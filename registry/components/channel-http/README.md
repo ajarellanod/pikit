@@ -31,8 +31,8 @@ the answer is `401`.
 - `conversationId`: your name for the conversation; 1 to 128 of `A-Z a-z 0-9 . _ ~ -`. Each one is
   its own conversation, with its own history.
 - `text`: the message.
-- `messageId` (optional): the message's identity; 1 to 128 of `A-Z a-z 0-9 . _ ~ : -`. It becomes
-  the request id. Send the same `messageId` again to the same conversation and it does not run
+- `messageId` (optional): the message's identity; 1 to 128 of `A-Z a-z 0-9 . _ ~ : -`, never
+  starting with `dashboard:` (the operator's messages, a `400`). It becomes the request id. Send the same `messageId` again to the same conversation and it does not run
   again. Without it, every POST is a new message.
 
 The POST waits for the answer, up to `replyTimeoutMs` (120 s by default):

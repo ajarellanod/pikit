@@ -130,6 +130,13 @@ test("admitInbound: a stage that changes which message or conversation this is b
   expect(e.steps).toEqual([]);
 });
 
+test("admitInbound: a message whose id is the dashboard's is refused before anything runs", async () => {
+  const e = ends();
+  const ctx = await appWith(() => {});
+  await expect(admitInbound(ctx, { ...message, id: "dashboard:x" }, { ...e, key: "test:c1" })).rejects.toThrow('starts with "dashboard:"');
+  expect(e.steps).toEqual([]);
+});
+
 test("admitInbound: beforeDispatch sees the conversation after it resolves and before dispatch", async () => {
   const e = ends();
   const ctx = await appWith(() => {});

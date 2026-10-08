@@ -284,6 +284,7 @@ test("a body that is not a message is a 400", async () => {
     { conversationId: "has spaces", text: "hello" },
     { conversationId: "c/1", text: "hello" },
     { conversationId: "c1", text: "hello", messageId: "" },
+    { conversationId: "c1", text: "hello", messageId: "dashboard:m1" },
     { conversationId: "c1", text: "hello", extra: true },
     [],
   ];
