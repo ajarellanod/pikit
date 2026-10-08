@@ -50,6 +50,8 @@ pikit add <component>...                     # and remove, upgrade, doctor, logs
 
 ## Read next
 
+- [docs/README.md](docs/README.md): how pikit works: concepts, components, contracts, pipelines, a
+  message end to end, targets, the CLI, the dashboard.
 - [MANIFESTO.md](MANIFESTO.md): what pikit is for, and its principles.
 - [SPEC.md](SPEC.md): what must hold (the kernel, contracts, targets, the CLI).
 - [features/README.md](features/README.md): every feature, one note each, and how they are built.
