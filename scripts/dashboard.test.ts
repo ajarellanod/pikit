@@ -24,6 +24,12 @@ test("the dashboard's copy of the admin API's types is admin-api's api.ts, byte 
   expect(read("src/lib/admin-api.ts")).toBe(original);
 });
 
+test("admin-proposals' view keeps its component's api.ts as its types.ts, byte for byte", () => {
+  const component = join(REPO, "registry/components/admin-proposals");
+
+  expect(readFileSync(join(component, "view/types.ts"), "utf8")).toBe(readFileSync(join(component, "files/src/pikit/admin-proposals/api.ts"), "utf8"));
+});
+
 test("its npm packages are pinned to exact versions, so every project builds the same dashboard", () => {
   const manifest = JSON.parse(read("package.json")) as Record<string, Record<string, string> | undefined>;
   const ranges = Object.entries({ ...manifest.dependencies, ...manifest.devDependencies }).filter(([, version]) => !/^\d+\.\d+\.\d+$/.test(version));

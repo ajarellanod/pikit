@@ -19,6 +19,15 @@
       ],
       "path": "components/admin-auth-token"
     },
+    "admin-proposals": {
+      "version": "0.0.0",
+      "description": "The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/admin-proposals"
+    },
     "channel-http": {
       "version": "0.0.0",
       "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",

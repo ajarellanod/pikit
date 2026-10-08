@@ -48,15 +48,21 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      before it proposes, and again in CI.
 3. **The gate, out of the agent's reach:** proposals are pull requests from `pikit/self/*` to the
    main branch of the project's repository on GitHub, on both targets. One path for both, and the
-   one Workers Builds already deploys from.
-   - **Approve in the dashboard:** a "Proposals" view lists them (diff, checks, preview URL),
-     with Approve and Reject. Approve merges through GitHub's API with a merge token
-     (`PIKIT_MERGE_TOKEN`) that only admin-api's operator route reads; the agent's token
-     (`GITHUB_TOKEN`) can push branches and open PRs, never merge. A ruleset on the main branch
-     (no direct push, PR required) holds even if the agent's token leaks.
-   - **Checks:** a GitHub Actions workflow the project ships (`pikit doctor`, `bun test`, the bundle
-     on Cloudflare), whose status the view shows; Approve is refused while they fail, unless the
-     operator overrides it.
+   one Workers Builds already deploys from. **Built:** `admin-proposals` (server and durable; on
+   Cloudflare in both Apps, the Worker's serving its routes).
+   - **Approve in the dashboard:** its "Proposals" view lists them (state, checks, preview URL) and
+     shows each (the agent's description, the diff per file, the checks), with Approve and Reject
+     behind a confirmation. Approve squash-merges through GitHub's API with a merge token
+     (`PIKIT_MERGE_TOKEN`) that only its operator routes read; reads use `GITHUB_TOKEN`, which may
+     be the agent's (push branches, open PRs, never merge); the same token in both is refused. Only
+     a branch under the prefix of the repository itself is a proposal (never a fork's), into the
+     default branch, at the head the operator read. A ruleset on the main branch (no direct push, PR
+     required, the `checks` status required) holds even if the agent's token leaks.
+   - **Checks:** a GitHub Actions workflow the component installs
+     (`.github/workflows/pikit-checks.yml`: install by the project's lockfile, `typecheck`,
+     `bun test`, `wrangler deploy --dry-run` on Cloudflare), whose status the view shows; Approve is
+     refused while they fail, run or never ran, unless the operator overrides it. `pikit doctor` is
+     not in it: the CLI is not a project dependency nor on npm yet.
    - **Deploy:** Cloudflare: Workers Builds deploys the merge (a branch's push already builds a
      Preview). Server: a deployer on the host, outside the container (the app cannot run `docker`
      without root), pulls the main branch and runs `pikit up`; it keeps the previous image.
@@ -83,7 +89,7 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 
 ## In the dashboard
 
-- **Proposals** (a view of the self-change component): open, merged, rejected; each with its diff
+- **Proposals** (`admin-proposals`' view, built): open, merged, rejected; each with its diff
   (files, lines), the agent's description, checks, the preview URL, and Approve / Reject.
 - **The agent shown to itself**: the composition view already exists, from the same description
   `pikit-self` reads.
@@ -91,13 +97,25 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 ## Order
 
 1. `pikit-self`, with the docs (`docs/`): cheap, and everything else uses them. Built.
-2. Proposals on Cloudflare: `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` asked by the button, the
-   project's CI workflow and ruleset, the Proposals view and its Approve route.
+2. Proposals on Cloudflare: the project's CI workflow, the Proposals view and its Approve and
+   Reject routes (**built**: `admin-proposals`, which works on a server too). Left: the template
+   (the component in the preset, `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` asked by the button,
+   execution-do's `git.pushRepositories` set to the repository) and the ruleset, which the
+   operator sets on GitHub.
 3. Rollback on Cloudflare (`wrangler rollback` after a failed health check).
 4. The server: git and Bun in the image, the checkout in the volume, the host deployer.
 
 ## Open questions
 
+- The template's repository: the button forks the template into the operator's account under a
+  name of their choosing, so `admin-proposals.repository` and execution-do's
+  `git.pushRepositories` are not known when the template is built. A variable the button asks
+  (`PIKIT_REPOSITORY`) read at start, or a setup step after the deploy, decides it.
+- The ruleset cannot be made by the button: a setup page (or `pikit configure`) says how, or
+  makes it with the merge token if that token is given the Administration permission (it should
+  not need it otherwise).
+- Rollback after an approved deploy (Order 3) is not built: until it is, a bad merge is undone by
+  reverting it on GitHub (Workers Builds deploys the revert) or `wrangler rollback` by hand.
 - The host deployer: a `pikit deploy-watch` systemd unit (polls GitHub, or a webhook through the
   same tunnel), or a GitHub Action that reaches the host over SSH. The first needs no inbound
   access.

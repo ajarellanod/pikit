@@ -58,6 +58,12 @@
       "description": "The dashboard's delivery view."
     },
     {
+      "name": "admin-proposals",
+      "type": "registry:file",
+      "title": "admin-proposals",
+      "description": "admin-proposals's view: The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow. Its admin API routes come with the component (pikit add admin-proposals)."
+    },
+    {
       "name": "health-registry",
       "type": "registry:file",
       "title": "health-registry",

@@ -107,6 +107,15 @@ there.
   `storage.kv`), which starts over after a calm period. Mark essential only what a restart can fix. It brings the dashboard's Health view (`view/`, the reference component with a view) and its
   route. `channel-telegram`'s bots report their polling: `degraded` after a failed `getUpdates`,
   `down` after 5 in a row.
+- Self-improvement's gate: `admin-proposals` (server and durable; on Cloudflare in both Apps): the
+  agent's pull requests from `pikit/self/*` of the project's repository in the dashboard's Proposals
+  view (state, checks, preview URL; a page per proposal with its description, diff and checks),
+  approved (squash-merged at the head the operator read, into the default branch) or rejected
+  (commented and closed) with `PIKIT_MERGE_TOKEN`, which only those routes read; reads with
+  `GITHUB_TOKEN`; failing, pending or missing checks refuse Approve unless overridden. It installs
+  the project's CI, `.github/workflows/pikit-checks.yml` (typecheck, `bun test`, the Worker's
+  dry-run bundle). `pikit doctor` no longer calls a component whose only use is its routes unused on
+  Cloudflare, where the Worker's host serves them.
 - `outbound-durable` implements `pending` (50 per page, at most 500); a piece cut by a crash records
   why it is sent again.
 - Serving and operating: `server-bun` (`/health` answers `{ status }`, 503 when `health` says `down`; `/ready`), `admin-auth-token` (operators by a bearer

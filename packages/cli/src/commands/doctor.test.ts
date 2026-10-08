@@ -11,6 +11,7 @@ import { join } from "node:path";
 import { OPERATION_MARKER } from "../project/operation.ts";
 import { emptyManifest, hashOf, modifiedFiles, readProjectManifest, writeProjectManifest } from "../project/pikit-json.ts";
 import { runCli } from "../testing/cli.ts";
+import { unusedProviders } from "./doctor.ts";
 
 const dirs: string[] = [];
 afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
@@ -190,4 +191,11 @@ test("a generated file (the manifest's `generated`) is never reported modified; 
   const run = await runCli(["doctor"], dir);
   expect(run.out).toContain(`modified: ${edited} (checked)`);
   expect(run.out).not.toContain(`modified: ${seed}`);
+});
+
+test("a component whose only use is its routes is unused without a server, but not on Cloudflare, where the Worker's host serves them", () => {
+  const components = [{ name: "admin-proposals", provides: ["http.route"], requires: ["admin.auth", "secrets"], optional: [] }];
+
+  expect(unusedProviders(components)).toEqual(["admin-proposals provides http.route, which no component uses: `pikit remove admin-proposals` if you do not need it"]);
+  expect(unusedProviders(components, true)).toEqual([]);
 });

@@ -104,7 +104,7 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
       const listable = existsSync(join(projectDir, "src", "pikit", name, "index.ts")) && !name.startsWith("deployment-");
       if (listable && !result.listed.includes(name)) notes.push(`${name} is installed but not listed in pikit.config.ts`);
     }
-    notes.push(...unusedProviders(result.description.components));
+    notes.push(...unusedProviders(result.description.components, result.worker !== undefined));
     warnings.push(...secretsInConfig(result.description.config, "config"));
     if (result.worker !== undefined) warnings.push(...secretsInConfig(result.worker.config, "workerConfig"));
     problems.push(...brokenReferences(result, undefined, registryProviders(projectDir, project.registries)));
@@ -208,9 +208,14 @@ function registryProviders(projectDir: string, registries: Record<string, string
   };
 }
 
-/** Components that provide capabilities no other component uses: installed, and doing nothing. */
-function unusedProviders(components: Extract<ProbeResult, { ok: true }>["description"]["components"]): string[] {
+/**
+ * Components that provide capabilities no other component uses: installed, and doing nothing. On
+ * Cloudflare (`hostServesRoutes`) the Worker's host, which is no component, serves `http.route`s: a
+ * component in both Apps whose routes the Worker serves (admin-proposals) is not unused.
+ */
+export function unusedProviders(components: Extract<ProbeResult, { ok: true }>["description"]["components"], hostServesRoutes = false): string[] {
   const used = new Set(components.flatMap((c) => [...c.requires, ...c.optional]));
+  if (hostServesRoutes) used.add("http.route");
   return components
     .filter((c) => c.provides.length > 0 && c.provides.every((capability) => !used.has(capability)))
     .map((c) => `${c.name} provides ${c.provides.join(", ")}, which no component uses: \`pikit remove ${c.name}\` if you do not need it`);
