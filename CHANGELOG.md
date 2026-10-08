@@ -51,13 +51,15 @@ there.
   Contracts still without a suite are listed in `features/building-components.md`.
 
 ### Pi adapter (`@pikit/pi-adapter`, the only package that imports Pi)
-- On `@earendil-works/pi-durable` 1.0.3 (with `chord`, `pi-ai` and `pi-mcp` 1.0.3, exact pins):
+- On `@earendil-works/pi-durable` 1.1.0 (with `chord`, `pi-ai` and `pi-mcp` 1.1.0, exact pins):
   `createDurableRuntime` runs `agent.runtime`, `agent.conversations` and `agent.submissions` on one
   pi-durable `Harness` per storage, over `storage.sql` (`openDurableStorage`; pi-durable's storage
   conformance passes on SQLite and on a Durable Object). Messages queued while a run goes are answered
   together by the next run, steers join the run going; settlements are grouped exactly by their
   inputs' commit and logged once in `runtime_pi_answers`. Each conversation sends the provider its own
-  session id, the same on every turn, so prompt caches keyed on it hit.
+  session id, the same on every turn, so prompt caches keyed on it hit. On Cloudflare Workers an idle
+  conversation's context is not kept in memory (`contextRetentionMs: 0`), so no timer keeps a Durable
+  Object alive after a run.
 - `createDurableExecutionConformance` runs pi-durable's `ExecutionEnv` suite (readers, `watch`, argv
   `exec`, output streams) and then pikit's cases it lacks; `watch: false` and `shell: false` leave out
   what an environment does not have.

@@ -22,7 +22,7 @@
 
 # Downloaded references
 
-- `/Users/alex/Projects/Personal/pi` — Pi monorepo (`earendil-works/pi`); read `origin/main` (v1.0.3: `packages/durable`, `packages/chord`, `packages/server`) after `git fetch`, the local `main` checkout is stale.
+- `/Users/alex/Projects/Personal/pi` — Pi monorepo (`earendil-works/pi`); read `origin/main` (v1.1.0: `packages/durable`, `packages/chord`, `packages/server`) after `git fetch`, the local `main` checkout is stale.
 - `/Users/alex/Projects/Personal/beautiful-ui` — Beautiful UI (`slev12397/beautiful-ui`, MIT): the primitives and the harness the dashboard's look is ported from (`components/primitives`, `components/atoms`, `components/site/IceCreamHarness.tsx`, `app/globals.css`); live at https://www.beautifului.dev/harness. Its `SidebarNav` icons (`@central-icons-react`) are paid: never install them.
 - `/Users/alex/Projects/Personal/comark` — Comark (`comarkdown/comark`, MIT), the dashboard's markdown engine (`comark`, `@comark/react`, pinned 0.7.0): `docs/content/3.rendering/5.react.md`, `packages/comark-react/src/components`. `<Markdown>` is an async (server) component: in the dashboard parse with `parseMarkdown` and render `MarkdownDocument`.
 - `/Users/alex/Projects/Personal/shadcn-ui` — shadcn CLI and registry (sparse: `packages/shadcn`, `packages/registry`, `apps/v4/content/docs/registry`), checked at 4.21.1.

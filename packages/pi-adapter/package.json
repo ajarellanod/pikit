@@ -72,6 +72,7 @@
     "./api/mistral-conversations": "./src/api/mistral-conversations.ts",
     "./api/openai-codex-responses": "./src/api/openai-codex-responses.ts",
     "./api/openai-completions": "./src/api/openai-completions.ts",
+    "./api/openai-decisions": "./src/api/openai-decisions.ts",
     "./api/openai-responses": "./src/api/openai-responses.ts",
     "./api/openrouter-images": "./src/api/openrouter-images.ts",
     "./api/pi-messages": "./src/api/pi-messages.ts",
@@ -84,10 +85,10 @@
     "bun": ">=1.4.0"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.0.3",
-    "@earendil-works/pi-ai": "1.0.3",
-    "@earendil-works/pi-durable": "1.0.3",
-    "@earendil-works/pi-mcp": "1.0.3",
+    "@earendil-works/chord": "1.1.0",
+    "@earendil-works/pi-ai": "1.1.0",
+    "@earendil-works/pi-durable": "1.1.0",
+    "@earendil-works/pi-mcp": "1.1.0",
     "@pikit/contracts": "workspace:*",
     "@pikit/core": "workspace:*"
   }

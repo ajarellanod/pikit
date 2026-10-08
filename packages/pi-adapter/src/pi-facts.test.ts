@@ -1,5 +1,5 @@
 /**
- * Facts about @earendil-works/pi-durable 1.0.3 that the durable runtime (`runtime.ts`) relies on,
+ * Facts about @earendil-works/pi-durable 1.1.0 that the durable runtime (`runtime.ts`) relies on,
  * asserted on pi-durable directly (a `MemoryStorage`, pi-ai 1.0's faux provider), so a Pi bump that
  * changes one fails here before it breaks the runtime. Each names what depends on it.
  */
@@ -85,7 +85,7 @@ async function open(
   return { harness, conversation, faux, changes, submissions, commitOf };
 }
 
-describe("pi-durable facts (1.0.3)", () => {
+describe("pi-durable facts (1.1.0)", () => {
   test("a known requestId returns its submission and commits nothing; another type under it throws (duplicate admission)", async () => {
     const { harness, conversation, changes } = await open([fauxAssistantMessage("one")]);
     const first = await conversation.submit({ type: "input", content: "hello", requestId: "r1" }, ctx);

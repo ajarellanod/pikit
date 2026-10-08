@@ -79,6 +79,16 @@ import { isSettledInput, type SettledInput, settlementOf, toResult } from "./res
 import { openDurableStorage } from "./sql.ts";
 import { ABANDONED, AdmissionsDoc, announced, durableId, runKey, runsOf, storedRunsOf } from "./submissions.ts";
 
+/**
+ * Settings pi-durable gets on Cloudflare Workers, under the host's. pi-durable keeps an idle
+ * conversation's context for `contextRetentionMs` (ten minutes) behind a timer it unreferences, and keeps
+ * none where timers cannot be unreferenced. workerd with `nodejs_compat` returns Node timers whose `unref`
+ * does nothing, so the timer would keep a Durable Object alive (and `evictDurableObject` waits for it):
+ * there the context is dropped once the conversation is idle (docs/upstream, proposal 18).
+ */
+const WORKERS_SETTINGS: Partial<HarnessSettings> =
+  typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers" ? { contextRetentionMs: 0 } : {};
+
 export interface DurableRuntimeOptions {
   /**
    * The app's `storage.sql` (SQLite: storage-sqlite, storage-do). pi-durable's storage is opened over it
@@ -372,7 +382,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         // other inputs: live and answered runs are still grouped exactly (by the settling commit, by
         // the answer), but a failed run that took a steer, found after a crash, is grouped by placing
         // commit and its steer announced apart (submissions.ts says how steers will be grouped).
-        settings: { ...options.settings, steeringMode: "all", followUpMode: "all" },
+        settings: { ...WORKERS_SETTINGS, ...options.settings, steeringMode: "all", followUpMode: "all" },
         ...(env !== undefined && { env }),
         now,
         onReport: (error) => logger.warn("pi-durable reported a failure", { error: error instanceof Error ? error.message : String(error) }),

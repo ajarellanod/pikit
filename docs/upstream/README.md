@@ -25,15 +25,19 @@ here with the Pi version.
 | 14 | pi-ai | [Provider SDKs as hard dependencies](#14-pi-ai-provider-sdks-as-hard-dependencies) | Every project installs every provider's SDK | low | **declined** ([#2297](https://github.com/earendil-works/pi/issues/2297), [#5053](https://github.com/earendil-works/pi/issues/5053)): not to send |
 | 15 | pi-durable | [`abortSubmission` with a reason](#15-abortsubmission-with-a-reason) | `abandon` repeats `abortSubmission` with its own reason | low | note (here) |
 | 16 | pi-durable | [No time on a submission](#16-no-time-on-a-submission) | pikit keeps admission times in `pikit.admissions` | low | note (here) |
-| 17 | pi-durable | [Conversations newest first](#17-conversations-newest-first) | The dashboard reads every page to show the latest conversations first | low | draft (here) |
+| 17 | pi-durable | [Conversations newest first](#17-conversations-newest-first) | The dashboard reads every page to show the latest conversations first | low | **partly shipped** in pi-durable 1.1.0 ([#10546](https://github.com/earendil-works/pi/issues/10546)): newest first by creation, not by last activity |
+| 18 | pi-durable | [Idle-context timer on workerd](#18-idle-context-timer-on-workerd) | A Durable Object would stay alive ten minutes after each run | medium | candidate issue (here); worked around in the adapter |
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
-([storage-postgres](../../features/storage-postgres.md)), and a Durable Object example (pikit's
-`storage-do` + `openDurableStorage`, proven with pi-durable's storage conformance). pi-durable 1.0.3
-ships its own `ExecutionEnv` suite (`createEnvConformance`); pikit runs it and keeps only the cases it
+([storage-postgres](../../features/storage-postgres.md)). A Durable Object example is no longer one:
+pi-durable 1.1.0 ships `openDurableObjectSqliteStorage`. pikit keeps `storage-do` +
+`openDurableStorage`, because pi's adapter queues its own work on `ctx.storage` apart from
+`storage.sql`'s line, which pikit's own tables share. pi-durable ships its own `ExecutionEnv` suite (`createEnvConformance`); pikit runs it and keeps only the cases it
 lacks (`packages/pi-adapter/src/testing/execution.ts`), which could be offered to it.
 
-Re-checked against pi-durable 1.0.3 (2026-10-05): only proposal 6 is solved; 1 to 5 and 7 are not.
+Re-checked against pi-durable 1.1.0 (2026-10-08): proposal 17 is partly solved (descending scans);
+1 to 5, 7 and 16 are not (1.1.0 times tasks, `startedAt`/`endedAt`, not submissions). 1.1.0 brought
+proposal 18.
 
 **Tracked, not commented:** [#10325](https://github.com/earendil-works/pi/issues/10325)
 (proposal 1). The owner decided (2026-10-07) not to comment; check it at each pin bump. Nothing is
@@ -188,7 +192,7 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
 - **Ask.** An optional peer dependency, or the bundler in its own package.
 - **Outcome: declined.** Asked by someone else as
   [#9225](https://github.com/earendil-works/pi/issues/9225) (2026-09-06), auto-closed `not planned`
-  with `no-action` and never reopened. Not to be sent again; Chord 1.0.3 still has it.
+  with `no-action` and never reopened. Not to be sent again; Chord 1.1.0 still has it.
 
 ## 10. Chord: a stability statement
 - **Problem.** Chord is 1.0 by lockstep versioning with Pi, while its `PLANNING.md` says it is not a
@@ -301,6 +305,29 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   `agent.observe` at start and updated on every dispatch and run: a second record pi-durable could
   make unnecessary.
 - **Ask.** A descending scan (`order: "desc"` on `ConversationQuery`), or a scan by last activity.
+- **Outcome: partly shipped.** Not sent by pikit: pi-durable 1.1.0 added `order: "descending"` to
+  conversation, entry, task and submission scans ([#10546](https://github.com/earendil-works/pi/issues/10546)).
+  That is newest first by creation; the dashboard lists by last activity, so admin-api's index stays.
+  `agent.observe` could page newest first with it, if its contract ever asks.
+
+## 18. Idle-context timer on workerd
+- **Problem.** pi-durable 1.1.0 keeps an idle conversation's context in memory for
+  `settings.contextRetentionMs` (ten minutes) and drops it from a `setTimeout` it unreferences. Where
+  timers cannot be unreferenced it keeps none, and it tells by `typeof timer.unref !== "function"`.
+  workerd with `nodejs_compat` (compatibility date 2026-09-01, pikit's) returns Node timers whose
+  `unref` exists and does nothing, so the timer stays: it keeps a Durable Object alive about ten
+  minutes after each run, and `evictDurableObject` waits for it.
+- **Evidence.** `harness/scheduler.js`, `#scheduleExpiry`. In the workerd lane, `setTimeout` returns
+  an object with an `unref` function; on 1.1.0 without the workaround, `direct-delivery.workerd.ts`
+  and `runtime-answers.workerd.ts` time out at their eviction (they pass on 1.0.3).
+- **pikit meanwhile.** The adapter sets `contextRetentionMs: 0` on Workers
+  (`WORKERS_SETTINGS`, `packages/pi-adapter/src/runtime.ts`): the context is dropped once the
+  conversation is idle. A host's own `settings` still override it.
+- **Ask.** Tell Workers apart without `unref` (for example `navigator.userAgent ===
+  "Cloudflare-Workers"`), or never keep a retention timer and check expiry at task changes only, as
+  pi-durable already does where it keeps none.
+- **To delete when it ships:** `WORKERS_SETTINGS` in `runtime.ts`; the workerd lane stays.
+- **If sent:** a concrete bug with a short repro and a one-line fix, the kind #10188 was.
 
 ---
 
@@ -331,5 +358,6 @@ Rules for pikit:
   `lgtmi` from a maintainer keeps future issues open, `lgtm` also allows PRs. We have neither yet.
 - Avoid Friday to Sunday: issues then may be missed.
 
-Next candidate, if any: proposal 2 (queued inputs stuck after a failed run) reads as a bug, but
+Next candidate, if any: proposal 18 (the idle-context timer on workerd), a concrete bug with a repro,
+when the owner decides. Proposal 2 (queued inputs stuck after a failed run) reads as a bug, but
 pi-durable's README documents it as the behaviour, so ask on Discord before opening an issue.

@@ -61,10 +61,10 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **When:** the other skills with what they teach (adding a view with the dashboard).
 
 ## Chord: through the adapter and components, never in `@pikit/core`
-- **Decided (re-checked against Chord 1.0.3, which changed nothing since 1.0.0 but its version):** `@pikit/core` stays, and Chord does not enter the
+- **Decided (re-checked against Chord 1.1.0, which changed nothing since 1.0.0 but its version and a dev dependency):** `@pikit/core` stays, and Chord does not enter the
   kernel. The kernel's only runtime dependency is `typebox` (SPEC §3); `Context` is pikit's own and
   frozen (K5), matching Chord's shape and bridged by the adapter (`toChord`).
-- **Why, with Chord 1.0.3:** portability is no longer the objection (it runs in Bun and in bare
+- **Why, with Chord 1.1.0:** portability is no longer the objection (it runs in Bun and in bare
   workerd). What remains:
   - its 1.0 is 1.0 in name, not stable: it comes from Pi's lockstep versioning, and Chord's
     `PLANNING.md` says it is not a stable public contract, while the kernel promises 1.x (K8, P7);

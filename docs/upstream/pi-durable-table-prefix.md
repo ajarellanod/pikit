@@ -1,6 +1,6 @@
 # Proposal for pi-durable: a table prefix for `SqliteStorage`
 
-Status: draft for upstream (`@earendil-works/pi-durable`, against 1.0.3). From pikit, whose
+Status: draft for upstream (`@earendil-works/pi-durable`, against 1.1.0). From pikit, whose
 components share one SQL database per app (a SQLite file on a server, a Durable Object's SQLite on
 Cloudflare).
 

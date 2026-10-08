@@ -1,6 +1,6 @@
 # Proposal for pi-durable: place queued inputs when a run fails
 
-Status: draft for upstream (`@earendil-works/pi-durable`, against 1.0.3). From pikit, which runs Pi
+Status: draft for upstream (`@earendil-works/pi-durable`, against 1.1.0). From pikit, which runs Pi
 agents behind chat channels.
 
 ## Problem

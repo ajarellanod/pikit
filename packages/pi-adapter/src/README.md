@@ -1,7 +1,7 @@
 # @pikit/pi-adapter: Pi (pi-durable 1.0) behind pikit's contracts
 
 The only package that imports Pi: `@earendil-works/pi-durable`, `@earendil-works/chord`,
-`@earendil-works/pi-ai` and `@earendil-works/pi-mcp`, all exactly `1.0.3`. It implements
+`@earendil-works/pi-ai` and `@earendil-works/pi-mcp`, all exactly `1.1.0`. It implements
 `agent.runtime` on pi-durable's `Harness`, opens pi-durable's storage over pikit's `storage.sql`, and
 gives components Pi's tools, models, MCP client and execution environments by subpath.
 
