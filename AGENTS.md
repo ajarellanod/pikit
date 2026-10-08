@@ -21,6 +21,37 @@
 - The user's Cloudflare test bot is `/Users/alex/Projects/Personal/pikit-telegram-cloudflare`, deployed as the Worker `pikit-telegram-bot-dash` (its `wrangler.jsonc` says `pikit-telegram-bot`). To ship this checkout's changes there: `bun scripts/template.ts telegram-cloudflare ../pikit-telegram-cloudflare` (regenerates it, packing `vendor/*.tgz` from `packages/`: copying files is not enough for package changes), then `npm ci` and `npx wrangler deploy --name pikit-telegram-bot-dash` there. Never `npm run deploy`: it deploys another Worker name.
 - To repair a stray six-character `\u00a7` from `js_exec`, never write it as a string literal there: a `'\\u00a7'` in the code arrives unescaped (it is `§`) and matches nothing. Build it: `String.fromCharCode(92) + "u00a7"`, check the match count, replace, then `grep -c u00a7` the files.
 
+# Contract rules
+
+When adding or changing a contract in `@pikit/contracts`, a Pi-typed contract in `@pikit/pi-adapter`,
+or a registry's own contract:
+
+1. Real usage first. Add a contract, method or field only with the component that produces or
+   consumes it. No speculative generality.
+2. Right layer. Shared vocabulary in `@pikit/contracts`; Pi's shapes in the adapter; a feature's own
+   contract with its defining component; nothing domain-specific in `@pikit/core`. Platform handles
+   (`WORKERS_HOST`) live behind their own subpath.
+3. Depend on the narrowest contract that states the intent. Never reach for a lower-level capability
+   or duplicate config that a contract already carries (execution-do pushes to `proposals.remote()`,
+   with its `branchPrefix`, never to `github` with a prefix of its own).
+4. Guarantees, not policy. Contracts state observable guarantees; components choose policy. Shared
+   helpers implement protocol, with policy passed in.
+5. Every stated invariant is enforced in one shared place (the helper, the provider entrypoint) and
+   covered by a test. A rule only written in a comment is a bug (the `dashboard:` request ids were
+   "never" used by channels until `admitInbound` refused them).
+6. Trace the whole flow. Every supported field survives normalization, dispatch, persistence and
+   delivery, or the contract says it does not.
+7. Prove it. A runner-independent conformance suite checks the public behaviour, with negative cases
+   for authorization, approval gates, data loss and duplicates. Fixtures never bypass a guarantee for
+   every case (an `override` on every approval hid `checks_failing`). Check a new case catches a
+   broken provider (mutate it, see the case fail, restore). Run it on a real provider of each
+   supported target (workerd for `durable`).
+8. Stability needs two independent providers passing the suite (or SPEC's decision for
+   project-provided contracts). One provider on two targets is not two.
+9. Update exports, the capability catalogue (`packages/cli/src/registry/capabilities.ts`),
+   `docs/contracts.md`, SPEC and every affected README in the same change, then `bun run registry
+   generate` and `validate`; report what the tests do not cover.
+
 # Downloaded references
 
 - `/Users/alex/Projects/Personal/pi` — Pi monorepo (`earendil-works/pi`); read `origin/main` (v1.1.0: `packages/durable`, `packages/chord`, `packages/server`) after `git fetch`, the local `main` checkout is stale.

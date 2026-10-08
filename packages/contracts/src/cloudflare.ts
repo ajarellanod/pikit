@@ -32,7 +32,12 @@ export interface WorkersHost {
    * Telegram webhook) reads it, since a Worker is never told its own public URL.
    */
   origin?: string;
-  /** Only in a Durable Object's App. */
+  /**
+   * Only in a Durable Object's App. Each of `onAlarm`, `onDeliver` and `onCall` takes one handler per
+   * App: the object has one alarm and one RPC entry, so one component multiplexes each (`wakeups` the
+   * alarm, `actor.inbox` the deliveries and calls). A second registration throws, naming what is taken;
+   * the next App (after a reset) registers again.
+   */
   object?: {
     /** The object's id, as `DurableObjectId.toString()` gives it. */
     id: string;
