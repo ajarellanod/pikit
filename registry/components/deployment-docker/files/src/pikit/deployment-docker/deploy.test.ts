@@ -5,10 +5,10 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { Runner } from "./commands.ts";
+import { type Runner, spawnRunner } from "./commands.ts";
 import { deploy, deployOnce, install, probeHealth, serviceName, systemdUnit, watch, type WatchOptions } from "./deploy.ts";
 
 const dirs: string[] = [];
@@ -253,4 +253,43 @@ test("probeHealth wants a 200, tries again, and gives up", async () => {
     throw new TypeError("connection refused");
   }) as unknown as typeof fetch;
   expect(await probeHealth({ fetch: refused, attempts: 2, delayMs: 1 })).toBe(false);
+});
+
+test("with real git: a merge on the remote is fetched and fast-forwarded; a rollback returns the checkout to the deployed commit", async () => {
+  const root = project();
+  const real = async (args: string[], cwd: string) => {
+    const result = await spawnRunner(["git", "-c", "user.name=t", "-c", "user.email=t@t", ...args], { cwd, capture: true });
+    if (result.code !== 0) throw new Error(`git ${args.join(" ")} exited with ${result.code}`);
+    return result.stdout.trim();
+  };
+  await real(["init", "--quiet", "--bare", "--initial-branch=main", "origin.git"], root);
+  await real(["init", "--quiet", "--initial-branch=main", "author"], root);
+  const author = join(root, "author");
+  await real(["remote", "add", "origin", join(root, "origin.git")], author);
+  const commit = async (file: string) => {
+    writeFileSync(join(author, file), file);
+    await real(["add", file], author);
+    await real(["commit", "--quiet", "-m", file], author);
+    await real(["push", "--quiet", "origin", "HEAD:main"], author);
+    return real(["rev-parse", "HEAD"], author);
+  };
+  const first = await commit("first");
+  await real(["clone", "--quiet", "origin.git", "host"], root);
+  const host = join(root, "host");
+  // git runs for real; docker, bun and pikit are faked.
+  const { run: fake } = fakeHost();
+  const run: Runner = (command, opts) => (command[0] === "git" ? spawnRunner(command, opts) : fake(command, opts));
+
+  const healthy = options(host, run);
+  expect(await deployOnce(healthy.options)).toBe("unchanged");
+  const second = await commit("second");
+  expect(await deployOnce(healthy.options)).toBe("deployed");
+  expect(await real(["rev-parse", "HEAD"], host)).toBe(second);
+
+  const third = await commit("third");
+  const unhealthy = options(host, run, { health: async () => false });
+  expect(await deployOnce(unhealthy.options)).toBe("rolled back");
+  expect(await real(["rev-parse", "HEAD"], host)).toBe(second);
+  expect(state(host)).toEqual({ deployed: second, failed: third });
+  expect(first).not.toBe(second);
 });

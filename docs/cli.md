@@ -154,6 +154,20 @@ Delegated to the installed `deployment-*` component's exported functions
 `up` runs right before the build) and checks model credentials where the app runs. `restart` exists
 only where the deployment exports it (Docker).
 
+## pikit deploy watch | install
+
+```
+pikit deploy watch | install [--interval <seconds>]
+```
+
+The deployment's optional `deploy` export, given this CLI as it was run (`cli`) and stopped by
+SIGTERM or SIGINT. deployment-docker's is the deployer on the host for self-improvement: `watch`
+polls the checkout's upstream every `--interval` seconds (60) and deploys each new commit with
+`pikit up`, rolling back to the previous image when it fails or `/health` does not answer;
+`install` writes and enables a systemd user service that runs `watch`
+([its README](../registry/components/deployment-docker/README.md#the-deployer-deployts-pikit-deploy-watch--install)).
+On Cloudflare there is none (Workers Builds deploys a merge).
+
 ## pikit registry
 
 ```
@@ -172,7 +186,7 @@ defaults to `registry/`.
 
 ## Not built
 
-`init`, `create`, `outdated`, `diff`, `config`, `expose` and `deploy` answer "not built yet" (some
+`init`, `create`, `outdated`, `diff`, `config` and `expose` answer "not built yet" (some
 with the design note that specifies them) and exit 1. [features/cli-features.md](../features/cli-features.md)
 is a design note.
 

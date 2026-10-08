@@ -50,6 +50,11 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
 - **Limits.** One process per storage: conversations-kv's guarantees across two processes are weaker
   (one replica is the supported setup). Tools run as the server's user: `tool-bash` is a real shell.
 - **Dev.** `pikit dev` runs `main.ts` with `bun --watch` and `.env` loaded.
+- **Self-improvement.** The steward's checkout is in `.pikit/workspace` (the volume), with
+  execution-local's own `git` (fenced pushes, the token never in the shell; on a server the shell can
+  still read the process's environment: its README says what that means). Approved proposals are
+  merges, deployed from the host by `pikit deploy watch` (a systemd user service, `pikit deploy
+  install`): `git fetch`, `pikit up`, back to the previous image when unhealthy.
 
 ## durable (Cloudflare)
 
@@ -95,7 +100,7 @@ A `deployment-*` component runs the App instead of running in it: no default exp
 `pikit.config.ts`. The CLI delegates `pikit up | down | restart | logs | status` to the functions its
 `src/pikit/<name>/index.ts` exports (`DeploymentModule`,
 [deployment-module.ts](../packages/cli/src/project/deployment-module.ts)); `dev` and `exec` are
-optional exports. A project has exactly one.
+optional exports, and so is `deploy` (`pikit deploy watch | install`). A project has exactly one.
 
 | Function | deployment-docker | deployment-cloudflare |
 |---|---|---|
@@ -106,6 +111,7 @@ optional exports. A project has exactly one.
 | `status` | containers, `/health`, `/ready` | `wrangler deployments list`, `/health` |
 | `dev` | not exported (the CLI runs `main.ts --watch`) | `wrangler dev` |
 | `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | not exported |
+| `deploy` | the host deployer: polls the main branch, `pikit up` each new commit, back to the previous image when unhealthy; `install`: a systemd user service | not exported (Workers Builds deploys a merge) |
 
 The dashboard is built by every deploy of a project with `src/dashboard/`: in a stage of the Docker
 image, or by `wrangler.jsonc`'s `build.command` ([dashboard.md](dashboard.md)).

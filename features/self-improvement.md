@@ -109,7 +109,20 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
    execution-do's `git.pushRepositories` set to the repository) and the ruleset, which the
    operator sets on GitHub.
 3. Rollback on Cloudflare (`wrangler rollback` after a failed health check).
-4. The server: git and Bun in the image, the checkout in the volume, the host deployer.
+4. The server: **built**, but for `pikit configure`'s part (the repository and the tokens, being
+   built there).
+   - **git:** `execution-local` has execution-do's `git` (isomorphic-git, run by the server; the
+     shell reaches it through a `git` program on its `PATH`): same commands, same fences, the token
+     read through `secrets` and never a command's variable. So the image needs no `git` binary; Bun
+     is already there for `bun install` and `bun test` in the checkout. Not protected: a command can
+     read the process's environment (`/proc/<pid>/environ`), both GitHub tokens included
+     (execution-local's README).
+   - **The checkout** is in `.pikit/workspace` (the `pikit-state` volume).
+   - **The deployer:** `pikit deploy watch` (deployment-docker's `deploy`), as a systemd user
+     service (`pikit deploy install`). It polls (`git fetch`, every 60 s), keeps the running image
+     as `<image>:pikit-previous`, fast-forwards, `bun install`, `pikit up`, checks `/health`; on a
+     failure it runs the previous image again, returns the checkout, and does not retry that
+     commit. A hook (`irreversible`) can forbid a rollback; none is known on a server.
 
 ## Open questions
 
@@ -122,9 +135,10 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
   not need it otherwise).
 - Rollback after an approved deploy (Order 3) is not built: until it is, a bad merge is undone by
   reverting it on GitHub (Workers Builds deploys the revert) or `wrangler rollback` by hand.
-- The host deployer: a `pikit deploy-watch` systemd unit (polls GitHub, or a webhook through the
-  same tunnel), or a GitHub Action that reaches the host over SSH. The first needs no inbound
-  access.
+- The host deployer: decided, `pikit deploy watch`, polling, as a systemd user service (no inbound
+  access, no webhook). Left: a GitHub Action over SSH for hosts that prefer a push; and real
+  isolation of the agent's commands from the app's environment on a server (another user or
+  another container, features/sandboxed-execution.md), which the tokens' safety there waits for.
 - A project made by `pikit new` has no GitHub repository: `pikit configure` could create one
   (`gh repo create`), or self-improvement stays off until the operator connects one.
 - Preview on the server: none for now (the diff and the checks only).
