@@ -88,6 +88,10 @@ test.skipIf(!E2E)(
     expect(readFileSync(join(project, "README.md"), "utf8")).toContain(`It runs from the kit's checkout at \`${PIKIT_ROOT}\``);
     // Portable: the registry is this CLI's, by name, not by this machine's path.
     expect(manifest.registries).toEqual({ default: "builtin" });
+    // On a server the project is a git repository on main, everything committed: the deployer merges there.
+    expect((await git("symbolic-ref", "--short", "HEAD")).out.trim()).toBe("main");
+    expect((await git("status", "--porcelain")).out).toBe("");
+    expect((await git("log", "--format=%s")).out.trim()).toBe("pikit new my-agent");
     // The skills for the user's AI agent come with every project, saying where the kit is.
     for (const skill of ["pikit-component", "pikit-extension"]) {
       const text = readFileSync(join(project, ".agents", "skills", skill, "SKILL.md"), "utf8");
@@ -213,9 +217,9 @@ test.skipIf(!E2E)(
 test.skipIf(!E2E)(
   "P3: add then remove leaves no trace, and remove refuses to leave a required capability unprovided",
   async () => {
-    expect((await git("init", "-q")).code).toBe(0);
+    // `pikit new` made the repository; what the steps above changed is committed too.
     expect((await git("add", "-A")).code).toBe(0);
-    expect((await git("commit", "-qm", "new")).code).toBe(0);
+    expect((await git("commit", "-qm", "configured", "--allow-empty")).code).toBe(0);
 
     // server-bun brings an npm dependency only it uses (hono); channel-http brings a variable. server-bun
     // goes with channel-http out first: remove refuses to leave its route with no server.
@@ -277,7 +281,7 @@ test.skipIf(!E2E)(
 test.skipIf(!E2E)(
   "pikit new with two channels, every feature the preset offers and the dashboard: doctor is green once configured",
   async () => {
-    const features = ["router-rules", "agents-live", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"];
+    const features = ["router-rules", "agents-live", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry", "admin-proposals"];
     const args = ["new", "many", "--preset", "telegram", "--with", "channel-telegram", "--with", "channel-http", ...features.flatMap((f) => ["--with", f]), "--ui"];
     const created = await pikit(args, { cwd: parent });
     expect(created.err).not.toContain("✗");
@@ -290,6 +294,13 @@ test.skipIf(!E2E)(
     for (const section of ["agents-live", "router-rules"]) expect(existsSync(join(many, "src/dashboard/src/settings", section, "index.tsx"))).toBe(true);
     // Telegram's durable delivery comes with it, as with `pikit add`.
     expect(components).toContain("outbound-durable");
+    // Self-improvement, a group: its provider on a server, its section; the steward gets a shell, the
+    // deployer's service is in compose.yaml, and the project is a git repository.
+    expect(components).toContain("proposals-local");
+    expect(existsSync(join(many, "src/dashboard/src/settings/admin-proposals/index.tsx"))).toBe(true);
+    expect(readFileSync(join(many, "src/agents/assistant/agent.ts"), "utf8")).toContain('"bash"');
+    expect(readFileSync(join(many, "compose.yaml"), "utf8")).toContain("  deployer:\n");
+    expect(existsSync(join(many, ".git"))).toBe(true);
 
     writeFileSync(
       join(many, ".env"),

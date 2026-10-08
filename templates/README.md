@@ -8,7 +8,7 @@ commit it was made from.
 
 | Template | Made from | Published at |
 |---|---|---|
-| `telegram-cloudflare` | `pikit new pikit-telegram-bot --target durable --preset telegram-cloudflare --ui --with admin-proposals` | `github.com/ajarellanod/pikit-telegram-cloudflare` |
+| `telegram-cloudflare` | `pikit new pikit-telegram-bot --target durable --preset telegram-cloudflare --ui --with admin-proposals` (with `proposals-github`) | `github.com/ajarellanod/pikit-telegram-cloudflare` |
 
 ## Making one
 
@@ -89,8 +89,8 @@ its webhook with its own secret (the build has none). Besides, each version chec
 first HTTPS request (`channel-telegram-webhook`'s README, "Registering the webhook"), and the
 template's README tells its user to open `/telegram/setup` if the build did not.
 
-**Self-improvement, connected after deploying.** The template has `admin-proposals` and `github-app`
-(the preset's feature group, `--with admin-proposals`), dormant: the button cannot know the repository
+**Self-improvement, connected after deploying.** The template has `admin-proposals`, `proposals-github` and
+`github-app` (the preset's feature group, `--with admin-proposals`), dormant: the button cannot know the repository
 it is about to create, and a GitHub token is not something to ask of a person deploying a bot for the
 first time. So the form stays short (`notAsked` says why for each token) and the App starts without
 them. The operator connects GitHub from the dashboard's Settings → GitHub in two clicks: a GitHub App

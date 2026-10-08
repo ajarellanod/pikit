@@ -2,7 +2,7 @@ import { expect, test } from "bun:test";
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { KIT_REPOSITORY, PIKIT_ROOT } from "../paths.ts";
-import { agent, BUNFIG, introduction, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterExtensions, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
+import { agent, BUNFIG, introduction, NEEDS_DASHBOARD, PROJECT_REGISTRY, readme, SKILLS_DIR, skillFiles, starterExtensions, starterTools, tsconfig, upText, withKitLocation } from "./starter.ts";
 
 test("a project is ready for a registry of its own and a dashboard: tsc and bun test leave registry/ and src/dashboard/ out, and its lib has ES2023", () => {
   const config = JSON.parse(tsconfig()) as { compilerOptions: { lib: string[] }; exclude: string[] };
@@ -90,6 +90,13 @@ test("on a server the starter agent does not name bash, even installed, and says
   expect(durable).toContain("read, write and edit files there, and to run commands in it.");
   expect(durable).not.toContain("installed but not named");
   expect(starterTools(["read"], "server")).toEqual(["read"]);
+
+  // Self-improvement on a server needs a shell: with proposals-local the steward names bash.
+  const steward = agent(installed, "faux/echo", [], "server", [], ["tool-bash", "proposals-local", "admin-proposals"]);
+  expect(steward).toContain('tools: ["read","write","edit","bash"],');
+  expect(steward).toContain("and to run commands in it.");
+  expect(steward).not.toContain("installed but not named");
+  expect(NEEDS_DASHBOARD).toContain("admin-proposals");
 });
 
 test("the README says what `pikit up` does by the installed deployment, never by the target", () => {
