@@ -118,6 +118,9 @@ const Config = Type.Object({
  */
 const ENVIRONMENT_TOOLS: ReadonlySet<string> = new Set(["read", "write", "edit", "bash"]);
 
+/** The extensions only the steward may name (SPEC §6): never a live agent's, which is never the steward. */
+const STEWARD_EXTENSIONS: ReadonlySet<string> = new Set(["pikit-self"]);
+
 /** The wakeup handler that drives this worker's runs, with `wakeups` installed. */
 export const DRIVE = "runtime-pi.drive";
 
@@ -190,6 +193,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           for (const agent of await source.list(ctx)) {
             if (agents.get(agent.name) !== undefined) continue;
             let problem: string | undefined;
+            const stewards = (agent.extensions ?? []).filter((name) => STEWARD_EXTENSIONS.has(name));
             try {
               const definition = defineAgent({
                 name: agent.name,
@@ -198,7 +202,13 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
                 ...(agent.tools !== undefined && { tools: agent.tools }),
                 ...(agent.extensions !== undefined && { extensions: agent.extensions }),
               });
-              problem = problemOf(definition);
+              // Never the steward (SPEC §6): the data has no such field, and names no steward's extension.
+              problem =
+                (agent as { steward?: unknown }).steward !== undefined
+                  ? `agent "${agent.name}" is marked steward; a live agent never is`
+                  : stewards.length > 0
+                    ? `agent "${agent.name}" names "${stewards[0]}", which only the steward may name; a live agent never is the steward`
+                    : problemOf(definition);
               if (problem === undefined) found.set(agent.name, definition);
             } catch (error) {
               problem = error instanceof Error ? error.message : String(error);

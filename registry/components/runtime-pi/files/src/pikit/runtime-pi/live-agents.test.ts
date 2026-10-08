@@ -138,7 +138,12 @@ test("a live agent answers with no restart, as the directory says it is now; the
 
 test("a name that is no agent, or a live agent that cannot run here, fails its admission saying why; start checked neither", async () => {
   const parts = project();
-  parts.agents.push({ name: "shell", model: "faux/scripted", tools: ["bash"] }, { name: "elsewhere", model: "gone/model" });
+  parts.agents.push(
+    { name: "shell", model: "faux/scripted", tools: ["bash"] },
+    { name: "elsewhere", model: "gone/model" },
+    { name: "knows", model: "faux/scripted", extensions: ["pikit-self"] },
+    { name: "boss", model: "faux/scripted", steward: true } as DirectoryAgent,
+  );
   const { app, conversation, dispatch } = await started([parts.component]);
 
   await expect(dispatch(await conversation("nobody"), "r1", "hi")).rejects.toThrow(
@@ -146,6 +151,9 @@ test("a name that is no agent, or a live agent that cannot run here, fails its a
   );
   await expect(dispatch(await conversation("shell"), "r2", "hi")).rejects.toThrow('runtime-pi: live agent "shell" names the tool "bash", which no agent.tool provides');
   await expect(dispatch(await conversation("elsewhere"), "r3", "hi")).rejects.toThrow('runtime-pi: live agent "elsewhere" names model "gone/model", which no model.provider provides');
+  // Never the steward (SPEC §6): not marked so, and not naming what only the steward may.
+  await expect(dispatch(await conversation("knows"), "r4", "hi")).rejects.toThrow('runtime-pi: live agent "knows" names "pikit-self", which only the steward may name');
+  await expect(dispatch(await conversation("boss"), "r5", "hi")).rejects.toThrow('runtime-pi: live agent "boss" is marked steward; a live agent never is');
   await app.stop();
 }, 30_000);
 

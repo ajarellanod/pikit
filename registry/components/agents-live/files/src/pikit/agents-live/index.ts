@@ -7,7 +7,8 @@
  *
  * - **An agent** is a name (kebab-case), a description, a system prompt, a model (one an installed
  *   `model.provider` has), and tools and extensions by name (installed `agent.tool` and
- *   `agent.extension` keys only). What needs code (`prepare`, a tool of the project's own) is an agent
+ *   `agent.extension` keys only, never `pikit-self`: a live agent is never the steward, SPEC §6, and has
+ *   no `steward` field). What needs code (`prepare`, a tool of the project's own) is an agent
  *   of `src/agents/`, which stays as it is: the project's agents are listed beside these, read-only.
  * - **Its settings** are one key per agent (`{ support: { model, systemPrompt, … } }`), declared at
  *   start with what this App has: the models, the tools, the extensions, and the names of the code's
@@ -37,6 +38,11 @@ export const AGENT_NAME = "^[a-z][a-z0-9]*(-[a-z0-9]+)*$";
 export const MAX_PROMPT = 100_000;
 /** The longest description, in characters. */
 export const MAX_DESCRIPTION = 300;
+/**
+ * The extensions only the steward may name (SPEC §6): what the project is made of, for the agent its
+ * operators ask to change it. A live agent is never the steward, so never offered these.
+ */
+export const STEWARD_EXTENSIONS: readonly string[] = ["pikit-self"];
 /** The most live agents one App holds. */
 export const MAX_AGENTS = 100;
 
@@ -106,7 +112,8 @@ export default defineComponent({
         const models = modelsFrom(providers.keys().flatMap((key) => providers.get(key) ?? []))
           .getModels()
           .map((model) => `${model.provider}/${model.id}`);
-        const schema = agentsSchema({ models, tools: tools.keys(), extensions: extensions.keys(), defined: definitions.keys() });
+        const offered = extensions.keys().filter((name) => !STEWARD_EXTENSIONS.includes(name));
+        const schema = agentsSchema({ models, tools: tools.keys(), extensions: offered, defined: definitions.keys() });
         settings.get().declare("agents-live", schema, {});
         declared = true;
       },

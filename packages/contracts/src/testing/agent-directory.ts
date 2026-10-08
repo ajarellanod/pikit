@@ -105,11 +105,12 @@ export function createAgentDirectoryConformance(factory: () => AgentDirectoryFix
       expect(await fixture.directory.get("billing", ctx), undefined, 'get("billing") once taken out');
     }),
 
-    directoryCase("an agent of the code's name, or of a name no agent may have, is refused, and nothing is stored", async (fixture, ctx) => {
+    directoryCase("an agent of the code's name, of a name no agent may have, or marked steward is refused, and nothing is stored", async (fixture, ctx) => {
       const [support] = two(fixture) as [DirectoryAgent];
       await fixture.put([support]);
       check(await rejects(fixture.put([support, { name: fixture.definedAgent, model: fixture.model }])), `storing an agent named "${fixture.definedAgent}", an agent.definition's name, to be refused`);
       check(await rejects(fixture.put([support, { name: "Not An Agent", model: fixture.model }])), "storing an agent named \"Not An Agent\" to be refused");
+      check(await rejects(fixture.put([support, { name: "steward", model: fixture.model, steward: true } as DirectoryAgent])), "storing an agent marked steward to be refused: a live agent never is");
       expect(await fixture.directory.list(ctx), [support], "list() after the refusals");
       expect(await fixture.directory.get(fixture.definedAgent, ctx), undefined, "get() of the agent.definition's name");
     }),

@@ -11,6 +11,7 @@ import { type AgentDirectory, type AgentTool, defineAgent, type DirectoryAgent, 
 import { createAgentDirectoryConformance } from "@pikit/contracts/testing";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { scriptedProvider } from "@pikit/pi-adapter/testing";
+import { defineExtension } from "@pikit/pi-adapter/extensions";
 import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
 import Value from "typebox/value";
@@ -53,6 +54,7 @@ const project = defineComponent({
     pikit.provideKeyed("agent.definition", "assistant", defineAgent({ name: "assistant", model: "faux/scripted" }));
     pikit.provideKeyed("model.provider", "faux", scriptedProvider());
     pikit.provideKeyed("agent.tool", "lookup", lookup);
+    for (const name of ["plan", "pikit-self"]) pikit.provideKeyed("agent.extension", name, defineExtension({ name }));
   },
 });
 
@@ -96,7 +98,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   });
 });
 
-test("its settings accept only this App's models, tools and extensions, and no code agent's name", async () => {
+test("its settings accept only this App's models, tools and extensions (not pikit-self), no steward, and no code agent's name", async () => {
   const { app, settings } = await started();
   const schema = settings.schema() as never;
   try {
@@ -104,7 +106,11 @@ test("its settings accept only this App's models, tools and extensions, and no c
     expect(Value.Check(schema, { support: { model: "faux/scripted", tools: ["lookup"], description: "Customers", systemPrompt: "Be kind." } })).toBe(true);
     expect(Value.Check(schema, { support: { model: "nobody/nothing" } })).toBe(false);
     expect(Value.Check(schema, { support: { model: "faux/scripted", tools: ["bash"] } })).toBe(false);
-    expect(Value.Check(schema, { support: { model: "faux/scripted", extensions: ["plan"] } })).toBe(false);
+    expect(Value.Check(schema, { support: { model: "faux/scripted", extensions: ["plan"] } })).toBe(true);
+    expect(Value.Check(schema, { support: { model: "faux/scripted", extensions: ["other"] } })).toBe(false);
+    // Never the steward (SPEC §6): not marked so, and not what only the steward may name.
+    expect(Value.Check(schema, { support: { model: "faux/scripted", extensions: ["pikit-self"] } })).toBe(false);
+    expect(Value.Check(schema, { support: { model: "faux/scripted", steward: true } })).toBe(false);
     expect(Value.Check(schema, { support: { model: "faux/scripted", tools: ["lookup", "lookup"] } })).toBe(false);
     expect(Value.Check(schema, { support: {} })).toBe(false);
     expect(Value.Check(schema, { assistant: { model: "faux/scripted" } })).toBe(false);

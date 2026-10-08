@@ -17,6 +17,9 @@
  * - **Names are agents' names** (kebab-case, as `defineAgent` checks), unique, and **never a key of
  *   `agent.definition`**: an agent of the code cannot be shadowed by one of data. A provider refuses
  *   to store one (and does not list one a deploy made a code agent's).
+ * - **A live agent is never the steward** (SPEC §6, `AgentDefinition.steward`): it has no `steward`
+ *   field (a provider refuses one), and names no extension only the steward may (`pikit-self`, what
+ *   the project is made of): a provider refuses it when stored, and a runtime when used.
  * - **Each agent is one `defineAgent` accepts**: a model named `provider/modelId`, tools and extensions
  *   by name, each named once. A provider checks what it can against the App when an agent is stored
  *   (a model an installed provider has, installed tools and extensions); a runtime checks again when
