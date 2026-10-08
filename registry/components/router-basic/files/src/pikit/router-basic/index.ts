@@ -9,10 +9,16 @@
  * It refuses to start when `defaultAgent` names no `agent.definition`: a router that sends every
  * message to an agent that does not exist is a broken deployment.
  *
+ * **A setting too** (`settings`, when a provider is installed; features/settings.md): an operator may
+ * change which agent answers by default from the dashboard (its Agent section, `settings/`), live. Its
+ * default is the config's `defaultAgent`. It is read at every message this stage routes, and used only
+ * while it names an `agent.definition`; otherwise, or when the settings cannot be read, the config's
+ * applies (logged).
+ *
  * Targets: `server` and `durable` (it imports nothing platform-specific).
  */
 
-import { defineComponent } from "@pikit/core";
+import { type AppContext, defineComponent } from "@pikit/core";
 import Type from "typebox";
 
 const Config = Type.Object({
@@ -20,15 +26,34 @@ const Config = Type.Object({
   defaultAgent: Type.String({ minLength: 1 }),
 });
 
+/** Its settings: the default agent, among the App's agents. */
+export type RouterSettings = { defaultAgent: string };
+
 export default defineComponent({
   name: "router-basic",
   config: Config,
   setup(pikit, config) {
     const agents = pikit.useKeyed("agent.definition");
+    const settings = pikit.useOptional("settings");
+    let declared = false;
+
+    /** The agent that answers by default now: the operator's, while it is an agent; else the config's. */
+    const defaultAgent = async (ctx: AppContext): Promise<string> => {
+      const store = settings.get();
+      if (store === undefined || !declared) return config.defaultAgent;
+      try {
+        const { defaultAgent: chosen } = await store.get<RouterSettings>("router-basic", ctx);
+        if (agents.get(chosen) !== undefined) return chosen;
+        ctx.logger.warn("router-basic: the default agent set from the dashboard is not an agent; defaultAgent applies", { agent: chosen, defaultAgent: config.defaultAgent });
+      } catch (error) {
+        ctx.logger.warn("router-basic: its settings could not be read; defaultAgent applies", { error: error instanceof Error ? error.message : String(error) });
+      }
+      return config.defaultAgent;
+    };
 
     pikit.pipeline(
       "route.resolve",
-      (value) => (value.decision !== undefined ? value : { ...value, decision: { agent: config.defaultAgent, access: "allow" } }),
+      async (value, ctx) => (value.decision !== undefined ? value : { ...value, decision: { agent: await defaultAgent(ctx), access: "allow" } }),
       { id: "router-basic" },
     );
 
@@ -38,6 +63,26 @@ export default defineComponent({
           const known = agents.keys().map((name) => `"${name}"`).join(", ") || "none";
           throw new Error(`router-basic: defaultAgent "${config.defaultAgent}" is not an agent.definition (agents: ${known})`);
         }
+        const store = settings.get();
+        if (store === undefined) return;
+        const names = agents.keys().sort();
+        store.declare(
+          "router-basic",
+          Type.Object(
+            {
+              defaultAgent: Type.Union(
+                names.map((name) => Type.Literal(name)),
+                { title: "Default agent", description: "The agent that answers every message no other rule routed." },
+              ),
+            },
+            { additionalProperties: false },
+          ),
+          { defaultAgent: config.defaultAgent },
+        );
+        declared = true;
+      },
+      stop() {
+        declared = false;
       },
     };
   },

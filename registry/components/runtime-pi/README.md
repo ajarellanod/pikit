@@ -29,7 +29,10 @@ it into the app.
   - `secrets`, if installed: where those variables are read first, then the environment. On
     Cloudflare, `secrets-cloudflare` reads them from the Worker's secrets, with no `process.env`;
   - `wakeups`, if installed: runs are driven inside wakeups, in slices, instead of by promises left
-    running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes.
+    running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes;
+  - `settings`, if installed (`settings-store`): the agents' live overrides, an operator's system
+    prompt, model and tools per agent, set from the dashboard ("Live overrides" below). Without it,
+    every agent is its definition.
 
   It refuses to start without an agent, when an agent names a model no provider has, when an agent
   names a tool or an extension no component provides (`pikit doctor` names the registry component that
@@ -223,6 +226,26 @@ logged.
 `prepare` is the simple path: pure and synchronous, from the state. Anything that reads a store, waits,
 or must see each model request or tool call is an extension.
 
+## Live overrides
+
+With `settings` installed (`settings-store`, installed with the dashboard), an operator changes an
+agent's **system prompt**, **model** (one an installed provider has) and **tools** (on or off, among
+those its definition names) from the dashboard's Settings, Agent (router-basic's section), with no
+deploy and no restart (features/settings.md). The definition still owns the agent (SPEC §6): the
+overrides are data over it (`overrides.ts`).
+
+- **Declared at start** as runtime-pi's settings: one optional object per agent, its schema built from
+  the App (the installed providers' models, the tools the definition names), its `default`s the
+  definition's (what the dashboard shows), its defaults none. A value outside it is refused when set,
+  and left out when read (a deploy removed the model).
+- **Read** before every admission, every resume and `/compact`, and every run of the driving wakeup; on
+  a server also at start. The agent of each model request is then the definition, `prepare` of the state,
+  and the override over what `prepare` gave: a restart, a reopened Harness and an evicted object build
+  the same agent, and a change applies to every conversation's next run (one already going keeps its
+  agent until the next of these).
+- **Failing safe**: an override the runtime cannot resolve makes the run use the definition, logged as
+  `prepare`'s failures are; settings that cannot be read keep the ones read last, logged.
+
 ## Agent extensions
 
 What an agent does besides its model, prompt and tools is a Pi extension (`defineExtension` from
@@ -259,6 +282,11 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
   pi-durable suspended meanwhile; stop cancelling a waiting handler, which asks again;
 - the start failures above, and a stored credential reaching the provider;
 - an agent whose `prepare` gives it a tool once another tool moved its state on.
+
+`overrides.test.ts` covers the live overrides (with a `settings` double): an override changing the next
+run's system prompt, model and tools, the same agent after a restart, and the definition again once it
+is taken away; the declared schema (the providers' models, the definition's tools); an override over
+what `prepare` gives.
 
 `extensions.test.ts` takes an agent extension through a real App: an async section reading a
 document its tool wrote, a `beforeTool` hook that blocks, a `beforeRequest` hook, per-agent selection,

@@ -80,6 +80,12 @@
       "type": "registry:file",
       "title": "health-registry",
       "description": "health-registry's view: What is up, degraded or down: components report their own state; /health fails when an essential one stays down, so the supervisor restarts the process. Its admin API routes come with the component (pikit add health-registry)."
+    },
+    {
+      "name": "router-basic-settings",
+      "type": "registry:file",
+      "title": "router-basic-settings",
+      "description": "router-basic's section of the Settings dialog: Every message goes to one agent: `defaultAgent`. Its settings come with the component (pikit add router-basic), stored by settings-store."
     }
   ]
 }

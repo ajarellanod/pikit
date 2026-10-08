@@ -31,6 +31,12 @@
  *   Cloudflare, the Worker's secrets, with no `process.env`);
  * - `wakeups`, if installed: runs are driven inside wakeups, in slices (SPEC §4.1, C4), for a host
  *   that keeps running only while an event is in progress (a Durable Object). See `createDriver` below.
+ * - `settings`, if installed (settings-store): the agents' live overrides, an operator's system prompt,
+ *   model and tools per agent (`overrides.ts`), declared at start and read before every admission, every
+ *   resume and compaction, and every run of the driving wakeup; on a server also at start, before what
+ *   is pending resumes (in a Durable Object's start it is not: the object cannot call while it starts,
+ *   and the first wakeup reads them before it opens anything). What was read last applies until the
+ *   next read; one that fails keeps it, logged. Without `settings`, every agent is its definition.
  *
  * In a Cloudflare object's App (`WORKERS_HOST` has an `object`) the object is one chat: its first
  * conversation is pi-durable's root, and pi-durable's clock is the app's (workerd freezes `Date.now()`).
@@ -62,6 +68,7 @@ import {
   parseModelName,
 } from "@pikit/pi-adapter";
 import Type from "typebox";
+import { type AgentOverrides, overridesOf, overridesSchema, withOverride } from "./overrides.ts";
 import { resumePending, type ResumeOptions } from "./resume.ts";
 
 const Config = Type.Object({
@@ -118,6 +125,24 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const workspace = pikit.useOptional("workspace");
       // Optional: with it, runs are driven inside wakeups, in slices, instead of in the background.
       const wakeupsHandle = pikit.useOptional("wakeups");
+      // Optional: the agents' live overrides, an operator's (`overrides.ts`).
+      const settings = pikit.useOptional("settings");
+
+      /** The overrides read last, by agent; none until read. */
+      let overrides: AgentOverrides = {};
+      let declared = false;
+      /** Reads the overrides again; a failure keeps the ones read last. */
+      const refresh = async (ctx: AppContext): Promise<void> => {
+        const store = settings.get();
+        if (store === undefined || !declared) return;
+        try {
+          overrides = overridesOf(await store.get("runtime-pi", ctx));
+        } catch (error) {
+          ctx.logger.warn("runtime-pi: the agents' settings could not be read; the ones read last apply", { error: error instanceof Error ? error.message : String(error) });
+        }
+      };
+      /** An agent as it runs now: its definition, with the operator's override over what `prepare` gives. */
+      const definition = (name: string) => withOverride(agents.get(name), overrides[name]);
 
       // Created in start, when the capabilities can be read; consumers start after this component.
       let runtime: DurableRuntime | undefined;
@@ -136,6 +161,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       };
       const agentRuntime: AgentRuntime = {
         async dispatch(request, ctx) {
+          // The agent this admission builds is the definition with the overrides as they are now.
+          await refresh(ctx);
           const admission = await current().dispatch(request, ctx);
           // Asked before the dispatch resolves: a channel acknowledges its platform only once a wakeup
           // will drive the run. If asking fails, so does the dispatch; the platform sends it again.
@@ -144,6 +171,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         },
         abort: (conversation, ctx) => current().abort(conversation, ctx),
         async resume(conversation, ctx) {
+          await refresh(ctx);
           await current().resume(conversation, ctx);
           await wakeFor(conversation, ctx);
         },
@@ -173,6 +201,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         description: "Compact the context: summarize the older messages",
         argumentHint: "<what the summary keeps>",
         async run(conversation, args, ctx) {
+          await refresh(ctx);
           const done = await current().compact(conversation, args === "" ? undefined : args, ctx);
           await wakeFor(conversation, ctx);
           return { text: done.compacted ? "Compacted: the older messages are summarized, and the model reads the summary from now on." : "Nothing to compact: the conversation is short enough as it is." };
@@ -236,19 +265,28 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
               );
             }
           }
+          // The overrides an operator may set: the agents', among the models and tools this App has.
+          const store = settings.get();
+          if (store !== undefined) {
+            const modelNames = made.getModels().map((model) => `${model.provider}/${model.id}`);
+            store.declare("runtime-pi", overridesSchema(agents.keys().flatMap((name) => agents.get(name) ?? []), modelNames), {});
+            declared = true;
+          }
+          // A Cloudflare object is one chat: its storage holds that chat's conversations, the root first.
+          const perObject = ctx.value(WORKERS_HOST)?.object !== undefined;
+          // A server reads them before what is pending resumes; an object, in its first wakeup.
+          if (!perObject) await refresh(ctx);
           const wakeups = wakeupsHandle.get();
           // Runs outlive the calls that admit them; never keep start's context (its deadline).
           const background = ctx.derive(() => BACKGROUND_CONTEXT);
           const now = () => background.clock.now();
           const resumeOptions = { abandonAfterMs: config.abandonPendingAfterHours * 60 * 60 * 1_000 };
-          const drives = wakeups === undefined ? undefined : createDriver(wakeups, background, resumeOptions);
+          const drives = wakeups === undefined ? undefined : createDriver(wakeups, background, resumeOptions, refresh);
           const db = sql.get();
-          // A Cloudflare object is one chat: its storage holds that chat's conversations, the root first.
-          const perObject = ctx.value(WORKERS_HOST)?.object !== undefined;
           const created = createDurableRuntime({
             db,
             keepSettledDays: config.keepSettledDays,
-            agent: (name) => agents.get(name),
+            agent: definition,
             tool: (name) => tools.get(name),
             extension: (name) => extensions.get(name),
             models: made,
@@ -283,6 +321,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         },
         async stop(ctx) {
           // Runs in progress stay pending in pi-durable; the next process resumes them.
+          declared = false;
+          overrides = {};
           const stopping = runtime;
           runtime = undefined;
           const resumed = resuming;
@@ -320,6 +360,7 @@ interface Driver {
  * With `wakeups`, every run is driven inside a run of the handler `runtime-pi.drive`, since a promise
  * left running after its event may be killed (SPEC §4.1, C4). Whatever may leave a run going (a
  * dispatch, a resume, start with work pending) asks for the handler. The handler:
+ * 0. reads the agents' overrides (`settings`), so what it opens builds each agent as admissions do;
  * 1. opens pi-durable if it is not open (a new instance after an eviction): what it finds resumes;
  * 2. resumes the conversations holding pending messages that this worker does not drive (a message
  *    nobody answered: as at start, `resume.ts`);
@@ -331,7 +372,7 @@ interface Driver {
  * A request carries nothing: what to do is read from pi-durable each time, so
  * a handler that runs twice, or late, or after the object was evicted, does the right thing.
  */
-function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: ResumeOptions): Driver {
+function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: ResumeOptions, refresh: (ctx: AppContext) => Promise<void>): Driver {
   /** The earliest time asked for and not yet taken by a run of the handler, in this App. */
   let requested: number | undefined;
   /** Set by `later` during a run of the handler: what is left only waits for a time. */
@@ -365,6 +406,8 @@ function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: R
     waiting = false;
     const signal = handlerCtx.abortSignal === undefined ? stopping.signal : AbortSignal.any([handlerCtx.abortSignal, stopping.signal]);
     const ctx = handlerCtx.derive((inner) => withAbortSignal(signal, inner));
+    // The agents' overrides before anything is opened: a reopened Harness rebuilds each agent with them.
+    await refresh(ctx);
     try {
       // Opened first, so what it finds running counts as held below and is not waited for twice.
       await runtime.inspect(ctx);

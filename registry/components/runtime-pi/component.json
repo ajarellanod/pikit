@@ -25,7 +25,8 @@
       "agent.extension",
       "execution",
       "workspace",
-      "wakeups"
+      "wakeups",
+      "settings"
     ]
   },
   "provides": [

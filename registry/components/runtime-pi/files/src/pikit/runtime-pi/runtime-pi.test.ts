@@ -123,7 +123,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(described).toMatchObject({
     provides: ["agent.runtime", "agent.conversations", "agent.submissions", "agent.observe", "model.complete", "agent.command"],
     requires: ["storage.sql"],
-    optional: ["agent.definition", "model.provider", "model.credentials", "secrets", "agent.tool", "agent.extension", "execution", "workspace", "wakeups"],
+    optional: ["agent.definition", "model.provider", "model.credentials", "secrets", "agent.tool", "agent.extension", "execution", "workspace", "wakeups", "settings"],
   });
 });
 

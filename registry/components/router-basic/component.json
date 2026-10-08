@@ -13,10 +13,12 @@
   },
   "optional": {
     "capabilities": [
-      "agent.definition"
+      "agent.definition",
+      "settings"
     ]
   },
   "provides": [],
+  "settings": "settings",
   "dependencies": {
     "typebox": "1.3.27"
   },
