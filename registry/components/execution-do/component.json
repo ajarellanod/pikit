@@ -14,7 +14,8 @@
   },
   "optional": {
     "capabilities": [
-      "secrets"
+      "secrets",
+      "settings"
     ]
   },
   "provides": [

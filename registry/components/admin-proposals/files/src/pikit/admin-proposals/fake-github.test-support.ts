@@ -55,6 +55,8 @@ export interface FakeGitHub {
   failWith: "rate_limit" | "secondary_rate_limit" | "down" | undefined;
   /** What `PUT …/merge` answers instead of merging (405 not mergeable, 409 head moved). */
   mergeRefusal: { status: number; message: string } | undefined;
+  /** The rules the rulesets apply to the default branch (`GET …/rules/branches/:branch`); none at first. */
+  rules: { type: string }[];
   stop(): Promise<void>;
 }
 
@@ -85,11 +87,13 @@ export function startFakeGitHub(repository = "ana/bot", defaultBranch = "main"):
       if (fake.failWith === "down") return fail(503, "Service unavailable");
       if (token !== readToken && token !== mergeToken) return fail(401, "Bad credentials");
       const prefix = `/repos/${repository}`;
+      if (url.pathname === prefix && request.method === "GET") return Response.json({ full_name: repository, default_branch: defaultBranch, private: true });
       if (!url.pathname.startsWith(`${prefix}/`)) return fail(404, "Not Found");
       const path = url.pathname.slice(prefix.length);
       if (request.method !== "GET" && token !== mergeToken) return fail(403, "Resource not accessible by personal access token");
 
       let match: RegExpExecArray | null;
+      if (request.method === "GET" && path === `/rules/branches/${defaultBranch}`) return Response.json(fake.rules.map((rule) => ({ ...rule, ruleset_source_type: "Repository", ruleset_id: 1 })));
       if (request.method === "GET" && path === "/pulls") {
         const state = url.searchParams.get("state") ?? "open";
         const perPage = Number(url.searchParams.get("per_page") ?? 30);
@@ -162,6 +166,7 @@ export function startFakeGitHub(repository = "ana/bot", defaultBranch = "main"):
     comments: new Map(),
     failWith: undefined,
     mergeRefusal: undefined,
+    rules: [],
     addPull(input) {
       pulls.set(input.number, {
         number: input.number,

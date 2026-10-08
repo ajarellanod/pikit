@@ -119,13 +119,49 @@ export interface RejectResponse {
   closed: true;
 }
 
+/** One part of the connection, as `GET /admin/api/admin-proposals/status` checks it. */
+export interface ConnectionCheck {
+  /** `ok`; `missing` (not set yet); `failing` (set, and wrong); `unknown` (not checked, or GitHub did not say). */
+  state: "ok" | "missing" | "failing" | "unknown";
+  /** What was found, or what to do: names a secret, never holds one. */
+  message: string;
+}
+
+/**
+ * `GET /admin/api/admin-proposals/status`: whether self-improvement is connected, checked live. It is
+ * when the repository is set and the read token reads it, and the merge token is set and another
+ * token. The ruleset is best effort: GitHub's rules for the default branch, read with the read token.
+ */
+export interface ConnectionStatus {
+  connected: boolean;
+  /** `owner/name`, the setting's (or the config's); empty when none. */
+  repository: string;
+  branchPrefix: string;
+  /** The secrets' names: `GITHUB_TOKEN`, `PIKIT_MERGE_TOKEN` unless the config says otherwise. */
+  tokenSecret: string;
+  mergeTokenSecret: string;
+  /** The repository's default branch, when it was read. */
+  defaultBranch?: string;
+  checks: {
+    /** The repository is set, and GitHub has it. */
+    repository: ConnectionCheck;
+    /** The read token is set, and reads the repository. */
+    readToken: ConnectionCheck;
+    /** The merge token is set, and is not the read token (it is never sent to check it). */
+    mergeToken: ConnectionCheck;
+    /** A ruleset requires a pull request on the default branch. */
+    ruleset: ConnectionCheck;
+  };
+}
+
 /**
  * An error: `unauthorized` 401; `invalid_request` 400; `not_found` 404 (no such pull request);
  * `not_a_proposal` 404 to a read, 409 to an action (its head is not a branch under the prefix of the
  * repository); `not_open`, `wrong_base`, `checks_failing`, `changed`, `not_mergeable` 409;
- * `too_large` 413; `rate_limited` 429 (with `retry-after`); `not_configured` 503 (a token missing,
- * or the same in both secrets); `github_unauthorized`, `github_forbidden`, `github_not_found`,
- * `github_unavailable`, `github_refused` 502. Never a token.
+ * `too_large` 413; `rate_limited` 429 (with `retry-after`); `not_connected` 503 (no repository, or a
+ * token missing: self-improvement is not connected yet, and the message says what to set);
+ * `not_configured` 503 (the same token in both secrets); `github_unauthorized`, `github_forbidden`,
+ * `github_not_found`, `github_unavailable`, `github_refused` 502. Never a token.
  */
 export interface ProposalError {
   error: string;

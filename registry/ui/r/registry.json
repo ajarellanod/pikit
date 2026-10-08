@@ -70,10 +70,16 @@
       "description": "The dashboard's delivery view."
     },
     {
+      "name": "admin-proposals-settings",
+      "type": "registry:file",
+      "title": "admin-proposals-settings",
+      "description": "admin-proposals's section of the Settings dialog: The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow. Dormant until connected, after deploying: the repository from the dashboard's Settings, the two tokens as secrets. Its settings come with the component (pikit add admin-proposals), stored by settings-store."
+    },
+    {
       "name": "admin-proposals",
       "type": "registry:file",
       "title": "admin-proposals",
-      "description": "admin-proposals's view: The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow. Its admin API routes come with the component (pikit add admin-proposals)."
+      "description": "admin-proposals's view: The gate of the agent's changes to itself: its pull requests from pikit/self/* listed in the dashboard, with their diff and checks, approved (merged) or rejected there with a token the agent never holds; and the project's CI workflow. Dormant until connected, after deploying: the repository from the dashboard's Settings, the two tokens as secrets. Its admin API routes come with the component (pikit add admin-proposals)."
     },
     {
       "name": "health-registry",

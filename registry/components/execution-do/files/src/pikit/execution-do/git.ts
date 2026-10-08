@@ -27,8 +27,8 @@ export interface GitOptions {
   files: Files;
   /** The GitHub token, read at each command that needs it; `undefined` without one. */
   token(): Promise<string | undefined>;
-  /** `owner/name`: the only repositories a push or a pull request may go to. */
-  pushRepositories: readonly string[];
+  /** `owner/name`: the only repositories a push or a pull request may go to, read at each command that needs them. */
+  pushRepositories(): Promise<readonly string[]>;
   /** What every pushed branch starts with. */
   branchPrefix: string;
   /** Who commits. */
@@ -108,8 +108,8 @@ export function createGit(options: GitOptions) {
   const { files } = options;
   const fs = gitFs(files);
   const author = options.author ?? AUTHOR;
-  const allowed = (repository: { owner: string; name: string }) =>
-    options.pushRepositories.some((entry) => entry.toLowerCase() === `${repository.owner}/${repository.name}`.toLowerCase());
+  const allowed = async (repository: { owner: string; name: string }) =>
+    (await options.pushRepositories()).some((entry) => entry.toLowerCase() === `${repository.owner}/${repository.name}`.toLowerCase());
   const ok = (stdout: string): CommandResult => ({ stdout: stdout === "" || stdout.endsWith("\n") ? stdout : `${stdout}\n`, stderr: "", exitCode: 0 });
   const fail = (message: string, exitCode = 1): CommandResult => ({ stdout: "", stderr: `${message}\n`, exitCode });
   /** Every request to github.com carries the token, when there is one (the key isomorphic-git's `onAuth` sets too). */
@@ -170,7 +170,8 @@ export function createGit(options: GitOptions) {
       return fail(`fatal: destination path '${target ?? repository.name}' already exists and is not an empty directory`, 128);
     }
     const token = await options.token();
-    const onAuth = token !== undefined && allowed(repository) ? () => ({ username: "x-access-token", password: token }) : undefined;
+    const pushable = token !== undefined && (await allowed(repository));
+    const onAuth = pushable ? () => ({ username: "x-access-token", password: token }) : undefined;
     try {
       await retrying(
         () => git.clone({ fs, http, dir, url, depth: 1, singleBranch: true, headers: headersFor(token), ...(onAuth !== undefined && { onAuth }) }),
@@ -182,7 +183,7 @@ export function createGit(options: GitOptions) {
     }
     const branch = await git.currentBranch({ fs, dir });
     const count = (await git.listFiles({ fs, dir })).length;
-    const push = token !== undefined && allowed(repository) ? `you may push branches ${options.branchPrefix}… to it` : "read-only: pushing to it is not allowed here";
+    const push = pushable ? `you may push branches ${options.branchPrefix}… to it` : "read-only: pushing to it is not allowed here";
     return ok(`Cloned ${url} into ${dir} (branch ${branch}, ${count} files, latest commit only); ${push}.`);
   }
 
@@ -250,7 +251,7 @@ export function createGit(options: GitOptions) {
     }
     if (!(await isClone(dir))) return fail(`fatal: ${dir} is not a complete clone: clone it again`);
     const origin = await originOf(dir);
-    if (!allowed(origin)) return fail(`fatal: pushing to ${origin.owner}/${origin.name} is not allowed here`);
+    if (!(await allowed(origin))) return fail(`fatal: pushing to ${origin.owner}/${origin.name} is not allowed here`);
     const token = await options.token();
     if (token === undefined) return fail("fatal: there is no GitHub token here, so nothing can be pushed");
     await git.branch({ fs, dir, ref: branch, force: true });
@@ -281,7 +282,7 @@ export function createGit(options: GitOptions) {
     if (branch === undefined || title.length === 0) return fail(`usage: git pr ${options.branchPrefix}<topic> <title> [-b <body>]`);
     if (!branchAllowed(branch, options.branchPrefix)) return fail(`fatal: pull requests are opened only from branches ${options.branchPrefix}<topic>`);
     const origin = await originOf(dir);
-    if (!allowed(origin)) return fail(`fatal: opening pull requests on ${origin.owner}/${origin.name} is not allowed here`);
+    if (!(await allowed(origin))) return fail(`fatal: opening pull requests on ${origin.owner}/${origin.name} is not allowed here`);
     const token = await options.token();
     if (token === undefined) return fail("fatal: there is no GitHub token here, so no pull request can be opened");
     const api = `https://api.github.com/repos/${origin.owner}/${origin.name}`;

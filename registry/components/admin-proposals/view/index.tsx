@@ -3,6 +3,9 @@
  * `pikit/self/*`, open first with their checks, then the last merged or rejected; and a page per
  * proposal (`proposal.tsx`) to read it and approve or reject it. It reads the component's own routes,
  * `/admin/api/admin-proposals/*`, slowly: each read asks GitHub.
+ *
+ * Until self-improvement is connected (no repository, or no read token: `503 not_connected`), the page
+ * says what is missing and how to connect it, which the Settings dialog's Self-improvement does.
  */
 
 import { Activity, Clock, GitBranch, GitPullRequest, User } from "iconoir-react";
@@ -14,7 +17,7 @@ import { Page, PageLoading, Section } from "@/components/bui/Page";
 import RecordsTable, { type RecordColumn, RecordTag } from "@/components/bui/RecordsTable";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { every } from "@/lib/activity";
-import { useApi } from "@/lib/api";
+import { ApiFailure, useApi } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
 import { Link, pagePath } from "@/lib/router";
 import { defineView } from "@/lib/views";
@@ -24,10 +27,44 @@ import type { ProposalList, ProposalState, ProposalSummary } from "./types";
 
 type Filter = "all" | ProposalState;
 
+/** What the page shows before self-improvement is connected: what is missing, and the steps. */
+function ConnectState({ missing }: { missing: string }) {
+  const steps = [
+    ["The repository", "Open Settings (the sidebar's foot) → Self-improvement, and set your project's GitHub repository, owner/name."],
+    ["Two GitHub tokens, as secrets", "GITHUB_TOKEN for the agent, PIKIT_MERGE_TOKEN for your approvals: fine-grained, this repository only. Self-improvement lists their permissions and where to add them (on Cloudflare, the Worker's Variables and Secrets)."],
+    ["A ruleset on GitHub", "Protect the default branch: a pull request required, the checks required, no force push."],
+  ];
+  return (
+    <Page
+      eyebrow="Proposals"
+      title="Connect self-improvement"
+      description="Your agent can propose changes to itself as GitHub pull requests, which you approve or reject here. It is off until it is connected to your project's repository."
+    >
+      <Section title="What is missing">
+        <p className="text-[13px] text-ink-2 [overflow-wrap:anywhere]">{missing}</p>
+      </Section>
+      <Section title="How to connect it">
+        <ol className="flex flex-col gap-3">
+          {steps.map(([title, text], i) => (
+            <li key={title} className="flex gap-3">
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-full bg-inset font-mono text-[12px] text-ink-2">{i + 1}</span>
+              <div className="min-w-0 text-[13px] leading-relaxed text-ink-2">
+                <div className="text-[14px] text-ink">{title}</div>
+                {text}
+              </div>
+            </li>
+          ))}
+        </ol>
+      </Section>
+    </Page>
+  );
+}
+
 function ProposalsPage() {
   const { data, error } = useApi<ProposalList>(BASE, every(60_000));
   const [filter, setFilter] = useState<Filter>("open");
 
+  if (error instanceof ApiFailure && error.body.error === "not_connected") return <ConnectState missing={error.message} />;
   if (error !== undefined && data === undefined) {
     return (
       <Page eyebrow="Proposals">

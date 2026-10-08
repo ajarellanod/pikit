@@ -5,7 +5,8 @@ C7). Its files live in the object's own SQLite; its shell is a bash interpreter 
 with `git`, `node` and `curl`. pi-durable's own `read`, `write`, `edit` and `bash` tools work on it unchanged.
 
 - **Provides:** `execution` and `execution.shell` (one pi-durable `ExecutionEnv`, `env.ts`, whose files are the object's own namespace: `execution-do:<object id>`).
-- **Requires:** nothing. **Optional:** `secrets`, for the GitHub token.
+- **Requires:** nothing. **Optional:** `secrets`, for the GitHub token; `settings`, for one more push
+  repository set from the dashboard.
 - **Target:** `durable`. On a server, use `execution-local`.
 - **Installs to:** `src/pikit/execution-do/`.
 - **npm dependencies:** `just-bash` 3.4.2, `isomorphic-git` 1.42.3, `quickjs-emscripten-core` and
@@ -51,7 +52,11 @@ They are code, not instructions to the model:
   (`rm -r repo`) is allowed.
 - **Pushes go only to `git.pushRepositories`, on branches under `git.branchPrefix`** (`pikit/self/` by
   default): never to `main`. Those branches are the agent's own, so a push replaces what is there. A
-  pull request is opened from such a branch, for a person to review.
+  pull request is opened from such a branch, for a person to review. One more repository may be its
+  setting, `repository` (`owner/name`, empty by default), which the dashboard's Settings →
+  Self-improvement (admin-proposals' section) sets with admin-proposals' own: read at each push and
+  pull request, so connecting self-improvement after deploying needs no deploy. When the settings
+  cannot be read, `git.pushRepositories` alone applies (logged).
 - **The token never reaches the shell.** It is the secret named `git.tokenSecret` (`GITHUB_TOKEN`),
   read through `secrets` when `git` needs it, and sent only to github.com and api.github.com. It is
   also sent when cloning other public repositories, because GitHub rate-limits anonymous git traffic

@@ -7,6 +7,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
+import type { Settings, SettingsValue } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { withWorkersHost } from "@pikit/contracts/testing";
@@ -26,7 +27,7 @@ afterEach(() => {
 });
 
 /** A started app with this component over `storage`, a `secrets` holding `secrets`, and its environments. */
-async function started(options: { storage?: DurableObjectFilesStorage; config?: Record<string, unknown>; secrets?: Record<string, string> } = {}) {
+async function started(options: { storage?: DurableObjectFilesStorage; config?: Record<string, unknown>; secrets?: Record<string, string>; settings?: Settings } = {}) {
   const storage = options.storage ?? fakeDurableObjectStorage();
   let found: { files: ExecutionEnv; shell: ExecutionEnv } | undefined;
   const reader = defineComponent({
@@ -41,8 +42,9 @@ async function started(options: { storage?: DurableObjectFilesStorage; config?: 
     name: "secrets-test",
     setup: (pikit) => pikit.provide("secrets", { get: async (name: string) => options.secrets?.[name] }),
   });
+  const store = defineComponent({ name: "settings-test", setup: (pikit) => void (options.settings !== undefined && pikit.provide("settings", options.settings)) });
   const app = await defineApp({
-    components: [...(options.secrets === undefined ? [] : [secrets]), executionDo, reader],
+    components: [...(options.secrets === undefined ? [] : [secrets]), store, executionDo, reader],
     config: { "execution-do": options.config ?? {} },
     logger: silentLogger,
   }).create();
@@ -75,7 +77,7 @@ for (const c of createLifecycleConformance(() => ({ component: hosted }))) {
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [executionDo], logger: silentLogger }).create();
-  expect(app.describe().components).toEqual([{ name: "execution-do", provides: ["execution", "execution.shell"], requires: [], optional: ["secrets"] }]);
+  expect(app.describe().components).toEqual([{ name: "execution-do", provides: ["execution", "execution.shell"], requires: [], optional: ["secrets", "settings"] }]);
 });
 
 /** The reason `app.start` fails with, when the host in its context is `host`. */
@@ -262,6 +264,43 @@ test("git push and pr are fenced: the branch prefix, the allowed repositories, a
   expect(github.pushes).toEqual([]);
   expect(github.pulls).toEqual([]);
   for (const started of [allowed, otherRepository, noToken]) await started.app.stop();
+});
+
+/** A `settings` in memory: the stored value over the defaults, set whole. */
+function memorySettings() {
+  const declared = new Map<string, SettingsValue>();
+  const stored = new Map<string, SettingsValue>();
+  const settings: Settings = {
+    declare: (component, _schema, defaults) => void declared.set(component, defaults),
+    get: async <T extends SettingsValue>(component: string) => ({ ...declared.get(component), ...stored.get(component) }) as T,
+    set: async (component, value) => {
+      stored.set(component, value);
+      return { ...declared.get(component), ...value };
+    },
+    sections: async () => [],
+  };
+  return { settings, declared };
+}
+
+test("git push and pr also reach the repository set from the dashboard (its setting), read at each push", async () => {
+  const github = await fakeGitHub();
+  const { settings, declared } = memorySettings();
+  const { app, env } = await started({ secrets: { GITHUB_TOKEN: TOKEN }, settings });
+  expect(declared.get("execution-do")).toEqual({ repository: "" });
+  const clone = await run(env, "git clone https://github.com/acme/app && cd app && echo x >> README.md && git commit -m change");
+  expect(clone.output).toContain("read-only");
+  expect((await run(env, "git push origin pikit/self/x", "app")).output).toContain("pushing to acme/app is not allowed here");
+
+  await settings.set("execution-do", { repository: "acme/app" }, { id: "ops" }, app.context());
+  const pushed = await run(env, "git push origin pikit/self/x && git pr pikit/self/x 'A change'", "app");
+  expect(pushed.exitCode).toBe(0);
+  expect(github.pushes.map((push) => push.repository)).toEqual(["acme/app"]);
+  expect(github.pulls.map((pull) => pull.head)).toEqual(["pikit/self/x"]);
+
+  await settings.set("execution-do", { repository: "" }, { id: "ops" }, app.context());
+  expect((await run(env, "git push origin pikit/self/y", "app")).output).toContain("not allowed here");
+  expect(github.pushes.length).toBe(1);
+  await app.stop();
 });
 
 test("git clone: GitHub over HTTPS only, a private repository needs the token, and a failed clone leaves nothing", async () => {

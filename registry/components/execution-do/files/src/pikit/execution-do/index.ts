@@ -12,6 +12,11 @@
  *   `git.pushRepositories`, on branches under `git.branchPrefix`; the GitHub token is the secret named
  *   `git.tokenSecret`, read through `secrets`, and never reaches the shell. Without it, clones are
  *   public and read-only.
+ * - **One more push repository is a setting** (`settings`, when a provider is installed): `repository`,
+ *   the project's own, which the dashboard's Settings → Self-improvement (admin-proposals' section)
+ *   sets with admin-proposals' own. It is read at each `git` command that pushes or opens a pull
+ *   request, so connecting self-improvement after deploying needs no deploy. When the settings cannot
+ *   be read, `git.pushRepositories` alone applies (logged).
  *
  * It refuses to start outside a Durable Object's App, or on an object without SQLite. It reads the
  * object from `WORKERS_HOST`, which `deployment-cloudflare` puts in the start context; it imports
@@ -21,7 +26,7 @@
  * Target: `durable`. On a server, `execution-local` gives the agent the machine's own shell.
  */
 
-import { defineComponent } from "@pikit/core";
+import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import Type from "typebox";
 import { createDurableExecutionEnv } from "./env.ts";
@@ -29,6 +34,23 @@ import { createFiles, type DurableObjectFilesStorage } from "./files.ts";
 import { createGit } from "./git.ts";
 import { createShell } from "./shell.ts";
 import { createShellFs } from "./shell-fs.ts";
+
+const NAME = "execution-do";
+const REPOSITORY = "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$";
+
+/** Its settings: one more repository `git push` and `git pr` may reach (empty: none). */
+export type WorkspaceSettings = { repository: string };
+
+const SettingsSchema = Type.Object(
+  {
+    repository: Type.String({
+      pattern: `^$|${REPOSITORY}`,
+      title: "Repository",
+      description: "The project's repository on GitHub, owner/name: git push and git pr may reach it too, besides git.pushRepositories.",
+    }),
+  },
+  { additionalProperties: false },
+);
 
 const Config = Type.Object({
   /** The agent's working directory, and the shell's `HOME`. */
@@ -58,7 +80,7 @@ const Config = Type.Object({
       /** The secret holding the GitHub token, read through `secrets`. Without it, public clones only. */
       tokenSecret: Type.String({ minLength: 1, default: "GITHUB_TOKEN" }),
       /** `owner/name`: the only repositories `git push` and `git pr` may reach. */
-      pushRepositories: Type.Array(Type.String({ pattern: "^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$" }), { default: [] }),
+      pushRepositories: Type.Array(Type.String({ pattern: REPOSITORY }), { default: [] }),
       /** What a pushed branch must start with: the agent never pushes to `main`. */
       branchPrefix: Type.String({ minLength: 1, default: "pikit/self/" }),
     },
@@ -77,10 +99,27 @@ function isFilesStorage(storage: unknown): storage is DurableObjectFilesStorage 
 }
 
 export default defineComponent({
-  name: "execution-do",
+  name: NAME,
   config: Config,
   setup(pikit, config) {
     const secrets = pikit.useOptional("secrets");
+    const settings = pikit.useOptional("settings");
+    // A context of its own for reading the settings from a command: never start's.
+    let background: AppContext | undefined;
+    let declared = false;
+
+    /** The repositories a push may reach now: the config's, and the setting's when it names one. */
+    const pushRepositories = async (): Promise<readonly string[]> => {
+      const store = settings.get();
+      if (store === undefined || !declared || background === undefined) return config.git.pushRepositories;
+      try {
+        const { repository } = await store.get<WorkspaceSettings>(NAME, background);
+        return repository === "" ? config.git.pushRepositories : [...config.git.pushRepositories, repository];
+      } catch (error) {
+        background.logger.warn("execution-do: its settings could not be read; git.pushRepositories alone applies", { error: error instanceof Error ? error.message : String(error) });
+        return config.git.pushRepositories;
+      }
+    };
     // Everything is built now; only the object's storage arrives at `start`. Used before or after,
     // the files answer that the app is not running.
     let storage: DurableObjectFilesStorage | undefined;
@@ -91,7 +130,7 @@ export default defineComponent({
     const git = createGit({
       files,
       token: async () => secrets.get()?.get(config.git.tokenSecret),
-      pushRepositories: config.git.pushRepositories,
+      pushRepositories,
       branchPrefix: config.git.branchPrefix,
     });
     const shell = createShell({
@@ -127,8 +166,15 @@ export default defineComponent({
         objectId = host.object.id;
         files.migrate();
         files.mkdirp(config.root);
+        background = ctx.derive(() => BACKGROUND_CONTEXT);
+        const store = settings.get();
+        if (store !== undefined) {
+          store.declare(NAME, SettingsSchema, { repository: "" });
+          declared = true;
+        }
       },
       stop() {
+        declared = false;
         // Nothing to close: the files are the object's, and no process outlives a command. A command
         // still running ends with its run, whose context the runtime cancels.
         storage = undefined;

@@ -84,7 +84,22 @@ export interface HeadChecks {
   texts: string[];
 }
 
+/** The repository, as GitHub answers it. */
+export interface GitHubRepository {
+  full_name: string;
+  default_branch: string;
+}
+
+/** One rule that applies to a branch (a ruleset's): `pull_request`, `required_status_checks`, `non_fast_forward`… */
+export interface GitHubBranchRule {
+  type: string;
+}
+
 export interface GitHubClient {
+  /** The repository itself: whether the token reads it, and its default branch. */
+  repository(token: string, signal?: AbortSignal): Promise<GitHubRepository>;
+  /** The rules the repository's rulesets apply to `branch` (not a classic branch protection's). */
+  branchRules(token: string, branch: string, signal?: AbortSignal): Promise<GitHubBranchRule[]>;
   pulls(token: string, state: "open" | "closed", perPage: number, signal?: AbortSignal): Promise<GitHubPull[]>;
   pull(token: string, number: number, signal?: AbortSignal): Promise<GitHubPull>;
   files(token: string, number: number, signal?: AbortSignal): Promise<GitHubFile[]>;
@@ -181,6 +196,8 @@ export function createGitHub(repository: string, apiBase: string, now: () => num
   }
 
   return {
+    repository: (token, signal) => call<GitHubRepository>(token, "GET", "", undefined, signal),
+    branchRules: (token, branch, signal) => call<GitHubBranchRule[]>(token, "GET", `/rules/branches/${encodeURIComponent(branch)}?per_page=100`, undefined, signal),
     pulls: (token, state, perPage, signal) =>
       call<GitHubPull[]>(token, "GET", `/pulls?state=${state}&sort=${state === "open" ? "created" : "updated"}&direction=desc&per_page=${perPage}`, undefined, signal),
     pull: (token, number, signal) => call<GitHubPull>(token, "GET", `/pulls/${number}`, undefined, signal),
