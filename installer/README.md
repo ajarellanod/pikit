@@ -27,8 +27,9 @@ before doing it. The steps and settings are at the top of the script.
   only with `--install-docker` / `PIKIT_INSTALL_DOCKER=1` or a "y", and with the same consent adds you
   to the `docker` group; on macOS it points to Docker Desktop. With `--durable` it is skipped.
 - Then, on a terminal, it runs `pikit new`: the guided path asks the agent's name, where it runs (a
-  server, or Cloudflare), where to talk to it (Telegram, HTTP…), sets that up, logs in to the model
-  and starts it. Ctrl-C stops it; `pikit new` continues later. `PIKIT_NO_WIZARD=1` skips it. It ends
+  server, or Cloudflare), where to talk to it (Telegram, HTTP…, several at once), what it can do
+  (the dashboard, routing rules, MCP tools, web search…, any or none), sets that up, logs in to the
+  model and starts it. Ctrl-C stops it; `pikit new` continues later. `PIKIT_NO_WIZARD=1` skips it. It ends
   with the lines this shell still needs (`PATH`, `newgrp docker`).
 
 ## Cloudflare in one line
@@ -45,7 +46,9 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
   install it.
 - **`pikit new --target durable --preset telegram-cloudflare`** instead of `pikit new`: a Telegram
   bot on Cloudflare Workers, a Durable Object per chat. It asks:
-  1. the bot's name (its folder), then writes it and runs `bun install`;
+  1. the bot's name (its folder), and what it can do besides (the dashboard, routing rules, MCP
+     tools, a health check: any or none, `pikit add` adds one later), then writes it and runs
+     `bun install`;
   2. "Configure it now?": the bot's token from @BotFather (checked with Telegram), who may talk to it
      (send the bot a message; it asks you to allow the sender), a Brave Search key (optional: Enter
      skips) and the OpenRouter key. The webhook's secret is generated;

@@ -34,7 +34,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [channel-email](channel-email.md) | ⭐ | An address for the agent; replies in the thread | No |
 | [channel-slack](channel-slack.md) | ⭐ | A Slack app, by Events API or Socket Mode | No |
 | [channel-whatsapp](channel-whatsapp.md) | ⭐ | WhatsApp, by the Cloud API or a linked device | No |
-| [cli-features](cli-features.md) | ⭐ | `pikit new` with several channels and a step of features (dashboard, multi-agent, subagents, MCP…) | Yes: the launch |
+| [cli-features](cli-features.md) | ⭐ | `pikit new` with several channels and a step of features (dashboard, multi-agent, subagents, MCP…); several channels and single-component features built, groups not | Yes: the launch |
 | [import-from-openclaw-hermes](import-from-openclaw-hermes.md) | ⭐ | `pikit import`: persona, skills, memories, channels from an existing setup | No |
 | [learned-skills](learned-skills.md) | ⭐ | Skills the agent writes from experience, through the self-change gate | No; builds on SPEC §6 |
 | [memory](memory.md) | ⭐ | Memory and user profiles across conversations and channels; written as a build guide | No |

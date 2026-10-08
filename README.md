@@ -18,11 +18,13 @@ curl -fsSL https://raw.githubusercontent.com/ajarellanod/pikit/main/installer/in
 ```
 
 The installer puts the CLI in `~/.pikit/bin/pikit` (a checkout in `~/.pikit/pikit`) and runs
-`pikit new`, which asks where the agent runs and where you talk to it, then configures and starts
-it ([installer/README.md](installer/README.md)). By hand, in a project:
+`pikit new`, which asks where the agent runs, where you talk to it (Telegram, HTTP, or both) and
+what it can do (a dashboard, routing rules, MCP tools, web search…), then configures and starts it
+([installer/README.md](installer/README.md)). By hand, in a project:
 
 ```sh
 pikit new my-agent --preset telegram         # or http; --target durable --preset telegram-cloudflare
+                                             # --with channel-telegram --with channel-http: both; --with tool-mcp, --ui: features
 cd my-agent
 pikit configure                              # secrets and the model login
 pikit dev                                    # run it here; `pikit up` deploys (Docker or Cloudflare)

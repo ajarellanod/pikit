@@ -148,11 +148,13 @@ there.
 ### Presets
 - `http` and `telegram` (Docker on a server; conversations on `conversations-kv` over
   `storage-kv-sql`), `telegram-cloudflare` and `cloudflare-minimal` (`--target durable`). A preset is a
-  list of `pikit add`s; its `choose` questions pick a channel. The starter agent's prompt says where
+  list of `pikit add`s; its `choose` questions pick a channel (`multiple`: several at once), and its
+  `features` are the components `pikit new` offers to add. The starter agent's prompt says where
   it is reached, and its model is one the preset installs; on a server it does not name `bash`.
 
 ### CLI (`pikit`)
-- `new` (guided in a terminal: target, preset, channel), `add` (one or several names, one
+- `new` (guided in a terminal: target, preset, channels, several at once, then what it can do: the
+  dashboard and the preset's features; `--with` answers both in a script), `add` (one or several names, one
   transaction), `remove`, `upgrade` (three-way merge
   of your edits from `pikit-bases/`; a kit behind the CLI is a plan of its own, shown in `--dry-run`,
   and `doctor` notes it), `configure` (secrets, generated tokens, model logins), `doctor`,
@@ -184,7 +186,7 @@ there.
   registry of the project's own (`registry/`) and the dashboard (`src/dashboard/`) out of `tsc` and
   `bun test` (`bunfig.toml`); `lib` is ES2023. Its `.gitattributes` marks the dashboard's built
   module generated (collapsed, `-diff`).
-- `pikit new --ui` (and the guided path's question) and `pikit ui on | off`: the dashboard and what it
+- `pikit new --ui` (and the guided path's features step) and `pikit ui on | off`: the dashboard and what it
   needs (`admin-auth-token`, `admin-api`), or neither; `off` refuses to lose your edits or your own
   views without `--force`. `pikit.json`'s `dashboard` records its files and `pikit-bases/` keeps them,
   so `pikit upgrade` (without names) merges its new version with your edits. `deployment-docker`'s
