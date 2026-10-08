@@ -1,0 +1,72 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "settings-store",
+  "version": "0.0.0",
+  "title": "Settings: values an operator changes live from the dashboard",
+  "description": "Stores the settings components declare (the agent's prompt, model and tools, the default agent), validated against their schemas, and serves them to the dashboard's Settings dialog (/admin/api/settings). On Cloudflare one object keeps them, and each conversation's object reads it when used.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": [
+      "storage.sql",
+      "actor.mailbox"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "admin.auth",
+      "actor.inbox"
+    ]
+  },
+  "provides": [
+    "settings",
+    "http.route"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "settings",
+        "http.route"
+      ],
+      "requires": [
+        "storage.sql"
+      ],
+      "optional": [
+        "admin.auth",
+        "actor.inbox",
+        "actor.mailbox"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth"
+      ]
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

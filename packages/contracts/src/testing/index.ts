@@ -49,6 +49,9 @@ export { createAgentObserveConformance } from "./observe.ts";
 export type { AdminAuthFixture } from "./admin.ts";
 export { createAdminAuthConformance } from "./admin.ts";
 
+export type { SettingsFixture } from "./settings.ts";
+export { createSettingsConformance } from "./settings.ts";
+
 export type { HealthFixture, HealthPolicy } from "./health.ts";
 export { createHealthConformance } from "./health.ts";
 

@@ -44,6 +44,8 @@ export type { AgentObserver, ObservedConversation, ObservedEvent, ObservedPage, 
 export type { AdminAuth, AdminSessions, Operator } from "./admin.ts";
 export { ADMIN_CLIENT_HEADER } from "./admin.ts";
 export type { ComponentHealth, HealthRegistry, HealthReporter, HealthSnapshot, HealthStatus } from "./health.ts";
+export type { Settings, SettingsErrorCode, SettingsSchema, SettingsSection, SettingsValue } from "./settings.ts";
+export { SettingsError } from "./settings.ts";
 export type { JsonValue } from "./json.ts";
 export { isJsonObject } from "./json.ts";
 export type { KeyValueStorage, KeyValueStore, SqlDatabase, SqlRow, SqlStatements, SqlValue } from "./storage.ts";

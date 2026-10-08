@@ -45,6 +45,8 @@ export const KINDS: readonly string[] = [
   "extension",
   // What is up, degraded or down (`health`): `health-registry`.
   "health",
+  // Values an operator changes live (`settings`): `settings-store`.
+  "settings",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */

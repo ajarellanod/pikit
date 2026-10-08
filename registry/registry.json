@@ -257,6 +257,15 @@
       ],
       "path": "components/server-bun"
     },
+    "settings-store": {
+      "version": "0.0.0",
+      "description": "Stores the settings components declare (the agent's prompt, model and tools, the default agent), validated against their schemas, and serves them to the dashboard's Settings dialog (/admin/api/settings). On Cloudflare one object keeps them, and each conversation's object reads it when used.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/settings-store"
+    },
     "storage-do": {
       "version": "0.0.0",
       "description": "The app's SQL database (storage.sql) in a Durable Object's own SQLite, on Cloudflare: records each conversation's object keeps.",

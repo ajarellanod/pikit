@@ -117,6 +117,12 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "What is up, degraded or down: components report their own state, and /health fails when an essential one stays down.",
   },
+  settings: {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    summary: "Values an operator changes live from the dashboard, read when used: each component declares its own (a schema, defaults).",
+  },
   "conversations.registry": {
     mode: "single",
     definedIn: "@pikit/contracts",
