@@ -44,10 +44,11 @@ guarantees, and how they differ (receipts here; retries that never give up there
   normally.
 - **Stopping** waits for the sends in flight, within the stop deadline, then aborts them; they are
   sent again (as possible duplicates) next time.
-
-Known gap: an answer is enqueued by the channel right after the run ends. A crash in those few
-milliseconds loses its delivery (the answer is still in the conversation's session). Pi's durable
-runtime has the same gap; it closes when Pi can enqueue in the same commit as the answer.
+- **Before it is enqueued.** A channel enqueues answers from runtime-pi's `answers` feed (written when
+  the run ends, or after a crash by the next start), and moves its cursor past an answer only once it
+  is enqueued and marked done (`startAnswerDelivery`, `@pikit/contracts`' `delivery.ts`). A crash
+  between the run's end and the enqueue only delays the answer: the next start reads it from the
+  cursor again and enqueues it, under the same key (enqueued twice, stored once).
 
 ## Receipts: for what must not miss a delivery
 

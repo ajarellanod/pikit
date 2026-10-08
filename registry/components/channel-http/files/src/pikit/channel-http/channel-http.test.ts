@@ -65,8 +65,10 @@ const router = defineComponent({
 });
 
 /**
- * An agent runtime double: one run per session at a time; messages to a busy session join it. With
- * `submissions`, it records admissions and run ends there, as runtime-pi does.
+ * An agent runtime double: one run per session at a time. A message to a busy session is queued, as
+ * runtime-pi queues a follow-up (the channel dispatches without `whenBusy`): once the run going ends,
+ * the next run takes every message queued meanwhile and answers them together. With `submissions`, it
+ * records admissions and run ends there, as runtime-pi does.
  */
 function scriptedRuntime(submissions?: RecordingSubmissions) {
   const dispatched: { requestId: string; key: string; agent: string; prompt: string }[] = [];
@@ -79,7 +81,9 @@ function scriptedRuntime(submissions?: RecordingSubmissions) {
     setup(pikit) {
       let events = BACKGROUND_CONTEXT as unknown as Parameters<AgentRuntime["dispatch"]>[1];
       const seen = new Map<string, Set<string>>();
+      /** The run going, per session, and the messages that wait for it: the next run takes them all. */
       const runs = new Map<string, { requestIds: string[]; prompts: string[] }>();
+      const queued = new Map<string, { requestIds: string[]; prompts: string[] }>();
       const run = async (conversation: ConversationRef, requestId: string) => {
         const current = runs.get(conversation.conversationId);
         if (current === undefined) return;
@@ -87,7 +91,6 @@ function scriptedRuntime(submissions?: RecordingSubmissions) {
           holding();
           await released;
         }
-        runs.delete(conversation.conversationId);
         const base = { conversation, requestId, requestIds: current.requestIds, messages: [] };
         if (current.prompts[0] === "fail") {
           const error = { code: "provider_error", message: "the model failed" };
@@ -97,6 +100,14 @@ function scriptedRuntime(submissions?: RecordingSubmissions) {
           const text = `answer: ${current.prompts.at(-1)}`;
           await submissions?.settled({ conversation, requestId, requestIds: current.requestIds, kind: "completed", text }, events);
           await events.emit("agent.settled", { ...base, kind: "completed", text });
+        }
+        // The run has ended: the messages queued meanwhile start the next one.
+        const next = queued.get(conversation.conversationId);
+        queued.delete(conversation.conversationId);
+        if (next === undefined) runs.delete(conversation.conversationId);
+        else {
+          runs.set(conversation.conversationId, next);
+          void run(conversation, next.requestIds[0] as string);
         }
       };
       const runtime: AgentRuntime = {
@@ -109,10 +120,11 @@ function scriptedRuntime(submissions?: RecordingSubmissions) {
           if (known.has(requestId)) admission = { kind: "duplicate", requestId };
           else {
             known.add(requestId);
-            const active = runs.get(conversation.conversationId);
-            if (active !== undefined) {
-              active.requestIds.push(requestId);
-              active.prompts.push(prompt);
+            if (runs.has(conversation.conversationId)) {
+              const waiting = queued.get(conversation.conversationId) ?? { requestIds: [], prompts: [] };
+              waiting.requestIds.push(requestId);
+              waiting.prompts.push(prompt);
+              queued.set(conversation.conversationId, waiting);
               admission = { kind: "queued", requestId };
             } else {
               runs.set(conversation.conversationId, { requestIds: [requestId], prompts: [prompt] });
@@ -283,17 +295,20 @@ test("a body that is not a message is a 400", async () => {
   await s.app.stop();
 });
 
-test("a message sent while the agent works is steered into the run, and both POSTs get its answer", async () => {
+test("a message sent while the agent works waits for that run: each POST gets the answer of the run that took its message", async () => {
   const s = await started();
 
   const first = send(s, { conversationId: "c1", text: "hold", messageId: "m1" });
   await s.runtime.hold.started;
-  const second = send(s, { conversationId: "c1", text: "change course", messageId: "m2" });
-  while (s.runtime.dispatched.length < 2) await Bun.sleep(1);
+  const second = send(s, { conversationId: "c1", text: "and then?", messageId: "m2" });
+  const third = send(s, { conversationId: "c1", text: "one more thing", messageId: "m3" });
+  while (s.runtime.dispatched.length < 3) await Bun.sleep(1);
   s.runtime.hold.release();
 
-  expect(await first).toEqual({ status: 200, body: { requestId: "m1", text: "answer: change course" } });
-  expect(await second).toEqual({ status: 200, body: { requestId: "m2", text: "answer: change course" } });
+  // The run going answers its own message; the next run takes both that waited and answers them together.
+  expect(await first).toEqual({ status: 200, body: { requestId: "m1", text: "answer: hold" } });
+  expect(await second).toEqual({ status: 200, body: { requestId: "m2", text: "answer: one more thing" } });
+  expect(await third).toEqual({ status: 200, body: { requestId: "m3", text: "answer: one more thing" } });
   await s.app.stop();
 });
 

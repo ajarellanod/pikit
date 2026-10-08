@@ -74,7 +74,6 @@ target (K1).
 | `devDependencies` | hand | packages only its tests import, and tools it runs (`wrangler`), pinned |
 | `files` | hand | `{ source, target }` pairs; only `files/src` → `src` may map a directory |
 | `environment` | hand | variables `pikit configure` sets in `.env`: `name`, `secret`, `required`, `description` |
-| `config`, `migrations` | hand | component-relative paths; in the schema, used by no component today |
 
 `generate` also rewrites `registry/registry.json` (the index, sorted by name) and the schemas.
 

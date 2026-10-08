@@ -125,15 +125,6 @@ export function checkManifest(
       problems.push(`files source "${f.source}": ${error instanceof Error ? error.message : String(error)}`);
     }
   }
-  for (const key of ["config", "migrations"] as const) {
-    const path = m[key];
-    if (path === undefined) continue;
-    try {
-      if (!existsSync(confinedPath(componentDir, path))) problems.push(`${key} "${path}" does not exist`);
-    } catch (error) {
-      problems.push(`${key} "${path}": ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
   return problems;
 }
 

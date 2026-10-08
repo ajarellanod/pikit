@@ -102,9 +102,6 @@ export function openRegistry(path: string): Registry {
       const problems = schemaProblems(ManifestSchema, manifest);
       if (problems.length > 0) throw new Error(`the registry's component "${name}" has an invalid component.json: ${problems.join("; ")}`);
       if (manifest.name !== name) throw new Error(`the registry's component "${name}" has component.json name "${manifest.name}"`);
-      for (const field of ["config", "migrations"] as const) {
-        if (manifest[field] !== undefined) confinedPath(componentDir, manifest[field]);
-      }
       return manifest;
     },
     preset(name, choices = []) {

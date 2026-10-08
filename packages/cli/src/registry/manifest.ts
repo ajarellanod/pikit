@@ -292,8 +292,6 @@ export const ManifestSchema = Type.Object(
           "Variables `pikit configure` sets in .env. A `provider-*` component lists its API key's variable first among its secret ones: `pikit configure` offers to set that one when its provider has no credentials.",
       }),
     ),
-    config: Type.Optional(Type.String({ description: "A component-relative path." })),
-    migrations: Type.Optional(Type.String({ description: "A component-relative path." })),
   },
   { additionalProperties: false, title: "pikit component.json", description: "A component of a pikit registry." },
 );
