@@ -76,7 +76,8 @@ the dashboard applies to the next run of every conversation.
   (`unknown_component`, `invalid_value`).
 - **settings-store** (`registry/components/settings-store/`), both targets: a `settings_store` table of
   `storage.sql` on a server; on Cloudflare the object `settings-store:settings` (`SETTINGS_KEY`) keeps
-  it, the Worker's half (`settings-store-worker`) serves the routes as calls to it, and each
+  it, the Worker's half (`settings-store-worker`) serves the routes as calls to it (and provides
+  `settings` to the Worker's App, read the same way: admin-proposals' routes are the Worker's), and each
   conversation's object reads it when used, cached with its version for `freshMs` (1 s). The routes:
   `GET /admin/api/settings`, `GET` and `PUT /admin/api/settings/:component`, behind `admin.auth`.
 - **The CLI**: `component.json`'s `settings` (a folder) is copied to `src/dashboard/src/settings/<name>/`

@@ -19,13 +19,14 @@
  *   reads it when used, keeping what it read with its version, asked again at most every second: one
  *   call per admission at most. The routes are the Worker's half's (`worker.ts`, `export const
  *   worker`), calls to that object; they are registered in the object's App too, where no server
- *   serves them.
+ *   serves them. The Worker's half provides `settings` too, read the same way, for the components of
+ *   the Worker's App (admin-proposals, whose routes the Worker serves).
  */
 
 import { defineComponent } from "@pikit/core";
-import { type Settings, SettingsError } from "@pikit/contracts";
+import type { Settings } from "@pikit/contracts";
 import Type from "typebox";
-import { answerCalls, createRemoteAdmin, createRemoteSource, FRESH_MS } from "./calls.ts";
+import { answerCalls, createRemoteSettings, FRESH_MS } from "./calls.ts";
 import { provideRoutes } from "./routes.ts";
 import { createDeclarations, createSettings } from "./settings.ts";
 import { createSettingsTable } from "./table.ts";
@@ -56,22 +57,7 @@ export default defineComponent({
     const table = createSettingsTable(() => sql.get(), () => pikit.clock.now());
     // The App's settings over its own table: a server's, and what the settings object answers with.
     const local = createSettings(declarations, table);
-    let provided: Settings = local;
-    if (durable) {
-      const source = createRemoteSource(() => mailbox.get(), pikit.clock, config.freshMs);
-      const remote = createSettings(declarations, source);
-      const admin = createRemoteAdmin(() => mailbox.get());
-      provided = {
-        ...remote,
-        // Validated, stored and logged in the settings object; this App's next get asks it again.
-        async set(component, value, operator, ctx) {
-          if (declarations.get(component) === undefined) throw new SettingsError("unknown_component", `"${component}" declared no settings`);
-          const stored = await admin.set(component, value, operator, ctx);
-          source.forget();
-          return stored;
-        },
-      };
-    }
+    const provided: Settings = durable ? createRemoteSettings(declarations, () => mailbox.get(), pikit.clock, config.freshMs) : local;
     pikit.provide("settings", provided);
     provideRoutes(pikit, { auth, settings: () => provided });
 

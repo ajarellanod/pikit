@@ -189,7 +189,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   const workerApp = await defineApp({ components: [mailbox, worker], logger: silentLogger }).create();
 
   expect(objectApp.describe().components.slice(1)).toEqual([{ name: "settings-store", provides: ["settings", "http.route"], requires: ["storage.sql"], optional: ["admin.auth", "actor.inbox", "actor.mailbox"] }]);
-  expect(workerApp.describe().components.slice(1)).toEqual([{ name: "settings-store-worker", provides: ["http.route"], requires: ["actor.mailbox"], optional: ["admin.auth"] }]);
+  expect(workerApp.describe().components.slice(1)).toEqual([{ name: "settings-store-worker", provides: ["settings", "http.route"], requires: ["actor.mailbox"], optional: ["admin.auth"] }]);
 });
 
 test("the routes answer an operator only: 401 without the credential, and without an admin.auth", async () => {
@@ -257,6 +257,28 @@ test("on Cloudflare the Worker's routes are calls to the settings object, which 
   objects.unreachable = true;
   const unreachable = await workerApp.fetch("/admin/api/settings", { headers: AUTH });
   expect(unreachable.status).toBe(503);
+});
+
+test("on Cloudflare the Worker's App reads its components' settings from the settings object too, and sets them there", async () => {
+  const objects = new Objects();
+  const clock = createManualClock();
+  const inObject: { settings?: Settings } = {};
+  const inWorker: { settings?: Settings } = {};
+  const object = await serve([sqliteStorage(), auth, objects.platform(), settingsStore, declarer(inObject)], { target: "durable", clock });
+  const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", objects.mailbox) });
+  const workerApp = await serve([auth, mailbox, worker, declarer(inWorker)], { target: "durable", clock });
+  const settings = inWorker.settings as Settings;
+
+  expect(await settings.get("agent", workerApp.app.context())).toEqual({ model: "faux/small", prompt: "Be brief." });
+  // Set from the dashboard (the Worker's route): the Worker reads it once its second is past.
+  expect((await workerApp.fetch("/admin/api/settings/agent", put({ model: "faux/large" }))).status).toBe(200);
+  await clock.advance(1_000);
+  expect(await settings.get("agent", workerApp.app.context())).toEqual({ model: "faux/large", prompt: "Be brief." });
+  // Its own set goes to the settings object, and its next get asks again.
+  await settings.set("agent", { prompt: "Shorter." }, { id: "ops" }, workerApp.app.context());
+  expect(await settings.get("agent", workerApp.app.context())).toEqual({ model: "faux/small", prompt: "Shorter." });
+  expect(await inObject.settings?.get("agent", object.app.context())).toEqual({ model: "faux/small", prompt: "Shorter." });
+  await expect(settings.set("nobody", {}, { id: "ops" }, workerApp.app.context())).rejects.toThrow("declared no settings");
 });
 
 test("an object asks the settings object at most once per freshMs, and only for what changed; unreachable, it keeps what it read", async () => {

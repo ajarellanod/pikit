@@ -17,8 +17,10 @@
  *   answered from them; past it, the call says whether the version changed, and carries the values
  *   only when it did. Concurrent reads share one call. When the call fails, the values it holds are
  *   used (logged); with none, `get` rejects and its caller keeps what it had.
- * - **The Worker** (`worker.ts`) only serves the routes: `sections` and `set` are calls, validated and
- *   logged in the settings object, against its App's declarations (the same as every object's).
+ * - **The Worker** (`worker.ts`) serves the routes: `sections` and `set` are calls, validated and
+ *   logged in the settings object, against its App's declarations (the same as every object's). Its
+ *   App's components (admin-proposals' routes) read their settings as an object does
+ *   (`createRemoteSettings`).
  */
 
 import type { AppContext, Clock } from "@pikit/core";
@@ -34,7 +36,7 @@ import {
   type SettingsSection,
   type SettingsValue,
 } from "@pikit/contracts";
-import type { SettingsSource } from "./settings.ts";
+import { createSettings, type Declarations, type SettingsSource } from "./settings.ts";
 import type { SettingsTable } from "./table.ts";
 
 /** The object that keeps the values on Cloudflare: an object of the conversations' class, never a conversation. */
@@ -130,6 +132,26 @@ export function createRemoteSource(mailbox: () => ActorMailbox | undefined, cloc
     /** After this App's own set: its next `get` asks. */
     forget() {
       if (held !== undefined) held = { ...held, at: Number.NEGATIVE_INFINITY };
+    },
+  };
+}
+
+/**
+ * The `settings` of an App that is not the settings object (a conversation's object, the Worker's):
+ * its own declarations, the values read from the settings object (`createRemoteSource`), and `set` as
+ * a call to it, after which this App's next `get` asks again.
+ */
+export function createRemoteSettings(declarations: Declarations, mailbox: () => ActorMailbox | undefined, clock: Clock, freshMs = FRESH_MS): Settings {
+  const source = createRemoteSource(mailbox, clock, freshMs);
+  const admin = createRemoteAdmin(mailbox);
+  return {
+    ...createSettings(declarations, source),
+    // Validated, stored and logged in the settings object; this App's next get asks it again.
+    async set(component, value, operator, ctx) {
+      if (declarations.get(component) === undefined) throw new SettingsError("unknown_component", `"${component}" declared no settings`);
+      const stored = await admin.set(component, value, operator, ctx);
+      source.forget();
+      return stored;
     },
   };
 }

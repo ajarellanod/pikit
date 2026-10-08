@@ -65,7 +65,9 @@ A store that cannot be reached is `503 unavailable`, logged.
 - **Cloudflare:** the values are one object's, `settings-store:settings` (`SETTINGS_KEY`), of the
   conversations' class and never a conversation, as admin-api's index is. The Worker's half
   (`export const worker`, `settings-store-worker`) serves the routes as calls to it; it validates
-  against its App's declarations (every object runs the same App), stores and logs. A conversation's
+  against its App's declarations (every object runs the same App), stores and logs. The Worker's half
+  also provides `settings` to the Worker's App, read as an object reads it, for a component whose
+  routes the Worker serves (admin-proposals declares its repository there too). A conversation's
   object reads it when used, keeping the values with their version: a `get` within `freshMs` of the
   last call is answered from them, and past it the call says whether the version changed (the values
   cross only when it did). One call per admission at most. When the call fails, the values read last
