@@ -80,7 +80,7 @@ export async function createFakeGitHubApp(options: { now?: () => number } = {}):
     true,
     ["sign", "verify"],
   )) as CryptoKeyPair;
-  const privatePem = pem("RSA PRIVATE KEY", pkcs1Of(new Uint8Array(await crypto.subtle.exportKey("pkcs8", keys.privateKey))));
+  const privatePem = pem("RSA PRIVATE KEY", pkcs1Of(new Uint8Array((await crypto.subtle.exportKey("pkcs8", keys.privateKey)) as ArrayBuffer)));
   const codes = new Map<string, Record<string, unknown>>();
   const installations = new Map<number, { account: string; repositories: string[] }>();
   const tokens = new Map<string, { installation: number; repositories: string[]; expiresAt: number; revoked: boolean }>();

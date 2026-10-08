@@ -468,7 +468,7 @@ test("disconnect forgets the App, revokes the token it kept, and says where to d
 
 test("crypto: GitHub's PKCS#1 key signs a JWT the public key verifies; the App's name from the Worker's host", async () => {
   const keys = (await crypto.subtle.generateKey({ name: "RSASSA-PKCS1-v1_5", modulusLength: 2048, publicExponent: new Uint8Array([1, 0, 1]), hash: "SHA-256" }, true, ["sign", "verify"])) as CryptoKeyPair;
-  const pkcs8 = new Uint8Array(await crypto.subtle.exportKey("pkcs8", keys.privateKey));
+  const pkcs8 = new Uint8Array((await crypto.subtle.exportKey("pkcs8", keys.privateKey)) as ArrayBuffer);
   const pem = (label: string, der: Uint8Array) => `-----BEGIN ${label}-----\n${btoa(String.fromCharCode(...der))}\n-----END ${label}-----`;
   // PKCS#8 as it is; PKCS#1 (its inner key, from offset 26 for a 2048-bit key) wrapped back into the same bytes.
   expect(pkcs8Of(pem("PRIVATE KEY", pkcs8))).toEqual(pkcs8);
