@@ -14,8 +14,8 @@
  * 2. The body becomes an `InboundMessage`, and `admitInbound` takes it the way every channel does:
  *    `inbound.normalize`, `route.resolve` (a router picks the agent), the conversation
  *    `http:<conversationId>`, and `agent.runtime.dispatch`: Pi takes the message. An idle
- *    conversation starts a run. A busy one steers the run in progress, and that run answers this
- *    message too. A message a stage stops gets `422` (a policy in `inbound.normalize`) or `403`
+ *    conversation starts a run. A busy one queues it as a follow-up: the next run answers it, with
+ *    every other message that waited. A message a stage stops gets `422` (a policy in `inbound.normalize`) or `403`
  *    (`route.resolve`, or the router's deny); no router installed is `500 no_route`.
  *
  * The POST then waits for the answer, up to `replyTimeoutMs`:
@@ -43,7 +43,7 @@
  * Guarantee: a message accepted by `dispatch` (any answer but 4xx/5xx before it) is in the session
  * and will be answered there, at least once.
  *
- * Targets: `server` and `durable` (fetch handlers and Web Crypto only).
+ * Target: `server` (it needs a server component to serve its route).
  */
 
 import { type AppContext, defineComponent, Halt } from "@pikit/core";

@@ -18,8 +18,10 @@ pikit new <dir> [--target server|durable] [--preset <name> [--with <component>].
 ```
 
 - Without `<dir>`, the guided path ([wizard.ts](../packages/cli/src/commands/wizard.ts)) asks the
-  agent's name, where it runs, the preset, the preset's questions (`choose`: which `channel-*`), and
-  whether to have a dashboard; then runs `new`, `configure`, and `up` or `dev`. Flags answer its
+  agent's name, where it runs, the preset, then two multi-selects: **where you talk to it** (every
+  `channel-*` of the target, several at once, the preset's checked; skipped when the target has one)
+  and **what it can do** (the dashboard and the preset's `features`, none checked). Then it runs
+  `new`, `configure`, and `up` or `dev`, and prints the same as one command. Flags answer its
   questions. Running it again with the same name continues.
 - With `<dir>` ([new.ts](../packages/cli/src/commands/new.ts)): writes the project's own files
   ([starter.ts](../packages/cli/src/commands/starter.ts): `pikit.config.ts` (two Apps on `durable`),
@@ -28,8 +30,15 @@ pikit new <dir> [--target server|durable] [--preset <name> [--with <component>].
   `.agents/skills/`), vendors the kit packages into `vendor/` as tarballs, adds every component of the
   preset as `pikit add` does, runs `bun install` once, and ends with `pikit doctor`.
 - `--target` is recorded in `pikit.json` (`server` by default). A preset for another target is refused.
-- `--with` replaces the preset's component of the same kind. `--ui` adds the dashboard
+- `--with` answers both steps. For a kind the preset asks with `multiple: true` (channels), the
+  `--with`s of that kind are the whole answer: `--preset http --with channel-telegram` is Telegram
+  alone, `--with channel-http --with channel-telegram` both. Another kind's `--with` replaces the
+  preset's component of that kind; a feature's `--with` adds it. `--ui` adds the dashboard
   ([dashboard.md](dashboard.md)). `--registry` uses another registry folder.
+- A preset's `features` ([features/cli-features.md](../features/cli-features.md)) are opt-in
+  components: on `http`, `router-rules`, `tool-mcp`, `tool-fetch`, `tool-websearch-brave`,
+  `health-registry`; on `telegram-cloudflare`, `router-rules`, `tool-mcp`, `health-registry`.
+  `registry validate` checks each one composes alone and all together.
 - Everything refusable is refused before the first write. A failure after it leaves the directory
   marked `UNFINISHED`.
 

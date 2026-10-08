@@ -65,8 +65,7 @@ Docker rotates the log files (5 × 10 MB). Read them with `pikit logs`, or
   (`bun install --frozen-lockfile` and its `build`, from its own `bun.lock`), whose last step writes
   the built files into admin-api as a module (`src/pikit/admin-api/dashboard-files.ts`): only that
   file reaches the image, over the context's copy, and admin-api serves it at `/admin/`. Without a UI
-  the stage builds nothing. admin-api's `beforeDeploy` hook builds nothing on a server, so `up`
-  builds the dashboard once, in the image.
+  the stage builds nothing. No hook builds it before: `up` builds the dashboard once, in the image.
 - `vendor/` is copied before the install. Until `@pikit/*` is published on npm, `pikit new`
   vendors those packages there as tarballs, and `package.json` depends on them with
   `file:vendor/…`, so the image builds from the project's directory alone.

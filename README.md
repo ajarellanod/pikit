@@ -46,7 +46,7 @@ pikit add <component>...                     # and remove, upgrade, doctor, logs
 | `installer/` | `install.sh` and its tests |
 | `features/` | a design note per feature, built (`completed/`) or not; kit follow-ups |
 | `docs/` | upstream proposals to Pi (`docs/upstream/`), architecture audits |
-| `.agents/skills/` | skills for AI agents (`pikit-component`, `pikit-extension`), copied into every project |
+| `.agents/skills/` | skills for AI agents (`pikit-component`, `pikit-view`, `pikit-extension`), copied into every project |
 
 ## Read next
 
