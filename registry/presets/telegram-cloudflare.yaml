@@ -41,7 +41,10 @@ choose:
     multiple: true
 # What `pikit new` offers to add, several at once, with the dashboard (`--ui`): each by its `title`,
 # `--with <component>` in a script. tool-fetch and tool-websearch-brave are installed above already.
+# admin-proposals (self-improvement) starts dormant: it is connected after deploying, from the
+# dashboard's Settings → Self-improvement or `pikit configure`.
 features:
   - router-rules
   - tool-mcp
   - health-registry
+  - admin-proposals

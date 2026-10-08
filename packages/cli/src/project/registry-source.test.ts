@@ -256,7 +256,7 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   expect(r.slots("telegram")[0]).toMatchObject({ multiple: true, defaults: ["channel-telegram"] });
   expect(r.preset("telegram", ["channel-telegram", "channel-http"]).filter((c) => c.startsWith("channel-"))).toEqual(["channel-telegram", "channel-http"]);
   expect(r.features("telegram", ["server"]).map((f) => f.name)).toEqual(["router-rules", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry"]);
-  expect(r.features("telegram-cloudflare", ["durable"]).map((f) => f.name)).toEqual(["router-rules", "tool-mcp", "health-registry"]);
+  expect(r.features("telegram-cloudflare", ["durable"]).map((f) => f.name)).toEqual(["router-rules", "tool-mcp", "health-registry", "admin-proposals"]);
 });
 
 test("the project's own records are protected targets, however they are spelled; a component's files are not", () => {

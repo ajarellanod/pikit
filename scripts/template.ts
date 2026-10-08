@@ -36,6 +36,8 @@ export interface Template {
   target: string;
   /** Made with the dashboard (`pikit new --ui`). */
   ui: boolean;
+  /** The preset's features it is made with (`pikit new --with <feature>`). */
+  with: string[];
   /**
    * The Bun the dashboard's build runs with, through npx (`pinBun`): Workers Builds has an older one
    * (1.2.15) than its lockfile needs. The installer's pin (`installer/install.sh`, `BUN_PINNED`).
@@ -61,6 +63,8 @@ export const TEMPLATES: Record<string, Template> = {
     preset: "telegram-cloudflare",
     target: "durable",
     ui: true,
+    // Self-improvement, dormant: connected after deploying, from the dashboard's Settings, never in the form.
+    with: ["admin-proposals"],
     bun: "1.4.2",
     name: "pikit-telegram-bot",
     description: "An AI agent in Telegram, on Cloudflare: a pikit project.",
@@ -99,6 +103,8 @@ export const TEMPLATES: Record<string, Template> = {
     ],
     notAsked: {
       TELEGRAM_ALLOWED_USERS: "nobody knows their Telegram user id before deploying: the owner logs in with TELEGRAM_PASSWORD instead",
+      GITHUB_TOKEN: "self-improvement is connected after deploying, from the dashboard's Settings → Self-improvement (the repository the button made is not known before)",
+      PIKIT_MERGE_TOKEN: "self-improvement is connected after deploying, from the dashboard's Settings → Self-improvement",
     },
     bindings: {
       CONVERSATION: "One Durable Object per Telegram chat, SQLite-backed: its conversations (pi-durable) and the agent's workspace. Nothing to set.",
@@ -322,9 +328,9 @@ export async function makeTemplate(key: string, outDir: string, options: MakeOpt
   const staging = mkdtempSync(join(tmpdir(), "pikit-template-"));
   const project = join(staging, template.name);
   try {
-    const ui = template.ui ? ["--ui"] : [];
-    say(`pikit new ${template.name} --target ${template.target} --preset ${template.preset}${template.ui ? " --ui" : ""}`);
-    await run([process.execPath, MAIN, "new", project, "--target", template.target, "--preset", template.preset, ...ui], staging, { NO_COLOR: "1" });
+    const flags = [...(template.ui ? ["--ui"] : []), ...template.with.flatMap((feature) => ["--with", feature])];
+    say(`pikit new ${template.name} --target ${template.target} --preset ${template.preset} ${flags.join(" ")}`.trimEnd());
+    await run([process.execPath, MAIN, "new", project, "--target", template.target, "--preset", template.preset, ...flags], staging, { NO_COLOR: "1" });
     adjust(project, key, template);
 
     // The kit's tarballs `outDir` has under the same name have the same files: keep their bytes, which

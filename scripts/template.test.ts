@@ -46,7 +46,8 @@ const REGISTRY = join(import.meta.dir, "..", "registry");
 const WRANGLER = readFileSync(join(REGISTRY, "components", "deployment-cloudflare", "files", "wrangler.jsonc"), "utf8");
 
 const dirs: string[] = [];
-afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })));
+// The end to end's directories hold whole npm trees: deleting them takes longer than a hook's 5 s.
+afterAll(() => dirs.forEach((dir) => rmSync(dir, { recursive: true, force: true })), 120_000);
 function temp(): string {
   const dir = mkdtempSync(join(tmpdir(), "pikit-template-test-"));
   dirs.push(dir);
@@ -93,7 +94,10 @@ test("the dashboard's build runs the installer's Bun through npx, the rest of wr
 
 test("the button asks for every secret the components need, and nothing else", () => {
   const registry = openRegistry(DEFAULT_REGISTRY);
-  const components = [...registry.preset(TEMPLATE.preset), ...(TEMPLATE.ui ? UI_COMPONENTS : [])];
+  const components = [...registry.preset(TEMPLATE.preset, TEMPLATE.with), ...(TEMPLATE.ui ? UI_COMPONENTS : [])];
+  // Self-improvement comes in, dormant: its tokens are not in the form.
+  expect(components).toContain("admin-proposals");
+  for (const name of ["GITHUB_TOKEN", "PIKIT_MERGE_TOKEN"]) expect(TEMPLATE.notAsked[name]).toContain("Settings → Self-improvement");
   const { order } = withOffers(registry, components, [TEMPLATE.target]);
   const declared = order.flatMap((component) => registry.manifest(component).environment ?? []);
   const asked = TEMPLATE.secrets.map((secret) => secret.name);
@@ -215,7 +219,7 @@ const PASSWORD = "template correct horse battery";
 const MODEL_KEY = "sk-or-template-dummy-not-a-key";
 const ADMIN_TOKEN = "template-admin-token-dummy-0123456789abcdef";
 /** This machine's variables the project reads: none may leak into the Worker. */
-const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "PIKIT_ADMIN_TOKEN", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN"];
+const OWN = ["TELEGRAM_BOT_TOKEN", "TELEGRAM_ALLOWED_USERS", "TELEGRAM_WEBHOOK_SECRET", "TELEGRAM_PASSWORD", "OPENROUTER_API_KEY", "PIKIT_ADMIN_TOKEN", "BRAVE_API_KEY", "CLOUDFLARE_API_TOKEN", "GITHUB_TOKEN", "PIKIT_MERGE_TOKEN"];
 const CLEAN_ENV = Object.fromEntries(Object.entries(process.env).filter(([name]) => !OWN.includes(name))) as Record<string, string>;
 
 async function run(command: string[], cwd: string, env: Record<string, string> = {}) {
@@ -407,6 +411,25 @@ test.skipIf(!E2E)(
         listed = JSON.stringify(await conversations.json());
       }
       expect(listed).toContain(`telegram:${OWNER.id}`);
+
+      // Self-improvement is there, dormant: the Proposals view says what to connect, and the status what is missing.
+      const proposals = await fetch(`${base}/admin/api/admin-proposals`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } });
+      expect([proposals.status, ((await proposals.json()) as { error?: string }).error]).toEqual([503, "not_connected"]);
+      const status = (await (await fetch(`${base}/admin/api/admin-proposals/status`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } })).json()) as { connected: boolean; checks: Record<string, { state: string }> };
+      expect([status.connected, status.checks.repository?.state, status.checks.readToken?.state]).toEqual([false, "missing", "missing"]);
+      // The repository set in the Settings dialog (settings-store's route) reaches the Worker that serves the routes.
+      const set = await fetch(`${base}/admin/api/settings/admin-proposals`, {
+        method: "PUT",
+        headers: { authorization: `Bearer ${ADMIN_TOKEN}`, "content-type": "application/json" },
+        body: JSON.stringify({ repository: "grace/pikit-telegram-bot" }),
+      });
+      expect(set.status).toBe(200);
+      let repository = "";
+      for (let i = 0; i < 10 && repository === ""; i++) {
+        if (i > 0) await Bun.sleep(500);
+        repository = ((await (await fetch(`${base}/admin/api/admin-proposals/status`, { headers: { authorization: `Bearer ${ADMIN_TOKEN}` } })).json()) as { repository: string }).repository;
+      }
+      expect(repository).toBe("grace/pikit-telegram-bot");
     } finally {
       dev.kill("SIGINT");
       const stopped = await Promise.race([dev.exited, Bun.sleep(15_000).then(() => undefined)]);

@@ -10,7 +10,8 @@ password you choose can talk to it. A dashboard on the same Worker (`/admin/`) s
 conversation, and lets you talk to the agent yourself.
 
 It is a [pikit](https://github.com/ajarellanod/pikit) project (`pikit new --target durable --preset
-telegram-cloudflare --ui`), so every part of it is source in this repository, yours to read and change.
+telegram-cloudflare --ui --with admin-proposals`), so every part of it is source in this repository,
+yours to read and change. It can also improve itself, once you let it (below).
 
 ## Before you click
 
@@ -82,6 +83,24 @@ builds it again, so a change you push shows at the next deploy.
 `{"ok":true,…}` when the Worker and its objects start. Then open `/telegram/setup` on the same URL
 once: it registers the webhook again and says what Telegram answered. The Worker's logs are in the
 Cloudflare dashboard (Workers & Pages → your Worker → Logs).
+
+## Let it improve itself (optional)
+
+The agent can change itself (a tool, its prompt, a view of the dashboard) by proposing the change as
+a pull request on the repository the button made; you read the diff and its checks in the dashboard's
+**Proposals** and approve it (merged, then Workers Builds deploys it) or reject it. It is off until you
+connect it, after deploying, from the dashboard: **Settings → Self-improvement** checks each part as
+you go and says what is missing.
+
+1. The repository: `owner/name` of your copy (Cloudflare shows it under Workers & Pages → your
+   Worker → Settings → Build).
+2. Two [fine-grained GitHub tokens](https://github.com/settings/personal-access-tokens/new), this
+   repository only: `GITHUB_TOKEN`, the agent's (Contents and Pull requests read and write, Checks and
+   Commit statuses read), and `PIKIT_MERGE_TOKEN`, yours, for approving (Contents and Pull requests read
+   and write). Add both as **secrets** in Workers & Pages → your Worker → Settings → Variables and
+   Secrets, never in the dashboard's settings.
+3. A ruleset on GitHub that protects `main`: a pull request required, the `checks` status check
+   required, no force push. Then nothing reaches `main` but a change you approved.
 
 ## How it works
 

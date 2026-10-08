@@ -74,6 +74,22 @@ Three pieces, each a component or a file of the kit, each removable (P3):
      with `wrangler rollback` (deployment-cloudflare's `deploy.mjs` and `pikit up`, built), the
      server with the previous image (`pikit deploy watch`, built). A change of Durable Object
      classes is never rolled back; marking such a proposal for an approval of its own is not built.
+   - **Connected after deploying, built.** `admin-proposals` is dormant until connected: it starts
+     without a repository or a token, its routes answer `503 not_connected` saying what is
+     missing, and the Proposals view shows "Connect self-improvement" with the steps. The
+     repository is a setting (its default the config's `repository`), read at each request; the
+     dashboard's Settings → Self-improvement (admin-proposals' `settings/`) sets it, saved with
+     execution-do's own `repository` setting (one more push repository, read at each push): each
+     component reads only its own (P4), the section writes both. It checks the connection live
+     (`GET /admin/api/admin-proposals/status`: the repository reachable with `GITHUB_TOKEN`, the
+     merge token set and different, a ruleset requiring a pull request on the default branch,
+     through GitHub's rules for a branch, best effort) and says how to add the two tokens as
+     secrets, with their fine-grained permissions, and how to create the ruleset. Tokens are never
+     typed into the dashboard. On Cloudflare the Worker serves the routes, so settings-store's
+     Worker half now provides `settings` to the Worker's App too. `pikit configure` does the same
+     from a terminal (admin-proposals' `configure.ts`: the repository from `git remote get-url
+     origin` written to the config, the tokens to `.env`, the ruleset explained), through a new
+     `io.setConfig`.
 
 **Who. Built:** the steward is the agent marked so in its `defineAgent` (`steward: true`), one per
 project: runtime-pi refuses to start with two, and extension-pikit-self refuses an agent that names
@@ -108,18 +124,19 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
 
 1. `pikit-self`, with the docs (`docs/`): cheap, and everything else uses them. Built.
 2. Proposals on Cloudflare: the project's CI workflow, the Proposals view and its Approve and
-   Reject routes (**built**: `admin-proposals`, which works on a server too). Left: the template
-   (the component in the preset, `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` asked by the button,
-   execution-do's `git.pushRepositories` set to the repository) and the ruleset, which the
-   operator sets on GitHub.
+   Reject routes (**built**: `admin-proposals`, which works on a server too), and connecting them
+   after deploying (**built**: the Settings section, the status route, the `pikit configure` step).
+   The template has `admin-proposals` (the `telegram-cloudflare` preset's feature, `--with`),
+   dormant: the button's form is unchanged, `GITHUB_TOKEN` and `PIKIT_MERGE_TOKEN` are `notAsked`.
+   Left: the ruleset, which the operator creates on GitHub (the section says how).
 3. Rollback on Cloudflare (**built**): every deploy, Workers Builds' (the template's deploy command,
    `deployment-cloudflare`'s `deploy.mjs`) and `pikit up`'s, waits for `/health` from the new
    version and rolls one that fails it or never answers back to the previous version, failing the
    build (`pikit: <version> failed /health: rolled back to <previous>`). Never one whose deploy
    changed the Durable Object classes: each version is tagged with its last migration tag, and a
    different one fails the deploy without a rollback (deployment-cloudflare's README, "Rolling back").
-4. The server: **built**, but for `pikit configure`'s part (the repository and the tokens, being
-   built there).
+4. The server: **built**, `pikit configure`'s part included (admin-proposals' step: the repository
+   and the tokens).
    - **git:** `execution-local` has execution-do's `git` (isomorphic-git, run by the server; the
      shell reaches it through a `git` program on its `PATH`): same commands, same fences, the token
      read through `secrets` and never a command's variable. So the image needs no `git` binary; Bun
@@ -134,14 +151,16 @@ service around it: which pikit it runs in, and change, check, approve, deploy an
      commit. A hook (`irreversible`) can forbid a rollback; none is known on a server.
 
 ## Open questions
-
-- The template's repository: the button forks the template into the operator's account under a
-  name of their choosing, so `admin-proposals.repository` and execution-do's
-  `git.pushRepositories` are not known when the template is built. A variable the button asks
-  (`PIKIT_REPOSITORY`) read at start, or a setup step after the deploy, decides it.
-- The ruleset cannot be made by the button: a setup page (or `pikit configure`) says how, or
-  makes it with the merge token if that token is given the Administration permission (it should
-  not need it otherwise).
+- The template's repository: decided, a setting set after the deploy (Settings →
+  Self-improvement), not a variable the button asks: the button's form stays short, and the
+  repository it creates is not known before.
+- The ruleset cannot be made by the button: the Settings section and `pikit configure` say how,
+  and the status checks it (best effort: a classic branch protection is not seen). Making it (with
+  `gh`, or the merge token given the Administration permission, which it should not need otherwise)
+  is not built.
+- Only admin-proposals' section sets execution-do's `repository`: a CLI-only project on Cloudflare
+  (no dashboard) adds the repository to execution-do's `git.pushRepositories` by hand, which
+  `pikit configure` says.
 - A merge that adds a Durable Object migration is never rolled back (Cloudflare cannot): its build
   fails and it stays until a fix is merged. Marking such a proposal as not reversible, for an
   approval of its own, is not built. A bad merge that passes `/health` is not rolled back either:
