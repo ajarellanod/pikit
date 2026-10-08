@@ -15,7 +15,8 @@
   },
   "optional": {
     "capabilities": [
-      "agent.definition"
+      "agent.definition",
+      "github"
     ]
   },
   "provides": [

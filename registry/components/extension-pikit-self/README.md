@@ -7,7 +7,8 @@ It is SPEC §6's self-knowledge (`features/self-improvement.md`, piece 1). It ha
 agent is doing (health, deliveries, proposals) is the operator's, in the dashboard.
 
 - **Provides:** `agent.extension`, under the key `pikit-self`.
-- **Requires:** nothing; it reads the agents (`agent.definition`) when there are some.
+- **Requires:** nothing; it reads the agents (`agent.definition`) when there are some, and the
+  project's repository (`github`, github-app's) when a provider is installed.
 - **Targets:** `server` and `durable`. On Cloudflare it is in the objects' App, where agents run.
 - **Installs to:** `src/pikit/extension-pikit-self/` (`index.ts`, `pikit-self.md`, `markdown.d.ts`,
   `extension-pikit-self.test.ts`).
@@ -68,8 +69,12 @@ Every model request of an agent that names it carries one section, `<pikit-self>
    (`redactSecrets`, from `@pikit/contracts`, as the dashboard does). And the agents, from
    `agent.definition`: model, tools, extensions, and which one is the steward. On Cloudflare this is the object's App; the Worker's
    is not in it.
+3. **Its repository**, only with a `github` provider (github-app, connected from the dashboard's
+   Settings → GitHub): where the project's source is and how a change reaches it (`git clone`, a
+   `pikit/self/<topic>` branch, `git push`, `git pr`), or that GitHub is not connected yet. Read
+   through the contract at each request, so connecting applies at once; never a token.
 
-The text is built once, in `start`: the same section on every request, so the provider's prompt cache
+The text of the first two parts is built once, in `start`: the same section on every request, so the provider's prompt cache
 stays warm. A change to the project shows after the next deploy (or restart), as every change does.
 
 Edit `pikit-self.md` to say more about your project (who the operator is, what it may change here):
@@ -79,7 +84,8 @@ it is yours, like every installed file.
 
 - `extension-pikit-self.test.ts` (copied into your project): what `setup` declares, the section's text
   from a real App's description (components, keys, agents and the steward, a durable App), a
-  secret-looking config value redacted, an App that does not start when another agent names it, the guide with the docs at the kit's commit, and the same text on every request.
+  secret-looking config value redacted, an App that does not start when another agent names it, the guide with the docs at the kit's commit, the same text on every request, and the repository
+  from a `github` provider (connected or not; nothing without one).
   Offline.
 - `app.test.ts` (beside `files/`, in the registry only): the extension in a real App with runtime-pi
   and the scripted faux model: the section reaches every request of an agent that names it, once, and

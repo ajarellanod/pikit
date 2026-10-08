@@ -15,7 +15,8 @@
   "optional": {
     "capabilities": [
       "secrets",
-      "settings"
+      "settings",
+      "github"
     ]
   },
   "provides": [

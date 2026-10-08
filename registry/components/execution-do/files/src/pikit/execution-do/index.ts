@@ -9,8 +9,11 @@
  * - **The shell** is just-bash, a bash interpreter in TypeScript, with `git` (isomorphic-git, fenced),
  *   `node` (QuickJS in WebAssembly) and `curl` as host commands (`shell.ts`). There are no processes.
  * - **Only `git` changes files inside `.git`.** Pushes go only to the repositories in
- *   `git.pushRepositories`, on branches under `git.branchPrefix`; the GitHub token is the secret named
- *   `git.tokenSecret`, read through `secrets`, and never reaches the shell. Without it, clones are
+ *   `git.pushRepositories`, on branches under `git.branchPrefix`, and never reach the shell's view of
+ *   a token. With a `github` provider (github-app: the GitHub App connected from the dashboard), the
+ *   connected repository is one more push repository, and its token (short-lived, minted when asked)
+ *   is the only one, sent for that repository alone: other clones are anonymous. Without one, the
+ *   token is the secret named `git.tokenSecret`, read through `secrets`. Without either, clones are
  *   public and read-only.
  * - **One more push repository is a setting** (`settings`, when a provider is installed): `repository`,
  *   the project's own, which the dashboard's Settings → Self-improvement (admin-proposals' section)
@@ -27,6 +30,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { isGitHubNotConnected } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import Type from "typebox";
 import { createDurableExecutionEnv } from "./env.ts";
@@ -104,12 +108,33 @@ export default defineComponent({
   setup(pikit, config) {
     const secrets = pikit.useOptional("secrets");
     const settings = pikit.useOptional("settings");
+    // The connected repository and its token, when a provider is installed (github-app).
+    const github = pikit.useOptional("github");
     // A context of its own for reading the settings from a command: never start's.
     let background: AppContext | undefined;
     let declared = false;
 
-    /** The repositories a push may reach now: the config's, and the setting's when it names one. */
+    /** The repositories a push may reach now: the config's, the setting's when it names one, and the connected one. */
     const pushRepositories = async (): Promise<readonly string[]> => {
+      const connected = github.get() === undefined || background === undefined ? undefined : await github.get()?.repository(background);
+      const listed = await configuredRepositories();
+      return connected === undefined ? listed : [...listed, connected];
+    };
+    /** The token for `repository`: the connected one's from `github` (none for others), else the secret. */
+    const token = async (repository: { owner: string; name: string }): Promise<string | undefined> => {
+      const access = github.get();
+      if (access === undefined) return secrets.get()?.get(config.git.tokenSecret);
+      if (background === undefined) return undefined;
+      const connected = await access.repository(background);
+      if (connected === undefined || connected.toLowerCase() !== `${repository.owner}/${repository.name}`.toLowerCase()) return undefined;
+      try {
+        return await access.token(background);
+      } catch (error) {
+        if (isGitHubNotConnected(error)) return undefined;
+        throw error;
+      }
+    };
+    const configuredRepositories = async (): Promise<readonly string[]> => {
       const store = settings.get();
       if (store === undefined || !declared || background === undefined) return config.git.pushRepositories;
       try {
@@ -129,7 +154,7 @@ export default defineComponent({
     });
     const git = createGit({
       files,
-      token: async () => secrets.get()?.get(config.git.tokenSecret),
+      token,
       pushRepositories,
       branchPrefix: config.git.branchPrefix,
     });

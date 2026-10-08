@@ -17,16 +17,20 @@
  * that knows what the project is made of is the one its operators ask to change it. `start` refuses an
  * agent that names it and is not the steward; runtime-pi refuses two stewards.
  *
- * The text is built once, in `start`, so the section is the same on every request and the provider's
- * prompt cache stays warm. Live state (health, deliveries, proposals) is not in it: that is the
+ * 3. **Its repository**, when a `github` provider is installed (github-app: connected from the
+ *    dashboard's Settings → GitHub): read through the contract at each request (connecting applies at
+ *    once), so the steward knows where to clone, push and propose, or that GitHub is not connected yet.
+ *
+ * The rest of the text is built once, in `start`, so the section is the same on every request and the
+ * provider's prompt cache stays warm. Live state (health, deliveries, proposals) is not in it: that is the
  * operator's, in the dashboard.
  *
  * Targets: `server` and `durable`. On Cloudflare it belongs in the objects' App, where agents run; the
  * description it reads is that App's.
  */
 
-import { APP_DESCRIPTION, type AppDescription, defineComponent } from "@pikit/core";
-import { redactSecrets } from "@pikit/contracts";
+import { APP_DESCRIPTION, type AppContext, type AppDescription, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
+import { type GitHubAccess, redactSecrets } from "@pikit/contracts";
 import { defineExtension, type Extension, section } from "@pikit/pi-adapter/extensions";
 import GUIDE from "./pikit-self.md" with { type: "text" };
 
@@ -145,9 +149,44 @@ export function pikitSelfText(commit: string | undefined, composition: string | 
   return composition === undefined ? guide : `${guide}\n\n${composition}`;
 }
 
-/** The extension, whose section is `text()`: `undefined` (before the App starts) leaves it out. */
-export function createPikitSelf(text: () => string | undefined): Extension {
-  return defineExtension({ name: PIKIT_SELF, sections: [section(PIKIT_SELF, () => text())] });
+/**
+ * What the section says of the project's repository (`github`'s): where it is and how a change
+ * reaches it, or that GitHub is not connected yet.
+ */
+export function repositoryText(repository: string | undefined): string {
+  if (repository === undefined) {
+    return "## Your repository\nGitHub is not connected yet: you cannot propose a change until an operator connects it (the dashboard's Settings → GitHub). Say so if asked for a change.";
+  }
+  return [
+    "## Your repository",
+    `Your project's source is https://github.com/${repository} (connected in the dashboard's Settings → GitHub).`,
+    `To change yourself: \`git clone https://github.com/${repository}\`, commit on a branch \`pikit/self/<topic>\`, \`git push origin pikit/self/<topic>\`, then \`git pr pikit/self/<topic> <title> -b <description>\`. The operator approves it in the dashboard's Proposals; you never hold a token.`,
+  ].join("\n");
+}
+
+/** The repository's part of the section, read at each request: `undefined` without a provider, or when it cannot be read. */
+async function repositoryPart(github: GitHubAccess | undefined, ctx: AppContext | undefined): Promise<string | undefined> {
+  if (github === undefined || ctx === undefined) return undefined;
+  try {
+    return repositoryText(await github.repository(ctx));
+  } catch {
+    return undefined;
+  }
+}
+
+/** The extension, whose section is `text()` (`undefined`, before the App starts, leaves it out), then `extra()` when it says something. */
+export function createPikitSelf(text: () => string | undefined, extra: () => Promise<string | undefined> = async () => undefined): Extension {
+  return defineExtension({
+    name: PIKIT_SELF,
+    sections: [
+      section(PIKIT_SELF, async () => {
+        const built = text();
+        if (built === undefined) return undefined;
+        const more = await extra();
+        return more === undefined ? built : `${built}\n\n${more}`;
+      }),
+    ],
+  });
 }
 
 export default defineComponent({
@@ -155,10 +194,21 @@ export default defineComponent({
   setup(pikit) {
     // The agents, for what each is (model, tools, extensions): the description has only their names.
     const definitions = pikit.useKeyed("agent.definition");
+    // The project's repository, when a provider is installed (github-app).
+    const github = pikit.useOptional("github");
     let text: string | undefined;
-    pikit.provideKeyed("agent.extension", PIKIT_SELF, createPikitSelf(() => text));
+    let background: AppContext | undefined;
+    pikit.provideKeyed(
+      "agent.extension",
+      PIKIT_SELF,
+      createPikitSelf(
+        () => text,
+        () => repositoryPart(github.get(), background),
+      ),
+    );
     return {
       async start(ctx) {
+        background = ctx.derive(() => BACKGROUND_CONTEXT);
         const agents = definitions
           .keys()
           .sort()

@@ -6,8 +6,8 @@
  * The fences are code, not a prompt:
  * - **Push only to allowed repositories, only to branches under the prefix** (`pikit/self/` by
  *   default), never to `main`. A pull request is opened from such a branch, for a person to review.
- * - **The token never reaches the shell.** It is read through `secrets` when a command needs it, and
- *   sent only to github.com: in the headers of git's requests (GitHub rate-limits anonymous git
+ * - **The token never reaches the shell.** It is asked for when a command needs it (`token`: the
+ *   `github` capability's for its repository, or a secret), and sent only to github.com: in the headers of git's requests (GitHub rate-limits anonymous git
  *   traffic per IP, and Cloudflare's are shared), in `onAuth`, and to GitHub's API for `pr`. No token
  *   means public clones only.
  * - **Only `git` writes inside `.git`**: this is the one caller of the filesystem that is not fenced
@@ -25,8 +25,8 @@ import { type Files, fsError, type Node, normalize, resolvePath } from "./files.
 
 export interface GitOptions {
   files: Files;
-  /** The GitHub token, read at each command that needs it; `undefined` without one. */
-  token(): Promise<string | undefined>;
+  /** The GitHub token for `repository`, read at each command that needs it; `undefined` without one. */
+  token(repository: { owner: string; name: string }): Promise<string | undefined>;
   /** `owner/name`: the only repositories a push or a pull request may go to, read at each command that needs them. */
   pushRepositories(): Promise<readonly string[]>;
   /** What every pushed branch starts with. */
@@ -169,7 +169,7 @@ export function createGit(options: GitOptions) {
     if (existing !== undefined && (existing.kind !== "dir" || files.list(dir).length > 0)) {
       return fail(`fatal: destination path '${target ?? repository.name}' already exists and is not an empty directory`, 128);
     }
-    const token = await options.token();
+    const token = await options.token(repository);
     const pushable = token !== undefined && (await allowed(repository));
     const onAuth = pushable ? () => ({ username: "x-access-token", password: token }) : undefined;
     try {
@@ -252,7 +252,7 @@ export function createGit(options: GitOptions) {
     if (!(await isClone(dir))) return fail(`fatal: ${dir} is not a complete clone: clone it again`);
     const origin = await originOf(dir);
     if (!(await allowed(origin))) return fail(`fatal: pushing to ${origin.owner}/${origin.name} is not allowed here`);
-    const token = await options.token();
+    const token = await options.token(origin);
     if (token === undefined) return fail("fatal: there is no GitHub token here, so nothing can be pushed");
     await git.branch({ fs, dir, ref: branch, force: true });
     const result = await git.push({
@@ -283,7 +283,7 @@ export function createGit(options: GitOptions) {
     if (!branchAllowed(branch, options.branchPrefix)) return fail(`fatal: pull requests are opened only from branches ${options.branchPrefix}<topic>`);
     const origin = await originOf(dir);
     if (!(await allowed(origin))) return fail(`fatal: opening pull requests on ${origin.owner}/${origin.name} is not allowed here`);
-    const token = await options.token();
+    const token = await options.token(origin);
     if (token === undefined) return fail("fatal: there is no GitHub token here, so no pull request can be opened");
     const api = `https://api.github.com/repos/${origin.owner}/${origin.name}`;
     const headers = { authorization: `Bearer ${token}`, accept: "application/vnd.github+json", "user-agent": "pikit-execution-do" };

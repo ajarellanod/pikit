@@ -8,7 +8,7 @@
 
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDefinition, defineAgent } from "@pikit/contracts";
+import { type AgentDefinition, defineAgent, type GitHubAccess } from "@pikit/contracts";
 import type { Extension } from "@pikit/pi-adapter/extensions";
 import Type from "typebox";
 import pikitSelf, { agentSummary, KIT_REPOSITORY, kitUrl, PIKIT_SELF, pikitSelfText, stewardProblem } from "./index.ts";
@@ -26,7 +26,7 @@ const leaky = defineComponent({
 });
 
 /** An App with the component, started; its `agent.extension` under `pikit-self`, and the section's text. */
-async function sectionOf(list: AgentDefinition[], target: "server" | "durable" = "server") {
+async function sectionOf(list: AgentDefinition[], target: "server" | "durable" = "server", github?: GitHubAccess) {
   let extension: Extension | undefined;
   const reader = defineComponent({
     name: "reader",
@@ -36,7 +36,8 @@ async function sectionOf(list: AgentDefinition[], target: "server" | "durable" =
     },
   });
   const config = { "tool-leaky": { botToken: TELEGRAM_TOKEN, tokenSecret: "TELEGRAM_BOT_TOKEN", retries: 3 } };
-  const app = await defineApp({ components: [agents(list), leaky, pikitSelf, reader], config, target, logger: silentLogger }).create();
+  const access = defineComponent({ name: "github-test", setup: (pikit) => void (github !== undefined && pikit.provide("github", github)) });
+  const app = await defineApp({ components: [agents(list), leaky, access, pikitSelf, reader], config, target, logger: silentLogger }).create();
   await app.start();
   const section = extension?.sections?.[0];
   const text = await section?.render({} as never, {} as never);
@@ -52,7 +53,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "extension-pikit-self")).toMatchObject({
     provides: ["agent.extension"],
     requires: [],
-    optional: ["agent.definition"],
+    optional: ["agent.definition", "github"],
   });
   expect(app.describe().capabilities["agent.extension"]?.keys).toEqual({ [PIKIT_SELF]: "extension-pikit-self" });
 });
@@ -131,4 +132,22 @@ test("only the steward may name it: the App does not start with another agent th
     'extension-pikit-self: agent "helper" names "pikit-self" and is not the steward',
   );
   expect(stewardProblem([agentSummary("assistant", assistant), agentSummary("triage", { model: "x/y" })])).toBeUndefined();
+});
+
+test("its repository: with a github provider the section says where it is and how a change reaches it, read at each request", async () => {
+  let connected: string | undefined;
+  const github: GitHubAccess = {
+    repository: async () => connected,
+    token: async () => {
+      throw new Error("the section never asks for a token");
+    },
+  };
+  const before = (await sectionOf([assistant], "durable", github)).text ?? "";
+  expect(before).toContain("GitHub is not connected yet");
+  connected = "ana/my-bot";
+  const after = (await sectionOf([assistant], "durable", github)).text ?? "";
+  expect(after).toContain("Your project's source is https://github.com/ana/my-bot");
+  expect(after).toContain("git clone https://github.com/ana/my-bot");
+  // Without a provider, nothing about a repository.
+  expect((await sectionOf([assistant])).text).not.toContain("## Your repository");
 });

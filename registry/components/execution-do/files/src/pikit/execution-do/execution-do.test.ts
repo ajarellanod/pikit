@@ -7,7 +7,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import type { Settings, SettingsValue } from "@pikit/contracts";
+import { type GitHubAccess, GitHubNotConnectedError, type Settings, type SettingsValue } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { withWorkersHost } from "@pikit/contracts/testing";
@@ -27,7 +27,7 @@ afterEach(() => {
 });
 
 /** A started app with this component over `storage`, a `secrets` holding `secrets`, and its environments. */
-async function started(options: { storage?: DurableObjectFilesStorage; config?: Record<string, unknown>; secrets?: Record<string, string>; settings?: Settings } = {}) {
+async function started(options: { storage?: DurableObjectFilesStorage; config?: Record<string, unknown>; secrets?: Record<string, string>; settings?: Settings; github?: GitHubAccess } = {}) {
   const storage = options.storage ?? fakeDurableObjectStorage();
   let found: { files: ExecutionEnv; shell: ExecutionEnv } | undefined;
   const reader = defineComponent({
@@ -43,8 +43,9 @@ async function started(options: { storage?: DurableObjectFilesStorage; config?: 
     setup: (pikit) => pikit.provide("secrets", { get: async (name: string) => options.secrets?.[name] }),
   });
   const store = defineComponent({ name: "settings-test", setup: (pikit) => void (options.settings !== undefined && pikit.provide("settings", options.settings)) });
+  const github = defineComponent({ name: "github-test", setup: (pikit) => void (options.github !== undefined && pikit.provide("github", options.github)) });
   const app = await defineApp({
-    components: [...(options.secrets === undefined ? [] : [secrets]), store, executionDo, reader],
+    components: [...(options.secrets === undefined ? [] : [secrets]), store, github, executionDo, reader],
     config: { "execution-do": options.config ?? {} },
     logger: silentLogger,
   }).create();
@@ -77,7 +78,7 @@ for (const c of createLifecycleConformance(() => ({ component: hosted }))) {
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [executionDo], logger: silentLogger }).create();
-  expect(app.describe().components).toEqual([{ name: "execution-do", provides: ["execution", "execution.shell"], requires: [], optional: ["secrets", "settings"] }]);
+  expect(app.describe().components).toEqual([{ name: "execution-do", provides: ["execution", "execution.shell"], requires: [], optional: ["secrets", "settings", "github"] }]);
 });
 
 /** The reason `app.start` fails with, when the host in its context is `host`. */
@@ -322,4 +323,36 @@ test("git clone: GitHub over HTTPS only, a private repository needs the token, a
   expect((await run(withToken.env, "git clone https://github.com/acme/secret")).output).toContain("already exists");
   await app.stop();
   await withToken.app.stop();
+});
+
+test("with a github provider: the connected repository is one more push repository, with its token alone; other clones go without one", async () => {
+  const github = await fakeGitHub();
+  let connected: string | undefined;
+  const asked: string[] = [];
+  const access: GitHubAccess = {
+    repository: async () => connected,
+    async token() {
+      asked.push(connected ?? "none");
+      if (connected === undefined) throw new GitHubNotConnectedError("connect GitHub from the dashboard's Settings → GitHub");
+      return TOKEN;
+    },
+  };
+  // A GITHUB_TOKEN secret is set too: with a provider, it is never read.
+  const { app, env } = await started({ github: access, secrets: { GITHUB_TOKEN: "ghp_never-used-with-a-provider" } });
+  expect((await run(env, "git clone https://github.com/acme/app && cd app && echo x >> README.md && git commit -m change")).output).toContain("read-only");
+  expect((await run(env, "git push origin pikit/self/x", "app")).output).toContain("pushing to acme/app is not allowed here");
+
+  connected = "acme/app";
+  const pushed = await run(env, "git push origin pikit/self/x && git pr pikit/self/x 'A change'", "app");
+  expect(pushed.exitCode).toBe(0);
+  expect(github.pushes.map((push) => push.repository)).toEqual(["acme/app"]);
+  expect(github.pulls.map((pull) => pull.head)).toEqual(["pikit/self/x"]);
+
+  // Another repository: cloned without the connected one's token, and not pushable.
+  const before = github.requests.length;
+  expect((await run(env, "git clone https://github.com/acme/secret")).exitCode).toBe(128);
+  expect(github.requests.slice(before).every((request) => request.authorization === null)).toBe(true);
+  expect(JSON.stringify(github.requests)).not.toContain("never-used");
+  expect((await run(env, "env; set")).output).not.toContain(TOKEN);
+  await app.stop();
 });

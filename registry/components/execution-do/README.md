@@ -5,8 +5,9 @@ C7). Its files live in the object's own SQLite; its shell is a bash interpreter 
 with `git`, `node` and `curl`. pi-durable's own `read`, `write`, `edit` and `bash` tools work on it unchanged.
 
 - **Provides:** `execution` and `execution.shell` (one pi-durable `ExecutionEnv`, `env.ts`, whose files are the object's own namespace: `execution-do:<object id>`).
-- **Requires:** nothing. **Optional:** `secrets`, for the GitHub token; `settings`, for one more push
-  repository set from the dashboard.
+- **Requires:** nothing. **Optional:** `github` (github-app: the repository connected from the
+  dashboard and its short-lived tokens); `secrets`, for the GitHub token when no `github` provider is
+  installed; `settings`, for one more push repository set from the dashboard.
 - **Target:** `durable`. On a server, use `execution-local`.
 - **Installs to:** `src/pikit/execution-do/`.
 - **npm dependencies:** `just-bash` 3.4.2, `isomorphic-git` 1.42.3, `quickjs-emscripten-core` and
@@ -57,11 +58,17 @@ They are code, not instructions to the model:
   Self-improvement (admin-proposals' section) sets with admin-proposals' own: read at each push and
   pull request, so connecting self-improvement after deploying needs no deploy. When the settings
   cannot be read, `git.pushRepositories` alone applies (logged).
-- **The token never reaches the shell.** It is the secret named `git.tokenSecret` (`GITHUB_TOKEN`),
-  read through `secrets` when `git` needs it, and sent only to github.com and api.github.com. It is
-  also sent when cloning other public repositories, because GitHub rate-limits anonymous git traffic
-  per IP and Cloudflare's are shared. Without it, clones are public and read-only. Use a fine-grained
-  token scoped to the push repositories, and protect `main` with a ruleset.
+- **With a `github` provider** (github-app, connected from the dashboard's Settings → GitHub), the
+  connected repository is one more push repository, read at each push, and its token is the only one:
+  short-lived, minted by the app when `git` needs it, sent only for that repository (other clones are
+  anonymous). The `GITHUB_TOKEN` secret is then never read.
+- **The token never reaches the shell.** Without a `github` provider it is the secret named
+  `git.tokenSecret` (`GITHUB_TOKEN`), read through `secrets` when `git` needs it, and sent only to
+  github.com and api.github.com. It is also sent when cloning other public repositories, because
+  GitHub rate-limits anonymous git traffic per IP and Cloudflare's are shared. Without it, clones are
+  public and read-only. Use a fine-grained token scoped to the push repositories. Either way the
+  shell has no process that could read one, and a push reaches only `pikit/self/*`: one
+  repository-scoped credential is enough, and a ruleset on `main` an extra layer.
 - **A failed clone leaves nothing behind**, and a 429 or 5xx from GitHub is retried twice.
 
 ## Config
@@ -127,5 +134,6 @@ Copied with the component, they run in your project under `bun test`, over a dou
 Object's storage (`node:sqlite`) and a fake GitHub reached through `fetch` (no network): Pi's
 `ExecutionEnv` suite with a shell, the lifecycle suite, files in chunks surviving a restart, the
 shell, `node` and its limits, `curl`, the `.git` fence, and `git` from clone to pull request with
-every fence. pikit also runs the component in workerd on a real SQLite-backed Durable Object, with
+every fence, and the same through a `github` provider (its repository pushable with its token alone).
+pikit also runs the component in workerd on a real SQLite-backed Durable Object, with
 Pi's own tools through the `tool-*` components (`tests/workerd`).
