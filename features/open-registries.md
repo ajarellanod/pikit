@@ -9,6 +9,9 @@ from the bases kept in the project (`pikit-bases/`) and reads the new version fr
 `pikit.json` records it (`builtin`, or a path). A Git registry would give it one more place to read
 from. HTTP registries, private registries and a gallery are not required.
 
+A third-party feature's own contract is a package of its own, never copies in each component:
+[contract packages](contract-packages.md) comes first.
+
 ## What it gives
 Official, third-party, private (Git over SSH) and local registries as equals, for any kind of
 component (IDEA.md, "What's ours" 7), and a static gallery to browse them.

@@ -22,6 +22,27 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
   [pi-durable migration](completed/pi-durable-migration.md)).
 - **Size:** medium: package publishing, `pikit new`/`upgrade` resolving versions instead of commits.
 
+## Before publishing `@pikit/contracts`: review its public surface
+- **Why:** until the kit is published, removing or renaming an export costs nothing (no
+  compatibility, pikit is unreleased); after, every export is a promise. Interchangeability is not at
+  stake: it rests on the conformance suites, `checkStability` and `checkImports`, which hold today.
+- **What to look at:**
+  - Exports that no consumer imports and no doc cites: `REDACTED`, `HTTP_ROUTE_KEY`,
+    `commandProblem`. Make them internal, or say who they are for.
+  - Keep `answerKey` and `COMMAND_NAME`: nothing imports them yet, but `docs/` and `features/` cite
+    them as API for future channels (transports' idempotency keys, slash commands run from a chat).
+  - `agent.conversations` has no suite of its own: only `agent.observe`'s suite exercises it. One
+    provider (runtime-pi), so it waits; it is the first suite a second runtime needs
+    ([second agent runtime](second-agent-runtime.md)).
+- **Not on this list, on purpose:** the feature contracts that would leave the package
+  (`proposals`, `github`, `agent.directory`: [contract packages](contract-packages.md)), the
+  runtime's Pi-shaped contracts (abstracting them without a second provider would guess the
+  interface), `storage.kv` (a contract only if a native KV provider is wanted), and the dashboard's
+  request-id prefix in `delivery.ts` (a guarantee shared by every channel; revisit with a second
+  operator interface or commands run from a chat).
+- **When:** before the first publish ([above](#publish-the-kit-to-npm-then-upgrade-the-deployed-bot)).
+- **Size:** small.
+
 ## Dashboard and deployment stay open
 - **Decided:** the operator dashboard is a project's choice (`pikit new --ui`, `pikit ui on|off`), a
   shadcn/ui project of its own in `src/dashboard/` over a component, `admin-api` (SPEC §5), designed

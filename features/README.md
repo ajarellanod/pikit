@@ -61,6 +61,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [inbound-dedup](inbound-dedup.md) | | Transport deduplication for platforms that redeliver | No; the first webhook channel |
 | [interaction](interaction.md) | | Pi extensions' questions answered in the chat | No |
 | [multi-tenant-isolation](multi-tenant-isolation.md) | | Tenants that cannot reach each other | No |
+| [contract-packages](contract-packages.md) | | A contract that is not the kit's is a package of its own, versioned, with its suite, shipped by its registry and vendored; decided, not built | No: built when open registries are, if pikit succeeds and others build registries |
 | [open-registries](open-registries.md) | | Git, HTTP and private registries, and a gallery | No: `pikit upgrade` (P6) merges from the bases in `pikit-bases/`, from the registry as recorded (`builtin`, a path) |
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |
