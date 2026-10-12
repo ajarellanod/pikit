@@ -27,7 +27,7 @@
 
 import type { ConversationRef } from "./agent.ts";
 import type { Feed } from "./feed.ts";
-import type { ObservedPage, PageRequest } from "./observe.ts";
+import type { Page, PageRequest } from "./page.ts";
 
 /**
  * The key of a run's answer: `${conversationId}:${requestId}`, where `requestId` is the request that started
@@ -132,7 +132,7 @@ export interface OutboundQueue {
    * what an operator sees waiting. A view of now, not a feed: a piece that settles between two pages is
    * in neither, and is in `receipts` instead. Rejects a cursor this queue did not give.
    */
-  pending(page: PageRequest): Promise<ObservedPage<PendingPiece>>;
+  pending(page: PageRequest): Promise<Page<PendingPiece>>;
 }
 
 /** One piece not settled yet. Never its text. */

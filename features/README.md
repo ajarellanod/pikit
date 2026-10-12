@@ -66,7 +66,6 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |
-| [second-agent-runtime](second-agent-runtime.md) | | Another agent loop behind `AgentRuntime` | No |
 | [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations; replies in their thread | No |

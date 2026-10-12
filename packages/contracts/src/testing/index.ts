@@ -31,7 +31,6 @@ export { createSqlDatabaseConformance } from "./storage-sql.ts";
 export type { KeyValueFixture } from "./storage-kv.ts";
 export { createKeyValueConformance, createMemoryKeyValueStorage } from "./storage-kv.ts";
 
-export { withWorkersHost } from "./workers-host.ts";
 export type { MailboxFixture } from "./mailbox.ts";
 export { createMailboxConformance, createMemoryMailbox } from "./mailbox.ts";
 export type { WakeupsConformanceOptions, WakeupsFixture } from "./wakeups.ts";
@@ -49,7 +48,7 @@ export { createAgentObserveConformance } from "./observe.ts";
 export type { AdminAuthFixture } from "./admin.ts";
 export { createAdminAuthConformance } from "./admin.ts";
 
-export type { SettingsFixture } from "./settings.ts";
+export type { SettingsFixture, SettingsFixtureApp } from "./settings.ts";
 export { createSettingsConformance } from "./settings.ts";
 
 export type { AgentDirectoryFixture } from "./agent-directory.ts";

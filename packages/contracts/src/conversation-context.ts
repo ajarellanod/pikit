@@ -3,7 +3,8 @@
  *
  * The runtime puts the run's `ConversationRef` in the context of every run, next to its
  * `AGENT_STATE`, and Pi hands that context to each tool call. A tool that needs to know whose run it
- * works in (the tool components resolve the agent's `workspace` from it) reads it:
+ * works in reads it (features/memory.md's `remember` keys what it keeps by the conversation; the
+ * registry's tools need none: the runtime resolves each call's `workspace` itself):
  *
  *   const conversation = context.value(CONVERSATION);
  *

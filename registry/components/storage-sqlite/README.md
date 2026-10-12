@@ -2,7 +2,8 @@
 
 The app's SQL database in one SQLite file. It provides `storage.sql`: components that
 keep records across restarts (the outbox's deliveries, a scheduler's jobs) use it, and each creates
-and prefixes its own tables.
+its own tables, prefixed with its name (`outbound_durable_pieces`), which `pikit registry validate`
+checks.
 
 ```sh
 pikit add storage-sqlite

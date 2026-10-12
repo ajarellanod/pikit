@@ -10,7 +10,7 @@ import { type GitHubAccess, isGitHubNotConnected, type Settings, SettingsError, 
 import { createGitHubConformance } from "@pikit/contracts/testing";
 import githubToken from "./index.ts";
 
-/** A `settings` in memory: stored keys over the defaults; `unreadable` makes `get` reject. */
+/** A `settings` in memory: stored keys over the defaults; `unreadable` makes `get` reject; `set` is an operator's change. */
 function memorySettings() {
   const declared = new Map<string, SettingsValue>();
   const stored = new Map<string, SettingsValue>();
@@ -24,17 +24,11 @@ function memorySettings() {
         if (!declared.has(component)) throw new SettingsError("unknown_component", component);
         return { ...declared.get(component), ...stored.get(component) } as T;
       },
-      async set(component, value) {
-        stored.set(component, value);
-        return { ...declared.get(component), ...value };
-      },
-      sections: async () => [],
     } as Settings,
+    set: (component: string, value: SettingsValue) => void stored.set(component, value),
   };
   return store;
 }
-
-const operator = { id: "ops" };
 
 for (const c of createGitHubConformance(() => {
   const secrets: Record<string, string> = {};
@@ -45,12 +39,12 @@ for (const c of createGitHubConformance(() => {
       defineComponent({ name: "settings-test", setup: (pikit) => pikit.provide("settings", store.settings) }),
       githubToken,
     ],
-    async connect(repository, ctx) {
+    async connect(repository) {
       secrets.GITHUB_TOKEN = `github_pat_${repository.replace("/", "_")}_conformance`;
-      await store.settings.set("github-token", { repository }, operator, ctx);
+      store.set("github-token", { repository });
     },
-    async disconnect(ctx) {
-      await store.settings.set("github-token", { repository: "" }, operator, ctx);
+    async disconnect() {
+      store.set("github-token", { repository: "" });
     },
     accepts: async (token, repository) => token === `github_pat_${repository.replace("/", "_")}_conformance`,
   };
@@ -111,7 +105,7 @@ test("the repository is a setting over the config's, read at each call; the conf
   const store = memorySettings();
   const { app, github, ctx } = await started({ settings: store.settings, config: { repository: "ana/bot" }, secrets: { GITHUB_TOKEN: "github_pat_x" } });
   expect(store.declared.get("github-token")).toEqual({ repository: "ana/bot" });
-  await store.settings.set("github-token", { repository: "ana/other" }, operator, ctx);
+  store.set("github-token", { repository: "ana/other" });
   expect(await github.repository(ctx)).toBe("ana/other");
   store.unreadable = true;
   expect(await github.repository(ctx)).toBe("ana/bot");

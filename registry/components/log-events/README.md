@@ -3,8 +3,8 @@
 One structured log line per operational event: what reached which agent, how each run ended, how
 long it took and what it cost.
 
-- **Provides:** nothing. It listens to `agent.*`, `conversation.reset`, `pipeline.halted` and
-  `runtime.*`.
+- **Provides:** nothing. It listens to `agent.*`, `conversation.reset`, `outbound.*` (when an
+  `outbound.queue` such as outbound-durable emits them), `pipeline.halted` and `runtime.*`.
 - **Uses:** nothing. It writes through the app's logger (`ctx.logger`).
 - **Targets:** `server` and `durable`.
 - **Installs to:** `src/pikit/log-events/`.
@@ -21,6 +21,8 @@ The event's name is the line's message. The fields:
 | `agent.settled` | info (`warn` when aborted) | `conversation`, `agent`, `conversationId`, `requestId`, `requestIds`, `run` (`completed`, `aborted`), `messages`, `durationMs`, `inputTokens`, `outputTokens`, `cacheReadTokens`, `cacheWriteTokens`, `totalTokens`, `cost` |
 | `agent.failed` | error | the same, with `run: "failed"` and `errorCode` |
 | `conversation.reset` | info | `conversation`, `agent`, `conversationId` (the new one), `previousConversationId` |
+| `outbound.delivered` | info | `channel`, `conversation`, `key` (the piece's), `attempts`, `possibleDuplicate` |
+| `outbound.abandoned` | warn | `channel`, `conversation`, `key`, `attempts`; not its `reason` (an error's message: the queue logs it as an error itself, and its receipt keeps it) |
 | `pipeline.halted` | info | `pipeline`, `stage`, `reason` |
 | `runtime.starting` / `ready` / `stopping` / `stopped` | info | none |
 
@@ -64,7 +66,7 @@ To stop logging these events, remove the component. There is no switch.
 ## Tests
 
 `log-events.test.ts` is copied with the component and runs in your project, without an agent
-runtime: it emits the events a runtime would. It covers each event's line, the duration, a run
+runtime: it emits the events a runtime would. It covers each event's line (a delivered and an abandoned piece included), the duration, a run
 with no known start, the bound on the start times, usage of another shape, that no prompt, answer
 or error message reaches a line, and that a failing logger or payload cannot fail the emitter.
 

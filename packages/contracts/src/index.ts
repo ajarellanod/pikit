@@ -8,11 +8,12 @@
 // levels are in the catalogue (`packages/cli/src/registry/capabilities.ts`). What only Cloudflare
 // components use (`WORKERS_HOST`) is in `@pikit/contracts/cloudflare`, not here.
 
-export { defineAgent } from "./agent.ts";
+export { defineAgent, stewardProblem } from "./agent.ts";
 export type {
   Admission,
   AgentConversations,
   AgentDefinition,
+  AgentImage,
   AgentMessage,
   AgentPayloads,
   AgentRequest,
@@ -28,7 +29,7 @@ export type {
 export type { AgentDirectory, DirectoryAgent } from "./agent-directory.ts";
 
 export type { AgentCommand, CommandInfo, CommandLookup, CommandOutcome } from "./command.ts";
-export { COMMAND_NAME, commandProblem, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
+export { COMMAND_NAME, isCommandName, listAgentCommands, runAgentCommand } from "./command.ts";
 export type { CompletionRequest, ModelComplete } from "./model.ts";
 
 export { AgentUnavailableError, admitInbound, isAgentUnavailable } from "./inbound.ts";
@@ -39,15 +40,16 @@ export { AGENT_STATE } from "./agent-state.ts";
 export { CONVERSATION } from "./conversation-context.ts";
 export type { ConversationRegistry, ConversationReset } from "./conversations.ts";
 export type { HttpRoute, HttpRouteKey } from "./http.ts";
-export { compareHttpRoutes, HTTP_ROUTE_KEY, matchesHttpRoute, parseHttpRouteKey } from "./http.ts";
+export { compareHttpRoutes, matchesHttpRoute, parseHttpRouteKey } from "./http.ts";
 export type { SecretStore } from "./secrets.ts";
-export { REDACTED, redactSecrets, secretLikePaths } from "./secrets.ts";
-export type { AgentObserver, ObservedConversation, ObservedEvent, ObservedPage, PageRequest, TranscriptEntry } from "./observe.ts";
+export { redactSecrets, SECRET_NAME_PATTERN, secretLikePaths } from "./secrets.ts";
+export type { AgentObserver, ObservedConversation, ObservedEvent, TranscriptEntry } from "./observe.ts";
+export type { Page, PageRequest } from "./page.ts";
 export type { AdminAuth, AdminSessions, Operator } from "./admin.ts";
 export { ADMIN_CLIENT_HEADER } from "./admin.ts";
 export type { ComponentHealth, HealthRegistry, HealthReporter, HealthSnapshot, HealthStatus } from "./health.ts";
-export type { Settings, SettingsErrorCode, SettingsSchema, SettingsSection, SettingsValue } from "./settings.ts";
-export { SettingsError } from "./settings.ts";
+export type { Settings, SettingsErrorCode, SettingsSchema, SettingsValue } from "./settings.ts";
+export { credentialSettingProblem, SettingsError, secretSettingProblem } from "./settings.ts";
 export type { GitHubAccess } from "./github.ts";
 export { GITHUB_REPOSITORY, GITHUB_TOKEN_MIN_LIFE_MS, GitHubNotConnectedError, isGitHubNotConnected } from "./github.ts";
 export type {

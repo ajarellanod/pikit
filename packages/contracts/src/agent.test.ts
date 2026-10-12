@@ -1,6 +1,6 @@
 import { expect, test } from "bun:test";
 import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type Admission, type AgentDefinition, type AgentRuntime, type AgentTool, defineAgent } from "./index.ts";
+import { type Admission, type AgentDefinition, type AgentRuntime, type AgentTool, defineAgent, stewardProblem } from "./index.ts";
 
 test("defineAgent returns the definition unchanged", () => {
   const definition = { name: "support", model: "anthropic/claude-sonnet", systemPrompt: "Be brief." };
@@ -147,4 +147,12 @@ test("agent.settled carries completed or aborted runs; failures are agent.failed
   const settled: AppEvents["agent.settled"] = failed;
   void settled;
   expect(failed.kind).toBe("failed");
+});
+
+test("stewardProblem: one steward or none is fine; two or more are named, sorted", () => {
+  expect(stewardProblem([])).toBeUndefined();
+  expect(stewardProblem([{ name: "main", steward: true }, { name: "helper" }, { name: "other", steward: false }])).toBeUndefined();
+  expect(stewardProblem([{ name: "support", steward: true }, { name: "assistant", steward: true }, { name: "helper" }])).toBe(
+    'agents "assistant" and "support" are each marked `steward: true`; a project has one steward, its main agent: take it off the others',
+  );
 });

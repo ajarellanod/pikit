@@ -29,6 +29,7 @@
 import type { AppContext } from "@pikit/core";
 import type { Usage } from "./agent.ts";
 import type { JsonValue } from "./json.ts";
+import type { Page, PageRequest } from "./page.ts";
 
 /** One conversation of the runtime, as an operator lists it. */
 export interface ObservedConversation {
@@ -55,29 +56,15 @@ export interface TranscriptEntry {
   messages: JsonValue[];
 }
 
-/** One page, and the cursor of the next (absent on the last page). */
-export interface ObservedPage<T> {
-  items: T[];
-  next?: string;
-}
-
-/** What a page asks for. */
-export interface PageRequest {
-  /** At most this many items. Default: the provider's (50 for runtime-pi). */
-  limit?: number;
-  /** The `next` of the previous page. */
-  cursor?: string;
-}
-
 /** One live event of a conversation: JSON, with its `type` (`snapshot` first). */
 export type ObservedEvent = { readonly type: string; readonly [key: string]: JsonValue };
 
 export interface AgentObserver {
-  conversations(page: PageRequest, ctx: AppContext): Promise<ObservedPage<ObservedConversation>>;
+  conversations(page: PageRequest, ctx: AppContext): Promise<Page<ObservedConversation>>;
   /** `undefined` when the runtime has no such conversation. */
   conversation(conversationId: string, ctx: AppContext): Promise<ObservedConversation | undefined>;
   /** Newest first. `undefined` when the runtime has no such conversation. */
-  transcript(conversationId: string, page: PageRequest, ctx: AppContext): Promise<ObservedPage<TranscriptEntry> | undefined>;
+  transcript(conversationId: string, page: PageRequest, ctx: AppContext): Promise<Page<TranscriptEntry> | undefined>;
   /**
    * The conversation live: a `snapshot`, then its changes, until `ctx` is cancelled or the runtime
    * closes. Rejects when the runtime has no such conversation. Stopping early (`break` in a

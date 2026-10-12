@@ -84,7 +84,7 @@ test("the file records each pointer and the conversations a conversation was in 
   const { app, registry } = await started(r);
   const ctx = app.context();
   const first = await registry.resolve("http:c1", "assistant", ctx);
-  const reset = await registry.reset("http:c1", ctx);
+  const reset = await registry.reset("http:c1", undefined, ctx);
 
   const file = JSON.parse(readFileSync(r.path, "utf8"));
 

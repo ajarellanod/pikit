@@ -30,7 +30,7 @@ import type { Settings } from "@pikit/contracts";
 import Type from "typebox";
 import { answerCalls, createRemoteSettings, FRESH_MS } from "./calls.ts";
 import { provideRoutes } from "./routes.ts";
-import { createDeclarations, createSettings } from "./settings.ts";
+import { createDeclarations, createSettings, type SettingsStore } from "./settings.ts";
 import { createSettingsTable } from "./table.ts";
 
 export { worker, WORKER_NAME } from "./worker.ts";
@@ -60,19 +60,18 @@ export default defineComponent({
     const local = createSettings(declarations, table);
     const remote = createRemoteSettings(declarations, () => mailbox.get(), pikit.clock, config.freshMs);
     // Chosen in start, by the inbox's scope; the components that use `settings` start after.
-    let chosen: Settings | undefined;
-    const current = (): Settings => {
+    let chosen: (Settings & SettingsStore) | undefined;
+    const current = (): Settings & SettingsStore => {
       if (chosen === undefined) throw new Error("settings-store: settings used before the App started; use it from start or later");
       return chosen;
     };
     const provided: Settings = {
       declare: (component, schema, defaults) => current().declare(component, schema, defaults),
       get: (component, ctx) => current().get(component, ctx),
-      set: (component, value, operator, ctx) => current().set(component, value, operator, ctx),
-      sections: (ctx) => current().sections(ctx),
     };
     pikit.provide("settings", provided);
-    provideRoutes(pikit, { auth, settings: () => provided });
+    // The operator side is the routes' only: components declare and read.
+    provideRoutes(pikit, { auth, store: current });
 
     return {
       start() {

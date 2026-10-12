@@ -9,7 +9,7 @@
 
 import { test } from "bun:test";
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import type { Admission, AgentRuntime, ConversationRef } from "../agent.ts";
+import { type Admission, type AgentRuntime, type ConversationRef, stewardProblem } from "../agent.ts";
 import { type AgentRuntimeFixture, createAgentRuntimeConformance } from "./agent-runtime.ts";
 
 interface Entry {
@@ -167,8 +167,12 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
         resume: (conversation) => serial(async () => void (await open(conversation))),
       };
       pikit.provide("agent.runtime", runtime);
+      // Its one agent is the script; the definitions are read only for what a runtime refuses at start.
+      const agents = pikit.useKeyed("agent.definition");
       return {
         start(ctx) {
+          const stewards = stewardProblem(agents.keys().flatMap((name) => agents.get(name) ?? []));
+          if (stewards !== undefined) throw new Error(`runtime-memory: ${stewards}`);
           background = ctx.derive(() => BACKGROUND_CONTEXT);
         },
         async stop() {
@@ -225,6 +229,7 @@ function memoryFixture(): AgentRuntimeFixture {
 
   return {
     components: [memoryRuntime(records, script)],
+    model: "memory/scripted",
     conversation: async () => conversation(),
     hold: { started: holdStarted, release: () => release() },
     holdAtEnd() {

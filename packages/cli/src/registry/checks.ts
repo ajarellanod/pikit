@@ -286,6 +286,83 @@ export function checkTargetReaders(componentDir: string): string[] {
     );
 }
 
+/** A table or an index a statement creates, and the name it gives (quotes aside), in SQL of any case. */
+const CREATES = /\bCREATE\s+(?:UNIQUE\s+|TEMP(?:ORARY)?\s+|VIRTUAL\s+)?(TABLE|INDEX)\s+(?:IF\s+NOT\s+EXISTS\s+)?["[]?((?:\$\{[^}]*\}|[^\s()"'`[\];,])*)/gi;
+/** A call of a method `namespace`: `storage.get().namespace(…)`, `kv.get()?.namespace(…)`. */
+const NAMESPACE_CALL = /\.\s*namespace\s*\(/g;
+/** A file's top-level `const NAME = "literal"` (exported or not): the names a table or namespace may be given by. */
+const LITERAL_CONST = /^(?:export\s+)?const\s+([A-Za-z_$][\w$]*)\s*=\s*(?:"([^"\\\n]*)"|'([^'\\\n]*)'|`([^`\\$]*)`)/gm;
+
+/**
+ * A component's own storage names (`@pikit/contracts`' storage.ts): every table and index it creates
+ * is named after it, `-` as `_` (`outbound_durable_pieces`), and the `storage.kv` namespace it opens
+ * is its name. Read from its shipped files, outside comments: a name in a string or template literal,
+ * whose `${NAME}` parts are top-level string consts of the same file; any other name is refused, as
+ * validate cannot read it.
+ */
+export function checkStorageNames(componentDir: string, name: string): string[] {
+  const filesDir = join(componentDir, "files");
+  return listFiles(filesDir)
+    .filter((file) => SOURCE.test(file) && !forTests(file))
+    .flatMap((file) => storageNameProblems(name, `files/${file}`, readFileSync(join(filesDir, file), "utf8")));
+}
+
+/** `checkStorageNames` on one file's `source`, reported as `at`. */
+export function storageNameProblems(name: string, at: string, source: string): string[] {
+  const code = stripComments(source);
+  const consts = new Map<string, string>();
+  for (const m of code.matchAll(LITERAL_CONST)) consts.set(m[1] ?? "", m[2] ?? m[3] ?? m[4] ?? "");
+  const prefix = name.replaceAll("-", "_");
+  const problems: string[] = [];
+
+  for (const m of code.matchAll(CREATES)) {
+    const kind = (m[1] ?? "").toLowerCase();
+    const written = m[2] ?? "";
+    let unreadable = written === "";
+    const resolved = written.replace(/\$\{([^}]*)\}/g, (_, expression: string) => {
+      const value = consts.get(expression.trim());
+      if (value === undefined) unreadable = true;
+      return value ?? "";
+    });
+    if (unreadable) {
+      const named = written === "" ? "" : ` named "${written}"`;
+      problems.push(`${at} creates a ${kind}${named} whose name validate cannot read: name it with a string literal, or a const of the same file`);
+    } else if (resolved.toLowerCase() !== prefix && !resolved.toLowerCase().startsWith(`${prefix}_`)) {
+      problems.push(`${at} creates the ${kind} "${resolved}": a component's tables and indexes start with its name, ${prefix}_ (storage.sql)`);
+    }
+  }
+
+  for (const m of code.matchAll(NAMESPACE_CALL)) {
+    const argument = callArgument(code, m.index + m[0].length).trim();
+    const literal = /^(["'`])([^"'`\\$]*)\1$/.exec(argument)?.[2];
+    // `this.namespace()` (execution-do's) is another method; the KV one takes the name, alone.
+    if (literal === undefined && (argument === "" || argument.includes(","))) continue;
+    const opened = literal ?? (/^[A-Za-z_$][\w$]*$/.test(argument) ? consts.get(argument) : undefined);
+    if (opened === undefined) {
+      problems.push(`${at} opens the storage.kv namespace ${argument}, which validate cannot read: write namespace("${name}"), or a const of the same file`);
+    } else if (opened !== name) {
+      problems.push(`${at} opens the storage.kv namespace "${opened}": a component opens the one named after it, namespace("${name}")`);
+    }
+  }
+  return problems;
+}
+
+/** The text between `(`, just before `from`, and its matching `)`; strings may hold parentheses. */
+function callArgument(code: string, from: number): string {
+  let depth = 1;
+  let quote = "";
+  for (let i = from; i < code.length; i++) {
+    const c = code[i];
+    if (quote !== "") {
+      if (c === "\\") i++;
+      else if (c === quote) quote = "";
+    } else if (c === '"' || c === "'" || c === "`") quote = c;
+    else if (c === "(") depth++;
+    else if (c === ")" && --depth === 0) return code.slice(from, i);
+  }
+  return code.slice(from);
+}
+
 /** What works on the environment the runtime builds for each tool call: `api.env`, or Pi's coding tools. */
 const WORKS_ON_ENV = /\bapi\.env\b|\bcreate(?:Read|Write|Edit|Bash)Tool\b/;
 

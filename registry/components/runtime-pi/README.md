@@ -58,7 +58,8 @@ with its admission:
   while that run goes is taken together by the **next run**, which starts once the run in progress
   ends: its `agent.started` names the first of them, and its one answer (`agent.settled`) lists them
   all in `requestIds`, so a channel that replies per message replies to each. A **steer**
-  (`dispatch({ ..., whenBusy: "steer" })`, a person correcting course, or the dashboard) joins the run
+  (`dispatch({ ..., whenBusy: "steer" })`, a person correcting course; no channel sends one yet, and
+  the dashboard never does: an operator's message is a follow-up, SPEC §5) joins the run
   in progress instead, after its current tool round, and that run's answer lists it in `requestIds`;
   if the run answers before another tool round, the steer gets the next run. A steer to an idle
   conversation starts a run, as any message does;

@@ -1,4 +1,7 @@
 /**
+ * `@pikit/contracts/cloudflare/testing`, apart from the neutral suites (`@pikit/contracts/testing`) as
+ * `WORKERS_HOST` is apart from the neutral root (SPEC C5).
+ *
  * For the tests of Cloudflare components: `WORKERS_HOST` in their start and stop context, as
  * `deployment-cloudflare`'s entrypoint puts it (`app.start(withContextValue(WORKERS_HOST, host, …))`).
  *

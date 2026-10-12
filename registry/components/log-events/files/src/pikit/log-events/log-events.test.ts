@@ -187,8 +187,6 @@ test("a reset, a halted pipeline and the runtime's lifecycle each log a line", a
     conversationId: "c1",
     actor: { id: "someone" },
     text: PROMPT,
-    raw: {},
-    receivedAt: 0,
   });
   await created.stop();
 
@@ -205,6 +203,23 @@ test("a reset, a halted pipeline and the runtime's lifecycle each log a line", a
     "runtime.stopped",
   ]);
   expect(JSON.stringify(c.lines)).not.toContain(PROMPT);
+});
+
+test("a delivered piece is an info line, an abandoned one a warning without its reason", async () => {
+  const c = capture();
+  const ctx = (await app(c.logger, c.clock)).context();
+  const piece = { channel: "telegram", conversationKey: "telegram:42", key: "s1:r1#0", attempts: 2 };
+
+  await ctx.emit("outbound.delivered", { ...piece, possibleDuplicate: true });
+  await ctx.emit("outbound.abandoned", { ...piece, attempts: 5, reason: ERROR_DETAIL });
+
+  expect(c.find("outbound.delivered")).toEqual([
+    { level: "info", message: "outbound.delivered", fields: { channel: "telegram", conversation: "telegram:42", key: "s1:r1#0", attempts: 2, possibleDuplicate: true } },
+  ]);
+  expect(c.find("outbound.abandoned")).toEqual([
+    { level: "warn", message: "outbound.abandoned", fields: { channel: "telegram", conversation: "telegram:42", key: "s1:r1#0", attempts: 5 } },
+  ]);
+  expect(JSON.stringify(c.lines)).not.toContain(ERROR_DETAIL);
 });
 
 test("no line carries a prompt, an answer or an error message", async () => {

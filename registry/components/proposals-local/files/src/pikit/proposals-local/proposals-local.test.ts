@@ -83,7 +83,7 @@ test("before the deployer made the repository: status says what is missing, the 
     ["deployer", "missing"],
   ]);
   const error = await proposals.list(ctx).catch((thrown: unknown) => thrown as ProposalsError);
-  expect([(error as ProposalsError).code, (error as ProposalsError).status]).toEqual(["not_connected", 503]);
+  expect((error as ProposalsError).code).toBe("not_connected");
   expect(await proposals.remote(ctx)).toBeUndefined();
   // Its directory is there for the deployer.
   expect(fs.existsSync(directory)).toBe(true);
@@ -115,11 +115,11 @@ test("a proposal: its title and description from the head commit, its files agai
       createdAt: new Date(1_790_000_100_000).toISOString(),
       updatedAt: new Date(1_790_000_200_000).toISOString(),
       state: "open",
-      draft: false,
     },
   ]);
   const detail = await proposals.get("tools/calendar", ctx);
-  expect(detail).toMatchObject({ head, base: "main", defaultBranch: "main", mergeableState: "clean", changedFiles: 4, additions: 2, deletions: 2, checks: { state: "none" } });
+  expect(detail.mergeDetail).toBeUndefined();
+  expect(detail).toMatchObject({ head, base: "main", defaultBranch: "main", changedFiles: 4, additions: 2, deletions: 2, checks: { state: "none" } });
   expect(detail.body).toBe("Adds a tool that reads the calendar.\n\nChecked: bun test (12 pass).\n\nEarlier commits:\n- Start a calendar tool");
   expect(detail.files.map((file) => [file.path, file.status, file.additions, file.deletions])).toEqual([
     ["README.md", "modified", 1, 1],
@@ -130,6 +130,9 @@ test("a proposal: its title and description from the head commit, its files agai
   expect(detail.files[0]?.patch).toBe("@@ -1,2 +1,2 @@\n hello\n-world\n+there");
   expect(detail.files[1]?.patch).toBeUndefined();
   expect(await proposals.remote(ctx)).toEqual({ kind: "path", path: gitdir, mainBranch: "main", branchPrefix: "pikit/self/" });
+  // main moves on: the proposal is behind it, said in plain words.
+  await commitOnto(gitdir, "refs/heads/main", main, { "NEWS.md": "news\n" }, "Main moves on", 1_790_000_300);
+  expect(await proposals.get("tools/calendar", ctx)).toMatchObject({ mergeable: null, mergeDetail: "behind main: the deployer merges it in" });
   await app.stop();
 });
 

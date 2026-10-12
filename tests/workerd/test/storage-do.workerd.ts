@@ -7,7 +7,8 @@
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import type { SqlDatabase } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createKeyValueConformance, createSqlDatabaseConformance, withWorkersHost } from "@pikit/contracts/testing";
+import { createKeyValueConformance, createSqlDatabaseConformance } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import { expect, it } from "vitest";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
 import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";

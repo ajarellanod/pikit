@@ -71,6 +71,7 @@ import {
   AgentUnavailableError,
   type ConversationRef,
   defineAgent,
+  stewardProblem,
   type Wakeups,
 } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
@@ -338,15 +339,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           // Fail at start, not at the first message: an agent that cannot run is a broken deployment.
           if (agents.keys().length === 0) throw new Error("runtime-pi: no agent.definition is provided");
           // One steward at most (SPEC §6): the agent its operators ask to change the project.
-          const stewards = agents
-            .keys()
-            .sort()
-            .filter((name) => agents.get(name)?.steward === true);
-          if (stewards.length > 1) {
-            throw new Error(
-              `runtime-pi: agents ${stewards.map((name) => `"${name}"`).join(" and ")} are each marked \`steward: true\`; a project has one steward, its main agent: take it off the others`,
-            );
-          }
+          const stewards = stewardProblem(agents.keys().flatMap((name) => agents.get(name) ?? []));
+          if (stewards !== undefined) throw new Error(`runtime-pi: ${stewards}`);
           for (const key of tools.keys()) {
             const tool = tools.get(key);
             if (tool !== undefined && tool.name !== key) {

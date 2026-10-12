@@ -31,8 +31,11 @@
  * - **An approval is the head the operator read**, and is recorded with the operator. A rejection
  *   closes the proposal, never deletes what the agent wrote without a trace.
  * - **Failures to reach where proposals live are `ProposalsError`**, typed (`not_connected` when it
- *   is not set up yet, `unavailable`, `rate_limited` with `retryAfter`…), with an HTTP status to
- *   answer and a message that names a secret, never holds one.
+ *   is not set up yet, `unavailable`, `rate_limited` with `retryAfter`…), with a message that names a
+ *   secret, never holds one. How a code is answered (an HTTP status) is the reader's (admin-proposals).
+ * - **What only some providers have is optional, in plain words**: `ref` (how the place names a
+ *   proposal for a person, `#42`), `draft`, `mergeDetail` (why it does or does not merge) and
+ *   `previewUrl`; they are for display, the id stays the branch's topic.
  * - **`status` never throws for a missing part**: it says what is missing, part by part.
  */
 
@@ -76,8 +79,8 @@ export interface ProposalDeploy {
 export interface ProposalSummary {
   /** The branch's topic: `pikit/self/<topic>` → `<topic>`. */
   id: string;
-  /** The pull request's number, where proposals are pull requests. */
-  number?: number;
+  /** How the place proposals live names it for a person (`#42` for a pull request); absent where it has no name of its own. */
+  ref?: string;
   title: string;
   /** Who proposed it (the agent's account, or its commits' author). */
   author: string;
@@ -88,12 +91,13 @@ export interface ProposalSummary {
   updatedAt: string;
   closedAt?: string;
   state: ProposalState;
-  draft: boolean;
+  /** True when its author marked it unfinished (a draft pull request); absent where the provider has no such thing. */
+  draft?: boolean;
   /** Its head's checks, when read. */
   checks?: ProposalChecks;
   /** Where it is read elsewhere (the pull request on GitHub). */
   url?: string;
-  /** A preview of the change when one is found (a Workers Builds preview). */
+  /** A preview of the change, where the provider finds one. */
   previewUrl?: string;
   deploy?: ProposalDeploy;
 }
@@ -135,8 +139,8 @@ export interface ProposalDetail extends ProposalSummary {
   head: string;
   /** Whether it merges cleanly; `null` while unknown. */
   mergeable: boolean | null;
-  /** The provider's word for it (`clean`, `dirty`, `unknown`…). */
-  mergeableState: string;
+  /** Why it does or does not merge, for the operator in plain words (`behind main`, `conflicts with main`, `unrelated history`); absent when there is nothing to say. */
+  mergeDetail?: string;
   additions: number;
   deletions: number;
   changedFiles: number;
@@ -245,7 +249,6 @@ export type ProposalsRemote =
 export type ProposalsErrorCode =
   | "not_found"
   | "not_connected"
-  | "not_configured"
   | "rate_limited"
   | "unauthorized"
   | "forbidden"
@@ -253,16 +256,14 @@ export type ProposalsErrorCode =
   | "unavailable"
   | "refused";
 
-/** A failure to read or reach where proposals live. `status` is the HTTP status a route answers with. */
+/** A failure to read or reach where proposals live; `retryAfter` in seconds, with `rate_limited`. */
 export class ProposalsError extends Error {
   readonly code: ProposalsErrorCode;
-  readonly status: number;
   readonly retryAfter: number | undefined;
-  constructor(code: ProposalsErrorCode, status: number, message: string, retryAfter?: number) {
+  constructor(code: ProposalsErrorCode, message: string, retryAfter?: number) {
     super(message);
     this.name = "ProposalsError";
     this.code = code;
-    this.status = status;
     this.retryAfter = retryAfter;
   }
 }

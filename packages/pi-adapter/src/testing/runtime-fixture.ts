@@ -106,6 +106,7 @@ export function createRuntimeFixture(runtime: ComponentDefinition[], records: Ru
 
   return {
     components: [...records.components, support.agents, support.provider, probe, ...runtime],
+    model: agent.model,
     conversation,
     hold: { started: holdStarted, release: () => release() },
     holdAtEnd() {

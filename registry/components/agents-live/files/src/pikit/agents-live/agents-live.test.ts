@@ -17,7 +17,10 @@ import Type from "typebox";
 import Value from "typebox/value";
 import agentsLive from "./index.ts";
 
-/** `settings` in memory: each stored key kept while the schema accepts it, as settings-store does. */
+/**
+ * `settings` in memory: each stored key kept while the schema accepts it, as settings-store does; and
+ * `set`, an operator's change, validated against what was declared as settings-store's routes validate it.
+ */
 function memorySettings() {
   const stored = new Map<string, SettingsValue>();
   const declared = new Map<string, { schema: object; defaults: SettingsValue }>();
@@ -33,16 +36,14 @@ function memorySettings() {
       }
       return structuredClone(value) as T;
     },
-    async set(component, value) {
-      const found = declared.get(component);
-      if (found === undefined) throw new SettingsError("unknown_component", component);
-      if (!Value.Check(found.schema as never, { ...found.defaults, ...value })) throw new SettingsError("invalid_value", component);
-      stored.set(component, structuredClone(value));
-      return value;
-    },
-    sections: async () => [],
   };
-  return { provider, stored, schema: () => declared.get("agents-live")?.schema, component: defineComponent({ name: "settings-test", setup: (pikit) => pikit.provide("settings", provider) }) };
+  const set = async (component: string, value: SettingsValue) => {
+    const found = declared.get(component);
+    if (found === undefined) throw new SettingsError("unknown_component", component);
+    if (!Value.Check(found.schema as never, { ...found.defaults, ...value })) throw new Error(`settings-test: the schema refuses ${component}'s value`);
+    stored.set(component, structuredClone(value));
+  };
+  return { provider, stored, set, schema: () => declared.get("agents-live")?.schema, component: defineComponent({ name: "settings-test", setup: (pikit) => pikit.provide("settings", provider) }) };
 }
 
 const lookup = defineTool({ name: "lookup", description: "Looks up", parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "found" }] }) }) as unknown as AgentTool;
@@ -73,7 +74,7 @@ async function started(settings = memorySettings()) {
   const ctx = app.context();
   const put = async (agents: readonly DirectoryAgent[]) => {
     const value = Object.fromEntries(agents.map(({ name, ...fields }) => [name, fields]));
-    await settings.provider.set("agents-live", value, { id: "ops" }, ctx);
+    await settings.set("agents-live", value);
   };
   return { app, ctx, settings, put, directory: directory as AgentDirectory };
 }

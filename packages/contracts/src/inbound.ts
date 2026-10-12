@@ -40,10 +40,6 @@ export interface InboundMessage {
   /** Who sent it, as the channel's authentication established. */
   actor: { id: string };
   text: string;
-  /** The platform's payload, for stages that need more than the fields above. The core never reads it. */
-  raw: unknown;
-  /** When the channel received it (`clock.now()`). */
-  receivedAt: number;
 }
 
 /** Which agent answers a message, and whether it may. */
@@ -128,7 +124,7 @@ export interface AdmitOptions {
  *
  * **A conversation whose agent is gone** (`dispatch` rejects with `AgentUnavailableError`: removed by a
  * deploy, a live agent deleted) is permanent, so it never throws: the key moves to a new conversation
- * of the agent routed now (`conversations.reset(key, ctx, agent)`, the old one kept, a warning logged
+ * of the agent routed now (`conversations.reset(key, agent, ctx)`, the old one kept, a warning logged
  * naming both), and the message goes there. When routing names the gone agent itself, the message is
  * `denied` with why: its sender is told once, and the platform is acknowledged.
  */
@@ -174,7 +170,7 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
     // Moved already (a message before this one did it): the key's conversation now; else a new one.
     const now = await options.conversations.get(options.key, ctx);
     const moved =
-      now !== undefined && now.conversationId !== conversation.conversationId ? now : (await options.conversations.reset(options.key, ctx, decision.agent))?.conversation;
+      now !== undefined && now.conversationId !== conversation.conversationId ? now : (await options.conversations.reset(options.key, decision.agent, ctx))?.conversation;
     if (moved === undefined) throw error;
     ctx.logger.warn("admitInbound: the conversation's agent is no agent now; its key moves to a new conversation of the agent routed now", {
       key: options.key,

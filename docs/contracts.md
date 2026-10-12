@@ -24,28 +24,29 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 |---|---|---|---|---|
 | `agent.runtime` | single | runtime-pi | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createAgentRuntimeConformance` |
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
-| `agent.submissions` | single | runtime-pi | channel-http?, channel-telegram, channel-telegram-webhook | `createSubmissionsConformance`, `createFeedConformance` |
+| `agent.submissions` | single | runtime-pi | channel-telegram, channel-telegram-webhook, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
 | `agent.observe` | single | runtime-pi | admin-api | `createAgentObserveConformance` |
-| `agent.definition` | keyed | the project | admin-api?, agents-live?, router-basic?, router-rules?, runtime-pi? | none (`defineAgent` validates) |
+| `agent.definition` | keyed | the project | admin-api?, agents-live?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
-| `agent.tool` | keyed | tool-bash, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | runtime-pi? | none |
-| `agent.extension` | keyed | extension-house-rules | runtime-pi? | none |
+| `agent.tool` | keyed | tool-bash, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
+| `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createConversationRegistryConformance` |
 | `outbound.queue` | single | outbound-durable | admin-api?, channel-telegram?, channel-telegram-webhook? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, outbound-durable, runtime-pi, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, github-app, outbound-durable, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-telegram, channel-telegram-webhook, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | mailbox-local, platform-cloudflare | admin-api, channel-telegram-webhook | `createMailboxConformance` |
-| `actor.inbox` | single | mailbox-local, platform-cloudflare | admin-api?, channel-telegram-webhook, settings-store? | `createMailboxConformance` |
+| `actor.mailbox` | single | mailbox-local, platform-cloudflare | admin-api, channel-telegram-webhook, github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | mailbox-local, platform-cloudflare | channel-telegram-webhook, github-app, admin-api?, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | platform-cloudflare, wakeups-timers | channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, channel-http, channel-telegram-webhook, health-registry | server-bun? | `createHttpRouteConformance` (run by servers) |
-| `admin.auth` | single | admin-auth-token | admin-api, health-registry? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-cloudflare, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, tool-websearch-brave, execution-do?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, github-app?, health-registry?, settings-store? | `createAdminAuthConformance` |
+| `secrets` | single | secrets-cloudflare, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, github-app, github-token, tool-websearch-brave, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `settings` | single | settings-store | agents-live, github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `github` | single | github-app, github-token | proposals-github | `createGitHubConformance` |
-| `proposals` | single | proposals-local, proposals-github | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
+| `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, server-bun? | `createHealthConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
-| `model.provider` | keyed | provider-anthropic, provider-faux, provider-openai-compatible, provider-openrouter | runtime-pi? | none |
+| `model.provider` | keyed | provider-anthropic, provider-faux, provider-openai-compatible, provider-openrouter | agents-live?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `execution` | single | execution-do, execution-local | tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-local | tool-bash | same |
@@ -88,9 +89,10 @@ interface AgentRuntime {
   after a crash has no caller, which is why.
 - Events `agent.dispatched` (every admission) and `agent.started` (with `resumed`) are emitted too.
 
-Provider: runtime-pi (on pi-durable, through `@pikit/pi-adapter`'s `createDurableRuntime`).
+Provider: runtime-pi (on pi-durable, through `@pikit/pi-adapter`'s `createDurableRuntime`), the only
+one for good: Pi is the only agent runtime (SPEC §3.3), as for every runtime contract below.
 Suite: `createAgentRuntimeConformance`, run by runtime-pi with and without `wakeups`, by the adapter,
-and in workerd.
+and in workerd; it also checks a runtime refuses to start with two stewards (`stewardProblem`).
 
 ### `agent.conversations`
 
@@ -103,7 +105,8 @@ Durable Object, the object's root conversation first).
 One `AgentDefinition` per agent name: `{ name, model: "provider/modelId", steward?, systemPrompt?,
 tools?, extensions?, state?, prepare?(state, ctx) }`, checked by `defineAgent`. `steward: true` marks
 the project's main agent, the one its operators may ask to change it (SPEC §6): at most one per App
-(runtime-pi refuses to start with two), and only it may name `pikit-self` (extension-pikit-self
+(the runtime refuses to start with two: `stewardProblem`, which the `agent.runtime` suite checks),
+and only it may name `pikit-self` (extension-pikit-self
 refuses to start otherwise). `tools` names `agent.tool`
 keys or holds tool objects; `extensions` names `agent.extension` keys. An agent gets only what it
 names. `prepare` is pure and synchronous: from the conversation's state it returns the fields that
@@ -170,15 +173,15 @@ Which runtime conversation a conversation key is in now.
 interface ConversationRegistry {
   resolve(key, agent, ctx): Promise<ConversationRef>;   // creates on first call, then returns the record
   get(key, ctx): Promise<ConversationRef | undefined>;  // creates nothing
-  reset(key, ctx): Promise<ConversationReset | undefined>;
+  reset(key, agent, ctx): Promise<ConversationReset | undefined>; // agent: undefined keeps the key's
 }
 ```
 
 - The pointer is a record, never memory. Concurrent first resolves of one key make one conversation.
 - A conversation keeps the agent it was created with.
 - `reset` points the key to a new conversation, keeps the old one, and emits `conversation.reset`
-  once the pointer is durable. No pointer is ever deleted. `reset(key, ctx, agent)` gives the new
-  conversation another agent: what `admitInbound` does when the key's agent is gone (below).
+  once the pointer is durable. No pointer is ever deleted. `reset(key, agent, ctx)` with an `agent` gives
+  the new conversation another agent (`undefined` keeps the key's): what `admitInbound` does when the key's agent is gone (below).
 
 Providers: conversations-kv (on `storage.kv`, both targets), conversations-file (a JSON file, server).
 Both use `agent.conversations`, so the runtime starts first.
@@ -193,8 +196,8 @@ stage decided). It throws when a stage changed the message's `id`, `channel` or 
 when a capability fails. A dispatch rejected with `AgentUnavailableError` (the conversation's agent
 is gone for good: removed, a live agent deleted) is not thrown: the key moves to a new conversation of
 the agent routed now and the message goes there, or, when routing names the gone agent, it is
-`denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text,
-raw, receivedAt }`; its `id` becomes the request id. See [pipelines.md](pipelines.md).
+`denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text }` (a field is
+added, optional, with the component that reads it); its `id` becomes the request id. See [pipelines.md](pipelines.md).
 
 Authentication is not here: each channel proves its senders its own way.
 
@@ -236,14 +239,15 @@ interface OutboundQueue {
   attach(channel, transport: ChannelTransport): void;  // a channel hands its transport while it runs
   detach(channel, signal?): Promise<void>;
   readonly receipts: Feed<DeliveryReceipt>;           // every piece that settled
-  pending(page): Promise<ObservedPage<PendingPiece>>; // what is not settled yet, never its text
+  pending(page): Promise<Page<PendingPiece>>;         // what is not settled yet, never its text
 }
 ```
 
 - The same `idempotencyKey` enqueued twice is stored once. Each conversation's pieces go in order.
 - At-least-once: a piece whose send may have reached the platform goes again with
   `possibleDuplicate`.
-- Events `outbound.delivered` and `outbound.abandoned` are notices; `receipts` is the record.
+- Events `outbound.delivered` and `outbound.abandoned` are notices (log-events logs them);
+  `receipts` is the record.
 - Transports attach rather than being a keyed capability, which would be a cycle (the queue would use
   the channels, the channels the queue).
 
@@ -281,7 +285,8 @@ interface SqlDatabase {
 ```
 
 Async, bound `?` parameters, one database per App, each component owns tables prefixed with its name
-and creates them in `start`. The dialect is the subset SQLite and Postgres share (pi-durable's own
+(`-` as `_`; `registry validate` checks the names its shipped files create) and creates them in
+`start`. The dialect is the subset SQLite and Postgres share (pi-durable's own
 tables and runtime-pi's answers log use SQLite's, and are unprefixed: one runtime per database).
 Providers: storage-sqlite (a file, server), storage-do (the Durable Object's SQLite). Suite:
 `createSqlDatabaseConformance`.
@@ -290,7 +295,7 @@ Providers: storage-sqlite (a file, server), storage-do (the Durable Object's SQL
 
 `namespace(name)` returns a `KeyValueStore`: `get`, `set`, `setIfAbsent` (exactly one concurrent
 writer wins), `delete`. Values are JSON and copied; each call is atomic on its own, with no
-transaction across calls. A component opens the namespace named after it. Provider: storage-kv-sql
+transaction across calls. A component opens the namespace named after it (`registry validate` checks it). Provider: storage-kv-sql
 (on `storage.sql`). Suite: `createKeyValueConformance`; double: `createMemoryKeyValueStorage`.
 
 ---
@@ -358,7 +363,9 @@ A context key in `@pikit/contracts/cloudflare`, not a capability. deployment-clo
 put `{ env, origin?, object? }` on each App's start context; `object` has `id`, `storage`,
 `onAlarm(handler)`, `onDeliver(handler)` and `onCall(handler)`. Only Cloudflare components read it
 (storage-do, secrets-cloudflare, platform-cloudflare, runtime-pi, channel-telegram-webhook's Worker
-half). Its types are structural: no `cloudflare:*` import.
+half). Its types are structural: no `cloudflare:*` import. Its test helper, `withWorkersHost` (a
+component gets the host in its start context, as from the entrypoint), is in
+`@pikit/contracts/cloudflare/testing`, apart from the neutral suites.
 
 ---
 
@@ -378,7 +385,8 @@ Servers (users): server-bun on a server, deployment-cloudflare's Worker host on 
 channel-http (`POST /v1/messages`, `GET /v1/conversations/:id/messages/:messageId`, `POST
 /v1/conversations/:id/reset`), channel-telegram-webhook's Worker half (`POST /telegram`, `POST
 /telegram/<name>`, `GET /telegram/setup`), admin-api (`/admin/api/*`, `GET /admin/*`),
-health-registry (`GET /admin/api/health-registry`). Suite: `createHttpRouteConformance`, run by
+health-registry (`GET /admin/api/health-registry`), and the dashboard routes of admin-proposals,
+github-app and settings-store. Suite: `createHttpRouteConformance`, run by
 server-bun and deployment-cloudflare.
 
 ### `admin.auth` ([admin.ts](../packages/contracts/src/admin.ts))
@@ -395,7 +403,10 @@ cookies). Suite: `createAdminAuthConformance`.
 Read-only, for operators: `conversations(page)`, `conversation(id)`, `transcript(id, page)` (newest
 first), `watch(id)` (an async iterable: a `snapshot`, then changes; a consumer that falls behind gets a
 new snapshot), `usage(id)`. It runs in the App that runs the runtime: on Cloudflare it sees only that
-object's conversations. Provider: runtime-pi (`createObserver` in the adapter). Suite:
+object's conversations. Pages are `Page<T>` (`{ items, next? }`) asked for with a `PageRequest`
+(`{ limit?, cursor? }`), both in [page.ts](../packages/contracts/src/page.ts): a view of now, not a
+feed (`outbound.queue`'s `pending` pages the same way). Provider: runtime-pi (`createObserver` in the
+adapter). Suite:
 `createAgentObserveConformance` (in the adapter's tests and workerd).
 
 ---
@@ -442,6 +453,43 @@ appears nowhere the agent can read (every durable provider's rule, SPEC C7).
 `get(name): Promise<string | undefined>`; an empty value is not set. A secret never appears in config,
 `describe()`, a log line or a transcript. Providers: secrets-env (the process environment), secrets-
 cloudflare (the Worker's `env`). Suite: `createSecretStoreConformance`.
+
+### `settings` ([settings.ts](../packages/contracts/src/settings.ts))
+
+Values an operator changes live from the dashboard, read when used (SPEC §6, "What changes live is
+data"; [features/settings.md](../features/settings.md)). The contract is what a component sees:
+
+```ts
+interface Settings {
+  declare(component, schema, defaults): void;        // in start, once per App
+  get<T>(component, ctx): Promise<T>;                 // the stored value over the defaults, valid
+}
+```
+
+- Config or setting, never both: config is deployed and read at start, a setting is changed by an
+  operator and read when used (its default may come from config).
+- A setting is never a secret, only a secret's name (`tokenSecret: "GITHUB_TOKEN"`). A provider holds
+  every component to it with two shared checks: `declare` refuses a schema whose secret-named string
+  (`apiKey`, `token`, `password`...) is free (`secretSettingProblem`: it must have
+  `pattern: SECRET_NAME_PATTERN`) and defaults holding a credential; an operator's change holding one
+  (a known shape, whole or as a word: `sk-...`, `ghp_...`, a bot token, a JWT) is refused
+  (`credentialSettingProblem`). Neither refusal, nor any log line, echoes the value; the suite checks
+  both.
+- `declare` takes a JSON Schema of an object (TypeBox's `Type.Object`) and defaults it must accept;
+  it throws otherwise, and on a second declaration.
+- `get` answers a copy: each top-level key the operator stored over its default; a stored key the
+  schema no longer accepts is left out, its default used, and logged. An undeclared component is
+  `SettingsError` (`unknown_component`); any other rejection is the store's, and a consumer keeps
+  what it read last, or its config.
+- An operator's change applies to the next `get` of every App within the provider's bound (a second
+  on Cloudflare), and outlives a restart.
+- How an operator changes them is the provider's own surface, not the contract's: settings-store's
+  dashboard routes and Settings section (`SettingsStore`: `set`, `sections`, `invalid_value`).
+
+Provider: settings-store (on `storage.sql`; on Cloudflare the values are one object's,
+`settings-store:settings`, which every App reaches through `actor.mailbox`). Users: agents-live (its agents), router-basic, router-rules, runtime-pi (an agent's
+overrides), github-token (the repository). Suite: `createSettingsConformance`, whose fixture changes
+values as an operator would (`operate`).
 
 ### `github` ([github.ts](../packages/contracts/src/github.ts))
 
@@ -490,8 +538,11 @@ interface Proposals {
   proposals: anything else is `not_found`.
 - An action is refused as an outcome, before anything is written: `not_found`, `not_open`, `moved`
   (the head is not the one the operator read), `checks_failing` (unless `override`), `wrong_base`,
-  `not_mergeable`. A failure to reach where proposals live is `ProposalsError` with a code and an
-  HTTP status (`not_connected` 503 while not set up).
+  `not_mergeable`. A failure to reach where proposals live is `ProposalsError` with a code
+  (`not_connected` while not set up, `rate_limited` with `retryAfter`…); the HTTP status is the
+  route's (admin-proposals maps each code to one).
+- What only some providers have is optional and in plain words: `ref` (`#42`, how the place proposals
+  live names one), `draft`, `mergeDetail` (why it does or does not merge), `previewUrl`.
 - An https remote's `authorization()` is read when git needs it, and rejects, saying why, when the
   credential cannot be had now; trusted code sends it to that remote alone.
 - Providers, interchangeable: proposals-local (server: branches of a bare repository in the state

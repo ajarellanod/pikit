@@ -8,6 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { storageNameProblems } from "../packages/cli/src/registry/checks.ts";
 import { generate, validate } from "../packages/cli/src/registry/commands.ts";
 import { scanImports } from "../packages/cli/src/registry/imports.ts";
 import type { Manifest } from "../packages/cli/src/registry/manifest.ts";
@@ -350,6 +351,67 @@ test("K1: no component's shipped files read the target; comments and tests may n
   expect(await problems(f)).toBe(
     "conversations-sample: files/src/pikit/conversations-sample/where.ts reads the target (pikit.target or ctx.target), which no component branches on (SPEC K1): " +
       "what differs per target comes through a capability (actor.inbox's scope says whose actor the App is), or is a component per target",
+  );
+});
+
+test("storage names: a component's tables and indexes start with its name, its storage.kv namespace is its name", () => {
+  const check = (source: string) => storageNameProblems("outbound-durable", "files/store.ts", source);
+  const sql = (statement: string) => check(`export const up = (db: { run(s: string): void }) => db.run(${statement});\n`);
+  // Literals, templates of same-file consts, indexes, any case; the bare name too.
+  expect(sql('"CREATE TABLE IF NOT EXISTS outbound_durable_pieces (key TEXT)"')).toEqual([]);
+  expect(sql("'create unique index outbound_durable_pieces_open ON outbound_durable_pieces (key)'")).toEqual([]);
+  expect(sql('"CREATE TABLE outbound_durable (key TEXT)"')).toEqual([]);
+  const consts = 'const TABLE = "outbound_durable_pieces";\nexport const META = `outbound_durable_meta`;\n';
+  expect(check(`${consts}export const s = [\`CREATE TABLE IF NOT EXISTS \${TABLE} (k TEXT)\`, \`CREATE INDEX IF NOT EXISTS \${TABLE}_at ON \${TABLE} (k)\`, \`CREATE TABLE \${META} (k TEXT)\`];\n`)).toEqual([]);
+  // A comment and a test are not read.
+  expect(check("// CREATE TABLE outbound_pieces (k TEXT)\n/* namespace: kv.namespace(\"other\") */\n")).toEqual([]);
+
+  expect(sql('"CREATE TABLE IF NOT EXISTS outbound_pieces (key TEXT)"')).toEqual([
+    'files/store.ts creates the table "outbound_pieces": a component\'s tables and indexes start with its name, outbound_durable_ (storage.sql)',
+  ]);
+  expect(sql('"CREATE INDEX outbound_durablepieces ON outbound_durable_pieces (key)"')).toEqual([
+    'files/store.ts creates the index "outbound_durablepieces": a component\'s tables and indexes start with its name, outbound_durable_ (storage.sql)',
+  ]);
+  expect(check('const T = "outbound";\nexport const s = `CREATE TABLE ${T}_pieces (k TEXT)`;\n')).toEqual([
+    'files/store.ts creates the table "outbound_pieces": a component\'s tables and indexes start with its name, outbound_durable_ (storage.sql)',
+  ]);
+  // A name validate cannot read: another file's const, an expression, a concatenation.
+  const unreadable = (written: string) =>
+    `files/store.ts creates a table${written === "" ? "" : ` named "${written}"`} whose name validate cannot read: name it with a string literal, or a const of the same file`;
+  expect(check("export const s = (t: string) => `CREATE TABLE IF NOT EXISTS ${t} (k TEXT)`;\n")).toEqual([unreadable("${t}")]);
+  expect(check("export const s = (t: { name: string }) => `CREATE TABLE ${t.name}_x (k TEXT)`;\n")).toEqual([unreadable("${t.name}_x")]);
+  expect(sql('"CREATE TABLE " + "outbound_durable_pieces (k TEXT)"')).toEqual([unreadable("")]);
+
+  // storage.kv: a literal, a same-file const; another method of that name without arguments is not it.
+  const kv = (call: string, before = "") => check(`${before}export const open = (kv: { namespace(n?: string): unknown }) => ${call};\n`);
+  expect(kv('kv.namespace("outbound-durable")')).toEqual([]);
+  expect(kv("kv?.namespace(NAME)", 'const NAME = "outbound-durable";\n')).toEqual([]);
+  expect(kv("kv.namespace()")).toEqual([]);
+  expect(check("export class Env { namespace(name: string) { return name; } }\n")).toEqual([]);
+  expect(kv("kv.namespace('channel-telegram')")).toEqual([
+    'files/store.ts opens the storage.kv namespace "channel-telegram": a component opens the one named after it, namespace("outbound-durable")',
+  ]);
+  expect(kv("kv.namespace(NAME)", 'const NAME = "outbound";\n')).toEqual([
+    'files/store.ts opens the storage.kv namespace "outbound": a component opens the one named after it, namespace("outbound-durable")',
+  ]);
+  expect(kv("kv.namespace(NAME)")).toEqual([
+    'files/store.ts opens the storage.kv namespace NAME, which validate cannot read: write namespace("outbound-durable"), or a const of the same file',
+  ]);
+  expect(kv("kv.namespace(`outbound-${'durable'}`)")).toEqual([
+    'files/store.ts opens the storage.kv namespace `outbound-${\'durable\'}`, which validate cannot read: write namespace("outbound-durable"), or a const of the same file',
+  ]);
+});
+
+test("storage names: validate reads a component's shipped files, not its tests", async () => {
+  const f = await fixture();
+  f.append("sample.test.ts", 'export const other = "CREATE TABLE other_table (k TEXT)";');
+  writeFileSync(join(f.own, "fake.test-support.ts"), 'export const other = "CREATE TABLE other_table (k TEXT)";\n');
+  writeFileSync(join(f.own, "store.ts"), 'export const schema = "CREATE TABLE IF NOT EXISTS conversations_sample_items (k TEXT)";\n');
+  expect(await problems(f)).toBe("");
+
+  writeFileSync(join(f.own, "store.ts"), 'export const schema = "CREATE TABLE IF NOT EXISTS items (k TEXT)";\n');
+  expect(await problems(f)).toBe(
+    'conversations-sample: files/src/pikit/conversations-sample/store.ts creates the table "items": a component\'s tables and indexes start with its name, conversations_sample_ (storage.sql)',
   );
 });
 

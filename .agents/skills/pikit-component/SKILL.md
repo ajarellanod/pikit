@@ -43,7 +43,7 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | A slash command the operator runs (`/deploy staging` in the dashboard's "/") | `agent.command` under its name (below: "A slash command") |
 | A text from one of the App's models, once (a title, a label) | `model.complete` (runtime-pi's): `complete({ model, system?, prompt, maxTokens? }, ctx)` |
 | Text in every request, a check on tool calls, per-conversation state | `agent.extension` (skill `pikit-extension`) |
-| Durable data | `storage.sql` (tables prefixed with your name) or `storage.kv` (a namespace named after you) |
+| Durable data | `storage.sql` (tables prefixed with your name, `-` as `_`) or `storage.kv` (a namespace named after you); `registry validate` checks both |
 | Routing a message to an agent | a stage of the `route.resolve` pipeline |
 | An HTTP endpoint | `http.route` (`"POST /v1/x"`, `"GET /items/:id"`, a prefix `"GET /admin/*"`) |
 | An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; the composition is `APP_DESCRIPTION`, which only a component named `admin-*` may read (SPEC K13, checked by `registry validate`) |
@@ -205,7 +205,8 @@ shared, upgraded or removed with `pikit remove`, or when it declares a kind or c
 Never hold what must survive in memory, and never rely on `stop()`: a `kill -9` or an eviction skips
 it (K6). Instead:
 - keep state in `storage.sql` (tables prefixed with the component's name, created in `start`) or
-  `storage.kv` (a namespace named after the component);
+  `storage.kv` (a namespace named after the component); `registry validate` checks both names, given
+  as a literal or a same-file const;
 - state that belongs to someone across conversations (a person, a team) lives with one owner: an
   actor key of yours (`memory:<person>`), reached with `actor.mailbox`'s `call`, whose `answer`
   handler reads and writes that actor's storage. On a server every key is the App itself; on

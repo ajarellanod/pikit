@@ -21,6 +21,8 @@
 - The user's Cloudflare test bot is `/Users/alex/Projects/Personal/pikit-telegram-cloudflare`, deployed as the Worker `pikit-telegram-bot-dash` (its `wrangler.jsonc` says `pikit-telegram-bot`). To ship this checkout's changes there: `bun scripts/template.ts telegram-cloudflare ../pikit-telegram-cloudflare` (regenerates it, packing `vendor/*.tgz` from `packages/`: copying files is not enough for package changes), then `npm ci` and `npx wrangler deploy --name pikit-telegram-bot-dash` there. Never `npm run deploy`: it deploys another Worker name.
 - To repair a stray six-character `\u00a7` from `js_exec`, never write it as a string literal there: a `'\\u00a7'` in the code arrives unescaped (it is `§`) and matches nothing. Build it: `String.fromCharCode(92) + "u00a7"`, check the match count, replace, then `grep -c u00a7` the files.
 
+- It happened four more times in the contracts audit, in edit and write text alike (`\u00a7`, `\u2026`): never type a `\u` escape in any tool's text, not even in JSON. Type the character itself (`§`, `…`), or keep the text ASCII ("...", "SPEC 3.3"), and `rg 'u00a7|u20[0-9a-f]{2}'` every file touched before committing.
+
 # Contract rules
 
 When adding or changing a contract in `@pikit/contracts`, a Pi-typed contract in `@pikit/pi-adapter`,
@@ -48,6 +50,8 @@ or a registry's own contract:
    supported target (workerd for `durable`).
 8. Stability needs two independent providers passing the suite (or SPEC's decision for
    project-provided contracts). One provider on two targets is not two.
+   The runtime's contracts are the exception: Pi is their only provider, for good (SPEC §3.3).
+   Never plan, propose or design for a second agent runtime.
 9. Update exports, the capability catalogue (`packages/cli/src/registry/capabilities.ts`),
    `docs/contracts.md`, SPEC and every affected README in the same change, then `bun run registry
    generate` and `validate`; report what the tests do not cover.

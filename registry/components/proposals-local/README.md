@@ -32,7 +32,9 @@ pikit add admin-proposals proposals-local    # or: pikit new --preset http --wit
    The pushed branch is the proposal: its head commit's first line is the title, the rest the
    description.
 4. **The operator reads it** in the dashboard: the description, the diff against `main` per file (from
-   where the branch left `main`), and once approved the deployer's checks.
+   where the branch left `main`), whether it is behind `main` or shares no history with it
+   (`mergeDetail`), and once approved the deployer's checks. It has no `ref` and no `draft`: a branch
+   is named by its topic.
 5. **Approve** records the head the operator read, with the operator, in `.pikit/self/decisions.json`.
    The deployer picks it up within seconds: it merges it into the project's `main` (fast-forward when
    it can, else a merge commit; a conflict fails it), runs `bun install --frozen-lockfile`,

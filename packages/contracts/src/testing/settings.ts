@@ -1,28 +1,42 @@
 /**
  * `settings` conformance: what every provider guarantees to the components that declare and read
- * settings, and to the operator who changes them (`../settings.ts`). Runner-independent:
+ * settings (`../settings.ts`). Runner-independent:
  *
  *   for (const c of createSettingsConformance(() => myProviderFixture()))
  *     test(`${c.group}: ${c.name}`, () => c.run());
  *
  * A case starts an App of the fixture's components and a consumer that declares in its `start`, as a
- * component does; "a restart" is a second App over the same storage. The schemas are plain JSON
- * Schema, as TypeBox builds them.
+ * component does; "a restart" is a second App over the same storage. An operator's change comes
+ * through the fixture's operator side (`operate`), which the provider implements over its own
+ * operator surface: how that surface validates, answers and logs is the provider's to test. The
+ * schemas are plain JSON Schema, as TypeBox builds them.
  */
 
 import { type AppContext, type ComponentDefinition, defineApp, defineComponent, type Handle, type Logger, type Target } from "@pikit/core";
 import type { ConformanceCase } from "@pikit/core/testing";
-import type { Operator } from "../admin.ts";
+import { SECRET_NAME_PATTERN } from "../secrets.ts";
 import type { Settings, SettingsSchema, SettingsValue } from "../settings.ts";
 import { checker, expecter } from "./assert.ts";
+
+/** One App of a case: its components, and its operator side. */
+export interface SettingsFixtureApp {
+  components: ComponentDefinition[];
+  /**
+   * Stores `value` as `component`'s whole value, as an operator does through the provider's own
+   * operator surface (settings-store: its dashboard route), in this App once it started (`ctx` is
+   * its). A refusal rejects, with the provider's message (the suite asks for one: a value holding a
+   * credential, which the rejection must not echo).
+   */
+  operate(component: string, value: SettingsValue, ctx: AppContext): Promise<void>;
+}
 
 /** A provider under test: one case's storage, which every App of the case shares. */
 export interface SettingsFixture {
   /**
-   * The components of one App, over the case's storage: called again for each App of the case (a
-   * restart). `logger` is the App's: a provider whose store is in another App (an object) logs there.
+   * One App over the case's storage: called again for each App of the case (a restart). `logger` is
+   * the App's: a provider whose store is in another App (an object) logs there.
    */
-  components(logger: Logger): ComponentDefinition[];
+  app(logger: Logger): SettingsFixtureApp;
   /** The Apps' config (a provider that caches across Apps reads through: its bound 0). */
   config?: Record<string, unknown>;
   /** The Apps' target; default `server`. */
@@ -33,10 +47,6 @@ export interface SettingsFixture {
 const GROUP = "settings";
 const expect = expecter(GROUP);
 const check = checker(GROUP);
-
-const OPERATOR: Operator = { id: "operator-1" };
-/** A value no log line may hold. */
-const MARKER = "never-in-a-log-7f3a";
 
 const MODE = {
   type: "object",
@@ -54,6 +64,8 @@ const OTHER_DEFAULTS: SettingsValue = { on: false };
 
 type Declarations = Record<string, { schema: SettingsSchema; defaults: SettingsValue }>;
 const BOTH: Declarations = { alpha: { schema: MODE, defaults: MODE_DEFAULTS }, beta: { schema: OTHER, defaults: OTHER_DEFAULTS } };
+/** A key in the shape of Anthropic's: what no setting may hold, and no refusal or log line may echo. */
+const CREDENTIAL = "sk-ant-api03-conformance0123456789abcdefghij";
 
 type Line = { level: string; message: string; fields?: Record<string, unknown> };
 
@@ -62,6 +74,8 @@ interface Running {
   settings: Settings;
   ctx: AppContext;
   lines: Line[];
+  /** The fixture's operator, in this App. */
+  operate(component: string, value: SettingsValue): Promise<void>;
   stop(): Promise<void>;
 }
 
@@ -81,15 +95,17 @@ async function boot(fixture: SettingsFixture, declarations: Declarations): Promi
       };
     },
   });
+  const built = fixture.app(logger);
   const app = await defineApp({
-    components: [...fixture.components(logger), consumer],
+    components: [...built.components, consumer],
     logger,
     ...(fixture.config !== undefined && { config: fixture.config }),
     ...(fixture.target !== undefined && { target: fixture.target }),
   }).create();
   await app.start();
   if (handle === undefined) throw new Error(`${GROUP}: the consumer did not set up`);
-  return { settings: handle.get(), ctx: app.context(), lines, stop: () => app.stop() };
+  const ctx = app.context();
+  return { settings: handle.get(), ctx, lines, operate: (component, value) => built.operate(component, value, ctx), stop: () => app.stop() };
 }
 
 /** `work`'s rejection code (a `SettingsError`'s), or `undefined` when it resolved. */
@@ -129,66 +145,36 @@ export function createSettingsConformance(factory: () => SettingsFixture | Promi
     });
 
   return [
-    appCase("a component that stored nothing gets its defaults", async ({ settings, ctx }) => {
-      expect(await settings.get("alpha", ctx), MODE_DEFAULTS, "get before any set");
+    appCase("a component nothing was stored for gets its defaults", async ({ settings, ctx }) => {
+      expect(await settings.get("alpha", ctx), MODE_DEFAULTS, "get before any change");
     }),
 
-    appCase("set stores the whole value, and get reads it; what the value leaves out takes its default", async ({ settings, ctx }) => {
-      const answered = await settings.set("alpha", { mode: "busy", prompt: "Be thorough." }, OPERATOR, ctx);
-      expect(answered, { mode: "busy", prompt: "Be thorough.", limit: 3 }, "set's answer");
-      expect(await settings.get("alpha", ctx), { mode: "busy", prompt: "Be thorough.", limit: 3 }, "get after set");
+    appCase("get reads what an operator stored, whole: what the value leaves out takes its default", async ({ settings, ctx, operate }) => {
+      await operate("alpha", { mode: "busy", prompt: "Be thorough." });
+      expect(await settings.get("alpha", ctx), { mode: "busy", prompt: "Be thorough.", limit: 3 }, "get after a change");
 
-      await settings.set("alpha", { limit: 9 }, OPERATOR, ctx);
-      expect(await settings.get("alpha", ctx), { mode: "calm", prompt: "Be brief.", limit: 9 }, "get after a second set, which left mode and prompt out");
+      await operate("alpha", { limit: 9 });
+      expect(await settings.get("alpha", ctx), { mode: "calm", prompt: "Be brief.", limit: 9 }, "get after a second change, which left mode and prompt out");
     }),
 
-    appCase("a value the schema refuses is invalid_value, and stores nothing", async ({ settings, ctx }) => {
-      await settings.set("alpha", { mode: "busy" }, OPERATOR, ctx);
-      expect(await codeOf(settings.set("alpha", { mode: "loud" }, OPERATOR, ctx)), "invalid_value", "a mode outside the enum");
-      expect(await codeOf(settings.set("alpha", { limit: 0 }, OPERATOR, ctx)), "invalid_value", "a limit under its minimum");
-      expect(await codeOf(settings.set("alpha", { mode: "busy", extra: 1 }, OPERATOR, ctx)), "invalid_value", "a key the schema does not have");
-      expect(await settings.get("alpha", ctx), { mode: "busy", prompt: "Be brief.", limit: 3 }, "get after the refusals");
-    }),
-
-    appCase("a component that declared nothing is unknown_component, to get and to set", async ({ settings, ctx }) => {
+    appCase("a component that declared nothing is unknown_component to get", async ({ settings, ctx }) => {
       expect(await codeOf(settings.get("gamma", ctx)), "unknown_component", "get");
-      expect(await codeOf(settings.set("gamma", { on: true }, OPERATOR, ctx)), "unknown_component", "set");
     }),
 
-    appCase("each component's value is its own", async ({ settings, ctx }) => {
-      await settings.set("beta", { on: true }, OPERATOR, ctx);
-      expect(await settings.get("alpha", ctx), MODE_DEFAULTS, "alpha after beta's set");
+    appCase("each component's value is its own", async ({ settings, ctx, operate }) => {
+      await operate("beta", { on: true });
+      expect(await settings.get("alpha", ctx), MODE_DEFAULTS, "alpha after beta's change");
       expect(await settings.get("beta", ctx), { on: true }, "beta");
     }),
 
-    appCase("sections lists every declared component by name, with its schema, defaults and value", async ({ settings, ctx }) => {
-      await settings.set("beta", { on: true }, OPERATOR, ctx);
-      expect(
-        await settings.sections(ctx),
-        [
-          { component: "alpha", schema: MODE, defaults: MODE_DEFAULTS, value: MODE_DEFAULTS },
-          { component: "beta", schema: OTHER, defaults: OTHER_DEFAULTS, value: { on: true } },
-        ],
-        "sections()",
-      );
-    }),
-
-    appCase("an answer is a copy: changing it changes nothing stored", async ({ settings, ctx }) => {
+    appCase("an answer is a copy: changing it changes nothing stored", async ({ settings, ctx, operate }) => {
       const read = (await settings.get("alpha", ctx)) as Record<string, unknown>;
       read.mode = "busy";
-      const sections = await settings.sections(ctx);
-      (sections[0]?.value as Record<string, unknown>).limit = 100;
-      expect(await settings.get("alpha", ctx), MODE_DEFAULTS, "get after changing earlier answers");
-    }),
-
-    appCase("set is logged with the operator and the component, never the value", async ({ settings, ctx, lines }) => {
-      await settings.set("alpha", { prompt: MARKER }, OPERATOR, ctx);
-      const logged = JSON.stringify(lines);
-      check(!logged.includes(MARKER), "no log line to hold the value set");
-      check(
-        lines.some((line) => JSON.stringify(line.fields ?? {}).includes(OPERATOR.id) && JSON.stringify(line).includes("alpha")),
-        "a log line naming the operator and the component",
-      );
+      expect(await settings.get("alpha", ctx), MODE_DEFAULTS, "get after changing an answer of the defaults");
+      await operate("beta", { on: true });
+      const stored = (await settings.get("beta", ctx)) as Record<string, unknown>;
+      stored.on = false;
+      expect(await settings.get("beta", ctx), { on: true }, "get after changing an answer of a stored value");
     }),
 
     appCase("declare refuses defaults its schema does not accept, and a component declared twice", async ({ settings }) => {
@@ -208,9 +194,38 @@ export function createSettingsConformance(factory: () => SettingsFixture | Promi
       check(threw, "declare to throw for a component declared already");
     }),
 
+    appCase("a setting is never a secret: declare refuses a schema whose secret-named string is free, and defaults holding a credential; naming a secret is fine", async ({ settings }) => {
+      const refuses = (component: string, schema: SettingsSchema, defaults: SettingsValue, what: string) => {
+        let threw: unknown;
+        try {
+          settings.declare(component, schema, defaults);
+        } catch (error) {
+          threw = error;
+        }
+        check(threw !== undefined, `declare to throw for ${what}`);
+        check(!String(threw instanceof Error ? threw.message : threw).includes(CREDENTIAL), `declare's refusal of ${what} not to echo the credential`);
+      };
+      refuses("gamma", { type: "object", properties: { apiKey: { type: "string" } } }, {}, "a free string under `apiKey`");
+      refuses("delta", { type: "object", properties: { prompt: { type: "string" } } }, { prompt: `call it with ${CREDENTIAL}` }, "defaults holding a credential");
+      settings.declare("epsilon", { type: "object", properties: { tokenSecret: { type: "string", pattern: SECRET_NAME_PATTERN } } }, { tokenSecret: "GITHUB_TOKEN" });
+    }),
+
+    appCase("a setting is never a secret: an operator's change holding a credential is refused, stores nothing, and nothing echoes it", async ({ settings, ctx, operate, lines }) => {
+      let refused: unknown;
+      try {
+        await operate("alpha", { mode: "busy", prompt: `Use ${CREDENTIAL} for the API.` });
+      } catch (error) {
+        refused = error;
+      }
+      check(refused !== undefined, "an operator's change holding a credential to be refused");
+      check(!String(refused instanceof Error ? refused.message : refused).includes(CREDENTIAL), "the refusal not to echo the credential");
+      expect(await settings.get("alpha", ctx), MODE_DEFAULTS, "get after the refused change");
+      check(!JSON.stringify(lines).includes(CREDENTIAL), "no log line to hold the credential");
+    }),
+
     settingsCase("a value outlives a restart", async (fixture) => {
       const first = await boot(fixture, BOTH);
-      await first.settings.set("alpha", { mode: "busy" }, OPERATOR, first.ctx);
+      await first.operate("alpha", { mode: "busy" });
       await first.stop();
       const second = await boot(fixture, BOTH);
       try {
@@ -220,28 +235,32 @@ export function createSettingsConformance(factory: () => SettingsFixture | Promi
       }
     }),
 
-    settingsCase("a stored key the schema no longer accepts takes its default; the others stay", async (fixture) => {
+    settingsCase("a stored key the schema no longer accepts takes its default, logged; the others stay", async (fixture) => {
       const first = await boot(fixture, BOTH);
-      await first.settings.set("alpha", { mode: "busy", prompt: "Kept." }, OPERATOR, first.ctx);
+      await first.operate("alpha", { mode: "busy", prompt: "Kept." });
       await first.stop();
       // A deploy took "busy" out of the enum.
       const narrower: SettingsSchema = { ...MODE, properties: { ...MODE.properties, mode: { type: "string", enum: ["calm"] } } };
       const second = await boot(fixture, { ...BOTH, alpha: { schema: narrower, defaults: MODE_DEFAULTS } });
       try {
         expect(await second.settings.get("alpha", second.ctx), { mode: "calm", prompt: "Kept.", limit: 3 }, "get under the narrower schema");
+        check(
+          second.lines.some((line) => line.level === "warn" && JSON.stringify(line).includes("alpha")),
+          "a warning naming the component whose stored key was left out",
+        );
       } finally {
         await second.stop();
       }
     }),
 
     // A provider that caches across Apps is configured by its fixture to read through (its bound 0).
-    settingsCase("a change made in one App is what the next get of another App reads", async (fixture) => {
+    settingsCase("an operator's change made in one App is what the next get of another App reads", async (fixture) => {
       const one = await boot(fixture, BOTH);
       const two = await boot(fixture, BOTH);
       try {
         expect(await two.settings.get("beta", two.ctx), OTHER_DEFAULTS, "the second App's get before the change");
-        await one.settings.set("beta", { on: true }, OPERATOR, one.ctx);
-        expect(await two.settings.get("beta", two.ctx), { on: true }, "the second App's get after the first one's set");
+        await one.operate("beta", { on: true });
+        expect(await two.settings.get("beta", two.ctx), { on: true }, "the second App's get after the change in the first one");
       } finally {
         await one.stop();
         await two.stop();

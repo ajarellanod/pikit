@@ -41,7 +41,7 @@ function memoryRegistry() {
       return found;
     },
     get: async (key) => pointers.get(key),
-    async reset(key, ctx) {
+    async reset(key, _agent, ctx) {
       const previous = pointers.get(key);
       if (previous === undefined) return undefined;
       const conversation = { ...previous, conversationId: `s${++sessions}` };

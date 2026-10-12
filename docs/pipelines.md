@@ -38,7 +38,7 @@ Three, found by every `pikit.pipeline(` and `ctx.run(` in the kernel, contracts 
 | | |
 |---|---|
 | Declared in | [packages/contracts/src/inbound.ts](../packages/contracts/src/inbound.ts) |
-| Value | `InboundMessage` (`{ id, channel, conversationId, actor, text, raw, receivedAt }`) |
+| Value | `InboundMessage` (`{ id, channel, conversationId, actor, text }`; a field is added, optional, with the component that reads it) |
 | Run by | `admitInbound`, first, for every message of every channel |
 | Stages in the registry | none |
 | Rules | a stage may rewrite the text or enrich the message, never `id`, `channel` or `conversationId` (`admitInbound` throws) |

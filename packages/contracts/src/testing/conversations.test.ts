@@ -40,7 +40,7 @@ function memoryRegistry(records: Records) {
           const ref = records.pointers.get(key);
           return ref === undefined ? undefined : { ...ref };
         },
-        async reset(key, ctx, agent) {
+        async reset(key, agent, ctx) {
           const previous = records.pointers.get(key);
           if (previous === undefined) return undefined;
           const conversation = { ...previous, ...(agent !== undefined && { agent }), conversationId: newSession() };

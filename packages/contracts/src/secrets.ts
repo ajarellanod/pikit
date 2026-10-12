@@ -46,9 +46,30 @@ const CREDENTIAL = [
 ];
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
+/** Whether `key` names a secret (`botToken`, `apiKey`, `password`): its string value would be one. */
+export function isSecretKey(key: string): boolean {
+  return SECRET_KEY.test(key);
+}
+
+/** Whether `value` is a secret's name (`GITHUB_TOKEN`), which config and settings may hold. */
+export function isSecretName(value: string): boolean {
+  return SECRET_NAME.test(value);
+}
+
+/** The grammar of a secret's name, as a JSON Schema `pattern`: what a property that names a secret is held to. */
+export const SECRET_NAME_PATTERN = SECRET_NAME.source;
+
+/**
+ * Whether `value` has the shape of a known credential (`sk-…`, `ghp_…`, a bot token, a JWT, a
+ * private key, a URL with a password): never a false positive on prose, unlike `looksLikeCredential`.
+ */
+export function isKnownCredential(value: string): boolean {
+  return CREDENTIAL.some((pattern) => pattern.test(value));
+}
+
 /** Whether `value` looks like a credential: a known shape, or 32+ random-looking characters. */
 function looksLikeCredential(value: string): boolean {
-  if (CREDENTIAL.some((pattern) => pattern.test(value))) return true;
+  if (isKnownCredential(value)) return true;
   // A long run of letters and digits with no space, dot or slash (not a path, a model, a name).
   return value.length >= 32 && /^[A-Za-z0-9_+=-]+$/.test(value) && /[0-9]/.test(value) && /[A-Za-z]/.test(value) && !UUID.test(value);
 }

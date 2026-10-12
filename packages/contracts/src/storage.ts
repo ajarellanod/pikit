@@ -7,8 +7,10 @@
  * - **Async.** `[decision]` Postgres cannot be sync; SQLite and Durable Object SQL wrap in promises
  *   at no cost.
  * - **Parameters are bound**, never interpolated: `?` placeholders, one value each.
- * - **One database per app.** Each component owns its tables and prefixes them with its name
- *   (`outbox_…`), creating them in `start` (`CREATE TABLE IF NOT EXISTS`).
+ * - **One database per app.** Each component owns its tables and prefixes them with its name, `-`
+ *   as `_` (outbound-durable's `outbound_durable_pieces`, and its indexes too), creating them in
+ *   `start` (`CREATE TABLE IF NOT EXISTS`). `pikit registry validate` checks the names its shipped
+ *   files create.
  * - **A transaction runs statements only**: no network call, no timer, nothing but `tx`'s own
  *   statements. A store that is sync underneath (SQLite, Durable Object SQL) may then run it as one
  *   step, and a stalled transaction never holds the database. Inside `work`, use `tx`: calling the
@@ -51,8 +53,8 @@ export interface SqlDatabase extends SqlStatements {
  * setting. What needs queries, or several records changed together, is `storage.sql`'s.
  *
  * - **A namespace per component.** A component opens the namespace named after it
- *   (`namespace("channel-telegram")`), as it prefixes its SQL tables with its name. Two namespaces
- *   never see each other's keys.
+ *   (`namespace("channel-telegram")`), as it prefixes its SQL tables with its name; `pikit registry
+ *   validate` checks the namespaces its shipped files open. Two namespaces never see each other's keys.
  * - **Values are JSON**, and a value read back is a copy of what was written: changing either changes
  *   nothing stored. `null` is a value; a missing key is `undefined`.
  * - **Each call is atomic on its own**, across processes too; there is no transaction across calls or

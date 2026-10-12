@@ -33,7 +33,7 @@ const defaultRouter = defineComponent({
 });
 
 function message(fields: Partial<InboundMessage> = {}): InboundMessage {
-  return { id: "m1", channel: "http", conversationId: "c1", actor: { id: "someone" }, text: "hello", raw: {}, receivedAt: 0, ...fields };
+  return { id: "m1", channel: "http", conversationId: "c1", actor: { id: "someone" }, text: "hello", ...fields };
 }
 
 async function started(rules: unknown[], extra: ReturnType<typeof defineComponent>[] = []) {
@@ -183,7 +183,7 @@ test("an invalid rule is rejected by config validation; no rules at all is valid
   expect(invalid([{ channel: "", agent: "support" }])).toThrow("invalid config");
 });
 
-/** `settings` in memory, validating against what was declared. */
+/** `settings` in memory, and `set`, an operator's change, validated against what was declared as settings-store's routes validate it. */
 function memorySettings() {
   const stored = new Map<string, SettingsValue>();
   const declared = new Map<string, { schema: object; defaults: SettingsValue }>();
@@ -194,16 +194,14 @@ function memorySettings() {
       if (found === undefined) throw new SettingsError("unknown_component", component);
       return structuredClone({ ...found.defaults, ...stored.get(component) }) as T;
     },
-    async set(component, value) {
-      const found = declared.get(component);
-      if (found === undefined) throw new SettingsError("unknown_component", component);
-      if (!Value.Check(found.schema as never, { ...found.defaults, ...value })) throw new SettingsError("invalid_value", component);
-      stored.set(component, structuredClone(value));
-      return value;
-    },
-    sections: async () => [],
   };
-  return { provider, component: defineComponent({ name: "settings-test", setup: (pikit) => pikit.provide("settings", provider) }) };
+  const set = async (component: string, value: SettingsValue) => {
+    const found = declared.get(component);
+    if (found === undefined) throw new SettingsError("unknown_component", component);
+    if (!Value.Check(found.schema as never, { ...found.defaults, ...value })) throw new Error(`settings-test: the schema refuses ${component}'s value`);
+    stored.set(component, structuredClone(value));
+  };
+  return { provider, set, component: defineComponent({ name: "settings-test", setup: (pikit) => pikit.provide("settings", provider) }) };
 }
 
 /** `agent.directory` as a list: the live agents. */
@@ -225,12 +223,12 @@ test("with settings, the rules an operator sets replace the config's, from the n
   const ctx = app.context();
 
   expect(await settings.provider.get("router-rules", ctx)).toEqual({ rules: [{ channel: "telegram", agent: "support" }] });
-  await settings.provider.set("router-rules", { rules: [{ channel: "telegram", agent: "sales" }, { actor: "spammer", deny: true, reason: "blocked" }] }, { id: "ops" }, ctx);
+  await settings.set("router-rules", { rules: [{ channel: "telegram", agent: "sales" }, { actor: "spammer", deny: true, reason: "blocked" }] });
   expect(await agentFor(app, { channel: "telegram" })).toEqual({ agent: "sales", access: "allow" });
   expect(await agentFor(app, { channel: "http", actor: { id: "spammer" } })).toEqual({ agent: "", access: "deny", reason: "blocked" });
   // Validated as the config's: without a directory, only the code's agents; never a typo.
-  await expect(settings.provider.set("router-rules", { rules: [{ agent: "billing" }] }, { id: "ops" }, ctx)).rejects.toThrow(SettingsError);
-  await expect(settings.provider.set("router-rules", { rules: [{ chanel: "telegram", agent: "sales" }] }, { id: "ops" }, ctx)).rejects.toThrow(SettingsError);
+  await expect(settings.set("router-rules", { rules: [{ agent: "billing" }] })).rejects.toThrow("the schema refuses");
+  await expect(settings.set("router-rules", { rules: [{ chanel: "telegram", agent: "sales" }] })).rejects.toThrow("the schema refuses");
   await app.stop();
 });
 
@@ -243,7 +241,7 @@ test("settings that cannot be read leave the config's rules", async () => {
     logger: { ...silentLogger, warn: (line: string) => void warnings.push(line) },
   }).create();
   await app.start();
-  await settings.provider.set("router-rules", { rules: [{ channel: "telegram", agent: "sales" }] }, { id: "ops" }, app.context());
+  await settings.set("router-rules", { rules: [{ channel: "telegram", agent: "sales" }] });
   settings.provider.get = async () => {
     throw new Error("unreachable");
   };
@@ -260,12 +258,12 @@ test("with agent.directory, a rule may name a live agent, checked when a message
   const ctx = app.context();
 
   expect(await agentFor(app, { channel: "telegram" })).toEqual({ agent: "billing", access: "allow" });
-  await settings.provider.set("router-rules", { rules: [{ channel: "telegram", agent: "nobody" }] }, { id: "ops" }, ctx);
+  await settings.set("router-rules", { rules: [{ channel: "telegram", agent: "nobody" }] });
   const routed = await ctx.run("route.resolve", { message: message({ channel: "telegram" }) });
   expect(routed).toBeInstanceOf(Halt);
   expect((routed as Halt).reason).toBe('router-rules: the rule for this message names "nobody", which is no agent (neither an agent.definition nor a live agent)');
   // An agent's name is kebab-case, live or not.
-  await expect(settings.provider.set("router-rules", { rules: [{ agent: "Not An Agent" }] }, { id: "ops" }, ctx)).rejects.toThrow(SettingsError);
+  await expect(settings.set("router-rules", { rules: [{ agent: "Not An Agent" }] })).rejects.toThrow("the schema refuses");
   await app.stop();
 });
 

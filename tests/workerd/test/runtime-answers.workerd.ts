@@ -17,7 +17,8 @@
 import { BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import type { ActorMailbox, ConversationRef, RunSettlement, SqlDatabase } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createFeedConformance, createSubmissionsConformance, withWorkersHost } from "@pikit/contracts/testing";
+import { createFeedConformance, createSubmissionsConformance } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import { createPiSubmissionsFixture, holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";

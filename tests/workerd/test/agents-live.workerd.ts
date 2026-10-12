@@ -10,9 +10,10 @@
  */
 
 import { BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import { type ActorMailbox, type AdminAuth, type AgentDirectory, admitInbound, type DirectoryAgent, type Settings } from "@pikit/contracts";
+import { type ActorMailbox, type AdminAuth, type AgentDirectory, admitInbound, type DirectoryAgent } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createAgentDirectoryConformance, withWorkersHost } from "@pikit/contracts/testing";
+import { createAgentDirectoryConformance } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { afterEach, expect, it, vi } from "vitest";
 import agentsLive from "../../../registry/components/agents-live/files/src/pikit/agents-live/index.ts";
@@ -27,6 +28,7 @@ import storageDo from "../../../registry/components/storage-do/files/src/pikit/s
 import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import { composeObjects, PLATFORM_BINDING } from "../src/platform.ts";
 import { inObject, objectHost, resetObjects, workerEnv } from "./host.ts";
+import { settingsOperator } from "./settings-operator.ts";
 
 afterEach(() => resetObjects());
 
@@ -50,27 +52,23 @@ function model(told: string[]): ComponentDefinition[] {
 
 for (const c of createAgentDirectoryConformance(async () => {
   let directory: AgentDirectory | undefined;
-  let settings: Settings | undefined;
   const reader = defineComponent({
     name: "reader-test",
     setup(pikit) {
-      const handles = { directory: pikit.use("agent.directory"), settings: pikit.use("settings") };
-      return {
-        start() {
-          directory = handles.directory.get();
-          settings = handles.settings.get();
-        },
-      };
+      const handle = pikit.use("agent.directory");
+      return { start: () => void (directory = handle.get()) };
     },
   });
-  const app = await defineApp({ components: withWorkersHost(objectHost(), [storageDo, ...model([]), settingsStore, agentsLive, reader]), logger: silentLogger }).create();
+  // An operator stores the agents through settings-store's route, as the dashboard does.
+  const operator = settingsOperator();
+  const app = await defineApp({ components: withWorkersHost(objectHost(), [storageDo, ...model([]), settingsStore, agentsLive, reader, ...operator.components]), logger: silentLogger }).create();
   await app.start();
   const ctx = app.context();
   return {
     directory: directory as AgentDirectory,
     ctx,
     put: async (agents: readonly DirectoryAgent[]) => {
-      await settings?.set("agents-live", Object.fromEntries(agents.map(({ name, ...fields }) => [name, fields])), { id: "ops" }, ctx);
+      await operator.operate("agents-live", Object.fromEntries(agents.map(({ name, ...fields }) => [name, fields])), ctx);
     },
     model: "faux/scripted",
     definedAgent: "scripted",
@@ -99,7 +97,7 @@ function channelActor(answers: string[], outcomes: string[]) {
         start() {
           inbox.get().handle("test.message", async (key, message, ctx) => {
             const { id, text, sender } = message as { id: string; text: string; sender: string };
-            const inbound = { id, channel: "test", conversationId: key, actor: { id: sender }, text, raw: {}, receivedAt: ctx.clock.now() };
+            const inbound = { id, channel: "test", conversationId: key, actor: { id: sender }, text };
             const outcome = await admitInbound(ctx, inbound, { conversations: registry.get(), runtime: runtime.get(), key });
             outcomes.push(outcome.kind === "halted" ? `halted: ${outcome.reason}` : outcome.kind);
           });

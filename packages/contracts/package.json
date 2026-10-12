@@ -5,6 +5,7 @@
   "exports": {
     ".": "./src/index.ts",
     "./cloudflare": "./src/cloudflare.ts",
+    "./cloudflare/testing": "./src/testing/workers-host.ts",
     "./testing": "./src/testing/index.ts"
   },
   "files": ["src"],

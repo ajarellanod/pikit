@@ -143,7 +143,7 @@ export default defineComponent({
     const newConversation: AgentCommand = {
       description: "Start a new conversation: this one is kept, and its key starts again empty",
       async run(conversation, _args, ctx) {
-        const reset = await registry.get().reset(conversation.key, ctx);
+        const reset = await registry.get().reset(conversation.key, undefined, ctx);
         if (reset === undefined) throw new Error("this conversation's key points to no conversation");
         return { text: "A new conversation started; the previous one is kept, and can be read." };
       },

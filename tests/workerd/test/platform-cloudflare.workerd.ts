@@ -23,7 +23,8 @@ import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "c
 import { type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { ActorCallError, type ActorMailbox, type JsonValue, type WakeupHandler, type Wakeups } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createMailboxConformance, createWakeupsConformance, withWorkersHost } from "@pikit/contracts/testing";
+import { createMailboxConformance, createWakeupsConformance } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import { afterEach, expect, it, vi } from "vitest";
 import platformCloudflare, { BACKOFF_MS, WAKEUPS_TABLE } from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/index.ts";
 import { simulatedObject } from "../../../registry/components/platform-cloudflare/files/src/pikit/platform-cloudflare/object.test-support.ts";

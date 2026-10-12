@@ -13,7 +13,8 @@
 import { BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import type { ActorMailbox, AdminAuth } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createSettingsConformance, withWorkersHost } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
+import { createSettingsConformance } from "@pikit/contracts/testing";
 import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { afterEach, expect, it, vi } from "vitest";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
@@ -27,10 +28,16 @@ import storageDo from "../../../registry/components/storage-do/files/src/pikit/s
 import storageKvSql from "../../../registry/components/storage-kv-sql/files/src/pikit/storage-kv-sql/index.ts";
 import { composeObjects, PLATFORM_BINDING } from "../src/platform.ts";
 import { inObject, objectHost, resetObjects, workerEnv } from "./host.ts";
+import { settingsOperator } from "./settings-operator.ts";
 
 afterEach(() => resetObjects());
 
-for (const c of createSettingsConformance(() => ({ components: () => withWorkersHost(objectHost(), [storageDo, settingsStore]) }))) {
+for (const c of createSettingsConformance(() => ({
+  app: () => {
+    const operator = settingsOperator();
+    return { components: withWorkersHost(objectHost(), [storageDo, settingsStore, ...operator.components]), operate: operator.operate };
+  },
+}))) {
   it(`settings-store over storage-do ${c.group}: ${c.name}`, () => inObject(c));
 }
 

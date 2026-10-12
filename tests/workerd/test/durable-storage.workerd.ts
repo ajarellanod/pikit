@@ -8,7 +8,7 @@
 import { env, evictDurableObject, runInDurableObject } from "cloudflare:test";
 import type { SqlDatabase } from "@pikit/contracts";
 import type { WorkersHost } from "@pikit/contracts/cloudflare";
-import { withWorkersHost } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { openDurableStorage } from "@pikit/pi-adapter";
 import {

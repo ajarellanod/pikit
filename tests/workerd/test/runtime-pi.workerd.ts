@@ -20,7 +20,8 @@
 import { type ComponentDefinition, defineApp, defineComponent, BACKGROUND_CONTEXT, silentLogger, withContextValue } from "@pikit/core";
 import type { ActorMailbox, ConversationRef, SqlDatabase } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import { createAgentRuntimeConformance, withWorkersHost } from "@pikit/contracts/testing";
+import { createAgentRuntimeConformance } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import { holdTool, scriptedAgent, scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
 import { createRuntimeFixture } from "@pikit/pi-adapter/testing/neutral";
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";

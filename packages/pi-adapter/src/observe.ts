@@ -20,7 +20,7 @@
 import type { Context as ChordContext } from "@earendil-works/chord";
 import { type AgentEvent, type ConversationId, type Harness, LiveDoc, type Storage, UsageDoc, type UsageState, watchEvents } from "@earendil-works/pi-durable";
 import type { AppContext } from "@pikit/core";
-import type { AgentObserver, ObservedConversation, ObservedEvent, ObservedPage, PageRequest, TranscriptEntry, Usage } from "@pikit/contracts";
+import type { AgentObserver, ObservedConversation, ObservedEvent, Page, PageRequest, TranscriptEntry, Usage } from "@pikit/contracts";
 import { ConversationDoc } from "./agent.ts";
 import { toChord } from "./context.ts";
 import { durableId } from "./submissions.ts";
@@ -197,6 +197,6 @@ function cursorOf(page: PageRequest): Readonly<Record<string, never>> | undefine
   throw new Error("agent.observe: the cursor is not one this observer gave");
 }
 
-function pageOf<T>(items: T[], next: object | undefined): ObservedPage<T> {
+function pageOf<T>(items: T[], next: object | undefined): Page<T> {
   return next === undefined ? { items } : { items, next: JSON.stringify(next) };
 }

@@ -58,8 +58,9 @@ unsafe, needs a shell, reaches the network).
 3. **Durability comes with the contracts.** Keep state in `storage.sql` / `storage.kv` or a
    pi-durable document, wake with `wakeups`, read what must not be missed from a feed with a cursor
    (SPEC K3), deliver a channel's answers through `startAnswerDelivery` (which uses `outbound.queue`
-   when installed). A component that does this never has to think about
-   crashes, evictions or deploys. Each kind has its ready-made path:
+   when installed). Its tables and indexes start with its name, `-` as `_`
+   (`outbound_durable_pieces`), and its `storage.kv` namespace is its name, which `registry validate`
+   checks. A component that does this never has to think about crashes, evictions or deploys. Each kind has its ready-made path:
    - a **channel** calls `admitInbound` for each message and `startAnswerDelivery` in its `start`
      (`@pikit/contracts`): answers from the `answers` feed with a cursor of its own, one lane per
      conversation, retries and idempotency keys, on both runtime models;

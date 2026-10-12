@@ -50,7 +50,9 @@ may come from its config.
   schema in TypeBox, as its config's;
 - `get(component, ctx)` returns the stored value over the defaults, validated; `set(component,
   value, ctx)` validates, stores, and is logged with the operator, never the value of a field marked
-  secret (a setting is never a secret: secrets stay in `secrets`);
+  secret (a setting is never a secret: secrets stay in `secrets`; a provider refuses, with the
+  contract's `secretSettingProblem` and `credentialSettingProblem`, a schema whose secret-named
+  string is free and a value holding a known credential's shape);
 - one admin route serves every section: `GET` and `PUT /admin/api/settings/:component`, behind
   `admin.auth`, answering the schema with the value, so a simple section renders from the schema
   and a custom one only places its controls.
@@ -72,9 +74,11 @@ the dashboard applies to the next run of every conversation.
 ## What is built
 
 - **The contract** (`packages/contracts/src/settings.ts`, suite `createSettingsConformance`, catalogue
-  `settings`, experimental): `declare(component, schema, defaults)`, `get(component, ctx)`,
-  `set(component, value, operator, ctx)`, `sections(ctx)`; refusals are `SettingsError`
-  (`unknown_component`, `invalid_value`).
+  `settings`, experimental): `declare(component, schema, defaults)` and `get(component, ctx)`, what a
+  component sees; `get` refuses an undeclared component (`SettingsError`, `unknown_component`). The
+  suite's fixture has an operator side (`operate`), which a provider implements over its own surface.
+  An operator's change (`set`, `sections`, `invalid_value`) is the provider's own operator surface,
+  not the contract's: settings-store's `SettingsStore`, behind its routes.
 - **settings-store** (`registry/components/settings-store/`), both targets: a `settings_store` table of
   `storage.sql` on a server; on Cloudflare the object `settings-store:settings` (`SETTINGS_KEY`) keeps
   it, the Worker's half (`settings-store-worker`) serves the routes as calls to it (and provides
@@ -99,8 +103,8 @@ the dashboard applies to the next run of every conversation.
 - **Declared in `start`, not `setup`.** Setup only registers, and a handle is read from start on; a
   component's `start` comes after its provider's, so the declarations are all there once the App is
   up. Every App of a deployment declares the same (the same components run in each).
-- **Values are top-level keys over the defaults.** `set` stores the component's whole value; `get`
-  puts each stored key over the defaults while the schema accepts it, so a deploy that makes one key
+- **Values are top-level keys over the defaults.** An operator stores the component's whole value;
+  `get` puts each stored key over the defaults while the schema accepts it, so a deploy that makes one key
   invalid (a model gone, an agent removed) loses that key only, logged. runtime-pi's settings are
   therefore keyed by agent at the top (`{ assistant: { systemPrompt?, model?, tools? } }`), not under
   one `agents` key.
@@ -114,9 +118,10 @@ the dashboard applies to the next run of every conversation.
   definition's: a tool `prepare` adds beyond them stays.
 - **Cloudflare: one call per admission at most, by time, not by admission.** An object answers `get`
   from what it read for `freshMs` (1 s) after its last call, and the call carries the values only when
-  the version changed: router-basic's read and runtime-pi's, in one admission, cost one call. An
-  object's own `set` forgets its cache. A Durable Object's start (inside `blockConcurrencyWhile`) never
-  calls the settings object: runtime-pi reads there at its first admission or wakeup.
+  the version changed: router-basic's read and runtime-pi's, in one admission, cost one call. A
+  change through an object's own routes (settings-store's `set`) forgets its cache. A Durable
+  Object's start (inside `blockConcurrencyWhile`) never calls the settings object: runtime-pi reads
+  there at its first admission or wakeup.
 - **settings-store comes with the dashboard** (`UI_COMPONENTS`), not as an offer: the dialog is the
   dashboard's and router-basic's section needs it; it requires nothing admin-api does not. A project
   without a UI has no settings and behaves as before.
@@ -181,8 +186,8 @@ A feature component (`agents-live`, with `router-rules`), offered by `pikit new`
 - **A conversation whose agent is gone moves, once** (a live agent deleted or made invalid, a code agent
   a deploy removed). It is permanent, not transient: runtime-pi rejects the dispatch with
   `AgentUnavailableError` (contracts, `inbound.ts`), and `admitInbound` moves the key to a new
-  conversation of the agent routed now (`conversations.registry.reset(key, ctx, agent)`, a new optional
-  argument; the old conversation kept, a warning logged), as a reset would, and dispatches the message
+  conversation of the agent routed now (`conversations.registry.reset(key, agent, ctx)`, an agent
+  that may be `undefined`; the old conversation kept, a warning logged), as a reset would, and dispatches the message
   there. If routing still names the gone agent, the message is `denied` (its sender told once, the
   platform acknowledged: Telegram's `200`), never a `500` that Telegram would deliver again and again.
   The transient case stays transient: while the directory was never read in this App, a missing name is

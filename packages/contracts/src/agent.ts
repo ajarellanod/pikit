@@ -100,7 +100,8 @@ export interface AgentDefinition<S extends object = object> {
   /**
    * Whether it is the project's steward (SPEC §6): its main agent, the only one that knows what the
    * project is made of (the `pikit-self` extension) and may be asked, by its operators, to change it.
-   * At most one agent of an App is: runtime-pi refuses to start with two, and extension-pikit-self
+   * At most one agent of an App is: the runtime refuses to start with two (`stewardProblem`, which the
+   * `agent.runtime` suite checks), and extension-pikit-self
    * refuses an agent that names `pikit-self` and is not the steward. Absent: `false`.
    */
   steward?: boolean;
@@ -181,6 +182,21 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
 }
 
 /**
+ * What is wrong with an App's agents taken together, or `undefined`: more than one of them is the steward
+ * (`AgentDefinition.steward`, SPEC §6). `defineAgent` sees one agent; the runtime sees them all, so it
+ * calls this at start with every `agent.definition` and refuses to start on a problem (the
+ * `agent.runtime` suite checks it does).
+ */
+export function stewardProblem(agents: readonly Pick<AgentDefinition, "name" | "steward">[]): string | undefined {
+  const stewards = agents
+    .filter((agent) => agent.steward === true)
+    .map((agent) => agent.name)
+    .sort();
+  if (stewards.length <= 1) return undefined;
+  return `agents ${stewards.map((name) => `"${name}"`).join(" and ")} are each marked \`steward: true\`; a project has one steward, its main agent: take it off the others`;
+}
+
+/**
  * An image a message carries (pi-ai's `ImageContent`): what a model that reads images sees with the
  * prompt.
  */
@@ -212,7 +228,8 @@ export interface AgentRequest {
   /**
    * What the message does to a conversation with a run going. `followUp` (the default): it waits for
    * that run to end, and the next run answers it. `steer`: it joins the run in progress after the
-   * run's current tool round (a person correcting course, an operator from the dashboard), and that
+   * run's current tool round (a person correcting course; never the dashboard's operator, whose
+   * message is a follow-up, SPEC §5), and that
    * run's result answers it with the others it took (`AgentResult.requestIds`); a run that answers
    * before another tool round leaves it to the next run, as a follow-up. A conversation with no run
    * going starts one either way.

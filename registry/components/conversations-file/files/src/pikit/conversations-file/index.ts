@@ -103,7 +103,7 @@ export default defineComponent({
         return found === undefined ? undefined : ref(key, found);
       },
 
-      async reset(key, ctx, agent) {
+      async reset(key, agent, ctx) {
         const reset = await serial(async (): Promise<ConversationReset | undefined> => {
           const file = running();
           const previous = pointers.get(key);

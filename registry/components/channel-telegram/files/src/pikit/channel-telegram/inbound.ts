@@ -22,7 +22,7 @@
 
 import { type AppContext } from "@pikit/core";
 import { admitInbound, type AgentRuntime, type ConversationRegistry, type InboundMessage, type KeyValueStore } from "@pikit/contracts";
-import type { TelegramMessage, TelegramUpdate, TelegramUser } from "./api.ts";
+import type { TelegramUpdate, TelegramUser } from "./api.ts";
 import { conversationKeyOf } from "./account.ts";
 import type { Replies } from "./replies.ts";
 
@@ -88,7 +88,7 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
     const last = await deps.store.get<number>(seenKey);
     if (last !== undefined && message.message_id <= last) return;
     if (command === "new") {
-      const reset = await deps.conversations.reset(key, ctx);
+      const reset = await deps.conversations.reset(key, undefined, ctx);
       await delivery.send(chatId, reset === undefined ? "This is already a new conversation." : "Started a new conversation.");
     } else {
       await delivery.send(chatId, command === "start" ? `Hi${from.first_name ? ` ${from.first_name}` : ""}! ${HELP}` : HELP);
@@ -103,8 +103,6 @@ export async function handleUpdate(update: TelegramUpdate, deps: InboundDeps): P
     conversationId: String(chatId),
     actor: { id: String(from.id) },
     text,
-    raw: message satisfies TelegramMessage,
-    receivedAt: ctx.clock.now(),
   };
   const outcome = await admitInbound(ctx, inbound, { conversations: deps.conversations, runtime: deps.runtime, key: conversationKeyOf(deps.instance, chatId) });
   switch (outcome.kind) {

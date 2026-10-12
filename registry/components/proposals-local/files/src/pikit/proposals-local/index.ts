@@ -161,7 +161,7 @@ export default defineComponent({
     /** `main`'s commit, or `undefined` while the deployer has not made the repository. */
     const mainHead = async () => git.resolveRef({ fs, gitdir, ref: `refs/heads/${main}` }).catch(() => undefined);
     const notReady = () =>
-      new ProposalsError("not_connected", 503, `Self-improvement is not ready: the proposals repository ${gitdir} has no ${main} yet. The deployer makes it when it starts: \`pikit up\`, with the project a git repository`);
+      new ProposalsError("not_connected", `Self-improvement is not ready: the proposals repository ${gitdir} has no ${main} yet. The deployer makes it when it starts: \`pikit up\`, with the project a git repository`);
     const ready = async () => {
       const head = await mainHead();
       if (head === undefined) throw notReady();
@@ -210,7 +210,6 @@ export default defineComponent({
         updatedAt: iso(top?.commit.committer.timestamp ?? 0),
         ...(decision !== undefined && { closedAt: decision.at }),
         state,
-        draft: false,
         ...(checks !== undefined && { checks }),
         ...(deploy !== undefined && { deploy }),
       };
@@ -329,7 +328,6 @@ export default defineComponent({
             updatedAt: decision.at,
             closedAt: decision.at,
             state,
-            draft: false,
             ...(deploy !== undefined && { deploy }),
           });
         }
@@ -341,7 +339,7 @@ export default defineComponent({
         const [all, file] = await Promise.all([decisions(), deployer()]);
         const head = (await headOf(id)) ?? all.find((decision) => decision.id === id)?.head;
         if (head === undefined || !(await git.readCommit({ fs, gitdir, oid: head }).then(() => true, () => false))) {
-          throw new ProposalsError("not_found", 404, `no proposal ${id}: no branch ${branchOf(id)}`);
+          throw new ProposalsError("not_found", `no proposal ${id}: no branch ${branchOf(id)}`);
         }
         const summary = await summaryOf(id, head, mainOid, all, file);
         const base = await baseOf(head, mainOid).catch(() => undefined);
@@ -358,7 +356,7 @@ export default defineComponent({
           defaultBranch: main,
           head,
           mergeable: base === undefined ? false : null,
-          mergeableState: base === undefined ? "unrelated" : base === mainOid ? "clean" : "behind",
+          ...(base === undefined ? { mergeDetail: `unrelated history: no commit in common with ${main}` } : base !== mainOid && { mergeDetail: `behind ${main}: the deployer merges it in` }),
           additions,
           deletions,
           changedFiles,

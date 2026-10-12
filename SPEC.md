@@ -177,6 +177,13 @@ component.
   gives components Pi's types, tools, models and environments, and bridges what Pi lacks until Pi ships
   it (P1). It holds what changes when Pi changes and must be the same in every project, nothing else.
   *Why:* Pi changes weekly; one package that follows it leaves every component and project as it was.
+- **Pi is the only agent runtime.** pikit runs its agents on Pi and on nothing else: `runtime-pi`
+  (through the adapter) is the one provider of the runtime's contracts (`agent.runtime`,
+  `agent.conversations`, `agent.submissions`, `agent.observe`, `model.complete`, `AGENT_STATE`),
+  for good. No second agent runtime (another SDK, a hosted agent) comes behind them. They exist so
+  that components never import Pi, not to make the runtime swappable, so they never wait for a second
+  provider: their stability is decided here. *Why:* P1, Pi is the agent; a second loop would make
+  every agent feature the lowest common denominator of two runtimes.
 - **A contracts helper is protocol, with the policy passed in.** `admitInbound` and
   `startAnswerDelivery` are what every provider must do alike for a guarantee to hold (one admission
   per message, a cursor per channel, a lane per conversation, idempotency keys). What may differ (the
@@ -568,5 +575,5 @@ Everything not in §1–§6 is a feature. Features are components or CLI command
 `SPEC.md` then. `features/README.md` marks with ⭐ those that make agents like OpenClaw or Hermes
 attractive to the public. Examples: more channels, the scheduler,
 approvals, Postgres, several replicas, sandboxes and tenant isolation, open registries, LLM-assisted
-merges, a second agent runtime. A feature may never require changing §1–§6; if one seems to, the
+merges (never a second agent runtime: §3.3). A feature may never require changing §1–§6; if one seems to, the
 change is proposed here first.

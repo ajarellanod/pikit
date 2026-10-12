@@ -15,8 +15,6 @@ const message: InboundMessage = {
   conversationId: "c1",
   actor: { id: "someone" },
   text: "hello",
-  raw: { text: "hello" },
-  receivedAt: 0,
 };
 
 test("a router fills in route.resolve's decision; a channel reads it", async () => {
@@ -162,7 +160,7 @@ function goneEnds(routed: string) {
   const conversations: ConversationRegistry = {
     resolve: async () => pointer,
     get: async () => pointer,
-    async reset(key, _ctx, agent) {
+    async reset(key, agent, _ctx) {
       const previous = pointer;
       pointer = { key, agent: agent ?? previous.agent, conversationId: `${previous.conversationId}+` };
       return { conversation: pointer, previousConversationId: previous.conversationId, newConversationId: pointer.conversationId };

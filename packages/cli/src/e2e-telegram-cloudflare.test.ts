@@ -338,7 +338,7 @@ test.skipIf(!E2E)(
     expect(chat).toBeDefined();
     const db = new DatabaseSync(join(objects, chat as string), { readOnly: true });
     const answers = db.prepare("SELECT conversation_key, kind, text FROM runtime_pi_answers").all();
-    const pieces = db.prepare("SELECT conversation_key, state FROM outbound_pieces").all();
+    const pieces = db.prepare("SELECT conversation_key, state FROM outbound_durable_pieces").all();
     db.close();
     expect(answers).toEqual([{ conversation_key: `telegram:${OWNER.id}`, kind: "completed", text: "answer: hello" }]);
     expect(pieces).toEqual([{ conversation_key: `telegram:${OWNER.id}`, state: "delivered" }]);

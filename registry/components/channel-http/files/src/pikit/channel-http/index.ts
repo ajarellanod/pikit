@@ -150,8 +150,6 @@ export default defineComponent({
         conversationId,
         actor,
         text,
-        raw: read.body,
-        receivedAt: ctx.clock.now(),
       };
       // The answer may come before dispatch returns: wait for it from right before dispatch.
       let waiter: ReturnType<Replies["expect"]> | undefined;
@@ -216,7 +214,7 @@ export default defineComponent({
       if (!new RegExp(CONVERSATION_ID).test(conversationId)) {
         return json(400, { error: "invalid_request", message: "the conversation id is not valid" });
       }
-      const reset = await conversations.get().reset(conversationKey(conversationId), ctx);
+      const reset = await conversations.get().reset(conversationKey(conversationId), undefined, ctx);
       if (reset === undefined) return json(404, { error: "not_found" });
       return json(200, { conversationId, previousRuntimeConversationId: reset.previousConversationId, runtimeConversationId: reset.newConversationId });
     });

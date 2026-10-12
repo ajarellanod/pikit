@@ -6,7 +6,8 @@
 
 import { defineComponent } from "@pikit/core";
 import type { SecretStore } from "@pikit/contracts";
-import { createAdminAuthConformance, createAgentObserveConformance, withWorkersHost } from "@pikit/contracts/testing";
+import { createAdminAuthConformance, createAgentObserveConformance } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import { testComponents } from "@pikit/pi-adapter/testing/neutral";
 import { afterEach, it } from "vitest";
 import adminAuthToken from "../../../registry/components/admin-auth-token/files/src/pikit/admin-auth-token/index.ts";

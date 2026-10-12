@@ -8,6 +8,8 @@
  *   agent.settled        conversation, agent, conversationId, requestId, requestIds, run, messages,
  *   agent.failed           durationMs?, tokens, cost, errorCode?
  *   conversation.reset   conversation, agent, conversationId, previousConversationId
+ *   outbound.delivered   channel, conversation, key, attempts, possibleDuplicate
+ *   outbound.abandoned   channel, conversation, key, attempts (warn: outbound-durable logs the error)
  *   pipeline.halted      pipeline, stage, reason
  *   runtime.*            no fields
  *
@@ -25,7 +27,7 @@
  */
 
 import { type AppContext, type AppEvents, defineComponent } from "@pikit/core";
-import { admissionFields, conversationFields, type Fields, resetFields, resultFields } from "./fields.ts";
+import { admissionFields, conversationFields, deliveryFields, type Fields, resetFields, resultFields } from "./fields.ts";
 
 /**
  * Most start times kept at once. A run that never ends in this process (its worker was stopped
@@ -83,6 +85,11 @@ export default defineComponent({
     log("agent.failed", (result, ctx) => ({ level: "error", fields: ended(result, ctx) }));
 
     log("conversation.reset", (reset) => ({ level: "info", fields: resetFields(reset) }));
+
+    // outbound.queue's notices; its receipts are the record. An abandoned piece is a warning here: the
+    // queue logs the error itself, with its reason, which an error's message may hold.
+    log("outbound.delivered", (piece) => ({ level: "info", fields: { ...deliveryFields(piece), possibleDuplicate: piece.possibleDuplicate } }));
+    log("outbound.abandoned", (piece) => ({ level: "warn", fields: deliveryFields(piece) }));
 
     // A halt reason is the stage's own short reason ("duplicate", "unauthorized"), logged as is.
     log("pipeline.halted", ({ pipeline, stage, reason }) => ({ level: "info", fields: { pipeline, stage, reason } }));

@@ -62,7 +62,7 @@ async function enqueueInNewObject(seen: { queue?: OutboundQueue }): Promise<Dura
 }
 
 const pieces = (stub: DurableObjectStub) =>
-  runInDurableObject(stub, async (_instance, state) => state.storage.sql.exec("SELECT key, state, attempts, possible_duplicate FROM outbound_pieces").toArray());
+  runInDurableObject(stub, async (_instance, state) => state.storage.sql.exec("SELECT key, state, attempts, possible_duplicate FROM outbound_durable_pieces").toArray());
 
 const alarmOf = (stub: DurableObjectStub) => runInDurableObject(stub, (_instance, state) => state.storage.getAlarm());
 

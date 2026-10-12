@@ -37,7 +37,7 @@ which installs it (`bun install` at the root: this directory is a workspace).
 Each case of a storage suite runs in a Durable Object of its own (`runInDurableObject` on a new id),
 and its components get that object in `WORKERS_HOST` as `deployment-cloudflare`'s entrypoint
 puts it (`test/host.ts`): the suites start their own apps, so the host is given with `withWorkersHost`
-from `@pikit/contracts/testing`. A test in each file also starts an app with the host in
+from `@pikit/contracts/cloudflare/testing`. A test in each file also starts an app with the host in
 `app.start`'s context, the entrypoint's own way.
 
 A worker killed mid-run cannot be a killed process here: `runtime-pi`'s suite closes a runtime over the

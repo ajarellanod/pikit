@@ -47,6 +47,8 @@ export interface AgentRuntimeFixture {
    */
   components: ComponentDefinition[];
   config?: Record<string, unknown>;
+  /** The scripted agent's model (`provider/modelId`): the suite names it in agents of its own. */
+  model: string;
   /** A new conversation of the scripted agent, new in the runtime's storage. */
   conversation(): Promise<ConversationRef>;
   /** The `hold` tool of this fixture. One hold per case. */
@@ -328,6 +330,46 @@ export function createAgentRuntimeConformance(
       const next = await w.result("r2");
       expect([next.kind, next.text, next.requestIds], ["completed", "answer: after the crash", ["r2"]], "result of the next run");
     }),
+
+    {
+      group: GROUP,
+      name: "it refuses to start when two agents are each the steward, naming both (stewardProblem)",
+      run: async () => {
+        const fixture = await factory();
+        const names = ["conformance-steward-a", "conformance-steward-b"];
+        const stewards = defineComponent({
+          name: "agent-runtime-conformance-stewards",
+          setup(pikit) {
+            for (const name of names) pikit.provideKeyed("agent.definition", name, { name, model: fixture.model, steward: true });
+          },
+        });
+        const app = await defineApp({
+          components: [...fixture.components, stewards],
+          ...(fixture.config !== undefined && { config: fixture.config }),
+          logger: silentLogger,
+        }).create();
+        let failure: unknown;
+        try {
+          await app.start();
+        } catch (error) {
+          failure = error;
+        } finally {
+          await app.stop().catch(() => {});
+          fixture.hold.release();
+          await fixture.dispose?.();
+        }
+        if (failure === undefined) throw new Error(`${GROUP}: it started with two stewards (${names.join(", ")}); a runtime refuses them at start`);
+        // The kernel wraps a failed start (`component "…" failed to start`): the runtime's words are its cause.
+        const messages: string[] = [];
+        for (let error: unknown = failure; error !== undefined && messages.length < 5; error = error instanceof Error ? error.cause : undefined) {
+          messages.push(error instanceof Error ? error.message : String(error));
+        }
+        const message = messages.join(": ");
+        for (const name of names) {
+          if (!message.includes(name)) throw new Error(`${GROUP}: the refusal of two stewards should name "${name}", got: ${message}`);
+        }
+      },
+    },
   ];
 }
 

@@ -10,7 +10,7 @@ import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withConte
 import type { Proposals, ProposalsRemote } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import { withWorkersHost } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
 import { createDurableExecutionConformance, createWorkspaceGitConformance } from "@pikit/pi-adapter/execution/testing";
 import { fakeDurableObjectStorage, fakeObjectHost } from "./durable-object.test-support.ts";

@@ -131,7 +131,7 @@ export function createConversationRegistryConformance(
       const w = await s.worker();
       const created = await w.registry.resolve("test:c1", "support", w.ctx);
 
-      const reset = await w.registry.reset("test:c1", w.ctx);
+      const reset = await w.registry.reset("test:c1", undefined, w.ctx);
 
       if (reset === undefined) throw new Error(`${GROUP}: reset of a known key returned undefined`);
       expect([reset.previousConversationId, reset.newConversationId], [created.conversationId, reset.conversation.conversationId], "the reset");
@@ -151,20 +151,20 @@ export function createConversationRegistryConformance(
       const w = await s.worker();
       const created = await w.registry.resolve("test:moved", "retired", w.ctx);
 
-      const reset = await w.registry.reset("test:moved", w.ctx, "support");
+      const reset = await w.registry.reset("test:moved", "support", w.ctx);
 
       if (reset === undefined) throw new Error(`${GROUP}: reset of a known key returned undefined`);
       check(reset.newConversationId !== created.conversationId, "a new runtime conversation");
       expect([reset.conversation.key, reset.conversation.agent], ["test:moved", "support"], "the conversation after a reset with an agent");
       same(await w.registry.resolve("test:moved", "retired", w.ctx), reset.conversation, "resolve after it: the new agent kept");
-      const again = await w.registry.reset("test:moved", w.ctx);
+      const again = await w.registry.reset("test:moved", undefined, w.ctx);
       expect(again?.conversation.agent, "support", "the agent after a reset without one");
     }),
 
     registryCase("reset of an unknown key is undefined and emits nothing", async (s) => {
       const w = await s.worker();
 
-      expect(await w.registry.reset("test:unknown", w.ctx), undefined, "reset");
+      expect(await w.registry.reset("test:unknown", undefined, w.ctx), undefined, "reset");
       expect(w.resets(), [], "conversation.reset events");
       expect(await w.registry.get("test:unknown", w.ctx), undefined, "get after reset");
     }),
@@ -173,7 +173,7 @@ export function createConversationRegistryConformance(
       const first = await s.worker();
       const kept = await first.registry.resolve("test:c1", "support", first.ctx);
       await first.registry.resolve("test:c2", "support", first.ctx);
-      const reset = await first.registry.reset("test:c2", first.ctx);
+      const reset = await first.registry.reset("test:c2", undefined, first.ctx);
       await first.app.stop();
 
       const second = await s.worker();

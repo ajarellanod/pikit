@@ -7,7 +7,7 @@
 
 import { test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import type { AgentRuntime } from "@pikit/contracts";
+import { type AgentRuntime, stewardProblem } from "@pikit/contracts";
 import { createAgentRuntimeConformance } from "@pikit/contracts/testing";
 import { modelsFrom } from "./models.ts";
 import { createDurableRuntime, type DurableRuntime } from "./runtime.ts";
@@ -33,6 +33,9 @@ const runtimeDurable = defineComponent({
     pikit.provide("agent.conversations", { create: (ctx) => use().createConversation(ctx) });
     return {
       start(ctx) {
+        // What runtime-pi refuses at start, as the suite requires of every runtime.
+        const stewards = stewardProblem(agents.keys().flatMap((name) => agents.get(name) ?? []));
+        if (stewards !== undefined) throw new Error(`runtime-durable: ${stewards}`);
         const db = sql.get();
         opened = createDurableRuntime({
           db,

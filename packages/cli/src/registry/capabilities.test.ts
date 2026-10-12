@@ -1,5 +1,7 @@
 import { expect, test } from "bun:test";
-import { DEFAULT_REGISTRY } from "../paths.ts";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+import { DEFAULT_REGISTRY, PIKIT_ROOT } from "../paths.ts";
 import {
   CAPABILITIES,
   type CapabilityEntry,
@@ -122,4 +124,38 @@ test("a stable contract needs two providers in the registry; one the project pro
 
 test("the repository's registry backs every stable contract", () => {
   expect(checkStability(capabilityUsage(readManifests(DEFAULT_REGISTRY)))).toEqual([]);
+});
+
+/**
+ * docs/contracts.md's overview says it comes from `pikit registry capabilities`: hold it to that. Each
+ * catalogued capability has one row, with its mode, its providers ("the project" for one the project
+ * provides) and its users (`name?` for an optional one), in any order.
+ */
+test("docs/contracts.md's overview lists every capability with the registry's providers and users", () => {
+  const doc = readFileSync(join(PIKIT_ROOT, "docs", "contracts.md"), "utf8");
+  const overview = doc.slice(doc.indexOf("## Overview"), doc.indexOf("\n---", doc.indexOf("## Overview")));
+  const cells = (cell: string | undefined) =>
+    (cell ?? "")
+      .split(",")
+      .map((name) => name.trim())
+      .filter((name) => name !== "" && name !== "none")
+      .sort();
+  const rows = new Map<string, { mode: string; providers: string[]; users: string[] }>();
+  for (const line of overview.split("\n")) {
+    const match = /^\| `([a-z.]+)` \| (\w+) \| ([^|]*) \| ([^|]*) \|/.exec(line);
+    if (match === null) continue;
+    rows.set(match[1] as string, { mode: match[2] as string, providers: cells(match[3]), users: cells(match[4]) });
+  }
+  const expected = new Map(
+    capabilityUsage(readManifests(DEFAULT_REGISTRY)).map(({ name, entry, providers, consumers }) => [
+      name,
+      {
+        mode: entry?.mode ?? "unknown",
+        providers: entry?.providedBy === "project" ? ["the project"] : [...providers].sort(),
+        users: consumers.map((c) => (c.optional ? `${c.name}?` : c.name)).sort(),
+      },
+    ]),
+  );
+  expect([...rows.keys()].sort()).toEqual([...expected.keys()].sort());
+  for (const [name, row] of rows) expect({ name, ...row }).toEqual({ name, ...(expected.get(name) as typeof row) });
 });

@@ -27,6 +27,7 @@ import {
   checkManifest,
   checkNaming,
   checkSettingsSection,
+  checkStorageNames,
   checkView,
 } from "./checks.ts";
 import { describeComponent, loadComponent, loadExport, mergeGenerated } from "./describe.ts";
@@ -296,6 +297,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
 
     checkDescriptionReaders(dir, name).forEach(report);
     checkTargetReaders(dir).forEach(report);
+    checkStorageNames(dir, name).forEach(report);
 
     try {
       const described = await generatedFor(dir, name, manifest);

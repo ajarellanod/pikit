@@ -606,7 +606,7 @@ function fakeConversations(durable: Durable): ComponentDefinition {
           return conversation;
         },
         get: async (key) => known.get(key),
-        async reset(key, _ctx, agent) {
+        async reset(key, agent, _ctx) {
           const previous = known.get(key);
           if (previous === undefined) return undefined;
           const conversation = { ...previous, ...(agent !== undefined && { agent }), conversationId: `${previous.conversationId}-reset-${durable.resets.length + 1}` };

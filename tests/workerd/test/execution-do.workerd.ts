@@ -9,7 +9,7 @@
 import { type App, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import type { AgentTool, Proposals } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
-import { withWorkersHost } from "@pikit/contracts/testing";
+import { withWorkersHost } from "@pikit/contracts/cloudflare/testing";
 import type { ExecutionEnv } from "@pikit/pi-adapter";
 import { callTool, createDurableExecutionConformance, createWorkspaceGitConformance } from "@pikit/pi-adapter/execution/testing";
 import { afterEach, expect, it } from "vitest";

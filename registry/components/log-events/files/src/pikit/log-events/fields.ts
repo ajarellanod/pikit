@@ -37,6 +37,14 @@ export function resultFields(result: AgentResult, durationMs: number | undefined
   };
 }
 
+/**
+ * What became of one piece of an answer (`outbound.queue`'s notices). An abandoned piece's `reason` is
+ * not logged: it is an error's message (the receipt and outbound-durable's own error line keep it).
+ */
+export function deliveryFields(piece: { channel: string; conversationKey: string; key: string; attempts: number }): Fields {
+  return { channel: piece.channel, conversation: piece.conversationKey, key: piece.key, attempts: piece.attempts };
+}
+
 export function resetFields(reset: ConversationReset): Fields {
   return {
     ...conversationFields(reset.conversation),
