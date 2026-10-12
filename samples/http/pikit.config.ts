@@ -23,7 +23,9 @@ import storageSqlite from "../../registry/components/storage-sqlite/files/src/pi
 import toolBash from "../../registry/components/tool-bash/files/src/pikit/tool-bash/index.ts";
 import extensionPikitSelf from "../../registry/components/extension-pikit-self/files/src/pikit/extension-pikit-self/index.ts";
 import toolEdit from "../../registry/components/tool-edit/files/src/pikit/tool-edit/index.ts";
+import toolFetch from "../../registry/components/tool-fetch/files/src/pikit/tool-fetch/index.ts";
 import toolRead from "../../registry/components/tool-read/files/src/pikit/tool-read/index.ts";
+import toolWebsearchBrave from "../../registry/components/tool-websearch-brave/files/src/pikit/tool-websearch-brave/index.ts";
 import toolWrite from "../../registry/components/tool-write/files/src/pikit/tool-write/index.ts";
 import agents from "./src/extensions/agents.ts";
 
@@ -54,6 +56,8 @@ export default defineApp({
     toolWrite,
     toolEdit,
     toolBash,
+    toolFetch,
+    toolWebsearchBrave,
     // What the agent is made of and how each part is changed: `assistant` names it.
     extensionPikitSelf,
     // The storage the http preset names. runtime-pi keeps its conversations and its record of

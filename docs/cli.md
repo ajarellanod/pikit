@@ -38,8 +38,8 @@ pikit new <dir> [--target server|durable] [--preset <name> [--with <component>].
   preset's component of that kind; a feature's `--with` adds it. `--ui` adds the dashboard
   ([dashboard.md](dashboard.md)). `--registry` uses another registry folder.
 - A preset's `features` ([features/cli-features.md](../features/cli-features.md)) are opt-in
-  components or groups: on `http`, `router-rules`, `tool-mcp`, `tool-fetch`, `tool-websearch-brave`,
-  `health-registry` and Self-improvement (`--with admin-proposals`: with `proposals-local`); on
+  components or groups: on `http`, `router-rules`, `tool-mcp`, `health-registry` and
+  Self-improvement (`--with admin-proposals`: with `proposals-local`); on
   `telegram-cloudflare`, `router-rules`, `tool-mcp`, `health-registry` and Self-improvement (with
   `proposals-github` and `github-app`). Self-improvement brings the dashboard (as `--ui`), and on a
   server the starter agent names `bash` (the steward runs git and the tests in its shell).

@@ -20,7 +20,7 @@ test("pikit.config.ts composes: every capability a component requires has a prov
   });
   expect(described.capabilities["model.provider"]?.keys).toEqual({ anthropic: "provider-anthropic" });
   expect(described.capabilities["agent.definition"]?.keys).toEqual({ assistant: "agents" });
-  expect(described.capabilities["agent.tool"]?.keys).toEqual({ read: "tool-read", write: "tool-write", edit: "tool-edit", bash: "tool-bash" });
+  expect(described.capabilities["agent.tool"]?.keys).toEqual({ read: "tool-read", write: "tool-write", edit: "tool-edit", bash: "tool-bash", fetch: "tool-fetch", websearch: "tool-websearch-brave" });
   expect(described.capabilities["agent.extension"]?.keys).toEqual({ "pikit-self": "extension-pikit-self" });
   expect(described.capabilities.execution?.selected).toBe("execution-local");
   expect(described.capabilities["execution.shell"]?.selected).toBe("execution-local");

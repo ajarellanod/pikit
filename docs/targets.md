@@ -12,7 +12,7 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | Apps in `pikit.config.ts` | one (default export) | two: the object's (default) and the Worker's (`worker`) |
 | Requests arrive at | `server-bun` (Hono on `Bun.serve`, port 3000) | the Worker (deployment-cloudflare's host), then RPC to an object |
 | `storage.sql` | `storage-sqlite`: one file, `.pikit/` | `storage-do`: each object's own SQLite |
-| `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor | `platform-cloudflare`: RPC to `idFromName(key)` |
+| `actor.mailbox` / `actor.inbox` | `mailbox-local`: the App is every key's actor (`scope` `"all"`) | `platform-cloudflare`: RPC to `idFromName(key)` (`scope` `"one"`) |
 | `wakeups` | `wakeups-timers`: in-process timers, lost on restart | `platform-cloudflare`: rows over the object's one alarm, in slices |
 | `secrets` | `secrets-env`: the process environment (`.env`) | `secrets-cloudflare`: the Worker's `env` |
 | `execution` | `execution-local`: the machine's files and shell | `execution-do`: files in the object's SQL, a simulated shell |
@@ -20,12 +20,11 @@ touch how code lives come one per target. A provider of a target is a `deploymen
 | HTTP API channel | `channel-http` | none yet |
 | Model logins | `credentials-file` (OAuth or keys) | API keys only (no `model.credentials` provider) |
 
-Components on both targets: runtime-pi, conversations-kv, storage-kv-sql, router-basic, router-rules,
-outbound-durable, admin-api, admin-auth-token, health-registry, log-events, the tools, the providers,
-extension-house-rules. Server only: channel-http, channel-telegram, conversations-file,
-credentials-file, execution-local, mailbox-local, secrets-env, server-bun, storage-sqlite,
-wakeups-timers, workspace-local, deployment-docker. Durable only: channel-telegram-webhook,
-execution-do, platform-cloudflare, secrets-cloudflare, storage-do, deployment-cloudflare.
+This page does not list every component's targets: a component says them itself. Its
+`component.json`'s `targets` is where it runs (`pikit add` refuses another), and its README's
+**Targets** line why not elsewhere, and whether that is for good (channel-telegram's long polling
+needs a process) or not built yet (channel-http has no Worker half). A component on both targets
+says how it differs, if it does, in its README ("On each target").
 
 `registry validate` refuses `node:*` or `bun:*` imports in the shipped files of a component that
 lists `durable`, and `cloudflare:*` in one that lists `server` (tests, and files that run on the
@@ -137,12 +136,13 @@ so. deployment-cloudflare's README has the rules ("Rolling back").
 
 - **server**: no per-conversation isolation (one process holds every conversation); no horizontal
   scale (one process per storage); timers do not survive a restart by themselves.
-- **durable**: no processes or native binaries (`execution-do`'s shell is just-bash with `git`
-  (isomorphic-git), `curl` (fetch) and `node` (QuickJS) as host commands; a real Linux is another
-  `execution` provider, not built); no long polling; no `channel-http`; no OAuth model login (no
-  `model.credentials` provider, API keys in `.env` only); no `restart` and no `exec`; `down` deletes
-  data; admin-api's Delivery view has nothing to list (each object's outbox is its own) and live events
-  are a snapshot polled every 2 s.
+- **durable**: no processes or native binaries (a real Linux is another `execution` provider, not
+  built); no connection held between events (no long polling); no `restart`
+  and no `exec`, and `down` deletes data (deployment-cloudflare's README).
+
+What a component cannot do on a target is in that component's README: channel-http (no Worker half
+yet), provider-anthropic and credentials-file (no subscription login on Cloudflare), execution-do
+(its simulated shell), admin-api (on Cloudflare, no Delivery view, and live events polled).
 
 Moving a project to the other target is swapping those components, never changing an agent, a route
 or a contract. [features/deployment-targets.md](../features/deployment-targets.md) has other hosts and a

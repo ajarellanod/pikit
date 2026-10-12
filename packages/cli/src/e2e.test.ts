@@ -281,14 +281,14 @@ test.skipIf(!E2E)(
 test.skipIf(!E2E)(
   "pikit new with two channels, every feature the preset offers and the dashboard: doctor is green once configured",
   async () => {
-    const features = ["router-rules", "agents-live", "tool-mcp", "tool-fetch", "tool-websearch-brave", "health-registry", "admin-proposals"];
+    const features = ["router-rules", "agents-live", "tool-mcp", "health-registry", "admin-proposals"];
     const args = ["new", "many", "--preset", "telegram", "--with", "channel-telegram", "--with", "channel-http", ...features.flatMap((f) => ["--with", f]), "--ui"];
     const created = await pikit(args, { cwd: parent });
     expect(created.err).not.toContain("✗");
     expect(created.code).toBe(0);
     const many = join(parent, "many");
     const components = Object.keys(JSON.parse(readFileSync(join(many, "pikit.json"), "utf8")).components);
-    for (const name of ["channel-telegram", "channel-http", "server-bun", "admin-api", ...features]) expect(components).toContain(name);
+    for (const name of ["channel-telegram", "channel-http", "server-bun", "admin-api", "tool-fetch", "tool-websearch-brave", ...features]) expect(components).toContain(name);
     // A group: agents from the dashboard brings its routing rules and settings, and its two Settings sections.
     expect(components).toContain("settings-store");
     for (const section of ["agents-live", "router-rules"]) expect(existsSync(join(many, "src/dashboard/src/settings", section, "index.tsx"))).toBe(true);

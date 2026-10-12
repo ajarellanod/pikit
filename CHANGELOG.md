@@ -214,7 +214,8 @@ there.
   `proposals-local` on a server, with `proposals-github` and `github-app` on Cloudflare; it brings the
   dashboard.
   Every preset that runs an agent installs `extension-pikit-self`, and the starter agent, the
-  project's steward (`steward: true`), names it.
+  project's steward (`steward: true`), names it. Both `http` and `telegram-cloudflare` install `tool-fetch` and
+  `tool-websearch-brave` (Brave's key optional), and the starter agent names them.
 
 ### CLI (`pikit`)
 - `new` (guided in a terminal: target, preset, channels, several at once, then what it can do: the

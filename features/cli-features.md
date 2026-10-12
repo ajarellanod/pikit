@@ -20,11 +20,10 @@ that are groups of components (agents from the dashboard: `agents-live` with `ro
 2. **What it can do**: any of the features, none checked, each a line saying what it gives (its
    component's `title`): the dashboard, then the preset's `features`. Today, on a server (`http`,
    `telegram`): routing rules (`router-rules`), agents from the dashboard (`agents-live`, a group),
-   MCP tools (`tool-mcp`), web pages (`tool-fetch`), web search (`tool-websearch-brave`), health
-   (`health-registry`), self-improvement (`admin-proposals` with `proposals-local`); on Cloudflare
-   (`telegram-cloudflare`): routing rules, agents from the dashboard, MCP tools, health,
-   self-improvement (with `proposals-github` and `github-app`) (it installs fetch and web search
-   already).
+   MCP tools (`tool-mcp`), health (`health-registry`), self-improvement (`admin-proposals` with
+   `proposals-local`); on Cloudflare (`telegram-cloudflare`): routing rules, agents from the
+   dashboard, MCP tools, health, self-improvement (with `proposals-github` and `github-app`). Both
+   install web pages (`tool-fetch`) and web search (`tool-websearch-brave`) already.
 3. Then, as before, configure and start.
 
 Each answer is a component that `new` installs as `pikit add` does, with the providers it brings

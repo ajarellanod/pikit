@@ -27,6 +27,10 @@ components:
   # Installed, but the starter agent does not name it on a server: a shell runs as the server's user
   # (its README). Add "bash" to an agent's `tools` to give it one.
   - tool-bash
+  # The web, as on Cloudflare: the starter agent names both. Brave's key is optional: without it, a
+  # search fails saying so.
+  - tool-fetch
+  - tool-websearch-brave
   # The agent knows what it is made of and how each part is changed: the starter agent names it
   # (`extensions: ["pikit-self"]`).
   - extension-pikit-self
@@ -51,7 +55,8 @@ choose:
     question: "Where do you want to talk to your agent?"
     multiple: true
 # What `pikit new` offers to add, several at once, with the dashboard (`--ui`): each by its `title`,
-# `--with <component>` in a script. Each brings what it needs, as `pikit add` would.
+# `--with <component>` in a script. Each brings what it needs, as `pikit add` would. tool-fetch and
+# tool-websearch-brave are installed above already.
 features:
   - router-rules
   # A group: agents made and edited in the dashboard, and the routing rules that send a channel, chat or
@@ -59,8 +64,6 @@ features:
   # dashboard; listed so the group composes without one (`pikit ui on` adds the rest later).
   - [agents-live, router-rules, settings-store]
   - tool-mcp
-  - tool-fetch
-  - tool-websearch-brave
   - health-registry
   # Self-improvement, a group: the agent proposes changes to itself as branches of a repository on
   # this server (proposals-local), and you approve them in the dashboard (admin-proposals, which brings
