@@ -42,17 +42,19 @@ refresh would rotate the token the Pi CLI holds.
 
 ## Cloudflare
 
-On `durable`, the provider has no OAuth: a Claude subscription login stays a server's. pi-ai loads
-its OAuth flow, the login and each token refresh, with an import no bundler follows (it keeps the
-flow's Node code out of bundles), so a Worker could not refresh a subscription's tokens. An API key
-needs nothing of it: set `ANTHROPIC_API_KEY` as a Worker secret (`wrangler secret put
+On `durable`, API keys only: a Claude subscription login stays a server's. A login is kept by
+`model.credentials`, which nothing provides on Cloudflare (`pikit configure --login` refuses without
+one), and pi-ai reaches its OAuth flow only for a stored OAuth credential; that flow loads with an
+import no bundler follows, so a Worker could not refresh a subscription's tokens anyway. The
+component is the same on both targets. An API key needs nothing of it: set `ANTHROPIC_API_KEY` as a Worker secret (`wrangler secret put
 ANTHROPIC_API_KEY`), which `secrets-cloudflare` reads. Workload identity federation reads a token
 file, so it is a server's too.
 
 ## Tests
 
 `provider-anthropic.test.ts` is copied with the component and runs in your project. It makes no
-request and reads no credential: it checks the provider on each target. In the pikit repository,
+request and reads no credential: it checks the provider, and that without `model.credentials` a key
+configures it. In the pikit repository,
 the workerd lane (`tests/workerd/test/provider-anthropic.workerd.ts`) composes it with runtime-pi in
 a real Durable Object, where an agent answers from a fake Anthropic API with a key from `secrets`.
 

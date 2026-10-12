@@ -3,14 +3,13 @@
  * `runtime-pi` and `secrets-cloudflare`, an agent on `anthropic/claude-sonnet-4-6` answers. The key is
  * a Worker secret (`ANTHROPIC_API_KEY` in the host's env, as `wrangler secret put` leaves it), read
  * through `secrets`; Anthropic's API is a fake behind `globalThis.fetch` (the test and the object share
- * one isolate), so pi-ai's Anthropic SDK, loaded by its lazy API in workerd, really streams. On this
- * target the provider has no OAuth: only keys.
+ * one isolate), so pi-ai's Anthropic SDK, loaded by its lazy API in workerd, really streams. Nothing
+ * provides `model.credentials` here: only keys.
  */
 
 import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
 import { type AgentConversations, type AgentRuntime, defineAgent } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
-import type { Provider } from "@pikit/pi-adapter";
 import { afterEach, expect, it } from "vitest";
 import providerAnthropic from "../../../registry/components/provider-anthropic/files/src/pikit/provider-anthropic/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
@@ -53,14 +52,13 @@ function fakeAnthropic(requests: AnthropicRequest[]): typeof globalThis.fetch {
   }) as typeof globalThis.fetch;
 }
 
-it("provider-anthropic in a real object: an agent answers with the key from the Worker's secrets, and there is no OAuth", () =>
+it("provider-anthropic in a real object: an agent answers with the key from the Worker's secrets", () =>
   inObject(async (host) => {
     const requests: AnthropicRequest[] = [];
     globalThis.fetch = fakeAnthropic(requests);
     const answers: (string | undefined)[] = [];
     let runtime: AgentRuntime | undefined;
     let conversations: AgentConversations | undefined;
-    let provider: Provider | undefined;
     const agent = defineAgent({ name: "assistant", model: "anthropic/claude-sonnet-4-6" });
     const agents = defineComponent({ name: "test-agents", setup: (pikit) => pikit.provideKeyed("agent.definition", agent.name, agent) });
     const channel = defineComponent({
@@ -68,13 +66,11 @@ it("provider-anthropic in a real object: an agent answers with the key from the 
       setup(pikit) {
         const runtimeHandle = pikit.use("agent.runtime");
         const conversationsHandle = pikit.use("agent.conversations");
-        const providers = pikit.useKeyed("model.provider");
         pikit.on("agent.settled", (result) => void answers.push(result.text));
         return {
           start() {
             runtime = runtimeHandle.get();
             conversations = conversationsHandle.get();
-            provider = providers.get("anthropic");
           },
         };
       },
@@ -84,7 +80,6 @@ it("provider-anthropic in a real object: an agent answers with the key from the 
     const withKey = { ...host, env: { ...workerEnv, ANTHROPIC_API_KEY: "sk-ant-workerd" } };
     await app.start(withContextValue(WORKERS_HOST, withKey, BACKGROUND_CONTEXT));
     try {
-      expect(provider?.auth.oauth).toBeUndefined();
       const ctx = app.context();
       const conversationId = await (conversations as AgentConversations).create(ctx);
       await (runtime as AgentRuntime).dispatch({ requestId: "m1", conversation: { key: "test:anthropic", agent: "assistant", conversationId }, prompt: "hello" }, ctx);
