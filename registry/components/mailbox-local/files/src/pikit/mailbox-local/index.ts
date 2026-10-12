@@ -53,6 +53,8 @@ export default defineComponent({
     };
 
     pikit.provide("actor.inbox", {
+      // This App is every key's actor.
+      scope: "all",
       handle(type, handler) {
         if (typeof type !== "string" || type === "") throw new TypeError("mailbox-local: a message type is a non-empty string, prefixed with the component that handles it");
         if (registered.has(type)) throw new Error(`mailbox-local: the message type "${type}" already has a handler; a type has one handler in an app`);

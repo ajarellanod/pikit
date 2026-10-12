@@ -60,6 +60,9 @@ A store that cannot be reached is `503 unavailable`, logged.
 
 ## On each target
 
+The component never reads the target: in its start, `actor.inbox`'s `scope` says whether this App is
+every key's actor (`"all"`, a server; or no `actor.inbox`) or one key's (`"one"`, a Durable Object).
+
 - **Server:** a table of the App's `storage.sql`, `settings_store`: one row per component (its value as
   set, as JSON; who and when; a version). Every `get` is one query.
 - **Cloudflare:** the values are one object's, `settings-store:settings` (`SETTINGS_KEY`), of the

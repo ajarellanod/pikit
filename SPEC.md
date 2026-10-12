@@ -56,8 +56,10 @@ Each decision states what the kernel promises and why it keeps holding as pikit 
   model an App runs on (§4), never a provider, and the CLI, the component schema's `targets` enum and
   `defineApp({ target })` share that one closed list. A component's targets are declared in its
   `component.json`; a component that needs something different per target gets it through a
-  capability (or `WORKERS_HOST`, C5), never by branching on `pikit.target` in `setup` (`registry
-  validate` describes `setup` on every target its manifest declares and refuses a difference). *Why:* a target
+  capability (`actor.inbox`'s `scope` says whether the App is every key's actor or one key's), or
+  `WORKERS_HOST` (C5), never by reading `pikit.target` or `ctx.target` (`registry validate` refuses
+  a component file that reads either, describes `setup` on every target its manifest declares and
+  refuses a difference). *Why:* a target
   is part of the composition (a deployment recomposes the App on its own), so the kernel carries it;
   `setup` that branches on it would make the generated manifest depend on the target it was generated
   for. A third value (`functions`) is a kernel change recorded here, made only when a host of that
@@ -260,7 +262,8 @@ written here. Status (built or not) is not tracked here, as for the kernel.
   platform retries. The actor handles it with the handler it registered for `type` on `actor.inbox`
   (`handle(type, (key, message, ctx) => …)`, in its `start`). A message is JSON. On a server the
   mailbox calls the inbox in the same App (`mailbox-local`); on Cloudflare it is an RPC to the object
-  `idFromName(key)` (`platform-cloudflare`). A component may also **ask** an actor:
+  `idFromName(key)` (`platform-cloudflare`). The inbox's `scope` says which: the App is every key's
+  actor (`"all"`) or one key's (`"one"`). A component may also **ask** an actor:
   `call(key, type, message, ctx)` resolves with the JSON its `answer(type, handler)` handler (on
   `actor.inbox`, registered in `start`) resolved with, or rejects with an `ActorCallError` whose
   `code` says why (`invalid`, `no_handler`, `cancelled`, `unreachable`, `failed`, or the handler's

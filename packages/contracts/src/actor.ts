@@ -84,6 +84,13 @@ export interface ActorMailbox {
 /** The actor's side: where the handler of each type of message is registered. */
 export interface ActorInbox {
   /**
+   * Whose actor this App is: every key's (`"all"`: one App, so its storage holds every conversation;
+   * `mailbox-local`), or one key's (`"one"`: an App per key, each with storage of its own; a Durable
+   * Object, `platform-cloudflare`). A component whose state is shared by every key reads it, never
+   * the target: with `"one"` that state lives in another actor, reached through `actor.mailbox`.
+   */
+  readonly scope: ActorScope;
+  /**
    * Registers `handler` for the messages of `type`, until the App stops. Call it in the `start` of
    * the component that handles them. Throws when `type` already has a handler in this App (one
    * handler per type, the error names it) or is empty.
@@ -96,6 +103,9 @@ export interface ActorInbox {
    */
   answer(type: string, handler: ActorCallHandler): void;
 }
+
+/** Whose actor an App is (`ActorInbox.scope`). */
+export type ActorScope = "all" | "one";
 
 /**
  * Handles one type of message for the actor `key`. Resolve once the message is durable (committed

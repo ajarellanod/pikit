@@ -20,6 +20,7 @@ import {
   checkDependencies,
   checkDescriptionReaders,
   checkEnvironmentUsers,
+  checkTargetReaders,
   checkDevDependencies,
   checkImports,
   checkLayout,
@@ -294,6 +295,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     checkSettingsSection(dir, name, manifest).forEach(report);
 
     checkDescriptionReaders(dir, name).forEach(report);
+    checkTargetReaders(dir).forEach(report);
 
     try {
       const described = await generatedFor(dir, name, manifest);

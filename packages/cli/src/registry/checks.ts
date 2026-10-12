@@ -265,6 +265,27 @@ export function checkDescriptionReaders(componentDir: string, name: string): str
     );
 }
 
+/** Reading the target: `pikit.target` in `setup`, `ctx.target` in a handler. */
+const READS_TARGET = /\b(?:pikit|ctx)\.target\b/;
+
+/**
+ * No component's shipped files read the target (SPEC K1), outside comments: what a component needs
+ * differently per target comes through a capability (`actor.inbox`'s `scope` says whose actor the App
+ * is), or is a component per target. Read from the source, by the names `pikit` and `ctx`; the drift
+ * check (`checkTargets`) still refuses a `setup` that declares differently, however it reads it.
+ */
+export function checkTargetReaders(componentDir: string): string[] {
+  const filesDir = join(componentDir, "files");
+  return listFiles(filesDir)
+    .filter((file) => SOURCE.test(file) && !forTests(file))
+    .filter((file) => READS_TARGET.test(stripComments(readFileSync(join(filesDir, file), "utf8"))))
+    .map(
+      (file) =>
+        `files/${file} reads the target (pikit.target or ctx.target), which no component branches on (SPEC K1): ` +
+        "what differs per target comes through a capability (actor.inbox's scope says whose actor the App is), or is a component per target",
+    );
+}
+
 /** What works on the environment the runtime builds for each tool call: `api.env`, or Pi's coding tools. */
 const WORKS_ON_ENV = /\bapi\.env\b|\bcreate(?:Read|Write|Edit|Bash)Tool\b/;
 

@@ -184,7 +184,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "Where an actor registers one handler per message type it receives through actor.mailbox; a handler resolves once the message is durable.",
+    summary: "Where an actor registers one handler per message type it receives through actor.mailbox; a handler resolves once the message is durable. Its scope says whose actor the App is: every key's, or one key's.",
   },
   wakeups: {
     mode: "single",

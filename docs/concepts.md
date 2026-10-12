@@ -147,8 +147,9 @@ Values that are not capabilities travel as context keys:
 
 `Target` is `"server" | "durable"` (K1): a runtime model, not a provider. `server` is a long-lived
 process with a persistent disk; `durable` is one actor (a Durable Object) per conversation, evicted
-between events. `pikit.target` and `ctx.target` say which, but no component branches on it in
-`setup`: a difference between targets is a different component, or a capability. A component's
+between events. `pikit.target` and `ctx.target` say which, but no component reads them (`registry
+validate` refuses it): a difference between targets is a different component, or a capability
+(`actor.inbox`'s `scope` says whether the App is every key's actor or one key's). A component's
 `component.json` lists its `targets`; a project's `pikit.json` records its own. See
 [targets.md](targets.md).
 

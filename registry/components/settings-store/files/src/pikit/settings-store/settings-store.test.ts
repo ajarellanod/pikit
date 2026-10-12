@@ -71,7 +71,7 @@ class Objects {
     return defineComponent({
       name: "platform-test",
       setup(pikit) {
-        pikit.provide("actor.inbox", { handle: () => {}, answer: (type, handler) => void answers.set(type, handler) });
+        pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: (type, handler) => void answers.set(type, handler) });
         pikit.provide("actor.mailbox", objects.mailbox);
         let entry: (typeof objects.live)[number] | undefined;
         return {
@@ -316,12 +316,13 @@ test("an object that never read the settings object, which cannot be reached, re
   await expect(holder.settings?.get("agent", served.app.context()) as Promise<unknown>).rejects.toThrow("could not be reached");
 });
 
-test("in an object's App it needs actor.inbox and actor.mailbox; without them its start says so", async () => {
-  const app = await defineApp({ components: [sqliteStorage(), settingsStore], target: "durable", logger: silentLogger }).create();
+test("in an App that is one key's actor it needs actor.mailbox; without it its start says so", async () => {
+  const inbox = defineComponent({ name: "inbox-test", setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {} }) });
+  const app = await defineApp({ components: [sqliteStorage(), inbox, settingsStore], logger: silentLogger }).create();
 
   const error = (await app.start().then(
     () => undefined,
     (thrown: unknown) => thrown,
   )) as { cause?: Error } | undefined;
-  expect(error?.cause?.message).toContain("needs actor.inbox, actor.mailbox: install platform-cloudflare");
+  expect(error?.cause?.message).toContain("reads the settings object, which needs actor.mailbox");
 });

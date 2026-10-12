@@ -18,6 +18,9 @@
  * It also answers calls (`answer`, reached by `call`): the answer is JSON and a copy, a refusal
  * reaches the caller as an `ActorCallError` with its code, and calls and messages are apart.
  *
+ * And `scope` says where the actors run, as they did: `"all"`, one App handled every key's messages;
+ * `"one"`, no App handled two keys'.
+ *
  * `createMemoryMailbox` is the in-memory double: it passes this suite, and it stands in for a
  * mailbox in the tests of a channel or an actor.
  */
@@ -70,6 +73,9 @@ interface Received {
   /** The actor App's own mailbox and wakeups (when provided): what its handlers may use. */
   mailbox: ActorMailbox;
   wakeups: Wakeups | undefined;
+  /** Which actor App handled it (each start of the suite's inbox is a new one), and its inbox's `scope`. */
+  app: number;
+  scope: unknown;
 }
 
 /** One call an answer handler got. */
@@ -274,6 +280,18 @@ export function createMailboxConformance(
       expect(s.received.length, 1, "handlers called: the first registration stands");
     }),
 
+    mailboxCase('scope says whose actor an App is: with "all" one App handles every key\'s messages, with "one" no App handles two keys\'', async (s) => {
+      await s.send("actor-1", TYPE, 1);
+      await s.send("actor-2", TYPE, 2);
+      await s.send("actor-1", TYPE, 3);
+      const scopes = [...new Set(s.received.map((r) => r.scope))];
+      check(scopes.length === 1 && (scopes[0] === "all" || scopes[0] === "one"), `scope to be "all" or "one", the same in every actor, got ${JSON.stringify(scopes)}`);
+      const apps = (key: string) => new Set(s.received.filter((r) => r.key === key).map((r) => r.app));
+      const [first, second] = [apps("actor-1"), apps("actor-2")];
+      if (scopes[0] === "all") check(new Set([...first, ...second]).size === 1, 'with scope "all", one App to handle every key\'s messages');
+      else check([...first].every((app) => !second.has(app)), 'with scope "one", no App to handle two keys\' messages');
+    }),
+
     mailboxCase("one component both handles and sends: a handler sends to another actor through the mailbox", async (s) => {
       s.behave(async (r) => {
         if (r.type === TYPE) await r.mailbox.send("actor-2", OTHER_TYPE, { forwarded: r.message }, r.ctx);
@@ -457,6 +475,7 @@ function createInbox(): Inbox {
   let finished = 0;
   let answered = 0;
   let woken = 0;
+  let apps = 0;
   let behaviour: (received: Received) => Promise<void> = async () => {};
   let answering: (asked: Asked) => Promise<JsonValue> = async ({ key, type, message }) => ({ key, type, message });
   const attempt = (register: () => void): unknown => {
@@ -476,7 +495,7 @@ function createInbox(): Inbox {
         const wakeups = pikit.useOptional("wakeups");
         return {
           start() {
-            const own = { mailbox: mailbox.get(), wakeups: wakeups.get() };
+            const own = { mailbox: mailbox.get(), wakeups: wakeups.get(), app: ++apps, scope: inbox.get().scope as unknown };
             const handler =
               (type: string): ActorInboxHandler =>
               async (key, message, ctx) => {
@@ -548,6 +567,7 @@ export function createMemoryMailbox(): ComponentDefinition {
       const answerers = new Map<string, ActorCallHandler>();
       let running: { ctx: AppContext; stop: AbortController } | undefined;
       pikit.provide("actor.inbox", {
+        scope: "all",
         handle(type, handler) {
           if (typeof type !== "string" || type === "") throw new TypeError("memory-mailbox: a message type is a non-empty string");
           if (handlers.has(type)) throw new Error(`memory-mailbox: the type "${type}" already has a handler`);

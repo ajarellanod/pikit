@@ -340,8 +340,24 @@ test("a component working on a tool call's environment declares execution (I4)",
   expect(await problems(declared)).toBe("");
 });
 
+test("K1: no component's shipped files read the target; comments and tests may name it", async () => {
+  const f = await fixture();
+  f.append("index.ts", "// Not pikit.target: a capability says it.");
+  f.append("sample.test.ts", "export const on = (ctx: { target: string }) => ctx.target;");
+  expect(await problems(f)).toBe("");
+
+  writeFileSync(join(f.own, "where.ts"), "export const where = (ctx: { target: string }) => ctx.target;\n");
+  expect(await problems(f)).toBe(
+    "conversations-sample: files/src/pikit/conversations-sample/where.ts reads the target (pikit.target or ctx.target), which no component branches on (SPEC K1): " +
+      "what differs per target comes through a capability (actor.inbox's scope says whose actor the App is), or is a component per target",
+  );
+});
+
+// The target read by another name, which the static check above does not see: the drift check refuses it.
+const BY_ANOTHER_NAME = "const kit: { target: string } = pikit;";
+
 test("K1: setup declares the same on every target its manifest declares, and is described on each", async () => {
-  const branches = await fixture({ setup: `\n    if (pikit.target === "durable") pikit.provide("conversations.registry", {});` });
+  const branches = await fixture({ setup: `\n    ${BY_ANOTHER_NAME}\n    if (kit.target === "durable") pikit.provide("conversations.registry", {});` });
   expect(await problems(branches)).toBe("");
   branches.writeManifest({ ...branches.manifest(), targets: ["server", "durable"] });
   await generate(branches.root);
@@ -350,7 +366,7 @@ test("K1: setup declares the same on every target its manifest declares, and is 
       "what differs per target comes through a capability, or is a component per target",
   );
 
-  const refuses = await fixture({ setup: `${SETUP}\n    if (pikit.target === "durable") throw new Error("no durable here");` });
+  const refuses = await fixture({ setup: `${SETUP}\n    ${BY_ANOTHER_NAME}\n    if (kit.target === "durable") throw new Error("no durable here");` });
   refuses.writeManifest({ ...refuses.manifest(), targets: ["server", "durable"] });
   await generate(refuses.root);
   expect(await problems(refuses)).toBe("conversations-sample: setup could not be described on durable, one of its targets (SPEC K1): no durable here");

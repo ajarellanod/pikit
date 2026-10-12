@@ -36,7 +36,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, outbound-durable, runtime-pi, storage-kv-sql | `createSqlDatabaseConformance` |
 | `storage.kv` | single | storage-kv-sql | channel-telegram, channel-telegram-webhook, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
 | `actor.mailbox` | single | mailbox-local, platform-cloudflare | admin-api, channel-telegram-webhook | `createMailboxConformance` |
-| `actor.inbox` | single | mailbox-local, platform-cloudflare | admin-api?, channel-telegram-webhook | `createMailboxConformance` |
+| `actor.inbox` | single | mailbox-local, platform-cloudflare | admin-api?, channel-telegram-webhook, settings-store? | `createMailboxConformance` |
 | `wakeups` | single | platform-cloudflare, wakeups-timers | channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, channel-http, channel-telegram-webhook, health-registry | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, health-registry? | `createAdminAuthConformance` |
@@ -307,6 +307,7 @@ interface ActorMailbox {
   call(key, type, message: JsonValue, ctx): Promise<JsonValue>;   // asks for an answer
 }
 interface ActorInbox {
+  readonly scope: "all" | "one";                                  // whose actor this App is: every key's, or one key's
   handle(type, (key, message, ctx) => Promise<void>): void;       // in start; one handler per type
   answer(type, (key, message, ctx) => Promise<JsonValue>): void;
 }
@@ -319,10 +320,13 @@ interface ActorInbox {
   `invalid`, `no_handler`, `cancelled`, `unreachable`, `failed`, or the handler's own.
 - Handlers are registered by method, not provided as a keyed capability: otherwise the mailbox would
   depend on every handler's component, a cycle through the runtime and `wakeups`.
+- `scope` is what a component whose state every key shares reads instead of the target (K1): with
+  `"one"` that state is another actor's, reached through `actor.mailbox` (settings-store's settings
+  object, admin-api's index). The suite checks it against where the messages were handled.
 - `answerCall` and `callResult` carry a call's outcome across an RPC, for providers.
 
-Providers: mailbox-local (server: the App itself is every key's actor), platform-cloudflare (an RPC to
-the Durable Object `idFromName(key)`; the object's own key is a local call). Types in use:
+Providers: mailbox-local (server: the App itself is every key's actor, `scope` `"all"`), platform-cloudflare
+(an RPC to the Durable Object `idFromName(key)`; the object's own key is a local call; `scope` `"one"`). Types in use:
 `telegram.update`, `telegram.stranger` (channel-telegram-webhook), and admin-api's `admin-api.*`
 messages and calls. Suite: `createMailboxConformance`; double: `createMemoryMailbox`.
 

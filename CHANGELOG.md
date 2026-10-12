@@ -37,7 +37,8 @@ there.
 - Platform: `http.route` (fetch handlers by `"METHOD /path"`, parameters and prefix keys such as
   `GET /admin/*`), `admin.auth` (whether a request is an operator's), `secrets`, `storage.sql`,
   `storage.kv`, `actor.mailbox` / `actor.inbox` (C2: `send`, and `call` answered by `answer`, failing
-  with a coded `ActorCallError`), `wakeups` (C3), and `WORKERS_HOST` in
+  with a coded `ActorCallError`; the inbox's `scope` says whether the App is every key's actor or one
+  key's, what a component reads instead of the target), `wakeups` (C3), and `WORKERS_HOST` in
   `@pikit/contracts/cloudflare` (C5).
 - `health` (`reporter(name)`: `up`, `degraded`, `down`; `snapshot()`), with its suite
   `createHealthConformance`: a component reports through `useOptional("health")`, so without a
@@ -226,8 +227,9 @@ there.
   kinds and capabilities (`declares` in `component.json`); the kit's catalogue is the default.
   `validate` holds imports per file kind: what shipped files import is a `dependency` (with a
   `requires` range for a kit package), what only tests import a `devDependency`. It refuses a
-  component other than `admin-*` whose shipped files name `APP_DESCRIPTION` (K13), and `setup` that
-  declares differently on two of its targets (K1). Outside the kit repository its messages say
+  component other than `admin-*` whose shipped files name `APP_DESCRIPTION` (K13), a component whose
+  shipped files read `pikit.target` or `ctx.target`, and `setup` that declares differently on two of
+  its targets (K1). Outside the kit repository its messages say
   `pikit registry generate <dir>`.
 - `pikit.json` records what each install wrote (files and hashes, npm packages, hooks, offers), read
   through a schema whose errors name the file and the field; `add` and `upgrade` share one
