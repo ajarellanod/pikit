@@ -83,7 +83,7 @@ test.skipIf(!E2E)(
     expect(Object.keys(manifest.components)).not.toContain("conversations-file");
     // tool-bash is installed, but on a server the starter agent does not name it.
     expect(Object.keys(manifest.components)).toContain("tool-bash");
-    expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('tools: ["read","write","edit"],');
+    expect(readFileSync(join(project, "src", "agents", "assistant", "agent.ts"), "utf8")).toContain('tools: ["read","write","edit","fetch","websearch"],');
     // The README says where pikit is.
     expect(readFileSync(join(project, "README.md"), "utf8")).toContain(`It runs from the kit's checkout at \`${PIKIT_ROOT}\``);
     // Portable: the registry is this CLI's, by name, not by this machine's path.

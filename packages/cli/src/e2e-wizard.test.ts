@@ -178,6 +178,10 @@ test.skipIf(!E2E)(
     at = await w.waitFor("Message from Ada (@ada), id 1001. Allow them to talk to your agent?", at);
     await Bun.sleep(100);
     w.type("\r");
+    // The preset's websearch tool asks for its optional key: Enter skips it.
+    at = await w.waitFor("BRAVE_API_KEY (Enter skips)", at);
+    await Bun.sleep(100);
+    w.type("\r");
     at = await w.waitFor("Start it?", at);
     await Bun.sleep(100);
     w.type(DOWN.repeat(2));
