@@ -11,18 +11,17 @@
 
 import { Activity, Clock, GitBranch, GitPullRequest, User } from "iconoir-react";
 import { useState } from "react";
-import { ValuePill } from "@/components/bui/Chip";
 import EmptyState from "@/components/bui/EmptyState";
 import { FilterChips } from "@/components/bui/FilterTable";
 import { Page, PageLoading, Section } from "@/components/bui/Page";
-import RecordsTable, { type RecordColumn, RecordTag } from "@/components/bui/RecordsTable";
+import RecordsTable, { type RecordColumn } from "@/components/bui/RecordsTable";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { every } from "@/lib/activity";
 import { ApiFailure, useApi } from "@/lib/api";
 import { formatAgo } from "@/lib/format";
 import { Link, pagePath } from "@/lib/router";
 import { defineView } from "@/lib/views";
-import { BASE, ChecksLabel, StateLabel } from "./labels";
+import { BASE, BranchName, ChecksLabel, StateLabel } from "./labels";
 import { ProposalPage } from "./proposal";
 import type { ProposalList, ProposalState, ProposalSummary } from "./types";
 
@@ -90,7 +89,7 @@ function ProposalsPage() {
       muted: (row) => row.checks === undefined,
       cell: (row) => (row.checks === undefined ? "—" : <ChecksLabel checks={row.checks} />),
     },
-    { key: "branch", label: "Branch", icon: <GitBranch />, width: 200, title: (row) => row.branch, cell: (row) => <RecordTag mono>{row.branch.slice(data.branchPrefix.length) || row.branch}</RecordTag> },
+    { key: "branch", label: "Branch", icon: <GitBranch />, width: 200, title: (row) => row.branch, cell: (row) => <BranchName title={row.branch}>{row.branch.slice(data.branchPrefix.length) || row.branch}</BranchName> },
     { key: "author", label: "By", icon: <User />, width: 130, cell: (row) => row.author },
     {
       key: "updated",
@@ -108,7 +107,7 @@ function ProposalsPage() {
       title={open === 0 ? "Nothing waiting for you" : `${open} ${open === 1 ? "change waits" : "changes wait"} for you`}
       description={
         <>
-          The changes your agent proposes to itself: branches <ValuePill>{data.branchPrefix}…</ValuePill> of{" "}
+          The changes your agent proposes to itself: branches <span className="font-mono text-[12.5px] font-semibold text-ink">{data.branchPrefix}…</span> of{" "}
           {data.url === undefined ? (
             data.where
           ) : (
