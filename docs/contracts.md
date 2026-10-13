@@ -40,14 +40,14 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `wakeups` | single | platform-cloudflare, wakeups-timers | channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, github-app?, health-registry?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-cloudflare, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, github-app, github-token, tool-websearch-brave, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `secrets` | single | secrets-cloudflare, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, github-app, github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `github` | single | github-app, github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
-| `health` | single | health-registry | channel-telegram?, server-bun? | `createHealthConformance` |
+| `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
-| `model.provider` | keyed | provider-anthropic, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, runtime-pi? | none |
-| `model.credentials` | single | credentials-file | runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
+| `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
+| `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `execution` | single | execution-do, execution-local | tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-local | tool-bash | same |
 | `workspace` | single | workspace-local | runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
@@ -464,7 +464,9 @@ adapter). Suite:
 - **`model.provider`** (keyed, `@pikit/pi-adapter`): one pi-ai `Provider` per id; agents name models
   as `provider/modelId`. Every pi-ai provider is a subpath `@pikit/pi-adapter/providers/<id>`.
   Providers: provider-anthropic, provider-openai, provider-openrouter, provider-openai-compatible, provider-faux
-  (scripted models for tests). `modelProviders` in `component.json` lists their keys.
+  (scripted models for tests), and provider-failover (`failover/<chain>`: a chain of the other
+  providers' models, a request moving to the next model when one fails before it answers). `modelProviders` in
+  `component.json` lists their keys.
 - **`model.credentials`** (`@pikit/pi-adapter`): pi-ai's `CredentialStore`, per provider id; pi-ai
   writes refreshed OAuth tokens back. Without it, providers read their environment variables (through
   `secrets` first, if installed). Provider: credentials-file (server only).

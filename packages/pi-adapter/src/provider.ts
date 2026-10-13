@@ -21,6 +21,9 @@
  *   through the runtime's `AuthContext` (runtime-pi reads `secrets` first, then the environment).
  * - The APIs are one subpath each, `@pikit/pi-adapter/api/<name>` (generated: `openai-completions`,
  *   `openai-responses`, `anthropic-messages`, `google-generative-ai`, `mistral-conversations`…).
+ * - A provider that answers through other providers (provider-failover) writes its own streams:
+ *   `createAssistantMessageEventStream` makes one, `isContextOverflow` and
+ *   `isRetryableAssistantError` read a failed answer as pi-ai and pi-durable do.
  *
  * Neutral: no node-only import.
  */
@@ -29,3 +32,14 @@ export { createProvider } from "@earendil-works/pi-ai/models";
 export type { CreateProviderOptions, Provider } from "@earendil-works/pi-ai/models";
 export { envApiKeyAuth } from "@earendil-works/pi-ai";
 export type { Api, ApiKeyAuth, AuthContext, Model, ModelCost, ProviderAuth, ProviderStreams } from "@earendil-works/pi-ai";
+export { createAssistantMessageEventStream } from "@earendil-works/pi-ai/utils/event-stream";
+export { isContextOverflow } from "@earendil-works/pi-ai/utils/overflow";
+export { isRetryableAssistantError } from "@earendil-works/pi-ai/utils/retry";
+export type {
+  AssistantMessage,
+  AssistantMessageEvent,
+  AssistantMessageEventStream,
+  SimpleStreamOptions,
+  StreamOptions,
+  TranscriptContext,
+} from "@earendil-works/pi-ai";
