@@ -193,7 +193,7 @@ test('the "/" menu lists only the commands the App registered; titles are the AP
   // No command of the dashboard's own: its actions are buttons.
   expect(composer).not.toContain("composerCommands");
   expect(promptBar).not.toMatch(/control\?: "image"/);
-  for (const page of ["src/views/conversations/home.tsx", "src/views/conversations/conversation.tsx"]) expect(read(page)).toContain("commands={commands ?? []}");
+  for (const page of ["src/views/conversations/new-chat.tsx", "src/views/conversations/conversation.tsx"]) expect(read(page)).toContain("commands={commands ?? []}");
   expect(read("src/app.tsx")).toContain('useApi<ApiCommands>("/commands")');
   expect(promptBar).toContain('"No commands"');
   // Titles: the API's, no localStorage of them, no transcript read to name a chat.

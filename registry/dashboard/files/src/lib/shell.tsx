@@ -18,7 +18,7 @@ export interface ShellState {
   reloadAgents(): void;
   /** The App's slash commands (`GET /admin/api/commands`), by name; undefined until read. */
   commands?: ApiCommand[];
-  /** Opens a new chat (the home, its draft empty), with `agent` chosen when given. */
+  /** Opens a new chat (New chat, its draft empty), with `agent` chosen when given. */
   newChat(agent?: string): void;
   /** The views the App's composition allows, in sidebar order. */
   views: View[];

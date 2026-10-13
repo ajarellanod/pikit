@@ -413,9 +413,9 @@ a:focus-visible .animated-underline::after {
   }
 }
 
-/* -- the home's entrance --------------------------------------------------- */
+/* -- New chat's entrance ---------------------------------------------------- */
 
-.home-reveal {
+.new-chat-reveal {
   will-change: opacity, transform, filter;
 }
 
@@ -504,7 +504,7 @@ a:focus-visible .animated-underline::after {
 
 /* -- the chat's type: 10% larger than the rest of the dashboard -------------
  * `chat-text-13` is 13px, times the scale `.chat` sets (a conversation, the new chat's page): the thread,
- * its composer and the composer's menus. Outside a `.chat` (a code block in the composition view) it is
+ * its composer and the composer's menus. Outside a `.chat` (a code block on Home) it is
  * 13px. */
 
 .chat {
@@ -958,7 +958,7 @@ button.records-header-button:hover {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .home-reveal {
+  .new-chat-reveal {
     opacity: 1 !important;
     transform: none !important;
     filter: none !important;

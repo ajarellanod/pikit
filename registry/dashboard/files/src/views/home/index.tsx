@@ -1,12 +1,13 @@
 /**
- * What the App is made of (`APP_DESCRIPTION`, SPEC K13): its components in start order, who provides
+ * Home: what the App is made of (`APP_DESCRIPTION`, SPEC K13), first in the sidebar after New chat: its
+ * components in start order, who provides
  * each capability, its agents (the steward marked), its pipelines' stages, and its config, each
  * searchable. The config holds no
  * secret: a component reads its secrets through `secrets` and its config names them at most, and the
  * API redacts a value that looks like one.
  */
 
-import { BoxIso, Code, Cpu, Cube, DataTransferBoth, KeyframesCouple, Puzzle, User } from "iconoir-react";
+import { Code, Cpu, Cube, DataTransferBoth, Home, KeyframesCouple, Puzzle, User } from "iconoir-react";
 import { useState } from "react";
 import { ValuePill } from "@/components/bui/Chip";
 import CodeBlock from "@/components/bui/CodeBlock";
@@ -31,7 +32,7 @@ const capabilityTag = (name: string) => (
   </RecordTag>
 );
 
-function CompositionPage() {
+function HomePage() {
   const { data: app, error } = useApi<ApiApp>("/app");
   const shell = useShell();
   const [part, setPart] = useState<Part>("components");
@@ -39,12 +40,12 @@ function CompositionPage() {
 
   if (error !== undefined) {
     return (
-      <Page eyebrow="Composition">
+      <Page eyebrow="Home">
         <ErrorNote error={error} title="The composition cannot be read" />
       </Page>
     );
   }
-  if (app === undefined) return <PageLoading eyebrow="Composition" />;
+  if (app === undefined) return <PageLoading eyebrow="Home" />;
 
   const needle = query.trim().toLowerCase();
   const matches = (...texts: string[]) => needle === "" || texts.some((text) => text.toLowerCase().includes(needle));
@@ -129,7 +130,7 @@ function CompositionPage() {
 
   return (
     <Page
-      eyebrow="Composition"
+      eyebrow="Home"
       title={`${app.components.length} components, ${app.target} target`}
       description="What this App runs: its components in start order, who provides each capability, its agents, its pipelines and its config. A config value that looks like a secret is never sent here."
     >
@@ -190,9 +191,9 @@ function CompositionPage() {
 }
 
 export default defineView({
-  id: "composition",
-  title: "Composition",
-  icon: BoxIso,
-  order: 90,
-  pages: [{ path: "/composition", component: CompositionPage, fill: true }],
+  id: "home",
+  title: "Home",
+  icon: Home,
+  order: 0,
+  pages: [{ path: "/home", component: HomePage, fill: true }],
 });

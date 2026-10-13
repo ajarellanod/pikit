@@ -4,7 +4,7 @@ import { LoaderGrid } from "./LoadingState";
 /* ---------------------------------------------------------
  * PAGE
  * An operator's page in the harness's voice: the view's name
- * quiet above what it says now (the home's two-tone heading),
+ * quiet above what it says now (New chat's two-tone heading),
  * a line of context, then its sections, each a small title
  * with its filters and a table or a panel. It fills the pane
  * and scrolls itself (a view's page with `fill: true`).

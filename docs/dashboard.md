@@ -123,7 +123,7 @@ App's composition (`visibleViews`, read from `GET /admin/api/app`).
 | View | `requires` | Where |
 |---|---|---|
 | `conversations` | `agent.observe` | the dashboard (the chat, not a sidebar item) |
-| `composition` | none | the dashboard |
+| `home` | none | the dashboard: Home, what the App is made of (first in the sidebar; `/admin/` opens New chat) |
 | `delivery` | `outbound.queue` | the dashboard |
 | `health-registry` | `health` | health-registry's `view/` |
 | `admin-proposals` | none (its routes need `proposals`) | admin-proposals' `view/`: the proposals, a page per proposal with its diff, checks and deploy, Approve / Reject |

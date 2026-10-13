@@ -11,7 +11,7 @@
  * - `lib`: the dashboard's client of the admin API, views and router (`src/lib/`, but shadcn's utils);
  * - the shared pieces of `src/components/pikit/`, one item each (`message`, `error-note`);
  * - `bui`: Beautiful UI's primitives as the dashboard has them (`src/components/bui/`);
- * - the base views of `src/views/` (`conversations`, `composition`);
+ * - the base views of `src/views/` (`conversations`, `home`);
  * - every registry component's view (its manifest's `view`), named after the component, and its section
  *   of the Settings dialog (its manifest's `settings`), `<component>-settings`.
  * Imports decide the rest: `@/components/ui/<x>` is the shadcn primitive `x` (`registryDependencies`),

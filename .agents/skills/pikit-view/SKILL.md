@@ -20,12 +20,12 @@ pikit doctor                         # what the App provides: what a view may re
 ```
 
 The base views are the references: `conversations` (a list, a live page over server-sent events,
-actions) and `composition` (one read, tabs). Read `src/dashboard/src/lib/api.ts` (`api`, `post`,
+actions) and `home` (one read, tabs: what the App is made of). Read `src/dashboard/src/lib/api.ts` (`api`, `post`,
 `useApi`, `follow`), `activity.ts` (`usePolling`, `every`), `views.ts` (`defineView`) and
 `router.tsx` (`Link`, `navigate`, `pagePath`).
 
 **Add a view; do not edit a base one.** `pikit upgrade` merges the kit's changes into the base views
-(`conversations`, `composition`, `delivery`) and the files of `src/lib/` and `src/components/`; every
+(`conversations`, `home`, `delivery`) and the files of `src/lib/` and `src/components/`; every
 file you edit is a file that can conflict. To show more about conversations, write a new view that
 imports what the base views export (`Status`, `DashboardBadge`, `agentsOf` from
 `@/views/conversations/list`, `useLive` from `@/views/conversations/live`, `MessageView`,
@@ -100,7 +100,7 @@ export default defineView({
   it says now, then sections with `FilterChips` (a dot and a count each), a `RecordsTable` (columns
   with a glyph, sorting, a numbered gutter, a count; `RecordMark`, `RecordTag`, `TagList` in its
   cells), `StatePill` for a state in a cell, `EmptyState` when nothing shows, `SearchField`,
-  `CodeBlock` for JSON; health-registry's and the base `delivery` and `composition` views are
+  `CodeBlock` for JSON; health-registry's and the base `delivery` and `home` views are
   examples. Also `StatusPill`, `Chip`, `ValuePill`, `Button`, `ContextCards` (a card per
   source: title, figure, text, a chip that opens it), `ToolChips`, `LoadingState`. shadcn's in `src/components/ui/` (in the same
   colours), and the pieces in `src/components/pikit/` (`ErrorNote`, `MessageView`). Use the tokens'

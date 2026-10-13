@@ -7,7 +7,7 @@
  * A title names one conversation (a reset's new one has its own). It is the API's
  * (`ApiConversation.title`: a model's, made after its first run, or the operator's `/name`; until then
  * its first message, once a model was asked to title it); until there is one, its first message when
- * this page has it at hand (sent from the home, or read in the open conversation's transcript: never
+ * this page has it at hand (sent from New chat, or read in the open conversation's transcript: never
  * looked for), else for another channel's key the id in it (`telegram:12345` is `12345`), and "New
  * chat" for one of the dashboard's own. A conversation with no key (no message reached it and no reset
  * pointed a key to it) has nothing to show or do: the list leaves it out. Tabs are kept in

@@ -1,5 +1,5 @@
 /**
- * The home: a new conversation of the dashboard's own. The operator picks one of the App's agents (in
+ * New chat: a new conversation of the dashboard's own. The operator picks one of the App's agents (in
  * the composer, where Beautiful UI picks a model; `?agent=<name>` chooses one, as a conversation's
  * composer does when another is picked there) and writes the first message, with images and a web
  * search when wanted: `POST /admin/api/conversations` makes `dashboard:<uuid>`, whose answers appear
@@ -18,21 +18,21 @@ import { useShell } from "@/lib/shell";
 import { assistantName, assistantOptions, attachmentsOf, imageLimits, webSearchOf } from "./composer";
 
 /* -- the entrance (ms after mount): hello, question, composer, suggestions -- */
-const HOME_REVEAL_TIMING = [170, 330, 400, 550];
-const HOME_REVEAL = { offsetY: 23, blur: 17, duration: 800, easing: "cubic-bezier(0.16, 1, 0.3, 1)" };
+const REVEAL_TIMING = [170, 330, 400, 550];
+const REVEAL = { offsetY: 23, blur: 17, duration: 800, easing: "cubic-bezier(0.16, 1, 0.3, 1)" };
 /** The conversations suggested: the most recently active. */
 const SUGGESTED = 3;
 
-function homeRevealStyle(visible: boolean): CSSProperties {
+function revealStyle(visible: boolean): CSSProperties {
   return {
     opacity: visible ? 1 : 0,
-    transform: visible ? "translate3d(0, 0, 0)" : `translate3d(0, ${HOME_REVEAL.offsetY}px, 0)`,
-    filter: visible ? "blur(0px)" : `blur(${HOME_REVEAL.blur}px)`,
-    transition: ["opacity", "transform", "filter"].map((property) => `${property} ${HOME_REVEAL.duration}ms ${HOME_REVEAL.easing}`).join(", "),
+    transform: visible ? "translate3d(0, 0, 0)" : `translate3d(0, ${REVEAL.offsetY}px, 0)`,
+    filter: visible ? "blur(0px)" : `blur(${REVEAL.blur}px)`,
+    transition: ["opacity", "transform", "filter"].map((property) => `${property} ${REVEAL.duration}ms ${REVEAL.easing}`).join(", "),
   };
 }
 
-export function HomePage() {
+export function NewChatPage() {
   const { app, agents: described, commands, operator } = useShell();
   const chats = useChats();
   const agents = agentsOf(app, described);
@@ -44,7 +44,7 @@ export function HomePage() {
   const webSearch = webSearchOf(described, chosen);
 
   useEffect(() => {
-    const timers = HOME_REVEAL_TIMING.map((at, i) => setTimeout(() => setStage(i + 1), at));
+    const timers = REVEAL_TIMING.map((at, i) => setTimeout(() => setStage(i + 1), at));
     return () => timers.forEach(clearTimeout);
   }, []);
 
@@ -71,15 +71,15 @@ export function HomePage() {
     <div className="min-h-0 flex-1 overflow-y-auto">
       <div className="mx-auto flex min-h-full max-w-[720px] flex-col justify-center px-4 py-10 sm:px-8">
         <h1 className="text-[26px] font-normal tracking-[-0.02em] text-ink">
-          <span className="home-reveal block text-ink-3" style={homeRevealStyle(stage >= 1)}>
+          <span className="new-chat-reveal block text-ink-3" style={revealStyle(stage >= 1)}>
             Hello{operator === undefined || operator === "operator" ? "" : ` ${operator}`}
           </span>
-          <span className="home-reveal block" style={homeRevealStyle(stage >= 2)}>
+          <span className="new-chat-reveal block" style={revealStyle(stage >= 2)}>
             What can I help you with?
           </span>
         </h1>
 
-        <div className="chat home-reveal relative mt-7" style={homeRevealStyle(stage >= 3)}>
+        <div className="chat new-chat-reveal relative mt-7" style={revealStyle(stage >= 3)}>
           <PromptBar
             autoFocus
             placeholder={chosen === undefined ? "The App has no agent to talk to" : `Ask ${assistantName(chosen)} anything…`}
@@ -107,7 +107,7 @@ export function HomePage() {
           )}
         </div>
 
-        <div className="home-reveal mt-6 flex flex-col" style={homeRevealStyle(stage >= 4)}>
+        <div className="new-chat-reveal mt-6 flex flex-col" style={revealStyle(stage >= 4)}>
           {recent.map((conversation) => {
             const title = chats.titleOf(conversation);
             return (

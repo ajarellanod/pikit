@@ -1,5 +1,5 @@
 /**
- * What the home's and a conversation's composers share: the images it takes (admin-api's limits, the
+ * What New chat's and a conversation's composers share: the images it takes (admin-api's limits, the
  * smaller total on Cloudflare), whether the assistant can search the web, the attachments a message
  * sends, and how an assistant is named (`assistantName`). The "/" menu lists only the commands the App
  * registered (`agent.command`, `GET /admin/api/commands`, read by the shell): the dashboard's own

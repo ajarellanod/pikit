@@ -2,13 +2,13 @@
 
 The operator's view of this pikit service (SPEC §5): its conversations, the most recently active
 first, one of them live (the transcript, the answer being written, the tools running), abort and
-reset, the cost, and what the App is made of. It is yours: a shadcn/ui project (Vite, React, Tailwind
+reset, the cost, and what the App is made of (**Home**). It is yours: a shadcn/ui project (Vite, React, Tailwind
 v4) whose source you change like any other file of the project.
 
 It looks like [Beautiful UI](https://www.beautifului.dev/harness)'s harness: a sidebar (the App's menu
-with **Settings**, the theme, the interaction sounds and sign out; **New chat**; **Home**; the views; every
+with **Settings**, the theme, the interaction sounds and sign out; **New chat**; the views, **Home** first; every
 conversation by its name, searchable), the conversations you opened as tabs (New chat's too: each one
-closes, and closing the last leaves a fresh home), a chat (the transcript, the answer streaming in as
+closes, and closing the last leaves a fresh New chat), a chat (the transcript, the answer streaming in as
 markdown through [Comark](https://comark.dev), the model's thinking and tool calls folded together
 between two texts, a message shown the moment it is sent) and its composer, and a **Context** panel.
 Light, dark, or the system's (the default); interaction sounds on until you turn them off. Both are
@@ -31,7 +31,7 @@ kept in this browser.
   channel gets it). `/new` takes you to the key's new conversation. With no command registered the
   menu says "No commands", and text that names no command is sent as a message. The dashboard's own
   actions are buttons, never commands: stop (the send button), reset (the menu), images and web
-  search (**+**), the assistant (the picker), the views (the sidebar). On the home a command says it
+  search (**+**), the assistant (the picker), the views (the sidebar). On New chat a command says it
   runs in a conversation.
 - **A conversation's top bar** has no figures: the **Context** button and the **…** menu (Reset,
   confirmed). **Context** shows the images sent in the conversation and its sources (what its web
@@ -60,7 +60,7 @@ switches and selects save at once; a text or a prompt with its own Save.
 
 ## A channel of its own
 
-- **New chat** (the home): pick one of the App's agents (in the composer) and write the first message
+- **New chat** (where `/admin/` opens): pick one of the App's agents (in the composer) and write the first message
   (or send images alone). It is a conversation of the dashboard's own (`dashboard:<uuid>`): its
   answers appear only here, and no other channel can continue it. Below the composer, the three
   conversations last active, to continue.
@@ -72,7 +72,7 @@ switches and selects save at once; a text or a prompt with its own Save.
   conversation at once; the one left behind stays readable, under its own name.
 - **Titles**: a chat is named by its title, which admin-api has a model write after its first answer
   (`ApiConversation.title`, its first message until then; `/name` sets your own), everywhere it is
-  named: the sidebar, the tabs, the home. A reset's new chat gets its own. Until there is one, by the
+  named: the sidebar, the tabs, New chat. A reset's new chat gets its own. Until there is one, by the
   first message when the page has it (you just sent it, or the open conversation shows it), else
   another channel's by the id in its key and the dashboard's own "New chat". Nothing about names is kept in the browser. The list shows names only,
   no channel.
@@ -137,7 +137,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/lib/settings.ts` | how sections are found and when they show (`defineSettings`), a component's settings (`useSettings`) |
 | `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General; its rows and controls (`SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`), and `SchemaSettings` |
 | `src/lib/router.tsx` | the pages under `/admin` |
-| `src/views/conversations/` | the home, a conversation (its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
+| `src/views/conversations/` | New chat (`new-chat.tsx`), a conversation (its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
 | `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles (the API's: a key's, shared by the conversations a reset left behind), the commands' notes (`useChats`, `agentsOf`) |
 | `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, its commands, the views, `newChat`, `TabActions`, `SidePanel` |
 | `src/lib/theme.ts`, `public/theme.js` | light, dark or the system's, before the first paint |
@@ -147,7 +147,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 ## Add a view
 
 A view is a folder of `src/views/`, found when the dashboard is built. **Prefer a new view to
-editing a base one** (`conversations`, `composition`, `delivery`): `pikit upgrade` merges the kit's
+editing a base one** (`conversations`, `home`, `delivery`): `pikit upgrade` merges the kit's
 changes into the base views, and a file you did not touch never conflicts. To show something more
 about conversations, add a view of your own (`src/views/my-conversations/`) that reuses the base
 pieces they export (`useLive` from `views/conversations/live.ts`, `turnsOf`, `Reply`, `MessageView`
@@ -173,7 +173,7 @@ export default defineView({
 A view appears in the sidebar with its icon (iconoir, MIT; never a paid set) and its page in the main
 pane, padded and scrolling (`fill: true` on a page: it fills the pane and scrolls itself, as the chat
 does). Build it from `src/components/bui/` (Beautiful UI's look) or `src/components/ui/` (shadcn's,
-in the same colours). An operator's page as the base views are (`delivery`, `composition`): `Page`
+in the same colours). An operator's page as the base views are (`delivery`, `home`): `Page`
 and `Section` (`fill: true`), `FilterChips`, a `RecordsTable`, `StatePill`, `EmptyState`, `CodeBlock`.
 
 Its data comes from admin routes its component registers through `http.route` (`GET

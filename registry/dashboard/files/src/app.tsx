@@ -1,12 +1,13 @@
 /**
  * The dashboard's shell, in Beautiful UI's harness layout: the operator signs in with the token once
- * (a session cookie, `lib/api.ts`), then a sidebar (the App's menu, New chat, Home, the views the
- * App's composition allows, every conversation), a main pane with the conversations opened as tabs
- * (and the New chat's while the home shows; each one closes), and a side panel a page may fill (a
- * conversation's Context). A page that loads with a session still open goes straight in.
+ * (a session cookie, `lib/api.ts`), then a sidebar (the App's menu, New chat, the views the App's
+ * composition allows, Home first, every conversation), a main pane with the conversations opened as
+ * tabs (and New chat's while it shows; each one closes), and a side panel a page may fill (a
+ * conversation's Context). A page that loads with a session still open goes straight in, and `/` opens
+ * New chat.
  */
 
-import { Archive, EditPencil, Home, LogOut, Settings, SoundHigh, SoundOff, Trash, Undo } from "iconoir-react";
+import { Archive, EditPencil, LogOut, Settings, SoundHigh, SoundOff, Trash, Undo } from "iconoir-react";
 import { useCallback, useEffect, useState } from "react";
 import { LoaderGrid } from "@/components/bui/LoadingState";
 import SidebarNav, { MenuRow, MenuSeparator, type SidebarChat, type SidebarItem } from "@/components/bui/SidebarNav";
@@ -54,13 +55,13 @@ function CloseTab({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * The tabs: the conversations opened, then New chat while the home shows. Each one closes: the active
- * one gives way to its neighbour, and closing the last one leaves a fresh home (`onNewChat`).
+ * The tabs: the conversations opened, then New chat while it shows. Each one closes: the active one
+ * gives way to its neighbour, and closing the last one leaves a fresh New chat (`onNewChat`).
  */
-function TabBar({ path, home, onActions, onNewChat }: { path: string; home: string; onActions: (element: HTMLDivElement | null) => void; onNewChat: () => void }) {
+function TabBar({ path, newChatPath, onActions, onNewChat }: { path: string; newChatPath: string; onActions: (element: HTMLDivElement | null) => void; onNewChat: () => void }) {
   const chats = useChats();
   const busy = new Map((chats.items ?? []).map((conversation) => [conversation.conversationId, conversation.busy]));
-  const onHome = path === home;
+  const newChatShown = path === newChatPath;
 
   const close = (id: string, active: boolean) => {
     const next = chats.closeTab(id);
@@ -68,7 +69,7 @@ function TabBar({ path, home, onActions, onNewChat }: { path: string; home: stri
     if (next === undefined) onNewChat();
     else navigate(pagePath(CHAT, next.id));
   };
-  const closeHome = () => {
+  const closeNewChat = () => {
     const last = chats.tabs.at(-1);
     if (last === undefined) onNewChat();
     else navigate(pagePath(CHAT, last.id));
@@ -93,12 +94,12 @@ function TabBar({ path, home, onActions, onNewChat }: { path: string; home: stri
             </div>
           );
         })}
-        {onHome && (
+        {newChatShown && (
           <div className="flex h-7 w-36 shrink-0 items-center gap-0.5 rounded-[7px] bg-hover-2 pr-0.5 pl-2.5 text-[12.5px] font-medium text-ink">
             <span aria-current="page" className="block min-w-0 flex-1 truncate">
               New chat
             </span>
-            <CloseTab onClose={closeHome} />
+            <CloseTab onClose={closeNewChat} />
           </div>
         )}
         <button
@@ -124,17 +125,17 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const views = visibleViews(app);
   const found = views.flatMap((view) => view.pages.map((page) => ({ view, page, params: match(page.path, path) }))).find((each) => each.params !== undefined);
   const chatView = views.find((view) => view.id === "conversations");
-  const home = chatView?.pages[0]?.path ?? views[0]?.pages[0]?.path ?? "/";
+  const newChatPath = chatView?.pages[0]?.path ?? views[0]?.pages[0]?.path ?? "/";
   const agents = useApi<ApiAgents>("/agents");
   const commands = useApi<ApiCommands>("/commands");
   const [draft, setDraft] = useState(0);
-  /** A fresh home (its draft empty), with `agent` chosen when given. */
+  /** A fresh New chat (its draft empty), with `agent` chosen when given. */
   const newChat = useCallback(
     (agent?: string) => {
       setDraft((n) => n + 1);
-      navigate(agent === undefined ? home : `${home}?agent=${encodeURIComponent(agent)}`);
+      navigate(agent === undefined ? newChatPath : `${newChatPath}?agent=${encodeURIComponent(agent)}`);
     },
-    [home],
+    [newChatPath],
   );
   const [actions, setActions] = useState<HTMLDivElement | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
@@ -144,7 +145,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   const [narrow] = useState(() => !window.matchMedia("(min-width: 1024px)").matches);
   const name = appName(app);
 
-  // Before the redirect to the home below, which drops the query.
+  // Before the redirect to New chat below, which drops the query.
   useEffect(() => {
     const params = new URLSearchParams(window.location.search);
     const id = params.get("settings");
@@ -157,8 +158,8 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
   }, []);
 
   useEffect(() => {
-    if (found === undefined && (path === "/" || path === "")) navigate(home, { replace: true });
-  }, [found, home, path]);
+    if (found === undefined && (path === "/" || path === "")) navigate(newChatPath, { replace: true });
+  }, [found, newChatPath, path]);
 
   // The tab's title: the conversation's (its AI title, as the sidebar names it), the view's, or New chat.
   const openId = found?.page.path === `${CHAT}/:id` ? found.params?.id : undefined;
@@ -181,10 +182,9 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       key: "new",
       label: "New chat",
       icon: <EditPencil />,
-      href: `${BASE}${home}`,
+      href: `${BASE}${newChatPath}`,
       onSelect: () => newChat(),
     },
-    { key: "home", label: "Home", icon: <Home />, active: path === home, href: `${BASE}${home}`, onSelect: () => navigate(home) },
     ...views
       .filter((view) => view.id !== "conversations")
       .map((view): SidebarItem => {
@@ -230,7 +230,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
       <div className="p-8 text-[13.5px] text-ink-3">No page here.</div>
     ) : found?.page.fill === true ? (
       // One instance per conversation: nothing of one shows in another.
-      <Page key={found.page.path === home ? `home-${draft}` : path} params={found.params ?? {}} />
+      <Page key={found.page.path === newChatPath ? `new-chat-${draft}` : path} params={found.params ?? {}} />
     ) : (
       <div className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-8">
@@ -332,7 +332,7 @@ function Shell({ app, operator, onSignOut }: { app: ApiApp; operator: string | u
                 <ErrorNote error={hideError} title="The chat could not be changed" />
               </div>
             )}
-            <TabBar path={path} home={home} onActions={setActions} onNewChat={() => newChat()} />
+            <TabBar path={path} newChatPath={newChatPath} onActions={setActions} onNewChat={() => newChat()} />
             <div className="flex min-h-0 flex-1 flex-col">{page}</div>
           </section>
           <div ref={setSide} className="contents" />
