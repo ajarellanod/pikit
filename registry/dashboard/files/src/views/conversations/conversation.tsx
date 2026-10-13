@@ -47,12 +47,29 @@ const PAGE = 50;
 const ANSWER_EXPECTED_MS = 30_000;
 const CONTEXT = "pikit-context";
 
-/** The transcript's latest page, read again when the conversation changes, and older pages on demand. */
+/** `page`'s entries, then the ones of `kept` it does not have: both newest first, as the API gives them. */
+const newestFirst = (page: ApiTranscriptEntry[], kept: ApiTranscriptEntry[]): ApiTranscriptEntry[] => {
+  const ids = new Set(page.map((entry) => entry.id));
+  return [...page, ...kept.filter((entry) => !ids.has(entry.id))];
+};
+
+/**
+ * The transcript's latest page, read again when the conversation changes, and older pages on demand.
+ * What was read stays: as the conversation grows past a page, the latest page leaves its oldest entries
+ * behind, and the thread keeps them (never losing its start, its turns never shifting).
+ */
 function useTranscript(id: string, changes: number) {
   const latest = useApi<ApiPage<ApiTranscriptEntry>>(`/conversations/${encodeURIComponent(id)}/transcript?limit=${PAGE}`);
-  const [older, setOlder] = useState<ApiTranscriptEntry[]>([]);
+  const [kept, setKept] = useState<ApiTranscriptEntry[]>([]);
+  // Older pages read on from the first latest page's end: the later ones start past what is kept.
   const [cursor, setCursor] = useState<string | null>();
-  const { reload } = latest;
+  const { reload, data: page } = latest;
+
+  useEffect(() => {
+    if (page === undefined) return;
+    setKept((items) => newestFirst(page.items, items));
+    setCursor((current) => (current === undefined ? (page.next ?? null) : current));
+  }, [page]);
 
   useEffect(() => {
     if (changes === 0) return;
@@ -60,18 +77,17 @@ function useTranscript(id: string, changes: number) {
     return () => clearTimeout(timer);
   }, [changes, reload]);
 
-  const next = cursor === undefined ? latest.data?.next : (cursor ?? undefined);
+  const next = cursor === undefined ? page?.next : (cursor ?? undefined);
   const loadOlder = async () => {
     if (next === undefined) return;
-    const page = await api<ApiPage<ApiTranscriptEntry>>(`/conversations/${encodeURIComponent(id)}/transcript?limit=${PAGE}&cursor=${encodeURIComponent(next)}`);
-    setOlder((items) => [...items, ...page.items]);
-    setCursor(page.next ?? null);
+    const older = await api<ApiPage<ApiTranscriptEntry>>(`/conversations/${encodeURIComponent(id)}/transcript?limit=${PAGE}&cursor=${encodeURIComponent(next)}`);
+    setKept((items) => newestFirst(items, older.items));
+    setCursor(older.next ?? null);
   };
 
   // Newest first from the API; shown oldest first.
-  const seen = new Set<string>();
-  const entries = [...(latest.data?.items ?? []), ...older].filter((entry) => !seen.has(entry.id) && seen.add(entry.id)).reverse();
-  return { entries, loaded: latest.data !== undefined, error: latest.error, hasOlder: next !== undefined, loadOlder, reload };
+  const entries = newestFirst(page?.items ?? [], kept).reverse();
+  return { entries, loaded: page !== undefined, error: latest.error, hasOlder: next !== undefined, loadOlder, reload };
 }
 
 /** The transcript's entries and, after them, the ones the live stream announced it does not have yet. */
