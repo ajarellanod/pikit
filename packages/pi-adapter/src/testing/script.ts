@@ -101,7 +101,7 @@ export function holdTool(run: (context: ChordContext) => Promise<string>, replay
     description: "Blocks until the test releases it.",
     parameters: Type.Object({}),
     replay,
-    execute: async (_args, _api, context) => ({ content: [{ type: "text", text: await run(context) }] }),
+    execute: async (_args, _api, context) => ({ output: [{ type: "text", text: await run(context) }] }),
   }) as unknown as ToolRegistration;
 }
 
@@ -113,7 +113,7 @@ export function recordingBash(ran: string[]): ToolRegistration {
     parameters: Type.Object({ command: Type.String() }),
     execute: async (args) => {
       ran.push(args.command);
-      return { content: [{ type: "text", text: "ran" }] };
+      return { output: [{ type: "text", text: "ran" }] };
     },
   }) as unknown as ToolRegistration;
 }

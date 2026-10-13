@@ -112,6 +112,12 @@ pi-durable keeps every message it admitted and how it ended; `agent.submissions`
   agent is no longer defined (`agent_removed`); and when resuming its conversation fails and its
   oldest pending message is older than `abandonPendingAfterHours`. Only messages still queued are
   abandoned: a run that took one settles it.
+- a **storage error** (the database unreachable, a failed write) closes pi-durable for good: the call
+  that hit it fails, and what was going stays pending in the storage, as after a crash. runtime-pi
+  opens pi-durable again without waiting for a message: on a server from a timer, with `wakeups` by
+  asking for one ("Cloudflare" below). It waits 1 s, doubled for each failure in a row up to 5
+  minutes, and starts over once an open worked; what it opens resumes as at start. A message that
+  arrives first opens it at once.
 
 ## Cloudflare: runs driven by wakeups, in slices
 
@@ -144,6 +150,9 @@ has work pending. The handler:
    (`onIdleWithPendingWork` and `nextWakeAtOf` in `@pikit/pi-adapter`), and the handler closes
    pi-durable inside its event (`suspend`) so the object can be evicted until then; the wakeup opens
    it again and the wait continues from its checkpoint.
+
+After a storage error closed pi-durable (the runtime's `onFailure`), runtime-pi asks for the handler
+after the backoff above; its step 1 opens pi-durable again, and what the failure left goes on.
 
 A request carries nothing: the handler reads what to do from pi-durable each time. So a handler that runs twice (delivery is at least once), late, or in a new object after an
 eviction does the right thing. An object evicted mid-run is started again by its alarm, and the run

@@ -51,7 +51,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [channel-google-chat](channel-google-chat.md) | | Google Chat by webhook, an agent per space | No |
 | [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |
-| [codemode](codemode.md) | | The model writes a script that calls its tools (Pi's `pi-codemode`), server only; what pikit leaves pending until then | No |
+| [codemode](codemode.md) | | The model writes a script that calls its tools: pi-durable 1.2's codemode and `tool_search` extensions as components (Cloudflare needs a sandbox Worker) | No |
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
 | [conversation-routing](conversation-routing.md) | | Decided: a conversation is one chat of one channel; its key is never rewritten | No |
 | [deployment-celld](deployment-celld.md) | | The `durable` target on your own machines (celld, self-hosted Durable Objects): scale out without Cloudflare | No; it should come, as the self-hosted way to scale out |

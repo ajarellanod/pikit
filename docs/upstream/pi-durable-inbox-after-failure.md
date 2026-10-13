@@ -1,6 +1,6 @@
 # Proposal for pi-durable: place queued inputs when a run fails
 
-Status: draft for upstream (`@earendil-works/pi-durable`, against 1.1.0). From pikit, which runs Pi
+Status: draft for upstream (`@earendil-works/pi-durable`, against 1.2.0). From pikit, which runs Pi
 agents behind chat channels.
 
 ## Problem
@@ -8,8 +8,8 @@ agents behind chat channels.
 A follow-up submitted while a run is going waits in the inbox and is placed when the run answers. If
 the run ends **without** an answer (`unanswered` with `model_error`, `faulted`, `orphaned`, …), the
 follow-ups stay queued and nothing places them. They move only when someone submits again. The
-README says so ("If a run fails, queued items stay in the inbox until the next submission places
-them, oldest first").
+README says so ("If a run fails, queued items stay in the inbox until the next input or queued write
+places them, oldest first").
 
 In a chat that means: a message sent while the agent was failing is never answered until the user
 writes once more, and its answer then comes before the new message's. Nothing reports the
@@ -25,18 +25,23 @@ inbox", on pi-ai's faux provider:
 2. while it is held, submit input `r2` (queued in `pi.inbox`);
 3. `r1` settles `unanswered` / `model_error`; `harness.waitForIdle()` resolves;
 4. `r2`'s status is still `queued`, and no run is going;
-5. any submission (pikit uses a write) places `r2`, which then runs and settles `done`.
+5. a write of only `kind` and `data` is appended at once (display-only, 1.2.0) and `r2` stays
+   `queued`;
+6. an input, or a queued write (pikit's, with an empty `edits`), places `r2`, which then runs and
+   settles `done`.
 
 ## pikit's workaround
 
 `packages/pi-adapter/src/runtime.ts`, `reconcileInbox`: after an input settles unanswered,
 and after opening a Harness, the runtime looks at `pi.live` and `pi.inbox`. With no run going and an
-input queued, it submits `{ type: "write", entry: { kind: "pikit.inbox-kick" } }`: an entry without
-model messages, so the model never sees it, whose admission boundary places the oldest input and
-starts its run.
+input queued, it submits `{ type: "write", entry: { kind: "pikit.inbox-kick", edits: [] } }`: an
+entry without model messages, so the model never sees it, whose admission boundary places the
+oldest input and starts its run. The empty `edits` only keeps it from being display-only, which
+1.2.0 appends at once without a boundary.
 
 Costs: one meaningless entry in the transcript per failure; a dependency on the admission boundary
-placing follow-ups; reads of two internal documents (`pi.live`, `pi.inbox`) after every failure.
+placing follow-ups, and on what makes a write queued (1.2.0 changed it); reads of two internal
+documents (`pi.live`, `pi.inbox`) after every failure.
 
 ## Proposal
 

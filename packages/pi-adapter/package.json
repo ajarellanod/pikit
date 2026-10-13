@@ -85,10 +85,10 @@
     "bun": ">=1.4.0"
   },
   "dependencies": {
-    "@earendil-works/chord": "1.1.0",
-    "@earendil-works/pi-ai": "1.1.0",
-    "@earendil-works/pi-durable": "1.1.0",
-    "@earendil-works/pi-mcp": "1.1.0",
+    "@earendil-works/chord": "1.2.0",
+    "@earendil-works/pi-ai": "1.2.0",
+    "@earendil-works/pi-durable": "1.2.0",
+    "@earendil-works/pi-mcp": "1.2.0",
     "@pikit/contracts": "workspace:*",
     "@pikit/core": "workspace:*"
   }

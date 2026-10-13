@@ -76,10 +76,10 @@ export function mcpParameters(inputSchema: Record<string, unknown>): TSchema {
  */
 export function mcpToolResult(result: CallToolResult, toolName: string): ToolExecutionResult {
   const content = toLlmContent(result);
-  if (result.isError !== true) return { content };
+  if (result.isError !== true) return { output: content };
   const hasText = content.some((part) => part.type === "text" && part.text.trim() !== "");
   return {
-    content: hasText ? content : [{ type: "text", text: `${toolName}: the MCP server reported a failure without a message` }, ...content],
+    output: hasText ? content : [{ type: "text", text: `${toolName}: the MCP server reported a failure without a message` }, ...content],
     isError: true,
   };
 }

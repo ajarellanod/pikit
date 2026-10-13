@@ -354,12 +354,13 @@ export async function callTool(tool: ToolRegistration, args: unknown, options: C
     callId: "call-1",
     env: options.env,
     output: (chunk: string | Uint8Array) => void (output += typeof chunk === "string" ? chunk : new TextDecoder().decode(chunk)),
+    retainedOutput: () => ({ text: output, truncated: false }),
     diagnostic: (diagnostic: ToolDiagnostic) => void diagnostics.push(diagnostic),
     details: async (value: unknown) => void (details = value),
   } as unknown as ToolExecutionApi;
   try {
     const result = await tool.execute(args as never, api, options.context ?? ctx);
-    const text = result.content === undefined ? output : result.content.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
+    const text = result.output === undefined ? output : result.output.flatMap((part) => (part.type === "text" ? [part.text] : [])).join("");
     return { text, isError: result.isError === true, diagnostics: [...diagnostics, ...(result.diagnostics ?? [])], details: result.details ?? details };
   } catch (error) {
     diagnostics.push({ severity: "error", code: "tool_error", message: error instanceof Error ? error.message : String(error) });

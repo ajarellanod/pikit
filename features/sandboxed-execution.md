@@ -34,7 +34,8 @@ only where each agent's commands run across a service.
 ## Open questions
 - Does self-improvement on the server need `execution-docker`, or is a local checkout with a closed
   network achievable otherwise?
-- The remote executor protocol: check `pi-protocol` and `pi-client` before defining one.
+- The remote executor protocol: check Chord's host links (`ipcLink`, `webSocketLink`) before defining one
+  (`pi-protocol` and `pi-client` were removed in Pi 1.2.0).
 - Per agent or per conversation, and what it costs.
 
 ## Moved from the former SPEC and ROADMAP

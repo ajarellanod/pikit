@@ -300,6 +300,115 @@ test("with wakeups, a long run is driven over several slices: each cut asks agai
   await app.stop();
 }, 30_000);
 
+/**
+ * `storage.sql` in memory whose next pi-durable entry append fails once `failNext` is called, as a lost
+ * connection would: pi-durable's Harness fails and closes.
+ */
+function flakyStorage() {
+  let fail = false;
+  let open: ReturnType<typeof openSqliteDatabase> | undefined;
+  const component = defineComponent({
+    name: "storage-flaky",
+    setup(pikit) {
+      const db = () => {
+        if (open === undefined) throw new Error("storage-flaky: not running");
+        return open.database;
+      };
+      pikit.provide("storage.sql", {
+        query: (sql, params) => db().query(sql, params),
+        run: (sql, params) => db().run(sql, params),
+        transaction: (work) =>
+          db().transaction((tx) =>
+            work({
+              query: (sql, params) => tx.query(sql, params),
+              run: (sql, params) => {
+                if (!fail || !sql.includes("INSERT INTO entries")) return tx.run(sql, params);
+                fail = false;
+                return Promise.reject(new Error("the storage is unreachable"));
+              },
+            }),
+          ),
+      });
+      return {
+        start: () => void (open = openSqliteDatabase(":memory:")),
+        stop: async () => {
+          await open?.close();
+          open = undefined;
+        },
+      };
+    },
+  });
+  return { component, failNext: () => void (fail = true) };
+}
+
+/** A tool held until `release`; `held` resolves once it runs. */
+function heldTool() {
+  let release!: () => void;
+  const released = new Promise<void>((resolve) => (release = resolve));
+  let reached!: () => void;
+  const held = new Promise<void>((resolve) => (reached = resolve));
+  const tool = holdTool(async () => {
+    reached();
+    await released;
+    return "released";
+  });
+  return { tool, held, release };
+}
+
+test("on a server, a storage error that closes pi-durable mid-run: a timer opens it again, and the run answers with no new message", async () => {
+  const hold = heldTool();
+  const flaky = flakyStorage();
+  const { agents, provider } = testComponents({ agents: [scriptedAgent(hold.tool)] });
+  const seen = observer();
+  const app = await defineApp({ components: [flaky.component, agents, provider, runtimePi, seen.component], logger: silentLogger }).create();
+  await app.start();
+  try {
+    const conversation = await seen.conversation("test:storage-error");
+    await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hold" }, app.context());
+    await hold.held;
+
+    // The tool's result is never written: the Harness fails, and nothing else calls the runtime.
+    flaky.failNext();
+    hold.release();
+
+    await until(() => seen.results.length > 0, "the run's answer after pi-durable opened again");
+    expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r1", "completed"]]);
+  } finally {
+    await app.stop();
+  }
+}, 30_000);
+
+test("with wakeups, a storage error that closes pi-durable mid-run asks for a wakeup a second later, which opens it again and answers the run", async () => {
+  const hold = heldTool();
+  const flaky = flakyStorage();
+  const { agents, provider } = testComponents({ agents: [scriptedAgent(hold.tool)] });
+  const wakeups = handDrivenWakeups();
+  const seen = observer();
+  const app = await defineApp({ components: [flaky.component, agents, provider, wakeups.component, runtimePi, seen.component], logger: silentLogger }).create();
+  await app.start();
+  try {
+    await wakeups.run(app).done;
+    const conversation = await seen.conversation("test:storage-error");
+    await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hold" }, app.context());
+    await hold.held;
+
+    const before = Date.now();
+    const slice = wakeups.run(app);
+    flaky.failNext();
+    hold.release();
+    // The slice ends: the failed Harness drives nothing.
+    await slice.done;
+    await until(() => wakeups.requests.has(DRIVE), "a wakeup to open pi-durable again");
+    expect(wakeups.requests.get(DRIVE)).toBeGreaterThanOrEqual(before + 1_000);
+    expect(seen.results).toEqual([]);
+
+    await wakeups.run(app).done;
+    expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r1", "completed"]]);
+  } finally {
+    await app.stop();
+  }
+}, 30_000);
+
 test("with wakeups, a model retry's backoff is a wakeup at its time, not a timer: the slice suspends pi-durable, and the run answers when it fires", async () => {
   let failed = false;
   const { agents, provider, storage } = testComponents({
@@ -527,7 +636,7 @@ const advance = defineTool({
   parameters: Type.Object({ phase: Type.String() }),
   execute: async (args, _api, context) => {
     await context.value(AGENT_STATE)?.update({ phase: args.phase }, context);
-    return { content: [{ type: "text", text: "advanced" }] };
+    return { output: [{ type: "text", text: "advanced" }] };
   },
 }) as unknown as AgentTool;
 

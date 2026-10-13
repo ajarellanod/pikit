@@ -25,7 +25,7 @@ import Type from "typebox";
 import Value from "typebox/value";
 import runtimePi from "./index.ts";
 
-const lookup = defineTool({ name: "lookup", description: "Looks up", parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "found" }] }) }) as unknown as AgentTool;
+const lookup = defineTool({ name: "lookup", description: "Looks up", parameters: Type.Object({}), execute: async () => ({ output: [{ type: "text", text: "found" }] }) }) as unknown as AgentTool;
 
 /** What each model request was told: its system prompt's instructions. */
 type SystemEntry = { role: string; sections?: { instructions?: string } };

@@ -23,7 +23,7 @@ export const greeting = defineTool({
   replay: "safe", // it only computes: a call a crash interrupted runs again
   async execute(args, api, context) {
     // api.conversationId, api.env (files and shell); context.abortSignal (the call's cancellation)
-    return { content: [{ type: "text", text: `Hello, ${args.name}!` }] };
+    return { output: [{ type: "text", text: `Hello, ${args.name}!` }] };
   },
 });
 

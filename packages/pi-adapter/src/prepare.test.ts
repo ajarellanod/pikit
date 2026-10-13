@@ -29,7 +29,7 @@ const advance = defineTool({
     const state = context.value(AGENT_STATE);
     if (state === undefined) throw new Error("no agent.state in the tool's context");
     const next = await state.update({ phase: args.phase }, context);
-    return { content: [{ type: "text", text: JSON.stringify(next) }] };
+    return { output: [{ type: "text", text: JSON.stringify(next) }] };
   },
 }) as unknown as DurableTool;
 

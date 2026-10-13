@@ -81,13 +81,14 @@ import { ABANDONED, AdmissionsDoc, announced, durableId, runKey, runsOf, storedR
 
 /**
  * Settings pi-durable gets on Cloudflare Workers, under the host's. pi-durable keeps an idle
- * conversation's context for `contextRetentionMs` (ten minutes) behind a timer it unreferences, and keeps
- * none where timers cannot be unreferenced. workerd with `nodejs_compat` returns Node timers whose `unref`
- * does nothing, so the timer would keep a Durable Object alive (and `evictDurableObject` waits for it):
- * there the context is dropped once the conversation is idle (docs/upstream, proposal 18).
+ * conversation's context for `contextRetentionMs`, and an unobserved document for `documentRetentionMs`
+ * (ten minutes each), behind timers it unreferences, and keeps none where timers cannot be unreferenced.
+ * workerd with `nodejs_compat` returns Node timers whose `unref` does nothing, so a timer would keep a
+ * Durable Object alive (and `evictDurableObject` waits for it): there both are dropped right after use
+ * (docs/upstream, proposal 18).
  */
 const WORKERS_SETTINGS: Partial<HarnessSettings> =
-  typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers" ? { contextRetentionMs: 0 } : {};
+  typeof navigator !== "undefined" && navigator.userAgent === "Cloudflare-Workers" ? { contextRetentionMs: 0, documentRetentionMs: 0 } : {};
 
 export interface DurableRuntimeOptions {
   /**
@@ -147,6 +148,14 @@ export interface DurableRuntimeOptions {
    * `wakeups.ts`); a reopened Harness continues them. A rejection is logged.
    */
   onIdleWithPendingWork?(inspection: HarnessInspection, ctx: AppContext): Promise<void>;
+  /**
+   * Called once a storage error closed the open Harness (pi-durable never uses a failed one again) and
+   * it has closed. The runtime opens another at the next call; nothing it left pending (a run, queued
+   * messages, a retry) moves until then. A host that must not wait for a call asks for one (a wakeup,
+   * a timer): when is its policy. A storage error while opening the next one rejects that call (and
+   * calls this too when the Harness had opened). A throw or rejection is logged.
+   */
+  onFailure?(error: unknown): void | Promise<void>;
 }
 
 export interface DurableRuntime extends AgentRuntime {
@@ -196,8 +205,9 @@ export interface DurableRuntime extends AgentRuntime {
   holds(conversation: Pick<ConversationRef, "conversationId">): boolean;
   /**
    * Resolves `true` once nothing is driven: no task running, no step or announcement under way (work
-   * that only waits for a time does not count; `onIdleWithPendingWork` is told about it). `false` as
-   * soon as `ctx` is cancelled or the runtime closed.
+   * that only waits for a time does not count; `onIdleWithPendingWork` is told about it). A Harness a
+   * storage error closed drives nothing either (`onFailure` is told about it). `false` as soon as `ctx`
+   * is cancelled or the runtime closed.
    */
   whenIdle(ctx: AppContext): Promise<boolean>;
   /** The conversation's `agent.state`, as its tools reach it through `AGENT_STATE`. */
@@ -257,8 +267,10 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   let opening: Promise<Harness> | undefined;
   /** The storage under the open Harness (read directly: scans and entry commit sequences). */
   let storage: Storage | undefined;
-  /** A `suspend` closing the Harness: the next open waits for it (one Harness per storage). */
+  /** A `suspend` closing the Harness, or a failed one closing: the next open waits for it (one Harness per storage). */
   let suspending: Promise<void> | undefined;
+  /** The Harness `opening` gives, from when it opened until `suspend`, `close` or a failure drops it. */
+  let current: Harness | undefined;
   let unsubscribe: (() => void) | undefined;
 
   /** Every promise in flight (steps, settlements, announcements): what `whenIdle` and `close` wait for. */
@@ -347,13 +359,16 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
   const harnessOf = (ctx: AppContext): Promise<Harness> => {
     if (closed) return Promise.reject(new Error("agent.runtime is closed"));
-    opening ??= (suspending ?? Promise.resolve())
+    if (opening !== undefined) return opening;
+    const attempt: Promise<Harness> = (suspending ?? Promise.resolve())
       .then(() => openHarness(ctx))
       .catch((error: unknown) => {
-        opening = undefined;
+        // A Harness that failed while opening was dropped already, and another may be opening.
+        if (opening === attempt) opening = undefined;
         throw error;
       });
-    return opening;
+    opening = attempt;
+    return attempt;
   };
 
   /** The open Harness and its storage. */
@@ -395,18 +410,63 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       throw new Error("agent.runtime is closed");
     }
     storage = store;
-    unsubscribe = harness.subscribeCommits((publication) => observe(publication.changes));
+    current = harness;
+    const unsubscribeCommits = harness.subscribeCommits((publication) => observe(publication.changes));
+    unsubscribe = unsubscribeCommits;
+    harness.subscribeClose(() => dropFailed(harness));
     try {
       await prepareOpened(harness, ctx);
     } catch (error) {
       // Never leave a second Harness over the storage for the next attempt to race.
-      unsubscribe();
-      storage = undefined;
+      unsubscribeCommits();
+      if (current === harness) {
+        current = undefined;
+        storage = undefined;
+      }
       await harness.close(toChord(ctx)).catch(() => {});
       throw error;
     }
     void track(prune(now()));
     return harness;
+  };
+
+  /**
+   * A storage error closes pi-durable's Harness for good: every later call rejects with `SessionFailed`.
+   * When the open Harness begins closing and neither `suspend` nor `close` closes it, drop it at once:
+   * the next call opens another over the storage, which finds what the failure left as after a crash
+   * (commits are atomic). That open waits until the failed one has closed (one Harness per storage).
+   */
+  const dropFailed = (harness: Harness): void => {
+    if (closed || current !== harness) return;
+    current = undefined;
+    opening = undefined;
+    unsubscribe?.();
+    unsubscribe = undefined;
+    storage = undefined;
+    busy.clear();
+    queued.clear();
+    // `whenIdle` waiting for a commit: none comes from a failed Harness.
+    const waiters = commitWaiters;
+    commitWaiters = [];
+    for (const wake of waiters) wake();
+    const before = suspending;
+    const done: Promise<void> = Promise.all([before, harness.closed]).then(
+      ([, end]) => {
+        if (suspending === done) suspending = undefined;
+        if (end.reason !== "failed" || closed) return;
+        logger.error("pi-durable's Harness failed on a storage error; the next call opens it again", {
+          error: end.error instanceof Error ? end.error.message : String(end.error),
+        });
+        // Not awaited: the next open waits for `done`, and a host may open it from here.
+        void Promise.resolve()
+          .then(() => options.onFailure?.(end.error))
+          .catch(logFailure("onFailure failed"));
+      },
+      () => {
+        if (suspending === done) suspending = undefined;
+      },
+    );
+    suspending = done;
   };
 
   /** What opening does once the Harness is open: see `openHarness`. */
@@ -625,9 +685,11 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
 
   /**
    * pi-durable leaves the inputs queued behind a run that ended unanswered in the inbox, until the next
-   * submission places them (pi-facts.test.ts). With no run going and inputs queued, a write submission
-   * (an entry of kind `pikit.inbox-kick`, never seen by the model) runs the boundary that places the
-   * oldest one and starts its run. In the conversation's line.
+   * input or queued write places them (pi-facts.test.ts). With no run going and inputs queued, a write
+   * submission (an entry of kind `pikit.inbox-kick`, never seen by the model) runs the boundary that
+   * places the oldest one and starts its run. Its empty `edits` make it a queued write: one of only
+   * `kind` and `data` is display-only, appended at once without a boundary, and places nothing.
+   * In the conversation's line.
    */
   const reconcileInbox = async (harness: Harness, id: ConversationId): Promise<void> => {
     if (closed) return;
@@ -635,7 +697,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     const [live, inbox] = await Promise.all([harness.snapshot(LiveDoc, id, ctx), harness.snapshot(InboxDoc, id, ctx)]);
     if (live?.run !== undefined || !(inbox?.items ?? []).some((item) => item.mode !== "write")) return;
     const conversation = await harness.conversation(id, ctx);
-    await conversation?.submit({ type: "write", entry: { kind: INBOX_KICK } }, ctx);
+    await conversation?.submit({ type: "write", entry: { kind: INBOX_KICK, edits: [] } }, ctx);
   };
 
   /** The conversation's `ConversationRef`, from memory or its `pikit.conversation` document. */
@@ -982,7 +1044,11 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
         if (harness === undefined) return !closed;
         const committed = new Promise<void>((resolve) => commitWaiters.push(resolve));
         const inspection = await harness.inspect(toChord(ctx)).catch(() => undefined);
-        if (inspection === undefined) return false;
+        if (inspection === undefined) {
+          // Dropped meanwhile (a storage error, a suspend): look again, at what is open now.
+          if (current !== harness) continue;
+          return false;
+        }
         const at = now();
         if (inflight.size === 0 && !inspection.tasks.some((task) => driven(task, at))) {
           if (options.onIdleWithPendingWork !== undefined && inspection.tasks.some((task) => timed(task, at))) {
@@ -1010,6 +1076,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
       opening = undefined;
       const stopping = (async () => {
         const harness = await open.catch(() => undefined);
+        current = undefined;
         unsubscribe?.();
         unsubscribe = undefined;
         storage = undefined;

@@ -1,7 +1,7 @@
-# @pikit/pi-adapter: Pi (pi-durable 1.0) behind pikit's contracts
+# @pikit/pi-adapter: Pi (pi-durable 1.2) behind pikit's contracts
 
 The only package that imports Pi: `@earendil-works/pi-durable`, `@earendil-works/chord`,
-`@earendil-works/pi-ai` and `@earendil-works/pi-mcp`, all exactly `1.1.0`. It implements
+`@earendil-works/pi-ai` and `@earendil-works/pi-mcp`, all exactly `1.2.0`. It implements
 `agent.runtime` on pi-durable's `Harness`, opens pi-durable's storage over pikit's `storage.sql`, and
 gives components Pi's tools, models, MCP client and execution environments by subpath.
 
@@ -65,7 +65,13 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 - **One Harness per storage**, opened at first use over `db` (`storage.sql`, `openDurableStorage`)
   and owned until `close`. Opening reconfigures every conversation with live work, resumes the scheduler (it is
   global: every conversation's work runs), announces the runs it resumes, and starts runs for inputs a
-  failed run left queued. `suspend` closes it and keeps the runtime: the next call reopens it.
+  failed run left queued. `suspend` closes it and keeps the runtime: the next call reopens it. A
+  storage error closes pi-durable's Harness for good (`SessionFailed` on every later call): the call
+  that hit it rejects, the runtime drops the Harness at once (`subscribeClose`), and the next call
+  opens another once the failed one has closed, which finds what the failure left as after a crash.
+  Until a call comes, what it left pending waits: `onFailure(error)` tells the host, whose policy says
+  when to come back (runtime-pi: a timer on a server, a wakeup with `wakeups`, with a backoff).
+  `whenIdle` counts a failed Harness as driving nothing.
 - **Conversation ids.** `ConversationRef.conversationId` is the pi-durable conversation id (a number,
   as a string). `createConversation(ctx)` makes one: `conversations: "ownerless"` (default, a
   server's storage holding many) an ownerless conversation each call; `"root"` (a per-chat Durable
@@ -116,14 +122,14 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   conversation directly is undone at the next one; a live change goes through `agent.state` or the
   data `prepare` reads.
 - **Tools, models and environments.** `tool(name)` returns a pi-durable tool; a tool object in a
-  definition must be one too. `models` is pi-ai 1.0's `Models`. Each tool call's environment is
+  definition must be one too. `models` is pi-ai's `Models`. Each tool call's environment is
   `harnessEnv` over `workspace()` (the call's conversation's) and `execution()`, unless `env` is given.
 - **Hosts that live per event.** `whenIdle` resolves once no task is driven and nothing is being
   recorded or announced; work that only waits for a time (a generation's `retry`/`poll`, a
   compaction's `retry`) does not count, and `onIdleWithPendingWork(inspection, ctx)` is called so the
   host schedules a wake-up (`nextWakeAtOf`). A reopened Harness continues the wait from its checkpoint,
   on the Harness clock (`now`).
-- **Contexts.** `toChord` re-attaches a pikit context's signal for Chord 1.0. Tasks run in the
+- **Contexts.** `toChord` re-attaches a pikit context's signal for Chord. Tasks run in the
   Harness's context (the app's values); a dispatching caller's values reach the run's events, not its
   tools.
 
@@ -171,7 +177,12 @@ pi-durable is the only record of what became of each message; `agent.submissions
 
 - A run that ends unanswered leaves follow-ups queued in the inbox until the next submission. The
   runtime submits a write of kind `pikit.inbox-kick` (an entry without model messages) to an idle
-  conversation with queued inputs: the admission boundary places them and starts their run.
+  conversation with queued inputs: the admission boundary places them and starts their run. Its
+  empty `edits` make it a queued write: since 1.2.0 one of only `kind` and `data` is display-only,
+  appended at once without a boundary.
+- On Workers, pi-durable's idle-context and document-cache timers would keep a Durable Object alive
+  (workerd's `unref` does nothing): `contextRetentionMs` and `documentRetentionMs` are `0` there
+  (`WORKERS_SETTINGS`; upstream proposal 18; proven by the workerd lane, not here).
 
 Closed upstream: since pi-durable 1.0.2 each conversation sends the provider its own persisted
 session id (`pi.provider`), the same on every turn, so prompt caches keyed on it hit (pi-facts.test.ts).

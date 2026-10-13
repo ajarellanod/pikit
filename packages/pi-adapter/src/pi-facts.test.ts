@@ -1,6 +1,6 @@
 /**
- * Facts about @earendil-works/pi-durable 1.1.0 that the durable runtime (`runtime.ts`) relies on,
- * asserted on pi-durable directly (a `MemoryStorage`, pi-ai 1.0's faux provider), so a Pi bump that
+ * Facts about @earendil-works/pi-durable 1.2.0 that the durable runtime (`runtime.ts`) relies on,
+ * asserted on pi-durable directly (a `MemoryStorage`, pi-ai 1.2's faux provider), so a Pi bump that
  * changes one fails here before it breaks the runtime. Each names what depends on it.
  */
 
@@ -22,6 +22,7 @@ import {
   MemoryStorage,
   ProviderDoc,
   section,
+  SessionFailed,
   type SubmissionRecord,
   ToolTask,
 } from "@earendil-works/pi-durable";
@@ -57,6 +58,7 @@ async function open(
     retry?: object;
     followUpMode?: "all" | "one-at-a-time";
     model?: { provider: string; modelId: string };
+    storage?: MemoryStorage;
   } = {},
 ) {
   const faux = fauxProvider();
@@ -64,7 +66,7 @@ async function open(
   const models = createModels();
   models.setProvider(faux.provider);
   const changes: CommitChange[][] = [];
-  const storage = new MemoryStorage();
+  const storage = options.storage ?? new MemoryStorage();
   const harness = await Harness.open(
     storage,
     {
@@ -85,7 +87,32 @@ async function open(
   return { harness, conversation, faux, changes, submissions, commitOf };
 }
 
-describe("pi-durable facts (1.1.0)", () => {
+/** A `MemoryStorage` whose next commit fails once `failNext` is set, as a lost connection would. */
+class FlakyStorage extends MemoryStorage {
+  failNext = false;
+  override commit(...args: Parameters<MemoryStorage["commit"]>): ReturnType<MemoryStorage["commit"]> {
+    if (!this.failNext) return super.commit(...args);
+    this.failNext = false;
+    return Promise.reject(new Error("the storage is unreachable"));
+  }
+}
+
+describe("pi-durable facts (1.2.0)", () => {
+  test("a storage error closes the Harness: close listeners run, the call rejects, later calls reject with SessionFailed, closed settles failed (runtime.ts's dropFailed)", async () => {
+    const storage = new FlakyStorage();
+    const { harness, conversation } = await open([fauxAssistantMessage("one")], { storage });
+    let closing = 0;
+    harness.subscribeClose(() => void closing++);
+
+    storage.failNext = true;
+    await expect(conversation.submit({ type: "input", content: "one", requestId: "r1" }, ctx)).rejects.toThrow("the storage is unreachable");
+
+    expect(closing).toBe(1);
+    await expect(conversation.submit({ type: "input", content: "one", requestId: "r1" }, ctx)).rejects.toBeInstanceOf(SessionFailed);
+    const end = await harness.closed;
+    expect(end.reason === "failed" && end.error instanceof Error && end.error.message).toBe("the storage is unreachable");
+  });
+
   test("a known requestId returns its submission and commits nothing; another type under it throws (duplicate admission)", async () => {
     const { harness, conversation, changes } = await open([fauxAssistantMessage("one")]);
     const first = await conversation.submit({ type: "input", content: "hello", requestId: "r1" }, ctx);
@@ -192,7 +219,7 @@ describe("pi-durable facts (1.1.0)", () => {
     await harness.close(ctx);
   });
 
-  test("a run that fails leaves the follow-ups in the inbox; a write submission places the oldest and starts its run (reconcileInbox)", async () => {
+  test("a run that fails leaves the follow-ups in the inbox; a queued write (empty `edits`) places the oldest and starts its run, a display-only one does not (reconcileInbox)", async () => {
     let fail!: () => void;
     const failing = new Promise<void>((resolve) => (fail = resolve));
     let reached!: () => void;
@@ -213,7 +240,13 @@ describe("pi-durable facts (1.1.0)", () => {
     expect((await second.status(ctx)).status).toBe("queued");
     expect((await harness.snapshot(LiveDoc, conversation.id, ctx))?.run).toBeUndefined();
 
-    await conversation.submit({ type: "write", entry: { kind: "pikit.inbox-kick" } }, ctx);
+    // Only `kind` and `data`: appended at once, done, without a boundary; the input stays queued.
+    const shown = await conversation.submit({ type: "write", entry: { kind: "pikit.note" } }, ctx);
+    expect((await shown.wait(ctx)).status).toBe("done");
+    await harness.waitForIdle(ctx);
+    expect((await second.status(ctx)).status).toBe("queued");
+
+    await conversation.submit({ type: "write", entry: { kind: "pikit.inbox-kick", edits: [] } }, ctx);
 
     expect((await second.wait(ctx)).status).toBe("done");
     // The write is an entry without model messages: the model never sees it.

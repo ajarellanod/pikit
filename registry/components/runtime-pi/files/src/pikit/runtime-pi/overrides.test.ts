@@ -16,7 +16,7 @@ import runtimePi from "./index.ts";
 import { withOverride } from "./overrides.ts";
 
 const tool = (name: string) =>
-  defineTool({ name, description: `The ${name} tool`, parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text", text: name }] }) }) as unknown as AgentTool;
+  defineTool({ name, description: `The ${name} tool`, parameters: Type.Object({}), execute: async () => ({ output: [{ type: "text", text: name }] }) }) as unknown as AgentTool;
 const lookup = tool("lookup");
 const notes = tool("notes");
 

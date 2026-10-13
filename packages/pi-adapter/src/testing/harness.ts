@@ -61,7 +61,7 @@ export async function answerWithTool(db: SqlDatabase): Promise<void> {
     parameters: Type.Object({ text: Type.String() }),
     execute: async (args) => {
       calls.push(args.text);
-      return { content: [{ type: "text", text: args.text }] };
+      return { output: [{ type: "text", text: args.text }] };
     },
   });
   const registry = createRegistry();

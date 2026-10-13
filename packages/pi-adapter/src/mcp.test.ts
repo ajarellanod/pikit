@@ -59,13 +59,13 @@ test("mcpToolName and mcpParameters name and shape a remote tool as before", () 
 });
 
 test("mcpToolResult: content for the model; a result with isError is an error result, not a throw", () => {
-  expect(mcpToolResult({ content: [{ type: "text", text: "ok" }] }, "s_t")).toEqual({ content: [{ type: "text", text: "ok" }] });
+  expect(mcpToolResult({ content: [{ type: "text", text: "ok" }] }, "s_t")).toEqual({ output: [{ type: "text", text: "ok" }] });
   expect(mcpToolResult({ content: [{ type: "text", text: "no such repository" }], isError: true }, "s_t")).toEqual({
-    content: [{ type: "text", text: "no such repository" }],
+    output: [{ type: "text", text: "no such repository" }],
     isError: true,
   });
   expect(mcpToolResult({ content: [], isError: true }, "s_t")).toEqual({
-    content: [{ type: "text", text: "s_t: the MCP server reported a failure without a message" }],
+    output: [{ type: "text", text: "s_t: the MCP server reported a failure without a message" }],
     isError: true,
   });
 });
@@ -99,7 +99,7 @@ test("mcpTool: provided before it is described; describe changes what the regist
   expect([tool.description, tool.replay]).toEqual(["Ask", "unsafe"]);
 
   const result = await tool.execute({ q: "what" } as never, {} as ToolExecutionApi, BACKGROUND_CONTEXT);
-  expect(result.content).toEqual([{ type: "text", text: "answer" }]);
+  expect(result.output).toEqual([{ type: "text", text: "answer" }]);
   expect(calls).toEqual([{ q: "what" }]);
 });
 

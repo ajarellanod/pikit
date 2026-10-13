@@ -37,7 +37,7 @@ const project = (kept: string[]) =>
         execute: async (args) => {
           if (args.fact.includes("password")) throw new Error("secrets are never kept");
           kept.push(args.fact);
-          return { content: [{ type: "text", text: `kept ${args.fact}` }] };
+          return { output: [{ type: "text", text: `kept ${args.fact}` }] };
         },
       });
       pikit.provideKeyed("agent.tool", "keep", keep as unknown as AgentTool);

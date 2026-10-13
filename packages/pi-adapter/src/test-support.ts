@@ -70,7 +70,7 @@ export function holdTool(run: (context: ChordContext) => Promise<string>, replay
     description: "Blocks until the test releases it.",
     parameters: Type.Object({}),
     replay,
-    execute: async (_args, _api, context) => ({ content: [{ type: "text", text: await run(context) }] }),
+    execute: async (_args, _api, context) => ({ output: [{ type: "text", text: await run(context) }] }),
   }) as unknown as DurableTool;
 }
 

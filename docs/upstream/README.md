@@ -9,15 +9,15 @@ here with the Pi version.
 
 | # | Package | Proposal | Hurts pikit | Priority | Status |
 |---|---|---|---|---|---|
-| 1 | pi-durable | [Next due time of sleeping work](#1-next-due-time-of-sleeping-work) | Durable Objects stall after eviction | **high** | open upstream as [#10325](https://github.com/earendil-works/pi/issues/10325) (not ours; reopened, assigned); tracked, not commented ([file](pi-durable-next-wake.md)) |
-| 2 | pi-durable | [Queued inputs stuck after a failed run](#2-queued-inputs-stuck-after-a-failed-run) | A message is never answered until the user writes again | **high** | draft ([file](pi-durable-inbox-after-failure.md)) |
+| 1 | pi-durable | [Next due time of sleeping work](#1-next-due-time-of-sleeping-work) | Durable Objects stall after eviction | **high** | open upstream as [#10325](https://github.com/earendil-works/pi/issues/10325) (not ours; reopened, assigned), and again as [#10857](https://github.com/earendil-works/pi/issues/10857) (not ours, open); tracked, not commented ([file](pi-durable-next-wake.md)) |
+| 2 | pi-durable | [Queued inputs stuck after a failed run](#2-queued-inputs-stuck-after-a-failed-run) | A message is never answered until the user writes again | **high** | draft ([file](pi-durable-inbox-after-failure.md)); still so in 1.2.0 |
 | 3 | pi-durable | [Caller context values reach tools](#3-caller-context-values-reach-tools) | Multi-tenant isolation, tracing | medium (high for multi-tenant) | draft (here) |
 | 4 | pi-durable | [Several writers per storage](#4-several-writers-per-storage) | Replicas, Postgres as a shared store | medium | draft (here) |
 | 5 | pi-durable | [Per-conversation scheduling scope](#5-per-conversation-scheduling-scope) | Servers holding many conversations | medium | draft ([file](pi-durable-scheduling-scope.md)) |
 | 6 | pi-durable | [Provider session id](#6-provider-session-id) | Prompt-cache cost on long chats | medium | **shipped** in pi-durable 1.0.2 ([#10424](https://github.com/earendil-works/pi/issues/10424)) |
 | 7 | pi-durable | [Table prefix for `SqliteStorage`](#7-table-prefix-for-sqlitestorage) | Generic table names in a shared database | low | draft ([file](pi-durable-table-prefix.md)) |
 | 8 | chord | [Foreign parent's `abortSignal`](#8-chord-foreign-parents-abortsignal) | A bridge (`toChord`) in the adapter | low | **declined** ([#10189](https://github.com/earendil-works/pi/issues/10189), `no-action`) |
-| 9 | chord | [`esbuild` only for the bundler](#9-chord-esbuild-only-for-the-bundler) | An unused dependency installed everywhere | low | **declined** ([#9225](https://github.com/earendil-works/pi/issues/9225), not ours, `no-action`): not to send |
+| 9 | chord | [`esbuild` only for the bundler](#9-chord-esbuild-only-for-the-bundler) | An unused dependency installed everywhere | low | **solved** in chord 1.2.0, which depends on `typebox` instead (the issue, [#9225](https://github.com/earendil-works/pi/issues/9225), was declined) |
 | 10 | chord | [A stability statement](#10-chord-a-stability-statement) | Why Chord stays out of `@pikit/core` | low | draft (here) |
 | 11 | pi-mcp | [`StreamableHttpTransport` on Workers](#11-pi-mcp-streamablehttptransport-on-workers) | A `fetch` wrapper in the adapter | low | **shipped** in pi-mcp 1.0 ([#10188](https://github.com/earendil-works/pi/issues/10188)) |
 | 12 | pi-ai | [A default for `select` login prompts](#12-pi-ai-a-default-for-select-login-prompts) | Non-interactive logins broke on 1.0 | low | note (here) |
@@ -26,7 +26,7 @@ here with the Pi version.
 | 15 | pi-durable | [`abortSubmission` with a reason](#15-abortsubmission-with-a-reason) | `abandon` repeats `abortSubmission` with its own reason | low | note (here) |
 | 16 | pi-durable | [No time on a submission](#16-no-time-on-a-submission) | pikit keeps admission times in `pikit.admissions` | low | note (here) |
 | 17 | pi-durable | [Conversations newest first](#17-conversations-newest-first) | The dashboard reads every page to show the latest conversations first | low | **partly shipped** in pi-durable 1.1.0 ([#10546](https://github.com/earendil-works/pi/issues/10546)): newest first by creation, not by last activity |
-| 18 | pi-durable | [Idle-context timer on workerd](#18-idle-context-timer-on-workerd) | A Durable Object would stay alive ten minutes after each run | medium | candidate issue (here); worked around in the adapter |
+| 18 | pi-durable | [Idle-context timer on workerd](#18-idle-context-timer-on-workerd) | A Durable Object would stay alive ten minutes after each run | medium | candidate issue (here); worked around in the adapter (also `documentRetentionMs`, new in 1.2.0) |
 
 Contributions we could offer instead of asking: a Postgres backend of pi-durable's `Storage`
 ([storage-postgres](../../features/storage-postgres.md)). A Durable Object example is no longer one:
@@ -35,9 +35,11 @@ pi-durable 1.1.0 ships `openDurableObjectSqliteStorage`. pikit keeps `storage-do
 `storage.sql`'s line, which pikit's own tables share. pi-durable ships its own `ExecutionEnv` suite (`createEnvConformance`); pikit runs it and keeps only the cases it
 lacks (`packages/pi-adapter/src/testing/execution.ts`), which could be offered to it.
 
-Re-checked against pi-durable 1.1.0 (2026-10-08): proposal 17 is partly solved (descending scans);
-1 to 5, 7 and 16 are not (1.1.0 times tasks, `startedAt`/`endedAt`, not submissions). 1.1.0 brought
-proposal 18.
+Re-checked against Pi 1.2.0 (2026-10-13): proposals 1 to 5, 7, 10, 16 and 17 stand as they were (1.2.0
+times no submissions and scopes no scheduling; its scheduler and document cache are only cheaper).
+Chord 1.2.0 solved proposal 9. pi-durable 1.2.0 brought a second case of proposal 18 (the document
+cache's timer), and appends a write of only `kind` and `data` at once, without the boundary that
+places queued inputs: proposal 2's kick is now a queued write (empty `edits`).
 
 **Tracked, not commented:** [#10325](https://github.com/earendil-works/pi/issues/10325)
 (proposal 1). The owner decided (2026-10-07) not to comment; check it at each pin bump. Nothing is
@@ -81,7 +83,9 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   only sleeping"); it was auto-closed, then reopened and assigned to a maintainer. Its shape,
   `inspect()` reporting a task as sleeping until a time, is option A of our file and enough for
   pikit. So pikit does not open its own issue nor push `nextDueAt()`, and does not comment there
-  (owner's decision, 2026-10-07): it tracks the issue at each pin bump.
+  (owner's decision, 2026-10-07): it tracks the issue at each pin bump. A second report from someone
+  else, [#10857](https://github.com/earendil-works/pi/issues/10857) (2026-10-12, "on a Durable Object,
+  a sleeping task wakes only on the next request"), is open too: tracked the same way.
 - **To delete when it ships** (sleeping tasks reported by pi-durable with their wake time, or a
   next-due API). Each place below reads pi-durable's private checkpoints:
   - `packages/pi-adapter/src/wakeups.ts`: `checkpointedDue` and the header's list of built-in waits;
@@ -103,7 +107,8 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
 - **Evidence.** pi-durable's README says so; `pi-facts.test.ts`, "a run that fails leaves follow-ups
   in the inbox".
 - **pikit meanwhile.** The runtime's `reconcileInbox` submits an invisible `pikit.inbox-kick` write
-  after a failure and after opening the Harness.
+  after a failure and after opening the Harness. Since pi-durable 1.2.0 the write carries an empty
+  `edits`: a write of only `kind` and `data` is display-only, appended at once, and places nothing.
 - **Ask.** Place queued follow-ups after a failure (`afterFailure: "continue" | "hold"`), do the same
   on `resume()`, optionally `conversation.drain()`. Full text:
   [pi-durable-inbox-after-failure.md](pi-durable-inbox-after-failure.md).
@@ -141,6 +146,10 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
 - **Why it matters.** A shared database (Postgres, a networked SQLite) gives backups and management,
   but not replicas sharing conversations; on servers, horizontal scaling needs each conversation
   owned by one process at a time. Cloudflare avoids it by giving each chat its own Durable Object.
+- **Upstream.** A narrower ask from someone else, a storage error meaning "this process no longer
+  owns the session" ([#10534](https://github.com/earendil-works/pi/issues/10534)), was auto-closed
+  `not planned`. pi-durable 1.2.0 fails the whole Harness on any storage error (its README, Errors),
+  which a fencing storage could use, but ids are still minted in memory.
 - **pikit meanwhile.** One process per storage: one replica on a server, one object per chat on
   Cloudflare. [Replicas](../../features/replicas.md) and [Postgres](../../features/storage-postgres.md)
   record the limit.
@@ -194,12 +203,16 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
 - **Ask.** An optional peer dependency, or the bundler in its own package.
 - **Outcome: declined.** Asked by someone else as
   [#9225](https://github.com/earendil-works/pi/issues/9225) (2026-09-06), auto-closed `not planned`
-  with `no-action` and never reopened. Not to be sent again; Chord 1.1.0 still has it.
+  with `no-action` and never reopened. Not to be sent again.
+- **Solved anyway** in Chord 1.2.0: its new host runtime depends on `typebox`, and the bundler and
+  `esbuild` are gone.
 
 ## 10. Chord: a stability statement
 - **Problem.** Chord is 1.0 by lockstep versioning with Pi, while its `PLANNING.md` says it is not a
   stable public contract yet (0.87 → 1.0 changed 49 files, +10k/−5k lines). Libraries cannot tell
-  what they may build on.
+  what they may build on. 1.2.0 replaced its facet and service runtime outright (a typed host runtime;
+  `defineService` and the remote services removed), keeping only `./context`, `./delta` and the
+  replicated-state names, which are what pikit uses.
 - **Ask.** Say which entry points follow semver (at least `@earendil-works/chord/context` and the
   root service API), and mark the rest experimental. With it, pikit could reconsider building
   parts of `@pikit/core` on Chord (`features/kit-follow-ups.md`, "Chord").
@@ -322,9 +335,12 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
 - **Evidence.** `harness/scheduler.js`, `#scheduleExpiry`. In the workerd lane, `setTimeout` returns
   an object with an `unref` function; on 1.1.0 without the workaround, `direct-delivery.workerd.ts`
   and `runtime-answers.workerd.ts` time out at their eviction (they pass on 1.0.3).
-- **pikit meanwhile.** The adapter sets `contextRetentionMs: 0` on Workers
-  (`WORKERS_SETTINGS`, `packages/pi-adapter/src/runtime.ts`): the context is dropped once the
-  conversation is idle. A host's own `settings` still override it.
+- **Again in 1.2.0.** The Session's document cache keeps an unobserved document for
+  `documentRetentionMs` (ten minutes) behind a timer of the same kind, with the same test: without a
+  workaround, the same two workerd tests and two of `runtime-pi.workerd.ts` time out at eviction.
+- **pikit meanwhile.** The adapter sets `contextRetentionMs: 0` and `documentRetentionMs: 0` on
+  Workers (`WORKERS_SETTINGS`, `packages/pi-adapter/src/runtime.ts`): the context is dropped once the
+  conversation is idle, and a document right after use. A host's own `settings` still override them.
 - **Ask.** Tell Workers apart without `unref` (for example `navigator.userAgent ===
   "Cloudflare-Workers"`), or never keep a retention timer and check expiry at task changes only, as
   pi-durable already does where it keeps none.

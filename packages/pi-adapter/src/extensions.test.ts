@@ -26,7 +26,7 @@ const switchMode = defineTool({
   parameters: Type.Object({ mode: Type.String() }),
   execute: async (args, _api, context) => {
     await context.value(AGENT_STATE)?.update({ mode: args.mode }, context);
-    return { content: [{ type: "text", text: "switched" }] };
+    return { output: [{ type: "text", text: "switched" }] };
   },
 }) as unknown as DurableTool;
 

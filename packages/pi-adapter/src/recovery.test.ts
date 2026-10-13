@@ -8,6 +8,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import type { ConversationRef, RunSettlement, SqlDatabase, SqlValue } from "@pikit/contracts";
+import { silentLogger } from "@pikit/core";
 import { databaseFile, openWorker, releasableHold, scriptedAgent, scriptedProvider, type Worker } from "./test-support.ts";
 
 const cleanup: (() => Promise<void> | void)[] = [];
@@ -479,6 +480,52 @@ test("suspend closes the Harness and keeps the runtime: the next call reopens it
   await w.runtime.resume(conversation, w.ctx);
   expect((await w.result("r1")).text).toBe("answer: hello");
   expect(w.events.filter((e) => e.name === "agent.started")).toHaveLength(1);
+});
+
+test("a storage error fails pi-durable's Harness: the call that hit it rejects, and the next call opens another that answers", async () => {
+  let failNext = false;
+  // pi-durable's next submission commit fails, as a lost connection would.
+  const flaky = (db: SqlDatabase): SqlDatabase => ({
+    query: (sql, params) => db.query(sql, params),
+    run: (sql, params) => db.run(sql, params),
+    transaction: (work) =>
+      db.transaction((tx) =>
+        work({
+          query: (sql, params) => tx.query(sql, params),
+          run: (sql, params) => {
+            if (!failNext || !sql.includes("INSERT INTO submissions")) return tx.run(sql, params);
+            failNext = false;
+            return Promise.reject(new Error("the storage is unreachable"));
+          },
+        }),
+      ),
+  });
+  const errors: string[] = [];
+  const logger = { ...silentLogger, error: (message: string) => void errors.push(message) };
+  const failures: unknown[] = [];
+  let told!: () => void;
+  const toldP = new Promise<void>((resolve) => (told = resolve));
+  const onFailure = (error: unknown) => {
+    failures.push(error instanceof Error ? error.message : error);
+    told();
+  };
+  const w = await records().worker({ db: flaky, logger, runtime: { onFailure } });
+  const conversation = await w.conversation();
+  await w.dispatch("r1", "one", conversation);
+  expect((await w.result("r1")).text).toBe("answer: one");
+
+  failNext = true;
+  await expect(w.dispatch("r2", "two", conversation)).rejects.toThrow("the storage is unreachable");
+
+  // At once, and again: the failed Harness is never used again.
+  expect(await w.dispatch("r2", "two", conversation)).toEqual({ kind: "started", requestId: "r2" });
+  expect((await w.result("r2")).text).toBe("answer: two");
+  expect(await w.dispatch("r3", "three", conversation)).toEqual({ kind: "started", requestId: "r3" });
+  expect((await w.result("r3")).text).toBe("answer: three");
+  expect(errors).toContain("pi-durable's Harness failed on a storage error; the next call opens it again");
+  // Told once the failed Harness closed: the host's to decide when to come back without a call.
+  await toldP;
+  expect(failures).toEqual(["the storage is unreachable"]);
 });
 
 test("recover does not wait for a run a new message started in the conversation", async () => {

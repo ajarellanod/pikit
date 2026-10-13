@@ -46,7 +46,7 @@ function memorySettings() {
   return { provider, stored, set, schema: () => declared.get("agents-live")?.schema, component: defineComponent({ name: "settings-test", setup: (pikit) => pikit.provide("settings", provider) }) };
 }
 
-const lookup = defineTool({ name: "lookup", description: "Looks up", parameters: Type.Object({}), execute: async () => ({ content: [{ type: "text", text: "found" }] }) }) as unknown as AgentTool;
+const lookup = defineTool({ name: "lookup", description: "Looks up", parameters: Type.Object({}), execute: async () => ({ output: [{ type: "text", text: "found" }] }) }) as unknown as AgentTool;
 
 /** The App's other parts: a code agent, a model provider (`faux/scripted`), a tool. */
 const project = defineComponent({

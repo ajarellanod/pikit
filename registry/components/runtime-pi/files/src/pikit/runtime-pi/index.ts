@@ -271,6 +271,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       let resuming: { controller: AbortController; done: Promise<void> } | undefined;
       /** With `wakeups`: the driving of this App's runs, from start to stop. */
       let driver: Driver | undefined;
+      /** Without `wakeups`: what opens pi-durable again after a storage error closed it, from start to stop. */
+      let reopener: Reopener | undefined;
       const current = (): DurableRuntime => {
         if (runtime === undefined) throw new Error("runtime-pi: agent.runtime used while the app is not running");
         return runtime;
@@ -387,6 +389,10 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           const now = () => background.clock.now();
           const resumeOptions: ResumeOptions = { abandonAfterMs: config.abandonPendingAfterHours * 60 * 60 * 1_000, skip: unread };
           const drives = wakeups === undefined ? undefined : createDriver(wakeups, background, resumeOptions, refresh);
+          // What a storage error leaves pending must not wait for a message: a wakeup reopens pi-durable,
+          // or, on a server, a timer here.
+          const reopens = drives === undefined ? createReopener(async () => void (await current().inspect(background)), background) : undefined;
+          reopener = reopens;
           const db = sql.get();
           const created = createDurableRuntime({
             db,
@@ -402,6 +408,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             workspace: () => workspace.get(),
             ...(options.settings !== undefined && { settings: options.settings }),
             ...(drives !== undefined && { onIdleWithPendingWork: (inspection) => drives.later(nextWakeAtOf(inspection, { now })) }),
+            onFailure: () => (drives !== undefined ? drives.failed() : reopens?.failed()),
           });
           runtime = created;
           if (drives !== undefined) {
@@ -438,6 +445,8 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           resumed?.controller.abort(new Error("runtime-pi: stopping"));
           // A handler still waiting stops now, and asks again for what remains: the next App drives it.
           driver?.stop();
+          reopener?.stop();
+          reopener = undefined;
           driver = undefined;
           await stopping?.close(ctx);
           // Settles once `close` ended the conversations it opened; bounded by the stop deadline all the same.
@@ -458,6 +467,11 @@ interface Driver {
    * runtime so the host can go meanwhile.
    */
   later(time: number | undefined): Promise<void>;
+  /**
+   * The runtime's `onFailure`: a storage error closed pi-durable. Asks for the handler, whose
+   * `inspect` opens it again, after `reopenDelayMs` (the failures in a row since an open worked).
+   */
+  failed(): Promise<void>;
   /** Registers the handler for `runtime`. */
   attach(runtime: DurableRuntime): void;
   /** Cancels the handler's run in progress; nothing is registered after. */
@@ -485,6 +499,8 @@ function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: R
   let requested: number | undefined;
   /** Set by `later` during a run of the handler: what is left only waits for a time. */
   let waiting = false;
+  /** Storage errors in a row since the handler last opened pi-durable. */
+  let failures = 0;
   /** Cancels the handler's run in progress when the App stops. */
   const stopping = new AbortController();
   const logger = background.logger;
@@ -519,6 +535,7 @@ function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: R
     try {
       // Opened first, so what it finds running counts as held below and is not waited for twice.
       await runtime.inspect(ctx);
+      failures = 0;
     } catch (error) {
       if (signal.aborted) return;
       throw error;
@@ -544,11 +561,60 @@ function createDriver(wakeups: Wakeups, background: AppContext, resumeOptions: R
       waiting = true;
       if (time !== undefined) await wakeLater(time);
     },
+    failed: () => wakeLater(background.clock.now() + reopenDelayMs(failures++)),
     attach(runtime) {
       wakeups.handle(DRIVE, handler(runtime));
     },
     stop() {
       stopping.abort(new Error("runtime-pi: stopping"));
+    },
+  };
+}
+
+/** After a storage error closed pi-durable: 1 s before opening it again, doubled per failure in a row, to 5 min. */
+function reopenDelayMs(failures: number): number {
+  return Math.min(1_000 * 2 ** failures, 300_000);
+}
+
+interface Reopener {
+  /** The runtime's `onFailure`: opens pi-durable again after `reopenDelayMs`. */
+  failed(): void;
+  /** Cancels what is asked; nothing is opened after. */
+  stop(): void;
+}
+
+/**
+ * Without `wakeups` (a server): after a storage error closed pi-durable, `open` it again from a timer,
+ * so what it left pending (a run, queued messages, a retry) goes on without waiting for a message. An
+ * open that fails tries again later; one that works starts the delays over.
+ */
+function createReopener(open: () => Promise<void>, background: AppContext): Reopener {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let failures = 0;
+  let stopped = false;
+  const failed = (): void => {
+    if (stopped) return;
+    clearTimeout(timer);
+    timer = setTimeout(() => {
+      timer = undefined;
+      open().then(
+        () => void (failures = 0),
+        (error: unknown) => {
+          if (stopped) return;
+          background.logger.error("runtime-pi: opening pi-durable again after a storage error failed; it tries again later", {
+            error: error instanceof Error ? error.message : String(error),
+          });
+          failed();
+        },
+      );
+    }, reopenDelayMs(failures++));
+  };
+  return {
+    failed,
+    stop() {
+      stopped = true;
+      clearTimeout(timer);
+      timer = undefined;
     },
   };
 }

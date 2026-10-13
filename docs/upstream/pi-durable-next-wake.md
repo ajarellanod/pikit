@@ -1,10 +1,12 @@
 # Proposal for pi-durable: report when sleeping work is next due
 
-Status: draft for upstream (`@earendil-works/pi-durable`, against 1.1.0). From pikit, which runs one
+Status: draft for upstream (`@earendil-works/pi-durable`, against 1.2.0). From pikit, which runs one
 Harness per Cloudflare Durable Object. Not to be sent as its own issue: the same gap is open as
 [#10325](https://github.com/earendil-works/pi/issues/10325) (opened by another Durable Object user,
 reopened and assigned to a maintainer), whose shape, `inspect()` reporting a sleeping task with its
-time, is option A below. Tracked, not commented (owner's decision, 2026-10-07); what pikit deletes
+time, is option A below. [#10857](https://github.com/earendil-works/pi/issues/10857) (2026-10-12, by
+another user) reports the same on Durable Object storage. Tracked, not commented (owner's decision,
+2026-10-07); what pikit deletes
 when it ships is listed in README.md, proposal 1.
 
 ## Motivation

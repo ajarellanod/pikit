@@ -55,10 +55,11 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **A base UI with shadcn/ui, extensible by components.** Not the largest interface: enough to
   start, and every other view comes from a component that brings it (SPEC §5). No platform
   under pikit (Pi Durable, Cloudflare, Rivet) offers an interface that is the user's to extend.
-- **Pi first, watched:** Pi's `pi-server` (experimental: clients attached to durable sessions, a Unix
-  socket and CBOR, authentication left to the application) is the closest thing Pi has to the admin
-  API's live part. When it reaches a browser (an HTTP or WebSocket transport) with authentication,
-  admin-api's events and actions move onto it and pikit's own transport goes. The coding agent's RPC
+- **Pi first, watched:** Pi's `pi-server` (clients attached to durable sessions), the closest thing
+  Pi had to the admin API's live part, was removed in Pi 1.2.0 with `pi-client` and `pi-protocol`;
+  Chord 1.2.0's hosts link over WebSockets (`webSocketLink`, `acceptWebSockets`), with nothing for a
+  browser or authentication yet. Re-check at each Pi bump: when Pi serves sessions to a browser with
+  authentication, admin-api's events and actions move onto it and pikit's own transport goes. The coding agent's RPC
   mode is for one process over stdio; its event vocabulary is the one `agent.observe` forwards.
 - **When:** in phases, each one usable. The first two have landed (CHANGELOG): `admin-api`,
   `src/dashboard/` (`registry/dashboard/`) and `pikit new --ui` / `pikit ui on|off` on a server, with
@@ -92,7 +93,7 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **Keep:** aligning `Context` with Chord's shape.
 - **Candidate**, through the adapter, when its feature is built: the operator UI's live state
   (SPEC §5), pi-durable's `watch()` and `taskGraph()` mapped through the `agent.observe` contract. pikit
-  uses no Chord services, so nothing else of Chord's is a candidate.
+  serves no Chord objects (hosts, facets), so nothing else of Chord's is a candidate.
 - **Open:** Chord's semver ([docs/upstream](../docs/upstream/README.md), proposal 10; gate G1).
 - **Size:** none now; each candidate is weighed with its feature.
 

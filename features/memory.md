@@ -273,7 +273,7 @@ export default defineComponent({
         const ctx = within(context);
         const id = `${api.conversationId}:${api.callId}`;
         await memory.get().remember(scopeOf(conversation), { id, text: args.fact, createdAt: ctx.clock.now() }, ctx);
-        return { content: [{ type: "text", text: `Remembered (id ${id}).` }] };
+        return { output: [{ type: "text", text: `Remembered (id ${id}).` }] };
       },
     });
     // forget({ id }): replay "safe" (deleting twice is deleting once). recall({ query }): replay "safe", read-only.
