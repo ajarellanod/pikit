@@ -1,191 +1,176 @@
 /**
- * Home: what the App is made of (`APP_DESCRIPTION`, SPEC K13), first in the sidebar after New chat: its
- * components in start order, who provides
- * each capability, its agents (the steward marked), its pipelines' stages, and its config, each
- * searchable. The config holds no
- * secret: a component reads its secrets through `secrets` and its config names them at most, and the
- * API redacts a value that looks like one.
+ * Home: what the App is made of (`APP_DESCRIPTION`, SPEC K13), first in the sidebar after New chat, in
+ * the words of the one who runs it. Where it runs and talks, in one line; its agents (the steward
+ * marked), each with its model and tools; its components by what they are for, one opening at the side
+ * with what it provides and needs and its config; and, folded, the wiring (`wiring.tsx`). The config
+ * holds no secret: a component reads its secrets through `secrets` and its config names them at most,
+ * and the API redacts a value that looks like one.
  */
 
-import { Code, Cpu, Cube, DataTransferBoth, Home, KeyframesCouple, Puzzle, User } from "iconoir-react";
-import { useState } from "react";
+import { ChatLines, Cloud, Cpu, Cube, Dashboard, Database, GitFork, Home, NavArrowRight, Sparks, Tools } from "iconoir-react";
+import { type ReactNode, useState } from "react";
 import { ValuePill } from "@/components/bui/Chip";
-import CodeBlock from "@/components/bui/CodeBlock";
 import EmptyState from "@/components/bui/EmptyState";
-import { FilterChips } from "@/components/bui/FilterTable";
+import LoadingState from "@/components/bui/LoadingState";
 import { Page, PageLoading, Section } from "@/components/bui/Page";
-import RecordsTable, { type RecordColumn, RecordMark, RecordName, RecordTag, TagList, tagHue } from "@/components/bui/RecordsTable";
-import SearchField from "@/components/bui/SearchField";
+import { RecordMark, RecordTag } from "@/components/bui/RecordsTable";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { type ApiAgent, type ApiApp, useApi } from "@/lib/api";
-import { useShell } from "@/lib/shell";
+import { assistantName } from "@/lib/names";
+import { SidePanel, useShell } from "@/lib/shell";
 import { defineView } from "@/lib/views";
+import { type Component, type Group, groupsOf, placeOf, summaryOf } from "./overview";
+import { ComponentDetails, ComponentPanel } from "./panel";
+import { WiringSection } from "./wiring";
 
-type Part = "components" | "capabilities" | "agents" | "pipelines" | "config";
-type Component = ApiApp["components"][number];
-type Capability = { name: string } & ApiApp["capabilities"][string];
+const GROUP_ICONS: Record<string, ReactNode> = {
+  Channels: <ChatLines />,
+  "Agents and models": <Sparks />,
+  Tools: <Tools />,
+  Data: <Database />,
+  Integrations: <GitFork />,
+  "Dashboard and admin": <Dashboard />,
+  Platform: <Cloud />,
+};
 
-/** A capability's tag, coloured by its family (`agent.`, `storage.`, …): the same everywhere. */
-const capabilityTag = (name: string) => (
-  <RecordTag base={tagHue(name.split(".")[0] ?? name)} title={name}>
-    {name}
-  </RecordTag>
-);
+const CARD = "overflow-hidden rounded-card bg-surface shadow-card";
+
+/** An agent: its name (the steward marked, a live one said so), what it is for, its model and its tools. */
+function AgentCard({ agent }: { agent: ApiAgent }) {
+  return (
+    <article className={`${CARD} flex flex-col gap-3 p-4`}>
+      <div className="flex min-w-0 items-center gap-2">
+        <RecordMark name={agent.name} />
+        <span className="min-w-0 truncate text-[14px] font-medium text-ink" title={agent.name}>
+          {assistantName(agent.name)}
+        </span>
+        {agent.steward && (
+          <span title="The project's steward: it knows what the project is made of, and operators ask it to change it">
+            <ValuePill tone="accent">steward</ValuePill>
+          </span>
+        )}
+        {agent.live === true && (
+          <span title="Made in the dashboard: it is data, not the project's code">
+            <ValuePill>live</ValuePill>
+          </span>
+        )}
+      </div>
+      {agent.description !== undefined && <p className="text-[12.5px] leading-relaxed text-ink-2">{agent.description}</p>}
+      <div className="flex min-w-0 items-center gap-1.5 text-[12.5px] text-ink-2" title={agent.model}>
+        <Cpu width={14} height={14} className="shrink-0 text-ink-3" aria-hidden />
+        <span className="min-w-0 truncate font-mono text-[12px]">{agent.model}</span>
+      </div>
+      <div className="flex flex-wrap gap-1">
+        {agent.tools.length === 0 ? (
+          <span className="text-[12.5px] text-ink-3">No tools</span>
+        ) : (
+          agent.tools.map((tool) => (
+            <RecordTag key={tool} title={tool}>
+              {tool}
+            </RecordTag>
+          ))
+        )}
+      </div>
+    </article>
+  );
+}
+
+function AgentsSection({ agents }: { agents: ApiAgent[] | undefined }) {
+  return (
+    <Section title="Agents" meta={agents === undefined ? undefined : `${agents.length}`}>
+      {agents === undefined ? (
+        <div className="flex min-h-6 items-center">
+          <LoadingState label="Reading the agents" variant="Dots" />
+        </div>
+      ) : agents.length === 0 ? (
+        <div className={CARD}>
+          <EmptyState icon={<Sparks />} title="No agent" hint="The App has no agent to talk to." />
+        </div>
+      ) : (
+        <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+          {agents.map((agent) => (
+            <AgentCard key={agent.name} agent={agent} />
+          ))}
+        </div>
+      )}
+    </Section>
+  );
+}
+
+/** A kind of component: its rows, the open one pressed (and, below `lg`, its details under it). */
+function GroupCard({ app, group, open, onOpen }: { app: ApiApp; group: Group; open: string | undefined; onOpen: (name: string) => void }) {
+  return (
+    <div className={`${CARD} mb-4 break-inside-avoid`}>
+      <div className="flex items-center gap-2 border-b border-line px-4 py-2.5 text-ink-2 [&_svg]:size-[15px]">
+        {GROUP_ICONS[group.title] ?? <Cube />}
+        <h3 className="text-[12.5px] font-semibold text-ink">{group.title}</h3>
+        <span className="text-[12px] text-ink-3 tabular-nums">{group.components.length}</span>
+      </div>
+      <ul className="p-1">
+        {group.components.map((component) => {
+          const pressed = component.name === open;
+          return (
+            <li key={component.name}>
+              <button
+                type="button"
+                aria-pressed={pressed}
+                onClick={() => onOpen(component.name)}
+                className={`flex h-9 w-full items-center gap-2.5 rounded-[7px] px-3 text-left transition-colors duration-100 ${pressed ? "bg-hover-2" : "hover:bg-hover"}`}
+              >
+                <RecordMark name={component.name} />
+                <span className="min-w-0 flex-1 truncate text-[13px] text-ink">{component.name}</span>
+                {component.version !== undefined && <span className="shrink-0 font-mono text-[11.5px] text-ink-3">{component.version}</span>}
+                <NavArrowRight width={14} height={14} strokeWidth={2} className={`shrink-0 text-ink-3 transition-transform duration-200 ${pressed ? "rotate-90 lg:rotate-0" : ""}`} aria-hidden />
+              </button>
+              {pressed && (
+                <div className="border-y border-line bg-page px-4 py-4 lg:hidden">
+                  <ComponentDetails app={app} component={component} />
+                </div>
+              )}
+            </li>
+          );
+        })}
+      </ul>
+    </div>
+  );
+}
 
 function HomePage() {
   const { data: app, error } = useApi<ApiApp>("/app");
   const shell = useShell();
-  const [part, setPart] = useState<Part>("components");
-  const [query, setQuery] = useState("");
+  const [open, setOpen] = useState<string>();
 
   if (error !== undefined) {
     return (
       <Page eyebrow="Home">
-        <ErrorNote error={error} title="The composition cannot be read" />
+        <ErrorNote error={error} title="What the App is made of cannot be read" />
       </Page>
     );
   }
   if (app === undefined) return <PageLoading eyebrow="Home" />;
 
-  const needle = query.trim().toLowerCase();
-  const matches = (...texts: string[]) => needle === "" || texts.some((text) => text.toLowerCase().includes(needle));
-
-  // Start order is the API's; the row number says it.
-  const components = app.components.filter((component) => matches(component.name, ...component.provides, ...component.requires, ...component.optional));
-  const capabilities: Capability[] = Object.entries(app.capabilities)
-    .map(([name, capability]) => ({ name, ...capability }))
-    .sort((a, b) => a.name.localeCompare(b.name))
-    .filter((capability) => matches(capability.name, ...capability.providers, ...Object.keys(capability.keys ?? {})));
-  const agents = (shell.agents ?? []).filter((agent) => matches(agent.name, agent.model, ...agent.tools, ...(agent.steward ? ["steward"] : [])));
-  const pipelines = Object.entries(app.pipelines).filter(([name, stages]) => matches(name, JSON.stringify(stages)));
-  const config = Object.fromEntries(Object.entries(app.config).filter(([name]) => matches(name)));
-
-  const nothingFound = <EmptyState title="No results found" hint="Adjust your search to try again." />;
-
-  const componentColumns: RecordColumn<Component>[] = [
-    {
-      key: "name",
-      label: "Component",
-      icon: <Cube />,
-      width: 250,
-      cell: (component) => (
-        <>
-          <RecordMark name={component.name} />
-          <RecordName>{component.name}</RecordName>
-          {component.version !== undefined && <span className="ml-1.5 shrink-0 font-mono text-[11.5px] text-ink-3">{component.version}</span>}
-        </>
-      ),
-    },
-    { key: "provides", label: "Provides", icon: <Puzzle />, width: 260, cell: (component) => <TagList tags={component.provides} render={capabilityTag} /> },
-    { key: "requires", label: "Requires", icon: <DataTransferBoth />, width: 260, cell: (component) => <TagList tags={component.requires} render={capabilityTag} /> },
-    { key: "optional", label: "Uses if installed", icon: <KeyframesCouple />, width: 240, cell: (component) => <TagList tags={component.optional} render={capabilityTag} /> },
-  ];
-
-  const capabilityColumns: RecordColumn<Capability>[] = [
-    { key: "name", label: "Capability", icon: <Puzzle />, width: 240, sort: (a, b) => a.name.localeCompare(b.name), title: (capability) => capability.name, cell: (capability) => capabilityTag(capability.name) },
-    {
-      key: "providers",
-      label: "Providers",
-      icon: <Cube />,
-      width: 260,
-      sort: (a, b) => a.providers.length - b.providers.length,
-      cell: (capability) => <TagList tags={capability.providers} render={(name) => <RecordTag title={name}>{name}</RecordTag>} empty="none" />,
-    },
-    {
-      key: "selected",
-      label: "Selected / keys",
-      icon: <KeyframesCouple />,
-      width: 320,
-      cell: (capability) => {
-        const keys = Object.entries(capability.keys ?? {}).map(([key, provider]) => `${key} → ${provider}`);
-        if (keys.length > 0) return <TagList tags={keys} render={(entry) => <RecordTag title={entry}>{entry}</RecordTag>} />;
-        return capability.selected === undefined ? <span className="records-muted">—</span> : <RecordTag title={capability.selected}>{capability.selected}</RecordTag>;
-      },
-    },
-  ];
-
-  // The steward (SPEC §6) is the agent its operators ask to change the project: one at most.
-  const agentColumns: RecordColumn<ApiAgent>[] = [
-    {
-      key: "name",
-      label: "Agent",
-      icon: <User />,
-      width: 250,
-      sort: (a, b) => a.name.localeCompare(b.name),
-      cell: (agent) => (
-        <>
-          <RecordMark name={agent.name} />
-          <RecordName>{agent.name}</RecordName>
-          {agent.steward && (
-            <span className="ml-1.5 shrink-0" title="The project's steward: it knows what the project is made of, and operators ask it to change it">
-              <ValuePill tone="accent">steward</ValuePill>
-            </span>
-          )}
-        </>
-      ),
-    },
-    { key: "model", label: "Model", icon: <Cpu />, width: 260, title: (agent) => agent.model, cell: (agent) => <RecordTag mono title={agent.model}>{agent.model}</RecordTag> },
-    { key: "tools", label: "Tools", icon: <Puzzle />, width: 320, cell: (agent) => <TagList tags={agent.tools} render={(tool) => <RecordTag title={tool}>{tool}</RecordTag>} empty="none" /> },
-  ];
+  const groups = groupsOf(app.components);
+  const opened: Component | undefined = app.components.find((component) => component.name === open);
 
   return (
-    <Page
-      eyebrow="Home"
-      title={`${app.components.length} components, ${app.target} target`}
-      description="What this App runs: its components in start order, who provides each capability, its agents, its pipelines and its config. A config value that looks like a secret is never sent here."
-    >
-      <Section
-        title={{ components: "Components", capabilities: "Capabilities", agents: "Agents", pipelines: "Pipelines", config: "Config" }[part]}
-        tools={
-          <>
-            <FilterChips
-              label="Show"
-              value={part}
-              onChange={setPart}
-              filters={[
-                { key: "components", label: "Components", count: components.length },
-                { key: "capabilities", label: "Capabilities", count: capabilities.length },
-                { key: "agents", label: "Agents", count: agents.length },
-                { key: "pipelines", label: "Pipelines", count: pipelines.length },
-                { key: "config", label: "Config", count: Object.keys(config).length },
-              ]}
-            />
-            <SearchField value={query} onChange={setQuery} placeholder="Search components, capabilities" label="Search the composition" className="w-64" />
-          </>
-        }
-      >
-        {part === "components" && (
-          <RecordsTable label="The App's components, in start order" columns={componentColumns} rows={components} rowKey={(component) => component.name} maxHeight={640} empty={nothingFound} />
-        )}
+    <Page eyebrow="Home" title={`Runs on ${placeOf(app.target)}`} description={summaryOf(app, shell.agents?.length)}>
+      <AgentsSection agents={shell.agents} />
 
-        {part === "capabilities" && (
-          <RecordsTable label="The App's capabilities and their providers" columns={capabilityColumns} rows={capabilities} rowKey={(capability) => capability.name} maxHeight={640} empty={nothingFound} />
-        )}
-
-        {part === "agents" && (
-          <RecordsTable label="The App's agents and the steward" columns={agentColumns} rows={agents} rowKey={(agent) => agent.name} maxHeight={640} empty={shell.agents === undefined ? <EmptyState title="Reading the agents" /> : nothingFound} />
-        )}
-
-        {part === "pipelines" &&
-          (pipelines.length === 0 ? (
-            <div className="rounded-card bg-surface shadow-card">
-              {needle === "" ? <EmptyState icon={<Code />} title="No pipeline has a stage" /> : nothingFound}
-            </div>
-          ) : (
-            <div className="flex flex-col gap-4">
-              {pipelines.map(([name, stages]) => (
-                <CodeBlock key={name} filename={name} meta={`${stages.length} ${stages.length === 1 ? "stage" : "stages"}`} code={JSON.stringify(stages, null, 2)} />
-              ))}
-            </div>
+      <Section title="Components" meta="by what they are for">
+        <div className="columns-1 gap-4 md:columns-2">
+          {groups.map((group) => (
+            <GroupCard key={group.title} app={app} group={group} open={open} onOpen={(name) => setOpen(name === open ? undefined : name)} />
           ))}
-
-        {part === "config" &&
-          (Object.keys(config).length === 0 && needle !== "" ? (
-            <div className="rounded-card bg-surface shadow-card">{nothingFound}</div>
-          ) : (
-            <CodeBlock filename="config.json" meta={needle === "" ? "redacted by the API" : `the components matching “${query.trim()}”`} code={JSON.stringify(config, null, 2)} />
-          ))}
+        </div>
       </Section>
+
+      <WiringSection app={app} />
+
+      {opened !== undefined && (
+        <SidePanel>
+          <ComponentPanel app={app} component={opened} onClose={() => setOpen(undefined)} />
+        </SidePanel>
+      )}
     </Page>
   );
 }

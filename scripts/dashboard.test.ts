@@ -12,6 +12,7 @@ import { createAssets, type DashboardFiles } from "../registry/components/admin-
 import { assistantName } from "../registry/dashboard/files/src/lib/names.ts";
 import { imagesOf, sourcesOf } from "../registry/dashboard/files/src/views/conversations/sources.ts";
 import { INITIAL, type LiveState, reduce } from "../registry/dashboard/files/src/views/conversations/live-state.ts";
+import { groupsOf, providersOf, summaryOf, usersOf, wiringOf } from "../registry/dashboard/files/src/views/home/overview.ts";
 import { generated, OUTPUT } from "./ui-registry.ts";
 
 const REPO = join(import.meta.dir, "..");
@@ -225,4 +226,65 @@ test("an answer that ended between two snapshots (a reconnect) stays as last see
   expect(streamed.partial).toBeUndefined();
   expect(streamed.ended).toEqual([]);
   expect(streamed.entries).toEqual([{ id: "12", kind: "message", messages: [partial("Hello")] }]);
+});
+
+test("Home groups the components by what they are for, sums the App up in a line, and shows only the wiring worth a look", () => {
+  const component = (name: string, provides: string[] = [], requires: string[] = [], optional: string[] = []) => ({ name, provides, requires, optional });
+  const app = {
+    version: 1,
+    target: "durable",
+    components: [
+      component("channel-telegram-webhook", ["http.route"], ["agent.runtime"], ["outbound.queue"]),
+      component("runtime-pi", ["agent.runtime", "model.complete"], ["storage.sql"], ["workspace"]),
+      component("router-basic"),
+      component("tool-bash", ["agent.tool"], [], ["workspace"]),
+      component("tool-read", ["agent.tool"]),
+      component("storage-do", ["storage.sql"]),
+      component("storage-memory", ["storage.sql"]),
+      component("admin-api", ["http.route"], ["agent.runtime"]),
+      component("mystery"),
+    ],
+    capabilities: {
+      "http.route": { providers: ["channel-telegram-webhook", "admin-api"], keys: { "POST /telegram": "channel-telegram-webhook", "GET /admin/api/app": "admin-api" } },
+      "agent.runtime": { providers: ["runtime-pi"], selected: "runtime-pi" },
+      "agent.tool": { providers: ["tool-bash", "tool-read"] },
+      "storage.sql": { providers: ["storage-do", "storage-memory"], selected: "storage-do" },
+      "outbound.queue": { providers: [] },
+    },
+    pipelines: { "route.resolve": [{ id: "project.vip", priority: 10 }, { id: "router-basic.default", priority: 0 }, "odd"], "message.inbound": [] },
+    config: {},
+  };
+
+  // By what they provide, else by their name's prefix; Other last, each kind by name, no empty kind.
+  expect(groupsOf(app.components).map((group) => [group.title, group.components.map((each) => each.name)])).toEqual([
+    ["Channels", ["channel-telegram-webhook"]],
+    ["Agents and models", ["router-basic", "runtime-pi"]],
+    ["Tools", ["tool-bash", "tool-read"]],
+    ["Data", ["storage-do", "storage-memory"]],
+    ["Dashboard and admin", ["admin-api"]],
+    ["Other", ["mystery"]],
+  ]);
+  expect(summaryOf(app, 1)).toBe("Talks on Telegram and this dashboard, with 1 agent and 2 tools: 9 components in all.");
+  expect(summaryOf(app, undefined)).toBe("Talks on Telegram and this dashboard, with 2 tools: 9 components in all.");
+
+  // Who gives a capability: its keys' providers, the one selected, or every one; nobody when none is installed.
+  expect(providersOf(app, "http.route")).toEqual(["channel-telegram-webhook", "admin-api"]);
+  expect(providersOf(app, "storage.sql")).toEqual(["storage-do"]);
+  expect(providersOf(app, "agent.tool")).toEqual(["tool-bash", "tool-read"]);
+  expect(providersOf(app, "outbound.queue")).toEqual([]);
+  expect(usersOf(app, app.components[1] as (typeof app.components)[number])).toEqual(["channel-telegram-webhook", "admin-api"]);
+
+  // A choice is a single capability with several providers: a collection (agent.tool) or a keyed one is not.
+  const wiring = wiringOf(app);
+  expect(wiring.choices).toEqual([{ capability: "storage.sql", providers: ["storage-do", "storage-memory"], selected: "storage-do" }]);
+  expect(wiring.keyed).toEqual([
+    { capability: "http.route", key: "GET /admin/api/app", provider: "admin-api" },
+    { capability: "http.route", key: "POST /telegram", provider: "channel-telegram-webhook" },
+  ]);
+  expect(wiring.missing).toEqual([
+    { capability: "outbound.queue", wantedBy: ["channel-telegram-webhook"] },
+    { capability: "workspace", wantedBy: ["runtime-pi", "tool-bash"] },
+  ]);
+  // A pipeline with no stage is left out; a stage the API gives otherwise shows as its JSON.
+  expect(wiring.pipelines).toEqual([{ name: "route.resolve", stages: [{ id: "project.vip", priority: 10 }, { id: "router-basic.default", priority: 0 }, { id: '"odd"' }] }]);
 });

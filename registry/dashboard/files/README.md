@@ -138,6 +138,7 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/components/pikit/settings-dialog.tsx`, `settings.tsx` | the Settings dialog and General; its rows and controls (`SettingsRow`, `Segmented`, `SelectControl`, `TextControl`, `PromptEditor`), and `SchemaSettings` |
 | `src/lib/router.tsx` | the pages under `/admin` |
 | `src/views/conversations/` | New chat (`new-chat.tsx`), a conversation (its commands' notes), what their composers share (`composer.ts`: the image limits, web search, the assistants' names), the Context panel (`context.tsx`, what it reads of a transcript in `sources.ts`), live events (`live.ts`) |
+| `src/views/home/` | Home: where the App runs and talks, its agents, its components by what they are for (`overview.ts`), one at the side (`panel.tsx`: what it provides and needs, its config), and the wiring, folded (`wiring.tsx`) |
 | `src/lib/chats.tsx` | the conversations the sidebar lists, the tabs, the titles (the API's: a key's, shared by the conversations a reset left behind), the commands' notes (`useChats`, `agentsOf`) |
 | `src/lib/shell.tsx` | what the shell gives a page: the App, its agents, its commands, the views, `newChat`, `TabActions`, `SidePanel` |
 | `src/lib/theme.ts`, `public/theme.js` | light, dark or the system's, before the first paint |
