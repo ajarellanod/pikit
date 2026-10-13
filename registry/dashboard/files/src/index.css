@@ -502,6 +502,19 @@ a:focus-visible .animated-underline::after {
   width: 36px;
 }
 
+/* -- the chat's type: 10% larger than the rest of the dashboard -------------
+ * `chat-text-13` is 13px, times the scale `.chat` sets (a conversation, the new chat's page): the thread,
+ * its composer and the composer's menus. Outside a `.chat` (a code block in the composition view) it is
+ * 13px. */
+
+.chat {
+  --chat-scale: 1.1;
+}
+
+@utility chat-text-* {
+  font-size: calc(--value(number) * 1px * var(--chat-scale, 1));
+}
+
 /* -- Markdown: a model's text (components/pikit/markdown.tsx) ---------------
  * Sizes and colour come from the element it is in; this spaces the blocks and marks the rest. */
 

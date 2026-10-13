@@ -435,16 +435,16 @@ export default function PromptBar({
                 className="relative z-10 flex h-9 w-full items-center gap-2.5 rounded-[6px] px-2 text-left disabled:cursor-default"
               >
                 {row.icon !== undefined && <span className={`flex size-5.5 shrink-0 items-center justify-center ${row.disabled ? "text-ink-3" : "text-ink-2"}`}>{row.icon}</span>}
-                <span className={`shrink-0 text-[12.5px] font-medium ${row.disabled ? "text-ink-3" : "text-ink"}`}>{row.name}</span>
-                {row.hint !== undefined && <span className="shrink-0 font-mono text-[11.5px] text-ink-3">{row.hint}</span>}
-                <span className="min-w-0 flex-1 truncate text-[12px] text-ink-3">{row.desc}</span>
+                <span className={`shrink-0 chat-text-12.5 font-medium ${row.disabled ? "text-ink-3" : "text-ink"}`}>{row.name}</span>
+                {row.hint !== undefined && <span className="shrink-0 font-mono chat-text-11.5 text-ink-3">{row.hint}</span>}
+                <span className="min-w-0 flex-1 truncate chat-text-12 text-ink-3">{row.desc}</span>
                 {row.trailing}
               </button>
             ))}
             {rows.length === 0 && (
-              <div className="flex h-9 items-center px-2 text-[12px] text-ink-3">{menu === "slash" && commands.length === 0 ? "No commands" : `No command “/${query}”`}</div>
+              <div className="flex h-9 items-center px-2 chat-text-12 text-ink-3">{menu === "slash" && commands.length === 0 ? "No commands" : `No command “/${query}”`}</div>
             )}
-            {menu === "slash" && rows.length > 0 && <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 text-[11px] text-ink-3">{commandsNote}</div>}
+            {menu === "slash" && rows.length > 0 && <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 chat-text-11 text-ink-3">{commandsNote}</div>}
           </div>
         )}
 
@@ -485,8 +485,8 @@ export default function PromptBar({
                 }}
                 className="relative z-10 flex h-7.5 w-full items-center gap-2 rounded-[6px] px-2 text-left"
               >
-                <span className="min-w-0 flex-1 truncate text-[12.5px] font-medium text-ink">{option.name}</span>
-                {option.tag !== undefined && <span className="shrink-0 text-[11px] text-ink-3">{option.tag}</span>}
+                <span className="min-w-0 flex-1 truncate chat-text-12.5 font-medium text-ink">{option.name}</span>
+                {option.tag !== undefined && <span className="shrink-0 chat-text-11 text-ink-3">{option.tag}</span>}
                 <span className={`shrink-0 text-ink ${option.key === picker?.value ? "" : "invisible"}`}>
                   <Icon size={13} strokeWidth={2.5}>
                     {GLYPHS.check}
@@ -494,7 +494,7 @@ export default function PromptBar({
                 </span>
               </button>
             ))}
-            {picker?.note !== undefined && <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 text-[11px] leading-4 text-ink-3">{picker.note}</div>}
+            {picker?.note !== undefined && <div className="mt-1 border-t border-line px-2 pt-1.5 pb-1 chat-text-11 leading-4 text-ink-3">{picker.note}</div>}
           </div>
         )}
 
@@ -574,7 +574,7 @@ export default function PromptBar({
               }}
               placeholder={placeholder ?? "Write a message…"}
               aria-label="Message"
-              className={`col-span-full col-start-1 row-start-1 ${compact ? "min-h-9" : "min-h-[68px]"} w-full min-w-0 resize-none bg-transparent px-2 py-2 text-[14px] leading-5 text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3 disabled:opacity-60`}
+              className={`col-span-full col-start-1 row-start-1 ${compact ? "min-h-9" : "min-h-[68px]"} w-full min-w-0 resize-none bg-transparent px-2 py-2 chat-text-14 leading-5 text-ink outline-none [overflow-wrap:anywhere] placeholder:text-ink-3 disabled:opacity-60`}
             />
 
             {/* "+": images, web search */}
@@ -611,7 +611,7 @@ export default function PromptBar({
                   setPlusOpen(false);
                   setModelOpen((current) => !current);
                 }}
-                className="col-start-2 row-start-2 flex h-7 shrink-0 items-center gap-1 justify-self-start rounded-[8px] px-1.5 text-[12px] font-medium text-ink-2 transition-colors duration-150 enabled:hover:bg-hover enabled:hover:text-ink"
+                className="col-start-2 row-start-2 flex h-7 shrink-0 items-center gap-1 justify-self-start rounded-[8px] px-1.5 chat-text-12 font-medium text-ink-2 transition-colors duration-150 enabled:hover:bg-hover enabled:hover:text-ink"
               >
                 {chosen?.name ?? picker.value ?? `No ${picker.label}`}
                 {choosable && (
@@ -629,7 +629,7 @@ export default function PromptBar({
             {/* web search on for the next message, or what was refused */}
             <div className="col-start-3 row-start-2 flex min-w-0 items-center gap-2 self-center pl-1">
               {webSearchOn && (
-                <span className="flex h-6.5 shrink-0 items-center gap-1.5 rounded-chip bg-accent-tint py-1 pr-1 pl-1.5 text-[11.5px] font-medium text-accent-ink" style={{ animation: "pop-in 200ms cubic-bezier(0.23,1,0.32,1) both" }}>
+                <span className="flex h-6.5 shrink-0 items-center gap-1.5 rounded-chip bg-accent-tint py-1 pr-1 pl-1.5 chat-text-11.5 font-medium text-accent-ink" style={{ animation: "pop-in 200ms cubic-bezier(0.23,1,0.32,1) both" }}>
                   <Icon size={12}>{GLYPHS.globe}</Icon>
                   Web search
                   <button
@@ -645,7 +645,7 @@ export default function PromptBar({
                 </span>
               )}
               {problem !== undefined && (
-                <span role="status" className="min-w-0 truncate text-[12px] text-red" title={problem}>
+                <span role="status" className="min-w-0 truncate chat-text-12 text-red" title={problem}>
                   {problem}
                 </span>
               )}

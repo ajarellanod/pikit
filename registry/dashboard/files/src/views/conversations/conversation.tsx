@@ -110,9 +110,9 @@ function useContextOpen(): [boolean, (open: boolean) => void] {
 function CommandNoteRow({ note }: { note: CommandNote }) {
   return (
     <div className="flex items-start gap-2.5 rounded-card bg-inset px-3 py-2.5 shadow-hairline" style={{ animation: "fade-up 320ms cubic-bezier(0.23,1,0.32,1) both" }}>
-      <span className="mt-px flex h-5 shrink-0 items-center rounded-chip bg-surface px-1.5 font-mono text-[11.5px] text-ink-2 shadow-hairline">/{note.command}</span>
-      <p className="min-w-0 flex-1 text-[13px] leading-5 text-ink-2 [overflow-wrap:anywhere]">{note.text}</p>
-      <span className="mt-0.5 shrink-0 text-[11px] text-ink-3">Only you see this</span>
+      <span className="mt-px flex h-5 shrink-0 items-center rounded-chip bg-surface px-1.5 font-mono chat-text-11.5 text-ink-2 shadow-hairline">/{note.command}</span>
+      <p className="min-w-0 flex-1 chat-text-13 leading-5 text-ink-2 [overflow-wrap:anywhere]">{note.text}</p>
+      <span className="mt-0.5 shrink-0 chat-text-11 text-ink-3">Only you see this</span>
     </div>
   );
 }
@@ -308,7 +308,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const hasContext = contextImages.length > 0 || contextSources.length > 0;
 
   return (
-    <div className="relative flex min-h-0 flex-1 flex-col">
+    <div className="chat relative flex min-h-0 flex-1 flex-col">
       {conversation !== undefined && hasContext && (
         <TabActions>
           <button
@@ -329,7 +329,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
         <div className="flex flex-col gap-8 px-4 pt-8 sm:px-8 lg:px-12" style={{ paddingBottom: composerH + 56 }}>
           {transcript.hasOlder && (
             <div className="mx-auto w-full max-w-[720px]">
-              <button type="button" onClick={() => void transcript.loadOlder()} className="mx-auto flex h-7 items-center rounded-full px-3 text-[12.5px] font-medium text-ink-2 shadow-btn transition-colors duration-100 hover:bg-hover">
+              <button type="button" onClick={() => void transcript.loadOlder()} className="mx-auto flex h-7 items-center rounded-full px-3 chat-text-12.5 font-medium text-ink-2 shadow-btn transition-colors duration-100 hover:bg-hover">
                 Earlier messages
               </button>
             </div>
@@ -340,7 +340,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
             </div>
           )}
           {!transcript.loaded && transcript.error === undefined && sentShown.length === 0 && (
-            <div className="mx-auto flex w-full max-w-[720px] items-center gap-2.5 text-[13px] text-ink-3">
+            <div className="mx-auto flex w-full max-w-[720px] items-center gap-2.5 chat-text-13 text-ink-3">
               <LoaderGrid /> Loading the conversation
             </div>
           )}
@@ -368,7 +368,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
           {sentShown.map((each) => (
             <div key={`sent-${each.id}`} className={`mx-auto flex w-full max-w-[720px] flex-col items-end gap-1 transition-opacity duration-200 ${each.queued ? "opacity-60" : ""}`}>
               <UserBubble message={sentMessage(each)} animate />
-              {each.queued && <span className="px-1 text-[11.5px] text-ink-3">Queued: it runs once the run going ends</span>}
+              {each.queued && <span className="px-1 chat-text-11.5 text-ink-3">Queued: it runs once the run going ends</span>}
             </div>
           ))}
           {/* one line at the end, whatever comes before it: it stays put, and never mounts again as the thread grows */}
@@ -377,7 +377,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
               <LoadingState label={activity} variant="Dots" since={since} />
             </div>
           )}
-          {transcript.loaded && turns.length === 0 && notes.length === 0 && sentShown.length === 0 && !live.busy && <p className="mx-auto w-full max-w-[720px] text-[13.5px] text-ink-3">No messages yet.</p>}
+          {transcript.loaded && turns.length === 0 && notes.length === 0 && sentShown.length === 0 && !live.busy && <p className="mx-auto w-full max-w-[720px] chat-text-13.5 text-ink-3">No messages yet.</p>}
         </div>
       </div>
 
@@ -389,7 +389,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
         <div className="mx-auto flex max-w-[720px] flex-col gap-2">
           {actionError !== undefined && <ErrorNote error={actionError} title="That did not work" />}
           {conversation !== undefined && conversation.current !== true ? (
-            <p className="rounded-card bg-inset px-3 py-2.5 text-[13px] text-ink-2 shadow-hairline">
+            <p className="rounded-card bg-inset px-3 py-2.5 chat-text-13 text-ink-2 shadow-hairline">
               {conversation.current === false ? "A reset left this conversation behind: it can be read, not talked to." : "No message has reached this conversation yet."}
             </p>
           ) : (
@@ -419,7 +419,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
                 onStop={stop}
                 onSend={send}
               />
-              {note !== undefined && <p className="px-1 text-center text-[12px] text-ink-3">{note}</p>}
+              {note !== undefined && <p className="px-1 text-center chat-text-12 text-ink-3">{note}</p>}
             </>
           )}
         </div>

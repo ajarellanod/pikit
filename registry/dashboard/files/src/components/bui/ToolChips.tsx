@@ -74,7 +74,7 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
           type="button"
           aria-expanded={open}
           onClick={() => setExpanded((current) => !current)}
-          className="-mx-1.5 flex w-fit items-center gap-1.5 rounded-control px-1.5 py-1 text-[12.5px] text-ink-2 transition-colors duration-100 hover:bg-hover-2"
+          className="-mx-1.5 flex w-fit items-center gap-1.5 rounded-control px-1.5 py-1 chat-text-12.5 text-ink-2 transition-colors duration-100 hover:bg-hover-2"
         >
           <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" className="transition-transform duration-200" style={{ transform: open ? "rotate(0deg)" : "rotate(-90deg)" }} aria-hidden>
             <path d="M6 9l6 6 6-6" />
@@ -134,10 +134,10 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
                         <path d="M6 9l6 6 6-6" />
                       </svg>
                     </span>
-                    <span className={`shrink-0 text-[12.5px] font-medium ${failed ? "text-red" : "text-ink"}`}>{row.label}</span>
+                    <span className={`shrink-0 chat-text-12.5 font-medium ${failed ? "text-red" : "text-ink"}`}>{row.label}</span>
                     {row.chip !== undefined && row.chip !== "" && (
                       <span
-                        className={`inline-flex h-5.5 min-w-0 flex-1 items-center truncate rounded-chip bg-field px-1.5 text-[11.5px] text-ink-2 shadow-hairline transition-colors duration-100 hover:bg-hover-2 ${row.mono ? "font-mono" : ""}`}
+                        className={`inline-flex h-5.5 min-w-0 flex-1 items-center truncate rounded-chip bg-field px-1.5 chat-text-11.5 text-ink-2 shadow-hairline transition-colors duration-100 hover:bg-hover-2 ${row.mono ? "font-mono" : ""}`}
                       >
                         <span className="truncate">{row.chip}</span>
                       </span>
@@ -152,7 +152,7 @@ export default function ToolChips({ steps, header, className }: { steps: ToolSte
                     <div className="min-h-0 overflow-hidden">
                       <div className="mt-0.5 mb-1 ml-2 flex flex-col gap-0.5 border-l border-line py-0.5 pl-3.5">
                         <pre
-                          className={`max-h-56 overflow-auto font-mono text-[11.5px] leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere] ${failed ? "text-red" : "text-ink-2"}`}
+                          className={`max-h-56 overflow-auto font-mono chat-text-11.5 leading-[1.6] whitespace-pre-wrap [overflow-wrap:anywhere] ${failed ? "text-red" : "text-ink-2"}`}
                         >
                           {row.detail !== undefined && row.detail !== "" ? row.detail : row.status === "running" ? "No output yet." : row.status === "none" ? "No result: the run ended first." : "(no output)"}
                         </pre>

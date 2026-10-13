@@ -87,17 +87,17 @@ export default function CodeBlock({
 
   return (
     <div className={`w-full overflow-hidden rounded-card bg-surface shadow-card ${className}`}>
-      <div className="flex h-11 items-center gap-2 border-b border-line px-4 text-[12.5px]">
+      <div className="flex h-11 items-center gap-2 border-b border-line px-4 chat-text-12.5">
         <span className="inline-flex min-w-0 items-center gap-[7px]">
           <FileIcon />
           <span className="truncate font-mono leading-none text-ink">{filename}</span>
         </span>
-        {meta !== undefined && <span className="truncate text-[12px] text-ink-3">{meta}</span>}
+        {meta !== undefined && <span className="truncate chat-text-12 text-ink-3">{meta}</span>}
         <button
           type="button"
           aria-label="Copy code"
           onClick={copy}
-          className={`-mr-1 ml-auto flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1.5 text-[12px] font-medium transition-colors duration-100 hover:bg-hover ${copied ? "text-green" : "text-ink-3 hover:text-ink"}`}
+          className={`-mr-1 ml-auto flex h-6 shrink-0 items-center gap-1 rounded-[6px] px-1.5 chat-text-12 font-medium transition-colors duration-100 hover:bg-hover ${copied ? "text-green" : "text-ink-3 hover:text-ink"}`}
         >
           {copied ? (
             <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
@@ -113,12 +113,12 @@ export default function CodeBlock({
         </button>
       </div>
 
-      <div className="py-3 font-mono text-[12.5px] leading-[1.65] text-ink-2">
+      <div className="py-3 font-mono chat-text-12.5 leading-[1.65] text-ink-2">
         <div className="relative">
           <span className="pointer-events-none absolute inset-y-0 w-px bg-line" style={{ left: gutter }} />
           {lines.map((line, i) => (
             <div key={i} className="grid items-start" style={{ gridTemplateColumns: `${gutter}px minmax(0,1fr)` }}>
-              <span className="select-none text-center text-[11px] text-ink-3">{i + 1}</span>
+              <span className="select-none text-center chat-text-11 text-ink-3">{i + 1}</span>
               <code className="pr-3 pl-2 break-words whitespace-pre-wrap">{plain ? line : highlight(line)}</code>
             </div>
           ))}

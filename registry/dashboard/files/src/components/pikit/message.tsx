@@ -201,11 +201,11 @@ function Steps({ steps }: { steps: Step[] }) {
         step.kind === "tools" ? (
           <ToolChips key={i} steps={step.calls.map((each) => ({ id: each.id, ...describeCall(each.name, each.arguments), status: each.status, detail: each.output }))} />
         ) : step.redacted ? (
-          <p key={i} className="px-1.5 text-[12.5px] text-ink-3">
+          <p key={i} className="px-1.5 chat-text-12.5 text-ink-3">
             Thinking redacted by the provider
           </p>
         ) : step.text.trim() === "" ? null : (
-          <Markdown key={i} text={step.text} streaming={step.streaming} className="px-1.5 py-0.5 text-[12.5px] leading-relaxed text-ink-2" />
+          <Markdown key={i} text={step.text} streaming={step.streaming} className="px-1.5 py-0.5 chat-text-12.5 leading-relaxed text-ink-2" />
         ),
       )}
     </ThinkingState>
@@ -229,7 +229,7 @@ export function UserBubble({ message, from, animate = false }: { message: UserMe
   const { text, operator, images } = userText(message);
   return (
     <div className="flex flex-col items-end gap-1 pl-10 sm:pl-24" style={animate ? { animation: "fade-up 200ms cubic-bezier(0.23,1,0.32,1) both" } : undefined}>
-      {!operator && from !== undefined && <span className="px-1 text-[11.5px] font-medium text-ink-3">{from}</span>}
+      {!operator && from !== undefined && <span className="px-1 chat-text-11.5 font-medium text-ink-3">{from}</span>}
       {images.length > 0 && (
         <div className="flex max-w-full flex-wrap justify-end gap-2">
           {images.map((image, i) => (
@@ -238,7 +238,7 @@ export function UserBubble({ message, from, animate = false }: { message: UserMe
         </div>
       )}
       {text !== "" && (
-        <div className="max-w-full rounded-xl bg-field px-3.5 py-2 text-[13px] leading-relaxed whitespace-pre-wrap text-ink shadow-hairline [overflow-wrap:anywhere]">{text}</div>
+        <div className="max-w-full rounded-xl bg-field px-3.5 py-2 chat-text-13 leading-relaxed whitespace-pre-wrap text-ink shadow-hairline [overflow-wrap:anywhere]">{text}</div>
       )}
     </div>
   );
@@ -249,12 +249,12 @@ export function Reply({ segments, waiting, activity = "Thinking", since }: { seg
   const blocks: ReactNode[] = blocksOf(segments).map((block, i) => {
     switch (block.kind) {
       case "text":
-        return <Markdown key={i} text={block.text} streaming={block.streaming} className="max-w-[640px] text-[13.5px] leading-[1.65] text-ink" />;
+        return <Markdown key={i} text={block.text} streaming={block.streaming} className="max-w-[640px] chat-text-13.5 leading-[1.65] text-ink" />;
       case "steps":
         return <Steps key={i} steps={block.steps} />;
       case "error":
         return (
-          <p key={i} className="max-w-[640px] rounded-card bg-red-tint px-3 py-2 text-[13px] text-red [overflow-wrap:anywhere]">
+          <p key={i} className="max-w-[640px] rounded-card bg-red-tint px-3 py-2 chat-text-13 text-red [overflow-wrap:anywhere]">
             {block.text}
           </p>
         );

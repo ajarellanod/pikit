@@ -66,7 +66,7 @@ export default function LoadingState({ label = "Working", variant = "Dots", sinc
     <div role="status" className="flex w-fit items-center gap-2.5">
       <LoaderGrid variant={variant} />
       <span
-        className="bg-clip-text text-[13px] font-medium text-transparent"
+        className="bg-clip-text chat-text-13 font-medium text-transparent"
         style={{
           backgroundImage: "linear-gradient(90deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%)",
           backgroundSize: "200% 100%",
@@ -75,7 +75,7 @@ export default function LoadingState({ label = "Working", variant = "Dots", sinc
       >
         {label}
       </span>
-      <span className="font-mono text-[12px] text-ink-3 tabular-nums">{elapsed}</span>
+      <span className="font-mono chat-text-12 text-ink-3 tabular-nums">{elapsed}</span>
     </div>
   );
 }

@@ -72,7 +72,7 @@ export default function ThinkingState({
         <span role="status" className="contents">
           {working ? (
             <span
-              className="bg-clip-text text-[13px] font-medium whitespace-nowrap text-transparent"
+              className="bg-clip-text chat-text-13 font-medium whitespace-nowrap text-transparent"
               style={{
                 backgroundImage: "linear-gradient(90deg, var(--ink-3) 35%, var(--ink) 50%, var(--ink-3) 65%)",
                 backgroundSize: "200% 100%",
@@ -82,7 +82,7 @@ export default function ThinkingState({
               {active}
             </span>
           ) : (
-            <span className="text-[13px] font-medium whitespace-nowrap text-ink-2" style={{ animation: "fade-in 350ms ease-out both" }}>
+            <span className="chat-text-13 font-medium whitespace-nowrap text-ink-2" style={{ animation: "fade-in 350ms ease-out both" }}>
               {done}
             </span>
           )}
@@ -122,7 +122,7 @@ export default function ThinkingState({
             <div ref={traceRef} className="flex flex-col gap-1 py-1">
               {children ?? rows.map((row, i) => (
                 <div key={i} className="flex min-h-7 w-full items-center gap-2 rounded-[6px] px-1.5 py-0.5 text-left" style={{ animation: "fade-up 320ms cubic-bezier(0.23,1,0.32,1) both" }}>
-                  <span className="min-w-0 text-[12.5px] leading-relaxed whitespace-pre-wrap text-ink-2 [overflow-wrap:anywhere]">{row}</span>
+                  <span className="min-w-0 chat-text-12.5 leading-relaxed whitespace-pre-wrap text-ink-2 [overflow-wrap:anywhere]">{row}</span>
                 </div>
               ))}
             </div>

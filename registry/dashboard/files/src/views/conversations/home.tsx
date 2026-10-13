@@ -79,7 +79,7 @@ export function HomePage() {
           </span>
         </h1>
 
-        <div className="home-reveal relative mt-7" style={homeRevealStyle(stage >= 3)}>
+        <div className="chat home-reveal relative mt-7" style={homeRevealStyle(stage >= 3)}>
           <PromptBar
             autoFocus
             placeholder={chosen === undefined ? "The App has no agent to talk to" : `Ask ${assistantName(chosen)} anything…`}
