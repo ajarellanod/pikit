@@ -236,9 +236,12 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   const sentAt = chats.lastSentAt(id);
   const answering = last?.kind === "user" && sentAt !== undefined && Date.now() - sentAt < ANSWER_EXPECTED_MS;
   const waiting = live.busy || sentShown.some((each) => !each.queued) || answering;
-  // While the model thinks or a tool runs, its group's header says so: no second line says it again.
-  const lastPart = live.partial?.content.at(-1);
-  const activity = live.tools.length > 0 || lastPart?.type === "thinking" || lastPart?.type === "toolCall" ? undefined : lastPart?.type === "text" ? "Writing" : "Thinking";
+  // Once the reply ends on its thinking and calls, that group's header says the run goes, until text
+  // follows it (between two steps too, while nothing streams): no second line, and no blinking from one
+  // to the other.
+  const lastSegment = last?.kind === "reply" ? last.segments.at(-1) : undefined;
+  const stepsGoing = waiting && (lastSegment?.kind === "thinking" || lastSegment?.kind === "tools");
+  const activity = stepsGoing ? undefined : live.partial?.content.at(-1)?.type === "text" ? "Writing" : "Thinking";
   // One count per answer: from the message it answers, not from each of its steps.
   const since = sentShown.at(-1)?.at ?? (answering ? sentAt : [...messages].reverse().find((message) => message.role === "user" && message.timestamp !== undefined)?.timestamp);
   const webSearch = webSearchOf(described, conversation?.agent);
@@ -354,7 +357,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
               {turn.kind === "user" ? (
                 <UserBubble message={turn.message} from={conversation?.key} />
               ) : (
-                <Reply segments={turn.segments} />
+                <Reply segments={turn.segments} going={stepsGoing && i === turns.length - 1} />
               )}
             </div>
           ))}

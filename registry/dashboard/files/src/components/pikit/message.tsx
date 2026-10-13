@@ -192,11 +192,11 @@ export function stepsHeader(steps: Step[]): { working: boolean; active: string; 
   };
 }
 
-/** The thinking and the calls between two texts: one fold. */
-function Steps({ steps }: { steps: Step[] }) {
+/** The thinking and the calls between two texts: one fold; `going` while the run goes on after them (the model's next step). */
+function Steps({ steps, going = false }: { steps: Step[]; going?: boolean }) {
   const { working, active, done } = stepsHeader(steps);
   return (
-    <ThinkingState working={working} active={active} done={done} openWhileWorking={false}>
+    <ThinkingState working={working || going} active={working ? active : "Thinking"} done={done} openWhileWorking={false}>
       {steps.map((step, i) =>
         step.kind === "tools" ? (
           <ToolChips key={i} steps={step.calls.map((each) => ({ id: each.id, ...describeCall(each.name, each.arguments), status: each.status, detail: each.output }))} />
@@ -244,14 +244,30 @@ export function UserBubble({ message, from, animate = false }: { message: UserMe
   );
 }
 
-/** The agent's reply: its segments in order; `waiting` while its run goes, saying what goes on (`activity`). */
-export function Reply({ segments, waiting, activity = "Thinking", since }: { segments: Segment[]; waiting?: boolean; activity?: string; since?: number }) {
-  const blocks: ReactNode[] = blocksOf(segments).map((block, i) => {
+/**
+ * The agent's reply: its segments in order; `waiting` while its run goes, saying what goes on
+ * (`activity`) on a line of its own, or `going` when its last group (thinking, calls) says it.
+ */
+export function Reply({
+  segments,
+  waiting,
+  going = false,
+  activity = "Thinking",
+  since,
+}: {
+  segments: Segment[];
+  waiting?: boolean;
+  going?: boolean;
+  activity?: string;
+  since?: number;
+}) {
+  const all = blocksOf(segments);
+  const blocks: ReactNode[] = all.map((block, i) => {
     switch (block.kind) {
       case "text":
         return <Markdown key={i} text={block.text} streaming={block.streaming} className="max-w-[640px] chat-text-13.5 leading-[1.65] text-ink" />;
       case "steps":
-        return <Steps key={i} steps={block.steps} />;
+        return <Steps key={i} steps={block.steps} going={going && i === all.length - 1} />;
       case "error":
         return (
           <p key={i} className="max-w-[640px] rounded-card bg-red-tint px-3 py-2 chat-text-13 text-red [overflow-wrap:anywhere]">
