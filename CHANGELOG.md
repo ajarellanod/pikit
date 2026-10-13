@@ -106,7 +106,8 @@ there.
   once, and share their identical files (held by a test). The poller tries a failing update for 15
   minutes, never skipping past it, then tells its sender. Routing: `router-basic`, `router-rules`.
   Delivery: `outbound-durable` (on `wakeups` on both targets: a retry is a timer on a server and the
-  object's alarm on Cloudflare; transient failures never abandon, only an age of 24 hours does).
+  object's alarm on Cloudflare; transient failures never abandon, only an age of 24 hours does, also for a removed channel's pieces,
+  which no transport sends).
 - Conversations and storage: `conversations-file`, `conversations-kv`, `storage-sqlite`, `storage-do`,
   `storage-kv-sql`, `secrets-env`, `secrets-cloudflare`, `mailbox-local`, `wakeups-timers`,
   `platform-cloudflare` (mailbox, inbox and wakeups over one alarm).

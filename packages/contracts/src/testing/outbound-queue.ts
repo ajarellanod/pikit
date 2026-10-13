@@ -229,6 +229,33 @@ export function createOutboundQueueConformance(
       expect(w.delivered, [], "never delivered");
     }),
 
+    queueCase(`a channel's pieces left when it is gone (never attached again) are abandoned at the declared age, with no new message`, async (s) => {
+      const first = await s.open();
+      first.queue.attach("gone", scripted({ "g#0": [transient()] }));
+      first.queue.attach("chat", scripted());
+      await first.queue.enqueue(message("g", "gone:1", "one|two", "gone"));
+      await eventually(() => first.attempts() === 1, "the failed attempt");
+      await s.stopAll();
+
+      // The next process runs without that channel (it was removed): only the other one attaches.
+      const second = await s.open();
+      second.queue.attach("chat", scripted());
+      await second.queue.enqueue(message("c", "chat:1", "hello"));
+      await eventually(() => second.delivered.length === 1, "the other channel's message delivered");
+      const step = Math.ceil(maxAgeMs / 5);
+      for (let waited = step; waited <= maxAgeMs + 2 * step && second.abandoned.length < 2; waited += step) await s.clock.advance(step);
+      await eventually(() => second.abandoned.length === 2, "both pieces of the gone channel abandoned for their age");
+      expect(
+        second.abandoned.map((a) => [a.channel, a.key]),
+        [
+          ["gone", "g#0"],
+          ["gone", "g#1"],
+        ],
+        "the abandoned pieces, in order",
+      );
+      expect((await second.queue.pending({})).items, [], "pending once they were abandoned");
+    }),
+
     queueCase("a send that may have reached the platform is retried as a possible duplicate", async (s) => {
       const w = await s.open();
       const transport = scripted({ "m1#0": [new DeliveryError("transient", "timed out after sending", { maybeSent: true })] });

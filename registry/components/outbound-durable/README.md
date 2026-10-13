@@ -30,6 +30,7 @@ guarantees, and how they differ (receipts here; retries that never give up there
   | rate limited | waits what the platform asked; not counted as a failure |
   | permanent (bot blocked, chat gone) | abandoned at once |
   | anything, after 24 hours | abandoned |
+  | nothing: its channel has no transport (stopped, or removed from the project) | waits for one; abandoned after 24 hours |
 
   An abandoned piece is logged as an error, emits `outbound.abandoned` and gets a receipt.
 - **Woken by `wakeups`.** Sends and retries run in the handler it registers with `wakeups`
@@ -122,6 +123,9 @@ Delivered pieces are kept 7 days, abandoned ones 30, with their reason. Each del
 ```
 
 ## Removing it
+
+Removing a channel instead leaves its pending pieces here with no transport: they are abandoned
+(with a receipt and `outbound.abandoned`) once 24 hours old, without a new message.
 
 `pikit remove outbound-durable`: channels send directly again. Pieces still pending in the table are
 not sent by anyone; empty the table first if that matters.

@@ -246,6 +246,8 @@ interface OutboundQueue {
 - The same `idempotencyKey` enqueued twice is stored once. Each conversation's pieces go in order.
 - At-least-once: a piece whose send may have reached the platform goes again with
   `possibleDuplicate`.
+- A piece is abandoned at the provider's maximum age whatever the reason, also when its channel
+  never attaches a transport again (the channel was removed): nothing stays open for good.
 - Events `outbound.delivered` and `outbound.abandoned` are notices (log-events logs them);
   `receipts` is the record.
 - Transports attach rather than being a keyed capability, which would be a cycle (the queue would use
