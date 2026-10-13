@@ -5,7 +5,9 @@
 **Specified:** the contract is built: `ConversationRef.channel` (`packages/contracts/src/agent.ts`),
 recorded by `conversations.registry` and by the runtime, with its conformance case ("a conversation
 keeps the channel it was created with") and runtime-pi's test (a run sees it, in `prepare` and after a
-restart). The components below are not built.
+restart). Its first user is built too: `workspace-local`'s `per: "channel"` (below). A prompt
+and tools per channel need no component (`prepare`); a prompt from files waits for
+[agent folders](agent-folders.md).
 
 **Needed by:** nothing required.
 
@@ -41,17 +43,18 @@ Telegram).
   A prompt that is data (edited live, or a file per channel, [agent folders](agent-folders.md)) is an
   agent extension's system prompt section instead: sections run in the conversation's scope, so one
   reads `context.value(CONVERSATION)?.channel` and returns that channel's text.
-- **A directory per channel is `workspace-local`'s option**, not a new capability: `per: "agent"`
-  (today's, the default) or `"channel"`, `<root>/<agent>/<channel>/`. A conversation with no channel
-  recorded (a ref made by hand, a test) works in the agent's directory. A channel name that is not a
-  safe directory name is refused, as an agent's is (`AGENT_NAME` in workspace-local), never cleaned up.
-  `"conversation"` (one directory per conversation, pi-hive's per space) would name it by a hash of the
-  key, which hashes the key without reading it.
+- **A directory per channel is `workspace-local`'s option** (built), not a new capability:
+  `per: "agent"` (the default) or `"channel"`, `<root>/<agent>/<channel>/`, a channel instance's `:`
+  written `.` (`telegram:ops` → `telegram.ops/`). A conversation with no channel recorded (a ref made
+  by hand, a test) works in the agent's directory. A channel that is not a safe directory name is
+  refused, as an agent's is, never cleaned up. `"conversation"` (one directory per conversation,
+  pi-hive's per space) would name it by a hash of the key, which hashes the key without reading it.
 - **Order, not isolation**: the same caveat as workspace-local's own. `bash` can `cd ..` into another
   channel's directory; isolation is [sandboxed execution](sandboxed-execution.md)'s.
-- **Tests**: workspace-local's own tests and `createWorkspaceConformance` with `per: "channel"`: two
-  channels of one agent get two directories, a conversation without a channel gets the agent's, an
-  unsafe channel name fails the tool call and creates nothing outside `root`.
+- **Tests** (workspace-local's, built): two channels of one agent get two directories, a conversation
+  without a channel gets the agent's, an unsafe channel fails the tool call and creates nothing, a real
+  run's later message without a channel writes in its conversation's channel directory, and
+  `createWorkspaceConformance` passes with `per: "channel"`.
 
 ## Pi first
 Pi knows no channels: a Pi session has one working directory. pi-durable's conversation documents
@@ -59,8 +62,6 @@ keep the channel (`ConversationDoc`), and its `ExecutionEnv` is what a workspace
 (`atCwd`). Nothing else to take from Pi.
 
 ## Open questions
-- Channel instances as directory names: Telegram's `channel` is its instance's name; an instance named
-  with characters a path refuses needs a rule (refuse at start, or a mapping in config).
 - Whether a delegated child (`delegate`) works in its own directory or in its parent's. Today it is a
   conversation of its own channel, so `per: "channel"` gives it `<agent>/delegate/`.
 - Per conversation on Cloudflare: `execution-do` is already one environment per Durable Object, so a

@@ -28,6 +28,27 @@ Without it, every agent's tools work in `execution`'s one directory. With it, ea
 A tool called outside a run (a test calling it directly) has no conversation, and works in
 `execution`'s directory.
 
+## A directory per channel
+
+With `per: "channel"`, each channel of an agent has a directory of its own inside the agent's:
+
+```
+.pikit/workspace/agents/support/telegram/
+.pikit/workspace/agents/support/telegram.ops/   # the instance telegram:ops
+.pikit/workspace/agents/support/dashboard/
+.pikit/workspace/agents/support/delegate/       # tasks other agents gave it (tool-delegate)
+```
+
+- The channel is the conversation's (`ConversationRef.channel`): the one it was created on, for good.
+  The runtime gives it to every run, so an operator's message from the dashboard into a Telegram
+  conversation works in `telegram/`, not in `dashboard/`.
+- A channel instance's `:` becomes `.` (`telegram:ops` → `telegram.ops`). A channel whose parts are
+  not lowercase names (`..`, `a/b`, `tele.gram`) is refused: the tool call fails, and nothing is
+  created.
+- A conversation with no channel recorded (a ref made by hand, in a test) works in the agent's
+  directory.
+- It is still order, not isolation (below): `bash` can `cd ..` into another channel's directory.
+
 ## Order, not isolation
 
 A directory per agent keeps the agents' files apart when they behave. It is not a wall:
@@ -44,6 +65,7 @@ Until then, give `bash` only to the agents that need it, and see `execution-loca
 ```ts
 "workspace-local": {
   root: "agents", // default; relative to execution's working directory, or absolute
+  per: "agent",   // default; "channel" for a directory per channel of each agent
 }
 ```
 
@@ -53,6 +75,9 @@ Until then, give `bash` only to the agents that need it, and see `execution-loca
 directories. It covers:
 - the `workspace` conformance suite, and the `execution` one on an agent's directory (with a shell);
 - one directory per agent under `root`, relative to `execution`'s directory or absolute;
+- `per: "channel"`: a directory per channel inside the agent's (`telegram:ops` as `telegram.ops`), the
+  agent's own without a channel, unsafe channels refused, and in real runs a later message whose ref
+  has no channel still in its conversation's channel directory; the `workspace` suite again with it;
 - `execution`'s variables in an agent's commands, which run in its directory;
 - in real runs (scripted model), a file agent A writes is in A's directory and not in B's;
 - unsafe agent names refused;

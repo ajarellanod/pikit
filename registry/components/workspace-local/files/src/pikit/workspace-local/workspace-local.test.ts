@@ -70,6 +70,12 @@ for (const c of createWorkspaceConformance(async () => {
 })) {
   test(`workspace-local ${c.group}: ${c.name}`, () => c.run());
 }
+for (const c of createWorkspaceConformance(async () => {
+  const { app, workspace } = await started(temporaryDir(), { per: "channel" });
+  return { provider: workspace, dispose: () => app.stop() };
+})) {
+  test(`workspace-local per channel ${c.group}: ${c.name}`, () => c.run());
+}
 
 // An agent's directory is still pi-durable's whole ExecutionEnv, with a shell.
 for (const c of createDurableExecutionConformance(async () => {
@@ -143,10 +149,47 @@ test("an agent name that could leave root is refused, and nothing is created", a
   await app.stop();
 });
 
-test("in real runs, a file agent A's write tool writes is in A's directory and not in B's", async () => {
+test("per channel, each channel of an agent gets a directory of its own inside the agent's; a channel instance's `:` becomes `.`", async () => {
   const dir = temporaryDir();
-  const root = join(dir, "agents");
-  // The runtime gives each tool call its conversation's workspace (runtime-pi's wiring: `harnessEnv`).
+  const { app, workspace } = await started(dir, { per: "channel" });
+  const resolve = async (channel?: string) => (await workspace.resolve({ ...conversation("support"), ...(channel !== undefined && { channel }) }, app.context())).env.cwd;
+
+  expect(await resolve("telegram")).toBe(join(dir, "agents", "support", "telegram"));
+  expect(await resolve("telegram:ops")).toBe(join(dir, "agents", "support", "telegram.ops"));
+  expect(await resolve("dashboard")).toBe(join(dir, "agents", "support", "dashboard"));
+  // No channel recorded (a ref made by hand): the agent's directory.
+  expect(await resolve()).toBe(join(dir, "agents", "support"));
+  expect(readdirSync(join(dir, "agents", "support")).sort()).toEqual(["dashboard", "telegram", "telegram.ops"]);
+  await app.stop();
+});
+
+test("per agent (the default), the channel changes nothing", async () => {
+  const dir = temporaryDir();
+  const { app, workspace } = await started(dir);
+
+  expect((await workspace.resolve({ ...conversation("support"), channel: "telegram" }, app.context())).env.cwd).toBe(join(dir, "agents", "support"));
+  await app.stop();
+});
+
+test("per channel, a channel that is not a safe directory name is refused, and nothing is created", async () => {
+  const dir = temporaryDir();
+  const { app, workspace } = await started(dir, { per: "channel" });
+
+  for (const channel of ["", "..", "a/b", "../escaped", "Telegram", "telegram:", ":ops", "telegram:..", "tele.gram"]) {
+    await expect(workspace.resolve({ ...conversation("support"), channel }, app.context())).rejects.toThrow("not a safe directory name");
+  }
+
+  expect(readdirSync(join(dir, "agents"))).toEqual([]);
+  expect(existsSync(join(dir, "escaped"))).toBe(false);
+  await app.stop();
+});
+
+/**
+ * Real runs over this component (scripted model, the `write` tool): the runtime gives each tool call its
+ * conversation's workspace (runtime-pi's wiring: `harnessEnv`). `ask` sends one message to a
+ * conversation of `agent` and resolves when its run has ended.
+ */
+async function realRuns(dir: string, config: Record<string, unknown> = {}) {
   let workspace!: WorkspaceProvider;
   const agents = ["alpha", "beta"].map((name) => defineAgent({ name, model: "faux/scripted", tools: ["write"] }));
   const settled: string[] = [];
@@ -158,7 +201,7 @@ test("in real runs, a file agent A's write tool writes is in A's directory and n
       return { start: () => void (workspace = provided.get()) };
     },
   });
-  const app = await defineApp({ components: [executionAt(dir), workspaceLocal, reader], logger: silentLogger }).create();
+  const app = await defineApp({ components: [executionAt(dir), workspaceLocal, reader], config: { "workspace-local": config }, logger: silentLogger }).create();
   await app.start();
   const sqlite = openSqliteDatabase(":memory:");
   const write = createWriteTool();
@@ -170,24 +213,57 @@ test("in real runs, a file agent A's write tool writes is in A's directory and n
     events: app.context(),
     workspace: () => workspace,
   });
-  /** A new conversation with `agent`, sent one message; resolves when its run has ended. */
-  const ask = async (agent: string, prompt: string) => {
-    const conversationId = await runtime.createConversation(app.context());
-    const requestId = `r-${agent}`;
-    await runtime.dispatch({ requestId, conversation: { key: `test:${agent}`, agent, conversationId }, prompt }, app.context());
-    while (!settled.includes(requestId)) await Bun.sleep(5);
+  let requests = 0;
+  return {
+    /** A new conversation of `agent` (with `channel`, when given). */
+    async conversation(agent: string, channel?: string): Promise<ConversationRef> {
+      const conversationId = await runtime.createConversation(app.context());
+      return { key: `test:${agent}:${conversationId}`, agent, conversationId, ...(channel !== undefined && { channel }) };
+    },
+    async ask(conversation: ConversationRef, prompt: string) {
+      const requestId = `r${++requests}`;
+      await runtime.dispatch({ requestId, conversation, prompt }, app.context());
+      while (!settled.includes(requestId)) await Bun.sleep(5);
+    },
+    async close() {
+      await runtime.close(app.context());
+      await sqlite.close();
+      await app.stop();
+    },
   };
+}
 
-  await ask("alpha", 'call: write {"path":"note.md","content":"from alpha"}');
-  await ask("beta", 'call: write {"path":"other.md","content":"from beta"}');
+test("in real runs, a file agent A's write tool writes is in A's directory and not in B's", async () => {
+  const dir = temporaryDir();
+  const root = join(dir, "agents");
+  const runs = await realRuns(dir);
+
+  await runs.ask(await runs.conversation("alpha"), 'call: write {"path":"note.md","content":"from alpha"}');
+  await runs.ask(await runs.conversation("beta"), 'call: write {"path":"other.md","content":"from beta"}');
 
   expect(readFileSync(join(root, "alpha", "note.md"), "utf8")).toBe("from alpha");
   expect(existsSync(join(root, "beta", "note.md"))).toBe(false);
   expect(readFileSync(join(root, "beta", "other.md"), "utf8")).toBe("from beta");
   expect(existsSync(join(root, "alpha", "other.md"))).toBe(false);
-  await runtime.close(app.context());
-  await sqlite.close();
-  await app.stop();
+  await runs.close();
+});
+
+test("per channel, in real runs: a conversation's files are in its channel's directory, also for a later message whose ref has no channel", async () => {
+  const dir = temporaryDir();
+  const root = join(dir, "agents");
+  const runs = await realRuns(dir, { per: "channel" });
+  const telegram = await runs.conversation("alpha", "telegram");
+
+  await runs.ask(telegram, 'call: write {"path":"one.md","content":"from telegram"}');
+  // An operator's message: the runtime gives the run the channel recorded with the conversation.
+  await runs.ask({ key: telegram.key, agent: telegram.agent, conversationId: telegram.conversationId }, 'call: write {"path":"two.md","content":"from the operator"}');
+  await runs.ask(await runs.conversation("alpha", "dashboard"), 'call: write {"path":"one.md","content":"from the dashboard"}');
+
+  expect(readFileSync(join(root, "alpha", "telegram", "one.md"), "utf8")).toBe("from telegram");
+  expect(readFileSync(join(root, "alpha", "telegram", "two.md"), "utf8")).toBe("from the operator");
+  expect(readFileSync(join(root, "alpha", "dashboard", "one.md"), "utf8")).toBe("from the dashboard");
+  expect(existsSync(join(root, "alpha", "one.md"))).toBe(false);
+  await runs.close();
 });
 
 test("it refuses to start when root cannot be a directory", async () => {

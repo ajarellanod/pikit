@@ -488,7 +488,8 @@ All three are pi-durable's `ExecutionEnv` (files and a shell), in `@pikit/pi-ada
 
 Providers: execution-local (server: the machine's filesystem and shell), execution-do (Cloudflare:
 files in the object's SQL, a simulated shell with `git`, `curl`, `node` as host commands, C7),
-workspace-local (server: one directory per agent, inside `execution`). Suites:
+workspace-local (server: one directory per agent, or per channel of each agent from `ConversationRef.channel`,
+inside `execution`). Suites:
 `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`),
 `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`), and for a shell with `git`,
 `createWorkspaceGitConformance` (`@pikit/pi-adapter/execution/testing`): the steward's steps
