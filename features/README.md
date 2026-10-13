@@ -32,6 +32,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [browser](browser.md) | ⭐ | A tool to read and act on web pages | No |
 | [channel-discord](channel-discord.md) | ⭐ | A Discord bot, in DMs, channels and threads | No |
 | [channel-email](channel-email.md) | ⭐ | An address for the agent; replies in the thread | No |
+| [channel-web](channel-web.md) | ⭐ | A chat page for users who are not operators, with the dashboard's UI pieces; admin stays apart | No |
 | [channel-slack](channel-slack.md) | ⭐ | A Slack app, by Events API or Socket Mode | No |
 | [channel-whatsapp](channel-whatsapp.md) | ⭐ | WhatsApp, by the Cloud API or a linked device | No |
 | [cli-features](cli-features.md) | ⭐ | `pikit new` with several channels and a step of features (dashboard, multi-agent, subagents, MCP…); several channels, features and groups of them (agents from the dashboard) built; subagents not | Yes: the launch |
