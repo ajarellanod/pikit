@@ -302,10 +302,12 @@ test("with wakeups, a long run is driven over several slices: each cut asks agai
 
 /**
  * `storage.sql` in memory whose next pi-durable entry append fails once `failNext` is called, as a lost
- * connection would: pi-durable's Harness fails and closes.
+ * connection would: pi-durable's Harness fails and closes. While `down(true)`, every statement fails.
  */
 function flakyStorage() {
   let fail = false;
+  let isDown = false;
+  const unreachable = () => Promise.reject(new Error("the storage is unreachable"));
   let open: ReturnType<typeof openSqliteDatabase> | undefined;
   const component = defineComponent({
     name: "storage-flaky",
@@ -315,19 +317,22 @@ function flakyStorage() {
         return open.database;
       };
       pikit.provide("storage.sql", {
-        query: (sql, params) => db().query(sql, params),
-        run: (sql, params) => db().run(sql, params),
+        query: (sql, params) => (isDown ? unreachable() : db().query(sql, params)),
+        run: (sql, params) => (isDown ? unreachable() : db().run(sql, params)),
         transaction: (work) =>
-          db().transaction((tx) =>
-            work({
-              query: (sql, params) => tx.query(sql, params),
-              run: (sql, params) => {
-                if (!fail || !sql.includes("INSERT INTO entries")) return tx.run(sql, params);
-                fail = false;
-                return Promise.reject(new Error("the storage is unreachable"));
-              },
-            }),
-          ),
+          isDown
+            ? unreachable()
+            : db().transaction((tx) =>
+                work({
+                  query: (sql, params) => (isDown ? unreachable() : tx.query(sql, params)),
+                  run: (sql, params) => {
+                    if (isDown) return unreachable();
+                    if (!fail || !sql.includes("INSERT INTO entries")) return tx.run(sql, params);
+                    fail = false;
+                    return unreachable();
+                  },
+                }),
+              ),
       });
       return {
         start: () => void (open = openSqliteDatabase(":memory:")),
@@ -338,7 +343,7 @@ function flakyStorage() {
       };
     },
   });
-  return { component, failNext: () => void (fail = true) };
+  return { component, failNext: () => void (fail = true), down: (value: boolean) => void (isDown = value) };
 }
 
 /** A tool held until `release`; `held` resolves once it runs. */
@@ -374,6 +379,71 @@ test("on a server, a storage error that closes pi-durable mid-run: a timer opens
     await until(() => seen.results.length > 0, "the run's answer after pi-durable opened again");
     expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r1", "completed"]]);
   } finally {
+    await app.stop();
+  }
+}, 30_000);
+
+const REOPEN_FAILED = "runtime-pi: opening pi-durable again after a storage error failed; it tries again later";
+
+test("on a server, an open that finds the storage still down is tried again after a longer wait, and the run answers once it is back", async () => {
+  const hold = heldTool();
+  const flaky = flakyStorage();
+  const errors: string[] = [];
+  const logger = { ...silentLogger, error: (message: string) => void errors.push(message) };
+  const { agents, provider } = testComponents({ agents: [scriptedAgent(hold.tool)] });
+  const seen = observer();
+  const app = await defineApp({ components: [flaky.component, agents, provider, runtimePi, seen.component], logger }).create();
+  await app.start();
+  try {
+    const conversation = await seen.conversation("test:storage-down");
+    await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hold" }, app.context());
+    await hold.held;
+
+    flaky.down(true);
+    const failedAt = Date.now();
+    hold.release();
+    // The first open, a second later, finds the storage still down.
+    await until(() => errors.includes(REOPEN_FAILED), "an open that failed");
+    flaky.down(false);
+
+    await until(() => seen.results.length > 0, "the run's answer once the storage is back");
+    expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r1", "completed"]]);
+    expect(errors.filter((message) => message === REOPEN_FAILED)).toHaveLength(1);
+    // Opened after 1 s (failed), then after 2 s more: the wait doubled.
+    expect(Date.now() - failedAt).toBeGreaterThanOrEqual(2_900);
+  } finally {
+    flaky.down(false);
+    await app.stop();
+  }
+}, 30_000);
+
+test("with wakeups, a handler whose open finds the storage still down rejects, its provider runs it again, and the run answers once the storage is back", async () => {
+  const hold = heldTool();
+  const flaky = flakyStorage();
+  const { agents, provider } = testComponents({ agents: [scriptedAgent(hold.tool)] });
+  const seen = observer();
+  const app = await defineApp({
+    components: [flaky.component, agents, provider, createMemoryWakeups({ retryMs: 100 }), runtimePi, seen.component],
+    logger: silentLogger,
+  }).create();
+  await app.start();
+  try {
+    const conversation = await seen.conversation("test:storage-down");
+    await seen.runtime().dispatch({ requestId: "r1", conversation, prompt: "hold" }, app.context());
+    await hold.held;
+
+    flaky.down(true);
+    hold.release();
+    // The wakeup comes a second later and its handler fails while the storage is down; nothing but
+    // the provider's retries runs it again.
+    await Bun.sleep(1_500);
+    expect(seen.results).toEqual([]);
+    flaky.down(false);
+
+    await until(() => seen.results.length > 0, "the run's answer once the storage is back");
+    expect(seen.results.map((r) => [r.requestId, r.kind])).toEqual([["r1", "completed"]]);
+  } finally {
+    flaky.down(false);
     await app.stop();
   }
 }, 30_000);

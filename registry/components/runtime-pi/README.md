@@ -115,9 +115,12 @@ pi-durable keeps every message it admitted and how it ended; `agent.submissions`
 - a **storage error** (the database unreachable, a failed write) closes pi-durable for good: the call
   that hit it fails, and what was going stays pending in the storage, as after a crash. runtime-pi
   opens pi-durable again without waiting for a message: on a server from a timer, with `wakeups` by
-  asking for one ("Cloudflare" below). It waits 1 s, doubled for each failure in a row up to 5
-  minutes, and starts over once an open worked; what it opens resumes as at start. A message that
-  arrives first opens it at once.
+  asking for one ("Cloudflare" below). It waits 1 s, doubled for each error in a row up to 5
+  minutes (`reopen.ts`); an open that works does not start the waits over (a storage that opens and
+  fails again at once would be opened every second), 10 minutes without an error do. On a server an
+  open that fails counts as one more error; with `wakeups` the handler rejects and the wakeups
+  provider runs it again. What it opens resumes as at start. A message that arrives first opens it at
+  once.
 
 ## Cloudflare: runs driven by wakeups, in slices
 
@@ -152,7 +155,9 @@ has work pending. The handler:
    it again and the wait continues from its checkpoint.
 
 After a storage error closed pi-durable (the runtime's `onFailure`), runtime-pi asks for the handler
-after the backoff above; its step 1 opens pi-durable again, and what the failure left goes on.
+after the backoff above; its step 1 opens pi-durable again, and what the failure left goes on. If the
+storage is still down, that open fails and the handler rejects: the wakeups provider runs it again
+after its own backoff (the `wakeups` contract never gives up).
 
 A request carries nothing: the handler reads what to do from pi-durable each time. So a handler that runs twice (delivery is at least once), late, or in a new object after an
 eviction does the right thing. An object evicted mid-run is started again by its alarm, and the run
