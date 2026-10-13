@@ -141,7 +141,7 @@ so. deployment-cloudflare's README has the rules ("Rolling back").
   and no `exec`, and `down` deletes data (deployment-cloudflare's README).
 
 What a component cannot do on a target is in that component's README: channel-http (no Worker half
-yet), provider-anthropic and credentials-file (no subscription login on Cloudflare), execution-do
+yet), provider-anthropic, provider-openai and credentials-file (no subscription login on Cloudflare), execution-do
 (its simulated shell), admin-api (on Cloudflare, no Delivery view).
 
 Moving a project to the other target is swapping those components, never changing an agent, a route

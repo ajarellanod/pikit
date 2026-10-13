@@ -46,7 +46,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, server-bun? | `createHealthConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
-| `model.provider` | keyed | provider-anthropic, provider-faux, provider-openai-compatible, provider-openrouter | agents-live?, runtime-pi? | none |
+| `model.provider` | keyed | provider-anthropic, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
 | `execution` | single | execution-do, execution-local | tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-local | tool-bash | same |
@@ -455,7 +455,7 @@ adapter). Suite:
 
 - **`model.provider`** (keyed, `@pikit/pi-adapter`): one pi-ai `Provider` per id; agents name models
   as `provider/modelId`. Every pi-ai provider is a subpath `@pikit/pi-adapter/providers/<id>`.
-  Providers: provider-anthropic, provider-openrouter, provider-openai-compatible, provider-faux
+  Providers: provider-anthropic, provider-openai, provider-openrouter, provider-openai-compatible, provider-faux
   (scripted models for tests). `modelProviders` in `component.json` lists their keys.
 - **`model.credentials`** (`@pikit/pi-adapter`): pi-ai's `CredentialStore`, per provider id; pi-ai
   writes refreshed OAuth tokens back. Without it, providers read their environment variables (through

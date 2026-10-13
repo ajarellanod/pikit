@@ -15,14 +15,16 @@
  *   prompts on this terminal: a choice (Anthropic's login method: browser or copy-code) as a numbered
  *   list, a secret without echo. `<option>` answers a choice that offers it without asking
  *   (`copy_code` where the app runs: its container publishes no port, so a browser cannot reach the
- *   login's callback); without a terminal, a choice takes its first option, pi-ai's default.
+ *   login's callback); without a terminal, a choice takes its first option, pi-ai's default. A
+ *   login that names its installation (OpenAI's Sign in with ChatGPT) gets `deviceId`'s UUID, kept
+ *   in `.pikit/device-id` beside the credentials, and introduces itself as `pikit`.
  *
  * It uses the project's `@pikit/core` and `@pikit/pi-adapter`, resolved from its `node_modules`.
  * It never prints a credential, and never reads or writes Pi's own `~/.pi/agent/auth.json`: a
  * refresh here would rotate the token the Pi CLI holds.
  */
 
-import { writeFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createInterface } from "node:readline/promises";
 import { Writable } from "node:stream";
@@ -68,8 +70,34 @@ type ModelsFrom = (
   options: { credentials: CredentialStore | undefined },
 ) => {
   checkAuth(providerId: string): Promise<unknown>;
-  login(providerId: string, type: "oauth", interaction: AuthInteraction): Promise<unknown>;
+  login(providerId: string, type: "oauth", interaction: AuthInteraction, options: LoginOptions): Promise<unknown>;
 };
+/** pi-ai's `LoginOptions`, the two this script sets. */
+type LoginOptions = { getDeviceId(): string; agentName: string };
+
+/** What the login introduces itself as (OpenAI's agent name hint), in place of pi's own name. */
+const AGENT_NAME = "pikit";
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+/**
+ * This installation's id, a UUID made at its first login and the same at every later one (pi-ai's
+ * `getDeviceId`: OpenAI names the installation by it). Kept in `.pikit/device-id`, which is where the
+ * app runs, as the credentials are (the Docker volume for `pikit up`).
+ */
+export function deviceId(projectDir: string): string {
+  const file = join(projectDir, ".pikit", "device-id");
+  let stored = "";
+  try {
+    stored = readFileSync(file, "utf8").trim();
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+  }
+  if (UUID.test(stored)) return stored;
+  const made = crypto.randomUUID();
+  mkdirSync(join(projectDir, ".pikit"), { recursive: true, mode: 0o700 });
+  writeFileSync(file, `${made}\n`);
+  return made;
+}
 
 export type CredentialsResult =
   | {
@@ -157,7 +185,7 @@ async function login(projectDir: string, providerId: string, preferred: string |
       return { ok: false, error: "no installed component provides model.credentials, so a login has nowhere to be stored (install credentials-file)" };
     }
     const interaction = choosing(loginInteraction(terminal), terminal, { preferred, interactive: process.stdin.isTTY === true });
-    await models([provider], { credentials: found.credentials }).login(providerId, "oauth", interaction);
+    await models([provider], { credentials: found.credentials }).login(providerId, "oauth", interaction, { getDeviceId: () => deviceId(projectDir), agentName: AGENT_NAME });
     return { ok: true, providers: { [providerId]: true }, store, ...offered(found) };
   } finally {
     terminal.close();

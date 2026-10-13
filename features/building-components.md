@@ -140,8 +140,8 @@ MANIFESTO principle 13 promises a conformance suite for every contract. These do
   runs as a runtime groups them. Only `prunes` is left out: past the log's retention, runtime-pi's
   `get` reads pi-durable. The log's pruning runs under the feed suite (`answers.test.ts`), and crash
   recovery has its own tests (`recovery.test.ts`, `submissions.test.ts`).
-- **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openrouter,
-  provider-openai-compatible and provider-faux each test their own.
+- **`model.provider`.** pi-ai's `Provider`: no suite; provider-anthropic, provider-openai,
+  provider-openrouter, provider-openai-compatible and provider-faux each test their own.
 - **`agent.conversations`.** Only exercised through the `agent.runtime` and `conversations.registry`
   suites (a fixture creates conversations with it), never on its own.
 - **`route.resolve` as a router's stage.** The channel suite checks that a channel honours a stage's

@@ -101,7 +101,8 @@ there.
 - Runtime and models: `runtime-pi` (resumes what is pending at start; with `wakeups`, drives runs in
   slices; after a storage error, opens pi-durable again by itself, with a backoff; model keys read through `secrets`; refuses to start an agent that names a coding tool with
   no environment, naming what to install), `provider-anthropic` (API keys on both targets, its login
-  on a server), `provider-openrouter` (`apiBase`), `provider-openai-compatible` (any endpoint that
+  on a server), `provider-openai` (API keys on both targets, Sign in with ChatGPT on a server: a
+  ChatGPT subscription), `provider-openrouter` (`apiBase`), `provider-openai-compatible` (any endpoint that
   speaks OpenAI's API: `id`, `baseUrl`, the key's name, `models`), `provider-faux` (fake
   models for tests and trials: `faux/echo`, and `faux/scripted`, which calls a tool on
   `call: <tool> <json>` and shows the system prompt on `echo-system`), `credentials-file`.
@@ -252,7 +253,9 @@ there.
   config redacted.
 - `configure` and `up` check credentials only for the model providers the agents name, and reach
   the deployment (Docker) only when one is missing here; `dev` checks this machine's. A provider's key
-  name comes from its component's manifest, and a login is offered only where pi-ai has one.
+  name comes from its component's manifest, and a login is offered only where pi-ai has one. A
+  login introduces itself as `pikit` and names its installation by a UUID kept in `.pikit/device-id`
+  (Sign in with ChatGPT needs one).
 - `pikit new` on a server makes the project a git repository on `main`, everything committed (without
   git it says so and goes on).
 - `pikit new` copies the skills for AI agents (`.agents/skills/`) into every project, with where the

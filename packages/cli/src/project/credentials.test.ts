@@ -2,8 +2,11 @@
 // over a stubbed terminal, and `lineTerminal` over in-memory streams. No network, no pi-ai login.
 
 import { expect, test } from "bun:test";
+import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { PassThrough } from "node:stream";
-import { CREDENTIALS_MODULE, type CredentialsModule, choosing, type LoginTerminal, lineTerminal } from "./credentials.ts";
+import { CREDENTIALS_MODULE, type CredentialsModule, choosing, deviceId, type LoginTerminal, lineTerminal } from "./credentials.ts";
 
 // As the script does at run time: the adapter's module, not a type import (see credentials.ts).
 const { loginInteraction } = (await import(CREDENTIALS_MODULE)) as CredentialsModule;
@@ -128,5 +131,25 @@ test("lineTerminal gives up a question its signal aborts (the browser came back 
     expect(written()).toContain("shown");
   } finally {
     terminal.close();
+  }
+});
+
+test("the installation's device id is a UUID made at the first login, the same at every later one, in .pikit/device-id", () => {
+  const project = mkdtempSync(join(tmpdir(), "pikit-device-id-"));
+  try {
+    const first = deviceId(project);
+
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(deviceId(project)).toBe(first);
+    expect(readFileSync(join(project, ".pikit", "device-id"), "utf8").trim()).toBe(first);
+    expect(statSync(join(project, ".pikit")).mode & 0o777).toBe(0o700);
+
+    // A file that holds no UUID is replaced, never passed to pi-ai (which refuses it).
+    writeFileSync(join(project, ".pikit", "device-id"), "not a uuid\n");
+    const replaced = deviceId(project);
+    expect(replaced).not.toBe(first);
+    expect(deviceId(project)).toBe(replaced);
+  } finally {
+    rmSync(project, { recursive: true, force: true });
   }
 });

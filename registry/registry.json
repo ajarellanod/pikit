@@ -230,6 +230,15 @@
       ],
       "path": "components/provider-faux"
     },
+    "provider-openai": {
+      "version": "0.0.0",
+      "description": "OpenAI's models for your agents, with an API key or a ChatGPT subscription (Sign in with ChatGPT). An agent names one as `openai/<modelId>`, for example `openai/gpt-5.5`.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/provider-openai"
+    },
     "provider-openai-compatible": {
       "version": "0.0.0",
       "description": "The models of any endpoint that speaks OpenAI's chat completions (vLLM, Ollama, LM Studio, a gateway), for your agents. An agent names one as `<id>/<model>`, for example `ollama/llama3.1:8b`.",

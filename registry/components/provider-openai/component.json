@@ -1,0 +1,41 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "provider-openai",
+  "version": "0.0.0",
+  "description": "OpenAI's models for your agents, with an API key or a ChatGPT subscription (Sign in with ChatGPT). An agent names one as `openai/<modelId>`, for example `openai/gpt-5.5`.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "model.provider"
+  ],
+  "modelProviders": [
+    "openai"
+  ],
+  "dependencies": {
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "OPENAI_API_KEY",
+      "secret": true,
+      "required": false,
+      "description": "An OpenAI API key (platform.openai.com/api-keys). Read by pi-ai only when model.credentials stores nothing for openai."
+    }
+  ]
+}
