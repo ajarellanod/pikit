@@ -66,26 +66,31 @@ export async function projectKitCommit(): Promise<string | undefined> {
   }
 }
 
-/** An agent as the section says it: its name, its model, the names of its tools and extensions, whether it is the steward. */
+/** An agent as the section says it: its name, its model, the names of its tools, extensions and skills, whether it is the steward. */
 export interface AgentSummary {
   name: string;
   model: string;
   tools: string[];
   extensions: string[];
+  skills: string[];
   steward: boolean;
 }
 
 /** `definition` (an `agent.definition`) as the section says it. */
 export function agentSummary(
   name: string,
-  definition: { model?: unknown; tools?: readonly unknown[]; extensions?: readonly unknown[]; steward?: unknown } | undefined,
+  definition: { model?: unknown; tools?: readonly unknown[]; extensions?: readonly unknown[]; skills?: readonly unknown[]; steward?: unknown } | undefined,
 ): AgentSummary {
   const tools = (definition?.tools ?? []).flatMap((tool) => {
     const named = typeof tool === "string" ? tool : (tool as { name?: unknown } | null)?.name;
     return typeof named === "string" ? [named] : [];
   });
   const extensions = (definition?.extensions ?? []).filter((extension): extension is string => typeof extension === "string");
-  return { name, model: typeof definition?.model === "string" ? definition.model : "", tools, extensions, steward: definition?.steward === true };
+  const skills = (definition?.skills ?? []).flatMap((skill) => {
+    const named = (skill as { name?: unknown } | null)?.name;
+    return typeof named === "string" ? [named] : [];
+  });
+  return { name, model: typeof definition?.model === "string" ? definition.model : "", tools, extensions, skills, steward: definition?.steward === true };
 }
 
 /**
@@ -129,7 +134,8 @@ export function compositionText(description: AppDescription, agents: readonly Ag
   for (const agent of agents) {
     const tools = agent.tools.length > 0 ? agent.tools.join(", ") : "none";
     const extensions = agent.extensions.length > 0 ? `; extensions ${agent.extensions.join(", ")}` : "";
-    lines.push(`- ${agent.name}${agent.steward ? " (the steward)" : ""}: model ${agent.model}; tools ${tools}${extensions}`);
+    const skills = agent.skills.length > 0 ? `; skills ${agent.skills.join(", ")}` : "";
+    lines.push(`- ${agent.name}${agent.steward ? " (the steward)" : ""}: model ${agent.model}; tools ${tools}${extensions}${skills}`);
   }
 
   // Config holds no secret (K13); one put there by mistake is still never shown.

@@ -1,0 +1,41 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "tool-delegate",
+  "version": "0.0.0",
+  "title": "Delegation: your agent hands a task to another agent (the delegate tool)",
+  "description": "The `delegate` tool, for the agents that name it: a task handed to another agent of the project, in a child conversation on pi-durable's subagents, answered now or later as a message.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": [
+      "agent.definition"
+    ]
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "delegate": "safe"
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

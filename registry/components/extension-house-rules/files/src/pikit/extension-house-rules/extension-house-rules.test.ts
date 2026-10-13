@@ -10,9 +10,10 @@
 import { expect, test } from "bun:test";
 import { defineApp, silentLogger } from "@pikit/core";
 import type {} from "@pikit/pi-adapter";
-import houseRules, { createHouseRules, HOUSE_RULES, houseRulesBlock, houseRulesText } from "./index.ts";
+import houseRules, { createHouseRules, HOUSE_RULES, houseRulesBlock, houseRulesText, senderBlock } from "./index.ts";
 
-const config = { rules: ["Answer in English.", "Never share a customer's email address."], deniedTools: ["bash", "write"] };
+const config = { rules: ["Answer in English.", "Never share a customer's email address."], deniedTools: ["bash", "write"], senderTools: [] };
+const none = { rules: [], deniedTools: [], senderTools: [] };
 
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const app = await defineApp({ components: [houseRules], logger: silentLogger }).create();
@@ -38,8 +39,11 @@ test("the section lists the rules and the refused tools; with neither, there is 
   expect(houseRulesText(config)).toBe(
     "- Answer in English.\n- Never share a customer's email address.\n- Do not call these tools, they are refused here: bash, write.",
   );
-  expect(houseRulesText({ rules: ["Be brief."], deniedTools: [] })).toBe("- Be brief.");
-  expect(houseRulesText({ rules: [], deniedTools: [] })).toBeUndefined();
+  expect(houseRulesText({ ...none, rules: ["Be brief."] })).toBe("- Be brief.");
+  expect(houseRulesText(none)).toBeUndefined();
+  expect(houseRulesText({ ...none, senderTools: [{ tool: "bash", senders: ["telegram:1"] }] })).toBe(
+    "- These tools run only for some of the people you answer, and are refused for the others: bash.",
+  );
 
   // The section renders the same text on every request: it reads nothing but config.
   const section = createHouseRules(config).sections?.[0];
@@ -51,11 +55,24 @@ test("the section lists the rules and the refused tools; with neither, there is 
 test("a denied tool is blocked with a reason the model reads; any other runs", () => {
   expect(houseRulesBlock(config, "bash")).toBe('The tool "bash" is not allowed here (house rules).');
   expect(houseRulesBlock(config, "read")).toBeUndefined();
-  expect(houseRulesBlock({ rules: [], deniedTools: [] }, "bash")).toBeUndefined();
+  expect(houseRulesBlock(none, "bash")).toBeUndefined();
+});
+
+test("a tool kept for some senders runs only when every request of the run came from one of them", () => {
+  const kept = { ...none, senderTools: [{ tool: "bash", senders: ["telegram:1", "dashboard:ops"] }] };
+  const from = (channel: string, id: string) => ({ requestId: `${channel}-${id}`, sender: { channel, id } });
+
+  expect(senderBlock(kept, "bash", [from("telegram", "1")])).toBeUndefined();
+  expect(senderBlock(kept, "bash", [from("telegram", "1"), from("dashboard", "ops")])).toBeUndefined();
+  expect(senderBlock(kept, "read", [from("telegram", "2")])).toBeUndefined();
+  // Anyone else in the run, a request without a sender, or no run at all: refused.
+  for (const requests of [[from("telegram", "1"), from("telegram", "2")], [{ requestId: "r1" }], [], undefined]) {
+    expect(senderBlock(kept, "bash", requests)).toBe('The tool "bash" runs only for some senders, and this run answers someone else (house rules).');
+  }
 });
 
 test("config is checked when the App is defined: an empty rule or a tool name a model cannot call is refused", () => {
-  for (const bad of [{ rules: [""] }, { deniedTools: ["rm -rf"] }]) {
+  for (const bad of [{ rules: [""] }, { deniedTools: ["rm -rf"] }, { senderTools: [{ tool: "bash", senders: [] }] }, { senderTools: [{ tool: "bash", senders: ["alice"] }] }]) {
     expect(() => defineApp({ components: [houseRules], config: { "extension-house-rules": bad }, logger: silentLogger })).toThrow("/extension-house-rules/");
   }
 });

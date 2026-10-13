@@ -11,8 +11,9 @@ is at the end. Answer questions about yourself from it and from the docs, never 
   (`@pikit/core`) only composes them. Keyed capabilities hold one per name (`agent.tool`,
   `agent.extension`, `agent.definition`). **Pipelines** are ordered stages (`route.resolve` picks the
   agent of a message).
-- **Agents** are `src/agents/<name>/agent.ts` (`defineAgent`: model, system prompt, tools, extensions),
-  run by Pi through runtime-pi with only the tools and extensions they name.
+- **Agents** are `src/agents/<name>/agent.ts` (`defineAgent`: model, system prompt, tools, extensions,
+  skills), run by Pi through runtime-pi with only the tools and extensions they name. A skill is a
+  `SKILL.md` the agent loads with its `skill` tool when a task matches its description.
 - A message: a channel admits it, the router picks the agent, the runtime runs it in its
   conversation (checkpointed: a restart loses nothing), the channel delivers the answer.
 - **Targets:** `server`, one long-lived process (Docker); `durable`, Cloudflare: a Worker receives
@@ -20,7 +21,8 @@ is at the end. Answer questions about yourself from it and from the docs, never 
   with its own App, where agents run.
 
 ## How each part is changed
-- Your model, prompt, tools and extensions: `src/agents/<agent>/agent.ts`.
+- Your model, prompt, tools, extensions and skills: `src/agents/<agent>/agent.ts` (a skill's text in
+  its own `SKILL.md`, read with `defineSkill`).
 - A behaviour (a channel, a tool, a store, a route): a component in `src/pikit/`, listed in
   `pikit.config.ts` (skill `pikit-component`).
 - What every request carries, or a check on tool calls: an agent extension (skill `pikit-extension`).

@@ -74,13 +74,28 @@ async function appWith(stages: (pikit: Parameters<ComponentDefinition["setup"]>[
   return (await defineApp({ components, logger: options.logger ?? silentLogger }).create()).context();
 }
 
-test("admitInbound: normalized, routed, into its conversation, dispatched as the normalized text", async () => {
+test("admitInbound: normalized, routed, into its conversation, dispatched as the normalized text, its actor the sender", async () => {
   const e = ends();
   const ctx = await appWith((pikit) => pikit.pipeline("inbound.normalize", (m) => ({ ...m, text: m.text.toUpperCase() })));
   const outcome = await admitInbound(ctx, message, { ...e, key: "test:c1" });
 
   expect(outcome).toMatchObject({ kind: "admitted", admission: { kind: "started", requestId: "m1" }, conversation: { key: "test:c1", agent: "support" } });
-  expect(e.dispatched).toEqual([{ requestId: "m1", prompt: "HELLO", conversation: { key: "test:c1", agent: "support", conversationId: "conversation-of-test:c1" } }]);
+  expect(e.dispatched).toEqual([
+    {
+      requestId: "m1",
+      prompt: "HELLO",
+      sender: { channel: "test", id: "someone" },
+      conversation: { key: "test:c1", agent: "support", conversationId: "conversation-of-test:c1" },
+    },
+  ]);
+});
+
+test("admitInbound: the sender is the actor a normalize stage leaves (it may resolve one), on the message's own channel", async () => {
+  const e = ends();
+  const ctx = await appWith((pikit) => pikit.pipeline("inbound.normalize", (m) => ({ ...m, actor: { id: `person:${m.actor.id}` } })));
+  await admitInbound(ctx, message, { ...e, key: "test:c1" });
+
+  expect(e.dispatched[0]?.sender).toEqual({ channel: "test", id: "person:someone" });
 });
 
 test("admitInbound: a redelivered message is a duplicate, and runs once", async () => {

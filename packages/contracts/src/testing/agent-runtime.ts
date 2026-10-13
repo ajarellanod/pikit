@@ -13,7 +13,9 @@
  * - Each turn answers `answer: <text of the newest inbound message>`.
  * - A turn whose newest message is exactly `hold` first calls a tool that blocks until
  *   `fixture.hold.release()`. The tool honours cancellation. Once it returns, the turn answers the
- *   newest inbound message as usual (`answer: hold`).
+ *   newest inbound message as usual (`answer: hold`). Each call first reads the run's requests from
+ *   its context (`RUN_REQUESTS`), which `fixture.hold.requests()` returns. Once released, a later
+ *   call returns at once.
  * - `holdAtEnd()` pauses the next run at its final answer, before it ends.
  * - `failNext()` makes the next model call wait, then fail: the run in progress fails.
  *
@@ -35,7 +37,8 @@ import {
   silentLogger,
   withCancel,
 } from "@pikit/core";
-import type { Admission, AgentRuntime, ConversationRef } from "../agent.ts";
+import type { Admission, AgentRuntime, ConversationRef, Sender } from "../agent.ts";
+import type { RunRequest } from "../run-requests.ts";
 import type { ConformanceCase } from "@pikit/core/testing";
 
 /** A fresh set of records and a scripted agent, built for one case. */
@@ -57,6 +60,11 @@ export interface AgentRuntimeFixture {
     readonly started: Promise<void>;
     /** Lets the tool return. */
     release(): void;
+    /**
+     * What the tool's last call read from its context's `RUN_REQUESTS` (`list`), as it read it;
+     * `undefined` before any call, or when the context had none.
+     */
+    requests(): readonly RunRequest[] | undefined;
   };
   /** Pause the next run at its final answer (the model's answer has not ended the run yet), until `release()`. */
   holdAtEnd(): { reached: Promise<void>; release(): void };
@@ -223,6 +231,63 @@ export function createAgentRuntimeConformance(
       expect(w.all("agent.started", (e) => e.requestId === "r4").length, 1, "runs started for r4");
     }),
 
+    runtimeCase("a message's sender reaches its run's tools with its request (RUN_REQUESTS)", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const alice: Sender = { channel: "conformance", id: "alice" };
+
+      await w.dispatch("r1", "hold", conversation, undefined, alice);
+      await s.within(s.fixture.hold.started, "the hold tool to start");
+
+      expect(s.fixture.hold.requests(), [{ requestId: "r1", sender: alice }], "the requests the tool read");
+      s.fixture.hold.release();
+      expect((await w.result("r1")).kind, "completed", "result");
+    }),
+
+    runtimeCase("a run's requests are the messages it took, each with its own sender or none", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const alice: Sender = { channel: "conformance", id: "alice" };
+      const bob: Sender = { channel: "conformance", id: "bob" };
+      await w.dispatch("r1", "hold", conversation, undefined, alice);
+      await s.within(s.fixture.hold.started, "the hold tool to start");
+
+      // Queued while the run goes: the next run takes both, and its hold call reads them.
+      await w.dispatch("r2", "first", conversation, undefined, bob);
+      await w.dispatch("r3", "hold", conversation);
+      s.fixture.hold.release();
+      await w.result("r1");
+      const next = await w.result("r2");
+
+      expect(next.requestIds, ["r2", "r3"], "the requests the next run answered");
+      expect(s.fixture.hold.requests(), [{ requestId: "r2", sender: bob }, { requestId: "r3" }], "the requests its tool read");
+    }),
+
+    runtimeCase("a steer that joins a run is among its requests from its tool round on", async (s) => {
+      const w = await s.worker();
+      const conversation = await s.fixture.conversation();
+      const alice: Sender = { channel: "conformance", id: "alice" };
+      const bob: Sender = { channel: "conformance", id: "bob" };
+      await w.dispatch("r1", "hold", conversation, undefined, alice);
+      await s.within(s.fixture.hold.started, "the hold tool to start");
+      expect(s.fixture.hold.requests(), [{ requestId: "r1", sender: alice }], "the requests before the steer");
+
+      // The steer is `hold` too: after the first call's round the run takes it and calls the tool again.
+      await s.within(w.runtime.dispatch({ requestId: "r2", conversation, prompt: "hold", whenBusy: "steer", sender: bob }, w.app.context()), "steer(r2)");
+      s.fixture.hold.release();
+
+      const result = await w.result("r1");
+      expect(result.requestIds, ["r1", "r2"], "the run's requests");
+      expect(
+        s.fixture.hold.requests(),
+        [
+          { requestId: "r1", sender: alice },
+          { requestId: "r2", sender: bob },
+        ],
+        "the requests its second call read",
+      );
+    }),
+
     runtimeCase("cancelling the caller's context stops the wait, not the run; agent.settled still arrives", async (s) => {
       const w = await s.worker();
       const conversation = await s.fixture.conversation();
@@ -376,7 +441,7 @@ export function createAgentRuntimeConformance(
 interface Worker {
   app: App;
   runtime: AgentRuntime;
-  dispatch(requestId: string, prompt: string, conversation: ConversationRef, ctx?: AppContext): Promise<Admission>;
+  dispatch(requestId: string, prompt: string, conversation: ConversationRef, ctx?: AppContext, sender?: Sender): Promise<Admission>;
   /** `dispatch` with `whenBusy: "steer"`. */
   steer(requestId: string, prompt: string, conversation: ConversationRef): Promise<Admission>;
   event<K extends AgentEventName>(name: K, match: (payload: AppEvents[K]) => boolean): Promise<AppEvents[K]>;
@@ -461,8 +526,8 @@ function createSubject(fixture: AgentRuntimeFixture, workers: Worker[], timeoutM
       const worker: Worker = {
         app,
         runtime: agentRuntime,
-        dispatch: (requestId, prompt, conversation, ctx) =>
-          within(agentRuntime.dispatch({ requestId, conversation, prompt }, ctx ?? app.context()), `dispatch(${requestId})`),
+        dispatch: (requestId, prompt, conversation, ctx, sender) =>
+          within(agentRuntime.dispatch({ requestId, conversation, prompt, ...(sender !== undefined && { sender }) }, ctx ?? app.context()), `dispatch(${requestId})`),
         steer: (requestId, prompt, conversation) =>
           within(agentRuntime.dispatch({ requestId, conversation, prompt, whenBusy: "steer" }, app.context()), `steer(${requestId})`),
         event: (name, match) => waitFor(() => find(name, match)[0], `${name} matching the case`),

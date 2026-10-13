@@ -14,21 +14,22 @@ it loads instructions instead of rediscovering them; a skill that proves wrong i
 
 ## How it fits pikit
 - A skill is a file of the project: `src/agents/{name}/skills/` (a folder with a `SKILL.md`, the
-  format Pi's coding agent uses). pi-durable has no skills, so pikit loads them as data: an
-  `agent.extension` whose system prompt `section` lists each skill's name and description, and the
-  agent reads the one it needs with a read-only, replay-safe tool (`read`, or the extension's own).
-  Nothing in a skill is executed. Writing one changes the agent, so it is a self-change: a branch,
+  format Pi's coding agent uses). pi-durable has no skills, so pikit loads them as data, and this part
+  is built: `AgentDefinition.skills` holds `AgentSkill`s (`defineSkill(text, { location? })`,
+  `packages/contracts/src/skill.ts`), and the runtime gives an agent with skills its own extension
+  (`pikit.skills.<agent>.<hash>`): a system prompt section listing each skill's name, description
+  and location, as Pi's coding agent lists them, and a read-only, replay-safe tool `skill` that
+  returns one's instructions (`packages/pi-adapter/src/agent.ts`). Nothing in a skill is executed by
+  the runtime; a skill's scripts run only through the agent's own tools, from its `location`. Writing one changes the agent, so it is a self-change: a branch,
   `pikit doctor` and tests, a human's approval, a deploy (SPEC §6). There is no second path: a skill
   written into a live store that the running agent loads would bypass the gate, and is refused.
 - Levels of autonomy for "its own prompt or skills" are the policy component SPEC §6 already
   allows later, with automatic rollback. They never open the gate for anything else.
 - Only the steward holds the self-change tools; another agent's skill is proposed by the steward.
-- pikit adds the nudge (after a long run, suggest a skill): a hook of the same `agent.extension` on
+- pikit adds the nudge (after a long run, suggest a skill): a hook of an `agent.extension` on
   pi-durable's `GenerationTask` (`onYield` when the run would end, or `afterTools` to count a run's
-  rounds), or a line of `pikit-self`. Agents that name the extension get both the list and the
-  nudge; which skills an agent sees is its own (`AgentDefinition` has no `skills` field yet:
-  `[planned]` in the former SPEC §6.2a, not in `packages/contracts/src/agent.ts`), which SPEC §6
-  needs anyway for `pikit-self`.
+  rounds), or a line of `pikit-self`. Which skills an agent sees is its own (`AgentDefinition.skills`,
+  which `prepare` may change), and `pikit-self` lists each agent's skills by name.
 - On Cloudflare nothing is loaded at run time: a learned skill reaches the agent at the next deploy.
 
 ## Pi first

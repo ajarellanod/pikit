@@ -8,7 +8,7 @@
 // levels are in the catalogue (`packages/cli/src/registry/capabilities.ts`). What only Cloudflare
 // components use (`WORKERS_HOST`) is in `@pikit/contracts/cloudflare`, not here.
 
-export { defineAgent, stewardProblem } from "./agent.ts";
+export { defineAgent, SKILL_TOOL, skillsProblem, stewardProblem } from "./agent.ts";
 export type {
   Admission,
   AgentConversations,
@@ -22,9 +22,14 @@ export type {
   AgentTool,
   ConversationRef,
   PrepareContext,
+  Sender,
   TurnConfig,
   Usage,
 } from "./agent.ts";
+export type { AgentSkill } from "./skill.ts";
+export { defineSkill, skillProblem } from "./skill.ts";
+export type { RunRequest, RunRequests } from "./run-requests.ts";
+export { RUN_REQUESTS } from "./run-requests.ts";
 
 export type { AgentDirectory, DirectoryAgent } from "./agent-directory.ts";
 

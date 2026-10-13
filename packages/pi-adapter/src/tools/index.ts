@@ -20,6 +20,8 @@
  */
 
 export { defineExtension, defineTool, wrapTool } from "@earendil-works/pi-durable";
+export { AGENT_DELEGATION, RESULT_REQUEST_PREFIX, resultPrompt } from "../delegation.ts";
+export type { AgentDelegation, DelegatedOutcome, DelegatedTask } from "../delegation.ts";
 export type { Extension, ToolDiagnostic, ToolExecutionApi, ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
 export {
   type BashExecution,

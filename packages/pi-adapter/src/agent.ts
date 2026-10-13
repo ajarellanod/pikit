@@ -4,11 +4,17 @@
  * - **Tools** live in the registry, by extension: every agent has one, `pikit.agent.<name>`, holding
  *   every tool its turns used so far (its static tools, and whatever `prepare` returned). A tool named
  *   in `tools` resolves through the runtime's `tool(name)`; an object is taken as it is. Each tool is
- *   wrapped once, so it runs with `CONVERSATION` and `AGENT_STATE` in its context, as before.
+ *   wrapped once, so it runs in its conversation's scope (the runtime's `scope`: `CONVERSATION`,
+ *   `AGENT_STATE` and `RUN_REQUESTS` in its context).
  * - **Extensions** an agent names (`extensions`) resolve through the runtime's `extension(name)`
  *   (`agent.extension`) each time the agent is applied, and are installed in the registry under their
- *   own name, as a copy whose tools are wrapped like the agent's (the registry is live: pi-durable
- *   resolves names against it at each use). A name nothing provides fails the agent: no silent skip.
+ *   own name, as a copy whose tools, system prompt sections and hooks (on the generation, tool and
+ *   compaction tasks) are wrapped like the agent's tools (the registry is live: pi-durable resolves
+ *   names against it at each use). A name nothing provides fails the agent: no silent skip.
+ * - **Skills** an agent has (`skills`) are an extension of the runtime's, `pikit.skills.<agent>.<hash>`
+ *   (one per set of skills): a system prompt section listing each one's name, description and
+ *   location, as Pi's coding agent lists them, and the tool `skill` (`SKILL_TOOL`), which returns a
+ *   skill's instructions. It comes right after the agent's tools, so a named extension may replace it.
  * - **The agent** of a conversation is its `pi.agent` document: the model, `instructions` (the system
  *   prompt), the agent's tool extension then its named extensions as the selection, in order, and the
  *   tools offered by name (the agent's, then each extension's). pi-durable reads it when it prepares
@@ -22,22 +28,30 @@
  *   applies from the run's next model request (the old runtime waited for the next run).
  */
 
-import type { JsonValue } from "@earendil-works/chord";
+import type { Context as ChordContext, JsonValue } from "@earendil-works/chord";
+import { Type } from "@earendil-works/pi-ai";
 import {
   type AgentChange,
   AgentDoc,
+  CompactionTask,
   configure,
   type ConversationId,
   defineDoc,
   defineExtension,
+  defineTool,
   type Extension,
+  GenerationTask,
   type HarnessOptions,
+  type HookRegistration,
+  type PromptSection,
   type Registry,
+  section,
+  ToolTask,
   type ToolRegistration,
   type Tx,
 } from "@earendil-works/pi-durable";
 import type { Logger } from "@pikit/core";
-import type { AgentDefinition, ConversationRef, TurnConfig } from "@pikit/contracts";
+import { type AgentDefinition, type AgentSkill, type ConversationRef, SKILL_TOOL, skillsProblem, type TurnConfig } from "@pikit/contracts";
 
 /** A tool the durable runtime runs: pi-durable's (`defineTool`). */
 export type DurableTool = ToolRegistration;
@@ -89,7 +103,11 @@ export interface Turn {
   tools: DurableTool[];
   /** The agent's named extensions, as provided, in order. */
   extensions: DurableExtension[];
+  skills: readonly AgentSkill[];
 }
+
+/** The tasks whose hooks the runtime scopes: their handlers all end with `(…, api, context)`. */
+const SCOPED_HOOK_TASKS: ReadonlySet<string> = new Set([GenerationTask.definition.name, ToolTask.definition.name, CompactionTask.definition.name]);
 
 export interface AgentConfigSource {
   models: DurableModels;
@@ -98,8 +116,11 @@ export interface AgentConfigSource {
   tool?: ((name: string) => DurableTool | undefined) | undefined;
   /** An installed agent extension by name (`agent.extension`). */
   extension?: ((name: string) => DurableExtension | undefined) | undefined;
-  /** The tool as it runs in a conversation: with `CONVERSATION` and `AGENT_STATE` in its context. */
-  wrap(tool: DurableTool): DurableTool;
+  /**
+   * `context` in the scope of the conversation `conversationId`: what a tool, a section or a hook of its
+   * agent runs with (`CONVERSATION`, `AGENT_STATE`, `RUN_REQUESTS`); `context` itself when it has none.
+   */
+  scope(conversationId: ConversationId, context: ChordContext): Promise<ChordContext>;
 }
 
 /** The effective state: the agent's initial state with the stored updates over it, a copy. */
@@ -112,8 +133,10 @@ export class AgentConfigs {
   /** Per agent, the wrapped tools its extension holds, by name. */
   private readonly installed = new Map<string, Map<string, DurableTool>>();
   private readonly wrapped = new WeakMap<object, DurableTool>();
-  /** Per provided extension, the copy installed in the registry (its tools wrapped). */
+  /** Per provided extension, the copy installed in the registry (its tools, sections and hooks scoped). */
   private readonly installedExtensions = new WeakMap<DurableExtension, DurableExtension>();
+  /** The runtime's skills extensions, by name. */
+  private readonly installedSkills = new Map<string, DurableExtension>();
 
   constructor(private readonly source: AgentConfigSource) {}
 
@@ -133,7 +156,10 @@ export class AgentConfigs {
       throw new Error(`agent "${agent.name}": model "${name}" is not provided by any model.provider`);
     }
     const extensions = ((changes.extensions as TurnConfig["extensions"] | undefined) ?? agent.extensions ?? []).map((entry) => this.extensionOf(agent.name, entry));
-    return { model, systemPrompt: (changes.systemPrompt as string | undefined) ?? agent.systemPrompt, tools, extensions };
+    const skills = (changes.skills as TurnConfig["skills"] | undefined) ?? agent.skills ?? [];
+    const problem = skillsProblem(skills, names);
+    if (problem !== undefined) throw new Error(`agent "${agent.name}": ${problem}`);
+    return { model, systemPrompt: (changes.systemPrompt as string | undefined) ?? agent.systemPrompt, tools, extensions, skills };
   }
 
   /**
@@ -176,7 +202,7 @@ export class AgentConfigs {
 
     const turn = this.turn(agent, ref, state, logger);
     const own = this.install(agent.name, turn.tools);
-    const selected = turn.extensions.map((extension) => this.installExtension(extension));
+    const selected = [...(turn.skills.length === 0 ? [] : [this.installSkills(agent.name, turn.skills)]), ...turn.extensions.map((extension) => this.installExtension(extension))];
     // Offered by name: the agent's tools, then each extension's; a later one of the same name wins.
     const tools = [...own, ...selected.flatMap((extension) => extension.tools ?? [])];
     const names = [...new Set(tools.map((tool) => tool.name))];
@@ -207,11 +233,50 @@ export class AgentConfigs {
   private installExtension(extension: DurableExtension): DurableExtension {
     let copy = this.installedExtensions.get(extension);
     if (copy === undefined) {
-      copy = extension.tools === undefined ? extension : { ...extension, tools: extension.tools.map((tool) => this.wrapOnce(tool)) };
+      copy = {
+        ...extension,
+        ...(extension.tools !== undefined && { tools: extension.tools.map((tool) => this.wrapOnce(tool)) }),
+        ...(extension.sections !== undefined && { sections: extension.sections.map((each) => this.scopedSection(each)) }),
+        ...(extension.hooks !== undefined && { hooks: extension.hooks.map((each) => this.scopedHook(each)) }),
+      };
       this.installedExtensions.set(extension, copy);
     }
     if (this.source.registry.snapshot().extension(copy.name) !== copy) this.source.registry.install(copy);
     return copy;
+  }
+
+  /** The runtime's extension of `skills` for `agent`, installed once per set of skills. */
+  private installSkills(agent: string, skills: readonly AgentSkill[]): DurableExtension {
+    const name = `${RESERVED_EXTENSION_PREFIX}skills.${agent}.${fingerprint(JSON.stringify(skills))}`;
+    let extension = this.installedSkills.get(name);
+    if (extension === undefined) {
+      extension = skillsExtension(name, skills);
+      this.installedSkills.set(name, extension);
+    }
+    if (this.source.registry.snapshot().extension(name) !== extension) this.source.registry.install(extension);
+    return extension;
+  }
+
+  /** `prompt` rendered in its conversation's scope. */
+  private scopedSection(prompt: PromptSection): PromptSection {
+    return { ...prompt, render: async (input, context) => prompt.render(input, await this.source.scope(input.conversationId, context)) };
+  }
+
+  /** `registration`'s handlers called in their conversation's scope, for the built-in tasks (their last two arguments are `api`, `context`). */
+  private scopedHook(registration: HookRegistration): HookRegistration {
+    if (!SCOPED_HOOK_TASKS.has(registration.task)) return registration;
+    const handlers: Record<string, unknown> = {};
+    for (const [key, handler] of Object.entries(registration.handlers as Record<string, unknown>)) {
+      handlers[key] =
+        typeof handler !== "function"
+          ? handler
+          : async (...args: unknown[]) => {
+              const context = args.at(-1) as ChordContext;
+              const api = args.at(-2) as { conversationId: ConversationId };
+              return (handler as (...given: unknown[]) => unknown).apply(registration.handlers, [...args.slice(0, -1), await this.source.scope(api.conversationId, context)]);
+            };
+    }
+    return { ...registration, handlers };
   }
 
   /**
@@ -240,7 +305,7 @@ export class AgentConfigs {
   private wrapOnce(tool: DurableTool): DurableTool {
     let runnable = this.wrapped.get(tool);
     if (runnable === undefined) {
-      runnable = this.source.wrap(tool);
+      runnable = { ...tool, execute: async (args, api, context) => tool.execute(args, api, await this.source.scope(api.conversationId, context)) };
       this.wrapped.set(tool, runnable);
     }
     return runnable;
@@ -270,4 +335,60 @@ export class AgentConfigs {
     }
     return tool as DurableTool;
   }
+}
+
+/** A short, stable fingerprint of `text` (FNV-1a, 32 bits, hex): names one set of skills. */
+function fingerprint(text: string): string {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < text.length; i++) {
+    hash ^= text.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+const escapeXml = (text: string): string =>
+  text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&apos;");
+
+/** The skills section: Pi's coding agent's list, loaded with the `skill` tool. */
+export function skillsText(skills: readonly AgentSkill[]): string {
+  const lines = [
+    "The following skills provide specialized instructions for specific tasks.",
+    `Use the ${SKILL_TOOL} tool to load a skill's instructions when the task matches its description.`,
+    "When a skill's instructions reference a relative path, resolve it against the skill's location and use that absolute path in tool commands.",
+    "",
+    "<available_skills>",
+  ];
+  for (const skill of skills) {
+    lines.push("  <skill>", `    <name>${escapeXml(skill.name)}</name>`, `    <description>${escapeXml(skill.description)}</description>`);
+    if (skill.location !== undefined) lines.push(`    <location>${escapeXml(skill.location)}</location>`);
+    lines.push("  </skill>");
+  }
+  lines.push("</available_skills>");
+  return lines.join("\n");
+}
+
+/** What the `skill` tool returns for `skill`: its instructions, after where its files are. */
+export function skillText(skill: AgentSkill): string {
+  const where = skill.location === undefined ? "" : `Its files are in ${skill.location}: resolve the relative paths below against it.\n\n`;
+  return `${where}${skill.instructions === "" ? "(This skill has no instructions.)" : skill.instructions}`;
+}
+
+/** The extension of an agent's skills: their section, and the `skill` tool. Read-only, so replay is safe. */
+function skillsExtension(name: string, skills: readonly AgentSkill[]): DurableExtension {
+  const text = skillsText(skills);
+  const names = skills.map((skill) => skill.name);
+  const tool = defineTool({
+    name: SKILL_TOOL,
+    description: "Loads a skill's instructions by its name. Use it when the task matches a skill's description in <available_skills>, before you start the task.",
+    parameters: Type.Object({ name: Type.String({ description: `The skill's name: one of ${names.join(", ")}.` }) }),
+    replay: "safe",
+    async execute(args) {
+      const skill = skills.find((each) => each.name === args.name);
+      if (skill === undefined) throw new Error(`there is no skill "${args.name}"; the skills are: ${names.join(", ")}`);
+      return { output: [{ type: "text", text: skillText(skill) }] };
+    },
+  });
+  // Rendered once: the same text on every request, so the provider's prompt cache stays warm.
+  return defineExtension({ name, sections: [section("skills", () => text, { tag: false })], tools: [tool as DurableTool] });
 }

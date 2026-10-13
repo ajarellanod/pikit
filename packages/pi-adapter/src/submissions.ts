@@ -8,6 +8,10 @@
  *   its submission, and leaves it once its run is logged. It bounds what a reconciliation examines (a
  *   run is logged at most once, even after the log pruned it) and lists, at start, the conversations
  *   that may hold a settlement a crash left unlogged.
+ * - **Senders**: a request with a `sender` is placed as an entry of kind `pikit.input` (`INPUT_KIND`)
+ *   whose data is `{ sender }` (pi-durable's `InputEntry`, #10407): admitted in the submission's own
+ *   commit, kept in the transcript, carried by a queued input in `pi.inbox`. `RUN_REQUESTS` reads it
+ *   from the entries of the run's inputs (`pi.live.run.inputs`).
  * - **Runs**: the inputs one commit settles are grouped exactly (`runsOf`); inputs found settled later
  *   are grouped exactly too (`storedRunsOf`): an answered run by its answer entry, any other placed
  *   run by the commit that placed its inputs (pi-durable places a run's inputs in the one commit that
@@ -36,6 +40,18 @@ export const AdmissionsDoc = defineDoc<{ conversations: { [conversationId: strin
   scope: "session",
   initial: () => ({ conversations: {} }),
 });
+
+/** The kind of the entry an input with a sender is placed as (pi-durable's `InputEntry`); its data is `{ sender }`. */
+export const INPUT_KIND = "pikit.input";
+
+/** Whether an entry of `kind` placed an input: pi-durable's own `pi.user`, or the runtime's `pikit.input`. */
+export const isInputKind = (kind: string): boolean => kind === "pi.user" || kind === INPUT_KIND;
+
+/** The sender an input entry carries (`{ sender }` in its data), or `undefined`. */
+export function senderOfEntry(data: unknown): { channel: string; id: string } | undefined {
+  const sender = (data as { sender?: { channel?: unknown; id?: unknown } } | null | undefined)?.sender;
+  return typeof sender?.channel === "string" && typeof sender.id === "string" ? { channel: sender.channel, id: sender.id } : undefined;
+}
 
 /** The reason pi-durable records for inputs the runtime gave up on; `detail` is why. */
 export const ABANDONED = "abandoned";
@@ -71,7 +87,7 @@ export function runsOf(records: readonly SettledInput[]): SettledInput[][] {
  * run has the same inputs as `runsOf` gives it live, so `runKey` names it the same way.
  *
  * - Answered inputs by their answer: inputs a run answered share it.
- * - Other placed inputs by the commit of their `pi.user` entry (`storage.entry`'s `commitSeq`): a
+ * - Other placed inputs by the commit of their input entry (`pi.user` or `pikit.input`) (`storage.entry`'s `commitSeq`): a
  *   run's inputs are placed by one boundary in the commit that starts the run, and `endRun` settles
  *   exactly those, so inputs of two runs never share it, even adjacent ones that failed the same way.
  *   A failed run that took a steer is the exception: its steer was placed in a later commit and is

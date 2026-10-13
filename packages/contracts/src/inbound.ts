@@ -37,7 +37,11 @@ export interface InboundMessage {
   channel: string;
   /** The platform's conversation: a chat, a thread, an HTTP client's conversation id. */
   conversationId: string;
-  /** Who sent it, as the channel's authentication established. */
+  /**
+   * Who sent it, as the channel's authentication established. `admitInbound` dispatches it as the
+   * request's sender (`{ channel, id: actor.id }`), so the run's tools and hooks know it
+   * (`RUN_REQUESTS`).
+   */
   actor: { id: string };
   text: string;
 }
@@ -117,7 +121,7 @@ export interface AdmitOptions {
 
 /**
  * The inbound path after authentication: `inbound.normalize`, `route.resolve`, the
- * conversation, `dispatch`. Resolves once the message is durable (the ack point) or stopped; throws
+ * conversation, `dispatch` (with the message's actor as its sender, as a stage left it). Resolves once the message is durable (the ack point) or stopped; throws
  * when the message's id is the dashboard's (`DASHBOARD_REQUEST_PREFIX`: a channel that takes ids from
  * its clients refuses those first), when a stage breaks the path's rules (it changed which message or
  * conversation this is), or when a capability fails, as the channel's own code would.
@@ -154,7 +158,8 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
 
   const dispatch = async (conversation: ConversationRef) => {
     options.beforeDispatch?.(conversation);
-    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text }, ctx);
+    const sender = { channel: normalized.channel, id: normalized.actor.id };
+    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text, sender }, ctx);
   };
   const gone = (error: AgentUnavailableError): InboundOutcome => {
     ctx.logger.warn("admitInbound: the message's agent is no agent now, and routing names it: denied", { key: options.key, agent: error.agent });

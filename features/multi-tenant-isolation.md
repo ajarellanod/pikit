@@ -33,9 +33,10 @@ But pi-durable weighs on it: a caller's context values (the tenant a message bel
 id) no longer reach tools, since a run is durable tasks the scheduler starts with its own context
 (`packages/pi-adapter/src/README.md`). Isolation needs every tool call to know its tenant
 without trusting the model, durably across restarts. Meanwhile a tenant fixed per conversation can
-live in a conversation document that tools read; per-message values cannot. The ask is durable
-submission attributes ([upstream proposal 3](../docs/upstream/README.md#3-caller-context-values-reach-tools)),
-which this feature should wait for or design around.
+live in a conversation document that tools read, and each message's sender reaches its run: pikit
+keeps it with the admission and gives it to tools and hooks (`RUN_REQUESTS`), which a tenant by sender
+can build on. Other per-message values (a trace id) still need durable submission attributes
+([upstream proposal 3](../docs/upstream/README.md#3-caller-context-values-reach-tools)).
 
 ## Open questions
 - Isolation by process (one app per tenant) versus inside one app; which one the kit recommends.

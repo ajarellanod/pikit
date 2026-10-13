@@ -186,6 +186,8 @@ export async function openWorker(path: string, options: WorkerOptions = {}) {
       runtime.dispatch({ requestId, conversation, prompt }, context),
     /** The `agent.settled` or `agent.failed` of the run started by `requestId`. */
     result: (requestId: string) => waitFor(() => results().find((r) => r.requestId === requestId), `the result of ${requestId}`),
+    /** The first `agent.settled` or `agent.failed` that `match` takes. */
+    resultWhere: (match: (result: Result) => boolean) => waitFor(() => results().find(match), "a matching result"),
     started: (requestId: string) =>
       waitFor(
         () => events.find((e): e is Extract<AgentEvent, { name: "agent.started" }> => e.name === "agent.started" && e.payload.requestId === requestId)?.payload,

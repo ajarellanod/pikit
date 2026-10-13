@@ -302,7 +302,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     if ("problem" in read) return failure(read.status, read.error, read.problem);
     const { agent, requestId, ...message } = read.body;
     const key = `${DASHBOARD_KEY_PREFIX}${crypto.randomUUID()}`;
-    const started = await backend().start({ key, agent, ...message, requestId: requestIdOf(requestId) }, ctx);
+    const started = await backend().start({ key, agent, ...message, requestId: requestIdOf(requestId), operator: operator.id }, ctx);
     ctx.logger.info("admin-api: an operator started a conversation", { operator: operator.id, conversation: key, agent, requestId: started.requestId, ...facts(message) });
     return json<ApiStartResponse>(201, started);
   });
@@ -312,7 +312,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     if ("problem" in read) return failure(read.status, read.error, read.problem);
     const { requestId: given, ...message } = read.body;
     const requestId = requestIdOf(given);
-    const sent = await backend().send(conversationIdOf(request), { ...message, requestId }, ctx);
+    const sent = await backend().send(conversationIdOf(request), { ...message, requestId, operator: operator.id }, ctx);
     ctx.logger.info("admin-api: an operator sent a message", { operator: operator.id, conversation: sent.key, requestId, admission: sent.admission, ...facts(message) });
     return json<ApiSendResponse>(202, { requestId: sent.requestId, admission: sent.admission });
   });

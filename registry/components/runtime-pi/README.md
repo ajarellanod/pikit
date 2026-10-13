@@ -297,9 +297,32 @@ defineAgent({ name: "assistant", model: "anthropic/claude-sonnet-4-6", extension
 
 Only the agents that name an extension run with it, as with tools: installing one changes no agent, and
 agents that share one list it (`const shared = ["memory", "guard"]`). An extension's tools come with
-it, and run with `CONVERSATION` and `AGENT_STATE` like the agent's; one of the same name as an agent's
-tool replaces it. Its state is a document (`defineDoc`, committed with the transcript, surviving
-restarts) or the app's `storage.sql`. Names starting with `pikit.` are the runtime's own.
+it, and run with `CONVERSATION`, `AGENT_STATE` and `RUN_REQUESTS` like the agent's (its sections and
+hooks too); one of the same name as an agent's tool replaces it. Its state is a document
+(`defineDoc`, committed with the transcript, surviving restarts) or the app's `storage.sql`. Names
+starting with `pikit.` are the runtime's own.
+
+**Who a run answers.** Each message's `sender` (the channel's user, the dashboard's operator, a
+delegating agent) is kept with it and given to the run that takes it: `await
+context.value(RUN_REQUESTS)?.list(context)` lists the run's requests, each with its sender, in a tool,
+a section or a hook, after a restart too.
+
+## Skills
+
+An agent's skills are `SKILL.md` files (the Agent Skills format Pi's coding agent reads), given as
+data:
+
+```ts
+import review from "./skills/review/SKILL.md" with { type: "text" };
+defineAgent({ name: "assistant", model: "…", skills: [defineSkill(review)] });
+// on a server, a skill whose folder has scripts: defineSkill(text, { location: "/app/src/agents/assistant/skills/review" })
+```
+
+The runtime lists each skill's name, description and location in a system prompt section (the same
+text on every request) and gives the agent the tool `skill`, which returns a skill's instructions by
+name (replay `safe`). A skill's scripts run only through the agent's own tools (`bash`, `read`), from
+its location. `prepare` may change the skills with the state. An agent with skills may not have a tool
+of its own named `skill`.
 
 ## Tests
 

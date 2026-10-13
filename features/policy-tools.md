@@ -38,8 +38,10 @@ extension of Pi's named per agent, does not already cover the case.
 - "Hot-reloadable" (below) against a deep-frozen config (SPEC K4): a reload is a restart, or
   the rules are data in `storage.sql`. Code is never hot-reloaded ([kit follow-ups](kit-follow-ups.md),
   "No code hot reload"), so live rules can only be data.
-- Where roles come from: the agent, the actor, or both. The sender of a message does not reach a run
-  today (only its conversation does), so a role by actor needs it first.
+- Where roles come from: the agent, the actor, or both. The sender of each message reaches its run
+  (`AgentRequest.sender`, read through `RUN_REQUESTS` by tools and hooks), so a role by actor is
+  possible: extension-house-rules' `senderTools` is the first such rule (a tool kept for some
+  senders, refused in a run that answers anyone else).
 
 ## Moved from the former SPEC
 The former SPEC §18, "Higher-level components":

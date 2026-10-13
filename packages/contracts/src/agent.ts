@@ -14,11 +14,13 @@
  * What an agent does besides its model, prompt and tools (a system prompt section that recalls,
  * a hook that checks a tool call or rewrites a model request, a durable task) is an agent
  * extension: Pi's own (`defineExtension`), provided by a component under `agent.extension` and
- * named by the agents that run with it (`AgentDefinition.extensions`).
+ * named by the agents that run with it (`AgentDefinition.extensions`). What it knows how to do, as
+ * instructions it loads when a task needs them, is its skills (`AgentDefinition.skills`, `skill.ts`).
  */
 
 import type { AppContext } from "@pikit/core";
 import { isJsonObject } from "./json.ts";
+import { type AgentSkill, skillProblem } from "./skill.ts";
 
 /**
  * Pi payload types, filled in by `@pikit/pi-adapter`:
@@ -71,6 +73,8 @@ export interface TurnConfig {
   tools: readonly (AgentTool | string)[];
   /** As in `AgentDefinition.extensions`: names of installed agent extensions. */
   extensions: readonly string[];
+  /** As in `AgentDefinition.skills`. */
+  skills: readonly AgentSkill[];
 }
 
 /**
@@ -126,6 +130,17 @@ export interface AgentDefinition<S extends object = object> {
    */
   extensions?: readonly string[];
   /**
+   * The skills it knows (the Agent Skills format: `defineSkill` over a `SKILL.md`): instructions for a
+   * kind of task, which it loads when a task matches a skill's description. The runtime lists each
+   * one's name and description in the system prompt and gives the agent the tool `skill`, which
+   * returns a skill's instructions by name (and where its files are, when it has a `location`). A
+   * skill is data the project ships, read when the agent is defined: changing one is a change to the
+   * project, through its deploy (SPEC §6), never something a run writes. Absent or empty: no skills,
+   * no section and no `skill` tool, so an agent that has a tool of its own named `skill` has no
+   * skills.
+   */
+  skills?: readonly AgentSkill[];
+  /**
    * The initial state of each conversation: a JSON object. Tools update it through `AGENT_STATE`;
    * it is stored in the runtime's conversation and starts again from here after a reset. Absent,
    * it is `{}`.
@@ -174,12 +189,37 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
     }
     if (extensions.indexOf(name) !== index) throw new Error(`agent "${definition.name}": extension "${name}" is named twice`);
   }
+  const toolNames = (definition.tools ?? []).map((tool) => (typeof tool === "string" ? tool : (tool as { name?: unknown } | null)?.name)).filter((name) => typeof name === "string");
+  const problem = skillsProblem(definition.skills ?? [], toolNames);
+  if (problem !== undefined) throw new Error(`agent "${definition.name}": ${problem}`);
   // Checked here, not at the first update: the state is stored in the conversation as JSON.
   if (definition.state !== undefined && !isJsonObject(definition.state)) {
     throw new Error(`agent "${definition.name}": state must be a JSON object`);
   }
   return definition;
 }
+
+/**
+ * What is wrong with an agent's skills, or `undefined`: each must be a skill (`defineSkill`), no two of
+ * one name, and none beside a tool the agent names `skill` (the runtime's own tool for them). `tools`:
+ * the names of the agent's tools. `defineAgent` checks the definition; the runtime checks what `prepare`
+ * returns with it too.
+ */
+export function skillsProblem(skills: readonly AgentSkill[], tools: readonly string[]): string | undefined {
+  if (!Array.isArray(skills)) return "skills must be a list of skills (defineSkill)";
+  const names: string[] = [];
+  for (const skill of skills) {
+    const problem = skillProblem(skill);
+    if (problem !== undefined) return problem;
+    if (names.includes(skill.name)) return `skill "${skill.name}" is given twice`;
+    names.push(skill.name);
+  }
+  if (names.length > 0 && tools.includes(SKILL_TOOL)) return `it has skills and a tool named "${SKILL_TOOL}", the runtime's tool that loads them: rename the tool`;
+  return undefined;
+}
+
+/** The name of the tool the runtime gives an agent with skills, which loads one by name. */
+export const SKILL_TOOL = "skill";
 
 /**
  * What is wrong with an App's agents taken together, or `undefined`: more than one of them is the steward
@@ -205,6 +245,18 @@ export interface AgentImage {
   mimeType: string;
   /** Its bytes, base64 (standard alphabet, padded), without a `data:` prefix. */
   data: string;
+}
+
+/**
+ * Who sent a message, as its producer established it: a channel's authenticated user
+ * (`InboundMessage.actor`), the dashboard's operator, an agent that delegated work. Trusted data, never
+ * the model's: a tool or a hook decides with it (whose memory, which rules) without asking the model.
+ */
+export interface Sender {
+  /** Who established it: the channel's name (`telegram`, `http`), `dashboard`, or the producer's own. */
+  channel: string;
+  /** Its id there (`InboundMessage.actor.id`, an operator's id, an agent's name). */
+  id: string;
 }
 
 /**
@@ -235,6 +287,14 @@ export interface AgentRequest {
    * going starts one either way.
    */
   whenBusy?: "followUp" | "steer";
+  /**
+   * Who sent it. The runtime keeps it with the message, durably, and gives it to the run that takes the
+   * message: its tools, hooks and system prompt sections read the run's requests and their senders
+   * through `RUN_REQUESTS` (`run-requests.ts`), also after a restart. It is not in the run's result nor
+   * in `agent.submissions`: a producer that needs it there knows its own senders. Absent: unknown (a
+   * producer that authenticates no one).
+   */
+  sender?: Sender;
 }
 
 /** What happened to a message, known as soon as it is durable in the runtime's conversation. */

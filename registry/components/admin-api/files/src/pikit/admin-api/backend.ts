@@ -77,6 +77,11 @@ export interface Message {
   attachments?: ApiAttachment[];
   /** Asks the agent to search the web: its agent must have `WEB_SEARCH_TOOL` (else `invalid_request`). */
   webSearch?: boolean;
+  /**
+   * The operator who sends it (`Operator.id`, from `admin.auth`): the request's sender, `{ channel:
+   * "dashboard", id }`, which the run's tools and hooks read (`RUN_REQUESTS`).
+   */
+  operator?: string;
 }
 
 /** A new conversation of the dashboard's own, checked: what `POST /admin/api/conversations` takes. */
@@ -148,6 +153,9 @@ export function refusal(
 }
 
 export const NOT_FOUND = "no such conversation";
+
+/** The channel of an operator's messages, as their sender says it (`AgentRequest.sender`). */
+export const DASHBOARD_CHANNEL = "dashboard";
 
 /** Splits a qualified id on its last `~`. */
 const QUALIFIED = /^(.+)~([0-9]+)$/s;
@@ -266,7 +274,8 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
     const images = (message.attachments ?? []).map(({ mimeType, data }) => ({ mimeType, data }));
     const prompt = operatorPrompt(conversation.key, message.text, { webSearch });
     try {
-      return await contracts.runtime().dispatch({ requestId: message.requestId, conversation, prompt, ...(images.length > 0 && { images }), whenBusy: "followUp" }, ctx);
+      const sender = message.operator === undefined ? {} : { sender: { channel: DASHBOARD_CHANNEL, id: message.operator } };
+      return await contracts.runtime().dispatch({ requestId: message.requestId, conversation, prompt, ...(images.length > 0 && { images }), whenBusy: "followUp", ...sender }, ctx);
     } catch (error) {
       // Its agent is gone for good (removed, a live agent deleted): a refusal, not a failure. A message
       // from its channel moves the key to the agent routed now; `/new` here keeps the agent.

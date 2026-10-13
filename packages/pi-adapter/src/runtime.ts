@@ -28,6 +28,10 @@
  *   The runtime is its only writer: giving up on messages is `abandon`, the runtime's own.
  * - **Agents** are applied by `AgentConfigs` (`agent.ts`): each conversation's `pi.agent` selects the
  *   agent's tool extension and the extensions it names (`agent.extension`, resolved through `extension`).
+ * - **Senders**: a request with a `sender` is submitted as an input entry of kind `pikit.input` carrying
+ *   it (pi-durable's `InputEntry`): one commit with the input, in the transcript for good. A run's
+ *   tools, sections and hooks read `RUN_REQUESTS`: the run's inputs (`pi.live.run.inputs`) as they are
+ *   when asked, each with the sender its entry carries.
  *
  * Steps that touch one conversation (admissions, aborts, recoveries, settlements) run in that
  * conversation's line, one at a time, so a duplicate check and the submit after it never interleave,
@@ -44,6 +48,7 @@ import {
   type HarnessOptions,
   type HarnessSettings,
   InboxDoc,
+  type InputSubmissionDraft,
   LiveDoc,
   ROOT_CONVERSATION_ID,
   type Storage,
@@ -66,18 +71,23 @@ import {
   type ConversationRef,
   isJsonObject,
   type PendingConversation,
+  RUN_REQUESTS,
+  type RunRequest,
+  type RunRequests,
   type RunSettlement,
+  type Sender,
   type SqlDatabase,
 } from "@pikit/contracts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
 import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
 import { createAnswerLog } from "./answers.ts";
+import { AGENT_DELEGATION, createDelegation } from "./delegation.ts";
 import { runContext, toChord } from "./context.ts";
 import { harnessEnv } from "./execution.ts";
 import type { WorkspaceProvider } from "./types.ts";
 import { isSettledInput, type SettledInput, settlementOf, toResult } from "./result.ts";
 import { openDurableStorage } from "./sql.ts";
-import { ABANDONED, AdmissionsDoc, announced, durableId, runKey, runsOf, storedRunsOf } from "./submissions.ts";
+import { ABANDONED, AdmissionsDoc, announced, durableId, INPUT_KIND, runKey, runsOf, senderOfEntry, storedRunsOf } from "./submissions.ts";
 
 /**
  * Settings pi-durable gets on Cloudflare Workers, under the host's. pi-durable keeps an idle
@@ -330,16 +340,24 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     registry,
     tool: options.tool,
     extension: options.extension,
-    // Each tool runs with its conversation and that conversation's state in its context.
-    wrap: (tool) => ({
-      ...tool,
-      execute: async (args, api, ctx) => {
-        const ref = await refOf(api.conversationId);
-        if (ref === undefined) return tool.execute(args, api, ctx);
-        return tool.execute(args, api, toChord(withContextValue(CONVERSATION, ref, withContextValue(AGENT_STATE, stateOf(ref), ctx))));
-      },
-    }),
+    // Each tool, section and hook runs with its conversation, its state and the run's requests in its context.
+    scope: async (conversationId, ctx) => {
+      const ref = await refOf(conversationId);
+      if (ref === undefined) return ctx;
+      const scoped = withContextValue(RUN_REQUESTS, requestsOf(conversationId), withContextValue(CONVERSATION, ref, withContextValue(AGENT_STATE, stateOf(ref), ctx)));
+      return toChord(withContextValue(AGENT_DELEGATION, delegation, scoped));
+    },
   });
+
+  // Child conversations of other agents (delegation.ts): their tasks are installed before pi-durable opens,
+  // so a restart finds the background ones it must resume.
+  const { delegation, extension: delegationExtension } = createDelegation({
+    agent: (name) => options.agent(name),
+    apply: (tx, id, ref, agent) => config.apply(tx, id, ref, agent, effectiveState(agent, {}), logger),
+    dispatch: (request, ctx) => runtime.dispatch(request, ctx),
+    events,
+  });
+  registry.install(delegationExtension);
 
   /** Each tool call's environment: its conversation's workspace when a provider is installed, else `execution`. */
   const env: HarnessOptions["env"] =
@@ -742,6 +760,28 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     return agent;
   };
 
+  /**
+   * `RUN_REQUESTS` of a conversation: its run's inputs (`pi.live.run.inputs`) when asked, in order, each
+   * with the sender its entry carries (`pikit.input`). Empty with no run going.
+   */
+  const requestsOf = (id: ConversationId): RunRequests => ({
+    async list(ctx) {
+      const { harness, storage: stored } = await opened(events);
+      const chord = toChord(ctx);
+      const inputs = (await harness.snapshot(LiveDoc, id, chord))?.run?.inputs ?? [];
+      if (inputs.length === 0) return [];
+      const requests: RunRequest[] = [];
+      for (const input of inputs) {
+        const record = await stored.submission(input, chord);
+        if (record?.type !== "input" || record.requestId === undefined) continue;
+        const placed = record.entry === undefined ? undefined : await stored.entry(id, record.entry, chord);
+        const sender = placed?.entry.kind === INPUT_KIND ? senderOfEntry(placed.entry.data) : undefined;
+        requests.push({ requestId: record.requestId, ...(sender !== undefined && { sender }) });
+      }
+      return requests;
+    },
+  });
+
   /** `agent.state` of a conversation: reads its document, updates it with `pi.agent` in one commit. */
   const stateOf = (ref: ConversationRef): AgentState => ({
     async get(ctx) {
@@ -894,6 +934,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     async dispatch(request: AgentRequest, ctx: AppContext): Promise<Admission> {
       const ref = request.conversation;
       const { requestId } = request;
+      const sender = senderOf(request);
       const agent = definitionOf(ref);
       const harness = await harnessOf(ctx);
       const id = conversationIdOf(ref);
@@ -930,8 +971,15 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           runs.set(key, { ctx: runContext(ctx), announced: admissionAnnounced });
           admitting.set(key, undefined);
           try {
-            const whenBusy = request.whenBusy === "steer" ? ({ whenBusy: "steer" } as const) : {};
-            const submission = await conversation.submit({ type: "input", content: inputOf(request), requestId, ...whenBusy }, toChord(ctx));
+            const draft: InputSubmissionDraft = {
+              type: "input",
+              content: inputOf(request),
+              requestId,
+              ...(request.whenBusy === "steer" && { whenBusy: "steer" }),
+              // A sender is placed with the input, in its entry (pi-durable's `InputEntry`): one commit, kept in the transcript.
+              ...(sender !== undefined && { entry: { kind: INPUT_KIND, data: { sender: { channel: sender.channel, id: sender.id } } } }),
+            };
+            const submission = await conversation.submit(draft, toChord(ctx));
             const status = admitting.get(key) ?? (await submission.status(toChord(ctx))).status;
             return { kind: status === "queued" ? "queued" : "started", requestId } as const;
           } catch (error) {
@@ -1158,6 +1206,16 @@ async function untilAborted(work: Promise<unknown>, signal: AbortSignal | undefi
   }
   await Promise.race(racers);
   if (onAbort !== undefined) signal?.removeEventListener("abort", onAbort);
+}
+
+/** `request.sender` as stored, checked: its channel and id are non-empty text. */
+function senderOf(request: AgentRequest): Sender | undefined {
+  const sender = request.sender as Partial<Sender> | undefined;
+  if (sender === undefined) return undefined;
+  if (typeof sender?.channel !== "string" || sender.channel === "" || typeof sender.id !== "string" || sender.id === "") {
+    throw new TypeError(`dispatch(${request.requestId}): a sender has a channel and an id, both non-empty text`);
+  }
+  return { channel: sender.channel, id: sender.id };
 }
 
 /**

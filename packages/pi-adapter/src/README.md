@@ -116,8 +116,12 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
   change: at each admission, in the same commit as every state update, and before a reopened Harness
   resumes a conversation. So the agent pi-durable reads when it prepares a model request is always
   `prepare` of the state at that moment: **a tool's state update applies from the run's next model
-  request**, not from the next run. Tools run wrapped so their context carries `CONVERSATION` and
-  `AGENT_STATE`. **The definition owns `pi.agent`** (SPEC §6): each of those applies
+  request**, not from the next run. Tools, and the sections and hooks (generation, tool, compaction)
+  of named extensions, run wrapped so their context carries `CONVERSATION`, `AGENT_STATE` and
+  `RUN_REQUESTS` (the runtime's `scope`). An agent's `skills` are an extension of the runtime's,
+  `pikit.skills.<agent>.<hash>` (one per set of skills), selected right after the agent's own: a
+  section listing them as Pi's coding agent does, and the replay-safe tool `skill` that returns one's
+  instructions. **The definition owns `pi.agent`** (SPEC §6): each of those applies
   rebuilds it from `prepare` and writes it when it differs, so a `configure()` made on the
   conversation directly is undone at the next one; a live change goes through `agent.state` or the
   data `prepare` reads.
@@ -132,6 +136,18 @@ and a Durable Object (storage-do). pi-durable's own storage conformance passes o
 - **Contexts.** `toChord` re-attaches a pikit context's signal for Chord. Tasks run in the
   Harness's context (the app's values); a dispatching caller's values reach the run's events, not its
   tools.
+- **Senders.** A request with a `sender` is submitted as an input entry of kind `pikit.input` whose
+  data is `{ sender }` (pi-durable's `InputEntry`, #10407): in the submission's own commit, carried by a
+  queued input's `pi.inbox` item, kept in the transcript. `RUN_REQUESTS` reads the run's inputs
+  (`pi.live.run.inputs`) when asked, each one's request id from its submission and its sender from its
+  entry: steers that joined the run included, and the same after a reopened Harness resumes it. An
+  input entry is `pi.user` or `pikit.input` wherever the runtime finds a run's inputs (`result.ts`).
+- **Delegation** (`delegation.ts`). `AGENT_DELEGATION`, in every tool's context: `run` creates a child
+  conversation owned by the tool call's task (pi-durable's example 22), applies another agent's
+  definition to it (`AgentConfigs.apply`), submits the task with its sender and waits; `start` gives
+  the child to a background anchor task and a background reporter task (example 23), which admits the
+  answer to the parent through `dispatch` (logged and announced). The tasks are installed in the
+  registry (`pikit.delegation`) before pi-durable opens.
 
 ## Submissions (`submissions.ts`, `answers.ts`)
 

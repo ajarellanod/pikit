@@ -448,5 +448,6 @@ does with it (the section, the tools, a nudge) is a Pi extension, reached throug
   what is kept?
 - The link's flow (who starts it, how it is undone, whether the owner approves): with
   [pairing](pairing.md).
-- The sender of a message inside a run (`InboundMessage.actor.id` does not reach the runtime today):
-  needed for per-sender memory in group chats.
+- The sender of a message inside a run: it reaches the run now (`RUN_REQUESTS`, each request with
+  its `sender`, `{ channel, id: actor.id }`), so per-sender memory in group chats can key by it;
+  linking one person across channels stays open.

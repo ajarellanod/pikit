@@ -4,13 +4,14 @@
  * The runtime admits every message as a follow-up, and pi-durable places the follow-ups queued while a
  * run goes all at once, as the inputs of the next run: they settle together, and are one result whose
  * `requestId` is the first and whose `requestIds` lists them all, in order. Its transcript is the
- * entries from the first input's `pi.user` entry to the answer (`done`), or, unanswered, to the entry
- * before the next `pi.user` that is not one of its inputs (the next run's).
+ * entries from the first input's entry to the answer (`done`), or, unanswered, to the entry before the
+ * next input entry (`pi.user` or `pikit.input`) that is not one of its inputs (the next run's).
  */
 
 import type { Context } from "@earendil-works/chord";
 import type { Conversation, EntryId, EntryRecord, SubmissionRecord } from "@earendil-works/pi-durable";
 import type { AgentResult, ConversationRef, RunSettlement } from "@pikit/contracts";
+import { isInputKind } from "./submissions.ts";
 
 /** A pi-ai 1.0 message, as pi-durable entries carry them. */
 export type DurableMessage = NonNullable<EntryRecord["model"]>[number];
@@ -79,7 +80,7 @@ async function runEntries(conversation: Conversation, records: readonly SettledI
   const entries = newestFirst.reverse();
   if (to !== undefined) return entries;
   // Unanswered: the run ended at its last entry before the next run's input.
-  const next = entries.findIndex((entry) => entry.kind === "pi.user" && !inputs.has(entry.id));
+  const next = entries.findIndex((entry) => isInputKind(entry.kind) && !inputs.has(entry.id));
   return next === -1 ? entries : entries.slice(0, next);
 }
 

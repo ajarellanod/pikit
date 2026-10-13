@@ -262,6 +262,8 @@ test("POST …/messages to another channel's conversation: a follow-up, the dash
       conversation: { key: "telegram:1", agent: "assistant", conversationId: "c1" },
       prompt: `${OPERATOR_NOTE}: the user of this conversation does not see this message or your answer to it.]\nstop and summarise`,
       whenBusy: "followUp",
+      // Its sender is the operator, for the run's tools and hooks (RUN_REQUESTS).
+      sender: { channel: "dashboard", id: "ops" },
     },
   ]);
   const log = s.logged.find((each) => each.message.includes("sent a message"));
@@ -295,7 +297,13 @@ test("POST /admin/api/conversations: a conversation of the dashboard's own (dash
   expect(body).toMatchObject({ conversationId: "c100", admission: "started", requestId: expect.stringMatching(/^dashboard:/) });
   expect(s.runtime.pointers.get(body.key)).toEqual({ key: body.key, agent: "assistant", conversationId: "c100" });
   expect(s.runtime.dispatched).toEqual([
-    { requestId: body.requestId, conversation: { key: body.key, agent: "assistant", conversationId: "c100" }, prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`, whenBusy: "followUp" },
+    {
+      requestId: body.requestId,
+      conversation: { key: body.key, agent: "assistant", conversationId: "c100" },
+      prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`,
+      whenBusy: "followUp",
+      sender: { channel: "dashboard", id: "ops" },
+    },
   ]);
   expect(s.logged.find((each) => each.message.includes("started a conversation"))?.fields).toMatchObject({ operator: "ops", conversation: body.key, agent: "assistant" });
   expect(JSON.stringify(s.logged)).not.toContain("what changed");

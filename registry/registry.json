@@ -120,7 +120,7 @@
     },
     "extension-house-rules": {
       "version": "0.0.0",
-      "description": "House rules for the agents that name them: the rules in config as a system prompt section, and the tools in config refused before they run.",
+      "description": "House rules for the agents that name them: the rules in config as a system prompt section, the tools in config refused before they run, and tools kept for some senders refused for the others.",
       "targets": [
         "server",
         "durable"
@@ -341,6 +341,15 @@
         "durable"
       ],
       "path": "components/tool-bash"
+    },
+    "tool-delegate": {
+      "version": "0.0.0",
+      "description": "The `delegate` tool, for the agents that name it: a task handed to another agent of the project, in a child conversation on pi-durable's subagents, answered now or later as a message.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/tool-delegate"
     },
     "tool-edit": {
       "version": "0.0.0",

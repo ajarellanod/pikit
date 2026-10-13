@@ -41,7 +41,8 @@ the channel).
    - `conversations.resolve(key, agent)` (`conversations-kv/.../index.ts`): the key's pointer in
      `storage.kv`, or on the first message a new conversation from `agent.conversations` (runtime-pi)
      and the pointer written with `setIfAbsent`.
-   - `runtime.dispatch({ requestId, conversation, prompt })`.
+   - `runtime.dispatch({ requestId, conversation, prompt, sender })`, the sender being the chat's user
+     (`{ channel: "telegram", id }`), which the run's tools and hooks read (`RUN_REQUESTS`).
 4. **Dispatch.** runtime-pi (`runtime-pi/files/src/pikit/runtime-pi/index.ts`) calls the adapter
    (`packages/pi-adapter/src/runtime.ts`), which hands the message to pi-durable. It resolves when the
    message is committed: `started` (idle), `queued` (a run is going; the next run takes it with the

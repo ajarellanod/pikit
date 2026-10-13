@@ -1,12 +1,13 @@
 # extension-house-rules
 
 House rules for the agents that name them: the rules you write in config become a system prompt
-section, and the tools you list are refused before they run, whatever the model asks. It is also
+section, the tools you list are refused before they run, whatever the model asks, and the tools you
+keep for some senders are refused in a run that answers anyone else. It is also
 **the reference agent extension**: copy it to add behaviour to your agents (the skill
 `.agents/skills/pikit-extension/SKILL.md` walks through it).
 
 - **Provides:** `agent.extension`, under the key `house-rules`.
-- **Requires:** nothing.
+- **Requires:** nothing (it reads who a run answers from its context, `RUN_REQUESTS`).
 - **Targets:** `server` and `durable`: it imports nothing platform-specific.
 - **Installs to:** `src/pikit/extension-house-rules/` (`index.ts`, `extension-house-rules.test.ts`).
 
@@ -23,6 +24,8 @@ export const config = {
   "extension-house-rules": {
     rules: ["Answer in English.", "Never share a customer's email address."],
     deniedTools: ["bash", "write"],
+    // Only these senders, as their channel authenticated them (`<channel>:<id>`), may have a run call it.
+    senderTools: [{ tool: "edit", senders: ["telegram:12345", "dashboard:operator"] }],
   },
 };
 ```
@@ -44,7 +47,10 @@ Every model request of `support` then carries:
 ```
 
 and a call to `bash` gets the error result `The tool "bash" is not allowed here (house rules).`
-without running. An agent that does not name `house-rules` has neither, even with the component
+without running. A call to `edit` runs only when every message the run answers came from one of its
+senders (a run may answer several people in a group chat); otherwise it gets `The tool "edit" runs only
+for some senders, and this run answers someone else (house rules).`, and the section says such tools
+exist without naming who. An agent that does not name `house-rules` has neither, even with the component
 installed. Installed with the default config (no rules, no tools), it adds nothing.
 
 ## How this extension is built
@@ -66,7 +72,9 @@ installed. Installed with the default config (no rules, no tools), it adds nothi
    `createHouseRules`. pi-durable sends a section again only when its text changes, so a stable
    section keeps the provider's prompt cache warm; a section that changes on every request (the time,
    a search over the latest message) defeats it.
-3. **The hook decides from the call alone.** `beforeTool` runs before the call's intent is recorded,
+3. **The hook decides from the call and what it reads.** It reads who the run answers from its context
+   (`context.value(RUN_REQUESTS)?.list(context)`: each request with its sender, trusted, never the
+   model's words). `beforeTool` runs before the call's intent is recorded,
    and again if the call is retried after a crash, so it has no effect of its own: it returns
    `{ block: reason }` (the model reads the reason as the call's error result) or `undefined`. A hook
    that throws blocks the call too.
@@ -85,6 +93,7 @@ installed. Installed with the default config (no rules, no tools), it adds nothi
   another's): the extension in a real App, with runtime-pi on a SQLite file and the scripted faux
   model (`scriptedProvider` from `@pikit/pi-adapter/testing`, model `faux/scripted`): the section is
   in every request of an agent that names it and sent once, a denied `bash` never runs and the model
-  reads why, and an agent that does not name it is untouched. In your project, the same test is the
+  reads why, a tool kept for some senders runs for them and is refused for a stranger or a message
+  without a sender, and an agent that does not name it is untouched. In your project, the same test is the
   project's own and imports `src/pikit/runtime-pi/index.ts`, shaped like
   `src/pikit/runtime-pi/extensions.test.ts`.

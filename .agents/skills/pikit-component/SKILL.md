@@ -51,6 +51,8 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | Run later, at least once | `wakeups` (`handle(name, handler)` in `start`, `at(name, time)`) |
 | Deliver to a platform, retried | `outbound.queue` (through `startAnswerDelivery` for a channel) |
 | Talk to a busy conversation | `agent.runtime`'s `dispatch` with `whenBusy: "steer"` (into the run's current round) |
+| Know who sent the messages a run answers (in a tool or a hook) | `context.value(RUN_REQUESTS)?.list(context)`: each request with its `sender`, as its channel authenticated it |
+| A tool that hands work to another agent (a child conversation) | a tool cannot use `agent.runtime` or `conversations.registry` (the runtime uses every tool: a cycle). Use the runtime's delegation in its context: `context.value(AGENT_DELEGATION)` (`@pikit/pi-adapter/tools`), `run` or `start`; reference `tool-delegate` |
 | Models from another provider | `model.provider` under the provider's id (below: "A model provider") |
 | Say that it broke after `start` (a stuck poller) | `useOptional("health")`: `reporter(name)`'s `up` / `degraded` / `down` |
 

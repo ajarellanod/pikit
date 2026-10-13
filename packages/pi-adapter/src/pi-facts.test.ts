@@ -425,6 +425,27 @@ describe("pi-durable facts (1.2.0)", () => {
     await harness.close(ctx);
   });
 
+  test("an input with an entry (InputEntry) is placed as that kind with its data, queued or not; the model reads its content as a user message (runtime.ts: senders)", async () => {
+    const gate = gated("one");
+    const { harness, conversation, faux } = await open([gate.step, fauxAssistantMessage("two")]);
+    const sender = { sender: { channel: "telegram", id: "1001" } };
+
+    await conversation.submit({ type: "input", content: "one", requestId: "r1", entry: { kind: "pikit.input", data: sender } }, ctx);
+    await gate.reached;
+    // Queued while the run goes: its inbox item carries the entry, and it is placed as one at the next run.
+    const queued = await conversation.submit({ type: "input", content: "two", requestId: "r2", entry: { kind: "pikit.input", data: sender } }, ctx);
+    expect((await harness.snapshot(InboxDoc, conversation.id, ctx))?.items.map((item) => item.entry)).toEqual([{ kind: "pikit.input", data: sender }]);
+    gate.release();
+    const settled = await queued.wait(ctx);
+
+    const placed = settled.type === "input" && settled.entry !== undefined ? await conversation.commit((tx) => tx.entry(settled.entry as EntryId), ctx) : undefined;
+    expect([placed?.kind, placed?.data]).toEqual(["pikit.input", sender]);
+    expect(placed?.model?.map((message) => message.role)).toEqual(["user"]);
+    expect(faux.state.callCount).toBe(2);
+    await expect(conversation.submit({ type: "input", content: "x", requestId: "r3", entry: { kind: "pi.mine" } }, ctx)).rejects.toThrow();
+    await harness.close(ctx);
+  });
+
   test("a conversation document survives a new Harness over the storage, and a new conversation starts from its initial value (agent.state)", async () => {
     const Doc = defineDoc<{ phase?: string }>({ kind: "pikit.fact", version: 1, scope: "conversation", history: "latest", fork: "current", initial: () => ({}) });
     const file = databaseFile();

@@ -136,6 +136,12 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
   hooks and tools (`api.attributes`, the union or the latest of the inputs a run places), and kept
   across restarts. Optionally `HarnessOptions.contextFor(invocation)` so a host can turn attributes
   back into its own context values.
+- **Partly solved in 1.2.0** ([#10407](https://github.com/earendil-works/pi/issues/10407)): an input
+  takes `entry: { kind, data }` (`InputEntry`), placed with the input in its commit and carried by a
+  queued input. pikit places a request's sender there (kind `pikit.input`) and reads it back for
+  `RUN_REQUESTS`. Still open: hooks and sections read only documents, not entries, so the runtime
+  reads the run's input entries for them; and values that are not a message's (a trace id) still have
+  no place.
 - **Compatibility.** Additive.
 
 ## 4. Several writers per storage

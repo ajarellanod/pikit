@@ -7,15 +7,17 @@
  * queued while it goes waits for the next run; steers queued while it goes join it after its tool round.
  */
 
-import { test } from "bun:test";
+import { expect, test } from "bun:test";
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
-import { type Admission, type AgentRuntime, type ConversationRef, stewardProblem } from "../agent.ts";
+import { type Admission, type AgentRuntime, type ConversationRef, type Sender, stewardProblem } from "../agent.ts";
+import type { RunRequest } from "../run-requests.ts";
 import { type AgentRuntimeFixture, createAgentRuntimeConformance } from "./agent-runtime.ts";
 
 interface Entry {
   kind: "in" | "tool" | "out";
   text: string;
   requestId?: string;
+  sender?: Sender;
   /** A steer, waiting in the inbox for the run's tool round. */
   steer?: boolean;
 }
@@ -30,13 +32,15 @@ interface Conversation {
 }
 
 interface Script {
-  hold(signal: AbortSignal): Promise<void>;
+  /** The tool: `requests` are the run's, as `RUN_REQUESTS` would list them. */
+  hold(signal: AbortSignal, requests: readonly RunRequest[]): Promise<void>;
   atEnd(): Promise<void>;
   /** Before each answer: rejects when the model call fails. */
   answer(): Promise<void>;
 }
 
-function memoryRuntime(records: Map<string, Conversation>, script: Script) {
+/** `broken`: a runtime that loses what the suite checks (a sender), to see the suite catch it. */
+function memoryRuntime(records: Map<string, Conversation>, script: Script, broken: { dropSenders?: boolean } = {}) {
   return defineComponent({
     name: "runtime-memory",
     setup(pikit) {
@@ -69,8 +73,12 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
           for (;;) {
             const last = record.transcript.at(-1);
             if (last?.kind === "in" && last.text === "hold") {
+              const requests = taken.map((id): RunRequest => {
+                const sender = record.transcript.find((e) => e.requestId === id)?.sender;
+                return { requestId: id, ...(sender !== undefined && broken.dropSenders !== true && { sender }) };
+              });
               try {
-                await script.hold(controller.signal);
+                await script.hold(controller.signal, requests);
               } catch {
                 return { kind: "aborted" };
               }
@@ -143,7 +151,13 @@ function memoryRuntime(records: Map<string, Conversation>, script: Script) {
             if (seen || record.withdrawn.has(requestId)) {
               admission = { kind: "duplicate", requestId };
             } else {
-              record.inbox.push({ kind: "in", text: request.prompt, requestId, ...(request.whenBusy === "steer" && { steer: true }) });
+              record.inbox.push({
+                kind: "in",
+                text: request.prompt,
+                requestId,
+                ...(request.sender !== undefined && { sender: { ...request.sender } }),
+                ...(request.whenBusy === "steer" && { steer: true }),
+              });
               if (live.has(conversation.conversationId)) {
                 admission = { kind: "queued", requestId };
               } else {
@@ -187,7 +201,7 @@ function notStarted(): never {
   throw new Error("runtime-memory: a run ended before start()");
 }
 
-function memoryFixture(): AgentRuntimeFixture {
+function memoryFixture(broken: { dropSenders?: boolean } = {}): AgentRuntimeFixture {
   const records = new Map<string, Conversation>();
   let next = 0;
   let release!: () => void;
@@ -196,6 +210,7 @@ function memoryFixture(): AgentRuntimeFixture {
   const holdStarted = new Promise<void>((resolve) => (started = resolve));
   let end: { reach(): void; released: Promise<void> } | undefined;
   let failing: { reach(): void; released: Promise<void> } | undefined;
+  let requests: readonly RunRequest[] | undefined;
 
   const script: Script = {
     async answer() {
@@ -206,7 +221,8 @@ function memoryFixture(): AgentRuntimeFixture {
       await armed.released;
       throw new Error("scripted failure");
     },
-    hold(signal) {
+    hold(signal, taken) {
+      requests = taken;
       started();
       return new Promise((resolve, reject) => {
         signal.addEventListener("abort", () => reject(signal.reason), { once: true });
@@ -228,10 +244,10 @@ function memoryFixture(): AgentRuntimeFixture {
   };
 
   return {
-    components: [memoryRuntime(records, script)],
+    components: [memoryRuntime(records, script, broken)],
     model: "memory/scripted",
     conversation: async () => conversation(),
-    hold: { started: holdStarted, release: () => release() },
+    hold: { started: holdStarted, release: () => release(), requests: () => requests },
     holdAtEnd() {
       let reach!: () => void;
       let resume!: () => void;
@@ -258,6 +274,12 @@ function memoryFixture(): AgentRuntimeFixture {
   };
 }
 
-for (const c of createAgentRuntimeConformance(memoryFixture)) {
+for (const c of createAgentRuntimeConformance(() => memoryFixture())) {
   test(`${c.group}: ${c.name}`, () => c.run());
 }
+
+test("a runtime that loses a message's sender fails the sender cases", async () => {
+  const cases = createAgentRuntimeConformance(() => memoryFixture({ dropSenders: true })).filter((c) => /sender|requests/.test(c.name));
+  expect(cases.length).toBeGreaterThanOrEqual(3);
+  for (const c of cases) await expect(c.run()).rejects.toThrow("the requests");
+});

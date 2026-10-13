@@ -25,6 +25,7 @@ state across a restart).
 | One more thing the model can call | a tool component (`pikit-component`, reference `tool-fetch`) |
 | Switch model, prompt, tools or extensions with the conversation's state (a mode, a phase) | the agent's `prepare(state)` in `src/agents/<agent>/agent.ts`: pure and synchronous. The definition owns the conversation's agent (SPEC §6): the runtime rebuilds it from `prepare` at each admission and state update, so nothing else changes it live |
 | Text in every request (rules, a persona, recalled memories), possibly read from a store | an extension's **section** |
+| Instructions for a kind of task, loaded only when one matches | a skill: a `SKILL.md`, `defineSkill(text)` in the agent's `skills`; the runtime lists them and gives the `skill` tool |
 | See or change each model request or answer, each tool call or result, a compaction | an extension's **hook** |
 | Decorate a tool or a section someone else provides | an extension's **wrap** |
 | Tools that belong with that behaviour (`remember` with memory's section) | the extension's **tools** |
@@ -69,9 +70,13 @@ defineExtension({
 - **Which conversation:** a section gets `input.conversationId` (pi-durable's) and `input.read`; a
   hook gets `api.conversationId` and `api` as a reader. The conversation's key and agent are its
   `ConversationDoc`: `await input.read.snapshot(ConversationDoc, input.conversationId, context)` (in a
-  hook, `api.snapshot(…)`), `{ key, agent }`, or `undefined`. A tool reads `CONVERSATION` (the whole
-  `ConversationRef`) and `AGENT_STATE` from its context: `context.value(CONVERSATION)`, from
-  `@pikit/contracts`.
+  hook, `api.snapshot(…)`), `{ key, agent }`, or `undefined`. A tool, a section and a hook (of the
+  generation, tool and compaction tasks) read `CONVERSATION` (the whole `ConversationRef`) and
+  `AGENT_STATE` from their context: `context.value(CONVERSATION)`, from `@pikit/contracts`.
+- **Who the run answers:** `await context.value(RUN_REQUESTS)?.list(context)` (from
+  `@pikit/contracts`), in a tool, a section or a hook: the requests the run takes, each with its
+  `sender` (`{ channel, id }`, as the channel authenticated it). Decide with it (whose memory, which
+  tools), never with what the model says; a run may answer several people at once.
 - **The extension's own state, per conversation:** a document, committed with the transcript, so it
   survives crashes and is reset with the conversation:
 

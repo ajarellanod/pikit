@@ -141,6 +141,7 @@ Values that are not capabilities travel as context keys:
 | `APP_DESCRIPTION` | `@pikit/core` | the kernel, on every context an App creates | the frozen `describe()` |
 | `AGENT_STATE` | `@pikit/contracts` (`agent-state.ts`) | the runtime, on each run | the conversation's `AgentState` |
 | `CONVERSATION` | `@pikit/contracts` (`conversation-context.ts`) | the runtime, on each run | the run's `ConversationRef` |
+| `RUN_REQUESTS` | `@pikit/contracts` (`run-requests.ts`) | the runtime, on each run | the requests the run takes, each with its `sender` |
 | `WORKERS_HOST` | `@pikit/contracts/cloudflare` | deployment-cloudflare's entrypoints, on the start context | `env`, `origin` (Worker), `object` (Durable Object) |
 
 ## Target

@@ -15,7 +15,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDefinition, type AgentRuntime, type AgentTool, type ConversationRef, defineAgent } from "@pikit/contracts";
+import { type AgentDefinition, type AgentRuntime, type AgentTool, type ConversationRef, defineAgent, type Sender } from "@pikit/contracts";
 import { createLocalExecution } from "@pikit/pi-adapter/node";
 import { type ModelRequest, recordingBash, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import runtimePi from "../runtime-pi/files/src/pikit/runtime-pi/index.ts";
@@ -56,7 +56,7 @@ function sections(request: ModelRequest | undefined): Record<string, string> {
 }
 
 /** An App with runtime-pi, the agents and house rules; `ask` dispatches a message and waits for the run's end. */
-async function start(agents: AgentDefinition[], ran: string[]) {
+async function start(agents: AgentDefinition[], ran: string[], rules: Record<string, unknown> = config["extension-house-rules"]) {
   const dir = mkdtempSync(join(tmpdir(), "pikit-house-rules-"));
   cleanup.push(() => rmSync(dir, { recursive: true, force: true }));
   const requests: ModelRequest[] = [];
@@ -77,18 +77,18 @@ async function start(agents: AgentDefinition[], ran: string[]) {
     },
   });
   const components = [sqliteStorage(join(dir, "pikit.db")), agentsComponent(agents), provider, bash(ran), houseRules, runtimePi, observer];
-  const app = await defineApp({ components, config, logger: silentLogger }).create();
+  const app = await defineApp({ components, config: { "extension-house-rules": rules }, logger: silentLogger }).create();
   await app.start();
   cleanup.push(() => app.stop());
   const live = () => reached ?? (() => { throw new Error("the observer has not started"); })();
 
   return {
     requests,
-    async ask(key: string, agent: string, prompt: string) {
+    async ask(key: string, agent: string, prompt: string, sender?: Sender) {
       const conversation: ConversationRef = { key, agent, conversationId: await live().create() };
       const requestId = `${key}:1`;
       const before = requests.length;
-      await live().runtime.dispatch({ requestId, conversation, prompt }, app.context());
+      await live().runtime.dispatch({ requestId, conversation, prompt, ...(sender !== undefined && { sender }) }, app.context());
       const deadline = Date.now() + 10_000;
       for (;;) {
         const result = results.find((r) => r.requestId === requestId);
@@ -137,4 +137,17 @@ test("an agent that does not name it has no section and runs the tool", async ()
   expect(result.text).toBe("tool said: ran");
   expect(ran).toEqual(["ls"]);
   expect(requests.map((request) => sections(request)["house-rules"])).toEqual([undefined, undefined]);
+});
+
+test("a tool kept for some senders runs for them and is refused for anyone else, as the channel authenticated them", async () => {
+  const ran: string[] = [];
+  const s = await start(agents, ran, { senderTools: [{ tool: "bash", senders: ["telegram:1001"] }] });
+
+  const owner = await s.ask("test:owner", "ruled", "bash: ls", { channel: "telegram", id: "1001" });
+  const stranger = await s.ask("test:stranger", "ruled", "bash: rm -rf /", { channel: "telegram", id: "2002" });
+  const nobody = await s.ask("test:nobody", "ruled", "bash: rm -rf /");
+
+  expect(owner.result.text).toBe("tool said: ran");
+  expect(ran).toEqual(["ls"]);
+  for (const { result } of [stranger, nobody]) expect(result.text).toContain('The tool "bash" runs only for some senders, and this run answers someone else (house rules).');
 });

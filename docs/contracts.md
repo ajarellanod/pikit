@@ -26,9 +26,9 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
 | `agent.submissions` | single | runtime-pi | channel-telegram, channel-telegram-webhook, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
 | `agent.observe` | single | runtime-pi | admin-api | `createAgentObserveConformance` |
-| `agent.definition` | keyed | the project | admin-api?, agents-live?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi? | none (`defineAgent` validates) |
+| `agent.definition` | keyed | the project | admin-api?, agents-live?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
-| `agent.tool` | keyed | tool-bash, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
+| `agent.tool` | keyed | tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
 | `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createConversationRegistryConformance` |
@@ -74,8 +74,13 @@ interface AgentRuntime {
 }
 ```
 
-- `AgentRequest` is `{ requestId, conversation, prompt, images?, whenBusy? }`. `ConversationRef` is
+- `AgentRequest` is `{ requestId, conversation, prompt, images?, whenBusy?, sender? }`. `ConversationRef` is
   `{ key, agent, conversationId }`: the channel's key, the agent's name, the runtime's conversation.
+- `sender` (`Sender`, `{ channel, id }`) is who sent the message, as its producer established it:
+  `admitInbound` gives the message's actor (`{ channel, id: actor.id }`), admin-api the operator
+  (`{ channel: "dashboard", id }`), tool-delegate's tasks the delegating agent (`{ channel: "delegate",
+  id }`). The runtime keeps it with the message, durably, and gives it to the run that takes the
+  message (`RUN_REQUESTS`, below); it is not in the result nor in `agent.submissions`.
 - `dispatch` resolves once the message is durable in the runtime (a channel's acknowledgement point),
   not when it is answered. Cancelling `ctx` never stops a run.
 - The same `requestId` in one conversation is `duplicate`: nothing runs. This is pikit's inbound
@@ -103,14 +108,18 @@ Durable Object, the object's root conversation first).
 ### `agent.definition` (keyed, provided by the project)
 
 One `AgentDefinition` per agent name: `{ name, model: "provider/modelId", steward?, systemPrompt?,
-tools?, extensions?, state?, prepare?(state, ctx) }`, checked by `defineAgent`. `steward: true` marks
+tools?, extensions?, skills?, state?, prepare?(state, ctx) }`, checked by `defineAgent`. `steward: true` marks
 the project's main agent, the one its operators may ask to change it (SPEC §6): at most one per App
 (the runtime refuses to start with two: `stewardProblem`, which the `agent.runtime` suite checks),
 and only it may name `pikit-self` (extension-pikit-self
 refuses to start otherwise). `tools` names `agent.tool`
 keys or holds tool objects; `extensions` names `agent.extension` keys. An agent gets only what it
-names. `prepare` is pure and synchronous: from the conversation's state it returns the fields that
-change for this run. The project provides agents (`src/extensions/agents.ts`); runtime-pi refuses to
+names. `skills` are `AgentSkill`s (`defineSkill` over a `SKILL.md`, [skill.ts](../packages/contracts/src/skill.ts):
+the Agent Skills format Pi's coding agent reads): the runtime lists each one's name, description and
+location in a system prompt section and gives the agent the tool `skill` (`SKILL_TOOL`), which loads
+one's instructions; an agent with skills may not have a tool of its own named `skill`
+(`skillsProblem`). `prepare` is pure and synchronous: from the conversation's state it returns the
+fields that change for this run (`skills` among them). The project provides agents (`src/extensions/agents.ts`); runtime-pi refuses to
 start when an agent names a model, tool or extension nothing provides.
 
 ### `agent.directory` ([agent-directory.ts](../packages/contracts/src/agent-directory.ts), optional)
@@ -125,7 +134,10 @@ router-rules checks a rule's agent here when a message matches it; admin-api lis
 true`). Provider: agents-live (its settings). Suite: `createAgentDirectoryConformance` (agents-live,
 and in workerd over settings-store on storage-do).
 
-### `agent.state` and `CONVERSATION` (context keys, not capabilities)
+### `agent.state`, `CONVERSATION` and `RUN_REQUESTS` (context keys, not capabilities)
+
+The runtime puts all three in the context of everything that runs for a conversation: its tools, and
+the system prompt sections and hooks (generation, tool, compaction) of its agent's extensions.
 
 - `AGENT_STATE` ([agent-state.ts](../packages/contracts/src/agent-state.ts)): the conversation's JSON
   state. `get(ctx)`, `update(patch, ctx)` (a shallow merge, committed, one at a time per conversation;
@@ -134,6 +146,11 @@ and in workerd over settings-store on storage-do).
   (run in the adapter's `prepare.test.ts`).
 - `CONVERSATION` ([conversation-context.ts](../packages/contracts/src/conversation-context.ts)): the
   run's `ConversationRef`, for a tool that needs to know whose run it is in.
+- `RUN_REQUESTS` ([run-requests.ts](../packages/contracts/src/run-requests.ts)): `list(ctx)`, the
+  requests the run in progress takes (its starter, the follow-ups queued with it, the steers that
+  joined it), each with its `sender`, read when asked; empty with no run going. Whose memory, which
+  rules: code decides with it, never with the model (extension-house-rules' `senderTools`). Suite: the
+  `agent.runtime` suite's sender cases (a request's sender, queued requests, a steer joining).
 
 ### `agent.tool` (keyed)
 
@@ -141,7 +158,18 @@ One tool per name the model calls it by: pi-durable's `ToolRegistration` (`defin
 `@pikit/pi-adapter/tools`), with its `replay` (`safe`: an interrupted call runs again on recovery;
 `unsafe`: the model gets an interrupted result). `component.json`'s `replay.tools` records it. A tool
 that works on `api.env` must use `execution` or `execution.shell`. Registry tools: `read` (safe),
-`write`, `edit`, `bash`, `fetch` (unsafe), `websearch` (safe), and tool-mcp's `<server>_<tool>`.
+`write`, `edit`, `bash`, `fetch` (unsafe), `websearch` (safe), `delegate` (safe), and tool-mcp's
+`<server>_<tool>`.
+
+A tool cannot use `agent.runtime` or `conversations.registry` (the runtime uses every tool: a cycle).
+What a tool may need of the runtime is in its context, from the runtime's `scope`: besides the keys
+above, `AGENT_DELEGATION` (`@pikit/pi-adapter/tools`, Pi-shaped: it takes the call's `api`), the
+runtime's delegation on pi-durable's subagents: `run(api, { agent, key, task, sender })`, a child
+conversation of another agent owned by the call (stopping the run stops it; a rerun finds it), or
+`start(…)`, one that outlives the run, whose answer is admitted to the parent through `dispatch`
+(request id `delegate-result:<task id>`). Used by tool-delegate. Tested by the adapter's
+`delegation.test.ts` and the workerd lane.
+
 No suite (see [building-components.md](../features/building-components.md), "Contracts without a
 suite").
 

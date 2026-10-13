@@ -8,7 +8,7 @@
 
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDefinition, defineAgent, type Proposals, type ProposalsRemote } from "@pikit/contracts";
+import { type AgentDefinition, defineAgent, defineSkill, type Proposals, type ProposalsRemote } from "@pikit/contracts";
 import type { Extension } from "@pikit/pi-adapter/extensions";
 import Type from "typebox";
 import pikitSelf, { agentSummary, KIT_REPOSITORY, kitUrl, PIKIT_SELF, pikitSelfText, proposingText, stewardProblem } from "./index.ts";
@@ -68,12 +68,13 @@ test("one extension named like its key, with one section and nothing else", asyn
 });
 
 test("the section says what runs: the target, each component and what it provides, the agents, the config", async () => {
-  const { text } = await sectionOf([assistant, defineAgent({ name: "triage", model: "faux/echo" })]);
+  const review = defineSkill("---\nname: review\ndescription: Reviews a diff.\n---\nRead it.");
+  const { text } = await sectionOf([assistant, defineAgent({ name: "triage", model: "faux/echo" }), defineAgent({ name: "reviewer", model: "faux/echo", skills: [review] })]);
 
   expect(text).toContain("## What runs now\nTarget: server.");
-  expect(text).toContain("Components, in start order, with what each provides:\n- agents: agent.definition (assistant, triage)\n- tool-leaky: agent.tool (leak)\n");
+  expect(text).toContain("Components, in start order, with what each provides:\n- agents: agent.definition (assistant, triage, reviewer)\n- tool-leaky: agent.tool (leak)\n");
   expect(text).toContain("- extension-pikit-self: agent.extension (pikit-self)");
-  expect(text).toContain("Agents:\n- assistant (the steward): model faux/scripted; tools read, leak; extensions pikit-self\n- triage: model faux/echo; tools none");
+  expect(text).toContain("Agents:\n- assistant (the steward): model faux/scripted; tools read, leak; extensions pikit-self\n- reviewer: model faux/echo; tools none; skills review\n- triage: model faux/echo; tools none");
   expect(text).not.toContain("the Worker's App");
 });
 
@@ -113,9 +114,16 @@ test("the section is the same text on every request: it is built once, when the 
   expect(await section?.render({} as never, {} as never)).toBe(await section?.render({} as never, {} as never));
 });
 
-test("an agent is said by its model and the names of its tools, its own tool objects included", () => {
-  expect(agentSummary("a", { model: "x/y", tools: ["read", { name: "mine" }, 3], extensions: ["memory"] })).toEqual({ name: "a", model: "x/y", tools: ["read", "mine"], extensions: ["memory"], steward: false });
-  expect(agentSummary("b", undefined)).toEqual({ name: "b", model: "", tools: [], extensions: [], steward: false });
+test("an agent is said by its model and the names of its tools, its own tool objects included, and of its skills", () => {
+  expect(agentSummary("a", { model: "x/y", tools: ["read", { name: "mine" }, 3], extensions: ["memory"], skills: [{ name: "review" }, 4] })).toEqual({
+    name: "a",
+    model: "x/y",
+    tools: ["read", "mine"],
+    extensions: ["memory"],
+    skills: ["review"],
+    steward: false,
+  });
+  expect(agentSummary("b", undefined)).toEqual({ name: "b", model: "", tools: [], extensions: [], skills: [], steward: false });
   expect(agentSummary("c", { model: "x/y", steward: true }).steward).toBe(true);
 });
 
