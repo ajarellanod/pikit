@@ -33,5 +33,7 @@ Object per conversation). These pages describe what exists at this commit, read 
 - [../features/building-components.md](../features/building-components.md) and
   [../.agents/skills/](../.agents/skills/pikit-component/SKILL.md): how to build a component, a view or
   an agent extension.
+- [chord-decision.md](chord-decision.md): when pikit moves its kernel to Chord: the gates, how to
+  check each, every validation's result.
 - [upstream/](upstream/README.md): proposals made to Pi. [architecture-audit.md](architecture-audit.md):
   an earlier audit. Both are kept as they are; these pages do not replace them.

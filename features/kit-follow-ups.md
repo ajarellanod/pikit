@@ -85,28 +85,15 @@ their own file there. Each one Pi ships removes a workaround in the adapter or a
 - **When:** the other skills with what they teach (adding a view with the dashboard).
 
 ## Chord: through the adapter and components, never in `@pikit/core`
-- **Decided (re-checked against Chord 1.1.0, which changed nothing since 1.0.0 but its version and a dev dependency):** `@pikit/core` stays, and Chord does not enter the
-  kernel. The kernel's only runtime dependency is `typebox` (SPEC §3); `Context` is pikit's own and
-  frozen (K5), matching Chord's shape and bridged by the adapter (`toChord`).
-- **Why, with Chord 1.1.0:** portability is no longer the objection (it runs in Bun and in bare
-  workerd). What remains:
-  - its 1.0 is 1.0 in name, not stable: it comes from Pi's lockstep versioning, and Chord's
-    `PLANNING.md` says it is not a stable public contract, while the kernel promises 1.x (K8, P7);
-  - `esbuild` is still a hard dependency, though only its `./bundler` subpath uses it (asked
-    upstream by someone else as [#9225](https://github.com/earendil-works/pi/issues/9225), closed
-    `no-action`: not to be sent again);
-  - `withContextValue` still drops a foreign parent's `abortSignal`: pikit asked for the fix
-    ([#10189](https://github.com/earendil-works/pi/issues/10189)), which was declined (closed
-    `no-action`), so the adapter's bridge (`toChord`, `packages/pi-adapter/src/context.ts`) stays;
-  - its facades pay off only with hot reload or remote services, which pikit does not do (below);
-  - it lacks what pikit's kernel provides: typed events, pipelines with priority and halt, optional
-    dependencies, provider selection, keyed lookup, cancellable start/stop with deadlines and
-    rollback, `describe()`, and per-component config validation.
+- **Decided (validated against Chord 1.2.0, 2026-10-13, with a spike that ran the whole repository over a Chord-backed kernel):**
+  `@pikit/core` stays, and Chord does not enter the kernel. The gates that must pass first, the check
+  for each, what each validation found and how to re-run the spike are in
+  [docs/chord-decision.md](../docs/chord-decision.md); it is re-validated at every Pi pin bump.
 - **Keep:** aligning `Context` with Chord's shape.
 - **Candidate**, through the adapter, when its feature is built: the operator UI's live state
   (SPEC §5), pi-durable's `watch()` and `taskGraph()` mapped through the `agent.observe` contract. pikit
   uses no Chord services, so nothing else of Chord's is a candidate.
-- **Open:** Chord's semver ([docs/upstream](../docs/upstream/README.md), proposal 10).
+- **Open:** Chord's semver ([docs/upstream](../docs/upstream/README.md), proposal 10; gate G1).
 - **Size:** none now; each candidate is weighed with its feature.
 
 ## No code hot reload

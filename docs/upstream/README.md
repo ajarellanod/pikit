@@ -59,6 +59,8 @@ When the adapter's Pi pins move (`packages/pi-adapter/package.json`):
    workaround (MANIFESTO, principle 1).
 3. Re-read the CHANGELOG of each pinned package for the proposals' subjects, and update the
    "Re-checked against" line above and the `Status:` line of each proposal file.
+4. Validate gates G1 and G2 of [../chord-decision.md](../chord-decision.md) against the new Chord
+   (all gates when one of its triggers holds), and add a row to its History.
 
 ---
 
