@@ -202,12 +202,12 @@ test('the "/" menu lists only the commands the App registered; titles are the AP
   expect(chats).toContain("conversation.title");
 });
 
-test("an answer that ended between two polled snapshots (Cloudflare) stays as last seen; one that ended with its event is its entry", () => {
+test("an answer that ended between two snapshots (a reconnect) stays as last seen; one that ended with its event is its entry", () => {
   const partial = (text: string) => ({ role: "assistant" as const, content: [{ type: "text" as const, text }], timestamp: 7 });
   const snapshot = (fields: Record<string, unknown>) => ({ type: "event" as const, event: { type: "snapshot", ...fields } });
   const fold = (events: Parameters<typeof reduce>[1][]): LiveState => events.reduce(reduce, INITIAL);
 
-  // Polled: the next snapshot no longer has the answer, and the transcript is not read again yet.
+  // Reconnected: the next snapshot no longer has the answer, and the transcript is not read again yet.
   const polled = fold([snapshot({ run: {}, generation: { message: partial("Hel") } }), snapshot({})]);
   expect(polled.busy).toBe(false);
   expect(polled.partial).toBeUndefined();

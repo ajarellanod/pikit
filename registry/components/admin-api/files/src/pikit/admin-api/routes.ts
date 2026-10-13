@@ -207,6 +207,15 @@ function eventStream(events: AsyncIterable<ApiEvent>, heartbeatMs: number, ctx: 
         controller.enqueue(encoder.encode(`data: ${JSON.stringify(next.value)}\n\n`));
       } catch (error) {
         finish();
+        // The client went away (its request's context is cancelled): nobody reads, nothing to say.
+        if (ctx.abortSignal?.aborted === true) {
+          try {
+            controller.close();
+          } catch {
+            // Cancelled already.
+          }
+          return;
+        }
         ctx.logger.warn("admin-api: a conversation's live events stopped", { error: error instanceof Error ? error.message : String(error) });
         controller.enqueue(encoder.encode(`event: error\ndata: ${JSON.stringify({ error: "watch_failed" } satisfies ApiError)}\n\n`));
         controller.close();

@@ -69,7 +69,7 @@ boundaries (only the adapter imports Pi; the kernel and contracts stay neutral).
   conversation key. It composes the default export on its first event, inside `blockConcurrencyWhile`
   (20 s start deadline, 5 s rollback). A failed start is rethrown so Cloudflare resets the object.
   The object is never stopped: it is evicted without warning (K6). Its RPC methods are `health()`,
-  `deliver(type, key, message)`, `call(type, key, message)` and `alarm()`.
+  `deliver(type, key, message)`, `call(type, key, message)`, `stream(type, key, message)` and `alarm()`.
 - **Halves.** A component that must be in both Apps has a Worker half (`apps.worker` in
   `component.json`). channel-telegram-webhook (route in the Worker, handler in the object) and admin-api
   (routes in the Worker, answers in the objects) have two; platform-cloudflare, secrets-cloudflare and
@@ -142,7 +142,7 @@ so. deployment-cloudflare's README has the rules ("Rolling back").
 
 What a component cannot do on a target is in that component's README: channel-http (no Worker half
 yet), provider-anthropic and credentials-file (no subscription login on Cloudflare), execution-do
-(its simulated shell), admin-api (on Cloudflare, no Delivery view, and live events polled).
+(its simulated shell), admin-api (on Cloudflare, no Delivery view).
 
 Moving a project to the other target is swapping those components, never changing an agent, a route
 or a contract. [features/deployment-targets.md](../features/deployment-targets.md) has other hosts and a

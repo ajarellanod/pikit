@@ -178,13 +178,13 @@ export const CAPABILITIES: Catalogue = {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "Delivers a JSON message to the actor owning a key, wherever it runs; resolves once the actor holds it durably.",
+    summary: "Delivers a JSON message to the actor owning a key, wherever it runs; resolves once the actor holds it durably. Also asks it for an answer (call) or for answers as they come (stream).",
   },
   "actor.inbox": {
     mode: "single",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: "Where an actor registers one handler per message type it receives through actor.mailbox; a handler resolves once the message is durable. Its scope says whose actor the App is: every key's, or one key's.",
+    summary: "Where an actor registers one handler per message type it receives through actor.mailbox (a handler resolves once the message is durable), and per call and stream type it answers. Its scope says whose actor the App is: every key's, or one key's.",
   },
   wakeups: {
     mode: "single",

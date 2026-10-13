@@ -365,7 +365,7 @@ for (const c of createLifecycleConformance(() => {
 
 for (const c of createLifecycleConformance(() => {
   const telegram = fake();
-  const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", { send: async () => {}, call: async () => null }) });
+  const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", { send: async () => {}, call: async () => null, stream: async () => (async function* () {})() }) });
   return { component: worker, providers: [secretsWith(secretsFor(telegram)), mailbox], config: { [WORKER_NAME]: { apiBase: telegram.url } } };
 })) {
   test(`${WORKER_NAME} ${c.group}: ${c.name}`, () => c.run());
@@ -673,6 +673,7 @@ test("the halves in two Apps, as on Cloudflare: the Worker's App checks and send
       pikit.provide("actor.mailbox", {
         send: (key, type, message, ctx) => (objectMailbox as ActorMailbox).send(key, type, message, ctx),
         call: (key, type, message, ctx) => (objectMailbox as ActorMailbox).call(key, type, message, ctx),
+        stream: (key, type, message, ctx) => (objectMailbox as ActorMailbox).stream(key, type, message, ctx),
       }),
   });
   const server = httpServer();
@@ -753,7 +754,7 @@ test("accounts: the default bot's path and secrets; a named one gets its own", (
 /** The Worker's half alone, as in the Worker's App: a mailbox that records, served on a local port. `host` is its WORKERS_HOST. */
 async function workerOnly(options: { telegram: FakeTelegram; secrets?: Record<string, string>; accounts?: string[]; host?: WorkersHost; logger?: Logger; extra?: ComponentDefinition[] }) {
   const sent: [string, string][] = [];
-  const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", { send: async (key, type) => void sent.push([key, type]), call: async () => null }) });
+  const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", { send: async (key, type) => void sent.push([key, type]), call: async () => null, stream: async () => (async function* () {})() }) });
   const server = httpServer();
   const app = await defineApp({
     components: [

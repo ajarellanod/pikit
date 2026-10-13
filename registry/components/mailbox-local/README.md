@@ -59,6 +59,20 @@ The answer is a JSON copy. A failure is an `ActorCallError` with a `code`: `inva
 retries it, so a handler that changes state makes the change idempotent. Message and call types are
 apart: a type may have both a `handle` and an `answer` handler.
 
+**Streams ask an actor for answers as they come.** The actor registers `answerStream(type,
+handler)`, whose handler resolves with an async iterable; the caller iterates what `stream` resolved
+with, each value a JSON copy, read as it reads:
+
+```ts
+inbox.get().answerStream("memory.changes", async (key, message, ctx) => changesOf(key, ctx));
+for await (const change of await mailbox.get().stream(`telegram:${chatId}`, "memory.changes", null, ctx)) show(change);
+```
+
+It is refused as a call is; an error in it ends it with its code. Closing it (a `break`), or
+cancelling `ctx`, closes the handler's stream and cancels its context; stopping the app ends the open
+ones (`unreachable`). It goes through the same frames as on Cloudflare (`answerStream`,
+`streamResult`), so what passes here passes there.
+
 Handlers are registered, not provided, so this component depends on none of them: a component may
 handle messages and also send them, wake itself with `wakeups`, or use the runtime, with no
 dependency cycle.

@@ -21,13 +21,27 @@
  * - **Calls** (`call(key, type, message, ctx)`) reach the handler registered with
  *   `answer(type, handler)` the same way, and resolve with a JSON copy of its answer; a failure is an
  *   `ActorCallError` with its code, as on Cloudflare.
+ * - **Streams** (`stream(key, type, message, ctx)`) reach the handler registered with
+ *   `answerStream(type, handler)`, through the same frames as on Cloudflare (`answerStream`,
+ *   `streamResult`): each value a JSON copy, read as the caller reads. Stopping the App ends the open
+ *   ones (`unreachable`) and closes their handlers' streams.
  *
  * Targets: `server`. It imports nothing platform-specific, but on Cloudflare the actors live in other
  * objects, and the Cloudflare provider reaches them.
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import { type ActorCallHandler, ActorCallError, type ActorInboxHandler, answerCall, callResult, type JsonValue } from "@pikit/contracts";
+import {
+  type ActorCallHandler,
+  ActorCallError,
+  type ActorInboxHandler,
+  type ActorStreamHandler,
+  answerCall,
+  answerStream,
+  callResult,
+  type JsonValue,
+  streamResult,
+} from "@pikit/contracts";
 
 export default defineComponent({
   name: "mailbox-local",
@@ -36,6 +50,8 @@ export default defineComponent({
     const registered = new Map<string, ActorInboxHandler>();
     /** The handler of each call type (`answer`). */
     const answering = new Map<string, ActorCallHandler>();
+    /** The handler of each stream type (`answerStream`). */
+    const streaming = new Map<string, ActorStreamHandler>();
     /** While the app runs: the handlers' context, and what `stop` cancels and waits for. */
     let running: { handlers: AppContext; stop: AbortController; inFlight: Set<Promise<void>> } | undefined;
 
@@ -64,6 +80,11 @@ export default defineComponent({
         if (typeof type !== "string" || type === "") throw new TypeError("mailbox-local: a call type is a non-empty string, prefixed with the component that answers it");
         if (answering.has(type)) throw new Error(`mailbox-local: the call type "${type}" already has a handler; a type has one answer handler in an app`);
         answering.set(type, handler);
+      },
+      answerStream(type, handler) {
+        if (typeof type !== "string" || type === "") throw new TypeError("mailbox-local: a stream type is a non-empty string, prefixed with the component that answers it");
+        if (streaming.has(type)) throw new Error(`mailbox-local: the stream type "${type}" already has a handler; a type has one stream handler in an app`);
+        streaming.set(type, handler);
       },
     });
 
@@ -113,6 +134,31 @@ export default defineComponent({
         });
         return callResult(outcome);
       },
+
+      async stream(key, type, message, ctx) {
+        if (running === undefined) throw new ActorCallError("unreachable", "mailbox-local: actor.mailbox was used while the app is not running; stream from start or later");
+        if (typeof key !== "string" || key === "") throw new ActorCallError("invalid", `mailbox-local: the key of a "${type}" stream must be a non-empty string`);
+        const handler = streaming.get(type);
+        if (handler === undefined) {
+          const known = [...streaming.keys()];
+          throw new ActorCallError(
+            "no_handler",
+            `mailbox-local: no actor.inbox stream handler for the type "${type}" (streamed: ${known.length > 0 ? known.join(", ") : "none"}); ` +
+              "install the component that answers it, or check the type the caller names",
+          );
+        }
+        const text = JSON.stringify(message) as string | undefined;
+        if (text === undefined) throw new ActorCallError("invalid", `mailbox-local: a "${type}" stream's message must be JSON (not undefined or a function)`);
+        if (ctx.abortSignal?.aborted) throw new ActorCallError("cancelled", `mailbox-local: the "${type}" stream was cancelled before it was opened`, { cause: ctx.abortSignal.reason });
+        // The handlers' context is cancelled when the app stops, which ends the open streams.
+        const opening = answerStream(handler, key, JSON.parse(text) as JsonValue, running.handlers);
+        const outcome = await untilCancelled(opening, ctx.abortSignal).catch((reason: unknown) => {
+          // Opened after its caller left: nobody reads it.
+          void opening.then((late) => (late.ok ? late.body.cancel() : undefined)).catch(() => {});
+          throw new ActorCallError("cancelled", `mailbox-local: the "${type}" stream was cancelled before it was opened`, { cause: reason });
+        });
+        return streamResult(outcome, ctx.abortSignal);
+      },
     });
 
     return {
@@ -134,6 +180,7 @@ export default defineComponent({
         // The next app's components register theirs again.
         registered.clear();
         answering.clear();
+        streaming.clear();
       },
     };
   },

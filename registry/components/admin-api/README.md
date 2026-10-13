@@ -194,10 +194,12 @@ by `actor.mailbox.call` (JSON in, JSON out). So admin-api has two halves, which 
   then each conversation's object for it: a page is at most 20 conversations whatever `limit` says
   (each is a subrequest). An object that does not answer is left out of the page, and logged.
 - **A new conversation** of the dashboard's own is one call to the object of its new key.
-- **Live events are polled.** No call streams, so `…/events` asks the object for its `snapshot` every
-  2 s and sends it only when it changed, then ends after 40 of them (the subrequests of a request are
-  bounded); the dashboard connects again. Text does not stream word by word: the view shows where the
-  run is, every 2 s.
+- **Live events are streamed.** `…/events` opens the object's `admin-api.live` stream
+  (`actor.mailbox.stream`, one RPC): its conversation's events as they happen, the answer as it is
+  written, as on a server. The object stays in memory while the stream is open, which is while the
+  dashboard follows the conversation with its tab active; one whose reader left closes within
+  platform-cloudflare's `streamBeatMs` (5 s). A stream cut by an eviction or a deploy ends, and the
+  dashboard connects again.
 - **The composition** (`/admin/api/app`), **the agents** (`/admin/api/agents`) and **the commands**
   (`/admin/api/commands`) are the objects' App's, where the agents run (the index's). A command runs
   in its conversation's object (`admin-api.command`), and a title is made and kept there.
@@ -265,8 +267,8 @@ still answers.
   operator's.
 - No config value that looks like a secret leaves it (`redactSecrets`), on either host.
 - Each action is logged with the operator's id and the conversation's key, never the message's text.
-- Live events end when the client goes away or the server stops (on Cloudflare also after their
-  polls): nothing keeps watching.
+- Live events end when the client goes away or the server stops (on Cloudflare also when the object
+  is evicted): nothing keeps watching.
 
 ## Tests
 
@@ -285,7 +287,8 @@ still answers.
   answer), the index told at an object's start and on dispatch (once per conversation), a dashboard
   conversation in its own object, reads, actions and their refusals across the call, the agents, images
   and web search across the call (over 1 MB `413` before any call), a transcript page answered shorter
-  until it fits, the polled snapshot, `401` before any call; commands listed from the index object and
+  until it fits, live events over the object's stream (each event, the watch released when the client
+  leaves, `404` and `503` before any stream), `401` before any call; commands listed from the index object and
   run in the conversation's, the title in the list.
 - `conversation-index.test.ts`: the index on SQLite (an upsert a late `seen` does not move back, one
   row per conversation, order, pages, cursors; titles: one model's try and one more, the operator's

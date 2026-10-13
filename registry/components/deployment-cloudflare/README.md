@@ -128,7 +128,7 @@ export on its first event, never in its constructor:
   starts, the count is deleted and `platform-cloudflare`'s `wakeups`, the alarm's one owner, sets the
   alarm as its rows say.
 - The start context carries `WORKERS_HOST` (`@pikit/contracts/cloudflare`): `env`, and `object` with the
-  object's `id`, its `storage` (for `storage-do`), and three hooks:
+  object's `id`, its `storage` (for `storage-do`), and its hooks:
   - `onAlarm(handler)`: `alarm()` calls it. A rejection makes Cloudflare retry the alarm (6 times at
     most; a failed start leaves the guard alarm). An alarm with no handler is logged and dropped.
   - `onDeliver(handler)`: the RPC `deliver(type, key, message)` calls it and resolves once it
@@ -136,10 +136,13 @@ export on its first event, never in its constructor:
     platform retries.
   - `onCall(handler)`: the RPC `call(type, key, message)` calls it and resolves with its answer
     (`actor.mailbox.call`). With no handler, `call` answers `{ ok: false, code: "no_handler" }`.
+  - `onStream(handler)`: the RPC `stream(type, key, message)` calls it and resolves with its outcome,
+    whose body is a byte stream (`actor.mailbox.stream`). With no handler, `stream` answers
+    `{ ok: false, code: "no_handler" }`. While its body is open, the object stays in memory.
   
   One handler of each per object. A second registration fails the start: one component (the
   platform's wakeups and mailbox) multiplexes them.
-- Its RPC interface is `health()`, `deliver()`, `call()` and `alarm()`, nothing else.
+- Its RPC interface is `health()`, `deliver()`, `call()`, `stream()` and `alarm()`, nothing else.
 - With `runtime-pi`, the object is one chat: pi-durable keeps its conversations in the object's SQL
   (`storage-do`), the first one being pi-durable's root, on the App's clock. Its runs are driven inside
   the alarm (`runtime-pi.drive`, through `platform-cloudflare`'s `wakeups`); when what is left only

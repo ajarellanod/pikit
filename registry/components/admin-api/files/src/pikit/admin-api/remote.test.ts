@@ -8,13 +8,24 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type App, type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type ActorCallHandler, ActorCallError, type ActorInboxHandler, type ActorMailbox, answerCall, callResult, type JsonValue } from "@pikit/contracts";
+import {
+  type ActorCallHandler,
+  ActorCallError,
+  type ActorInboxHandler,
+  type ActorMailbox,
+  type ActorStreamHandler,
+  answerCall,
+  answerStream,
+  callResult,
+  type JsonValue,
+  streamResult,
+} from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import { type ApiConversation, type ApiEvent, MAX_DURABLE_IMAGE_BYTES, OPERATOR_NOTE } from "./api.ts";
+import { type ApiConversation, MAX_DURABLE_IMAGE_BYTES, OPERATOR_NOTE } from "./api.ts";
 import { qualify, unqualify } from "./backend.ts";
 import { INDEX_KEY } from "./conversation-index.ts";
 import adminApi, { worker } from "./index.ts";
-import { CONVERSATIONS_PER_PAGE, polled } from "./remote.ts";
+import { CONVERSATIONS_PER_PAGE } from "./remote.ts";
 import { ANSWER_CHARS } from "./calls.ts";
 import { agents, AUTH, auth, imageOf, PIXEL, Runtime, type Served, serve, sse } from "./runtime.test-support.ts";
 
@@ -26,6 +37,7 @@ interface FakeObject {
   runtime: Runtime;
   answers: Map<string, ActorCallHandler>;
   handlers: Map<string, ActorInboxHandler>;
+  streams: Map<string, ActorStreamHandler>;
   ctx: AppContext;
 }
 
@@ -56,6 +68,14 @@ class Platform {
       if (handler === undefined) throw new ActorCallError("no_handler", `no answer handler for ${type}`);
       return callResult(await answerCall(handler, key, copy(message), object.ctx));
     },
+    stream: async (key, type, message, ctx) => {
+      this.calls.push(`${key} ${type}`);
+      if (this.unreachable.has(key)) throw new ActorCallError("unreachable", `the conversation object of "${key}" could not be reached`);
+      const object = await this.object(key);
+      const handler = object.streams.get(type);
+      if (handler === undefined) throw new ActorCallError("no_handler", `no stream handler for ${type}`);
+      return streamResult(await answerStream(handler, key, copy(message), object.ctx), ctx.abortSignal);
+    },
   };
 
   object(key: string): Promise<FakeObject> {
@@ -72,17 +92,23 @@ class Platform {
     this.before.get(key)?.(runtime);
     const answers = new Map<string, ActorCallHandler>();
     const handlers = new Map<string, ActorInboxHandler>();
+    const streams = new Map<string, ActorStreamHandler>();
     const platform = defineComponent({
       name: "platform-test",
       setup: (pikit) => {
-        pikit.provide("actor.inbox", { scope: "one", handle: (type, handler) => void handlers.set(type, handler), answer: (type, handler) => void answers.set(type, handler) });
+        pikit.provide("actor.inbox", {
+          scope: "one",
+          handle: (type, handler) => void handlers.set(type, handler),
+          answer: (type, handler) => void answers.set(type, handler),
+          answerStream: (type, handler) => void streams.set(type, handler),
+        });
         pikit.provide("actor.mailbox", this.mailbox);
       },
     });
     const logger = { ...silentLogger, warn: (message: string) => void this.warnings.push(message) };
     const app = await defineApp({ components: [auth, agents, runtime.component(), platform, sqliteStorage(), adminApi], target: "durable", logger }).create();
     await app.start();
-    return { app, runtime, answers, handlers, ctx: app.context() };
+    return { app, runtime, answers, handlers, streams, ctx: app.context() };
   }
 
   /** What `key`'s object tells the index of its conversation `conversationId` active at `at` (the tests below send it from the events). */
@@ -371,9 +397,9 @@ test("a transcript page too long for a call's answer (images inline) is answered
   expect(runtime.pages.slice(-2)).toEqual([{ limit: 4 }, { limit: 2 }]);
 });
 
-test("live events on the Worker: the object's snapshot first, as server-sent events", async () => {
+test("live events on the Worker: the object's stream, as server-sent events, each event as it happens; the client leaving closes it in the object", async () => {
   const { platform, worker: w } = await cloud();
-  await chat(platform, "telegram:1");
+  const runtime = await chat(platform, "telegram:1");
   const client = new AbortController();
 
   const response = await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/events`, { headers: AUTH, signal: client.signal });
@@ -382,29 +408,26 @@ test("live events on the Worker: the object's snapshot first, as server-sent eve
   expect(response.headers.get("content-type")).toContain("text/event-stream");
   const stream = sse(response);
   expect(await stream.take(1)).toEqual([{ type: "snapshot", conversationId: "1" }]);
+  // Not polled: what the object's runtime emits arrives, every part of it, over the one stream.
+  runtime.push({ type: "message_update", text: "hel" });
+  runtime.push({ type: "message_update", text: "lo" });
+  expect(await stream.take(2)).toEqual([
+    { type: "message_update", text: "hel" },
+    { type: "message_update", text: "lo" },
+  ]);
+  expect(platform.calls.filter((each) => each.startsWith("telegram:1 "))).toEqual(["telegram:1 admin-api.live"]);
   client.abort();
   await stream.reader.cancel();
-  // The object's watch was opened for the snapshot, and released at once.
-  const { runtime } = await platform.object("telegram:1");
-  expect(runtime.released).toBe(runtime.watching);
+  for (let i = 0; i < 50 && runtime.released < runtime.watching; i++) await Bun.sleep(5);
+  expect([runtime.watching, runtime.released]).toEqual([1, 1]);
 });
 
-test("polled: the first snapshot, then only those that changed, and it ends after its polls or when the client goes", async () => {
-  const answers: ApiEvent[] = [{ type: "snapshot", run: 1 }, { type: "snapshot", run: 1 }, { type: "snapshot", run: 2 }, { type: "snapshot", run: 2 }, { type: "snapshot" }];
-  let asked = 0;
-  const next = async () => answers[asked++] as ApiEvent;
-  const seen: ApiEvent[] = [];
-  for await (const event of polled({ type: "snapshot" }, next, 1, 6, undefined)) seen.push(event);
-  expect(seen).toEqual([{ type: "snapshot" }, { type: "snapshot", run: 1 }, { type: "snapshot", run: 2 }, { type: "snapshot" }]);
-  expect(asked).toBe(5);
-
-  const client = new AbortController();
-  const stopped: ApiEvent[] = [];
-  const began = Date.now();
-  setTimeout(() => client.abort(), 30);
-  for await (const event of polled({ type: "snapshot" }, async () => ({ type: "snapshot", at: Date.now() }), 1_000, 40, client.signal)) stopped.push(event);
-  expect(stopped).toEqual([{ type: "snapshot" }]);
-  expect(Date.now() - began).toBeLessThan(900);
+test("live events on the Worker: an unknown conversation is a 404 before any stream, an object that cannot be reached a 503", async () => {
+  const { platform, worker: w } = await cloud();
+  await chat(platform, "telegram:1");
+  expect((await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~9")}/events`, { headers: AUTH })).status).toBe(404);
+  platform.unreachable.add("telegram:1");
+  expect((await w.fetch(`/admin/api/conversations/${encodeURIComponent("telegram:1~1")}/events`, { headers: AUTH })).status).toBe(503);
 });
 
 test("the composition is an object's App (the index's); delivery is not listed on the Worker", async () => {
@@ -436,7 +459,7 @@ test("every Worker route answers 401 without an operator, and calls no object", 
 
 test("in an App that is one key's actor the default export tells the index through actor.mailbox; without it its start says so", async () => {
   const runtime = new Runtime();
-  const inbox = defineComponent({ name: "inbox-test", setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {} }) });
+  const inbox = defineComponent({ name: "inbox-test", setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {}, answerStream: () => {} }) });
   const app = await defineApp({ components: [auth, runtime.component(), inbox, sqliteStorage(), adminApi], logger: silentLogger }).create();
 
   const failed = (await app.start().catch((error: unknown) => error)) as Error;

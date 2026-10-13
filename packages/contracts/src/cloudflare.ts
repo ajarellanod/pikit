@@ -20,7 +20,7 @@
  */
 
 import { type ContextKey, createContextKey } from "@pikit/core";
-import type { ActorCallOutcome } from "./actor.ts";
+import type { ActorCallOutcome, ActorStreamOutcome } from "./actor.ts";
 import type { JsonValue } from "./json.ts";
 
 export interface WorkersHost {
@@ -33,9 +33,9 @@ export interface WorkersHost {
    */
   origin?: string;
   /**
-   * Only in a Durable Object's App. Each of `onAlarm`, `onDeliver` and `onCall` takes one handler per
-   * App: the object has one alarm and one RPC entry, so one component multiplexes each (`wakeups` the
-   * alarm, `actor.inbox` the deliveries and calls). A second registration throws, naming what is taken;
+   * Only in a Durable Object's App. Each of `onAlarm`, `onDeliver`, `onCall` and `onStream` takes one
+   * handler per App: the object has one alarm and one RPC entry of each, so one component multiplexes
+   * each (`wakeups` the alarm, `actor.inbox` the deliveries, calls and streams). A second registration throws, naming what is taken;
    * the next App (after a reset) registers again.
    */
   object?: {
@@ -52,6 +52,12 @@ export interface WorkersHost {
      * outcome crosses back whole. Absent where nothing can call the object (a test's double).
      */
     onCall?(handler: (type: string, key: string, message: JsonValue) => Promise<ActorCallOutcome>): void;
+    /**
+     * The entrypoint calls it when a stream is opened on this object by RPC (`actor.mailbox.stream`);
+     * the outcome crosses back whole, its body a byte stream. Absent where nothing can stream from the
+     * object (a test's double).
+     */
+    onStream?(handler: (type: string, key: string, message: JsonValue) => Promise<ActorStreamOutcome>): void;
   };
 }
 

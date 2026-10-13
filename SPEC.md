@@ -425,7 +425,8 @@ anywhere. A run that also answers a user's message is delivered to the user, as 
   host offers); commands are plain `POST`s. Host-specific shortcuts (Workers static assets, a Durable
   Object's hibernating WebSocket) are optional optimizations behind the same API, never requirements.
   Reading a conversation is location-transparent: on Cloudflare the Worker lists conversations from an
-  index and follows one in its Durable Object (by polling its snapshot: a call does not stream).
+  index and follows one in its Durable Object (by `actor.mailbox.stream`: one RPC whose byte stream
+  carries the conversation's events as they happen).
 - **Its build is its own.** `src/dashboard/`'s own `build` script makes the static files; every
   deploy runs it in a project with a UI (Cloudflare: wrangler's `build.command`, whoever runs
   wrangler; a server: the image's build), so a deploy never ships an old or empty dashboard, and a

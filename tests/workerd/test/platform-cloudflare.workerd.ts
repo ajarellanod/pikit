@@ -50,9 +50,11 @@ for (const c of createWakeupsConformance(
 }
 
 // Where the actors run, platform-cloudflare also provides wakeups: the suite's actor wakes itself by the real alarm.
+// Beats every 100 ms: a stream whose caller left while its handler waits closes at the next one, well
+// within the suite's wait (the default, 5 s, is longer than it).
 for (const c of createMailboxConformance(
   (inbox) => {
-    composeObjects([platformCloudflare, inbox]);
+    composeObjects([platformCloudflare, inbox], { "platform-cloudflare": { streamBeatMs: 100 } });
     return { components: withWorkersHost({ env: workerEnv }, [platformCloudflare]), config: WORKER_CONFIG, dispose: resetObjects };
   },
   { wakeups: true },

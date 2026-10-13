@@ -74,10 +74,12 @@ agent reads a first line saying the message is the operator's.
 - **Cloudflare.** Two halves (`"apps": { "worker": "worker" }`). The Worker's half
   (`admin-api-worker`, `worker.ts`) serves the routes over `remote.ts`: every read and action is an
   `actor.mailbox.call` to the conversation's object (`admin-api.list`, `admin-api.conversation`,
-  `admin-api.transcript`, `admin-api.snapshot`, `admin-api.message`, `admin-api.abort`,
+  `admin-api.transcript`, `admin-api.message`, `admin-api.abort`,
   `admin-api.reset`, `admin-api.command`, …). The object's half (default export) answers those calls
-  through the same contracts (`calls.ts`). Ids are `<conversation key>~<object id>`. Live events are a
-  snapshot polled every 2 s, ending after 40 polls; the dashboard reconnects. A list page is at most 20
+  through the same contracts (`calls.ts`). Ids are `<conversation key>~<object id>`. Live events are the
+  object's stream (`admin-api.live`, `actor.mailbox.stream`): each event as it happens, as on a
+  server; the object stays in memory while the dashboard follows it, and the dashboard reconnects when
+  the stream ends (an eviction, a deploy). A list page is at most 20
   conversations. Delivery is not listed (`404 not_installed`).
 
 ### The conversation index

@@ -97,6 +97,9 @@ class Objects {
       if (object === undefined || handler === undefined) throw new ActorCallError("no_handler", `no answer handler for ${type}`);
       return callResult(await answerCall(handler, key, copy(message), object.ctx()));
     },
+    stream: async (_key, type) => {
+      throw new ActorCallError("no_handler", `settings-store opens no stream (${type})`);
+    },
   };
 
   /** The platform of one object's App: its inbox, and the mailbox to the settings object. */
@@ -106,7 +109,7 @@ class Objects {
     return defineComponent({
       name: "platform-test",
       setup(pikit) {
-        pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: (type, handler) => void answers.set(type, handler) });
+        pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: (type, handler) => void answers.set(type, handler), answerStream: () => {} });
         pikit.provide("actor.mailbox", objects.mailbox);
         let entry: (typeof objects.live)[number] | undefined;
         return {
@@ -429,7 +432,7 @@ test("an object that never read the settings object, which cannot be reached, re
 });
 
 test("in an App that is one key's actor it needs actor.mailbox; without it its start says so", async () => {
-  const inbox = defineComponent({ name: "inbox-test", setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {} }) });
+  const inbox = defineComponent({ name: "inbox-test", setup: (pikit) => pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: () => {}, answerStream: () => {} }) });
   const app = await defineApp({ components: [sqliteStorage(), inbox, settingsStore], logger: silentLogger }).create();
 
   const error = (await app.start().then(

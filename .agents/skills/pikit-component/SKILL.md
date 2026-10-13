@@ -47,7 +47,7 @@ A component **provides** capabilities and **uses** others. Find the one your beh
 | Routing a message to an agent | a stage of the `route.resolve` pipeline |
 | An HTTP endpoint | `http.route` (`"POST /v1/x"`, `"GET /items/:id"`, a prefix `"GET /admin/*"`) |
 | An operator-only route | ask `admin.auth`; read the runtime with `agent.observe`; the composition is `APP_DESCRIPTION`, which only a component named `admin-*` may read (SPEC K13, checked by `registry validate`) |
-| Reach another conversation or an actor of yours | `actor.mailbox`: `send` (a message, held durably) or `call` (ask for an answer), handled with `actor.inbox`'s `handle` / `answer` |
+| Reach another conversation or an actor of yours | `actor.mailbox`: `send` (a message, held durably), `call` (ask for an answer) or `stream` (answers as they come; close it when done), handled with `actor.inbox`'s `handle` / `answer` / `answerStream` |
 | Run later, at least once | `wakeups` (`handle(name, handler)` in `start`, `at(name, time)`) |
 | Deliver to a platform, retried | `outbound.queue` (through `startAnswerDelivery` for a channel) |
 | Talk to a busy conversation | `agent.runtime`'s `dispatch` with `whenBusy: "steer"` (into the run's current round) |
@@ -99,7 +99,7 @@ preset (`{{PIKIT_ROOT}}/features/building-components.md`, "How big a component i
 | Channel | `channel-telegram` (server), `channel-telegram-webhook` (Cloudflare, two halves), `channel-http` | `admitInbound`, `startAnswerDelivery`, the channel suite |
 | Pipeline stage | `router-basic`, `router-rules` | `pikit.pipeline("route.resolve", …)`, refusing to start on bad config |
 | Store | `storage-sqlite`, `storage-kv-sql`, `conversations-kv` | providing a storage contract; state in `storage.kv` with `setIfAbsent` |
-| Actor messages and calls | `mailbox-local` (what `send` / `call` promise) | `actor.inbox`'s `handle` and `answer` in `start` |
+| Actor messages, calls and streams | `mailbox-local` (what `send` / `call` / `stream` promise) | `actor.inbox`'s `handle`, `answer` and `answerStream` in `start` |
 | Admin route / auth | `admin-auth-token` | `admin.auth`, a secret read at start, constant-time compare |
 | Model provider | `provider-openrouter`, `provider-openai-compatible`, `provider-faux` | a pi-ai provider as `model.provider` by its id, `modelProviders`, the key's variable first in `environment` |
 | Deployment | `deployment-docker` | `up`, `down`, `status`, `logs`; a stop deadline (K2) |

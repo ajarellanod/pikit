@@ -1,8 +1,8 @@
 /**
  * The Worker's calls to the objects, on Cloudflare (`actor.mailbox.call`, answered with
- * `actor.inbox.answer` in each object's App), and what each object answers with: its own
- * conversations, read and acted on through the local backend (`backend.ts`), with its own ids. The
- * Worker (`remote.ts`) qualifies them.
+ * `actor.inbox.answer` in each object's App), and its one stream (`actor.mailbox.stream`, answered
+ * with `answerStream`), and what each object answers with: its own conversations, read and acted on
+ * through the local backend (`backend.ts`), with its own ids. The Worker (`remote.ts`) qualifies them.
  *
  * | Type | Message | Answer |
  * |---|---|---|
@@ -10,7 +10,6 @@
  * | `admin-api.agents` | — | `ApiAgents`: this App's agents |
  * | `admin-api.conversation` | `{ conversationId }` | `ApiConversation` |
  * | `admin-api.transcript` | `{ conversationId, limit?, cursor? }` | `ApiPage<ApiTranscriptEntry>`, fewer entries than `limit` when they would not fit in an answer (`ANSWER_CHARS`) |
- * | `admin-api.snapshot` | `{ conversationId }` | `ApiEvent`: the first event of its live events |
  * | `admin-api.usage` | `{ conversationId }` | `ApiUsage` |
  * | `admin-api.message` | `{ conversationId, text, requestId, attachments?, webSearch? }` | `{ requestId, admission }`: the operator's follow-up |
  * | `admin-api.start` | `{ agent, text, requestId, attachments?, webSearch? }`, to the object of a `dashboard:` key | `ApiStartResponse`: the dashboard's own conversation |
@@ -20,6 +19,9 @@
  * | `admin-api.command` | `{ conversationId, name, args }` | `ApiCommandResponse`: the command run in the conversation |
  * | `admin-api.list` | `{ limit, cursor?, archived? }` | `IndexPage` (the index object's) |
  * | `admin-api.hide` | `{ key, conversationId, how? }` (`archived`, `deleted`; absent: back in the list) | `{}` (the index object's; `not_found` when it has no such conversation) |
+ *
+ * And one stream: `admin-api.live` `{ conversationId }`, the conversation's live events (`ApiEvent`s,
+ * a `snapshot` first), refused `not_found` before the first; it ends when the Worker closes it.
  *
  * And one message (`send`, `actor.inbox.handle`): `admin-api.seen` `{ entries: [{ key,
  * conversationId, agent, at }] }`, to the index.
@@ -43,7 +45,6 @@ export const CALL = {
   agents: "admin-api.agents",
   conversation: "admin-api.conversation",
   transcript: "admin-api.transcript",
-  snapshot: "admin-api.snapshot",
   usage: "admin-api.usage",
   message: "admin-api.message",
   start: "admin-api.start",
@@ -54,6 +55,9 @@ export const CALL = {
   list: "admin-api.list",
   hide: "admin-api.hide",
 } as const;
+
+/** The stream of a conversation's live events. */
+export const LIVE = "admin-api.live";
 
 /** The message each conversation's object sends the index. */
 export const SEEN = "admin-api.seen";
@@ -133,7 +137,6 @@ export function answerCalls(inbox: ActorInbox, backendOf: (key: string) => Admin
       limit = Math.max(1, Math.floor(limit / 2));
     }
   });
-  inbox.answer(CALL.snapshot, async (key, message, ctx) => json(await backendOf(key).snapshot(id(message), ctx)));
   inbox.answer(CALL.usage, async (key, message, ctx) => json(await backendOf(key).usage(id(message), ctx)));
   inbox.answer(CALL.message, async (key, message, ctx) => {
     const sent = await backendOf(key).send(id(message), messageOf(message), ctx);
@@ -149,6 +152,8 @@ export function answerCalls(inbox: ActorInbox, backendOf: (key: string) => Admin
     const { text: note } = await backendOf(key).command(id(message), text(message, "name"), args ?? "", ctx);
     return note === undefined ? {} : { text: note };
   });
+
+  inbox.answerStream(LIVE, async (key, message, ctx) => (await backendOf(key).live(id(message), ctx)) as AsyncIterable<JsonValue>);
 
   inbox.handle(SEEN, async (_key, message) => index.seen(seenOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {

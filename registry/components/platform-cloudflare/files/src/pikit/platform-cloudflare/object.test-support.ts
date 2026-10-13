@@ -2,7 +2,8 @@
  * For the tests only: Durable Objects as the platform and `deployment-cloudflare` run them, around a
  * real or a double SQL storage.
  *
- * - `simulatedObject` is one object: its `WORKERS_HOST`, its one alarm and its `deliver` RPC. The
+ * - `simulatedObject` is one object: its `WORKERS_HOST`, its one alarm and its `deliver`, `call` and
+ *   `stream` RPCs. The
  *   alarm runs on the app's clock, as the platform's runs on the real one: it fires at or after its
  *   time, one at a time, once (a new `setAlarm` during it stands after it), and again a second later
  *   when the handler rejects. So the conformance suite's manual clock drives it to the millisecond.
@@ -14,7 +15,7 @@
  */
 
 import { type App, BACKGROUND_CONTEXT, type Clock, type ComponentDefinition, defineApp, defineComponent, silentLogger, withContextValue } from "@pikit/core";
-import type { ActorCallOutcome, JsonValue } from "@pikit/contracts";
+import type { ActorCallOutcome, ActorStreamOutcome, JsonValue } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 import type { ConversationNamespace, ObjectStorage } from "./index.ts";
 
@@ -34,6 +35,8 @@ export interface SimulatedObject {
   deliver(type: string, key: string, message: JsonValue): Promise<void>;
   /** The `call` RPC: the message and the outcome cross as structured clones. */
   call(type: string, key: string, message: JsonValue): Promise<ActorCallOutcome>;
+  /** The `stream` RPC: the message crosses as a structured clone, the body as the byte stream it is. */
+  stream(type: string, key: string, message: JsonValue): Promise<ActorStreamOutcome>;
 }
 
 export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: string; env?: Record<string, unknown> } = {}): SimulatedObject {
@@ -46,6 +49,7 @@ export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: strin
   let onAlarm: (() => Promise<void>) | undefined;
   let onDeliver: ((type: string, key: string, message: JsonValue) => Promise<void>) | undefined;
   let onCall: ((type: string, key: string, message: JsonValue) => Promise<ActorCallOutcome>) | undefined;
+  let onStream: ((type: string, key: string, message: JsonValue) => Promise<ActorStreamOutcome>) | undefined;
 
   const schedule = () => {
     const mine = ++generation;
@@ -89,6 +93,7 @@ export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: strin
         onAlarm: (handler) => void (onAlarm = handler),
         onDeliver: (handler) => void (onDeliver = handler),
         onCall: (handler) => void (onCall = handler),
+        onStream: (handler) => void (onStream = handler),
       },
     },
     component: defineComponent({
@@ -107,6 +112,10 @@ export function simulatedObject(sql: ObjectStorage["sql"], options: { id?: strin
     async call(type, key, message) {
       if (onCall === undefined) throw new Error("simulated object: nothing registered onCall");
       return structuredClone(await onCall(type, key, structuredClone(message)));
+    },
+    async stream(type, key, message) {
+      if (onStream === undefined) throw new Error("simulated object: nothing registered onStream");
+      return await onStream(type, key, structuredClone(message));
     },
   };
 }
@@ -152,6 +161,7 @@ export function simulatedNamespace(
     get: (id: never) => ({
       deliver: async (type, key, message) => (await open((id as { name: string }).name)).deliver(type, key, message),
       call: async (type, key, message) => (await open((id as { name: string }).name)).call(type, key, message),
+      stream: async (type, key, message) => (await open((id as { name: string }).name)).stream(type, key, message),
     }),
   };
   env[binding] = namespace;

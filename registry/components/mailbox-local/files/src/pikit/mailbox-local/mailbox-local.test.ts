@@ -6,7 +6,7 @@
 
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import type { ActorInboxHandler, ActorMailbox } from "@pikit/contracts";
+import { ActorCallError, type ActorInboxHandler, type ActorMailbox, type ActorStreamHandler } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createMailboxConformance, createMemoryWakeups } from "@pikit/contracts/testing";
 import mailboxLocal from "./index.ts";
@@ -36,10 +36,16 @@ const actorOf = (handler: ActorInboxHandler) =>
     },
   });
 
-/** An app of mailbox-local and `handler` under the type "test.message"; its mailbox and app. */
-async function open(handler: ActorInboxHandler) {
+/** An app of mailbox-local and `handler` under the type "test.message" (and `stream` under "test.stream"); its mailbox and app. */
+async function open(handler: ActorInboxHandler, stream?: ActorStreamHandler) {
   let mailbox: ActorMailbox | undefined;
-  const actor = actorOf(handler);
+  const actor = stream === undefined ? actorOf(handler) : defineComponent({
+    name: "test-actor",
+    setup(pikit) {
+      const inbox = pikit.use("actor.inbox");
+      return { start: () => (inbox.get().handle("test.message", handler), inbox.get().answerStream("test.stream", stream)) };
+    },
+  });
   const channel = defineComponent({
     name: "test-channel",
     setup(pikit) {
@@ -79,6 +85,29 @@ test("stop cancels a running handler's context and waits for it; a send after st
   expect(finished).toBe(true);
   await sent;
   await expect(mailbox.send("telegram:1", "test.message", { id: 2 }, app.context())).rejects.toThrow("while the app is not running");
+});
+
+test("stop ends an open stream as unreachable and closes its handler's, even one that heeds nothing", async () => {
+  let closed = false;
+  const { mailbox, app } = await open(async () => {}, async () =>
+    (async function* () {
+      try {
+        yield "first";
+        yield "second";
+      } finally {
+        closed = true;
+      }
+    })(),
+  );
+  const iterator = (await mailbox.stream("telegram:1", "test.stream", null, app.context()))[Symbol.asyncIterator]();
+  expect((await iterator.next()).value).toBe("first");
+  await app.stop();
+  const error = await iterator.next().then(() => undefined, (thrown: unknown) => thrown);
+  expect(error).toBeInstanceOf(ActorCallError);
+  expect((error as ActorCallError).code).toBe("unreachable");
+  for (let i = 0; i < 50 && !closed; i++) await new Promise((resolve) => setTimeout(resolve, 5));
+  expect(closed).toBe(true);
+  await expect(mailbox.stream("telegram:1", "test.stream", null, app.context())).rejects.toMatchObject({ code: "unreachable" });
 });
 
 test("a type nobody handles is refused with the types that are handled", async () => {

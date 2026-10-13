@@ -9,7 +9,7 @@
  */
 
 import type { AppDefinition } from "@pikit/core";
-import type { ActorCallOutcome, JsonValue } from "@pikit/contracts";
+import type { ActorCallOutcome, ActorStreamOutcome, JsonValue } from "@pikit/contracts";
 import type { WorkersHost } from "@pikit/contracts/cloudflare";
 // @ts-ignore: typed by Workers' runtime types (`wrangler types`) where they are installed; under Bun's
 // types the class below extends an untyped base, and host.ts types what is used of it.
@@ -54,6 +54,14 @@ export function createEntrypoint(object: AppDefinition, worker: AppDefinition | 
     /** RPC from `actor.mailbox.call`: the object's answer, or why it has none. */
     async call(type: string, key: string, message: JsonValue): Promise<ActorCallOutcome> {
       return await this.#objectHost().call(type, key, message);
+    }
+
+    /**
+     * RPC from `actor.mailbox.stream`: the object's byte stream of answers, or why it has none. The
+     * stream crosses the RPC with flow control; while it is open the object stays in memory.
+     */
+    async stream(type: string, key: string, message: JsonValue): Promise<ActorStreamOutcome> {
+      return await this.#objectHost().stream(type, key, message);
     }
 
     async alarm(info?: AlarmInfo): Promise<void> {

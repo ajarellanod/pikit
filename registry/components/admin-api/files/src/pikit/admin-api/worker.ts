@@ -7,8 +7,8 @@
  * bundled in (`dashboard-files.ts`).
  *
  * - **Ids** are qualified: `<conversation key>~<the object's id>` (`backend.ts`).
- * - **Live events** are a snapshot polled every second, sent when it changed, for a bounded number of
- *   polls; the dashboard reconnects when the stream ends (`remote.ts`).
+ * - **Live events** are the object's stream (`actor.mailbox.stream`), as they happen; the dashboard
+ *   reconnects when it ends (`remote.ts`).
  * - **Delivery** is not listed: each conversation's outbound queue is in its own object.
  *
  * `component.json`'s `apps.worker` names this export (`worker`): `pikit add` puts it in

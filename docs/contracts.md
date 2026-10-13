@@ -340,11 +340,13 @@ How a component reaches the actor that owns a key without knowing where it runs.
 interface ActorMailbox {
   send(key, type, message: JsonValue, ctx): Promise<void>;        // resolves once the actor holds it durably
   call(key, type, message: JsonValue, ctx): Promise<JsonValue>;   // asks for an answer
+  stream(key, type, message: JsonValue, ctx): Promise<AsyncIterable<JsonValue>>; // asks for answers as they come
 }
 interface ActorInbox {
   readonly scope: "all" | "one";                                  // whose actor this App is: every key's, or one key's
   handle(type, (key, message, ctx) => Promise<void>): void;       // in start; one handler per type
   answer(type, (key, message, ctx) => Promise<JsonValue>): void;
+  answerStream(type, (key, message, ctx) => Promise<AsyncIterable<JsonValue>>): void;
 }
 ```
 
@@ -353,17 +355,25 @@ interface ActorInbox {
   rejection does not acknowledge its platform. Delivery is at-least-once; handlers recognise repeats.
 - `call` is neither retried nor deduplicated. It rejects with `ActorCallError` whose `code` is
   `invalid`, `no_handler`, `cancelled`, `unreachable`, `failed`, or the handler's own.
+- `stream` is refused as `call` is, before its first value. Then it yields a JSON copy of each value
+  in order, read only as the caller reads, and ends with the handler's stream, or throws an
+  `ActorCallError`: the stream's own code (`failed` for any other error or a value that is not JSON),
+  `unreachable` (the actor's App stopped, its object was evicted), `cancelled`. Closing it, or
+  cancelling `ctx`, closes the handler's stream and cancels its context. On Cloudflare an open stream
+  keeps its object in memory: callers close the ones nobody reads.
 - Handlers are registered by method, not provided as a keyed capability: otherwise the mailbox would
   depend on every handler's component, a cycle through the runtime and `wakeups`.
 - `scope` is what a component whose state every key shares reads instead of the target (K1): with
   `"one"` that state is another actor's, reached through `actor.mailbox` (settings-store's settings
   object, admin-api's index). The suite checks it against where the messages were handled.
-- `answerCall` and `callResult` carry a call's outcome across an RPC, for providers.
+- `answerCall` and `callResult` carry a call's outcome across an RPC, for providers; `answerStream`
+  and `streamResult` a stream's (a byte stream of JSON frames, one per line, with beats while the
+  actor waits when its provider asks for them: an RPC stream notices a caller gone only when it writes).
 
 Providers: mailbox-local (server: the App itself is every key's actor, `scope` `"all"`), platform-cloudflare
 (an RPC to the Durable Object `idFromName(key)`; the object's own key is a local call; `scope` `"one"`). Types in use:
 `telegram.update`, `telegram.stranger` (channel-telegram-webhook), and admin-api's `admin-api.*`
-messages and calls. Suite: `createMailboxConformance`; double: `createMemoryMailbox`.
+messages, calls and its one stream (`admin-api.live`). Suite: `createMailboxConformance`; double: `createMemoryMailbox`.
 
 ### `wakeups` ([wakeups.ts](../packages/contracts/src/wakeups.ts), C3, C4)
 
@@ -391,7 +401,7 @@ run in slices of `sliceMs`, 60 s by default). Names in use: `runtime-pi.drive`, 
 
 A context key in `@pikit/contracts/cloudflare`, not a capability. deployment-cloudflare's entrypoints
 put `{ env, origin?, object? }` on each App's start context; `object` has `id`, `storage`,
-`onAlarm(handler)`, `onDeliver(handler)` and `onCall(handler)`. Only Cloudflare components read it
+`onAlarm(handler)`, `onDeliver(handler)`, `onCall(handler)` and `onStream(handler)`. Only Cloudflare components read it
 (storage-do, secrets-cloudflare, platform-cloudflare, runtime-pi, channel-telegram-webhook's Worker
 half). Its types are structural: no `cloudflare:*` import. Its test helper, `withWorkersHost` (a
 component gets the host in its start context, as from the entrypoint), is in

@@ -36,8 +36,9 @@ there.
   `ChannelTransport` and `DeliveryError`, `Feed` (what must not be missed, read with a cursor, K3).
 - Platform: `http.route` (fetch handlers by `"METHOD /path"`, parameters and prefix keys such as
   `GET /admin/*`), `admin.auth` (whether a request is an operator's), `secrets`, `storage.sql`,
-  `storage.kv`, `actor.mailbox` / `actor.inbox` (C2: `send`, and `call` answered by `answer`, failing
-  with a coded `ActorCallError`; the inbox's `scope` says whether the App is every key's actor or one
+  `storage.kv`, `actor.mailbox` / `actor.inbox` (C2: `send`, `call` answered by `answer`, and `stream`
+  answered by `answerStream`, each value a JSON copy read as the caller reads, closed with its caller,
+  failing with a coded `ActorCallError`; the inbox's `scope` says whether the App is every key's actor or one
   key's, what a component reads instead of the target), `wakeups` (C3), and `WORKERS_HOST` in
   `@pikit/contracts/cloudflare` (C5).
 - `health` (`reporter(name)`: `up`, `degraded`, `down`; `snapshot()`), with its suite
@@ -114,7 +115,8 @@ there.
   which no transport sends).
 - Conversations and storage: `conversations-file`, `conversations-kv`, `storage-sqlite`, `storage-do`,
   `storage-kv-sql`, `secrets-env`, `secrets-cloudflare`, `mailbox-local`, `wakeups-timers`,
-  `platform-cloudflare` (mailbox, inbox and wakeups over one alarm).
+  `platform-cloudflare` (mailbox, inbox and wakeups over one alarm; a stream is one RPC whose byte
+  stream beats every `streamBeatMs` while it waits, so one nobody reads closes).
 - Tools and execution: `tool-read`, `tool-write`, `tool-edit`, `tool-bash` (Pi's own), `tool-fetch`
   and `tool-websearch-brave` (their source in the component: the references for writing a tool),
   `tool-mcp` (remote MCP servers, with a deploy-time seed); each tool's `replay` is in its own source
@@ -166,7 +168,7 @@ there.
   `x-pikit-admin` required on unsafe methods), `admin-api` (the operator's HTTP API under
   `/admin/api/*`: the composition, config values that look like secrets redacted; conversations from
   its conversation index, newest activity first, paged, on both hosts; a transcript, live events as
-  server-sent events; conversations of the dashboard's own (`dashboard:<uuid>`) and the operator's
+  server-sent events, on Cloudflare streamed from the conversation's object as on a server, not polled; conversations of the dashboard's own (`dashboard:<uuid>`) and the operator's
   follow-ups to another channel's, marked for the agent and never delivered to that channel; abort and
   reset; with an `outbound.queue`, what is not delivered yet and what settled; it serves the
   dashboard's built files at `/admin/` under a Content-Security-Policy, `index.html` for any page

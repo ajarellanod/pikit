@@ -9,10 +9,11 @@
  *   `CONVERSATIONS_PER_PAGE` whatever `limit` asks (each is a subrequest; Workers count them). An
  *   object that does not answer, or no longer has the conversation, is left out of the page, and logged.
  * - **A new conversation** of the dashboard's own is its key's object's (`dashboard:<uuid>`): one call.
- * - **Live events are polled**: no call streams, so `live` asks the object for its `snapshot` every
- *   `pollMs` (2 s) and yields it only when it changed, then ends after `polls` of them (the
- *   subrequests of one request are bounded). The dashboard reconnects to a stream that ended
- *   (`live.ts`). Between two snapshots it sees no text streaming, only where the run is.
+ * - **Live events are streamed**: `live` opens the object's `admin-api.live` stream (one RPC,
+ *   `actor.mailbox.stream`), which yields its conversation's events as they happen, as on a server:
+ *   the answer as it is written. The object stays in memory while the stream is open, which is while
+ *   the dashboard follows the conversation (its tab active, `live.ts`); a stream cut by an eviction or
+ *   a deploy ends, and the dashboard reconnects.
  * - **The composition**, **the agents** and **the slash commands** are an object's App's (the index
  *   object's: every object runs the same App), where the agents run. A command runs in its
  *   conversation's object, as the other actions do.
@@ -38,24 +39,12 @@ import {
   attachmentsProblem,
 } from "./api.ts";
 import { type AdminBackend, type Message, NOT_FOUND, qualify, refusal, unqualify } from "./backend.ts";
-import { CALL } from "./calls.ts";
+import { CALL, LIVE } from "./calls.ts";
 import { INDEX_KEY, type IndexPage } from "./conversation-index.ts";
 
 /** Conversations read in one page of the list: one call each, besides the index's. */
 export const CONVERSATIONS_PER_PAGE = 20;
-/** How often a live view asks its object for a snapshot: each ask is a Durable Object request (the Free plan has 100,000 a day). */
-export const POLL_MS = 2_000;
-/** Snapshots asked per stream before it ends (and the client reconnects): well under a request's subrequests. */
-export const POLLS = 40;
-
-export interface RemoteOptions {
-  pollMs?: number;
-  polls?: number;
-}
-
-export function createRemoteBackend(mailbox: () => ActorMailbox, options: RemoteOptions = {}): AdminBackend {
-  const pollMs = options.pollMs ?? POLL_MS;
-  const polls = options.polls ?? POLLS;
+export function createRemoteBackend(mailbox: () => ActorMailbox): AdminBackend {
   const call = async <T>(key: string, type: string, message: JsonValue, ctx: AppContext): Promise<T> => (await mailbox().call(key, type, message, ctx)) as T;
 
   /** The key and the object's id `id` names: a malformed one is not found. */
@@ -65,7 +54,6 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
     return found;
   };
   const qualified = (key: string, conversation: ApiConversation): ApiConversation => ({ ...conversation, conversationId: qualify(key, conversation.conversationId) });
-  const snapshotOf = (key: string, local: string, ctx: AppContext) => call<ApiEvent>(key, CALL.snapshot, { conversationId: local }, ctx);
   /** `message` as a call carries it, its images within what an object stores. */
   const sendable = (message: Message): JsonValue => {
     const wrong = attachmentsProblem(message.attachments ?? [], "durable");
@@ -119,16 +107,10 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
       return call<ApiPage<ApiTranscriptEntry>>(key, CALL.transcript, { conversationId: local, ...page }, ctx);
     },
 
-    async snapshot(id, ctx) {
-      const { key, local } = target(id);
-      return snapshotOf(key, local, ctx);
-    },
-
     async live(id, ctx) {
       const { key, local } = target(id);
-      // Asked before the stream starts: an unknown conversation is a 404, not an empty stream.
-      const first = await snapshotOf(key, local, ctx);
-      return polled(first, () => snapshotOf(key, local, ctx), pollMs, polls, ctx.abortSignal);
+      // Refused before the stream starts: an unknown conversation is a 404, not an empty stream.
+      return (await mailbox().stream(key, LIVE, { conversationId: local }, ctx)) as AsyncIterable<ApiEvent>;
     },
 
     async usage(id, ctx) {
@@ -162,36 +144,4 @@ export function createRemoteBackend(mailbox: () => ActorMailbox, options: Remote
       return { key, ...(typeof answer.text === "string" && { text: answer.text }) };
     },
   };
-}
-
-/**
- * `first`, then what `next` answers every `pollMs` when it differs from the last one yielded, `polls`
- * answers in all (`first` among them). Ends early when `signal` aborts.
- */
-export async function* polled(first: ApiEvent, next: () => Promise<ApiEvent>, pollMs: number, polls: number, signal: AbortSignal | undefined): AsyncGenerator<ApiEvent> {
-  let last = JSON.stringify(first);
-  yield first;
-  for (let asked = 1; asked < polls; asked++) {
-    if (!(await sleep(pollMs, signal))) return;
-    const event = await next();
-    const text = JSON.stringify(event);
-    if (text === last) continue;
-    last = text;
-    yield event;
-  }
-}
-
-/** Waits `ms`; `false` when `signal` aborted first. */
-function sleep(ms: number, signal: AbortSignal | undefined): Promise<boolean> {
-  if (signal?.aborted === true) return Promise.resolve(false);
-  return new Promise((resolve) => {
-    const done = (value: boolean) => {
-      clearTimeout(timer);
-      signal?.removeEventListener("abort", abort);
-      resolve(value);
-    };
-    const abort = () => done(false);
-    const timer = setTimeout(() => done(true), ms);
-    signal?.addEventListener("abort", abort, { once: true });
-  });
 }

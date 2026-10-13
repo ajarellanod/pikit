@@ -5,13 +5,13 @@
  * a count of events. What is written for good (entries) is read from the transcript again: `changes`
  * counts the times it changed. Until it is, `entries` holds the ones the stream announced (a message
  * ended, an entry appended), as the transcript gives them: a message shows the moment it is written,
- * not once the transcript is read again. On Cloudflare the stream is polled snapshots, no events: an
- * answer that ended between two snapshots is in `ended` (its last partial) until the transcript has it,
- * so it never leaves the page for the time the transcript takes to be read again.
+ * not once the transcript is read again. An answer that ended between two snapshots (a reconnect, a
+ * client that fell behind) is in `ended` (its last partial) until the transcript has it, so it never
+ * leaves the page for the time the transcript takes to be read again.
  *
  * The stream is open only while the dashboard is active (`useActive`: the tab visible, the operator
- * there in the last minutes); it reconnects when it ends (on Cloudflare after a bounded number of
- * polled snapshots) and when the operator comes back.
+ * there in the last minutes): on Cloudflare an open stream keeps the conversation's Durable Object in
+ * memory. It reconnects when it ends (an object evicted or redeployed) and when the operator comes back.
  */
 
 import { useEffect, useReducer } from "react";

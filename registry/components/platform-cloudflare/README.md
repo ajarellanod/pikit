@@ -40,6 +40,16 @@ outcome. A failed RPC is `unreachable`, a cancelled `ctx` is `cancelled`, a hand
 `ActorCallError` keeps its code, and anything else it throws is `failed`. This is how the Worker
 reads a conversation's state (a dashboard), which it cannot read from its storage.
 
+`stream(key, type, message, ctx)` asks the object for answers as they come, by its `stream` RPC: the
+object opens the handler registered with `answerStream(type, handler)` and returns an outcome whose
+body is a byte stream of JSON frames, which Workers RPC carries with flow control: one RPC however
+long the stream, read as the caller reads. Refused as a call is; then each value, and its end or its
+error with a code. This is how the dashboard follows a conversation live on the Worker. While a
+stream is open its object stays in memory, and is billed for it. An RPC stream notices a caller gone
+only when it writes, so while it waits for a value the object writes a beat every `streamBeatMs`
+(5 s): a stream nobody reads any more closes within one, and its handler's context is cancelled. A
+stream cut by an eviction or a deploy ends `unreachable`; its caller opens another.
+
 It refuses to start when `env.CONVERSATION` (or the binding you configure) is not a Durable Object
 namespace. Its `actor.inbox` and `wakeups` throw there, saying they belong in the object's App.
 
@@ -150,10 +160,12 @@ minutes, then runs again from the start: honour `ctx.abortSignal`.
 "platform-cloudflare": {
   binding: "CONVERSATION",   // the conversation object's namespace binding in wrangler.jsonc
   sliceMs: 60_000,           // one alarm's slice, 1 ms to 10 minutes
+  streamBeatMs: 5_000,       // a beat on an open stream that waits, 10 ms to 60 s
 }
 ```
 
-Both are optional; these are the defaults. `binding` must be the one `deployment-cloudflare` binds
+All are optional; these are the defaults. `streamBeatMs` bounds how long a stream whose reader left
+keeps its object in memory; a beat is a few bytes, and costs no request. `binding` must be the one `deployment-cloudflare` binds
 its conversation class to.
 
 ## The dependency graph

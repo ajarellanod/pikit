@@ -60,6 +60,9 @@ class Objects {
       if (object === undefined || handler === undefined) throw new ActorCallError("no_handler", `no answer handler for ${type}`);
       return callResult(await answerCall(handler, key, copy(message), object.ctx()));
     },
+    stream: async (_key, type) => {
+      throw new ActorCallError("no_handler", `github-app opens no stream (${type})`);
+    },
   };
   platform(): ComponentDefinition {
     const answers = new Map<string, ActorCallHandler>();
@@ -67,7 +70,7 @@ class Objects {
     return defineComponent({
       name: "platform-test",
       setup(pikit) {
-        pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: (type, handler) => void answers.set(type, handler) });
+        pikit.provide("actor.inbox", { scope: "one", handle: () => {}, answer: (type, handler) => void answers.set(type, handler), answerStream: () => {} });
         pikit.provide("actor.mailbox", objects.mailbox);
         let entry: (typeof objects.live)[number] | undefined;
         return {

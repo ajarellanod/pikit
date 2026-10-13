@@ -179,7 +179,7 @@ export function ConversationPage({ params }: { params: Record<string, string> })
   }, [conversation, openTab]);
 
   const read = mergedEntries(transcript.entries, live.entries).flatMap((entry) => entry.messages as Message[]);
-  // An answer that ended (polled on Cloudflare) stays as it was last seen until the transcript has it.
+  // An answer that ended between two snapshots (a reconnect) stays as it was last seen until the transcript has it.
   const ended = live.ended.filter(
     (each) => each.timestamp !== live.partial?.timestamp && !read.some((message) => message.role === "assistant" && message.timestamp === each.timestamp),
   );
@@ -229,9 +229,9 @@ export function ConversationPage({ params }: { params: Record<string, string> })
     );
   }
 
-  // The run goes, said once at the thread's end until it ends, so an answer polled in parts (Cloudflare)
-  // never looks finished before it is. A message sent from here starts one at once: from the send, through
-  // its arrival in the transcript, to the run seen going (polled: up to 2 s later), it never blinks off.
+  // The run goes, said once at the thread's end until it ends, so an answer between two snapshots (a
+  // reconnect) never looks finished before it is. A message sent from here starts one at once: from the
+  // send, through its arrival in the transcript, to the run seen going, it never blinks off.
   const last = turns.at(-1);
   const sentAt = chats.lastSentAt(id);
   const answering = last?.kind === "user" && sentAt !== undefined && Date.now() - sentAt < ANSWER_EXPECTED_MS;

@@ -31,6 +31,14 @@
  *   outcome (`ActorCallOutcome`: the answer, or a code and a message), never throws one: an RPC keeps
  *   only an error's message, and the caller rebuilds the `ActorCallError` with its code. A failed RPC
  *   (the object did not start, the network) is `unreachable`.
+ * - **Streams** (`stream(key, type, message)`): an RPC to the object's `stream`, answered by the
+ *   handler registered with `answerStream`. Its outcome carries a byte stream of frames
+ *   (`answerStream`, `streamResult`), which Workers RPC carries with flow control: one RPC for the
+ *   whole stream, however long, read as the caller reads. While it is open the object stays in memory
+ *   (and is billed for it); a stream cut by an eviction or a deploy ends `unreachable`, and the
+ *   caller opens another. An RPC stream notices a caller gone only when it writes, so while it waits
+ *   for a value the object writes a beat every `streamBeatMs` (5 s): a stream nobody reads closes
+ *   within one. The object's own key is a local stream, as for calls.
  *
  * Durability (K6): a row is deleted only when its handler resolved. An alarm cut by the platform (a
  * deploy, 15 minutes of wall clock, an eviction) is retried by the platform and finds the row still
@@ -49,9 +57,13 @@ import {
   type ActorInbox,
   type ActorInboxHandler,
   type ActorMailbox,
+  type ActorStreamHandler,
+  type ActorStreamOutcome,
   answerCall,
+  answerStream,
   callResult,
   type JsonValue,
+  streamResult,
   type WakeupHandler,
   type Wakeups,
 } from "@pikit/contracts";
@@ -74,6 +86,12 @@ const Config = Type.Object({
    * 10 minutes: the platform cuts an alarm at 15 (C4; the README explains the default).
    */
   sliceMs: Type.Integer({ minimum: 1, maximum: 10 * 60 * SECOND, default: 60 * SECOND }),
+  /**
+   * While an open stream waits for its next value, the object writes a beat every `streamBeatMs`: an
+   * RPC stream notices a caller gone only when it writes, so a stream nobody reads any more keeps the
+   * object in memory at most this long (the README explains the default).
+   */
+  streamBeatMs: Type.Integer({ minimum: 10, maximum: 60 * SECOND, default: 5 * SECOND }),
 });
 
 /** What this component uses of a `DurableObjectStorage` (Cloudflare's type, written structurally). */
@@ -84,12 +102,13 @@ export interface ObjectStorage {
   deleteAlarm(): Promise<void>;
 }
 
-/** What it uses of a `DurableObjectNamespace` whose class has the `deliver` and `call` RPC methods. */
+/** What it uses of a `DurableObjectNamespace` whose class has the `deliver`, `call` and `stream` RPC methods. */
 export interface ConversationNamespace {
   idFromName(name: string): unknown;
   get(id: never): {
     deliver(type: string, key: string, message: JsonValue): Promise<void>;
     call(type: string, key: string, message: JsonValue): Promise<ActorCallOutcome>;
+    stream(type: string, key: string, message: JsonValue): Promise<ActorStreamOutcome>;
   };
 }
 
@@ -124,6 +143,8 @@ export default defineComponent({
     const inboxHandlers = new Map<string, ActorInboxHandler>();
     /** The handler of each call type (`answer`). */
     const callHandlers = new Map<string, ActorCallHandler>();
+    /** The handler of each stream type (`answerStream`). */
+    const streamHandlers = new Map<string, ActorStreamHandler>();
     const handlers = new Map<string, WakeupHandler>();
     /** The runs in progress, by name: `at` or `cancel` for a name during its run decides what its outcome does. */
     const inProgress = new Map<string, { touched: boolean }>();
@@ -381,6 +402,26 @@ export default defineComponent({
       return answered;
     };
 
+    /**
+     * Opens this App's stream handler for `type`; never rejects: the outcome says what came of it. Its
+     * handler's context is the inbox's, so the App's stop ends it (`unreachable`).
+     */
+    const streamHere = (r: Running, type: string, key: string, message: JsonValue): Promise<ActorStreamOutcome> => {
+      if (running !== r) return Promise.resolve({ ok: false, code: "unreachable", message: "platform-cloudflare: the conversation object's App is not running" });
+      const handler = streamHandlers.get(type);
+      if (handler === undefined) {
+        const known = [...streamHandlers.keys()];
+        return Promise.resolve({
+          ok: false,
+          code: "no_handler",
+          message:
+            `platform-cloudflare: no actor.inbox stream handler for the type "${type}" in the conversation object's App (streamed: ${known.length > 0 ? known.join(", ") : "none"}); ` +
+            "install the component that answers it in the default export of pikit.config.ts, or check the type the caller names",
+        });
+      }
+      return answerStream(handler, key, message, r.inbox, { beatMs: config.streamBeatMs });
+    };
+
     const actorInbox: ActorInbox = {
       // An object is one key's actor (`idFromName(key)`); the Worker's App has no actors, and refuses handlers.
       scope: "one",
@@ -403,6 +444,16 @@ export default defineComponent({
         }
         if (callHandlers.has(type)) throw new Error(`platform-cloudflare: the call type "${type}" already has a handler; a type has one answer handler in an app`);
         callHandlers.set(type, handler);
+      },
+      answerStream(type, handler) {
+        if (typeof type !== "string" || type === "") throw new TypeError("platform-cloudflare: a stream type is a non-empty string, prefixed with the component that answers it");
+        if (opened().object === undefined) {
+          throw new Error(
+            "platform-cloudflare: actor.inbox exists only in a Durable Object's App, and this is the Worker's: a component that answers streams belongs in the default export of pikit.config.ts.",
+          );
+        }
+        if (streamHandlers.has(type)) throw new Error(`platform-cloudflare: the stream type "${type}" already has a handler; a type has one stream handler in an app`);
+        streamHandlers.set(type, handler);
       },
     };
     pikit.provide("actor.inbox", actorInbox);
@@ -444,6 +495,29 @@ export default defineComponent({
         });
         return callResult(answered);
       },
+      async stream(key, type, message, ctx) {
+        const r = running;
+        if (r === undefined) throw new ActorCallError("unreachable", "platform-cloudflare: used while the app is not running; stream from start or later");
+        if (typeof key !== "string" || key === "") throw new ActorCallError("invalid", `platform-cloudflare: the key of a "${type}" stream must be a non-empty string`);
+        const text = JSON.stringify(message) as string | undefined;
+        if (text === undefined) throw new ActorCallError("invalid", `platform-cloudflare: a "${type}" stream's message must be JSON (not undefined or a function)`);
+        const copy = JSON.parse(text) as JsonValue;
+        if (ctx.abortSignal?.aborted) throw new ActorCallError("cancelled", `platform-cloudflare: the "${type}" stream was cancelled before it was opened`, { cause: ctx.abortSignal.reason });
+        const namespace = namespaceOf(r);
+        const id = namespace.idFromName(key);
+        const opening =
+          r.object !== undefined && String(id) === r.object.id
+            ? streamHere(r, type, key, copy)
+            : Promise.resolve()
+                .then(() => namespace.get(id as never).stream(type, key, copy))
+                .catch((error: unknown): ActorStreamOutcome => ({ ok: false, code: "unreachable", message: `platform-cloudflare: the conversation object of "${key}" could not be reached: ${error instanceof Error ? error.message : String(error)}` }));
+        const outcome = await untilCancelled(opening, ctx.abortSignal).catch((reason: unknown) => {
+          // Opened after its caller left: nobody reads it, and it would keep the object in memory.
+          void opening.then((late) => (late.ok ? late.body.cancel() : undefined)).catch(() => {});
+          throw new ActorCallError("cancelled", `platform-cloudflare: the "${type}" stream was cancelled before it was opened`, { cause: reason });
+        });
+        return streamResult(outcome, ctx.abortSignal);
+      },
     };
     pikit.provide("actor.mailbox", mailbox);
 
@@ -480,6 +554,7 @@ export default defineComponent({
         host.object.onAlarm(onAlarm(r));
         host.object.onDeliver(onDeliver(r));
         host.object.onCall?.((type, key, message) => answerHere(r, type, key, message));
+        host.object.onStream?.((type, key, message) => streamHere(r, type, key, message));
         // A deploy or a reset may have lost the alarm; the handlers are not registered yet, so any row sets it.
         if (rows(storage).length > 0) await arm(r, true);
       },
@@ -495,6 +570,7 @@ export default defineComponent({
         handlers.clear();
         inboxHandlers.clear();
         callHandlers.clear();
+        streamHandlers.clear();
       },
     };
   },

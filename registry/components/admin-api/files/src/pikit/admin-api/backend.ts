@@ -117,8 +117,6 @@ export interface AdminBackend {
   conversation(id: string, ctx: AppContext): Promise<ApiConversation>;
   /** Newest first. Throws `not_found`, `invalid_cursor`. */
   transcript(id: string, page: PageRequest, ctx: AppContext): Promise<ApiPage<ApiTranscriptEntry>>;
-  /** What the conversation is now: the first event of its live events. Throws `not_found`. */
-  snapshot(id: string, ctx: AppContext): Promise<ApiEvent>;
   /**
    * Its live events, a `snapshot` first, until `ctx` is cancelled or they end. Throws `not_found`
    * before the first one, so a route answers `404` rather than an empty stream.
@@ -324,17 +322,6 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       const result = id === "" ? undefined : await paged(page, () => contracts.observe().transcript(id, page, ctx));
       if (result === undefined) throw refusal("not_found", NOT_FOUND);
       return result as ApiPage<ApiTranscriptEntry>;
-    },
-
-    async snapshot(id, ctx) {
-      const iterator = (await live(id, ctx))[Symbol.asyncIterator]();
-      try {
-        const first = await iterator.next();
-        if (first.done === true) throw refusal("not_found", NOT_FOUND);
-        return first.value;
-      } finally {
-        await iterator.return?.();
-      }
     },
 
     live,

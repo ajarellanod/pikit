@@ -43,7 +43,7 @@ import {
   withAbortSignal,
   withContextValue,
 } from "@pikit/core";
-import { type ActorCallOutcome, compareHttpRoutes, type HttpRoute, type HttpRouteKey, type JsonValue, matchesHttpRoute, parseHttpRouteKey } from "@pikit/contracts";
+import { type ActorCallOutcome, type ActorStreamOutcome, compareHttpRoutes, type HttpRoute, type HttpRouteKey, type JsonValue, matchesHttpRoute, parseHttpRouteKey } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 
 /**
@@ -111,17 +111,21 @@ export interface ObjectHost {
   deliver(type: string, key: string, message: JsonValue): Promise<void>;
   /** A call for this object (`actor.mailbox.call`'s RPC): the handler a component registered with `onCall`. */
   call(type: string, key: string, message: JsonValue): Promise<ActorCallOutcome>;
+  /** A stream opened on this object (`actor.mailbox.stream`'s RPC): the handler a component registered with `onStream`. */
+  stream(type: string, key: string, message: JsonValue): Promise<ActorStreamOutcome>;
 }
 
 type AlarmHandler = () => Promise<void>;
 type DeliverHandler = (type: string, key: string, message: JsonValue) => Promise<void>;
 type CallHandler = (type: string, key: string, message: JsonValue) => Promise<ActorCallOutcome>;
+type StreamHandler = (type: string, key: string, message: JsonValue) => Promise<ActorStreamOutcome>;
 
 export function createObjectHost(definition: AppDefinition, state: ObjectState, env: WorkersHost["env"], options: HostOptions = {}): ObjectHost {
   const logger = options.logger ?? consoleLogger;
   let onAlarm: AlarmHandler | undefined;
   let onDeliver: DeliverHandler | undefined;
   let onCall: CallHandler | undefined;
+  let onStream: StreamHandler | undefined;
   const host: WorkersHost = {
     env,
     object: {
@@ -141,6 +145,10 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
         if (onCall !== undefined) throw new Error("deployment-cloudflare: the object's calls already have a handler; one component answers them (actor.inbox)");
         onCall = handler;
       },
+      onStream(handler) {
+        if (onStream !== undefined) throw new Error("deployment-cloudflare: the object's streams already have a handler; one component answers them (actor.inbox)");
+        onStream = handler;
+      },
     },
   };
 
@@ -152,6 +160,7 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
         onAlarm = undefined;
         onDeliver = undefined;
         onCall = undefined;
+        onStream = undefined;
         const app = await compose(definition, [], logger);
         await startWithin(app, withContextValue(WORKERS_HOST, host, BACKGROUND_CONTEXT), options, logger);
         logger.info("pikit: object started", { object: host.object?.id });
@@ -213,6 +222,11 @@ export function createObjectHost(definition: AppDefinition, state: ObjectState, 
       await start();
       if (onCall === undefined) return { ok: false, code: "no_handler", message: `deployment-cloudflare: a "${type}" call was made, but no component in the object's App answers calls (onCall)` };
       return await onCall(type, key, message);
+    },
+    async stream(type, key, message) {
+      await start();
+      if (onStream === undefined) return { ok: false, code: "no_handler", message: `deployment-cloudflare: a "${type}" stream was opened, but no component in the object's App answers streams (onStream)` };
+      return await onStream(type, key, message);
     },
   };
 }
