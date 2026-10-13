@@ -31,7 +31,7 @@ const delegate = defineTool({
     const delegation = context.value(AGENT_DELEGATION);
     const parent = context.value(CONVERSATION);
     if (delegation === undefined || parent === undefined) throw new Error("no delegation in the context");
-    const task = { agent: args.agent, key: `delegate:1:${String(api.taskId)}`, task: args.task, sender: { channel: "delegate", id: parent.agent } };
+    const task = { agent: args.agent, key: `delegate:1:${String(api.taskId)}`, channel: "delegate", task: args.task, sender: { channel: "delegate", id: parent.agent } };
     if (args.wait === false) {
       await delegation.start(api, task, context);
       return { output: [{ type: "text", text: "started" }] };
@@ -47,11 +47,12 @@ function hold() {
   const released = new Promise<void>((resolve) => (release = resolve));
   let started!: () => void;
   const holding = new Promise<void>((resolve) => (started = resolve));
-  const seen: { requests?: readonly RunRequest[] | undefined; key?: string | undefined; agent?: string | undefined; aborted: boolean } = { aborted: false };
+  const seen: { requests?: readonly RunRequest[] | undefined; key?: string | undefined; agent?: string | undefined; channel?: string | undefined; aborted: boolean } = { aborted: false };
   const tool = holdTool(async (context) => {
     seen.requests = await context.value(RUN_REQUESTS)?.list(context);
     seen.key = context.value(CONVERSATION)?.key;
     seen.agent = context.value(CONVERSATION)?.agent;
+    seen.channel = context.value(CONVERSATION)?.channel;
     started();
     await new Promise<void>((resolve, reject) => {
       const signal = context.abortSignal;
@@ -104,6 +105,8 @@ test("run: the task runs in a child conversation of the other agent, its sender 
   expect(toolResults(result.messages)).toEqual([JSON.stringify({ kind: "completed", text: "answer: hold" })]);
   expect(held.seen.agent).toBe("helper");
   expect(held.seen.key).toStartWith("delegate:1:");
+  // The child conversation's channel is the one the tool gave the task.
+  expect(held.seen.channel).toBe("delegate");
   expect(held.seen.requests).toEqual([{ requestId: expect.stringMatching(/^delegate:/) as never, sender: { channel: "delegate", id: "assistant" } }]);
   // The child's run is not the parent's: no result of its own is announced or logged.
   expect(w.results().map((each) => each.requestId)).toEqual(["r1"]);

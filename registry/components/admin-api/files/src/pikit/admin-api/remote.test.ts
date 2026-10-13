@@ -325,7 +325,7 @@ test("a conversation of the dashboard's own on the Worker: one call to the objec
   expect(platform.calls).toEqual([`${body.key} admin-api.start`]);
   const { runtime } = await platform.object(body.key);
   expect(runtime.dispatched).toEqual([
-    { requestId: body.requestId, conversation: { key: body.key, agent: "assistant", conversationId: "100" }, prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`, whenBusy: "followUp" },
+    { requestId: body.requestId, conversation: { key: body.key, agent: "assistant", channel: "dashboard", conversationId: "100" }, prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`, whenBusy: "followUp" },
   ]);
   // Told to the index when the message was dispatched, before any run.
   expect((await platform.listed())[0]).toBe(body.conversationId);

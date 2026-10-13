@@ -59,6 +59,19 @@ export interface ConversationRef {
    * opaque to everyone but the runtime. A reset points the key to a new one.
    */
   conversationId: string;
+  /**
+   * The channel the conversation belongs to: the `InboundMessage.channel` of the message that created
+   * it (`telegram`, `http`), `dashboard` for one the dashboard started, `delegate` for an agent's task.
+   * A conversation belongs to one channel for good (features/conversation-routing.md):
+   * `conversations.registry` records it with the key's first resolve, keeps it through resets and
+   * gives it with every ref; the runtime records it with the conversation, so a run sees it
+   * (`CONVERSATION`, `PrepareContext`, the `workspace` it asks for) whatever ref reached it. It is for
+   * a component that treats a channel's conversations apart (a directory, a prompt of their own), never
+   * for finding where an answer goes: that stays the key's channel's. Settlements (`AgentResult`,
+   * `agent.submissions`) do not carry it. Absent: a ref made by hand for a conversation with none
+   * recorded (a test).
+   */
+  channel?: string;
 }
 
 /**
@@ -85,7 +98,7 @@ type TurnChanges = { [K in keyof TurnConfig]?: TurnConfig[K] | undefined };
 
 /** What `prepare` knows besides the state. Fields are added with the features that need them. */
 export interface PrepareContext {
-  /** The conversation the run belongs to. */
+  /** The conversation the run belongs to, with its `channel` when one is recorded. */
   conversation: ConversationRef;
 }
 

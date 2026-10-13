@@ -164,10 +164,10 @@ export class Runtime {
   };
 
   readonly registry: ConversationRegistry = {
-    resolve: async (key, agent) => {
+    resolve: async (key, agent, channel) => {
       const known = this.pointers.get(key);
       if (known !== undefined) return known;
-      const conversation = { key, agent, conversationId: this.idOf(this.next++) };
+      const conversation = { key, agent, channel, conversationId: this.idOf(this.next++) };
       this.conversations.set(conversation.conversationId, { conversationId: conversation.conversationId, key, agent, busy: false, usage: ZERO });
       this.pointers.set(key, conversation);
       return conversation;

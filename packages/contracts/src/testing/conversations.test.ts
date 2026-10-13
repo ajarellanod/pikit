@@ -27,11 +27,11 @@ function memoryRegistry(records: Records) {
         return id;
       };
       const registry: ConversationRegistry = {
-        async resolve(key, agent) {
+        async resolve(key, agent, channel) {
           // Synchronous from lookup to record: concurrent first resolves cannot both create.
           let ref = records.pointers.get(key);
           if (ref === undefined) {
-            ref = { key, agent, conversationId: newSession() };
+            ref = { key, agent, channel, conversationId: newSession() };
             records.pointers.set(key, ref);
           }
           return { ...ref };

@@ -74,7 +74,7 @@ test("a call runs the task in a child of the agent it names, one level deeper, i
   const d = delegation();
   expect(textOf(await call({ agent: "researcher", task: "find X" }, d))).toBe('The agent "researcher" answered:\n\ndone');
 
-  expect(d.asked).toEqual([{ how: "run", task: { agent: "researcher", key: "delegate:1:t9", task: "find X", sender: { channel: "delegate", id: "assistant" } } }]);
+  expect(d.asked).toEqual([{ how: "run", task: { agent: "researcher", key: "delegate:1:t9", channel: "delegate", task: "find X", sender: { channel: "delegate", id: "assistant" } } }]);
 });
 
 test("wait: false starts it, and says the answer comes later", async () => {
@@ -93,7 +93,7 @@ test("a delegated task always waits for its own delegations, and goes no deeper 
   const d = delegation();
   const task: ConversationRef = { key: "delegate:1:t3", agent: "researcher", conversationId: "8" };
   await call({ agent: "coder", task: "x", wait: false }, d, task);
-  expect(d.asked).toEqual([{ how: "run", task: { agent: "coder", key: "delegate:2:t9", task: "x", sender: { channel: "delegate", id: "researcher" } } }]);
+  expect(d.asked).toEqual([{ how: "run", task: { agent: "coder", key: "delegate:2:t9", channel: "delegate", task: "x", sender: { channel: "delegate", id: "researcher" } } }]);
 
   const deepest: ConversationRef = { key: "delegate:2:t9", agent: "coder", conversationId: "9" };
   await expect(call({ agent: "researcher", task: "x" }, d, deepest)).rejects.toThrow("already 2 delegations deep, the most this project allows");

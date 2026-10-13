@@ -295,11 +295,12 @@ test("POST /admin/api/conversations: a conversation of the dashboard's own (dash
   expect(response.status).toBe(201);
   expect(body.key).toMatch(/^dashboard:[0-9a-f-]{36}$/);
   expect(body).toMatchObject({ conversationId: "c100", admission: "started", requestId: expect.stringMatching(/^dashboard:/) });
-  expect(s.runtime.pointers.get(body.key)).toEqual({ key: body.key, agent: "assistant", conversationId: "c100" });
+  // The dashboard's conversation belongs to its channel, `dashboard`.
+  expect(s.runtime.pointers.get(body.key)).toEqual({ key: body.key, agent: "assistant", channel: "dashboard", conversationId: "c100" });
   expect(s.runtime.dispatched).toEqual([
     {
       requestId: body.requestId,
-      conversation: { key: body.key, agent: "assistant", conversationId: "c100" },
+      conversation: { key: body.key, agent: "assistant", channel: "dashboard", conversationId: "c100" },
       prompt: `${OPERATOR_NOTE}.]\nwhat changed today?`,
       whenBusy: "followUp",
       sender: { channel: "dashboard", id: "ops" },
@@ -773,7 +774,7 @@ for (const c of createAgentCommandConformance(() => {
   });
   return {
     components: [auth, agents, sqliteStorage(), runtime.component(), adminApi, reader],
-    conversation: async (_app, ctx) => runtime.registry.resolve("dashboard:suite", "assistant", ctx),
+    conversation: async (_app, ctx) => runtime.registry.resolve("dashboard:suite", "assistant", "test", ctx),
     runs: [
       {
         name: "name",

@@ -119,12 +119,13 @@ test("what setup declares: component.json's provides / requires / optional come 
 test("each pointer is a value at its key in the conversations-kv namespace, with the conversations it was in before", async () => {
   const r = records();
   const w = await started(r);
-  const first = await w.registry.resolve("http:c1", "assistant", w.ctx);
+  const first = await w.registry.resolve("http:c1", "assistant", "http", w.ctx);
   const reset = await w.registry.reset("http:c1", undefined, w.ctx);
 
   expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toMatchObject({
     agent: "assistant",
     conversationId: reset?.newConversationId,
+    channel: "http",
     previousConversationIds: [first.conversationId],
   });
   await w.app.stop();
@@ -133,7 +134,7 @@ test("each pointer is a value at its key in the conversations-kv namespace, with
 test("a key named __proto__ is a key like any other, also after a restart", async () => {
   const r = records();
   const first = await started(r);
-  const created = await first.registry.resolve("__proto__", "assistant", first.ctx);
+  const created = await first.registry.resolve("__proto__", "assistant", "test", first.ctx);
   await first.app.stop();
 
   const second = await started(r);
@@ -149,7 +150,7 @@ test("a value that is not a pointer fails, and is never overwritten by a resolve
   const w = await started(r);
 
   await expect(w.registry.get("http:c1", w.ctx)).rejects.toThrow("conversations-kv:");
-  await expect(w.registry.resolve("http:c1", "assistant", w.ctx)).rejects.toThrow("conversations-kv:");
+  await expect(w.registry.resolve("http:c1", "assistant", "test", w.ctx)).rejects.toThrow("conversations-kv:");
   expect(await r.kv.namespace(NAMESPACE).get("http:c1")).toEqual({ agent: "assistant" });
   await w.app.stop();
 });
@@ -160,7 +161,7 @@ test("the registry is refused while the app is not running", async () => {
   await w.app.stop();
 
   await expect(w.registry.get("http:c1", w.ctx)).rejects.toThrow("while the app is not running");
-  await expect(w.registry.resolve("http:c1", "assistant", w.ctx)).rejects.toThrow("while the app is not running");
+  await expect(w.registry.resolve("http:c1", "assistant", "test", w.ctx)).rejects.toThrow("while the app is not running");
 });
 
 test("conversation.reset is emitted once the new pointer is stored, never when it could not be", async () => {
@@ -178,7 +179,7 @@ test("conversation.reset is emitted once the new pointer is stored, never when i
     if (failing && write === "set") throw new Error("the store is down");
   });
   const w = await started(r, storage, [listener]);
-  const created = await w.registry.resolve("http:c1", "assistant", w.ctx);
+  const created = await w.registry.resolve("http:c1", "assistant", "test", w.ctx);
 
   const reset = await w.registry.reset("http:c1", undefined, w.ctx);
   // A listener that reads the registry finds the new conversation: it was stored before the event.
@@ -195,9 +196,9 @@ test("conversation.reset is emitted once the new pointer is stored, never when i
 test("in one process, a reset and a resolve sent together run in order, and two resets both count", async () => {
   const r = records();
   const w = await started(r);
-  const created = await w.registry.resolve("http:c1", "assistant", w.ctx);
+  const created = await w.registry.resolve("http:c1", "assistant", "test", w.ctx);
 
-  const [reset, after] = await Promise.all([w.registry.reset("http:c1", undefined, w.ctx), w.registry.resolve("http:c1", "assistant", w.ctx)]);
+  const [reset, after] = await Promise.all([w.registry.reset("http:c1", undefined, w.ctx), w.registry.resolve("http:c1", "assistant", "test", w.ctx)]);
   expect(after).toEqual(reset?.conversation as ConversationRef);
 
   const [one, two] = await Promise.all([w.registry.reset("http:c1", undefined, w.ctx), w.registry.reset("http:c1", undefined, w.ctx)]);
@@ -219,7 +220,7 @@ test("two processes racing a first resolve get one conversation; the loser leave
   const a = await started(r, storage);
   const b = await started(r, storage);
 
-  const racing = Promise.all([a.registry.resolve("http:c1", "assistant", a.ctx), b.registry.resolve("http:c1", "assistant", b.ctx)]);
+  const racing = Promise.all([a.registry.resolve("http:c1", "assistant", "test", a.ctx), b.registry.resolve("http:c1", "assistant", "test", b.ctx)]);
   await both.arrived(2); // Both read no pointer and created a conversation.
   both.release();
   const [one, two] = await racing;
@@ -244,9 +245,9 @@ test("a first resolve that loses to another process's resolve and reset returns 
   );
   const b = await started(r);
 
-  const late = a.registry.resolve("http:c1", "assistant", a.ctx);
+  const late = a.registry.resolve("http:c1", "assistant", "test", a.ctx);
   await held.arrived(1); // A read no pointer and created a conversation; its write waits.
-  const created = await b.registry.resolve("http:c1", "assistant", b.ctx);
+  const created = await b.registry.resolve("http:c1", "assistant", "test", b.ctx);
   const reset = await b.registry.reset("http:c1", undefined, b.ctx);
   held.release();
 
@@ -266,7 +267,7 @@ test("two processes resetting one key at once: both succeed, the last write wins
   });
   const a = await started(r, storage);
   const b = await started(r, storage);
-  const created = await a.registry.resolve("http:c1", "assistant", a.ctx);
+  const created = await a.registry.resolve("http:c1", "assistant", "test", a.ctx);
 
   const racing = Promise.all([a.registry.reset("http:c1", undefined, a.ctx), b.registry.reset("http:c1", undefined, b.ctx)]);
   await both.arrived(2); // Both read the same pointer and created a conversation.

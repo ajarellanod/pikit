@@ -94,6 +94,7 @@ export function createDelegateTool(config: DelegateConfig): ToolRegistration {
       const task = {
         agent: args.agent,
         key: `${DELEGATE_KEY_PREFIX}${depth}:${String(api.taskId)}`,
+        channel: DELEGATE_CHANNEL,
         task: args.task,
         sender: { channel: DELEGATE_CHANNEL, id: parent.agent },
       };

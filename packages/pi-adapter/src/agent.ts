@@ -69,10 +69,11 @@ type JsonObject = { [key: string]: JsonValue };
 
 /**
  * What pikit knows of a conversation that pi-durable does not: its `ConversationRef` minus the id
- * (`key`, `agent`). Written when a message is admitted, so a settlement found later (a run resumed
- * after a restart) can be announced with its conversation.
+ * (`key`, `agent`, and `channel` once a ref gave one). Written when a message is admitted, so a
+ * settlement found later (a run resumed after a restart) can be announced with its conversation, and a
+ * run sees its channel whatever ref reached it.
  */
-export const ConversationDoc = defineDoc<{ key: string; agent: string }>({
+export const ConversationDoc = defineDoc<{ key: string; agent: string; channel?: string }>({
   kind: "pikit.conversation",
   version: 1,
   scope: "conversation",
@@ -121,6 +122,11 @@ export interface AgentConfigSource {
    * agent runs with (`CONVERSATION`, `AGENT_STATE`, `RUN_REQUESTS`); `context` itself when it has none.
    */
   scope(conversationId: ConversationId, context: ChordContext): Promise<ChordContext>;
+}
+
+/** `ref` with the conversation's recorded channel, which wins over a ref's own (a conversation's channel never changes). */
+export function withChannel(ref: ConversationRef, channel: string | undefined): ConversationRef {
+  return channel === undefined || channel === ref.channel ? ref : { ...ref, channel };
 }
 
 /** The effective state: the agent's initial state with the stored updates over it, a copy. */
@@ -183,10 +189,11 @@ export class AgentConfigs {
   }
 
   /**
-   * In `tx`: record the conversation's key and agent, and make its `pi.agent` what `prepare` gives
-   * for `state` (installing the tools it names). Writes `pi.agent` only when it differs, so an
-   * unchanged agent adds nothing to the transcript. The definition owns `pi.agent` (SPEC §6): a
-   * `configure()` made on the conversation directly is undone here.
+   * In `tx`: record the conversation's key and agent (and its channel, the first time a ref gives one),
+   * and make its `pi.agent` what `prepare` gives for `state` (installing the tools it names). Writes
+   * `pi.agent` only when it differs, so an unchanged agent adds nothing to the transcript. The
+   * definition owns `pi.agent` (SPEC §6): a `configure()` made on the conversation directly is undone
+   * here. Returns the conversation as a run sees it: `ref` with the recorded channel.
    */
   async apply(
     tx: Tx,
@@ -195,12 +202,15 @@ export class AgentConfigs {
     agent: AgentDefinition,
     state: Readonly<Record<string, unknown>>,
     logger: Logger,
-  ): Promise<void> {
+  ): Promise<ConversationRef> {
     const recorded = await tx.doc(ConversationDoc, conversationId);
     if (recorded.key !== ref.key) recorded.key = ref.key;
     if (recorded.agent !== ref.agent) recorded.agent = ref.agent;
+    // A conversation belongs to one channel for good: the first ref with one records it.
+    if (recorded.channel === undefined && ref.channel !== undefined) recorded.channel = ref.channel;
+    const conversation = withChannel(ref, recorded.channel);
 
-    const turn = this.turn(agent, ref, state, logger);
+    const turn = this.turn(agent, conversation, state, logger);
     const own = this.install(agent.name, turn.tools);
     const selected = [...(turn.skills.length === 0 ? [] : [this.installSkills(agent.name, turn.skills)]), ...turn.extensions.map((extension) => this.installExtension(extension))];
     // Offered by name: the agent's tools, then each extension's; a later one of the same name wins.
@@ -214,7 +224,7 @@ export class AgentConfigs {
       current.instructions === turn.systemPrompt &&
       JSON.stringify(current.extensions) === JSON.stringify(extensions) &&
       JSON.stringify(current.tools) === JSON.stringify(names);
-    if (same) return;
+    if (same) return conversation;
     const change: AgentChange = {
       model: turn.model,
       instructions: turn.systemPrompt ?? null,
@@ -223,6 +233,7 @@ export class AgentConfigs {
       tools: names.map((name) => tools.find((tool) => tool.name === name) as DurableTool),
     };
     await configure(tx, conversationId, change);
+    return conversation;
   }
 
   /**

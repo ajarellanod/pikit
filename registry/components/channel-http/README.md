@@ -89,8 +89,8 @@ answer.
 2. `inbound.normalize`: the body becomes an `InboundMessage` (`id` = request id). Your stages may
    rewrite the text or refuse the message, but must keep its id, channel and conversation.
 3. `route.resolve`: a router picks the agent.
-4. `conversations.registry.resolve("http:<conversationId>", agent)`: the conversation and its
-   runtime conversation.
+4. `conversations.registry.resolve("http:<conversationId>", agent, "http")`: the conversation (of the
+   channel `http`) and its runtime conversation.
 5. `agent.runtime.dispatch`: Pi takes the message.
 
 The answer comes from the runtime's `agent.settled` / `agent.failed` events. The channel answers

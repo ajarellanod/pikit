@@ -50,7 +50,9 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [subagents](subagents.md) | ⭐ | Delegation to helpers (Pi's) and to other agents (pikit's) | No |
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
 | [channel-google-chat](channel-google-chat.md) | | Google Chat by webhook, an agent per space | No |
+| [agent-folders](agent-folders.md) | | An agent is its directory: `agent.ts` (what it may use), `SYSTEM.md`, `AGENTS.md`, skills, per-channel text, workspace seed; one generated index for both targets | No |
 | [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |
+| [channel-context](channel-context.md) | | A directory, a prompt and tools per channel, from `ConversationRef.channel` (built); `prepare` already does prompt and tools | No |
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |
 | [codemode](codemode.md) | | The model writes a script that calls its tools: pi-durable 1.2's codemode and `tool_search` extensions as components (Cloudflare needs a sandbox Worker) | No |
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
@@ -64,9 +66,11 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [multi-tenant-isolation](multi-tenant-isolation.md) | | Tenants that cannot reach each other | No |
 | [contract-packages](contract-packages.md) | | A contract that is not the kit's is a package of its own, versioned, with its suite, shipped by its registry and vendored; decided, not built | No: built when open registries are, if pikit succeeds and others build registries |
 | [open-registries](open-registries.md) | | Git, HTTP and private registries, and a gallery | No: `pikit upgrade` (P6) merges from the bases in `pikit-bases/`, from the registry as recorded (`builtin`, a path) |
+| [pi-hive-on-pikit](pi-hive-on-pikit.md) | | A map: pi-hive's pieces against what the bases give, the notes that build the rest, and what has none | No |
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |
+| [skills-catalog](skills-catalog.md) | | Skills installed once and named by agents, live agents and overrides, like tools (`agent.skill`) | No |
 | [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations; replies in their thread | No |

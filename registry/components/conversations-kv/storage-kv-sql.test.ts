@@ -67,7 +67,7 @@ test("two processes over one database racing a first resolve get one conversatio
   const refs = await Promise.all(
     Array.from({ length: 6 }, (_, i) => {
       const w = i % 2 === 0 ? a : b;
-      return w.registry.resolve("http:c1", "assistant", w.app.context());
+      return w.registry.resolve("http:c1", "assistant", "test", w.app.context());
     }),
   );
 

@@ -296,4 +296,40 @@ describe("contexts", () => {
     expect(toolContext.abortSignal?.aborted).toBe(true);
     expect((await w.result("r1")).kind).toBe("aborted");
   });
+
+  test("a run sees its conversation's channel: the first ref's, also for a ref without one or with another, in prepare, and after a restart", async () => {
+    const seen: (string | undefined)[] = [];
+    const prepared: (string | undefined)[] = [];
+    const probe = holdTool(async (context) => {
+      seen.push(context.value(CONVERSATION)?.channel);
+      return "seen";
+    });
+    const agent = defineAgent({
+      ...scriptedAgent([probe as never]),
+      prepare: (_state, ctx) => {
+        prepared.push(ctx.conversation.channel);
+        return {};
+      },
+    });
+    const w = await worker({ agents: [agent] });
+    const conversation = await w.conversation();
+
+    await w.dispatch("r1", "hold", { ...conversation, channel: "telegram" });
+    expect((await w.result("r1")).kind).toBe("completed");
+    // A ref without a channel (an operator's action), or with another, gets the recorded one.
+    await w.dispatch("r2", "hold", conversation);
+    expect((await w.started("r2")).conversation.channel).toBe("telegram");
+    await w.result("r2");
+    await w.dispatch("r3", "hold", { ...conversation, channel: "dashboard" });
+    await w.result("r3");
+    await w.close();
+
+    const again = await openWorker(w.path, { agents: [agent] });
+    cleanup.push(() => again.close());
+    await again.dispatch("r4", "hold", conversation);
+    await again.result("r4");
+
+    expect(seen).toEqual(["telegram", "telegram", "telegram", "telegram"]);
+    expect(new Set(prepared)).toEqual(new Set(["telegram"]));
+  });
 });

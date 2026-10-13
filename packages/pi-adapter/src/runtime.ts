@@ -79,7 +79,7 @@ import {
   type SqlDatabase,
 } from "@pikit/contracts";
 import type { ExecutionEnv } from "@earendil-works/pi-durable/env";
-import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState } from "./agent.ts";
+import { AgentConfigs, AgentStateDoc, ConversationDoc, type DurableExtension, type DurableModels, type DurableTool, effectiveState, withChannel } from "./agent.ts";
 import { createAnswerLog } from "./answers.ts";
 import { AGENT_DELEGATION, createDelegation } from "./delegation.ts";
 import { runContext, toChord } from "./context.ts";
@@ -353,7 +353,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
   // so a restart finds the background ones it must resume.
   const { delegation, extension: delegationExtension } = createDelegation({
     agent: (name) => options.agent(name),
-    apply: (tx, id, ref, agent) => config.apply(tx, id, ref, agent, effectiveState(agent, {}), logger),
+    apply: async (tx, id, ref, agent) => void (await config.apply(tx, id, ref, agent, effectiveState(agent, {}), logger)),
     dispatch: (request, ctx) => runtime.dispatch(request, ctx),
     events,
   });
@@ -725,7 +725,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     const harness = open ?? (await harnessOf(events));
     const recorded = await harness.snapshot(ConversationDoc, id, toChord(events));
     if (recorded === undefined || recorded.key === "") return undefined;
-    const ref = { key: recorded.key, agent: recorded.agent, conversationId: String(id) };
+    const ref = withChannel({ key: recorded.key, agent: recorded.agent, conversationId: String(id) }, recorded.channel);
     refs.set(id, ref);
     return ref;
   };
@@ -735,11 +735,11 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     const ref = given ?? (await refOf(id, harness));
     const agent = ref === undefined ? undefined : options.agent(ref.agent);
     if (ref === undefined || agent === undefined) return;
-    await harness.commit(async (tx) => {
+    const conversation = await harness.commit(async (tx) => {
       const stored = copyJson(await tx.doc(AgentStateDoc, id)) as { [key: string]: JsonValue };
-      await config.apply(tx, id, ref, agent, effectiveState(agent, stored), logger);
+      return config.apply(tx, id, ref, agent, effectiveState(agent, stored), logger);
     }, toChord(ctx));
-    refs.set(id, ref);
+    refs.set(id, conversation);
   };
 
   const conversationIdOf = (ref: Pick<ConversationRef, "conversationId" | "key">): ConversationId => {
@@ -932,7 +932,9 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     },
 
     async dispatch(request: AgentRequest, ctx: AppContext): Promise<Admission> {
-      const ref = request.conversation;
+      const given = request.conversation;
+      // The conversation as its runs see it: the given ref with the channel recorded with the conversation.
+      let ref = given;
       const { requestId } = request;
       const sender = senderOf(request);
       const agent = definitionOf(ref);
@@ -948,9 +950,12 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
           // One commit: the duplicate check, the agent `prepare` gives, and the admission's time.
           const existing = await conversation.commit(async (tx) => {
             const found = await tx.submissionByRequest(id, requestId);
-            if (found !== undefined) return found;
+            if (found !== undefined) {
+              ref = withChannel(given, (await tx.doc(ConversationDoc, id)).channel);
+              return found;
+            }
             const stored = copyJson(await tx.doc(AgentStateDoc, id)) as { [key: string]: JsonValue };
-            await config.apply(tx, id, ref, agent, effectiveState(agent, stored), logger);
+            ref = await config.apply(tx, id, given, agent, effectiveState(agent, stored), logger);
             const admissions = await tx.doc(AdmissionsDoc);
             if (admissions.conversations[String(id)] === undefined) admissions.conversations[String(id)] = {};
             (admissions.conversations[String(id)] as { [requestId: string]: number })[requestId] = now();

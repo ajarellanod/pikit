@@ -60,7 +60,8 @@ The model calls `delegate({ agent, task, wait? })`:
   background task's answer is admitted to the parent through the runtime's `dispatch`, so it is
   logged and delivered like any answer.
 - **A task's key is the call's**: `delegate:<depth>:<tool call's task id>`. This tool makes it and
-  reads a conversation's depth from it. A call made again after a crash (replay `safe`) finds the
+  reads a conversation's depth from it. The child conversation's channel (`ConversationRef.channel`)
+  is `delegate`. A call made again after a crash (replay `safe`) finds the
   child it created and the input it submitted, and only waits again.
 - **Which agents, and how deep, is this tool's config**, checked when the App is defined; an agent it
   lists that the App does not define stops the App at start. Routing (`route.resolve`) is not asked:
@@ -69,7 +70,7 @@ The model calls `delegate({ agent, task, wait? })`:
 ## Tests
 
 - `tool-delegate.test.ts` (copied into your project): what `setup` declares, a start refused for an
-  unknown agent, the description, the task each call asks for (agent, key, task, sender) and how
+  unknown agent, the description, the task each call asks for (agent, key, channel, task, sender) and how
   (`run` or `start`), the outcomes as the model reads them, depth and waiting rules, and config that is
   refused. It calls the tool with a stand-in for the runtime's delegation.
 - `app.test.ts` (beside `files/`, in the registry only): with runtime-pi in a real App, on a SQLite

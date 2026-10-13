@@ -75,7 +75,13 @@ interface AgentRuntime {
 ```
 
 - `AgentRequest` is `{ requestId, conversation, prompt, images?, whenBusy?, sender? }`. `ConversationRef` is
-  `{ key, agent, conversationId }`: the channel's key, the agent's name, the runtime's conversation.
+  `{ key, agent, conversationId, channel? }`: the channel's key, the agent's name, the runtime's
+  conversation, and the channel the conversation belongs to for good (`telegram`, `http`, `dashboard`,
+  `delegate`). `conversations.registry` records the channel with the key's first resolve; the runtime
+  records it with the conversation, so a run sees it (`CONVERSATION`, `PrepareContext`, its `workspace`)
+  even when the ref that reached it has none (an operator's action). It is for treating a channel's
+  conversations apart (a directory, a prompt), never for finding where an answer goes. Settlements
+  (`AgentResult`, `agent.submissions`) do not carry it.
 - `sender` (`Sender`, `{ channel, id }`) is who sent the message, as its producer established it:
   `admitInbound` gives the message's actor (`{ channel, id: actor.id }`), admin-api the operator
   (`{ channel: "dashboard", id }`), tool-delegate's tasks the delegating agent (`{ channel: "delegate",
@@ -164,7 +170,7 @@ that works on `api.env` must use `execution` or `execution.shell`. Registry tool
 A tool cannot use `agent.runtime` or `conversations.registry` (the runtime uses every tool: a cycle).
 What a tool may need of the runtime is in its context, from the runtime's `scope`: besides the keys
 above, `AGENT_DELEGATION` (`@pikit/pi-adapter/tools`, Pi-shaped: it takes the call's `api`), the
-runtime's delegation on pi-durable's subagents: `run(api, { agent, key, task, sender })`, a child
+runtime's delegation on pi-durable's subagents: `run(api, { agent, key, channel, task, sender })`, a child
 conversation of another agent owned by the call (stopping the run stops it; a rerun finds it), or
 `start(…)`, one that outlives the run, whose answer is admitted to the parent through `dispatch`
 (request id `delegate-result:<task id>`). Used by tool-delegate. Tested by the adapter's
@@ -199,14 +205,16 @@ Which runtime conversation a conversation key is in now.
 
 ```ts
 interface ConversationRegistry {
-  resolve(key, agent, ctx): Promise<ConversationRef>;   // creates on first call, then returns the record
+  resolve(key, agent, channel, ctx): Promise<ConversationRef>; // creates on first call, then returns the record
   get(key, ctx): Promise<ConversationRef | undefined>;  // creates nothing
   reset(key, agent, ctx): Promise<ConversationReset | undefined>; // agent: undefined keeps the key's
 }
 ```
 
 - The pointer is a record, never memory. Concurrent first resolves of one key make one conversation.
-- A conversation keeps the agent it was created with.
+- A conversation keeps the agent and the channel it was created with: a later resolve's change nothing,
+  a reset keeps the channel. `admitInbound` resolves with the message's channel, admin-api with
+  `dashboard`. Every ref the registry gives has its channel.
 - `reset` points the key to a new conversation, keeps the old one, and emits `conversation.reset`
   once the pointer is durable. No pointer is ever deleted. `reset(key, agent, ctx)` with an `agent` gives
   the new conversation another agent (`undefined` keeps the key's): what `admitInbound` does when the key's agent is gone (below).

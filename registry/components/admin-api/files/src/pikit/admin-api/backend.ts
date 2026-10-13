@@ -305,7 +305,8 @@ export function createLocalBackend(contracts: LocalContracts): AdminBackend {
       if (!agents.includes(message.agent)) throw refusal("unknown_agent", `no agent "${message.agent}" in the App: ${agents.join(", ") || "none"}`);
       // Before the key is made: a refused message makes no conversation.
       await searchable(message.agent, message, ctx);
-      const conversation = await contracts.registry().resolve(message.key, message.agent, ctx);
+      // The dashboard's own conversation: its channel is the dashboard's, for good.
+      const conversation = await contracts.registry().resolve(message.key, message.agent, DASHBOARD_CHANNEL, ctx);
       const admission = await dispatch(conversation, message, ctx);
       return { key: conversation.key, conversationId: conversation.conversationId, requestId: message.requestId, admission: admission.kind };
     },

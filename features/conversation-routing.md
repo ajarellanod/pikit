@@ -17,6 +17,11 @@ day that decision changes; it is not to be built. From the architecture audit's 
   back (`account.ts:11`). Whatever must be in it, the channel puts there itself: a tenant in the
   channel's instance (`telegram:acme:12345`, [multi-tenant isolation](multi-tenant-isolation.md)), a
   thread in the channel's own format ([threads](threads.md)).
+- **Which channel a conversation belongs to is recorded, as a fact about it, not a route**:
+  `ConversationRef.channel` (`InboundMessage.channel` of the message that created it, `dashboard`,
+  `delegate`), recorded by `conversations.registry` with the key's first resolve and kept through
+  resets, so a component reads it without parsing a key ([channel context](channel-context.md)).
+  Answers still find their chat by the key alone.
 - **So answers keep finding their chat by the key**, and the proposal below is not needed: no
   component changes a key, Cloudflare's owner stays `idFromName` of the channel's key (C1, C2), and
   `conversation.resolve` is not planned ([pipeline anchors](pipeline-anchors.md)).

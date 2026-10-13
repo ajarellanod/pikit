@@ -51,6 +51,8 @@ export interface DelegatedTask {
    * (`delegate:…`); its tools see it through `CONVERSATION`.
    */
   key: string;
+  /** The child conversation's channel (`ConversationRef.channel`), the tool's own (`delegate`). */
+  channel: string;
   /** The task: the child's one message. */
   task: string;
   /** Who asks: the child's input's sender (`RUN_REQUESTS`), the delegating agent. */
@@ -208,7 +210,7 @@ export function createDelegation(options: DelegationOptions) {
         const existing = (await tx.scanConversations({ ownerTaskId: api.taskId }, 1)).items[0];
         if (existing !== undefined) return existing.id;
         const created = await tx.createConversation({ ownership: { kind: "task", taskId: api.taskId } });
-        await options.apply(tx, created.id, { key: task.key, agent: task.agent, conversationId: String(created.id) }, agent);
+        await options.apply(tx, created.id, { key: task.key, agent: task.agent, conversationId: String(created.id), channel: task.channel }, agent);
         return created.id;
       }, context);
       // A UI watching the parent finds the child under the call.
@@ -230,7 +232,7 @@ export function createDelegation(options: DelegationOptions) {
         const background = { ownership: { kind: "conversation" }, background: true } as const;
         const anchor = await tx.createTask(Anchor, null, background);
         const child = await tx.createConversation({ ownership: { kind: "task", taskId: anchor } });
-        await options.apply(tx, child.id, { key: task.key, agent: task.agent, conversationId: String(child.id) }, agent);
+        await options.apply(tx, child.id, { key: task.key, agent: task.agent, conversationId: String(child.id), channel: task.channel }, agent);
         const sender = plainSender(task.sender);
         const input: ReporterInput = {
           child: child.id as number,

@@ -58,9 +58,9 @@ export function createConversationRegistryConformance(
       const w = await s.worker();
       const before = await s.conversationIds();
 
-      const created = await w.registry.resolve("test:c1", "support", w.ctx);
+      const created = await w.registry.resolve("test:c1", "support", "test", w.ctx);
 
-      expect([created.key, created.agent], ["test:c1", "support"], "the conversation");
+      expect([created.key, created.agent, created.channel], ["test:c1", "support", "test"], "the conversation");
       check(typeof created.conversationId === "string" && created.conversationId.length > 0, "a runtime conversation id");
       if (before !== undefined) {
         const after = (await s.conversationIds()) ?? [];
@@ -71,17 +71,17 @@ export function createConversationRegistryConformance(
 
     registryCase("resolving again returns the same conversation, and get finds it", async (s) => {
       const w = await s.worker();
-      const created = await w.registry.resolve("test:c1", "support", w.ctx);
+      const created = await w.registry.resolve("test:c1", "support", "test", w.ctx);
 
-      same(await w.registry.resolve("test:c1", "support", w.ctx), created, "the second resolve");
+      same(await w.registry.resolve("test:c1", "support", "test", w.ctx), created, "the second resolve");
       same(await w.registry.get("test:c1", w.ctx), created, "get");
     }),
 
     registryCase("each key has its own runtime conversation", async (s) => {
       const w = await s.worker();
 
-      const one = await w.registry.resolve("test:c1", "support", w.ctx);
-      const two = await w.registry.resolve("test:c2", "support", w.ctx);
+      const one = await w.registry.resolve("test:c1", "support", "test", w.ctx);
+      const two = await w.registry.resolve("test:c2", "support", "test", w.ctx);
 
       check(one.conversationId !== two.conversationId, "two keys to point to two runtime conversations");
     }),
@@ -90,7 +90,7 @@ export function createConversationRegistryConformance(
       const w = await s.worker();
       const before = await s.conversationIds();
 
-      const all = await Promise.all(Array.from({ length: 5 }, () => w.registry.resolve("test:c1", "support", w.ctx)));
+      const all = await Promise.all(Array.from({ length: 5 }, () => w.registry.resolve("test:c1", "support", "test", w.ctx)));
 
       expect(new Set(all.map((ref) => ref.conversationId)).size, 1, "distinct runtime conversations for one key");
       if (before !== undefined) expect(((await s.conversationIds()) ?? []).length - before.length, 1, "runtime conversations created");
@@ -107,16 +107,33 @@ export function createConversationRegistryConformance(
 
     registryCase("a conversation keeps the agent it was created with", async (s) => {
       const w = await s.worker();
-      await w.registry.resolve("test:c1", "support", w.ctx);
+      await w.registry.resolve("test:c1", "support", "test", w.ctx);
 
-      expect((await w.registry.resolve("test:c1", "sales", w.ctx)).agent, "support", "the agent after another route");
+      expect((await w.registry.resolve("test:c1", "sales", "test", w.ctx)).agent, "support", "the agent after another route");
+    }),
+
+    registryCase("a conversation keeps the channel it was created with: a later resolve's, a reset and a restart change nothing", async (s) => {
+      const first = await s.worker();
+      const created = await first.registry.resolve("test:c1", "support", "telegram", first.ctx);
+
+      expect(created.channel, "telegram", "the channel of the first resolve");
+      expect((await first.registry.resolve("test:c1", "support", "dashboard", first.ctx)).channel, "telegram", "the channel after a resolve from another channel");
+      expect((await first.registry.get("test:c1", first.ctx))?.channel, "telegram", "get's channel");
+      const reset = await first.registry.reset("test:c1", undefined, first.ctx);
+      expect(reset?.conversation.channel, "telegram", "the channel after a reset");
+      expect((await first.registry.reset("test:c1", "sales", first.ctx))?.conversation.channel, "telegram", "the channel after a reset to another agent");
+      await first.app.stop();
+
+      const second = await s.worker();
+      expect((await second.registry.get("test:c1", second.ctx))?.channel, "telegram", "the channel after a restart");
+      expect((await second.registry.resolve("test:c2", "support", "http", second.ctx)).channel, "http", "another key's own channel");
     }),
 
     registryCase("any string is a key: keys are opaque", async (s) => {
       const w = await s.worker();
       const keys = ["http:a/b", 'http:"quoted" ñandú ✓', "http:../../etc", "http:a.b:c"];
 
-      const refs = await Promise.all(keys.map((key) => w.registry.resolve(key, "support", w.ctx)));
+      const refs = await Promise.all(keys.map((key) => w.registry.resolve(key, "support", "test", w.ctx)));
 
       expect(
         refs.map((ref) => ref.key),
@@ -129,7 +146,7 @@ export function createConversationRegistryConformance(
 
     registryCase("reset points the key to a new runtime conversation, keeps the old one and emits conversation.reset", async (s) => {
       const w = await s.worker();
-      const created = await w.registry.resolve("test:c1", "support", w.ctx);
+      const created = await w.registry.resolve("test:c1", "support", "test", w.ctx);
 
       const reset = await w.registry.reset("test:c1", undefined, w.ctx);
 
@@ -138,7 +155,7 @@ export function createConversationRegistryConformance(
       check(reset.newConversationId !== created.conversationId, "a new runtime conversation");
       expect([reset.conversation.key, reset.conversation.agent], ["test:c1", "support"], "the conversation after reset");
       same(await w.registry.get("test:c1", w.ctx), reset.conversation, "get after reset");
-      same(await w.registry.resolve("test:c1", "support", w.ctx), reset.conversation, "resolve after reset");
+      same(await w.registry.resolve("test:c1", "support", "test", w.ctx), reset.conversation, "resolve after reset");
       expect(w.resets(), [reset], "conversation.reset events");
       const ids = await s.conversationIds();
       if (ids !== undefined) {
@@ -149,14 +166,14 @@ export function createConversationRegistryConformance(
 
     registryCase("reset with an agent points the key to a new conversation of that agent (its own was removed); without one, the key keeps it", async (s) => {
       const w = await s.worker();
-      const created = await w.registry.resolve("test:moved", "retired", w.ctx);
+      const created = await w.registry.resolve("test:moved", "retired", "test", w.ctx);
 
       const reset = await w.registry.reset("test:moved", "support", w.ctx);
 
       if (reset === undefined) throw new Error(`${GROUP}: reset of a known key returned undefined`);
       check(reset.newConversationId !== created.conversationId, "a new runtime conversation");
       expect([reset.conversation.key, reset.conversation.agent], ["test:moved", "support"], "the conversation after a reset with an agent");
-      same(await w.registry.resolve("test:moved", "retired", w.ctx), reset.conversation, "resolve after it: the new agent kept");
+      same(await w.registry.resolve("test:moved", "retired", "test", w.ctx), reset.conversation, "resolve after it: the new agent kept");
       const again = await w.registry.reset("test:moved", undefined, w.ctx);
       expect(again?.conversation.agent, "support", "the agent after a reset without one");
     }),
@@ -171,8 +188,8 @@ export function createConversationRegistryConformance(
 
     registryCase("pointers are records: a new worker finds them", async (s) => {
       const first = await s.worker();
-      const kept = await first.registry.resolve("test:c1", "support", first.ctx);
-      await first.registry.resolve("test:c2", "support", first.ctx);
+      const kept = await first.registry.resolve("test:c1", "support", "test", first.ctx);
+      await first.registry.resolve("test:c2", "support", "test", first.ctx);
       const reset = await first.registry.reset("test:c2", undefined, first.ctx);
       await first.app.stop();
 
@@ -231,8 +248,8 @@ function createSubject(fixture: ConversationRegistryFixture, workers: App[]): Su
 
 function same(actual: ConversationRef | undefined, expected: ConversationRef, what: string): void {
   expect(
-    actual === undefined ? undefined : { key: actual.key, agent: actual.agent, conversationId: actual.conversationId },
-    { key: expected.key, agent: expected.agent, conversationId: expected.conversationId },
+    actual === undefined ? undefined : { key: actual.key, agent: actual.agent, conversationId: actual.conversationId, channel: actual.channel },
+    { key: expected.key, agent: expected.agent, conversationId: expected.conversationId, channel: expected.channel },
     what,
   );
 }

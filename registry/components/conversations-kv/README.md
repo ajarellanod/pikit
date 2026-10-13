@@ -26,9 +26,11 @@ move from one to the other; a conversation whose pointer is not found starts on 
 
 A channel names a conversation with a key (`channel-http` uses `http:<conversationId>`).
 - The first time a key is resolved, the registry creates a new conversation and records
-  `key → { agent, conversationId }`.
-- After that, the key resolves to the same conversation. A conversation keeps the agent it was created
-  with, even if a later route names another one.
+  `key → { agent, conversationId, channel }`: the channel the resolve names (`admitInbound` gives the
+  message's), the one the conversation belongs to.
+- After that, the key resolves to the same conversation. A conversation keeps the agent and the channel
+  it was created with, even if a later route names another agent or a later resolve another channel; a
+  reset keeps the channel too. Every ref it gives has the channel.
 - A reset creates a new conversation and moves the pointer to it. The old conversation is kept, and its id
   is added to `previousConversationIds`. It then emits `conversation.reset`.
 - No pointer is ever deleted. A conversation that went idle and was closed in memory keeps its

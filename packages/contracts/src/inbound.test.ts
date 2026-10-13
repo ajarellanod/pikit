@@ -38,9 +38,9 @@ function ends() {
   const steps: string[] = [];
   const dispatched: AgentRequest[] = [];
   const conversations: ConversationRegistry = {
-    async resolve(key, agent) {
-      steps.push(`resolve ${key} ${agent}`);
-      return { key, agent, conversationId: `conversation-of-${key}` };
+    async resolve(key, agent, channel) {
+      steps.push(`resolve ${key} ${agent} ${channel}`);
+      return { key, agent, channel, conversationId: `conversation-of-${key}` };
     },
     get: async () => undefined,
     reset: async () => undefined,
@@ -85,7 +85,7 @@ test("admitInbound: normalized, routed, into its conversation, dispatched as the
       requestId: "m1",
       prompt: "HELLO",
       sender: { channel: "test", id: "someone" },
-      conversation: { key: "test:c1", agent: "support", conversationId: "conversation-of-test:c1" },
+      conversation: { key: "test:c1", agent: "support", channel: "test", conversationId: "conversation-of-test:c1" },
     },
   ]);
 });
@@ -162,8 +162,9 @@ test("admitInbound: beforeDispatch sees the conversation after it resolves and b
       e.steps.push("beforeDispatch");
     },
   });
-  expect(e.steps).toEqual(["resolve test:c1 support", "beforeDispatch", "dispatch m1"]);
-  expect(seen?.conversationId).toBe("conversation-of-test:c1");
+  // The message's channel is the one the conversation is resolved with: the registry records it when the key is new.
+  expect(e.steps).toEqual(["resolve test:c1 support test", "beforeDispatch", "dispatch m1"]);
+  expect([seen?.conversationId, seen?.channel]).toEqual(["conversation-of-test:c1", "test"]);
 });
 
 

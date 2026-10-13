@@ -165,7 +165,8 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
     ctx.logger.warn("admitInbound: the message's agent is no agent now, and routing names it: denied", { key: options.key, agent: error.agent });
     return { kind: "denied", message: normalized, reason: `the agent "${error.agent}" is no agent now` };
   };
-  let conversation = await options.conversations.resolve(options.key, decision.agent, ctx);
+  // The message's channel is the conversation's when this message creates it (the registry keeps the first).
+  let conversation = await options.conversations.resolve(options.key, decision.agent, normalized.channel, ctx);
   let admission: Admission;
   try {
     admission = await dispatch(conversation);

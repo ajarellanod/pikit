@@ -600,8 +600,8 @@ function fakeConversations(durable: Durable): ComponentDefinition {
     setup(pikit) {
       const known = durable.conversations;
       const registry: ConversationRegistry = {
-        async resolve(key, agent) {
-          const conversation = known.get(key) ?? { key, agent, conversationId: `conformance-conversation-${known.size + 1}` };
+        async resolve(key, agent, channel) {
+          const conversation = known.get(key) ?? { key, agent, channel, conversationId: `conformance-conversation-${known.size + 1}` };
           known.set(key, conversation);
           return conversation;
         },

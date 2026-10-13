@@ -80,7 +80,7 @@ curl -N -H "Authorization: Bearer $PIKIT_ADMIN_TOKEN" http://localhost:3000/admi
 
 - **Its own conversations.** `POST /admin/api/conversations` makes a key `dashboard:<uuid>` and
   resolves it with one of the App's agents (`GET /admin/api/agents`: the code's or a live one; another
-  is `400 unknown_agent`), then dispatches the first message. Its answers appear only in the dashboard:
+  is `400 unknown_agent`) and the channel `dashboard` (`ConversationRef.channel`), then dispatches the first message. Its answers appear only in the dashboard:
   no channel delivers a `dashboard:` key, and none makes one, so no other channel can continue it.
 - **Another channel's conversation.** The operator's message is a follow-up, never a steer (with a run
   going, it waits for it), and its request id starts with `dashboard:` (`DASHBOARD_REQUEST_PREFIX`; a
