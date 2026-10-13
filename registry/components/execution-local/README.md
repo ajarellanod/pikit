@@ -44,7 +44,7 @@ There is no fence and no token in this git, on purpose: the shell runs as the ap
 that repository's files anyway, so a fenced git would protect nothing. On a server an approval is the
 operator's decision, not a lock, and the deployer (deployment-docker) checks, waits for `/health` and
 rolls back whatever it deploys (proposals-local's README). A real lock needs the commands to run as
-another user or in another container (features/sandboxed-execution.md). On Cloudflare, execution-do's
+another user or in another container ([features/sandboxed-execution.md](https://github.com/ajarellanod/pikit/blob/main/features/sandboxed-execution.md)). On Cloudflare, execution-do's
 own git keeps its fences and the GitHub token away from the agent.
 
 ## It is not a sandbox

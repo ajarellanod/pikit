@@ -16,7 +16,7 @@
 
 import type { Context } from "@earendil-works/chord";
 import type { ToolExecutionResult, ToolRegistration } from "@earendil-works/pi-durable";
-import { type CallToolResult, type McpFetch, StreamableHttpTransport, type StreamableHttpTransportOptions, type Tool, toLlmContent } from "@earendil-works/pi-mcp";
+import { type CallToolResult, StreamableHttpTransport, type StreamableHttpTransportOptions, type Tool, toLlmContent } from "@earendil-works/pi-mcp";
 import { type TSchema, Type } from "@earendil-works/pi-ai";
 
 export {

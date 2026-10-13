@@ -35,7 +35,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { redactSecrets, secretLikePaths } from "@pikit/contracts";
-import { packageName, scanImports } from "../registry/imports.ts";
+import { scanImports } from "../registry/imports.ts";
 import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from "../project/component-doctor.ts";
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";

@@ -12,7 +12,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type App, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { ConversationRegistry } from "@pikit/contracts";
 import { createConversationRegistryConformance } from "@pikit/contracts/testing";
 import { fakeConversations } from "@pikit/pi-adapter/testing";

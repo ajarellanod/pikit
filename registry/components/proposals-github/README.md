@@ -1,6 +1,6 @@
 # proposals-github
 
-Self-improvement on Cloudflare (SPEC §6, `features/self-improvement.md`): the agent's changes to
+Self-improvement on Cloudflare (SPEC §6, [features/self-improvement.md](https://github.com/ajarellanod/pikit/blob/main/features/self-improvement.md)): the agent's changes to
 itself as pull requests on the project's GitHub repository. The steward proposes as it does on every
 target: it pushes a branch `pikit/self/<topic>` to `remote()` (execution-do's git, with the token kept
 away from it). This component opens the branch's pull request itself, the first time it lists or

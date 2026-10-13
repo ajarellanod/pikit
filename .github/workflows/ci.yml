@@ -1,5 +1,5 @@
 # The control of ROADMAP S12 and S15: every pull request and every push to main runs the tests,
-# the typecheck and the registry's checks, and the two end-to-end suites that need neither Docker nor a
+# the typecheck, the lint (oxlint, .oxlintrc.json) and the registry's checks, and the two end-to-end suites that need neither Docker nor a
 # credential. The other slow suites run nightly (nightly.yml); the live ones are manual (installer/README.md,
 # samples/http/README.md): nothing here reaches a paid API.
 name: CI
@@ -30,6 +30,7 @@ jobs:
       # shellcheck is preinstalled on ubuntu-latest, so installer/install.test.ts lints install.sh too.
       - run: bun test
       - run: bun run typecheck
+      - run: bun run lint
       - run: bun run registry validate
 
   # `pikit new` / `configure` / `dev` as a user runs them, for the http and Telegram presets. They need

@@ -235,7 +235,7 @@ or must see each model request or tool call is an extension.
 With `settings` installed (`settings-store`, installed with the dashboard), an operator changes an
 agent's **system prompt**, **model** (one an installed provider has) and **tools** (on or off, among
 those its definition names) from the dashboard's Settings, Agent (router-basic's section), with no
-deploy and no restart (features/settings.md). The definition still owns the agent (SPEC §6): the
+deploy and no restart ([features/settings.md](https://github.com/ajarellanod/pikit/blob/main/features/settings.md)). The definition still owns the agent (SPEC §6): the
 overrides are data over it (`overrides.ts`).
 
 - **Declared at start** as runtime-pi's settings: one optional object per agent, its schema built from

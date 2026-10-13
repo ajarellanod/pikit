@@ -1,0 +1,28 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  // oxlint's default: the correctness rules. Off below: style, or what this repository does on purpose.
+  "rules": {
+    // Style: escaped backticks in the CLI's generated texts, spreads that snapshot a live collection.
+    "no-useless-escape": "off",
+    "unicorn/no-useless-spread": "off",
+    "unicorn/no-useless-fallback-in-spread": "off",
+    "unicorn/no-useless-length-check": "off",
+    "unicorn/prefer-string-starts-ends-with": "off",
+    // On purpose: terminal escape codes are matched (ANSI), `then` is a data field (DEPLOYMENT_TEXT),
+    // execution-do types its wasm import with a triple-slash reference.
+    "no-control-regex": "off",
+    "unicorn/no-thenable": "off",
+    "typescript/triple-slash-reference": "off"
+  },
+  "overrides": [
+    {
+      // In tests, a failed lookup throwing is a failed test: `(found?.value as T).x` is fine there.
+      "files": ["**/*.test.ts", "**/*.test-support.ts", "**/testing/**", "tests/workerd/**"],
+      "rules": {
+        "no-unsafe-optional-chaining": "off",
+        "unicorn/no-unnecessary-await": "off",
+        "typescript/no-this-alias": "off"
+      }
+    }
+  ]
+}

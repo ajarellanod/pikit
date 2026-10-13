@@ -8,7 +8,7 @@ import { afterAll, expect, test } from "bun:test";
 import { mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type App, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { type ConversationRegistry } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createConversationRegistryConformance } from "@pikit/contracts/testing";

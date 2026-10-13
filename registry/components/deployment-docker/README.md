@@ -163,7 +163,7 @@ can write the proposals repository and `decisions.json`, so it could forge an ap
 is the operator's decision, not a lock. The deployer takes nothing else from the app, refuses changes
 of the deployment, runs the agent's code only in containers without the socket, and always checks,
 waits for `/health` and rolls back. A real lock needs the agent's commands to run elsewhere
-(`features/sandboxed-execution.md`).
+([features/sandboxed-execution.md](https://github.com/ajarellanod/pikit/blob/main/features/sandboxed-execution.md)).
 
 **Rootless Docker**, or a socket elsewhere: change the socket's path in compose.yaml's `deployer`.
 

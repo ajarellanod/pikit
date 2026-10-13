@@ -5,7 +5,7 @@
  */
 
 import { afterAll, expect, test } from "bun:test";
-import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { storageNameProblems } from "../packages/cli/src/registry/checks.ts";
@@ -74,6 +74,22 @@ async function problems(f: Fixture): Promise<string> {
 test("the real registry validates", async () => {
   expect((await validate(join(REPO, "registry"))).problems).toEqual([]);
 }, 60_000);
+
+test("the real components' READMEs, copied into projects, link the kit's design notes online, and each note exists", () => {
+  const kit = "https://github.com/ajarellanod/pikit/blob/main/";
+  const linked = /\[(features\/[\w/-]+\.md)\]\(https:\/\/github\.com\/ajarellanod\/pikit\/blob\/main\/(features\/[\w/-]+\.md)\)/g;
+  const components = join(REPO, "registry", "components");
+  const found: string[] = [];
+  for (const name of readdirSync(components)) {
+    const readme = readFileSync(join(components, name, "README.md"), "utf8");
+    for (const [, shown, target] of readme.matchAll(linked)) {
+      if (shown !== target || !existsSync(join(REPO, target as string))) found.push(`${name}: ${shown} -> ${kit}${target}`);
+    }
+    // A bare path means nothing in a project: the notes are the kit's, not the project's.
+    for (const [bare] of readme.replace(linked, "").matchAll(/features\/[\w/-]+\.md/g)) found.push(`${name}: ${bare} is not a link to the kit`);
+  }
+  expect(found).toEqual([]);
+});
 
 test("a fixture made like a real component validates", async () => {
   expect((await validate((await fixture()).root)).problems).toEqual([]);

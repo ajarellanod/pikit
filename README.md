@@ -68,6 +68,7 @@ Bun >= 1.4; Node >= 22 for the workerd lane.
 ```sh
 bun install
 bun run typecheck                 # tsc over the workspace
+bun run lint                      # oxlint (.oxlintrc.json), warnings fail
 bun test                          # every package, component, sample and script
 bun run test:workerd              # the Cloudflare suites inside workerd (offline)
 bun run registry validate         # every component, preset and schema

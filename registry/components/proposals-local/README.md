@@ -1,6 +1,6 @@
 # proposals-local
 
-Self-improvement on a server (SPEC §6, `features/self-improvement.md`), with nothing to set up: no
+Self-improvement on a server (SPEC §6, [features/self-improvement.md](https://github.com/ajarellanod/pikit/blob/main/features/self-improvement.md)), with nothing to set up: no
 GitHub, no token, no CI. The agent's changes to itself are branches `pikit/self/<topic>` of a git
 repository on this server; an operator approves or rejects them in the dashboard (`admin-proposals`);
 the deployer next to the app (`deployment-docker`) merges, checks and deploys what is approved, and
@@ -61,7 +61,7 @@ approval; there is no fence in git and no token to keep. What holds:
 - give `bash` only to the steward, and ask it for changes only through doors only you reach.
 
 A real lock needs the agent's commands to run elsewhere, as another user or in another container
-(`features/sandboxed-execution.md`).
+([features/sandboxed-execution.md](https://github.com/ajarellanod/pikit/blob/main/features/sandboxed-execution.md)).
 
 ## Status
 

@@ -91,8 +91,13 @@ function skipRegex(source: string, start: number): number {
     const c = source[i];
     if (c === "\\") i += 2;
     else if (c === "\n") return i;
-    else if (c === "[") (inClass = true), i++;
-    else if (c === "]") (inClass = false), i++;
+    else if (c === "[") {
+      inClass = true;
+      i++;
+    } else if (c === "]") {
+      inClass = false;
+      i++;
+    }
     else if (c === "/" && !inClass) {
       i++;
       while (i < source.length && /[a-z]/i.test(source[i] ?? "")) i++;

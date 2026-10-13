@@ -1,6 +1,6 @@
 # admin-proposals
 
-The dashboard's side of the agent's changes to itself (SPEC §6, `features/self-improvement.md`):
+The dashboard's side of the agent's changes to itself (SPEC §6, [features/self-improvement.md](https://github.com/ajarellanod/pikit/blob/main/features/self-improvement.md)):
 its routes and its Proposals view list, show, approve and reject the proposals that `proposals`
 holds, and its Settings section shows whether they can be made and approved now. It is the same on
 every target: where proposals live and what approving does are the provider's.
@@ -73,7 +73,7 @@ GitHub's token (execution-do's git only pushes branches under the prefix), and a
 the default branch. On a server (`proposals-local`) an
 approval is the operator's decision, not a lock: the agent's shell runs in the app's container and
 could forge one; the deployer checks, waits for `/health` and rolls back whatever it deploys
-(proposals-local's README; `features/sandboxed-execution.md` for a real lock).
+(proposals-local's README; [features/sandboxed-execution.md](https://github.com/ajarellanod/pikit/blob/main/features/sandboxed-execution.md) for a real lock).
 
 ## Tests
 
