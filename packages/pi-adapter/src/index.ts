@@ -2,7 +2,8 @@
 // Its pikit-facing surface follows the core's stability rule; its Pi-facing internals do not. Neutral:
 // it runs on a server (storage-sqlite) and in a Cloudflare Durable Object (storage-do) alike.
 
-export { createDurableRuntime, INBOX_KICK } from "./runtime.ts";
+export { createDurableRuntime, INBOX_KICK, PARTIAL_EVERY_MS } from "./runtime.ts";
+export { PARTS_DETAIL, withParts } from "./parts.ts";
 export type { DurableRuntime, DurableRuntimeOptions } from "./runtime.ts";
 export { openDurableStorage, type SqliteDatabase, SqliteStorage, splitSqlStatements, sqliteDatabaseFrom } from "./sql.ts";
 export { AgentStateDoc, ConversationDoc, extensionName } from "./agent.ts";

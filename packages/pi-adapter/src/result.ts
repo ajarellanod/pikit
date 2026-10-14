@@ -5,12 +5,18 @@
  * run goes all at once, as the inputs of the next run: they settle together, and are one result whose
  * `requestId` is the first and whose `requestIds` lists them all, in order. Its transcript is the
  * entries from the first input's entry to the answer (`done`), or, unanswered, to the entry before the
- * next input entry (`pi.user` or `pikit.input`) that is not one of its inputs (the next run's).
+ * next input entry (`pi.user` or `pikit.input`) that is not one of its inputs (the next run's). A run
+ * a tool ended (`control.terminate`) is answered by the assistant entry that called its tools, so its
+ * transcript also has the results of those calls, written after it.
+ *
+ * Its parts (`AgentResult.parts`) are those its successful tool results carry (`withParts`,
+ * `parts.ts`), in the order the results were written.
  */
 
 import type { Context } from "@earendil-works/chord";
 import type { Conversation, EntryId, EntryRecord, SubmissionRecord } from "@earendil-works/pi-durable";
 import type { AgentResult, ConversationRef, RunSettlement } from "@pikit/contracts";
+import { partsOfToolResult } from "./parts.ts";
 import { isInputKind } from "./submissions.ts";
 
 /** A pi-ai 1.0 message, as pi-durable entries carry them. */
@@ -34,10 +40,12 @@ export async function toResult(conversation: Conversation, ref: ConversationRef,
   const requestIds = records.map((input) => input.requestId ?? String(input.id));
   const entries = await runEntries(conversation, records, ctx);
   const messages = entries.flatMap((entry) => entry.model ?? []).filter((message) => message.role !== "system");
+  const parts = messages.flatMap(partsOfToolResult);
   const base = {
     conversation: ref,
     requestId: requestIds[0] as string,
     requestIds,
+    ...(parts.length > 0 && { parts }),
     messages: messages as AgentResult["messages"],
     usage: runUsage(messages),
   };
@@ -52,13 +60,14 @@ export async function toResult(conversation: Conversation, ref: ConversationRef,
 
 /** What `agent.submissions` keeps of a result: everything but the transcript and the usage. */
 export function settlementOf(result: AgentResult): RunSettlement {
-  const { conversation, requestId, requestIds, kind, text, error } = result;
+  const { conversation, requestId, requestIds, kind, text, parts, error } = result;
   return {
     conversation: { key: conversation.key, agent: conversation.agent, conversationId: conversation.conversationId },
     requestId,
     requestIds,
     kind,
     ...(text !== undefined && { text }),
+    ...(parts !== undefined && parts.length > 0 && { parts }),
     ...(error !== undefined && { error: { code: error.code, message: error.message } }),
   };
 }
@@ -78,10 +87,34 @@ async function runEntries(conversation: Conversation, records: readonly SettledI
     cursor = page.next;
   } while (cursor !== undefined);
   const entries = newestFirst.reverse();
-  if (to !== undefined) return entries;
+  if (to !== undefined) return [...entries, ...(await finalToolResults(conversation, entries, to, ctx))];
   // Unanswered: the run ended at its last entry before the next run's input.
   const next = entries.findIndex((entry) => isInputKind(entry.kind) && !inputs.has(entry.id));
   return next === -1 ? entries : entries.slice(0, next);
+}
+
+/**
+ * The results of the tool calls the answer made, when a tool ended the run (`control.terminate`): they
+ * are written after the answer. None for an answer that called no tool (a run the model ended).
+ */
+async function finalToolResults(conversation: Conversation, entries: readonly EntryRecord[], answer: EntryId, ctx: Context): Promise<EntryRecord[]> {
+  const message = entries.find((entry) => entry.id === answer)?.model?.find((m) => m.role === "assistant");
+  const calls = new Set(message?.role === "assistant" ? message.content.flatMap((part) => (part.type === "toolCall" ? [part.id] : [])) : []);
+  const found: EntryRecord[] = [];
+  let cursor: Parameters<Conversation["entries"]>[2];
+  while (calls.size > 0) {
+    const page = await conversation.entries({ minEntryId: (answer + 1) as EntryId, order: "ascending" }, PAGE, cursor, ctx);
+    for (const entry of page.items) {
+      // The next run's input: the round's results are all before it.
+      if (isInputKind(entry.kind)) return found;
+      const results = (entry.model ?? []).filter((m) => m.role === "toolResult" && calls.delete(m.toolCallId));
+      if (results.length > 0) found.push(entry);
+      if (calls.size === 0) break;
+    }
+    cursor = page.next;
+    if (cursor === undefined) break;
+  }
+  return found;
 }
 
 function answerText(entries: readonly EntryRecord[], answer: EntryId): string | undefined {
