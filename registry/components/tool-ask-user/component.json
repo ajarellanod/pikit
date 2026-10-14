@@ -1,0 +1,39 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "tool-ask-user",
+  "version": "0.0.0",
+  "title": "Questions: your agent asks you, with buttons or a form where the chat draws them (the askUser tool)",
+  "description": "The `askUser` tool, for the agents that name it: one question (yes or no, a choice, several, text, a date) that ends the run, drawn as buttons or a form by a channel that can (Google Chat) and sent as text by any other; the answer comes back as a message.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "adapter": "0.0.0",
+    "capabilities": []
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "agent.tool"
+  ],
+  "replay": {
+    "tools": {
+      "askUser": "safe"
+    }
+  },
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "@pikit/pi-adapter": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ]
+}

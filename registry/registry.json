@@ -377,6 +377,15 @@
       ],
       "path": "components/storage-sqlite"
     },
+    "tool-ask-user": {
+      "version": "0.0.0",
+      "description": "The `askUser` tool, for the agents that name it: one question (yes or no, a choice, several, text, a date) that ends the run, drawn as buttons or a form by a channel that can (Google Chat) and sent as text by any other; the answer comes back as a message.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/tool-ask-user"
+    },
     "tool-bash": {
       "version": "0.0.0",
       "description": "Pi's own `bash` tool, for the agents that name it: it runs a shell command in the working directory and returns its output (the last lines when it is long), with an optional timeout.",
