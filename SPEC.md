@@ -420,7 +420,10 @@ anywhere. A run that also answers a user's message is delivered to the user, as 
   admin API routes through `http.route`, and its view, a shadcn registry item that `pikit add` installs
   into `src/dashboard/` (through shadcn's installer) when the project has a UI. The same item installs
   alone with `shadcn add @pikit/<view>`. pikit's registry publishes its UI pieces (a transcript, a tool
-  call, a cost, later an approval card) and its views as shadcn registry items. The repository carries
+  call, a cost, later an approval card) and its views as shadcn registry items; their helpers are two
+  items, `@pikit/lib-ui` (generic, which the pieces need) and `@pikit/admin-client` (the admin API's
+  client, which the views need), so a UI project that is not the dashboard carries the pieces without
+  the admin client. The repository carries
   a skill that teaches an AI agent to add a view.
 - **It reads contracts and feeds, never internals.** The admin API is backed by the capabilities of
   the installed components. What must not be missed comes from feeds, not from events (K3). Live views

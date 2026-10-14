@@ -145,6 +145,11 @@ are opaque (on Cloudflare `<key>~<id>`, and one may hold `.`, `@` or `/`): alway
 | `src/lib/sounds.ts` | the interaction sounds, and their switch |
 | `src/app.tsx` | sign-in, the sidebar, the tabs and the page the path names |
 
+`src/lib/` is two shadcn items: `@pikit/lib-ui` (`activity`, `format`, `messages`, `names`, `sounds`,
+`theme`: no admin API) and `@pikit/admin-client` (`api`, `admin-api`, `chats`, `settings`, `views`,
+`router`, `shell`). Beautiful UI's primitives and the pieces `message`, `error-note` and `markdown`
+import only `lib-ui` and take their data by props, so another UI project can carry them.
+
 ## Add a view
 
 A view is a folder of `src/views/`, found when the dashboard is built. **Prefer a new view to

@@ -119,7 +119,11 @@ bun run dev                                              # or hot reload on :517
 
 For a component: `pikit registry validate <registry>` checks its `view/index.tsx` defines the view
 under the component's name; in the pikit repository, `bun scripts/ui-registry.ts generate` publishes
-it as the shadcn item `@pikit/<component>`.
+it as the shadcn item `@pikit/<component>`, which depends on `@pikit/admin-client` (the admin API's
+client, `src/lib/api.ts` and the rest of the admin's `src/lib/`) and `@pikit/lib-ui` (the generic
+helpers: `format`, `theme`, `activity`...). A piece meant for any UI project (in `src/components/bui/`,
+or `message`, `error-note`, `markdown`) takes its data by props and imports only `lib-ui`
+(`scripts/ui-shared.ts`, checked by `scripts/ui-shared.test.ts`).
 
 Done means: the routes' tests pass (401 first), the dashboard builds, the view appears only while
 its `requires` are provided, and nothing in it shows a secret.

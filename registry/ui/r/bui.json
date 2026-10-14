@@ -9,7 +9,7 @@
     "iconoir-react@7.12.1"
   ],
   "registryDependencies": [
-    "@pikit/lib"
+    "@pikit/lib-ui"
   ],
   "files": [
     {

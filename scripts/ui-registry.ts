@@ -1,21 +1,25 @@
 /**
  * pikit's shadcn registry (`@pikit`, SPEC §5): the dashboard's pieces and views as shadcn registry
- * items, so `shadcn add @pikit/<item>` installs them in a dashboard, or in any shadcn project that has
- * pikit's `lib` item. Generated from the sources, never written by hand:
+ * items, so `shadcn add @pikit/<item>` installs them in a dashboard, or in any shadcn project (the
+ * shared pieces need only `lib-ui`; the views also `admin-client`). Generated from the sources, never written by hand:
  *
  *   bun scripts/ui-registry.ts generate   write registry/ui/r/*.json from the sources
  *   bun scripts/ui-registry.ts check      exit 1 when they are not what generate writes
  *
  * Items, each a `registry:file` list with its `target` from the dashboard's root (`~/src/…`) and its
  * content inline (what `shadcn build` makes):
- * - `lib`: the dashboard's client of the admin API, views and router (`src/lib/`, but shadcn's utils);
+ * - `lib-ui`: the generic helpers of `src/lib/` (format, theme, sounds, activity, names, the
+ *   transcript's types), which need no admin API;
+ * - `admin-client`: the rest of `src/lib/`, the dashboard's client of the admin API, its views, settings,
+ *   router and shell (`scripts/ui-shared.ts` says which file is which; shadcn's utils is in neither);
  * - the shared pieces of `src/components/pikit/`, one item each (`message`, `error-note`);
  * - `bui`: Beautiful UI's primitives as the dashboard has them (`src/components/bui/`);
  * - the base views of `src/views/` (`conversations`, `home`);
  * - every registry component's view (its manifest's `view`), named after the component, and its section
  *   of the Settings dialog (its manifest's `settings`), `<component>-settings`.
  * Imports decide the rest: `@/components/ui/<x>` is the shadcn primitive `x` (`registryDependencies`),
- * `@/components/pikit/<x>` and `@/lib/<x>` are `@pikit` items, `@/components/bui/<x>` is `@pikit/bui`,
+ * `@/components/pikit/<x>` is the `@pikit` item `x`, `@/lib/<x>` (or `./<x>` in `src/lib/`) `@pikit/lib-ui` or
+ * `@pikit/admin-client`, `@/components/bui/<x>` is `@pikit/bui`,
  * a bare package is an npm dependency at the version the dashboard pins.
  *
  * Served from the repository: `registry/dashboard/files/components.json` names
@@ -24,6 +28,7 @@
 
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join, relative } from "node:path";
+import { ADMIN_CLIENT, LIB_UI, SHADCN_UTILS } from "./ui-shared.ts";
 
 const REPO = join(import.meta.dir, "..");
 const DASHBOARD = join(REPO, "registry/dashboard/files");
@@ -58,17 +63,36 @@ function folder(dir: string, target: string): Source[] {
   return list(dir).map((file) => ({ path: join(dir, file), target: `${target}/${file}` }));
 }
 
+const EXTENSION = /\.tsx?$/;
+
+/** The item a file of `src/lib/` (`name`, its extension optional) is in: none for shadcn's utils. */
+function libItemOf(name: string): string | undefined {
+  const bare = name.replace(EXTENSION, "");
+  const is = (files: readonly string[]) => files.some((file) => file.replace(EXTENSION, "") === bare);
+  if (is([SHADCN_UTILS])) return undefined;
+  if (is(LIB_UI)) return "lib-ui";
+  if (is(ADMIN_CLIENT)) return "admin-client";
+  throw new Error(`ui-registry: src/lib/${name} is in neither LIB_UI nor ADMIN_CLIENT (scripts/ui-shared.ts)`);
+}
+
 function items(): Item[] {
   const all: Item[] = [];
   const lib = join(DASHBOARD, "src/lib");
-  all.push({
-    name: "lib",
-    title: "pikit dashboard lib",
-    description: "The dashboard's client of pikit's admin API (the token, useApi, live events), its views and its router.",
-    sources: list(lib)
-      .filter((file) => file !== "utils.ts")
-      .map((file) => ({ path: join(lib, file), target: `src/lib/${file}` })),
+  const libFiles = list(lib).filter((file) => libItemOf(file) !== undefined);
+  const libItem = (name: string, title: string, description: string): Item => ({
+    name,
+    title,
+    description,
+    sources: libFiles.filter((file) => libItemOf(file) === name).map((file) => ({ path: join(lib, file), target: `src/lib/${file}` })),
   });
+  all.push(
+    libItem(
+      "lib-ui",
+      "pikit UI lib",
+      "The generic helpers of pikit's UI pieces: formatting, the theme, interaction sounds, whether the person is there (polling), names, a transcript's message types. No admin API: a UI project other than the dashboard may install it.",
+    ),
+    libItem("admin-client", "pikit admin client", "The dashboard's client of pikit's admin API (the session, useApi, live events), its conversations, views, settings, router and shell."),
+  );
   const pieces = join(DASHBOARD, "src/components/pikit");
   // The shell's own (the sign-in, the product's mark and its files in public/) are not pieces to install.
   for (const file of list(pieces).filter((f) => f !== "sign-in.tsx" && f !== "mark.tsx")) {
@@ -120,17 +144,21 @@ function itemJson(item: Item, versions: Record<string, string>, names: Set<strin
   const registry = new Set<string>();
   for (const source of item.sources) {
     const text = readFileSync(source.path, "utf8");
-    for (const [, specifier = ""] of text.matchAll(/(?:from|import)\s+["']([^"'.][^"']*)["']/g)) {
+    for (const [, specifier = ""] of text.matchAll(/(?:from|import)\s+["']([^"']+)["']/g)) {
       const ui = /^@\/components\/ui\/([\w-]+)$/.exec(specifier);
-      const own = /^@\/(?:components\/pikit|lib)\/([\w-]+?)(?:\.tsx?)?$/.exec(specifier);
+      const piece = /^@\/components\/pikit\/([\w-]+?)(?:\.tsx?)?$/.exec(specifier);
+      // `@/lib/x`, or `./x` from a file of src/lib/.
+      const lib = /^@\/lib\/([\w-]+(?:\.tsx?)?)$/.exec(specifier) ?? (source.target.startsWith("src/lib/") ? /^\.\/([\w-]+(?:\.tsx?)?)$/.exec(specifier) : null);
       if (ui !== null) registry.add(ui[1] as string);
       else if (specifier.startsWith("@/components/bui/")) {
         if (item.name !== "bui") registry.add("@pikit/bui");
-      }
-      else if (own !== null) {
-        const name = own[1] === "utils" ? undefined : names.has(own[1] as string) ? (own[1] as string) : "lib";
+      } else if (lib !== null) {
+        const name = libItemOf(lib[1] as string);
         if (name !== undefined && name !== item.name) registry.add(`@pikit/${name}`);
-      } else if (!specifier.startsWith("@/")) {
+      } else if (piece !== null) {
+        if (!names.has(piece[1] as string)) throw new Error(`ui-registry: ${relative(REPO, source.path)} imports ${specifier}, which is no item`);
+        if (piece[1] !== item.name) registry.add(`@pikit/${piece[1]}`);
+      } else if (!specifier.startsWith("@/") && !specifier.startsWith(".")) {
         const pkg = specifier.startsWith("@") ? specifier.split("/").slice(0, 2).join("/") : (specifier.split("/")[0] as string);
         if (pkg !== "react" && pkg !== "react-dom") npm.add(versions[pkg] === undefined ? pkg : `${pkg}@${versions[pkg]}`);
       }

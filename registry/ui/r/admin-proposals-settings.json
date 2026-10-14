@@ -8,9 +8,10 @@
     "iconoir-react@7.12.1"
   ],
   "registryDependencies": [
+    "@pikit/admin-client",
     "@pikit/bui",
     "@pikit/error-note",
-    "@pikit/lib",
+    "@pikit/lib-ui",
     "@pikit/settings"
   ],
   "files": [

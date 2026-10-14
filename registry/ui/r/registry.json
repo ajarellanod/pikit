@@ -4,10 +4,16 @@
   "homepage": "https://github.com/ajarellanod/pikit",
   "items": [
     {
-      "name": "lib",
+      "name": "lib-ui",
       "type": "registry:file",
-      "title": "pikit dashboard lib",
-      "description": "The dashboard's client of pikit's admin API (the token, useApi, live events), its views and its router."
+      "title": "pikit UI lib",
+      "description": "The generic helpers of pikit's UI pieces: formatting, the theme, interaction sounds, whether the person is there (polling), names, a transcript's message types. No admin API: a UI project other than the dashboard may install it."
+    },
+    {
+      "name": "admin-client",
+      "type": "registry:file",
+      "title": "pikit admin client",
+      "description": "The dashboard's client of pikit's admin API (the session, useApi, live events), its conversations, views, settings, router and shell."
     },
     {
       "name": "error-note",

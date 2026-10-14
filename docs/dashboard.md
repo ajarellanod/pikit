@@ -135,6 +135,22 @@ dashboard's pieces and every component's view as shadcn items (`@pikit/<name>`,
 [registry/ui](../registry/ui)); `scripts/dashboard-build.ts` builds the template with every
 component's view in it.
 
+`src/lib/` is two items ([scripts/ui-shared.ts](../scripts/ui-shared.ts) says which file is which):
+
+| Item | Files | Who depends on it |
+|---|---|---|
+| `@pikit/lib-ui` | `activity`, `format`, `messages`, `names`, `sounds`, `theme` (and shadcn's own `utils`, not in the item): no admin API | the pieces that use a helper (`bui`, `message`), the views |
+| `@pikit/admin-client` | `api`, `admin-api`, `chats`, `settings`, `views`, `router`, `shell`: the admin API's client and the shell | the views, the Settings dialog and its sections |
+
+The shared pieces (`bui`, `message`, `error-note`, `markdown`, `markdown-engine`, with `lib-ui`) take
+everything by props and never fetch, so a UI project other than the dashboard (channel-web's chat
+page) carries them without the admin client. `scripts/ui-shared.test.ts` fails when one of them
+reaches `@/lib/api`, `@/lib/admin-api`, `@/lib/chats`, `@/lib/settings`, `@/lib/views`,
+`@/lib/router`, `@/lib/shell` or any other file that is not shared. `ErrorNote` takes any
+`{ message, status? }` (an `ApiFailure` is one), and `messages.ts` keeps its own `OPERATOR_NOTE`, the
+same as `admin-api.ts`' (which imports nothing, being admin-api's `api.ts` byte for byte; a test checks
+the two are equal).
+
 A view reads only the admin API, through `src/lib/api.ts` (`api`, `post`, `useApi`, `follow`, which
 send the session and pause while the tab is hidden or the operator is away). New data means a new
 route, in the component that owns the data, asking `admin.auth` first.

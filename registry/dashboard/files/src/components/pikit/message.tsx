@@ -17,8 +17,7 @@ import { StatusPill } from "@/components/bui/StatusPill";
 import ThinkingState from "@/components/bui/ThinkingState";
 import ToolChips, { type ToolStatus, type ToolStep } from "@/components/bui/ToolChips";
 import { Markdown } from "@/components/pikit/markdown";
-import { OPERATOR_NOTE } from "@/lib/admin-api";
-import type { AssistantMessage, Image, Message, RunningTool, Text, ToolResultMessage, UserMessage } from "@/lib/messages";
+import { type AssistantMessage, type Image, type Message, OPERATOR_NOTE, type RunningTool, type Text, type ToolResultMessage, type UserMessage } from "@/lib/messages";
 
 export type { AssistantMessage, Message, RunningTool, ToolResultMessage, UserMessage };
 

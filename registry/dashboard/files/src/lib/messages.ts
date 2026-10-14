@@ -1,8 +1,15 @@
 /**
  * A transcript's messages in pi-ai's JSON (the runtime's own words, SPEC §5), as the API gives them,
  * and a tool running now: the types `components/pikit/message.tsx` shows and `live-state.ts` folds.
- * Types only.
+ * Types, and `OPERATOR_NOTE`.
  */
+
+/**
+ * How every message from the dashboard starts, as the agent reads it: admin-api's `OPERATOR_NOTE`
+ * (`admin-api.ts`), here too so the shared pieces need no admin client. The kit's tests check they are
+ * the same.
+ */
+export const OPERATOR_NOTE = "[From the operator, in the pikit dashboard";
 
 export type Text = { type: "text"; text: string };
 export type Thinking = { type: "thinking"; thinking: string; redacted?: boolean };

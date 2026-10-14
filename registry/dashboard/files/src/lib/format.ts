@@ -1,9 +1,7 @@
 /** Small formatting helpers shared by views. */
 
-import type { ApiUsage } from "./api.ts";
-
-/** A cost in dollars: `$0.0042`, `$1.23`. */
-export function formatCost(usage: ApiUsage | undefined): string {
+/** A cost in dollars: `$0.0042`, `$1.23`, from a usage's total (`ApiUsage` is one). */
+export function formatCost(usage: { cost: { total: number } } | undefined): string {
   const total = usage?.cost.total ?? 0;
   if (total === 0) return "$0";
   return `$${total < 0.01 ? total.toFixed(4) : total.toFixed(2)}`;
