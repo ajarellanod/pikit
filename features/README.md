@@ -49,7 +49,7 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [streaming-replies](streaming-replies.md) | ⭐ | A preview message edited as the answer is written | No |
 | [subagents](subagents.md) | ⭐ | Delegation to helpers (Pi's) and to other agents (pikit's) | No |
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
-| [channel-google-chat](channel-google-chat.md) | | Google Chat: threads, "Thinking…" edited into the answer, cards, attachments; questions in phase 2. Specified, the next channel | No |
+| [channel-google-chat](channel-google-chat.md) | | Google Chat: threads, "Thinking…" edited into the answer, cards, attachments, questions (`askUser`). Specified, the next channel | No |
 | [agent-folders](agent-folders.md) | | Each agent a folder (`agent.ts`, `SYSTEM.md`, per-channel texts, skills) and the skills catalog as folders: the component `agents-folders`, `pikit agents` writes the one file the App lists | No |
 | [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |
 | [channel-context](channel-context.md) | | A directory, a prompt and tools per channel, from `ConversationRef.channel` (built); `prepare` already does prompt and tools | No |

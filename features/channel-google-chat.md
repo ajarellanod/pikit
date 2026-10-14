@@ -2,50 +2,68 @@
 
 **Public appeal:** — (OpenClaw has it; it is not what draws the public)
 
-**Specified:** yes: this note, in two phases. Phase 1 is the component plus one contract field
-(`InboundMessage.images`); phase 2 is the [approvals](approvals.md) contract, for questions drawn
-as cards and dialogs. Keys and idempotency were decided in the former SPEC §5.
+**Specified:** yes: this note, the final version, built in one change: the component, the tool
+`askUser`, and the contract changes they bring (images in, parts out, answers back, the answer
+while it is written). Keys and idempotency were decided in the former SPEC §5.
 
 **Needed by:** nothing required. It is the next channel.
 
 ## What it gives
-A Google Chat app: an agent per space, a conversation per thread or per space, "Thinking…" edited
-into the answer, markdown drawn as Google Chat text and cards (tables, code, images), photos and files
-read by the agent, spaces allowed before they are answered, and (phase 2) questions with buttons,
-selects and dialogs.
+A Google Chat app: an agent per space, a conversation per thread or per space, "Thinking…" written
+into the answer as the model writes it, markdown drawn as Google Chat text and cards (tables, code,
+images), photos and files read by the agent, a quoted message as context, spaces allowed before they
+are answered, and questions the agent asks with buttons, selects and dialogs, answered in the chat.
 
 ## What it does, and where each piece goes
 
-A channel takes markdown text and draws it its platform's way, so almost everything is the
-component's own.
+A channel takes markdown text and draws it its platform's way, so most of it is the component's own.
+What another component produces or reads (a question, an image, the answer while it is written) is
+a contract, added here with its first producer and its first consumer.
 
 | Capability | Here | Contract change |
 |---|---|---|
 | Webhook verified by Google's ID token | the channel's own authentication (`inbound.ts`: not a shared contract) | none |
 | Replies in the message's thread; a thread or the whole space as the conversation | the key the channel builds, a value per space in its config ([threads](threads.md)) | none |
 | An agent per space | `InboundMessage.conversationId` is the space: one `router-rules` rule | none |
-| "Thinking…" message edited into the answer | sent on `agent.started`, edited by the transport's first piece (below) | none |
+| "Thinking…" placeholder, written as the model writes, edited into the answer | the channel, on `agent.started` and `agent.partial` | **`agent.partial`** |
 | Markdown to Google Chat text, tables and code as cards, 4096-character pieces | the transport's `split` and `send` | none |
 | Markdown images sent as image cards | the transport's `send` | none |
 | Retries, error classification | `DeliveryError` (`transient`, `rate_limited`, `permanent`) | none |
-| Create with `requestId` (a repeat returns the first message) | `ChannelTransport.idempotent`, a UUID from the piece's key | none |
+| A message created once, whatever is retried | `ChannelTransport.idempotent`: `requestId` and `messageId` from the piece's key | none |
 | Mention of the app stripped; DMs and spaces told apart | the channel, before `admitInbound` | none |
 | Edited and deleted messages: Google sends the app no event, nothing is answered | — | none |
-| Added to space: a space is allowed before it is answered | spaces allowed in config; a stranger space is told its id | none |
-| The agent stays silent | `text(answer)` gives `undefined`, nothing is sent | none |
-| Attachments (Chat media and Drive): downloaded, bounded, read by the agent | images to the model; text files in the message; the rest named as not read | **`InboundMessage.images`** |
-| Questions: confirm and select cards, dialogs with forms, button clicks back | phase 2 | **[approvals](approvals.md)** |
-| Progress shown in "Thinking…" | not in phase 1 ([streaming replies](streaming-replies.md)) | none |
-| A scheduled message's notification (a mention) | with the [scheduler](scheduler.md) | none yet |
-| A quoted message as the reply's context | with `replyTo` ([rich content](rich-content.md)) | later |
+| `ADDED_TO_SPACE`: a space is allowed before it is answered | spaces allowed in config; a stranger space is told its id | none |
+| The agent stays silent | an answer with no text and no part sends nothing | none |
+| Photos read by the model | images downloaded, bounded, passed on | **`InboundMessage.images`** |
+| Text files read; other files left in the workspace for the agent's tools | the channel, before dispatch (`beforeDispatch`) | none |
+| A quoted message as the reply's context | the channel reads it (`spaces.messages.get`) and quotes it in the text | none |
+| Questions: confirm and select cards, dialogs with forms | the tool `askUser`, a `question` part, drawn by the transport | **parts, `draws`, `AgentResult.parts`** |
+| A question's answer back to the agent | a click or a form, admitted as a message | **`InboundMessage.replyTo`** |
 
-## Decisions (phase 1)
+Out of this feature, with why:
+- **Questions from Pi's extensions** (`ctx.ui.select`, `confirm`, `input`): pi-durable has no UI API
+  for its extensions. They come when it does ([approvals](approvals.md)).
+- **Decisions** that wait days with reminders and escalation: [approvals](approvals.md)' own. A
+  question here never makes a run wait (below).
+- **A scheduled answer's notification** (a mention): no scheduler exists to produce one
+  ([scheduler](scheduler.md)).
+- **Drive files**: a Chat app's service account is not shared on the files people post, so it cannot
+  read them; they are named as not read. Reading as each user (domain-wide delegation, OAuth per
+  user) gives the app far more than one file.
+- **PDFs and Office files read as text**: they are left in the workspace for the agent's tools, as
+  [rich content](rich-content.md) decided; turning them into text is a tool's or a shared stage's.
+- **Senders restricted by Workspace domain**: who may talk is the router's or
+  [pairing](pairing.md)'s, not a channel's.
+
+## Decisions
 
 **The component.** `channel-google-chat`, kind `channel`, both targets. Several Chat apps are
-instances (`googlechat`, `googlechat:ops`), as channel-telegram's accounts are. It requires
-`agent.runtime`, `conversations.registry`, `agent.submissions`, `storage.kv`, `secrets` and
-`http.route`; on `durable` also `actor.mailbox`, `actor.inbox` and `wakeups`; `outbound.queue` when
-installed.
+instances (`googlechat`, `googlechat:ops`), as channel-telegram's accounts are, each with its own
+endpoint path and secrets. Two halves, as channel-telegram-webhook: the Worker's half verifies and
+hands each event to its conversation; the object's half admits, answers and draws. It requires
+`secrets`, `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv`, `wakeups`,
+`actor.inbox` and `actor.mailbox`, and provides `http.route`; `outbound.queue`, `workspace` and
+`execution` when installed. On a server both halves run in the one App, with `mailbox-local`.
 
 **The app.** The assistant has a Chat app of its own, in its own Google Cloud project, never one
 shared with another service: the app's endpoint is this channel's. It is built as a Google Workspace
@@ -57,6 +75,11 @@ add-on is not supported: its own `Event` format and other tokens (a shared
 `chat@system.gserviceaccount.com` sender, or a JWT for the project number) would be a second
 ingress for nothing a user sees.
 
+**Secrets, per instance** (`GOOGLE_CHAT_<NAME>_…` for a named one): the service account's JSON key
+(`GOOGLE_CHAT_SERVICE_ACCOUNT`), the project number (`GOOGLE_CHAT_PROJECT_NUMBER`, for the token's
+`email`), the endpoint URL as configured (`GOOGLE_CHAT_AUDIENCE`) and the allowed spaces
+(`GOOGLE_CHAT_ALLOWED_SPACES`).
+
 **Ingress.**
 - `POST <path>`, an `http.route`, the endpoint URL of every trigger. Google's bearer token is
   verified before anything else; a failure answers `401`. It is an OpenID Connect ID token signed by
@@ -65,17 +88,19 @@ ingress for nothing a user sees.
   - the signature, against the JWKs at the `jwks_uri` of Google's OpenID discovery document
     (`https://www.googleapis.com/oauth2/v3/certs` today), cached as their `Cache-Control` says;
   - `iss` is `https://accounts.google.com` or `accounts.google.com`;
-  - `aud` is the endpoint URL exactly as configured in the Chat API (a value);
+  - `aud` is the endpoint URL exactly as configured in the Chat API;
   - `email` is the app's service account,
     `service-<project number>@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`, and `email_verified`
     is true;
   - `exp` has not passed.
-- On `durable` the Worker hands the event to the conversation's object with
+- A message, an add, a removal: the Worker hands the event to the conversation's object with
   `actor.mailbox.send(key, "google-chat.event", event)`, as channel-telegram-webhook hands
-  `telegram.update`; the object admits it.
-- The webhook is acknowledged once the message is admitted (P5), with `{}`, an empty JSON object:
-  the answer goes by the REST API. Everything before admission (downloads included) fits in
-  Google's 30-second window; download limits and timeouts are values.
+  `telegram.update`, and acknowledges with `{}`, an empty JSON object, as that channel acknowledges
+  once the hand-off resolves (a failed hand-off answers `500`, and Google may send it again). The
+  object downloads, admits and answers by the REST API.
+- A button click needs its answer in the response (a dialog to open, a card to update), within
+  Google's 30 seconds: the Worker asks the object with `actor.mailbox.call(key, "google-chat.click",
+  event)` and returns the action it answers.
 
 **Identity and deduplication.**
 - `InboundMessage.id` is the Google message's `name` (`spaces/AAA/messages/BBB`). Google sends a
@@ -83,8 +108,8 @@ ingress for nothing a user sees.
   see those, through Pub/Sub), so an edit is not answered.
 - No [inbound dedup](inbound-dedup.md): Google may deliver an event again after a timeout or a
   non-2xx answer; the redelivered event has the same `name`, the runtime answers `duplicate`,
-  nothing runs, and the channel acknowledges. Before admission the channel only reads and
-  downloads; nothing it sends to the space depends on a message being new.
+  nothing runs. Before admission the channel only reads, downloads and writes files under the
+  message's own name; nothing it sends to the space depends on a message being new.
 - `actor.id` is the sender's `users/<id>` (stable; the email may be absent). In a space shared by
   several people, the message's text says who wrote it (their display name), so the agent knows who
   is talking; trusted identity stays in `actor` (`RUN_REQUESTS`).
@@ -108,123 +133,172 @@ ingress for nothing a user sees.
   kept in `storage.kv`. In a DM, a group chat or an unthreaded space the answer is sent without a
   thread: Google supports `messageReplyOption` only in named spaces.
 
-**Access.** Spaces are allowed in the channel's config. A space not allowed is a stranger: when the
-app is added to it (`chat.addedToSpacePayload`), and on each message from it, the app answers once
-that it is not allowed there and gives the space's id for the operator (as channel-telegram-webhook
-tells a stranger their id), and admits nothing. Approving a space from the chat or the dashboard is
-[pairing](pairing.md).
-Removal from a space is logged; answers still owed to that space fail `permanent`. `/new` resets
-the conversation, as in channel-telegram.
+**Access.** Spaces are allowed in the channel's secrets. A space not allowed is a stranger: when the
+app is added to it (`ADDED_TO_SPACE`), and on each message from it, the app answers once that it is
+not allowed there and gives the space's id for the operator (as channel-telegram-webhook tells a
+stranger their id), and admits nothing. Approving a space from the chat or the dashboard is
+[pairing](pairing.md). `REMOVED_FROM_SPACE` is logged; answers still owed to that space fail
+`permanent`. `/new` resets the conversation, as in channel-telegram.
 
-**"Thinking…" edited into the answer.**
+**"Thinking…", written as the model writes, edited into the answer.**
 - On `agent.started` for a conversation of the channel (`route(key)`), and not for a dashboard request
-  (`isDashboardRequest`), the channel creates the placeholder where the answer goes, with Google's
-  `requestId` derived from `answerKey(conversation, requestId)`: a resumed run (`resumed: true`)
-  sends the same request, and Google returns the placeholder it created the first time, with its
-  name. The placeholder's message name is kept in the channel's `storage.kv` under the answer's key.
-  Its text is a value (`thinkingText`).
-- The transport's `send` for piece `#0` of that answer edits the placeholder (a PATCH: repeating it is
-  harmless) instead of creating a message; the other pieces are created after it. Messages queued
-  behind a run get no placeholder of their own: the next run's `agent.started` names the first of them.
+  (`isDashboardRequest`), the channel creates the placeholder where the answer goes. Its `messageId`
+  is the one piece `#0` of that answer would have (below), so the answer's first piece finds it with
+  no record: a resumed run (`resumed: true`) creates the same message again, which Google refuses
+  or returns. Its text is a value (`thinkingText`).
+- While the run goes, the runtime's `agent.partial` events carry the answer as written so far; the
+  channel edits the placeholder with its first 4096 characters, at most once every few seconds (a
+  value, `previewEveryMs`; `0` keeps "Thinking…"), since a space takes one message write a second for
+  every app in it. A preview lost costs nothing: previews never go through answer delivery.
+- The transport's `send` for piece `#0` edits the placeholder (a PATCH: repeating it is harmless),
+  and creates the message under the same `messageId` when there is none (the channel was down when
+  the run started); the other pieces are created after it. Messages queued behind a run get no
+  placeholder of their own: the next run's `agent.started` names the first of them.
 - A run with nothing to send (aborted, an empty answer) deletes its placeholder on `agent.settled`;
-  a failed run's placeholder becomes the channel's failure text (`text(answer)`). A crash between the
-  two leaves a mark: at start, the channel deletes the placeholders whose request is settled
-  (`agent.submissions.get`) with nothing left to send.
+  a failed run's placeholder becomes the channel's failure text. The channel marks each placeholder
+  it creates in `storage.kv`; at start it deletes those whose request is settled
+  (`agent.submissions.get`) with nothing left to send, a crash's leftovers.
 
 **Answers.**
 - `startAnswerDelivery` in `start`, with the channel's transport, `route`, `text` and `policy`
-  ([answer delivery](completed/outbound-delivery.md)).
+  ([answer delivery](completed/outbound-delivery.md)). An answer carries the run's text and its parts.
 - `split` cuts at 4096 characters (a value) on a paragraph or line, never inside a table or a code
   block. Google documents no limit of characters for `text`, only 32,000 bytes for a message as a
   whole (its text and cards); 4096 characters is a size that has worked in practice, and a piece
   whose message as JSON would pass 32,000 bytes is cut further.
   `send` turns each piece's markdown into Google Chat's text format, tables and code blocks into
   `cardsV2`, and markdown images with a public URL into image cards.
-- The transport is `idempotent`: each create carries a `requestId` derived from the piece's key, a
-  UUID made from its SHA-256 hash, so the same key always gives the same id. Google documents
-  neither the characters nor the length a `requestId` may have, only that a random UUID is
-  recommended, and the keys hold `:`, `/` and `#`. A repeat must be identical and come from the same
-  service account; it returns the first message, not a new one.
+- The transport is `idempotent`. Each create carries two ids from the piece's key: a `requestId`, a
+  UUID from its SHA-256 hash (Google recommends a UUID and documents no other format), and a
+  `messageId`, `client-` and 56 hexadecimal characters of the same hash (Google: up to 63 lowercase
+  letters, digits and hyphens, unique within a space). A quick repeat returns the first message
+  (`requestId`); a late one, after Google forgot the request, is refused because the `messageId`
+  exists, and the transport reads that message (`spaces.messages.get`) and counts it delivered.
+  A repeat must be identical and come from the same service account.
 - Failures: `429` is `rate_limited` (with `Retry-After` when given; Google allows one message write
   a second in a space, shared by every app in it, and asks for exponential backoff), network errors
   and `5xx` are `transient` (`maybeSent` after a timeout), `400`, `403` and `404` are `permanent`
   (the app removed, the space gone).
-- The REST API is called as a service account: its JSON key from `secrets`, an access token from a
-  signed JWT (RS256, WebCrypto) for the `chat.bot` scope (`drive.readonly` too, for Drive files), kept
-  in memory until it expires.
+- The REST API is called as the service account: its JSON key from `secrets`, an access token from a
+  signed JWT (RS256, WebCrypto) for the `chat.bot` scope, kept in memory until it expires.
 
 **Attachments in.**
-- Chat media (`attachmentDataRef`, the `media.download` API) and Drive files (`driveDataRef`, the
-  Drive API) are downloaded before admission, bounded by values: how many per message, bytes each,
-  bytes in all (on Cloudflare 1 MB of images in all, `AgentRequest.images`).
+- Chat media (`attachmentDataRef`, the `media.download` API, `chat.bot`) is downloaded in the
+  object, before admission, bounded by values: how many per message, bytes each, bytes in all.
 - Images (`image/png`, `image/jpeg`, `image/webp`, `image/gif`) go to the model as
-  `InboundMessage.images`. Text files (`text/*`, JSON, CSV) are appended to the message's text,
-  bounded. Any other file (PDF, Office) is named in the text as not read, with why, until files reach
-  the workspace ([rich content](rich-content.md)). A Drive file the service account cannot read is
-  told the same way.
+  `InboundMessage.images` (on Cloudflare 1 MB of images in all, as `AgentRequest.images` says).
+- Text files (`text/*`, JSON, CSV) are appended to the message's text, bounded.
+- Any other file (PDF, Office, archives) is written to the conversation's workspace
+  (`workspace`, else `execution`) under `attachments/<message id>/<file name>`, in `beforeDispatch`
+  once the conversation is known, and the text names its path for the agent's tools. With neither
+  installed, or past the bound, it is named as not read, with why.
+- A Drive file (`driveDataRef`) is named as not read: "attach the file itself".
 
-## The contract change of phase 1: `InboundMessage.images`
+**Quoted messages.** A message that quotes another (`quotedMessageMetadata`) has the quoted message
+read (`spaces.messages.get`, `chat.bot`) and put before its text as a quote, bounded. A quote the
+app cannot read is named as unread.
 
-`AgentRequest.images` exists, but its only producer is the dashboard: `admitInbound` builds the
-request from the `InboundMessage`, which has no images, so no channel can give the model a photo. No
-component can add that from outside: `admitInbound` is the kit's code. So:
+**Questions.**
+- The tool `askUser` (component `tool-ask-user`, both targets, `replay: "safe"`) asks one question:
+  a title, a description, and fields (`confirm`, `select`, `multiselect`, `text`, `date`, each
+  named, with options where they apply). It never waits for the answer: it ends the run
+  (`control.terminate`) with the question as a part of the run's answer (`AgentResult.parts`), and
+  the answer comes back later as a new message. A run that waits days would hold a Durable Object
+  awake for days, and pi-durable has no wait on an outside signal.
+- The question is a `question` part (`AppMessageParts`, declared by `tool-ask-user`), with an id
+  (`<conversation id>:<request id>:<tool call id>`) and a `fallback` text that lists the fields and
+  their options. A transport that does not draw it sends the fallback; the answer typed back is an
+  ordinary message.
+- This transport draws it (`draws: ["question"]`): one `confirm` or `select` field as a card with
+  buttons; anything else as a card whose button opens a dialog with the form. The card's message is
+  recorded in `storage.kv` under the question's id.
+- A click or a submitted form is admitted as a message whose `replyTo` names the question's message
+  and holds the answer (`value`, the fields as JSON), and whose text says it in words ("Answer to
+  …: …") for the model. The card is updated to say who answered what (the click's response). A
+  question already answered, or unknown, answers the click with that, and admits nothing.
+- Anyone the channel admits in that conversation may answer, as anyone there may talk to the agent;
+  the answer carries their `actor`. Several questions may be open in a conversation; each is
+  answered once. A question stays open until answered or the conversation is reset.
 
-- `InboundMessage.images?: readonly AgentImage[]`, optional, added with this channel, its first
-  producer (`inbound.ts`: "a field is added, optional, with the component that produces it").
-- `admitInbound` passes them to `dispatch` as `AgentRequest.images`. An `inbound.normalize` stage may
-  read them and keep or drop them (a filter); `id`, `channel` and `conversationId` stay as they are.
-- Whoever builds the message bounds them (the channel's values), as `AgentRequest.images` says.
-- A test of `admitInbound` shows they reach the request, and `docs/contracts.md`, SPEC and the
-  [rich content](rich-content.md) note say it in the same change (the contract rules of `AGENTS.md`).
+## The contract changes
 
-Generic attachments (`InboundMessage.attachments`, `storage.blob`, files in the workspace) stay
-[rich content](rich-content.md)'s, for when a file must be kept rather than read once.
+Each is added with its first producer and first consumer, both in this change, with a test, and
+said in `docs/contracts.md`, SPEC, the capability catalogue and the notes it touches (the contract
+rules of `AGENTS.md`).
 
-## Phase 2: questions in cards and dialogs
+- **`InboundMessage.images?: readonly AgentImage[]`.** `admitInbound` passes them to `dispatch` as
+  `AgentRequest.images`; an `inbound.normalize` stage may keep or drop them; whoever builds the
+  message bounds them, as `AgentRequest.images` says. Producer: this channel; consumer: the runtime.
+- **Parts**, as [rich content](rich-content.md) shaped them: `AppMessageParts` (declaration merging,
+  the core declares none), `MessagePart` (`{ type, fallback }` and the declared fields),
+  `OutboundMessage.parts`, and `ChannelTransport.draws`. Delivery folds every part a transport does
+  not draw into the text as its fallback before splitting; a drawn part goes with the message's
+  last piece. Producer: `tool-ask-user`; consumer: this transport.
+- **`AgentResult.parts`** (and `RunSettlement`'s): the parts the run's tools gave, in order.
+  runtime-pi collects what a tool returns as parts; an answer with parts and no text is still delivered.
+- **`InboundMessage.replyTo?: { platformMessageId: string; value?: string }`**, as rich content
+  shaped it: `admitInbound` keeps it on the request for the run's tools and stages. Producer: this
+  channel; consumer: the agent, through the text, and any stage.
+- **`agent.partial`** (`{ conversation, requestId, text }`): the answer as written so far, emitted
+  by runtime-pi from pi-durable's live state, throttled. A notice: one lost costs nothing. Producer:
+  runtime-pi; consumer: this channel ([streaming replies](streaming-replies.md)).
 
-A question is drawn as a confirm card, an inline select card, or a card whose button opens a dialog
-with a form, and the answer comes back as a button click (`chat.buttonClickedPayload`). Here that
-is the [approvals](approvals.md) contract, because three parties that must not know each other meet in
-it: who asks (`askUser`, a Pi extension, a decision), who draws (each channel), and who waits for the
-answer (the run, durably, with a deadline). What is asked is shared vocabulary, so it belongs
-in `@pikit/contracts`; how it is drawn is each channel's (`draws`), and a channel that draws nothing
-sends the question as text, whose answer comes back as an ordinary message.
+## How it is built: work for parallel agents
 
-Phase 2 starts by settling approvals' open questions: Pi's `select`, `confirm` and `input`, or a
-form of several fields (`select`, `multiselect`, `text`, `confirm`, `date`); the deadline; and how a
-durable run waits. Then this channel draws them (cards, dialogs) and turns the click into the
-answer.
+One branch, one worktree per agent where they write in parallel. The contracts come first, since
+every other part builds on their types; then the rest in parallel; then one review of the whole.
+
+1. **Contracts** (one agent, first): the five changes above in `@pikit/contracts` and
+   `@pikit/pi-adapter`, delivery folding parts, runtime-pi emitting `agent.partial` and collecting
+   parts, their tests, `docs/contracts.md`, SPEC, the capability catalogue. Gate: the whole suite.
+2. **Then in parallel:**
+   - **Ingress** (Worker half): token verification with a test key pair, event parsing, the hand-off
+     and the click call, stranger replies, the route per instance.
+   - **Admission** (object half): keys and threading, access, `/new`, mention stripping, quoted
+     messages, attachments (images, text, workspace files), admission.
+   - **Transport**: the access token, markdown to text and cards, `split`, both ids, the placeholder
+     and its previews, failures, the start-up sweep.
+   - **Questions**: `tool-ask-user`, the question part, its cards and dialogs, clicks and answers.
+   - **Test harness**: a fake Google Chat API (a `fetch` double: messages, media, spaces, ids
+     refused when repeated), the conformance runs, the workerd lane.
+3. **Then:** the component's README (the console steps: a new project, the add-on box left checked,
+   the HTTP endpoint URL, the service account), `bun run registry generate` and `validate`, and one
+   review of the whole change against this note.
 
 ## Tests
-- `createChannelConformance` (`@pikit/contracts/testing`), and `createLifecycleConformance`.
-- The transport against a fake Google Chat API (a `fetch` double): pieces, cards, the placeholder
-  edited, each failure classified.
+- `createChannelConformance` (`@pikit/contracts/testing`) and `createLifecycleConformance`, on
+  both halves.
+- The transport against the fake API: pieces, cards, both ids (a late repeat refused, read, counted
+  delivered), the placeholder found by piece `#0` and created when missing, previews throttled, each
+  failure classified.
 - The ID token checked with a test key pair: a wrong audience, issuer, email or signature, and an
   expired token, refused with `401`.
 - The placeholder's life: started, resumed (no second one), aborted (deleted), failed (the failure
   text), a crash in between (swept at start).
-- Attachments: images reach `AgentRequest.images`, text files the text, others named; every bound.
-- The `durable` lane in workerd: the Worker verifies, the object admits and answers.
+- Attachments: images reach `AgentRequest.images`, text files the text, other files the workspace;
+  every bound; a Drive file named.
+- Questions: drawn as a card or a dialog; folded to text by a transport that does not draw; a click
+  admitted once, with `replyTo`; a second click told it is answered; the run ended by `askUser`.
+- The contract changes: each with a test in its package; a case of the channel suite that a broken
+  provider fails (mutate it, see it fail, restore).
+- The `durable` lane in workerd: the Worker verifies, the object admits, answers and draws.
+
+## Checked live, once, with the real app
+Before it is called done, with a test project's app: the events of a DM, a group chat and a threaded
+space (whether `space` carries `spaceType` and `spaceThreadingState`); a reply in a DM's inline thread
+and whether the app can answer in it; a `messageId` repeated (the error Google gives) and a
+`requestId` repeated; whether `user.email` and `user.domainId` arrive; a card, a dialog and a form;
+an answer of several pieces; a Drive file refused.
 
 ## Pi first
 Nothing in Pi: channels are pikit's (SPEC P1). The images are Pi's `ImageContent`, as
-`AgentRequest.images` already are.
+`AgentRequest.images` already are. The answer as it is written is pi-durable's live state, which
+runtime-pi re-emits; pikit builds no streaming of model calls. `askUser` is a pi-durable tool; its
+question needs no task engine, since no run waits for it.
 
 ## Open questions
-- Threads in DMs and group chats, to check live (Google's documentation does not say): the
-  `spaceThreadingState` they report, whether the event's `space` carries `spaceType` and
-  `spaceThreadingState`, and the `thread` of a message replied inline in a DM, and whether the app
-  can answer in it.
-- How long Google remembers a `requestId`: its documentation gives no window. A run resumed after
-  it would post a second placeholder, a retried piece a second message. Check a repeat after an
-  hour and after a day.
-- Drive attachments: whether the service account can read a Drive file shared in a space. Google's
-  documentation only says to use the Drive API; until checked, an unreadable file is named as not
-  read.
-- Workspace (domain) restrictions as sender authorization: the sender's email domain, when Google
-  gives it.
-- PDFs and Office files read as text before files reach the workspace: in the channel, or a stage
-  once attachments exist.
+- Whether the app can answer in a DM's inline thread (checked live above); until then it answers
+  outside threads in DMs and group chats.
 
 ## Moved from the former SPEC
 The former SPEC §18, "Higher-level components":

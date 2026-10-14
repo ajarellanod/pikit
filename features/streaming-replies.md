@@ -25,6 +25,9 @@ posted and edited as the model writes, then replaced by the final answer.
 - On Cloudflare, the dashboard's live updates use the Durable Object's hibernating WebSocket
   (SPEC §5).
 - Absent: "typing…", then the answer, as today.
+- Built first with [Google Chat](channel-google-chat.md): runtime-pi emits `agent.partial` (the
+  answer as written so far, throttled), and that channel edits its own "Thinking…" placeholder with
+  it. The generic `edit` and `stream-to-edit` stay for the other channels.
 
 ## Pi first
 Pi streams: pi-durable commits the partial answer to the conversation's live state (`pi.live`) as

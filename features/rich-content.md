@@ -26,9 +26,12 @@ text where it cannot.
     where a SQL row is at most 2 MB, C7). Until then an image is stored inline in the transcript;
   - a tool that produces a file as a part of the answer.
 - Absent: text only, as today; a part folds into its fallback.
-- Decided with [Google Chat](channel-google-chat.md), its first producer: a channel's images reach
-  the model by `InboundMessage.images` (`AgentImage`), which `admitInbound` passes to
-  `AgentRequest.images`. `attachments` and `storage.blob` stay for files that must be kept.
+- Decided with [Google Chat](channel-google-chat.md), built with it: a channel's images reach the
+  model by `InboundMessage.images` (`AgentImage`), which `admitInbound` passes to
+  `AgentRequest.images`; the parts' shape below, `ChannelTransport.draws`, `AgentResult.parts` and
+  `InboundMessage.replyTo`, with a first kind, `question` (`tool-ask-user`). Google Chat writes other
+  files to the conversation's workspace for the agent's tools. `attachments` and `storage.blob`
+  stay for files that must be kept.
 - What a platform draws from markdown (Google Chat's cards for tables and code, image cards for
   markdown images) is the channel's transport, not a part. Parts are for what another component
   produces and every channel must draw or fold: a question, a file.

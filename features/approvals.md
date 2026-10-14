@@ -10,7 +10,10 @@ merged here: both sections are kept below verbatim)
 **Needed by:** nothing required directly. Self-improvement needs a human's approval of every
 self-change (SPEC §6); whether that approval is this component or the git host's review is open
 below. The dashboard answers approvals only when this exists (SPEC §5).
-[Google Chat](channel-google-chat.md)'s phase 2 draws its questions.
+[Google Chat](channel-google-chat.md) brings its first part: the tool `askUser`, which ends its run
+with a `question` part instead of waiting, drawn as cards and dialogs, its answer a new message
+with `replyTo`. What stays here: Pi's extensions' questions (pi-durable has no UI API yet) and
+decisions that wait days.
 
 ## What it gives
 Something the agent cannot decide alone ("allow this `rm -rf`?", "which of these three?", "approve

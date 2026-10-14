@@ -32,7 +32,7 @@ a project installs, and agents that name what they may use.
 | Delegation, background tasks | `tool-delegate`: run or start, depth limit, answers to the parent | [subagents](subagents.md) |
 | An orchestrator: assign, list, follow, steer and cancel other agents' tasks, read their transcripts | none: `AgentDelegation` has `run` and `start` only | no note yet (below) |
 | An agent writes to another chat | none; `outbound.queue.enqueue` reached through the mailbox | no note yet |
-| Questions to the user (`askUser`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) phase 2 |
+| Questions to the user (`askUser`: cards, selects, dialogs) | none | [approvals](approvals.md), [channel-google-chat](channel-google-chat.md) (`askUser`) |
 | Decisions: proposed, supervised, approved by rule or after a veto window | the self-change gate only (SPEC §6) | [approvals](approvals.md) |
 | Missions: a goal ledger with checkpoints, mirrored in a task tracker | none | no note yet |
 | Memory: summaries, search, rules, preferences | none | [memory](memory.md) |
@@ -74,10 +74,11 @@ component that does through `actor.mailbox`, as [memory](memory.md) decides. Wha
 contracts:
 
 - **`InboundMessage.images`**: a channel's photos reach the model only through `admitInbound`, the
-  kit's code. With [channel-google-chat](channel-google-chat.md), phase 1.
+  kit's code. With [channel-google-chat](channel-google-chat.md).
 - **`approvals`** (questions now and decisions in days, one contract): what is asked is shared by who
   asks, who draws it and who waits for the answer, three components that must not know each other.
-  With channel-google-chat, phase 2.
+  Questions (`askUser`, the `question` part, `replyTo`) come with channel-google-chat; decisions
+  that wait days stay approvals'.
 - **`AgentDelegation`** (`@pikit/pi-adapter`): status, steer, cancel and the list of started tasks,
   for an orchestrator. Stitching `agent.runtime`, `agent.observe` and the mailbox together could do
   it, but `agent.observe` sees only its own Durable Object on Cloudflare.
