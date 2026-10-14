@@ -222,6 +222,8 @@ export type ClickHandler = (key: string, event: AddOnEvent, ctx: AppContext) => 
 /** A placeholder the channel created, kept until its answer replaced it or it was deleted. */
 export interface PlaceholderMark {
   answerKey: string;
+  /** The conversation's key: whose instance the placeholder is (the marks are shared by every instance). */
+  conversationKey: string;
   conversationId: string;
   requestId: string;
   /** Its message: `spaces/AAA/messages/client-…`. */
