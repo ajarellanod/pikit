@@ -31,10 +31,10 @@ component's own.
 | Create with `requestId` (a repeat returns the first message) | `ChannelTransport.idempotent`, a UUID from the piece's key | none |
 | Mention of the app stripped; DMs and spaces told apart | the channel, before `admitInbound` | none |
 | Edited and deleted messages: Google sends the app no event, nothing is answered | — | none |
-| `ADDED_TO_SPACE`: a space is allowed before it is answered | spaces allowed in config; a stranger space is told its id | none |
+| Added to space: a space is allowed before it is answered | spaces allowed in config; a stranger space is told its id | none |
 | The agent stays silent | `text(answer)` gives `undefined`, nothing is sent | none |
 | Attachments (Chat media and Drive): downloaded, bounded, read by the agent | images to the model; text files in the message; the rest named as not read | **`InboundMessage.images`** |
-| Questions: confirm and select cards, dialogs with forms, `CARD_CLICKED` back | phase 2 | **[approvals](approvals.md)** |
+| Questions: confirm and select cards, dialogs with forms, button clicks back | phase 2 | **[approvals](approvals.md)** |
 | Progress shown in "Thinking…" | not in phase 1 ([streaming replies](streaming-replies.md)) | none |
 | A scheduled message's notification (a mention) | with the [scheduler](scheduler.md) | none yet |
 | A quoted message as the reply's context | with `replyTo` ([rich content](rich-content.md)) | later |
@@ -47,18 +47,18 @@ instances (`googlechat`, `googlechat:ops`), as channel-telegram's accounts are. 
 `http.route`; on `durable` also `actor.mailbox`, `actor.inbox` and `wakeups`; `outbound.queue` when
 installed.
 
-**The app.** A Chat app that is not a Google Workspace add-on ("Build this Chat app as a Workspace
-add-on" left unchecked in the Chat API's configuration), with one HTTP endpoint and the endpoint URL
-as its authentication audience. Its events are the Chat API's interaction events (`Event`, by
-`type`: `MESSAGE`, `ADDED_TO_SPACE`, `REMOVED_FROM_SPACE`, `CARD_CLICKED`).
-- An add-on Chat app is not supported: converting an app to an add-on cannot be undone, and its
-  other event format (`chat.messagePayload`…) and other token would be a second ingress.
-- The project-number audience is not supported: its token is a JWT signed with
-  `chat@system.gserviceaccount.com`'s own keys, published only as X.509 certificates, a second
-  verification for nothing a user sees.
+**The app.** The assistant has a Chat app of its own, in its own Google Cloud project, never one
+shared with another service: the app's endpoint is this channel's. It is built as a Google Workspace
+add-on that extends Chat, the Chat API console's default. Its events are add-on event objects
+(`chat.messagePayload`, `chat.addedToSpacePayload`, `chat.removedFromSpacePayload`,
+`chat.buttonClickedPayload`), and its token is always an ID token for the endpoint URL from the
+project's own service account, so both `aud` and `email` name this app. A Chat app that is not an
+add-on is not supported: its own `Event` format and other tokens (a shared
+`chat@system.gserviceaccount.com` sender, or a JWT for the project number) would be a second
+ingress for nothing a user sees.
 
 **Ingress.**
-- `POST <path>`, an `http.route`, the app's endpoint URL. Google's bearer token is
+- `POST <path>`, an `http.route`, the endpoint URL of every trigger. Google's bearer token is
   verified before anything else; a failure answers `401`. It is an OpenID Connect ID token signed by
   Google (RS256), checked with WebCrypto, not with `googleapis` or `google-auth-library`, which do
   not run in a Worker:
@@ -66,7 +66,9 @@ as its authentication audience. Its events are the Chat API's interaction events
     (`https://www.googleapis.com/oauth2/v3/certs` today), cached as their `Cache-Control` says;
   - `iss` is `https://accounts.google.com` or `accounts.google.com`;
   - `aud` is the endpoint URL exactly as configured in the Chat API (a value);
-  - `email` is `chat@system.gserviceaccount.com`, and `email_verified` is true;
+  - `email` is the app's service account,
+    `service-<project number>@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`, and `email_verified`
+    is true;
   - `exp` has not passed.
 - On `durable` the Worker hands the event to the conversation's object with
   `actor.mailbox.send(key, "google-chat.event", event)`, as channel-telegram-webhook hands
@@ -107,11 +109,11 @@ as its authentication audience. Its events are the Chat API's interaction events
   thread: Google supports `messageReplyOption` only in named spaces.
 
 **Access.** Spaces are allowed in the channel's config. A space not allowed is a stranger: when the
-app is added to it (`ADDED_TO_SPACE`), and on each message from it, the app answers once that it is
-not allowed there and gives the space's id for the operator (as channel-telegram-webhook tells a
-stranger their id), and admits nothing. Approving a space from the chat or the dashboard is
+app is added to it (`chat.addedToSpacePayload`), and on each message from it, the app answers once
+that it is not allowed there and gives the space's id for the operator (as channel-telegram-webhook
+tells a stranger their id), and admits nothing. Approving a space from the chat or the dashboard is
 [pairing](pairing.md).
-`REMOVED_FROM_SPACE` is logged; answers still owed to that space fail `permanent`. `/new` resets
+Removal from a space is logged; answers still owed to that space fail `permanent`. `/new` resets
 the conversation, as in channel-telegram.
 
 **"Thinking…" edited into the answer.**
@@ -180,7 +182,7 @@ Generic attachments (`InboundMessage.attachments`, `storage.blob`, files in the 
 ## Phase 2: questions in cards and dialogs
 
 A question is drawn as a confirm card, an inline select card, or a card whose button opens a dialog
-with a form, and the answer comes back as `CARD_CLICKED`. Here that
+with a form, and the answer comes back as a button click (`chat.buttonClickedPayload`). Here that
 is the [approvals](approvals.md) contract, because three parties that must not know each other meet in
 it: who asks (`askUser`, a Pi extension, a decision), who draws (each channel), and who waits for the
 answer (the run, durably, with a deadline). What is asked is shared vocabulary, so it belongs
@@ -189,7 +191,7 @@ sends the question as text, whose answer comes back as an ordinary message.
 
 Phase 2 starts by settling approvals' open questions: Pi's `select`, `confirm` and `input`, or a
 form of several fields (`select`, `multiselect`, `text`, `confirm`, `date`); the deadline; and how a
-durable run waits. Then this channel draws them (cards, dialogs) and turns `CARD_CLICKED` into the
+durable run waits. Then this channel draws them (cards, dialogs) and turns the click into the
 answer.
 
 ## Tests
