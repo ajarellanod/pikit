@@ -179,6 +179,22 @@ defaults to `registry/`.
 - `capabilities`: each capability with its mode, where it is defined, its stability, its summary,
   and who provides and uses it.
 
+## pikit <command>
+
+```
+pikit <command> [args...]
+```
+
+A command an installed component adds (`commands` in its `component.json`, recorded by `pikit add`
+in `pikit.json`; see [components.md](components.md#commands)). In a project whose `pikit.json`
+declares it, `pikit <command>` runs the component's file in a child `bun`, in the project's directory,
+with its environment (`.env` under the process's) and stdin and stdout inherited
+([component-commands.ts](../packages/cli/src/commands/component-commands.ts)). The arguments after
+the name are the command's, passed as typed: the CLI parses none of them. Its problems are printed and
+it exits 1. `pikit help` (and `pikit` alone) in a project lists them after the CLI's own, each with
+its description and its component. Outside a project, or a name nothing declares, it is an unknown
+command (exit 2). No component's command takes a name of the CLI's own, nor one kept for later.
+
 ## Not built
 
 `init`, `create`, `outdated`, `diff`, `config` and `expose` answer "not built yet" (some

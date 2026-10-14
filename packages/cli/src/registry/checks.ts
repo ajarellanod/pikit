@@ -8,7 +8,7 @@ import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { capabilityEntry, KIT_CATALOGUE, type RegistryCatalogue } from "./capabilities.ts";
 import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports, stripComments } from "./imports.ts";
-import { type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
+import { commandProblems, type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 import { confinedPath } from "../project/paths.ts";
 
@@ -24,10 +24,13 @@ const forTests = (file: string): boolean => TEST.test(file) || TEST_SUPPORT.test
  * `wrangler` with `node:child_process` while its entrypoint runs in workerd. So do its plain Node
  * scripts (`*.mjs`: `deployment-cloudflare`'s `deploy.mjs`, a build's deploy command, and the
  * `rollout.mjs` both share), and a component's step of `pikit configure`
- * (`src/pikit/<name>/configure.ts`, which admin-proposals' reads the git remote with). Like tests,
+ * (`src/pikit/<name>/configure.ts`, which admin-proposals' reads the git remote with), and the files
+ * its `commands` name (`commands`, the set of their `src/pikit/<name>/<file>` paths: `pikit <command>`
+ * runs them in a child of the CLI, `component-command.ts`). Like tests,
  * those files are not held to the component's targets (SPEC §4).
  */
-const forMachine = (file: string, name: string): boolean =>
+const forMachine = (file: string, name: string, commands: ReadonlySet<string>): boolean =>
+  commands.has(file) ||
   (name.startsWith("deployment-") && (file === `src/pikit/${name}/commands.ts` || (file.startsWith(`src/pikit/${name}/`) && file.endsWith(".mjs")))) ||
   file === `src/pikit/${name}/configure.ts`;
 
@@ -105,13 +108,16 @@ export function checkManifest(
     // The one extra field worth explaining: a dependency on another component.
     problem.startsWith("/requires/") && problem.endsWith("is not a known field")
       ? `component.json ${problem}: components depend on capabilities only, never on components`
-      : `component.json ${problem}`,
+      : problem.startsWith("/commands/") && problem.endsWith("is not a known field")
+        ? `component.json ${problem.replace(/: is not a known field$/, "")}: a command's name is kebab-case`
+        : `component.json ${problem}`,
   );
   // The rules below read the fields; on a malformed manifest they would only add noise.
   if (shape.length > 0) return shape;
   const m = manifest as Manifest;
   const problems: string[] = [];
   if (m.name !== dirName) problems.push(`component.json name "${m.name}" does not match its directory "${dirName}"`);
+  problems.push(...commandProblems(m));
   const kit = kitRangeProblems(m, { "@pikit/core": coreVersion, "@pikit/contracts": contractsVersion, "@pikit/pi-adapter": adapterVersion });
   problems.push(...kit.missing);
   for (const { field, pkg, range, version } of kit.refused) problems.push(`requires.${field} "${range}" does not accept this repository's ${pkg} ${version}`);
@@ -189,7 +195,8 @@ export interface ImportScan {
  * The imports of every source file under `files/` (only the adapter imports Pi; no sibling
  * component's files, P4; the targets' runtimes, SPEC §4), and the packages they need.
  */
-export function checkImports(componentDir: string, name: string, targets: readonly string[]): ImportScan {
+export function checkImports(componentDir: string, name: string, targets: readonly string[], commandFiles: readonly string[] = []): ImportScan {
+  const commands = new Set(commandFiles.map((file) => `src/pikit/${name}/${file}`));
   const problems: string[] = [];
   const packages = new Set<string>();
   const testPackages = new Set<string>();
@@ -216,7 +223,7 @@ export function checkImports(componentDir: string, name: string, targets: readon
       if (scheme !== undefined) {
         // Tests run under Bun's test runner in the project (they import bun:test), never in a
         // deployed bundle, so only shipped files are held to the targets (SPEC §4).
-        if (forTests(file) || forMachine(file, name)) continue;
+        if (forTests(file) || forMachine(file, name, commands)) continue;
         if ((scheme === "node" || scheme === "bun") && !serverOnly) {
           problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: node:* and bun:* need targets ["server"] (SPEC §4)`);
         }
@@ -234,7 +241,7 @@ export function checkImports(componentDir: string, name: string, targets: readon
         problems.push(`${at} imports "${specifier}": only @pikit/pi-adapter imports Pi`);
       }
       // A kit export that reaches Node (`@pikit/pi-adapter/node`) is Node by another name.
-      if (SERVER_ONLY_EXPORTS.includes(specifier) && !serverOnly && !forTests(file) && !forMachine(file, name)) {
+      if (SERVER_ONLY_EXPORTS.includes(specifier) && !serverOnly && !forTests(file) && !forMachine(file, name, commands)) {
         problems.push(`${at} imports "${specifier}", but targets are ${JSON.stringify(targets)}: a server-only kit export needs targets ["server"] (SPEC §4)`);
       }
       const pkg = packageName(specifier);

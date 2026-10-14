@@ -68,6 +68,7 @@ target (K1).
 | `apps` | hand | `{ "worker": "<export>" }`: the export that goes in the Worker's App on Cloudflare; `"default"` puts the default export in both Apps |
 | `halves` | generated | when `apps.worker` names a half: what each App's half provides, requires and uses |
 | `hooks` | hand | `doctor`, `beforeDeploy`, `afterDeploy`: each a file of `src/pikit/<name>/` exporting a function of that name (below) |
+| `commands` | hand | `pikit <name>` commands it adds: name (kebab-case, never the CLI's own) → `{ file, description }`, the file of `src/pikit/<name>/` exporting `command` (below) |
 | `generated` | hand | files of `src/pikit/<name>/` a hook or build rewrites |
 | `view` | hand | a folder holding its dashboard view |
 | `replay.tools` | generated | each `agent.tool` it provides with the default config → `safe` or `unsafe` |
@@ -99,6 +100,32 @@ listed in `generated`); `channel-telegram-webhook` has `afterDeploy` (sets the T
 A `generated` file is never reported as modified by `pikit doctor`, is kept as the project has it by
 `pikit upgrade`, and is deleted by `pikit remove` without `--force`.
 
+### Commands
+
+A command is a hook the user runs by name ([features/component-commands.md](../features/component-commands.md)):
+
+```jsonc
+"commands": {
+  "agents": { "file": "generate.ts", "description": "Write src/extensions/agents.ts from src/agents/" }
+}
+```
+
+The name is kebab-case and never one of the CLI's own (`BUILT_IN_COMMANDS` in
+[manifest.ts](../packages/cli/src/registry/manifest.ts)); the file is the component's own; the
+description is one line, which `pikit help` shows in the project. `pikit add` records the commands in
+`pikit.json` by project path and refuses, before it writes anything, a name another installed
+component (or another in the same `add`) declares; `pikit upgrade` records the new version's, `pikit
+remove` takes them with the component.
+
+`pikit <name> [args...]` runs the file's `command(io)` in a child `bun`, in the project's directory,
+with stdin and stdout inherited ([component-command.ts](../packages/cli/src/project/component-command.ts),
+`CommandIO`): `args` (what follows the name, as typed), `config()` (its config in `pikit.config.ts`,
+imported only when asked, so a command that repairs the project runs without it), `get(name)` (the
+environment and `.env`) and `say(line)`. It resolves with its problems (empty, or nothing, when done):
+they are printed and the command exits 1, as is a file that does not export `command` or a command
+that throws. It runs on the machine, so, like `configure.ts`, it may import `node:*` whatever the
+component's targets, and may write the project's files.
+
 ### Views
 
 `"view": "view"` names a folder whose `index.tsx` default-exports `defineView({ id: "<component
@@ -126,7 +153,9 @@ the manifest's shape and that it matches its directory, the kit ranges against t
 packages, the layout, the view, the name's kind, that every capability provided or used is in the
 catalogue ([capabilities.ts](../packages/cli/src/registry/capabilities.ts), plus what the registry
 declares), the imports of every file per target (only the adapter imports Pi, no `node:*`/`bun:*`/
-`cloudflare:*` for `durable`, no sibling component's files), that `dependencies` are exactly what the
+`cloudflare:*` for `durable` outside `configure.ts`, a deployment's commands and the files `commands`
+names, no sibling component's files), that each hook's and command's file exists and exports its
+function, that no command takes a name of the CLI's own, that `dependencies` are exactly what the
 shipped files import, that a tool working on `api.env` uses `execution` or `execution.shell`, that only
 `admin-*` reads `APP_DESCRIPTION`, that `setup` declares the same on every declared target (K1), and
 the generated fields. It also checks presets and schemas.
@@ -136,7 +165,8 @@ the generated fields. It also checks presets and schemas.
 [add.ts](../packages/cli/src/commands/add.ts). Several names are one transaction.
 
 1. Resolve the registry (`builtin`, or a local path) and read each component.
-2. Check targets against `pikit.json`'s, the kit ranges (`requires.*`), and what is missing.
+2. Check targets against `pikit.json`'s, the kit ranges (`requires.*`), that no other component owns
+   one of its `commands`, and what is missing.
 3. Show what it writes, and confirm (`--yes` skips; without a terminal it must be given).
 4. Write its files and README. A file that exists and differs is refused without `--force`.
 5. Add its npm `dependencies` and `devDependencies` to `package.json`; `bun install`.
@@ -155,7 +185,7 @@ and `doctor` reports it.
 [pikit-json.ts](../packages/cli/src/project/pikit-json.ts). Per installed component: the registry,
 version and commit (`-dirty` when uncommitted), the kit ranges it accepts, each file with its
 `sha256` hash, the npm packages it declared and those `add` put in `package.json` for it, its
-`environment`, `hooks`, `generated`, `apps`, and `installedFor` when it came as an offer. Also the
+`environment`, `hooks`, `commands`, `generated`, `apps`, and `installedFor` when it came as an offer. Also the
 project's `targets`, its `registries`, the vendored kit's commit, and the dashboard's files. Whether a
 file is modified is never stored: it is computed from the hash.
 

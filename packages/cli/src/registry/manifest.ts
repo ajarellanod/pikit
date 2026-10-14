@@ -69,6 +69,18 @@ const IDENTIFIER = "^[A-Za-z_$][A-Za-z0-9_$]*$";
 const TEXT = "\\S";
 /** A file name of the component's own directory, `src/pikit/<name>/`. */
 const OWN_FILE = "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ts$";
+/** One line of text. */
+const ONE_LINE = "^[^\\n]*\\S[^\\n]*$";
+
+/**
+ * The CLI's own commands (`main.ts`): what it runs, the deployment's (`DEPLOYMENT_COMMANDS`), and the
+ * names kept for later (`LATER`). A component's command never takes one of them (`commands`).
+ */
+export const BUILT_IN_COMMANDS: readonly string[] = [
+  "new", "add", "remove", "upgrade", "ui", "doctor", "configure", "dev", "registry", "help",
+  "up", "down", "restart", "logs", "status",
+  "init", "create", "outdated", "diff", "config", "expose",
+];
 
 /**
  * `apps.worker` naming the default export: the component goes in both Apps as it is (SPEC §4.1, C1),
@@ -238,6 +250,27 @@ export const ManifestSchema = Type.Object(
         },
       ),
     ),
+    commands: Type.Optional(
+      Type.Record(
+        Type.String({ pattern: KEBAB }),
+        Type.Object(
+          {
+            file: Type.String({
+              pattern: OWN_FILE,
+              description:
+                "A file of src/pikit/<name>/ exporting `command({ args, config, get, say })`, which resolves with its problems (empty, or nothing, when done). `pikit <command> [args...]` runs it in a child bun, in the project's directory, stdin and stdout inherited: `args` are the arguments after the command's name, as typed; `config()` imports pikit.config.ts when asked and returns this component's config; `get` reads the environment and .env; `say` prints a line. Problems are printed and exit 1. It runs on the machine that runs the CLI, never in the app, so it is not held to the targets.",
+            }),
+            description: Type.String({ pattern: ONE_LINE, description: "One line: what `pikit help` says of it." }),
+          },
+          { additionalProperties: false },
+        ),
+        {
+          additionalProperties: false,
+          description:
+            "Commands this component adds to the CLI: name (kebab-case, never one of the CLI's own: `pikit help` lists them) → its file and description. `pikit add` records them in pikit.json, by project path, and refuses a name another installed component declares; `pikit remove` takes them out.",
+        },
+      ),
+    ),
     generated: Type.Optional(
       Type.Array(Type.String({ pattern: OWN_FILE }), {
         uniqueItems: true,
@@ -307,6 +340,16 @@ export type Manifest = Static<typeof ManifestSchema>;
 /** The hooks a component may declare, in the order they run; each file exports a function of that name. */
 export const HOOKS = ["doctor", "beforeDeploy", "afterDeploy"] as const;
 export type Hook = (typeof HOOKS)[number];
+
+/**
+ * What the schema does not say of `commands`: no name is one of the CLI's own (`BUILT_IN_COMMANDS`).
+ * Checked by `registry validate` and by `pikit add`, for a registry that was not validated.
+ */
+export function commandProblems(manifest: Pick<Manifest, "commands">): string[] {
+  return Object.keys(manifest.commands ?? {})
+    .filter((name) => BUILT_IN_COMMANDS.includes(name))
+    .map((name) => `commands.${name}: "pikit ${name}" is one of the CLI's own commands; a component's command takes another name`);
+}
 export type EnvironmentVariable = Static<typeof EnvironmentVariableSchema>;
 export type Half = Static<typeof HalfSchema>;
 

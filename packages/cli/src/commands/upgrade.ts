@@ -34,7 +34,7 @@
  *
  * The manifest's changes follow as `add` makes them: its `.env.example` block, its npm packages (new
  * ones added; those it added and no longer declares taken out when nothing else needs them; those it
- * added at the version it declared moved to the new one), its hooks and generated files, the kit
+ * added at the version it declared moved to the new one), its hooks, commands and generated files, the kit
  * ranges it accepts (a version this CLI's kit does not satisfy is refused, unless `--force`, as is a
  * downgrade), the Worker's App on Cloudflare when its `apps` changed, and the providers it now needs
  * (offered, as `add` offers them; warned about when nothing provides them). What the project provides
@@ -67,6 +67,7 @@ import {
   acceptedOffers,
   alsoWrites,
   applyInstall,
+  checkCommands,
   checkCompatible,
   checkConflicts,
   checkKit,
@@ -276,6 +277,7 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
   if (sameInstall(previous, record)) return undefined;
 
   checkCompatible(project.targets, manifest, force);
+  checkCommands(project, manifest);
   if (Bun.semver.order(manifest.version, previous.version) < 0) {
     const what = `${name}'s registry has ${manifest.version}, older than the installed ${previous.version}`;
     if (!force) throw new CliError(`${what}; pass --force to go back to it`);
@@ -358,6 +360,7 @@ function sameInstall(installed: InstalledComponent, next: InstalledComponent): b
       c.environment,
       c.requires,
       c.hooks ?? {},
+      c.commands ?? {},
       c.generated ?? [],
       c.apps ?? {},
     ]);

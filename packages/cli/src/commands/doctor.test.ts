@@ -93,6 +93,26 @@ test("only a declared check runs: a doctor.ts pikit.json does not name is not ca
   expect(run.err).toContain("checked: its doctor check failed:");
 });
 
+test("only an app component (its index.ts has a default export) is said to be missing from pikit.config.ts", async () => {
+  const dir = project(undefined);
+  // A component that only adds a command or a hook: its index.ts exports functions, never a component.
+  mkdirSync(join(dir, "src/pikit/agents-tool"), { recursive: true });
+  writeFileSync(join(dir, "src/pikit/agents-tool/index.ts"), "export function render(): string {\n  return \"\";\n}\n");
+  // An app component left out of pikit.config.ts.
+  mkdirSync(join(dir, "src/pikit/forgotten"), { recursive: true });
+  writeFileSync(join(dir, "src/pikit/forgotten/index.ts"), 'import { defineComponent } from "@pikit/core";\n\nexport default defineComponent({ name: "forgotten", setup() {} });\n');
+  const manifest = readProjectManifest(dir);
+  for (const name of ["agents-tool", "forgotten"]) {
+    manifest.components[name] = { registry: "default", version: "0.0.0", requires: { pikit: "0.0.0" }, addedDependencies: [], files: {}, dependencies: {}, environment: [] };
+  }
+  writeProjectManifest(dir, manifest);
+
+  const run = await runCli(["doctor"], dir);
+  expect(run.out).toContain("forgotten is installed but not listed in pikit.config.ts");
+  expect(run.out).not.toContain("agents-tool is installed but not listed");
+  expect(run.out).not.toContain("deployment-fake is installed but not listed");
+});
+
 test("a check may also give notes: they are printed and fail nothing", async () => {
   const dir = project('export async function doctor() {\n  return { problems: [], notes: ["the seed is out of date"] };\n}\n');
   const run = await runCli(["doctor"], dir);

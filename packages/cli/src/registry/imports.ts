@@ -28,6 +28,15 @@ export function scanImports(source: string): string[] {
 }
 
 /**
+ * Whether a component's entry point (`src/pikit/<name>/index.ts`) has a default export: an app
+ * component, which `pikit add` lists in pikit.config.ts. A `deployment-*` (its commands) and a
+ * component that only adds a command or a hook (agents-folders) have none, and are never listed.
+ */
+export function hasDefaultExport(source: string): boolean {
+  return /(^|\n)\s*export\s+default\b/.test(stripComments(source));
+}
+
+/**
  * Comments replaced by spaces; strings, template literals and regular expressions kept, so a
  * `//` inside a URL or a regex does not start a comment. The regex rule is the usual heuristic:
  * a `/` after an operator or at the start of an expression begins a regex, anything else divides.

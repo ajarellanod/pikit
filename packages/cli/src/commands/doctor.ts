@@ -35,7 +35,7 @@
 import { existsSync, readdirSync, readFileSync, statSync } from "node:fs";
 import { join } from "node:path";
 import { redactSecrets, secretLikePaths } from "@pikit/contracts";
-import { scanImports } from "../registry/imports.ts";
+import { hasDefaultExport, scanImports } from "../registry/imports.ts";
 import { type ComponentDoctorResult, doctorHooks, UNLESS_BEFORE_DEPLOY } from "../project/component-doctor.ts";
 import { projectEnv, probe, runScript } from "../project/run.ts";
 import type { AppDescription, ProbeResult } from "../project/probe.ts";
@@ -101,7 +101,9 @@ export async function doctor(projectDir: string, options: DoctorOptions = {}): P
       }
     }
     for (const name of Object.keys(project.components)) {
-      const listable = existsSync(join(projectDir, "src", "pikit", name, "index.ts")) && !name.startsWith("deployment-");
+      // As `pikit add` lists it: an app component, whose index.ts has a default export.
+      const entry = join(projectDir, "src", "pikit", name, "index.ts");
+      const listable = existsSync(entry) && hasDefaultExport(readFileSync(entry, "utf8"));
       if (listable && !result.listed.includes(name)) notes.push(`${name} is installed but not listed in pikit.config.ts`);
     }
     notes.push(...unusedProviders(result.description.components, result.worker !== undefined));

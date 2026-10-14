@@ -169,6 +169,15 @@ files/src/pikit/<name>/index.ts        export default defineComponent({ name, co
 files/src/pikit/<name>/<name>.test.ts  its tests, copied with it into the project
 ```
 
+What a component asks of the CLI runs on the machine, never in the App: `hooks` in `component.json`
+(`doctor`, `beforeDeploy`, `afterDeploy`), a `configure.ts`, and `commands`, a command the user runs
+as `pikit <name> [args...]` in the project: `"commands": { "<name>": { "file": "<own file>.ts",
+"description": "<one line>" } }`, the file exporting `command({ args, config, get, say })`, which
+resolves with its problems (`CommandIO` in `packages/cli/src/project/component-command.ts`;
+`config()` imports `pikit.config.ts` only when called). The name is kebab-case and never one of the
+CLI's own; those files may import `node:*` whatever the targets. See `docs/components.md`, Hooks and
+Commands.
+
 A component only the project needs can be a single file in `src/extensions/` listed in
 `pikit.config.ts`, like `src/extensions/agents.ts`; make it a registry component when it should be
 shared, upgraded or removed with `pikit remove`, or when it declares a kind or capability.

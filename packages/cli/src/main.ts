@@ -9,6 +9,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { add } from "./commands/add.ts";
+import { componentCommandsUsage, installedCommand, runComponentCommand } from "./commands/component-commands.ts";
 import { newWizard } from "./commands/wizard.ts";
 import { configure, LOGIN_METHODS, type LoginMethod } from "./commands/configure.ts";
 import { DEPLOYMENT_COMMANDS, type DeploymentCommand, deployment, dev } from "./commands/deployment.ts";
@@ -19,6 +20,7 @@ import { remove } from "./commands/remove.ts";
 import { uiOff, uiOn } from "./commands/ui.ts";
 import { upgrade } from "./commands/upgrade.ts";
 import { PIKIT_ROOT } from "./paths.ts";
+import { BUILT_IN_COMMANDS } from "./registry/manifest.ts";
 import { Cancelled, CliError, isInteractive, log } from "./ui.ts";
 
 const USAGE = `pikit: a kit for Pi.
@@ -36,13 +38,16 @@ Usage:
   pikit up | down | restart | status  delegate to the installed deployment-* component
   pikit logs [--follow] [--tail <n>]
   pikit registry validate | generate | capabilities [<registry-root>]
+  pikit <command> [args...]           a command an installed component adds (listed below, in a project)
   pikit --version
 
 Project commands run in the current directory.`;
 
 /**
  * Commands the former SPEC (§11) planned and pikit does not have yet: where each is specified now (a
- * file of the kit, and what to read there), or `""` when nothing current specifies it.
+ * file of the kit, and what to read there), or `""` when nothing current specifies it. Every command
+ * here, of the `switch` below and of the deployment is in `BUILT_IN_COMMANDS` (manifest.ts), which no
+ * component's command may take (`component-commands.test.ts` checks it).
  */
 const LATER: Record<string, string> = {
   init: "",
@@ -60,6 +65,13 @@ async function main(argv: string[]): Promise<number> {
   if (!Bun.semver.satisfies(Bun.version, `>=${MINIMUM_BUN}`)) {
     throw new CliError(`pikit requires Bun >= ${MINIMUM_BUN}, found ${Bun.version}. Run \`bun upgrade\`.`);
   }
+  // An installed component's command, never one of the CLI's own: its arguments are its, as typed.
+  const component = installedCommand(process.cwd(), argv[0]);
+  if (component !== undefined) return await runComponentCommand(process.cwd(), component, argv.slice(1));
+  // Any other name is unknown, whatever follows it (a component's command elsewhere has flags of its own).
+  const first = argv[0];
+  if (first !== undefined && !first.startsWith("-") && !BUILT_IN_COMMANDS.includes(first)) throw new CliError(`unknown command "${first}"\n\n${USAGE}`, 2);
+
   const { values, positionals } = parseArgs({
     args: argv,
     allowPositionals: true,
@@ -91,7 +103,7 @@ async function main(argv: string[]): Promise<number> {
     return 0;
   }
   if (command === undefined || values.help || command === "help") {
-    console.log(USAGE);
+    console.log(`${USAGE}${componentCommandsUsage(cwd)}`);
     return command === undefined && !values.help ? 2 : 0;
   }
   const one = (what: string): string => {

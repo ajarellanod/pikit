@@ -270,6 +270,33 @@
       "additionalProperties": false,
       "description": "Steps the CLI and the deployment run for this component, each a file of src/pikit/<name>/ exporting a function of the hook's name. `pikit add` records them in pikit.json, by project path."
     },
+    "commands": {
+      "type": "object",
+      "patternProperties": {
+        "^[a-z][a-z0-9]*(-[a-z0-9]+)*$": {
+          "type": "object",
+          "required": [
+            "file",
+            "description"
+          ],
+          "properties": {
+            "file": {
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ts$",
+              "description": "A file of src/pikit/<name>/ exporting `command({ args, config, get, say })`, which resolves with its problems (empty, or nothing, when done). `pikit <command> [args...]` runs it in a child bun, in the project's directory, stdin and stdout inherited: `args` are the arguments after the command's name, as typed; `config()` imports pikit.config.ts when asked and returns this component's config; `get` reads the environment and .env; `say` prints a line. Problems are printed and exit 1. It runs on the machine that runs the CLI, never in the app, so it is not held to the targets."
+            },
+            "description": {
+              "type": "string",
+              "pattern": "^[^\\n]*\\S[^\\n]*$",
+              "description": "One line: what `pikit help` says of it."
+            }
+          },
+          "additionalProperties": false
+        }
+      },
+      "additionalProperties": false,
+      "description": "Commands this component adds to the CLI: name (kebab-case, never one of the CLI's own: `pikit help` lists them) → its file and description. `pikit add` records them in pikit.json, by project path, and refuses a name another installed component declares; `pikit remove` takes them out."
+    },
     "generated": {
       "type": "array",
       "items": {

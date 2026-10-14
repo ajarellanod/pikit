@@ -5,7 +5,8 @@
  *
  *   1. resolve the registry (`builtin`, or a local path) and the component's version and commit
  *   2. read the component's package
- *   3. check its targets, `requires.pikit`, `requires.contracts` and `requires.adapter` (a range it
+ *   3. check its targets, its commands (one owner per name, `checkCommands`), `requires.pikit`,
+ *      `requires.contracts` and `requires.adapter` (a range it
  *      must state is refused when missing, even with `--force`), and that this CLI's kit is not older
  *      than the project's nor outside what an installed component accepts (`checkKit`); warn for each
  *      required capability nothing provides, by what `pikit.config.ts` composes now (`offers.ts`)
@@ -24,7 +25,7 @@
  *   8. list it in `pikit.config.ts` (a component with no default export, a `deployment-*`, is not);
  *      on Cloudflare, also in the Worker's App when its `component.json`'s `apps.worker` says so (C1)
  *   9. append its variables to `.env.example` (a reinstall replaces its block)
- *  10. record the registry, version, commit, kit ranges, file hashes, hooks and the npm packages it added
+ *  10. record the registry, version, commit, kit ranges, file hashes, hooks, commands and the npm packages it added
  *      in `pikit.json`, and keep each file
  *      as installed, its base, in `pikit-bases/` (`bases.ts`)
  *  11. `pikit doctor`, its notes printed (a provider nothing uses)
@@ -36,10 +37,10 @@
 
 import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { stripComments } from "../registry/imports.ts";
+import { hasDefaultExport } from "../registry/imports.ts";
 import { kitRangeProblems } from "../registry/checks.ts";
 import { adapterVersion, contractsVersion, coreVersion } from "../registry/commands.ts";
-import { BOTH_APPS, HOOKS, type Manifest } from "../registry/manifest.ts";
+import { BOTH_APPS, commandProblems, HOOKS, type Manifest } from "../registry/manifest.ts";
 import { APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { BASES_DIR, basePath, unreferencedBases } from "../project/bases.ts";
 import { componentUiFiles, settingsDir, viewDir } from "../project/dashboard.ts";
@@ -380,6 +381,7 @@ export function planInstall(
     );
   }
   checkCompatible(project.targets, manifest);
+  checkCommands(project, manifest);
   warnUnprovided(project, manifest, draft.provided);
   if (draft.provided !== undefined) draft.provided = mergeProvided(draft.provided, providedByManifests([manifest], project.targets));
 
@@ -388,7 +390,7 @@ export function planInstall(
 
   // An app component has a default export; a `deployment-*` does not, and is not listed.
   const entry = files.get(`src/pikit/${name}/index.ts`);
-  if (entry !== undefined && hasDefaultExport(entry)) {
+  if (entry !== undefined && hasDefaultExport(readFileSync(entry, "utf8"))) {
     if (draft.config === undefined) throw new CliError(`${CONFIG_FILE} is missing: ${name} is listed in it`);
     // A `ShapeError` refuses the install here, before a file is copied.
     if (!draft.config.after.includes(`"./src/pikit/${name}/index.ts"`)) {
@@ -471,6 +473,8 @@ export function recordInstall(
     environment: manifest.environment ?? [],
     // What `pikit doctor` and the deployment's `up` run for it, by its project path.
     ...(manifest.hooks !== undefined && { hooks: projectHooks(name, manifest.hooks) }),
+    // What `pikit <command>` runs for it, by its project path.
+    ...(manifest.commands !== undefined && { commands: projectCommands(name, manifest.commands) }),
     // Files a hook rewrites: never reported as the user's edits.
     ...(manifest.generated !== undefined && { generated: manifest.generated.map((file) => `${ownDir(name)}${file}`) }),
     // Where it goes on Cloudflare: `pikit upgrade` rewires the Worker's App only when this changes.
@@ -559,12 +563,33 @@ export function componentFiles(registry: Registry, name: string, project: Projec
   return files;
 }
 
-/** Where a component's own files go; the plan names every file it writes anywhere else. */
 /** A manifest's `hooks` (files of the component's own directory) by project path, in the order they run. */
 function projectHooks(name: string, hooks: NonNullable<Manifest["hooks"]>): NonNullable<InstalledComponent["hooks"]> {
   return Object.fromEntries(HOOKS.flatMap((hook) => (hooks[hook] === undefined ? [] : [[hook, `${ownDir(name)}${hooks[hook]}`]])));
 }
 
+/** A manifest's `commands` (files of the component's own directory) by project path. */
+function projectCommands(name: string, commands: NonNullable<Manifest["commands"]>): NonNullable<InstalledComponent["commands"]> {
+  return Object.fromEntries(Object.entries(commands).map(([command, { file, description }]) => [command, { file: `${ownDir(name)}${file}`, description }]));
+}
+
+/**
+ * Refuses a component whose command is one of the CLI's own (a registry need not be validated), or is
+ * already another component's: installed, or planned before it in the same `add` (the draft has both).
+ * One owner per name; a reinstall or an upgrade of the owner keeps its own.
+ */
+export function checkCommands(project: ProjectManifest, manifest: Manifest): void {
+  const own = commandProblems(manifest);
+  if (own.length > 0) throw new CliError(`${manifest.name}'s component.json: ${own.join("; ")}`);
+  for (const command of Object.keys(manifest.commands ?? {})) {
+    const owner = Object.entries(project.components).find(([other, c]) => other !== manifest.name && c.commands?.[command] !== undefined)?.[0];
+    if (owner !== undefined) {
+      throw new CliError(`${manifest.name} declares the command "pikit ${command}", which ${owner} already declares: a command has one owner, so only one of them can be installed`);
+    }
+  }
+}
+
+/** Where a component's own files go; the plan names every file it writes anywhere else. */
 export function ownDir(name: string): string {
   return `src/pikit/${name}/`;
 }
@@ -777,11 +802,9 @@ export function describePlan({ registry, manifest, files, obsolete }: Plan): voi
   if (devDeps.length > 0) log.info(`  npm (dev): ${devDeps.map(([p, v]) => `${p}@${v}`).join(", ")}`);
   const env = manifest.environment ?? [];
   if (env.length > 0) log.info(`  environment: ${env.map((v) => `${v.name}${v.required ? "" : " (optional)"}`).join(", ")}`);
+  const commands = Object.keys(manifest.commands ?? {});
+  if (commands.length > 0) log.info(`  commands: ${commands.map((command) => `pikit ${command}`).join(", ")}`);
   if (manifest.provides.length > 0) log.info(`  provides: ${manifest.provides.join(", ")}`);
   if (manifest.requires.capabilities.length > 0) log.info(`  requires: ${manifest.requires.capabilities.join(", ")}`);
 }
 
-/** Whether a component's entry point (its source in the registry) has a default export. */
-function hasDefaultExport(entry: string): boolean {
-  return /(^|\n)\s*export\s+default\b/.test(stripComments(readFileSync(entry, "utf8")));
-}

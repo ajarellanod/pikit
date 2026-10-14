@@ -165,6 +165,25 @@ async function checkHooks(componentDir: string, name: string, manifest: Manifest
   return problems;
 }
 
+/** Each of `commands` names a file of the component that exports a function `command`, as a hook's does. */
+async function checkCommandFiles(componentDir: string, name: string, manifest: Manifest): Promise<string[]> {
+  const problems: string[] = [];
+  for (const [command, { file }] of Object.entries(manifest.commands ?? {})) {
+    const path = join(componentDir, "files", "src", "pikit", name, file);
+    if (!existsSync(path)) problems.push(`commands.${command}.file "${file}" is not a file of files/src/pikit/${name}/`);
+    else if (/\.test(-support)?\.ts$/.test(file)) problems.push(`commands.${command}.file "${file}" is a test file`);
+    else {
+      try {
+        const module = (await import(pathToFileURL(path).href)) as Record<string, unknown>;
+        if (typeof module.command !== "function") problems.push(`commands.${command}.file "${file}" does not export a function command`);
+      } catch (error) {
+        problems.push(`commands.${command}.file could not be loaded: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+  }
+  return problems;
+}
+
 /**
  * A `deployment-*` component's `index.ts` exports the functions the CLI calls (`DEPLOYMENT_EXPORTS`):
  * each required one, and each one it exports, as a function; and nothing one letter or a case away
@@ -288,7 +307,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     // Every rule below reads the manifest's fields: a malformed one was reported, and that is all.
     if (schemaProblems(ManifestSchema, manifest).length > 0) continue;
 
-    const scan = checkImports(dir, name, manifest.targets);
+    const scan = checkImports(dir, name, manifest.targets, Object.values(manifest.commands ?? {}).map(({ file }) => file));
     scan.problems.forEach(report);
     checkDependencies(manifest, scan).forEach(report);
     checkDevDependencies(manifest).forEach(report);
@@ -314,6 +333,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
       report(`setup could not be described: ${error instanceof Error ? error.message : String(error)}`);
     }
     (await checkHooks(dir, name, manifest)).forEach(report);
+    (await checkCommandFiles(dir, name, manifest)).forEach(report);
     (await checkDeploymentExports(dir, name)).forEach(report);
     checkGeneratedFiles(dir, name, manifest).forEach(report);
   }

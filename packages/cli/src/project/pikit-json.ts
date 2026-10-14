@@ -76,6 +76,13 @@ export const InstalledComponentSchema = Type.Object(
       ),
     ),
     /**
+     * Its manifest's `commands`, by project path: `pikit <name>` runs the file's `command`
+     * (`component-command.ts`), and `pikit help` lists it with its description. Absent when it declared none.
+     */
+    commands: Type.Optional(
+      Type.Record(Type.String(), Type.Object({ file: Type.String(), description: Type.String() }, { additionalProperties: false })),
+    ),
+    /**
      * Its manifest's `generated`, by project path: files a hook rewrites (tool-mcp's `seed.ts`), which are
      * never the user's edits. Absent when it declared none.
      */
