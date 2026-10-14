@@ -9,7 +9,8 @@ while it is written). Keys and idempotency were decided in the former SPEC §5.
 **Needed by:** nothing required. It is the next channel.
 
 ## What it gives
-A Google Chat app: an agent per space, a conversation per thread or per space, "Thinking…" written
+A Google Chat app: an agent per space, every answer in its message's thread, a conversation per
+thread (or per chat, a setting), "Thinking…" written
 into the answer as the model writes it, markdown drawn as Google Chat text and cards (tables, code,
 images), photos and files read by the agent, a quoted message as context, spaces allowed before they
 are answered, and questions the agent asks with buttons, selects and dialogs, answered in the chat.
@@ -23,7 +24,7 @@ a contract, added here with its first producer and its first consumer.
 | Capability | Here | Contract change |
 |---|---|---|
 | Webhook verified by Google's ID token | the channel's own authentication (`inbound.ts`: not a shared contract) | none |
-| Replies in the message's thread; a thread or the whole space as the conversation | the key the channel builds, a value per space in its config ([threads](threads.md)) | none |
+| Every answer in the message's thread; a thread as the conversation, or the whole chat | the key the channel builds, its `conversations` setting ([threads](threads.md)) | none |
 | An agent per space | `InboundMessage.conversationId` is the space: one `router-rules` rule | none |
 | "Thinking…" placeholder, written as the model writes, edited into the answer | the channel, on `agent.started` and `agent.partial` | **`agent.partial`** |
 | Markdown to Google Chat text, tables and code as cards, 4096-character pieces | the transport's `split` and `send` | none |
@@ -59,11 +60,30 @@ Out of this feature, with why:
 
 **The component.** `channel-google-chat`, kind `channel`, both targets. Several Chat apps are
 instances (`googlechat`, `googlechat:ops`), as channel-telegram's accounts are, each with its own
-endpoint path and secrets. Two halves, as channel-telegram-webhook: the Worker's half verifies and
-hands each event to its conversation; the object's half admits, answers and draws. It requires
-`secrets`, `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv`, `wakeups`,
-`actor.inbox` and `actor.mailbox`, and provides `http.route`; `outbound.queue`, `workspace` and
-`execution` when installed. On a server both halves run in the one App, with `mailbox-local`.
+endpoint path and secrets. A server is a first target, not a port: everything works there and is
+tested there first.
+
+**One code, both targets**, as settings-store does it. The component never reads the target: in
+`start`, `actor.inbox`'s `scope` says where it runs.
+- **A server** (`"all"`, or no `actor.inbox`): the default export is everything, in the one App. Its
+  route verifies the token, then hands the event to the same handler the object runs on Cloudflare,
+  in process: no mailbox, no second App. The CLI installs only the default export on a server, so
+  nothing here may live in the Worker's half alone.
+- **Cloudflare** (`"one"`, each conversation's Durable Object): the Worker's half
+  (`export const worker`, `channel-google-chat-worker`) serves the route, verifies and hands each
+  event to its conversation's object through `actor.mailbox`; the object admits, answers and draws.
+  The default export registers the routes too, where no server serves them.
+
+It requires `secrets`, `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv`
+and `wakeups`, and provides `http.route`; it uses `outbound.queue`, `settings`, `workspace`,
+`execution`, and on Cloudflare `actor.inbox` and `actor.mailbox`, when installed. The Worker's half
+requires `secrets` and `actor.mailbox`, and uses `settings`.
+
+**On a server**, what it runs with: `server-bun` serving the route; `storage-sqlite` under
+`storage.kv`; `wakeups-timers`; `outbound-durable`, so an answer survives a restart (without it an
+answer cut by a restart is lost, as `delivery.ts` says of direct delivery); `workspace-local` for
+files. Google calls an HTTPS URL: `pikit expose` (expose-cloudflare-tunnel) gives one, or the
+operator's own proxy; that URL plus the path is `GOOGLE_CHAT_AUDIENCE`.
 
 **The app.** The assistant has a Chat app of its own, in its own Google Cloud project, never one
 shared with another service: the app's endpoint is this channel's. It is built as a Google Workspace
@@ -93,14 +113,18 @@ ingress for nothing a user sees.
     `service-<project number>@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`, and `email_verified`
     is true;
   - `exp` has not passed.
-- A message, an add, a removal: the Worker hands the event to the conversation's object with
+- A message, an add, a removal, on a server: the route runs the handler in process, which
+  downloads (within a deadline under Google's 30 seconds, a value) and admits, then acknowledges with
+  `{}`, an empty JSON object, once the message is admitted (P5). A failure answers `500`, and Google
+  may send it again. The answer goes by the REST API.
+- The same on Cloudflare: the Worker hands the event to the conversation's object with
   `actor.mailbox.send(key, "google-chat.event", event)`, as channel-telegram-webhook hands
-  `telegram.update`, and acknowledges with `{}`, an empty JSON object, as that channel acknowledges
-  once the hand-off resolves (a failed hand-off answers `500`, and Google may send it again). The
-  object downloads, admits and answers by the REST API.
+  `telegram.update`, and acknowledges with `{}` once the hand-off resolves; the object downloads,
+  admits and answers.
 - A button click needs its answer in the response (a dialog to open, a card to update), within
-  Google's 30 seconds: the Worker asks the object with `actor.mailbox.call(key, "google-chat.click",
-  event)` and returns the action it answers.
+  Google's 30 seconds: on a server the route asks the handler in process; on Cloudflare the Worker
+  asks the object with `actor.mailbox.call(key, "google-chat.click", event)`. Either way it
+  returns the action the handler answers.
 
 **Identity and deduplication.**
 - `InboundMessage.id` is the Google message's `name` (`spaces/AAA/messages/BBB`). Google sends a
@@ -117,21 +141,25 @@ ingress for nothing a user sees.
 **Conversations and routing.**
 - `InboundMessage.conversationId` is the space (`spaces/AAA`): what `router-rules` matches, so an agent
   per space is one rule and needs no `thread` field.
+- Every answer goes to the thread of the message it answers (`thread.name`,
+  `messageReplyOption: REPLY_MESSAGE_OR_FAIL`): a message sent at the top of a chat starts a new
+  thread, and the answer opens it. In spaces, DMs and group chats alike: DMs and group chats have
+  inline threads too.
+- Each thread is a conversation, by default. The `conversations` setting, per instance, says it:
+  `default` (`"thread"`) and `chats`, the chats that are one conversation each
+  (`{ "spaces/AAA": "chat" }`). An operator edits it from the dashboard's Settings (its section,
+  `settings/index.tsx`); its defaults come from the component's config, so without `settings`
+  installed the config holds it. A change applies to the next message: a conversation already going
+  keeps its key.
 - The key is the channel's own (`AdmitOptions.key`, [conversation routing](conversation-routing.md)):
-  `googlechat:spaces/AAA:threads/BBB` when the space's threads are conversations,
-  `googlechat:spaces/AAA` when the whole space is one.
-- The shape comes from the space, never from thread names. In a space (`spaceType` `SPACE`) whose
-  `spaceThreadingState` is `THREADED_MESSAGES` or `GROUPED_MESSAGES`, each thread is a
-  conversation. A DM, a group chat and an `UNTHREADED_MESSAGES` space are one conversation each:
-  DMs and group chats have inline threads too, and Google does not document the thread a DM's
-  messages carry, so going by threads there could make each message a new conversation.
-  `threads: "space"` per space in the channel's config makes a threaded space one conversation.
-  The space's type and threading state come from the event's `space`, or from `spaces.get` when it
-  lacks them, kept in the channel's `storage.kv`.
-- In a space, an answer goes to its thread (`messageReplyOption: REPLY_MESSAGE_OR_FAIL`): the key
-  holds it, or, for a threaded space made one conversation, the thread of the message it answers,
-  kept in `storage.kv`. In a DM, a group chat or an unthreaded space the answer is sent without a
-  thread: Google supports `messageReplyOption` only in named spaces.
+  `googlechat:spaces/AAA:threads/BBB` for a thread, `googlechat:spaces/AAA` for a whole chat. The
+  route builds it, reading the setting: on a server in the one App, on Cloudflare in the Worker's
+  half (settings-store answers in the Worker's App too).
+- In a whole chat the answer still goes to its message's thread: the thread is kept in
+  `storage.kv` under the answer's key, since the conversation's key does not hold it.
+- A chat whose `spaceThreadingState` is `UNTHREADED_MESSAGES` (a meeting's chat, a group chat from
+  before 2022) has no threads: it is one conversation, answered without a thread. The state comes
+  from the event's `space`, or from `spaces.get` when it lacks it, kept in `storage.kv`.
 
 **Access.** Spaces are allowed in the channel's secrets. A space not allowed is a stranger: when the
 app is added to it (`ADDED_TO_SPACE`), and on each message from it, the app answers once that it is
@@ -252,22 +280,29 @@ every other part builds on their types; then the rest in parallel; then one revi
    `@pikit/pi-adapter`, delivery folding parts, runtime-pi emitting `agent.partial` and collecting
    parts, their tests, `docs/contracts.md`, SPEC, the capability catalogue. Gate: the whole suite.
 2. **Then in parallel:**
-   - **Ingress** (Worker half): token verification with a test key pair, event parsing, the hand-off
-     and the click call, stranger replies, the route per instance.
-   - **Admission** (object half): keys and threading, access, `/new`, mention stripping, quoted
+   - **Ingress**: the route per instance, token verification with a test key pair, event parsing,
+     the choice by `actor.inbox`'s scope: in process on a server (its first test), the hand-off and
+     the click call through `actor.mailbox` in the Worker's half on Cloudflare; stranger replies.
+   - **Admission** (the handler, the same code on both targets): keys and threads, the
+     `conversations` setting and its Settings section, access, `/new`, mention stripping, quoted
      messages, attachments (images, text, workspace files), admission.
    - **Transport**: the access token, markdown to text and cards, `split`, both ids, the placeholder
      and its previews, failures, the start-up sweep.
    - **Questions**: `tool-ask-user`, the question part, its cards and dialogs, clicks and answers.
    - **Test harness**: a fake Google Chat API (a `fetch` double: messages, media, spaces, ids
-     refused when repeated), the conformance runs, the workerd lane.
+     refused when repeated), the server lane first (the one App, real HTTP), the conformance runs,
+     then the workerd lane.
 3. **Then:** the component's README (the console steps: a new project, the add-on box left checked,
    the HTTP endpoint URL, the service account), `bun run registry generate` and `validate`, and one
    review of the whole change against this note.
 
 ## Tests
-- `createChannelConformance` (`@pikit/contracts/testing`) and `createLifecycleConformance`, on
-  both halves.
+- **The server lane, first:** an App composed as `pikit add` composes it on a server (the default
+  export only, `server-bun` serving real HTTP, `storage-sqlite`, `wakeups-timers`, `outbound-durable`,
+  `workspace-local`, no `actor.*`): a signed request in, admitted, answered by the fake API, a card
+  clicked; a restart in the middle of an answer, the answer delivered after it.
+- `createChannelConformance` (`@pikit/contracts/testing`) and `createLifecycleConformance`, on the
+  server's App, then on both halves of Cloudflare's.
 - The transport against the fake API: pieces, cards, both ids (a late repeat refused, read, counted
   delivered), the placeholder found by piece `#0` and created when missing, previews throttled, each
   failure classified.
@@ -284,11 +319,13 @@ every other part builds on their types; then the rest in parallel; then one revi
 - The `durable` lane in workerd: the Worker verifies, the object admits, answers and draws.
 
 ## Checked live, once, with the real app
-Before it is called done, with a test project's app: the events of a DM, a group chat and a threaded
-space (whether `space` carries `spaceType` and `spaceThreadingState`); a reply in a DM's inline thread
-and whether the app can answer in it; a `messageId` repeated (the error Google gives) and a
-`requestId` repeated; whether `user.email` and `user.domainId` arrive; a card, a dialog and a form;
-an answer of several pieces; a Drive file refused.
+Before it is called done, with a test project's app, on a server first (`pikit up`, the URL from
+`pikit expose`), then on Cloudflare: the events of a DM, a group chat and a threaded
+space (whether `space` carries `spaceType` and `spaceThreadingState`); the app answering in a
+thread in a DM and in a group chat (Google documents `messageReplyOption` for named spaces only: if
+a DM refuses it, DMs are whole chats until it does); a `messageId` repeated (the error Google gives)
+and a `requestId` repeated; whether `user.email` and `user.domainId` arrive; a card, a dialog and a
+form; an answer of several pieces; a Drive file refused.
 
 ## Pi first
 Nothing in Pi: channels are pikit's (SPEC P1). The images are Pi's `ImageContent`, as
@@ -297,8 +334,8 @@ runtime-pi re-emits; pikit builds no streaming of model calls. `askUser` is a pi
 question needs no task engine, since no run waits for it.
 
 ## Open questions
-- Whether the app can answer in a DM's inline thread (checked live above); until then it answers
-  outside threads in DMs and group chats.
+- Whether Google lets the app answer in a thread in a DM and a group chat (checked live above). If
+  it refuses, those chats are whole chats, answered at the top.
 
 ## Moved from the former SPEC
 The former SPEC §18, "Higher-level components":

@@ -19,7 +19,8 @@ lands in the thread it answers. A later reply can quote an earlier answer.
   ([conversation routing](conversation-routing.md)). A channel with threads keeps `conversationId` the
   chat or space (what routing matches: an agent per space is one `router-rules` rule) and puts the
   thread in the key (`googlechat:spaces/AAA:threads/BBB`) when a thread is its own conversation, a
-  value in the channel's config. [Google Chat](channel-google-chat.md) is the first.
+  setting of the channel (by default each thread; a chat may be one conversation).
+  [Google Chat](channel-google-chat.md) is the first.
 - **Why not `InboundMessage.threadId`.** Only the channel interprets a thread: it builds the key, and
   it finds the thread to answer in from the key (or, for a whole-chat conversation, from what it kept of
   the message it answers). A field every other component would carry and none would read is the
