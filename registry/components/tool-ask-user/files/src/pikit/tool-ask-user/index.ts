@@ -5,10 +5,12 @@
  *
  * - **It never waits for the answer.** The question is a `question` part of the run's answer
  *   (`questionPart` from `@pikit/contracts`, given with `withParts`), and the run ends with it
- *   (`control.terminate`). A channel that draws it (Google Chat: buttons, a dialog) shows it; any other
- *   sends its fallback text. The answer comes back later as an ordinary message whose text says it
- *   ("Answer to …", `answerText`), the same whether a person clicked or typed it. A run that waited
- *   would hold its conversation (a Durable Object) awake for as long as the person takes.
+ *   (`control.terminate`). A channel that draws it shows it; any other sends its fallback text. The
+ *   answer comes back later as an ordinary message. A run that waited would hold its conversation (a
+ *   Durable Object) awake for as long as the person takes.
+ * - **It does not know the drawer** (`@pikit/contracts`' question.ts): what the model is told is the
+ *   outcome only (the person answers with a form or in their own words, later, in a new message),
+ *   never how a channel draws a question or words its answer.
  * - **Its id** is `<conversation id>:<request id>:<tool call id>`: the conversation (`CONVERSATION`),
  *   the request that started the run (`RUN_REQUESTS`, the first; outside a run the call's task id), and
  *   the call (`api.callId`). The answer's text names it, so the model knows which question it answers.
@@ -20,7 +22,7 @@
  */
 
 import { defineComponent } from "@pikit/core";
-import { CONVERSATION, QUESTION_FIELD_KINDS, type Question, type QuestionField, questionPart, questionProblem, RUN_REQUESTS } from "@pikit/contracts";
+import { CONVERSATION, QUESTION_FIELD_KINDS, QUESTION_FIELD_NAME, type Question, type QuestionField, questionPart, questionProblem, RUN_REQUESTS } from "@pikit/contracts";
 import { defineTool, type ToolRegistration, withParts } from "@pikit/pi-adapter/tools";
 import Type, { type Static } from "typebox";
 
@@ -37,7 +39,7 @@ const Field = Type.Object({
     QUESTION_FIELD_KINDS.map((kind) => Type.Literal(kind)),
     { description: "confirm: yes or no. select: one of options. multiselect: any of options. text: free text. date: a day." },
   ),
-  name: Type.String({ pattern: "^[A-Za-z][A-Za-z0-9_-]*$", description: "The answer's key: a letter, then letters, digits, _ or -; unique in the question." }),
+  name: Type.String({ pattern: QUESTION_FIELD_NAME, description: "The answer's key: a letter, then letters, digits, _ or -; unique in the question." }),
   label: Type.String({ minLength: 1, description: "What the person reads." }),
   required: Type.Optional(Type.Boolean({ description: "The answer must give it. Default: optional." })),
   options: Type.Optional(Type.Array(Option, { minItems: 1, description: "The choices, for select and multiselect only." })),
@@ -46,15 +48,15 @@ const Field = Type.Object({
 const Parameters = Type.Object({
   title: Type.String({ minLength: 1, description: "The question, short." }),
   description: Type.Optional(Type.String({ description: "What the person needs to know to answer." })),
-  fields: Type.Array(Field, { minItems: 1, description: "What to answer: one confirm or select field is drawn as buttons." }),
+  fields: Type.Array(Field, { minItems: 1, description: "What to answer: one field or more." }),
 });
 
 export type AskUserArgs = Static<typeof Parameters>;
 
 export const ASK_USER_DESCRIPTION = [
   "Asks the person you are talking to one question, with fields to answer (yes or no, a choice among options, several choices, text, a date), and ends your turn.",
-  "Your turn ends with the question: do not wait for the answer, and write nothing after the call. Their answer arrives later as a new message that starts with 'Answer to' and names the question.",
-  "Ask only what you cannot decide yourself. One confirm or select field is answered with a button; anything else with a form.",
+  "Your turn ends with the question: do not wait for the answer, and write nothing after the call. The person may answer with a form or in their own words; their answer arrives later as a new message.",
+  "Ask only what you cannot decide yourself.",
 ].join("\n");
 
 /** The question `args` ask, with the id of this call. */

@@ -9,7 +9,7 @@
 
 import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, silentLogger, withContextValue } from "@pikit/core";
-import { answerProblem, answerText, CONVERSATION, type QuestionPart, questionPart, RUN_REQUESTS } from "@pikit/contracts";
+import { answerProblem, answerText, CONVERSATION, QUESTION_FIELD_NAME, type QuestionPart, questionPart, questionProblem, RUN_REQUESTS } from "@pikit/contracts";
 import { callTool, runToolCalls } from "@pikit/pi-adapter/execution/testing";
 import { PARTS_DETAIL } from "@pikit/pi-adapter/tools";
 import toolAskUser, { ASK_USER_TOOL, createAskUserTool } from "./index.ts";
@@ -39,6 +39,23 @@ test("its name, its description, and its replay: safe", () => {
   expect(tool.name).toBe(ASK_USER_TOOL);
   expect(tool.replay).toBe("safe");
   expect(tool.description).toContain("ends your turn");
+});
+
+test("what the model is told is the outcome, channel-neutral: never how a channel draws a question or words its answer", () => {
+  const tool = createAskUserTool();
+  expect(tool.description).toContain("The person may answer with a form or in their own words; their answer arrives later as a new message.");
+  // The description and every parameter's: no drawer (buttons, cards, a dialog, a platform), no answer's wording.
+  const told = JSON.stringify([tool.description, tool.parameters]);
+  for (const drawer of [/button/i, /card/i, /dialog/i, /google/i, /Answer to/]) expect(told).not.toMatch(drawer);
+});
+
+test("a field's name is the contracts' pattern (QUESTION_FIELD_NAME), the one questionProblem checks", () => {
+  const name = (tool: ReturnType<typeof createAskUserTool>) =>
+    (tool.parameters as unknown as { properties: { fields: { items: { properties: { name: { pattern: string } } } } } }).properties.fields.items.properties.name.pattern;
+  expect(name(createAskUserTool())).toBe(QUESTION_FIELD_NAME);
+  const asked = (field: string) => questionProblem({ id: "q", title: "T", fields: [{ kind: "text", name: field, label: "L" }] });
+  expect(asked("go_2-b")).toBeUndefined();
+  expect(asked("2go")).toContain("has no name");
 });
 
 test("a call gives the question as a part, its id the conversation, the run's first request and the call, and ends the run", async () => {

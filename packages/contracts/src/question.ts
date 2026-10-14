@@ -76,8 +76,13 @@ export type QuestionValue = boolean | string | string[];
 /** An answer to a question: each field's value by its name; an optional field may be absent. */
 export type QuestionAnswer = Record<string, QuestionValue | undefined>;
 
-/** A field's name: a letter, then letters, digits, `_` or `-`. */
-const FIELD_NAME = /^[A-Za-z][A-Za-z0-9_-]*$/;
+/**
+ * A field's name, as a pattern's source (JSON Schema's `pattern`, a `RegExp`): a letter, then letters,
+ * digits, `_` or `-`. The one definition: `questionProblem` checks it, and an asker's schema (the
+ * tool `askUser`'s parameters) states it.
+ */
+export const QUESTION_FIELD_NAME = "^[A-Za-z][A-Za-z0-9_-]*$";
+const FIELD_NAME = new RegExp(QUESTION_FIELD_NAME);
 /** A date answer. */
 const DATE = /^\d{4}-\d{2}-\d{2}$/;
 
@@ -87,7 +92,7 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
 /**
  * What is wrong with `question` (any value: a model's tool arguments, a part read back from JSON), or
  * `undefined` when it is a question: an id and a title (non-empty text), a description (text) or none,
- * one field or more, each of a known kind, with a unique name (`FIELD_NAME`), a label, `required` a
+ * one field or more, each of a known kind, with a unique name (`QUESTION_FIELD_NAME`), a label, `required` a
  * boolean or absent, and options (one or more, unique non-empty values, each labelled) exactly on
  * `select` and `multiselect`.
  */

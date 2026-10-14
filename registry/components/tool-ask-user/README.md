@@ -36,11 +36,19 @@ long as the person takes.
   Chat: one `confirm` or `select` field as buttons, anything else as a form in a dialog) shows it; any
   other sends its fallback text, which lists the fields and their options and asks for a reply.
 - **The answer is a message.** A click, a submitted form, or a reply typed to the fallback arrives as
-  an ordinary message whose text says it (`answerText`): `Answer to "<title>" (question <id>):` and
-  each field's label and value. It starts a new run, which reads it like any message.
+  an ordinary message. A channel that drew the question writes it with `answerText`
+  (`Answer to "<title>" (question <id>):` and each field's label and value); a reply typed to the
+  fallback is the person's own words. It starts a new run, which reads it like any message.
+- **The model is told the outcome only.** The tool's description says the person may answer with a
+  form or in their own words, and that the answer arrives later as a new message; never how a channel
+  draws a question (buttons, a dialog) or words its answer. The asker does not know the drawer
+  (`@pikit/contracts`' `question.ts`): a channel that draws questions differently, or not at all,
+  changes nothing here.
 - **The question's id** is `<conversation id>:<request id>:<tool call id>`: the conversation, the
-  request that started the run, the call. Unique, and named in the answer's text, so the model knows
-  which question an answer is to.
+  request that started the run, the call. Unique, and named in a drawn answer's text, so the model
+  knows which question an answer is to.
+- **A field's name** is `QUESTION_FIELD_NAME` from `@pikit/contracts` (a letter, then letters,
+  digits, `_` or `-`): the tool's schema states the pattern `questionProblem` checks, one definition.
 - **Replay is `safe`**: a call made again after a crash builds the same part with the same id, and
   sends nothing itself.
 
@@ -61,7 +69,8 @@ is answered once.
 ## Tests
 
 `tool-ask-user.test.ts` (copied with the component): the tool called directly, in a run and outside
-one; the component in an App; a Harness turn (`runToolCalls`) where the call ends the run.
+one; its description and parameters naming no drawer; its field name the contracts' pattern; the
+component in an App; a Harness turn (`runToolCalls`) where the call ends the run.
 `app.test.ts` (in the registry, beside `files/`): runtime-pi runs it, the run ends with the question
 in `AgentResult.parts`, and the answer sent as a message starts a run that reads it.
 

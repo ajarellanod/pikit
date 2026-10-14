@@ -112,6 +112,6 @@ export { answerKey, DeliveryError } from "./outbound.ts";
 export type { AppMessageParts, MessageContent, MessagePart } from "./parts.ts";
 export { foldParts, messagePieces } from "./parts.ts";
 export type { Question, QuestionAnswer, QuestionField, QuestionOption, QuestionPart, QuestionValue } from "./question.ts";
-export { answerProblem, answerText, QUESTION_FIELD_KINDS, questionPart, questionProblem } from "./question.ts";
+export { answerProblem, answerText, QUESTION_FIELD_KINDS, QUESTION_FIELD_NAME, questionPart, questionProblem } from "./question.ts";
 export type { AnswerDelivery, AnswerDeliveryOptions, DeliveryPolicy } from "./delivery.ts";
 export { answerContent, answersOnlyTheDashboard, DASHBOARD_REQUEST_PREFIX, isDashboardRequest, startAnswerDelivery } from "./delivery.ts";
