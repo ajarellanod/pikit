@@ -150,9 +150,11 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
       conversation: outcome.conversation.conversationId,
     });
     if (stored || admitted) {
+      // The live view first, before telling the index (on Cloudflare a call to another object, while the
+      // run, in this object's alarm, may already go on).
+      store.notify(ref.key, { type: "message", id: message.requestId });
       const row = await store.change(ref.key, { activity: at, ...(admitted && { busy: true }) });
       if (row !== undefined) await contracts.changed(row, ctx);
-      store.notify(ref.key, { type: "message", id: message.requestId });
     }
     if (admitted) await contracts.wake(ctx);
     return { requestId: message.requestId, admission: outcome.kind === "duplicate" ? "duplicate" : outcome.admission.kind };

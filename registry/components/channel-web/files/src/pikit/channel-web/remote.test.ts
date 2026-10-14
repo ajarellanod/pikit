@@ -3,8 +3,8 @@
  * the default export on the `durable` target (its runtime a double, its `storage.sql` SQLite), reached
  * through an `actor.mailbox` that calls its `actor.inbox` handlers with JSON copies, as actors-do's
  * RPC does. The Worker's half serves the routes over them; the accounts actor (`channel-web:accounts`)
- * keeps the users' index. The workerd lane runs the same on real Durable Objects (to come, with the
- * accounts).
+ * keeps the users' index. The workerd lane runs the same on real Durable Objects, with the real
+ * accounts (`tests/workerd/test/channel-web.workerd.ts`).
  */
 
 import { afterEach, expect, test } from "bun:test";

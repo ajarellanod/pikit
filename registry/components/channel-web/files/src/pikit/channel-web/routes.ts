@@ -229,13 +229,26 @@ export interface RouteOptions {
   accounts(): Accounts;
   backend(): ChatBackend;
   config: ChannelWebConfig;
-  /** Who may sign up now: the live setting, else the config's. */
-  signUp(ctx: AppContext): Promise<SignUpSettings>;
-  /** Where the conversations are, for the image limits and `ChatConfig.target`: `server`, or `durable` (Cloudflare). */
+  /**
+   * What `GET /chat/api/config` answers, as the App where the accounts are makes it (`chatConfigOf`):
+   * on a server this App; on Cloudflare the accounts actor's, which the Worker asks.
+   */
+  chatConfig(ctx: AppContext): Promise<ChatConfig>;
+  /** Where the conversations are, for the image limits: `server`, or `durable` (Cloudflare). */
   limits(): "server" | "durable";
-  /** Whether the App sends email (`email.send` installed where the accounts are). */
-  email(): boolean;
   assets: Assets;
+}
+
+/**
+ * The page's config, made where the accounts are: their sign-in methods (`config` is that App's), who
+ * may sign up now (`signUp`, the live setting), and whether that App sends email (`email.send` there).
+ */
+export async function chatConfigOf(
+  options: { config: ChannelWebConfig; target: "server" | "durable"; signUp(ctx: AppContext): Promise<SignUpSettings>; email: boolean },
+  ctx: AppContext,
+): Promise<ChatConfig> {
+  const { config, target, email } = options;
+  return { name: config.name, target, methods: methodsOf(config, email), signUp: (await options.signUp(ctx)).mode, email };
 }
 
 /** The sign-in methods the page offers, from the config (a link by email only when the App sends email). */
@@ -290,10 +303,7 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
   pikit.provideKeyed(
     "http.route",
     `GET ${API}/config`,
-    answering(`GET ${API}/config`, async (_request, ctx) => {
-      const email = options.email();
-      return json<ChatConfig>(200, { name: options.config.name, target: options.limits(), methods: methodsOf(options.config, email), signUp: (await options.signUp(ctx)).mode, email });
-    }),
+    answering(`GET ${API}/config`, async (_request, ctx) => json<ChatConfig>(200, await options.chatConfig(ctx))),
   );
 
   // better-auth's own: sign in and out, OAuth callbacks, links, sessions. Its answer as it made it.

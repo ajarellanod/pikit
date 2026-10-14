@@ -26,6 +26,7 @@
  * |---|---|---|
  * | `channel-web.list` | `{ userId, limit, cursor? }` | `ChatPage<ChatConversation>` |
  * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations leave the index |
+ * | `channel-web.config` | `{}` | `ChatConfig`: the page's config as the accounts' App makes it (its methods, its live sign-up mode, whether it sends email) |
  *
  * And one message (`send`, `actor.inbox.handle`), from each conversation's object to the accounts
  * actor: `channel-web.seen` `{ rows: ConversationRow[] }`, each row's newest version.
@@ -34,8 +35,9 @@
  * `denied`, `rejected`, `no_route`) whose code crosses the call.
  */
 
+import type { AppContext } from "@pikit/core";
 import { ActorCallError, type ActorInbox, type JsonValue } from "@pikit/contracts";
-import type { ChatImage } from "./api.ts";
+import type { ChatConfig, ChatImage } from "./api.ts";
 import { type ChatBackend, type ChatRef, conversationOf, type NewMessage, refusal } from "./backend.ts";
 import { isChatId, keyOf, REQUEST_ID } from "./chat.ts";
 import type { ChatStore, ConversationRow } from "./store.ts";
@@ -53,6 +55,7 @@ export const CALL = {
   abort: "channel-web.abort",
   list: "channel-web.list",
   forget: "channel-web.forget",
+  config: "channel-web.config",
 } as const;
 export const LIVE = "channel-web.live";
 export const SEEN = "channel-web.seen";
@@ -148,8 +151,12 @@ export function answerConversationCalls(inbox: ActorInbox, backend: ChatBackend)
   inbox.answerStream(LIVE, async (key, message, ctx) => (await backend.live(refOf(key, message), ctx)) as AsyncIterable<JsonValue>);
 }
 
-/** Registers the users' index's answers over `store` (used in the accounts actor). Call it in `start`. */
-export function answerIndexCalls(inbox: ActorInbox, store: ChatStore): void {
+/**
+ * Registers the users' index's answers over `store`, and the page's config made by `config` (used in
+ * the accounts actor, whose App sends the accounts' email). Call it in `start`.
+ */
+export function answerIndexCalls(inbox: ActorInbox, store: ChatStore, config: (ctx: AppContext) => Promise<ChatConfig>): void {
+  inbox.answer(CALL.config, async (_key, _message, ctx) => json(await config(ctx)));
   inbox.handle(SEEN, async (_key, message) => store.seen(rowsOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {
     const listed = await store.list(text(fieldsOf(message), "userId"), pageOf(message));

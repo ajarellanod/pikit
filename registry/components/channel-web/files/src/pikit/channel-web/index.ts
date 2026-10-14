@@ -42,7 +42,7 @@ import { parseKey } from "./chat.ts";
 import { type AccountSecrets, Config, configProblem, SignUp, type SignUpSettings, secretsOf } from "./config.ts";
 import { answerText, createTransport, DELIVERY, INSTANCE, routeOf } from "./delivery.ts";
 import { provideAdminRoutes } from "./admin-routes.ts";
-import { provideRoutes } from "./routes.ts";
+import { chatConfigOf, provideRoutes } from "./routes.ts";
 import { type ConversationRow, createChatStore } from "./store.ts";
 import { type AccountsWiring, BETTER_AUTH } from "./wiring.ts";
 
@@ -147,7 +147,10 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         return accounts;
       };
 
-      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, signUp, limits: () => limits, email: () => email.get() !== undefined, assets });
+      /** The page's config, as this App's accounts make it (on Cloudflare the accounts actor answers the Worker with it). */
+      const chatConfig = (ctx: AppContext) => chatConfigOf({ config, target: limits, signUp, email: email.get() !== undefined }, ctx);
+
+      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => limits, assets });
       provideAdminRoutes(pikit, {
         auth,
         accounts: accountsNow,
@@ -214,7 +217,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
           limits = "durable";
           tell = (rows, now) => send.send(ACCOUNTS_KEY, SEEN, { rows: rows.map((row) => ({ ...row })) }, now);
           answerConversationCalls(calls, backend);
-          answerIndexCalls(calls, store);
+          answerIndexCalls(calls, store, chatConfig);
           wiring.answer(calls, localAccounts);
           await startDelivery(ctx);
         },

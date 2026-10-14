@@ -10,13 +10,17 @@
  * - `tool`: a tool's name while it runs (`running`), and when it ends (`done`): no arguments, no output.
  * - `message`: a message or an answer was stored, or a message's state changed: read them again.
  *
- * `partial` and `tool` come only while the user has a message not answered yet in the conversation
- * (`store.pending`): a run the operator's own follow-up started streams nothing to the user. Never a
- * transcript entry, a system prompt, a tool's arguments or results, or an operator's note.
+ * `partial` and `tool` come only during a run one of whose inputs is not an operator's (a request id
+ * not `dashboard:`, as `startAnswerDelivery` decides what to deliver), known from the watch's own
+ * `submission` events; for a run whose inputs it did not see (it was going when the view opened),
+ * while the user has a message not answered yet (`store.pending`). A run the operator's own follow-up
+ * started streams nothing to the user, and a fast run is streamed even when its user's message was
+ * stored after it ended. Never a transcript entry, a system prompt, a tool's arguments or results, or an
+ * operator's note.
  */
 
 import { type AppContext, withAbortSignal } from "@pikit/core";
-import type { AgentObserver, ObservedEvent } from "@pikit/contracts";
+import { type AgentObserver, DASHBOARD_REQUEST_PREFIX, type ObservedEvent } from "@pikit/contracts";
 import type { ChatEvent } from "./api.ts";
 import type { ChatStore, StoreNote } from "./store.ts";
 
@@ -102,6 +106,17 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
 
   let busy: boolean | undefined;
   let pending = await store.pending(key);
+  /** The request id of each submission the watch reported, by its id: what a run's inputs are. */
+  const requests = new Map<number, string>();
+  /** Whether the run going is the user's, by its inputs; `undefined` when they are not all known (then `pending`). */
+  let usersRun: boolean | undefined;
+  const runOf = (inputs: unknown): boolean | undefined => {
+    if (!Array.isArray(inputs) || inputs.length === 0) return undefined;
+    const ids = inputs.map((input) => (typeof input === "number" ? requests.get(input) : undefined));
+    if (ids.some((id) => id === undefined)) return undefined;
+    return ids.some((id) => !(id as string).startsWith(DASHBOARD_REQUEST_PREFIX));
+  };
+  const streams = (): boolean => usersRun ?? pending;
   let partial: Assistant | undefined;
   let shown: string | undefined;
   const tools = new Map<string, string>();
@@ -113,7 +128,7 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
       yield { type: "state", busy };
     }
     if ("partial" in next) partial = next.partial;
-    if (!pending) return;
+    if (!streams()) return;
     const text = partial === undefined ? undefined : textOf(partial);
     if (text !== undefined && (text !== shown || next.started === true)) {
       shown = text;
@@ -143,23 +158,32 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
       }
       const event = item.event;
       switch (event.type) {
+        case "submission": {
+          const record = event.record as { id?: unknown; requestId?: unknown } | null;
+          if (typeof record?.id === "number" && typeof record.requestId === "string") requests.set(record.id, record.requestId);
+          break;
+        }
         case "snapshot": {
           const generation = event.generation as { message?: Assistant } | undefined;
           const running = Array.isArray(event.tools) ? (event.tools as { callId?: unknown; name?: unknown; status?: unknown }[]) : [];
+          usersRun = runOf((event.run as { inputs?: unknown } | null | undefined)?.inputs);
           yield* changes({ busy: event.run !== undefined && event.run !== null, partial: generation?.message?.role === "assistant" ? generation.message : undefined });
           const now = new Map(running.filter((tool) => tool.status !== "done" && typeof tool.callId === "string" && typeof tool.name === "string").map((tool) => [tool.callId as string, tool.name as string]));
-          for (const [callId, name] of tools) if (!now.has(callId) && pending) yield { type: "tool", name, state: "done" };
-          for (const [callId, name] of now) if (!tools.has(callId) && pending) yield { type: "tool", name, state: "running" };
+          for (const [callId, name] of tools) if (!now.has(callId) && streams()) yield { type: "tool", name, state: "done" };
+          for (const [callId, name] of now) if (!tools.has(callId) && streams()) yield { type: "tool", name, state: "running" };
           tools.clear();
           for (const [callId, name] of now) tools.set(callId, name);
           break;
         }
         case "run_start":
+          usersRun = runOf(event.inputs);
           yield* changes({ busy: true });
           break;
         case "run_end":
           yield* changes({ busy: false, partial: undefined });
           tools.clear();
+          usersRun = undefined;
+          if (Array.isArray(event.inputs)) for (const input of event.inputs) if (typeof input === "number") requests.delete(input);
           break;
         case "message_start": {
           const message = event.message as Assistant | undefined;
@@ -175,13 +199,13 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
         case "tool_execution_start": {
           const name = typeof event.toolName === "string" ? event.toolName : "tool";
           tools.set(String(event.toolCallId), name);
-          if (pending) yield { type: "tool", name, state: "running" };
+          if (streams()) yield { type: "tool", name, state: "running" };
           break;
         }
         case "tool_execution_end": {
           const name = tools.get(String(event.toolCallId));
           tools.delete(String(event.toolCallId));
-          if (name !== undefined && pending) yield { type: "tool", name, state: "done" };
+          if (name !== undefined && streams()) yield { type: "tool", name, state: "done" };
           break;
         }
         default:

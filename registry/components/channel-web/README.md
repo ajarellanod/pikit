@@ -110,8 +110,10 @@ send it over a channel you trust. Without `email.send`, sending it is yours.
   The sender of each message is `{ channel: "web", id: <user id> }`, so roles by actor see a user, not
   an operator. An operator's follow-up from the dashboard (`dashboard:` request ids) is never
   delivered (`startAnswerDelivery`'s own rule) and streams nothing live: the live view sends the
-  answer as written and the tools' names only while the user has a message not answered yet, and
-  never thinking, tool arguments or results, system prompts or transcript entries (`live.ts`).
+  answer as written and the tools' names only during a run one of whose inputs is the user's (by the
+  request ids the runtime's own events give; a run already going when the view opened, while the user
+  has a message not answered yet), and never thinking, tool arguments or results, system prompts or
+  transcript entries (`live.ts`).
 - **Messages** go through `admitInbound` (the router, `inbound.normalize`, duplicates by request id),
   with their images (at most 4 PNG, JPEG, WebP or GIF, 5 MB each; 1 MB in all on Cloudflare). The
   page may name its request (`web:` then 1 to 118 of `A-Z a-z 0-9 . _ ~ : -`): sent again, it runs
@@ -147,7 +149,15 @@ In `start`, `actor.inbox`'s `scope` says where it runs:
   `channel-web.auth.*` calls (`wiring.ts`). The Worker's half (`export const worker`, config key
   `channel-web-worker`) serves the routes: a call to the conversation's object, the list one call to
   the index, live events a stream from the object, better-auth's routes forwarded as JSON with every
-  `set-cookie`, and the session from the signed cookie cache when it can (no call), else a call.
+  `set-cookie`, and the session from the signed cookie cache when it can (no call), else a call. The
+  page's config (`GET /chat/api/config`) is the accounts actor's (`channel-web.config`, kept 10 s in
+  the Worker): its sign-in methods, the live sign-up mode, and whether its App sends email, so
+  `email.send` goes in the default App only (the accounts actor sends), never in the Worker's.
+
+On Cloudflare one script holds both Apps: channel-web adds about 1.3 MiB to it (265 KiB gzip; better-auth,
+its core, zod, jose, OpenTelemetry's conventions), measured with wrangler 4.143.0 on a Worker of
+runtime-pi, provider-anthropic, admin-api and the platform's components (3.3 MiB, 649 KiB gzip with
+it).
 
 ```ts
 import channelWeb, { worker as channelWebWorker } from "./src/pikit/channel-web/index.ts";
@@ -183,6 +193,16 @@ Content-Security-Policy: same origin only, images also `data:`, `blob:` and `htt
   (no token, a wrong one, no App, no routes, bad arguments).
 - The view and the Settings section compile and bundle with the dashboard (`bun
   scripts/dashboard-build.ts` in the kit).
+- The kit's workerd lane (`tests/workerd/test/channel-web.workerd.ts`): on real Durable Objects
+  (deployment-cloudflare's class) through the Worker's `fetch`, composed as a project's (storage-do,
+  storage-kv-sql, actors-do, runtime-pi with provider-faux, conversations-kv, router-basic,
+  outbound-durable, admin-auth-token, admin-api): better-auth in the accounts actor (its bundle,
+  AsyncLocalStorage, scrypt from `node:crypto`, Web Crypto), sign-up and sign-in with a password, the
+  cookies (`__Secure-` and `Secure` on https only, path `/chat/`), a message and its answer, the live
+  view (`state`, `partial`, `message`), another user's every route on a chat `404`, an operator's
+  follow-up never in the user's messages or live view, the accounts' tables in the accounts actor only;
+  an invitation's link setting a password, a ban refused once the cookie cache expired (the actor asked
+  then); `email.send` in the default App only: the config says so, a magic link signs a new user in, a
+  password sign-up verifies first, an invitation is emailed.
 
-Not covered yet: the workerd lane (real Durable Objects), the page, the view and the Settings
-section in a browser.
+Not covered yet: the page, the view and the Settings section in a browser.

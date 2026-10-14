@@ -71,9 +71,7 @@
         "actor.mailbox"
       ],
       "optional": [
-        "admin.auth",
-        "settings",
-        "email.send"
+        "admin.auth"
       ]
     }
   },
