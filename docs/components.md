@@ -85,18 +85,20 @@ target (K1).
 
 What a component asks of the CLI runs on the machine that configures or deploys, never in the App. A
 hook gets a plain `io` (its config from `pikit.config.ts`, `get(name)` reading the environment and
-`.env`) and resolves with its problems, one line each (SPEC §3.2). `pikit add` records each hook in
+`.env`; a `doctor` hook on Cloudflare also its Worker half's config, `workerConfig`) and resolves with its problems, one line each (SPEC §3.2). `pikit add` records each hook in
 `pikit.json` by project path; only recorded hooks run.
 
 | Hook | Called by | `io` | Notes |
 |---|---|---|---|
-| `doctor` | `pikit doctor` (so `pikit dev`), once the App composes | `config`, `get` | may reach the network, writes nothing; may also return notes |
+| `doctor` | `pikit doctor` (so `pikit dev`), once the App composes | `config`, `workerConfig` (`<name>-worker` in the Worker's App, on Cloudflare only), `get` | may reach the network, writes nothing; may also return notes |
 | `beforeDeploy` | the deployment's `up`, before it builds or bundles | `config`, `get`, `write`, `say` | `write(file, text)` writes only files of its own directory; a problem deploys nothing. `up` runs it instead of `doctor` |
 | `afterDeploy` | the deployment's `up`, once the new version answers (C8); on Docker once the containers are healthy, with `PIKIT_PUBLIC_URL` (none without it) | `url`, `config`, `get`, `say` | a problem fails `up` but the version stays deployed |
 
 In the registry today: `tool-mcp` has `doctor` and `beforeDeploy` (`deploy.ts` writes `seed.ts`,
 listed in `generated`); `channel-telegram-webhook` has `afterDeploy` (sets the Telegram webhook);
 `expose-cloudflare-tunnel` has `doctor` (no Cloudflare API token in `.env`);
+`channel-google-chat` has `doctor` (on Cloudflare, its Worker half's config and the default export's
+agree on what both read);
 `admin-api` lists `dashboard-files.ts` in `generated` (written by the dashboard's build, not a hook).
 
 A `generated` file is never reported as modified by `pikit doctor`, is kept as the project has it by

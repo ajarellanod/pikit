@@ -6,8 +6,9 @@
  * cannot be reached, or lacks a tool config names) declares a check in its `component.json`,
  * `"hooks": { "doctor": "doctor.ts" }`, a file of its own exporting `doctor(io)`, as it declares
  * `afterDeploy` (SPEC §3.2). `pikit add` records it in `pikit.json` by project path; the CLI calls it
- * and knows nothing about what it checks. It gets its config from `pikit.config.ts` and a reader of
- * `.env` and the environment, and resolves with its problems (empty when it is fine), or with
+ * and knows nothing about what it checks. It gets its config from `pikit.config.ts` (on Cloudflare
+ * also its Worker half's, `<name>-worker` in `workerConfig`, which a component whose two halves must
+ * agree compares) and a reader of `.env` and the environment, and resolves with its problems (empty when it is fine), or with
  * `{ problems, notes }` when it also has information to give (a note stops nothing). It may reach the
  * network, and writes nothing: a project without such a component starts no process for this.
  *
@@ -33,6 +34,12 @@ export const UNLESS_BEFORE_DEPLOY = "--unless-before-deploy";
 export interface DoctorIO {
   /** The component's config in `pikit.config.ts`: the default export's, else the Worker's. */
   config: Readonly<Record<string, unknown>>;
+  /**
+   * Its Worker half's config (`<name>-worker` in the Worker's App, `workerConfig`; `{}` when it has no
+   * entry), when `pikit.config.ts` exports a Worker's App (`worker`, a Cloudflare project); absent on a
+   * server. For a component whose halves must be configured alike (channel-google-chat).
+   */
+  workerConfig?: Readonly<Record<string, unknown>>;
   /** A variable of the environment or `.env` (the environment wins), or `undefined`. */
   get(name: string): string | undefined;
 }
@@ -63,8 +70,10 @@ async function run(projectDir: string, unlessBeforeDeploy: boolean): Promise<{ p
   const notes: string[] = [];
   for (const { component: name, file } of doctorHooks(projectDir, { unlessBeforeDeploy })) {
     const config = module.default?.config?.[name] ?? module.worker?.config?.[name];
+    const half = module.worker?.config?.[`${name}-worker`];
     const io: DoctorIO = {
       config: typeof config === "object" && config !== null ? (config as Record<string, unknown>) : {},
+      ...(module.worker !== undefined && { workerConfig: typeof half === "object" && half !== null ? (half as Record<string, unknown>) : {} }),
       // `runScript` passes the project's environment: `.env` under the process's own.
       get: (variable) => process.env[variable] || undefined,
     };

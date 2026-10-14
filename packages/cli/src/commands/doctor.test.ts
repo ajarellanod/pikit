@@ -60,6 +60,32 @@ test("a component's own check: its problems fail doctor, named after it, with it
   expect(run.err).toContain("checked: the config says so");
 });
 
+test("a component's check gets its Worker half's config (`<name>-worker` in the Worker's App) on Cloudflare, and none on a server", async () => {
+  const halves =
+    'export async function doctor(io: { config: Record<string, unknown>; workerConfig?: Record<string, unknown> }) {\n  return [io.workerConfig === undefined ? "no worker config" : `worker says ${String(io.workerConfig.fail)}, objects say ${String(io.config.fail)}`];\n}\n';
+  const server = await runCli(["doctor"], project(halves));
+  expect(server.err).toContain("checked: no worker config");
+
+  const cloudflare = project(halves);
+  writeFileSync(
+    join(cloudflare, "pikit.config.ts"),
+    [
+      'import { defineApp, defineComponent } from "@pikit/core";',
+      'import checked from "./src/pikit/checked/index.ts";',
+      "",
+      'const checkedWorker = defineComponent({ name: "checked-worker", config: { type: "object", properties: { fail: { type: "string" } } } as never, setup() {} });',
+      "",
+      'export default defineApp({ components: [checked], config: { checked: { fail: "thread" } } });',
+      "",
+      'export const workerConfig = { "checked-worker": { fail: "chat" } };',
+      "",
+      "export const worker = defineApp({ components: [checkedWorker], config: workerConfig });",
+      "",
+    ].join("\n"),
+  );
+  expect((await runCli(["doctor"], cloudflare)).err).toContain("checked: worker says chat, objects say thread");
+});
+
 test("pikit up refuses to deploy when a component's check reports a problem, and deploys once it reports none", async () => {
   const dir = project(REPORTS);
   const refused = await runCli(["up"], dir);

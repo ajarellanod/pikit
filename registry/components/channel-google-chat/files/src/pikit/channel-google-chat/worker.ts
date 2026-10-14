@@ -10,7 +10,8 @@
  *
  * It requires `secrets` and `actor.mailbox`, and uses `settings`. It has no `storage.kv`: whether a
  * space has threads is kept in memory, per isolate. Its config (`workerConfig`) is `WorkerConfig`, the
- * same values as the default export's (apiBase, jwksUrl, instances, conversations): keep them equal.
+ * same values as the default export's (apiBase, jwksUrl, instances, conversations): `pikit doctor`
+ * (so `pikit dev` and `pikit up`) fails while they differ (doctor.ts).
  *
  * `component.json`'s `apps.worker` names this export (`worker`): `pikit add` puts it in
  * `export const worker` of pikit.config.ts, as `channel-google-chat-worker`. On a server it is not

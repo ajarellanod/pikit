@@ -229,7 +229,7 @@ export const ManifestSchema = Type.Object(
             Type.String({
               pattern: OWN_FILE,
               description:
-                "A file of src/pikit/<name>/ exporting `doctor({ config, get })`, which resolves with its problems (empty when fine), or with `{ problems, notes }` when it also has information to give (notes never stop anything). `pikit doctor` (so `pikit dev`) calls it once the app composes, with this component's config in pikit.config.ts and a reader of .env and the environment; `pikit up` skips it when the component has a `beforeDeploy`, which checks the same right before the build. It may reach the network; it writes nothing.",
+                "A file of src/pikit/<name>/ exporting `doctor({ config, workerConfig, get })`, which resolves with its problems (empty when fine), or with `{ problems, notes }` when it also has information to give (notes never stop anything). `pikit doctor` (so `pikit dev`) calls it once the app composes, with this component's config in pikit.config.ts (`config`; on Cloudflare also its Worker half's, `workerConfig`: `<name>-worker` in the Worker's App) and a reader of .env and the environment; `pikit up` skips it when the component has a `beforeDeploy`, which checks the same right before the build. It may reach the network; it writes nothing.",
             }),
           ),
           beforeDeploy: Type.Optional(

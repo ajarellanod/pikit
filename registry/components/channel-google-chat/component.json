@@ -72,6 +72,9 @@
       ]
     }
   },
+  "hooks": {
+    "doctor": "doctor.ts"
+  },
   "settings": "settings",
   "dependencies": {
     "@pikit/contracts": "0.0.0",
