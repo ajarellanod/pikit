@@ -409,7 +409,8 @@ test("live: a user's message changing state is a message event, at its run's end
   expect(await events.take(1)).toEqual([{ type: "message", id: sent.requestId }]);
   await c.runtime.end(key, [sent.requestId], { kind: "failed" });
   expect(await events.take(1)).toEqual([{ type: "message", id: sent.requestId }]);
-  expect((await messagesOf(c, "ana", id))[0]).toMatchObject({ id: sent.requestId, state: "failed" });
+  // By id: two messages of one millisecond are in either order.
+  expect((await messagesOf(c, "ana", id)).find((message) => message.id === sent.requestId)).toMatchObject({ state: "failed" });
   client.abort();
   await events.reader.cancel();
 });

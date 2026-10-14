@@ -268,10 +268,11 @@ test("the repository's presets resolve: telegram is http with channel-telegram",
   expect(checkPresets(DEFAULT_REGISTRY)).toEqual([]);
   const r = openRegistry(DEFAULT_REGISTRY);
   expect(r.preset("telegram")).toEqual(r.preset("http", ["channel-telegram"]));
-  expect(r.slots("http")[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram", "channel-telegram-webhook"]);
+  expect(r.slots("http")[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram", "channel-telegram-webhook", "channel-web"]);
   // A server project is not offered the webhook; Cloudflare has neither the poller nor an HTTP Worker half.
-  expect(r.slots("http", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram"]);
-  expect(r.slots("http", ["durable"])[0]?.options.map((o) => o.name)).toEqual(["channel-telegram-webhook"]);
+  // The chat page (channel-web) runs on both.
+  expect(r.slots("http", ["server"])[0]?.options.map((o) => o.name)).toEqual(["channel-http", "channel-telegram", "channel-web"]);
+  expect(r.slots("http", ["durable"])[0]?.options.map((o) => o.name)).toEqual(["channel-telegram-webhook", "channel-web"]);
   // Several channels at once; the features each target offers, none installed already.
   expect(r.slots("telegram")[0]).toMatchObject({ multiple: true, defaults: ["channel-telegram"] });
   expect(r.preset("telegram", ["channel-telegram", "channel-http"]).filter((c) => c.startsWith("channel-"))).toEqual(["channel-telegram", "channel-http"]);
