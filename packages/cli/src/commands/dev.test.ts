@@ -139,6 +139,26 @@ test("with no model provider installed yet (no adapter either), there is nothing
   expect(existsSync(join(dir, "dev-ran"))).toBe(true);
 }, 60_000);
 
+test("on a server (the entrypoint under bun --watch), dev builds each UI project at start: a fresh project serves its page with no edit", async () => {
+  const dir = project("faux/echo", true);
+  const own = join(dir, "src", "pikit", "deployment-fake");
+  rmSync(join(own, "index.ts"));
+  // The app: waits for the page's module the build writes, then exits (2 if it never comes).
+  writeFileSync(
+    join(own, "main.ts"),
+    'for (let i = 0; i < 300; i++) {\n  if ((await Bun.file("src/pikit/channel-web/chat-files.ts").text()).includes("built")) process.exit(0);\n  await Bun.sleep(50);\n}\nprocess.exit(2);\n',
+  );
+  mkdirSync(join(dir, "src", "pikit", "channel-web"), { recursive: true });
+  writeFileSync(join(dir, "src", "pikit", "channel-web", "chat-files.ts"), "export const CHAT_FILES = {};\n");
+  mkdirSync(join(dir, "src", "chat"), { recursive: true });
+  writeFileSync(join(dir, "src", "chat", "package.json"), JSON.stringify({ name: "chat", private: true, scripts: { build: "bun build.ts" } }));
+  writeFileSync(join(dir, "src", "chat", "build.ts"), 'await Bun.write("../pikit/channel-web/chat-files.ts", "export const CHAT_FILES = {}; // built\\n");\n');
+
+  const started = await pikit(["dev"], dir);
+  expect(started.out).toContain("src/chat: bun run build");
+  expect(started.code).toBe(0);
+}, 60_000);
+
 test("an agent on a model that needs no credentials (provider-faux) starts; an installed provider no agent uses is not checked", async () => {
   const dir = project("faux/echo", true);
   const started = await pikit(["dev"], dir);

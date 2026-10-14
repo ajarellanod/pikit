@@ -60,6 +60,29 @@ async function until(check: () => boolean, ms = 10_000): Promise<void> {
   }
 }
 
+test("with atStart, pikit dev's watcher builds every UI project once before any change; without it, none", async () => {
+  const dir = tree({ "src/chat/package.json": "{}", "src/chat/src/app.tsx": "1", "src/dashboard/package.json": "{}", "src/dashboard/src/main.tsx": "1" });
+  await Bun.sleep(300);
+  const builds: string[] = [];
+  const idle = watchUiProjects(dir, async (_project, ui) => void builds.push(ui));
+  await Bun.sleep(600);
+  idle.close();
+  expect(builds).toEqual([]);
+
+  const watcher = watchUiProjects(dir, async (_project, ui) => void builds.push(ui), { atStart: true });
+  try {
+    await until(() => builds.length === 2);
+    await Bun.sleep(600);
+    expect(builds.sort()).toEqual(["src/chat", "src/dashboard"]);
+    // And again on a change, as without it.
+    writeFileSync(join(dir, "src/chat/src/app.tsx"), "2");
+    await until(() => builds.length === 3);
+    expect(builds[2]).toBe("src/chat");
+  } finally {
+    watcher.close();
+  }
+}, 30_000);
+
 test("pikit dev's watcher builds a UI project again when its files change, never for what its build writes", async () => {
   const dir = tree({ "src/chat/package.json": "{}", "src/chat/src/app.tsx": "1", "src/chat/index.html": "<html>", "src/pikit/channel-web/chat-files.ts": "" });
   const builds: string[] = [];

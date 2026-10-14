@@ -103,8 +103,8 @@ module is empty and `/admin/` says no dashboard is built. It is listed in admin-
 
 Every deploy builds it: deployment-docker's Dockerfile in a stage of its own (`ui`), deployment-cloudflare's
 `wrangler.jsonc` `build.command` (`bun install --frozen-lockfile && bun run build` in it) whoever runs
-wrangler. A project without `src/dashboard/` builds nothing. `pikit dev` builds it again when its files
-change (and the app reloads with the new module); `bun run dev` in `src/dashboard/` serves it with hot
+wrangler. A project without `src/dashboard/` builds nothing. `pikit dev` builds it at start and again when
+its files change (and the app reloads with the new module); `bun run dev` in `src/dashboard/` serves it with hot
 reload on `http://localhost:5173/admin/` against `PIKIT_URL`.
 
 ### Other UI projects

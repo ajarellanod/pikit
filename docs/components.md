@@ -131,8 +131,8 @@ files module, as admin-api serves the dashboard ([dashboard.md](dashboard.md#bui
   of both. `pikit ui on` and `off` never touch it.
 - **Every deploy builds it**: any folder of `src/` with a `package.json` (`src/pikit` aside) is a UI
   project, and deployment-docker's image and deployment-cloudflare's `build.command` build each one
-  before they bundle; a build that fails stops the deploy. `pikit dev` builds it again when its files
-  change. `.gitattributes` marks every `src/pikit/*/*-files.ts` as generated.
+  before they bundle; a build that fails stops the deploy. `pikit dev` builds it at start and again when
+  its files change. `.gitattributes` marks every `src/pikit/*/*-files.ts` as generated.
 
 ### Commands
 

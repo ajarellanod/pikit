@@ -13,7 +13,8 @@
  *   (its `bun install` rewrites it). The project's `tsc` and `bun test` skip it: `pikit add` lists it in
  *   `tsconfig.json`'s `exclude` and `bunfig.toml`'s `pathIgnorePatterns`, `pikit remove` takes it out
  *   (`syncUiExclusions`), as the starter lists `src/dashboard`.
- * - **`pikit dev`** builds one again when its files change (`watchUiProjects`).
+ * - **`pikit dev`** builds one again when its files change (`watchUiProjects`), and each once at start on
+ *   a server (wrangler's build command does it on Cloudflare), so a fresh project serves its pages.
  */
 
 import { existsSync, type FSWatcher, readdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from "node:fs";
@@ -152,7 +153,7 @@ export function removeUiLeftovers(projectDir: string, target: string): string[] 
 
 /** Builds the UI project at `dir` (`bun run build` there), its output on this terminal; whether it succeeded. */
 export async function buildUiProject(projectDir: string, dir: string): Promise<boolean> {
-  log.step(`${dir} changed: bun run build`);
+  log.step(`${dir}: bun run build`);
   const child = Bun.spawn([process.execPath, "run", "build"], { cwd: confinedPath(projectDir, dir), stdin: "ignore", stdout: "inherit", stderr: "inherit" });
   const ok = (await child.exited) === 0;
   if (!ok) log.warn(`${dir}: its build failed (were its packages installed? \`bun install\` in ${dir}/): the app serves its last build`);
@@ -163,9 +164,14 @@ export async function buildUiProject(projectDir: string, dir: string): Promise<b
  * `pikit dev`: builds each UI project again when one of its files changes, never for what its build
  * makes (`node_modules/`, `dist/`), one build at a time per project. Its build writes its component's
  * module, which the running app imports, so the app reloads with it. Not the whole of `src/`: a watcher
- * there would also watch every UI project's `node_modules/`.
+ * there would also watch every UI project's `node_modules/`. With `atStart`, it also builds each once
+ * at start: a project fresh from `pikit add` (its module empty) serves its page without an edit first.
  */
-export function watchUiProjects(projectDir: string, build: (projectDir: string, dir: string) => Promise<unknown> = buildUiProject): { close(): void } {
+export function watchUiProjects(
+  projectDir: string,
+  build: (projectDir: string, dir: string) => Promise<unknown> = buildUiProject,
+  options: { atStart?: boolean } = {},
+): { close(): void } {
   const watchers: FSWatcher[] = [];
   const timers = new Set<ReturnType<typeof setTimeout>>();
   for (const dir of uiProjects(projectDir)) {
@@ -201,6 +207,7 @@ export function watchUiProjects(projectDir: string, build: (projectDir: string, 
     for (const entry of readdirSync(root, { withFileTypes: true })) {
       if (entry.isDirectory() && !BUILT.has(entry.name)) watchers.push(watch(join(root, entry.name), { recursive: true }, changed));
     }
+    if (options.atStart === true) void run();
   }
   return {
     close() {

@@ -14,7 +14,9 @@
  * (`deployment-cloudflare`: `wrangler dev`), or else its process entrypoint, `src/pikit/<name>/main.ts`,
  * with Bun's `--watch` and `.env` loaded (`deployment-docker`). Either way it builds a UI project again
  * when its files change (`watchUiProjects`: the dashboard, a component's `src/chat/`), so the app
- * reloads with the module that build writes.
+ * reloads with the module that build writes. With the entrypoint it also builds each once at start,
+ * alongside the app (which reloads with what the build writes): wrangler's build command does that for
+ * its own `dev`, and two builds of one project at once would collide.
  */
 
 import { existsSync } from "node:fs";
@@ -172,7 +174,7 @@ export async function dev(projectDir: string): Promise<number> {
   const forward = (signal: NodeJS.Signals) => () => child.kill(signal);
   process.on("SIGINT", forward("SIGINT"));
   process.on("SIGTERM", forward("SIGTERM"));
-  const ui = watchUiProjects(projectDir);
+  const ui = watchUiProjects(projectDir, undefined, { atStart: true });
   try {
     return await child.exited;
   } finally {
