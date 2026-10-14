@@ -50,11 +50,12 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [subagents](subagents.md) | ⭐ | Delegation to helpers (Pi's) and to other agents (pikit's) | No |
 | [voice](voice.md) | ⭐ | Voice notes in, transcribed; voice notes out | No |
 | [channel-google-chat](channel-google-chat.md) | | Google Chat by webhook, an agent per space | No |
-| [agent-folders](agent-folders.md) | | An agent is its directory: `agent.ts` (what it may use), `SYSTEM.md`, `AGENTS.md`, skills, per-channel text, workspace seed; one generated index for both targets | No |
+| [agent-folders](agent-folders.md) | | Each agent a folder (`agent.ts`, `SYSTEM.md`, per-channel texts, skills) and the skills catalog as folders: the component `agents-folders`, `pikit agents` writes the one file the App lists | No |
 | [building-components](building-components.md) | | How a component is made, by a person or an AI agent; what is missing to make it the easy path | Yes: the bases are for building on (SPEC P1) |
 | [channel-context](channel-context.md) | | A directory, a prompt and tools per channel, from `ConversationRef.channel` (built); `prepare` already does prompt and tools | No |
 | [cloudflare-conversation-index](cloudflare-conversation-index.md) | | A global list of conversations on Cloudflare | Open: the dashboard and resuming on Cloudflare |
 | [codemode](codemode.md) | | The model writes a script that calls its tools: pi-durable 1.2's codemode and `tool_search` extensions as components (Cloudflare needs a sandbox Worker) | No |
+| [component-commands](component-commands.md) | | An installed component adds `pikit <name>` (declared in `component.json`, recorded in `pikit.json`), as the deployment component's `up` and the hooks already are | No; agent folders' `pikit agents` |
 | [config-files](config-files.md) | | YAML values and profiles, read by the CLI | No |
 | [conversation-routing](conversation-routing.md) | | Decided: a conversation is one chat of one channel; its key is never rewritten | No |
 | [deployment-celld](deployment-celld.md) | | The `durable` target on your own machines (celld, self-hosted Durable Objects): scale out without Cloudflare | No; it should come, as the self-hosted way to scale out |

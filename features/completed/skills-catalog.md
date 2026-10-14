@@ -5,8 +5,8 @@
 **Status:** built: the keyed capability `agent.skill` (`packages/contracts/src/agent.ts`), skills by
 name in `AgentDefinition.skills`, `DirectoryAgent.skills` and runtime-pi's overrides, checked by
 runtime-pi at start (a code agent) or when used (a live one), offered in the dashboard (agents-live's
-Agents, router-basic's Agent). Still open: a catalog that fills itself from `src/skills/`
-([agent folders](../agent-folders.md)), and the questions below.
+Agents, router-basic's Agent). The catalog fills itself from `src/skills/` with
+[agent folders](../agent-folders.md) (`pikit agents`). Still open: the questions below.
 
 **Needed by:** nothing required. [Skills hub](../skills-hub.md) and [learned skills](../learned-skills.md)
 write into the catalog.

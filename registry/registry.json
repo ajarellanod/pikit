@@ -28,6 +28,15 @@
       ],
       "path": "components/admin-proposals"
     },
+    "agents-folders": {
+      "version": "0.0.0",
+      "description": "Your agents and skills from folders (src/agents/<name>/, src/skills/<name>/): `pikit agents` writes src/extensions/agents.ts from them, and doctor fails while it is out of date.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/agents-folders"
+    },
     "agents-live": {
       "version": "0.0.0",
       "description": "Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live.",

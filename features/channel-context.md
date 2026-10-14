@@ -6,8 +6,8 @@
 recorded by `conversations.registry` and by the runtime, with its conformance case ("a conversation
 keeps the channel it was created with") and runtime-pi's test (a run sees it, in `prepare` and after a
 restart). Its first user is built too: `workspace-local`'s `per: "channel"` (below). A prompt
-and tools per channel need no component (`prepare`); a prompt from files waits for
-[agent folders](agent-folders.md).
+and tools per channel need no component (`prepare`); a prompt per channel from files is
+[agent folders](agent-folders.md)' `channels/<channel>.md` (built, through `prepare`).
 
 **Needed by:** nothing required.
 
@@ -40,8 +40,9 @@ Telegram).
   });
   ```
 
-  A prompt that is data (edited live, or a file per channel, [agent folders](agent-folders.md)) is an
-  agent extension's system prompt section instead: sections run in the conversation's scope, so one
+  A file per channel is [agent folders](agent-folders.md)' `channels/<channel>.md`, which the generated
+  agent appends the same way, in `prepare`. A prompt that is data edited live is an agent extension's
+  system prompt section instead: sections run in the conversation's scope, so one
   reads `context.value(CONVERSATION)?.channel` and returns that channel's text.
 - **A directory per channel is `workspace-local`'s option** (built), not a new capability:
   `per: "agent"` (the default) or `"channel"`, `<root>/<agent>/<channel>/`, a channel instance's `:`

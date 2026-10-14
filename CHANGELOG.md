@@ -129,7 +129,9 @@ there.
   and a tool on `api.env` uses `execution` (checked by `registry validate`). `execution-local` (its
   commands run the image's plain git: no built-in, no token),
   `workspace-local` (a directory per agent under `execution`'s, or per channel of each agent with
-  `per: "channel"`, with its variables and shell),
+  `per: "channel"`, with its variables and shell), `agents-folders` (each agent a folder of
+  `src/agents/`, with its `SYSTEM.md`, channel texts and skills, and the skills catalog in `src/skills/`:
+  `pikit agents` writes `src/extensions/agents.ts`, doctor fails while it is out of date),
   `execution-do` (files in the object's SQL, a shell without processes, `git`, `node` in QuickJS;
   pi-durable 1.0.3's environment: positional and directory readers, argv `exec`, no `watch`).
 - Health: `health-registry` (server and durable): a degraded component, or a non-essential one down,
@@ -255,6 +257,11 @@ there.
   `configure.ts` and `doctor`, `beforeDeploy` and `afterDeploy` hooks, which run on the machine that
   configures or deploys, never in the app. `pikit add` installs a component's README beside its
   code (`src/pikit/<name>/README.md`).
+- Component commands: a component declares `commands` in `component.json` (`pikit agents`), `add`
+  records them in `pikit.json` (one owner per name; never one of the CLI's own), and `pikit <name>
+  [args…]` runs the component's `command(io)` in the project, its arguments as typed; `pikit help`
+  lists them. `doctor` says a component is missing from `pikit.config.ts` only when it is an app
+  component (its `index.ts` has a default export), as `add` lists it.
 - `doctor` warns when a config value looks like a secret (pointing to `secrets`), and prints the
   config redacted.
 - `configure` and `up` check credentials only for the model providers the agents name, and reach

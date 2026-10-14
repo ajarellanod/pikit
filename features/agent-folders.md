@@ -3,13 +3,12 @@
 **Public appeal:** — (pi-hive's `agents/{name}/`: `system-prompt.md`, `skills/`, `extensions/`,
 `context/`, each found by convention)
 
-**Specified:** no. Today an agent is `src/agents/<name>/agent.ts` (`defineAgent`, its prompt a
-string in it), registered by hand in the project's `src/extensions/agents.ts`
-(`provideKeyed("agent.definition", …)`), and a skill is imported and passed by hand
-(`defineSkill(text)`, `packages/contracts/src/skill.ts`).
+**Specified:** this note; built as the component `agents-folders` (its name's kind is `agents`, as
+agents-live's), the first user of
+[component commands](component-commands.md) (`pikit agents`).
 
-**Needed by:** nothing required. [Channel context](channel-context.md) and the
-[skills catalog](completed/skills-catalog.md) (built) use it.
+**Needed by:** nothing required. It fills the [skills catalog](completed/skills-catalog.md) and the
+per-channel prompt of [channel context](channel-context.md) from files.
 
 ## What it gives
 What an agent may do is written in one place, and what it knows sits next to it, as files:
@@ -17,61 +16,74 @@ What an agent may do is written in one place, and what it knows sits next to it,
 ```
 src/agents/support/
   agent.ts                  # what it may do: model, tools, extensions, skills by name, steward
-  SYSTEM.md                 # its system prompt
-  AGENTS.md                 # optional: context appended to it (conventions, who it serves)
+  SYSTEM.md                 # optional: its system prompt
   channels/telegram.md      # optional: appended when the conversation is Telegram's
-  skills/review/SKILL.md    # optional: skills of this agent only
-  context/                  # optional: files its workspace starts with
+  channels/telegram.ops.md  # the instance telegram:ops (":" written ".", as workspace-local does)
+  skills/notes/SKILL.md     # optional: skills of this agent only
+src/skills/
+  review/SKILL.md           # the project's catalog (agent.skill): agents name "review"
 ```
 
-Adding an agent is adding a folder; nothing is registered by hand. An agent without a folder entry
-keeps today's form: `agent.ts` alone, its prompt in it.
+Adding an agent is adding a folder and running `pikit agents`; adding a skill is adding a folder of
+`src/skills/` and naming it in the agents that should know it.
 
 ## How it fits pikit
-- **What it may do stays TypeScript.** `agent.ts` keeps `defineAgent`'s allow-lists (`tools`,
-  `extensions`, and skills by name: the [skills catalog](completed/skills-catalog.md)): installing
-  a tool, an extension or a skill gives no agent anything until it names it, and the runtime refuses to
-  start on a name nothing provides. A YAML file would lose both checks ([config files](config-files.md)
-  is undecided and holds values, never strategies).
-- **The texts are files, read where the App is built, not where it runs.** Cloudflare has no project
-  files at run time, so a server-only `readFile` at setup would split the targets. One index for both:
-  `src/agents/index.ts`, generated from the folders, imports each text `with { type: "text" }` (the
-  Text rule `deployment-cloudflare` already has for `.md`) and provides one `agent.definition` per
-  folder: `defineAgent({ ...agent, systemPrompt: SYSTEM + AGENTS, skills: [...] })`. It replaces
-  `src/extensions/agents.ts`. The index is generated and committed; `pikit doctor` fails when it is
-  stale (a folder added, a file removed), so an App never runs other agents than its folders say.
-- **One source per field.** An `agent.ts` that sets `systemPrompt` while its folder has `SYSTEM.md`
-  is refused, saying which to keep.
-- **Skills of the folder** are `defineSkill(text, { name: <its folder> })`; on a server their
-  `location` is the folder's path in the deployed image, so the scripts they name run there
-  (`deployment-docker`'s image copies the project, `COPY . .`); on Cloudflare a skill is its text only, as `skill.ts` says.
-- **`channels/<channel>.md`** is appended for that channel's conversations: an extension section that
-  reads `CONVERSATION`'s `channel` ([channel context](channel-context.md)), installed by the index for
-  the agents that have such files.
-- **`context/`** seeds the agent's workspace: copied into its directory the first time the workspace
-  makes it, never over a file the agent changed. That is `workspace-local`'s (a `seed` per agent),
-  server only; on Cloudflare `execution-do` would seed its object's files the same way.
-- **Live agents stay data** ([agents-live](../registry/components/agents-live/README.md)): an operator's
-  agent is a name, a prompt and allow-lists in the dashboard, not a folder.
-- **It is source**, so the steward changes it as any source: a proposal, approved, deployed (SPEC §6).
+- **A component, not the CLI.** Everything that is not the kernel is source the project owns (MANIFESTO
+  §4): `pikit add agents-folders` copies the generator into `src/pikit/agents-folders/`, where it is read
+  and edited like any component; a project that wants another layout edits it, and one that does not
+  want it never installs it (§5). It adds `pikit agents` ([component commands](component-commands.md))
+  and a `doctor` hook. No new contract: what it writes provides `agent.definition` and `agent.skill`,
+  which exist and are the project's to provide.
+- **Folders in, one plain file out.** `pikit agents` writes `src/extensions/agents.ts`, the project
+  component `pikit.config.ts` already lists (the starter's hand-written one, replaced): one import per
+  `agent.ts`, the texts of the folders in it as strings, and one `agent.definition` per folder and one
+  `agent.skill` per catalog skill. Following the imports from `pikit.config.ts` still shows everything
+  that runs (§9): the generated file is that list, readable and reviewed in a diff like any source.
+- **Texts inlined, not imported.** A `.md` imported `with { type: "text" }` needs a `declare module
+  "*.md"` (TypeScript 7.0 does not type it), and two components declaring it fail `tsc` (TS2300:
+  extension-pikit-self declares it). Strings in the generated file need no declaration, no bundler
+  rule, and are the same on a server and on Cloudflare.
+- **Stale is loud, never fixed behind your back.** The `doctor` hook generates in memory and compares:
+  a file that differs fails `pikit doctor`, so `pikit dev` and `pikit up` stop before they start, naming
+  `pikit agents`. Nothing regenerates at deploy: what the operator approved in a diff (SPEC §6, a
+  steward's proposal includes the regenerated file) is what runs.
+- **One source per field.** `agent.ts` with a `systemPrompt` and a `SYSTEM.md` beside it is refused when
+  the App starts, naming both; so is a folder whose `agent.ts` names another agent.
+- **Channel texts** go through `prepare`, which knows the conversation's channel
+  (`ConversationRef.channel`): the agent's own `prepare` first, then the channel's text appended to the
+  system prompt it gives. An operator's prompt override (runtime-pi's settings) replaces the whole
+  prompt, channel text included, as it replaces what `prepare` gives.
+- **Skills.** A folder's `skills/<name>/SKILL.md` is the agent's own (`defineSkill`, in its `skills`);
+  `src/skills/<name>/SKILL.md` is the catalog, which an agent names in `agent.ts` (`skills: ["review"]`).
+  On a server a skill whose folder holds more than its `SKILL.md` gets its `location`, the folder's path
+  where the project runs (`fileURLToPath(new URL(…, import.meta.url))`: deployment-docker runs the
+  project's source), so the scripts it names run there; on Cloudflare a skill is its text only.
+- **Removing it** (`pikit remove agents-folders`) leaves `src/extensions/agents.ts` as it was last
+  generated: plain code that needs nothing of the component, kept from then on by hand (§7).
+- **Live agents stay data** ([agents-live](../registry/components/agents-live/README.md)): an
+  operator's agent is not a folder.
 
 ## Pi first
-Pi's coding agent already reads these names: `SYSTEM.md` replaces its system prompt, `AGENTS.md` is
-appended as context, skills are `SKILL.md` folders (the Agent Skills format), and packages ship them
-(`pi-coding-agent`'s README, "Context Files" and "Skills"). pikit takes the names and the format, not
-the loader: Pi's reads the disk where it runs, which Cloudflare cannot. pi-durable has no skills nor
-context files; pikit's runtime adds both (`packages/pi-adapter/src/agent.ts`).
+Pi's coding agent reads `SYSTEM.md` (it replaces its system prompt) and Agent Skills folders
+(`SKILL.md`), which pikit's runtime already reads as `defineSkill`. pikit takes the names and the
+format, not the loader: Pi's reads the disk where it runs, which Cloudflare cannot. `AGENTS.md` is left
+out on purpose: a coding agent working in `src/agents/support/` reads an `AGENTS.md` there as its own
+instructions, so the agent's context lives in `SYSTEM.md`.
 
 ## Tests
-- The generator: a folder gives its definition (prompt, context, skills, channel files); a folder
-  without `SYSTEM.md` keeps `agent.ts`'s prompt; both is refused; a skill whose folder name differs
-  from its `name` is refused (`defineSkill`'s check); output is stable (same folders, same file).
-- `pikit doctor`: a stale index fails, naming the folder.
-- The App: runtime-pi's tests with a generated index, on both targets (workerd for `durable`).
+- The generator: a folder gives its definition (prompt, channel texts, own skills); `src/skills/` gives
+  the catalog; a folder without `agent.ts` and unsafe folder names are problems; the output is stable
+  (same folders, same text) and inlines texts as strings; on a server a skill with files gets a
+  location, on Cloudflare none.
+- The generated file in a real App: the prompt from `SYSTEM.md`, a channel's text appended for its
+  conversations only (after the agent's own `prepare`), `SYSTEM.md` beside a `systemPrompt` refused, a
+  folder named after another agent refused, the catalog provided as `agent.skill`.
+- The hooks: `pikit agents` writes the file and says so; `doctor` passes when current and fails, naming
+  the command, when a folder changed.
 
 ## Open questions
-- Where the generator lives: a `pikit agents` command, a step of `pikit dev` and `pikit up`, or both.
-- Whether `extensions/` per agent (pi-hive's) has a place: an extension is a component today, named by
-  agents; an agent-private one could be a file the index provides under the agent's own name.
-- `AGENTS.md` beside the project's own `AGENTS.md` (the one for the developer's AI agent): the name
-  clashes only in meaning; another name (`CONTEXT.md`) would avoid confusing the two.
+- `context/`, files an agent's workspace starts with: a `seed` of workspace-local, copied the first
+  time it makes an agent's directory, server only.
+- `pikit new` offering agent folders in its features step, as it offers agents from the dashboard.
+- `extensions/` per agent (pi-hive's): an extension is a component today; an agent-private one could be
+  a file the generated component provides under the agent's name.

@@ -20,8 +20,8 @@ may use.
 
 | pi-hive | pikit today | Where it goes |
 |---|---|---|
-| Agents in `agents.yaml`, `agents/<name>/` by convention (prompt, skills, extensions, context) | `defineAgent` per agent (allow-lists of tools and extensions), agents-live for the dashboard's | [agent folders](agent-folders.md) |
-| Skills per agent (symlinks into a shared `.agents/skills/`) | built: the project's catalog (`agent.skill`), each agent names its skills, live agents and overrides too | [skills catalog](completed/skills-catalog.md); filled from folders: [agent folders](agent-folders.md) |
+| Agents in `agents.yaml`, `agents/<name>/` by convention (prompt, skills, extensions, context) | built: `agents-folders`, each agent a folder (`agent.ts` its allow-lists, `SYSTEM.md`, channel texts, skills), `pikit agents` writes the App's file; agents-live for the dashboard's | [agent folders](agent-folders.md); `context/` and `extensions/` still open |
+| Skills per agent (symlinks into a shared `.agents/skills/`) | built: the project's catalog (`agent.skill`) from `src/skills/`, each agent names its skills, live agents and overrides too | [skills catalog](completed/skills-catalog.md), [agent folders](agent-folders.md) |
 | `tools` / `builtin_tools` per agent | built: an agent has the tools it names (`tool-*`, `tool-mcp`) | — |
 | Roles: bash and path rules (`agent-roles.yaml`) | `extension-house-rules` (tools by name, by sender) | [policy-tools](policy-tools.md) |
 | `isolated_workspace` per space, `context/` copied in | `workspace-local`, a directory per agent; `ConversationRef.channel` built | [channel context](channel-context.md), [agent folders](agent-folders.md) |
@@ -48,7 +48,7 @@ may use.
 | A developer agent that changes the platform | the steward, a proposal approved in the dashboard (SPEC §6) | [self-improvement](self-improvement.md) |
 
 ## How it fits pikit
-- **Agents first**: [agent folders](agent-folders.md), the [skills catalog](completed/skills-catalog.md) (built) and
+- **Agents first** (built): [agent folders](agent-folders.md), the [skills catalog](completed/skills-catalog.md) and
   [channel context](channel-context.md) make pi-hive's agents expressible: each agent a folder, what it
   may use named in it, what it knows next to it. The contract that tells channels apart is built.
 - **Then the daily work**: [scheduler](scheduler.md) (routines and followups), [memory](memory.md),
