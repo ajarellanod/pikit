@@ -1,6 +1,7 @@
 # Skills catalog: skills by name, like tools
 
-**Public appeal:** — (pi-hive links a shared `.agents/skills/<name>` into each agent's `skills/`)
+**Public appeal:** — (skills shared by agents: one `.agents/skills/<name>` linked into each agent's
+`skills/`)
 
 **Status:** built: the keyed capability `agent.skill` (`packages/contracts/src/agent.ts`), skills by
 name in `AgentDefinition.skills`, `DirectoryAgent.skills` and runtime-pi's overrides, checked by

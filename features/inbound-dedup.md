@@ -5,9 +5,11 @@
 **Specified:** specified (the design, the former SPEC §5's "Inbound deduplication is not core", is
 kept below verbatim; the component's row moved from the former SPEC §18)
 
-**Needed by:** nothing required today. The first webhook channel whose platform retries needs it
-(Google Chat). `channel-telegram` by long polling does not: a redelivered update is the same request,
-which the conversation recognises as a duplicate.
+**Needed by:** nothing required today. A channel needs it only when something it does before
+admission must not happen twice. `channel-telegram` by long polling does not: a redelivered update is
+the same request, which the conversation recognises as a duplicate. Nor does
+[Google Chat](channel-google-chat.md): a redelivered event carries the same message `name` (its
+request id), and the channel sends nothing to the space before admission.
 
 ## What it gives
 A platform that redelivers a webhook (a retry, a timeout on its side) gets one message into the

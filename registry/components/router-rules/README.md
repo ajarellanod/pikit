@@ -58,8 +58,9 @@ and to an existing one after a reset (`/new`).
 Rules are values. Choosing the agent another way (from the chat itself, by content) is a different
 router component, not a config key here.
 
-**Planned:** a `thread` field, once channels set `InboundMessage.threadId`. Until then a rule with
-`thread` is invalid config.
+**No `thread` field.** A channel with threads keeps `conversation` the chat or space and puts the
+thread in the conversation's key (features/threads.md): an agent per space is one rule, whatever the
+thread. A rule with `thread` is invalid config, as any field it does not know.
 
 ## Config
 

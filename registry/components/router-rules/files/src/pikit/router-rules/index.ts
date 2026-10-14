@@ -10,8 +10,8 @@
  * Rules are values, not strategies (MANIFESTO, principle 8): choosing the agent from the chat itself is another
  * component. A rule matches on `channel` (an instance, `telegram:support`, or a kind, `telegram`,
  * which matches every account of it), `conversation` and `actor`; a rule with none of them matches
- * everything. `thread` waits for `InboundMessage.threadId`: until then a rule naming it is invalid
- * config rather than a rule that silently matches every thread.
+ * everything. There is no `thread`: a channel keeps `conversationId` the chat or space and puts the
+ * thread in its key (features/threads.md), so a rule naming it is invalid config, as any unknown field.
  *
  * A `deny` rule decides `{ agent: "", access: "deny" }`: `RouteDecision.agent` is required, and a
  * denied message has no agent. `admitInbound` never reads it for a deny; the channel refuses the

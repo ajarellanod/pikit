@@ -177,7 +177,7 @@ test("an invalid rule is rejected by config validation; no rules at all is valid
   expect(invalid([{ channel: "telegram" }])).toThrow("invalid config");
   expect(invalid([{ agent: "support", deny: true }])).toThrow("invalid config");
   expect(invalid([{ deny: false }])).toThrow("invalid config");
-  // An unknown match field (a typo, or `thread` before it exists) is not a catch-all.
+  // An unknown match field (a typo, or `thread`, which is the channel's key) is not a catch-all.
   expect(invalid([{ chanel: "telegram", agent: "support" }])).toThrow("invalid config");
   expect(invalid([{ thread: "t1", agent: "support" }])).toThrow("invalid config");
   expect(invalid([{ channel: "", agent: "support" }])).toThrow("invalid config");

@@ -6,8 +6,8 @@ OpenClaw and Hermes both handle media in chats.
 **Specified:** partly (the shape was decided in the former SPEC §5, "Rich content", kept below
 verbatim; the code is not built)
 
-**Needed by:** nothing required. [Interaction](interaction.md) and [approvals](approvals.md) draw
-their questions as `choice` parts.
+**Needed by:** nothing required. [Approvals](approvals.md) (`askUser`, Pi extensions' questions,
+decisions) draw their questions as parts.
 
 ## What it gives
 Images, files and buttons in both directions, on every channel: drawn where the platform can, as
@@ -26,6 +26,12 @@ text where it cannot.
     where a SQL row is at most 2 MB, C7). Until then an image is stored inline in the transcript;
   - a tool that produces a file as a part of the answer.
 - Absent: text only, as today; a part folds into its fallback.
+- Decided with [Google Chat](channel-google-chat.md), its first producer: a channel's images reach
+  the model by `InboundMessage.images` (`AgentImage`), which `admitInbound` passes to
+  `AgentRequest.images`. `attachments` and `storage.blob` stay for files that must be kept.
+- What a platform draws from markdown (Google Chat's cards for tables and code, image cards for
+  markdown images) is the channel's transport, not a part. Parts are for what another component
+  produces and every channel must draw or fold: a question, a file.
 
 ## Pi first
 Pi's messages carry images (`ImageContent`), and the model sees them. Inbound messages go to Pi as
@@ -39,7 +45,8 @@ messages. pikit adds download and upload per platform, and storage. A PDF become
 
 ## Moved from the former SPEC
 The former SPEC §5, verbatim (its code already has `OutboundMessage`, `ChannelTransport` and
-`InboundMessage`, without these fields):
+`InboundMessage`, without these fields; its `interaction-*` and `features/interaction.md` are now
+[approvals](approvals.md)):
 
 **Rich content.** `[decision]` for the shape; `[planned]` for the code, which arrives with the first
 component that produces a part (the first channel that draws cards, or the first `interaction-*`,

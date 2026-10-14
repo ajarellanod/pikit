@@ -23,7 +23,7 @@ their own chat, and the sender is in.
   pairing request with a short code in `storage.sql`, and tells the owner; the approved actors are
   its records, per channel instance.
 - The owner answers with a command ([slash commands](slash-commands.md)) or a button
-  ([interaction](interaction.md), [approvals](approvals.md)).
+  ([approvals](approvals.md)).
 - A denied sender is told, never left without an answer (the `denied` outcome,
   `packages/contracts/src/inbound.ts`).
 - Absent: each channel keeps its own allowlist.

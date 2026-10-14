@@ -1,7 +1,7 @@
 # Agent folders: an agent is its directory
 
-**Public appeal:** — (pi-hive's `agents/{name}/`: `system-prompt.md`, `skills/`, `extensions/`,
-`context/`, each found by convention)
+**Public appeal:** — (an agent as a folder: `agents/{name}/` with `system-prompt.md`, `skills/`,
+`extensions/`, `context/`, each found by convention)
 
 **Specified:** this note; built as the component `agents-folders` (its name's kind is `agents`, as
 agents-live's), the first user of
@@ -89,5 +89,5 @@ instructions, so the agent's context lives in `SYSTEM.md`.
 - `context/`, files an agent's workspace starts with: a `seed` of workspace-local, copied the first
   time it makes an agent's directory, server only.
 - `pikit new` offering agent folders in its features step, as it offers agents from the dashboard.
-- `extensions/` per agent (pi-hive's): an extension is a component today; an agent-private one could be
+- `extensions/` per agent: an extension is a component today; an agent-private one could be
   a file the generated component provides under the agent's name.

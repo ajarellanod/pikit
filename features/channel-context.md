@@ -1,6 +1,6 @@
 # Channel context: a directory, a prompt and tools per channel
 
-**Public appeal:** — (pi-hive's `isolated_workspace`, a directory per chat space)
+**Public appeal:** — (an isolated workspace, a directory per chat space)
 
 **Specified:** the contract is built: `ConversationRef.channel` (`packages/contracts/src/agent.ts`),
 recorded by `conversations.registry` and by the runtime, with its conformance case ("a conversation
@@ -49,7 +49,7 @@ Telegram).
   written `.` (`telegram:ops` → `telegram.ops/`). A conversation with no channel recorded (a ref made
   by hand, a test) works in the agent's directory. A channel that is not a safe directory name is
   refused, as an agent's is, never cleaned up. `"conversation"` (one directory per conversation,
-  pi-hive's per space) would name it by a hash of the key, which hashes the key without reading it.
+  per space in a chat with spaces) would name it by a hash of the key, which hashes the key without reading it.
 - **Order, not isolation**: the same caveat as workspace-local's own. `bash` can `cd ..` into another
   channel's directory; isolation is [sandboxed execution](sandboxed-execution.md)'s.
 - **Tests** (workspace-local's, built): two channels of one agent get two directories, a conversation

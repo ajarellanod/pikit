@@ -1,41 +1,77 @@
-# Approvals
+# Approvals: questions to a person, answered in the chat
 
 **Public appeal:** ⭐ The agent asks a person before a risky action and waits for the answer in the
 chat. Hermes has command approval; OpenClaw approves requests from the chat or its CLI.
 
-**Specified:** partly (moved from the former SPEC §18; the former §4.5 named the `approvals`
-capability)
+**Specified:** partly (moved from the former SPEC §18, whose §4.5 named the `approvals` capability,
+and from the former SPEC §6.2b, the questions from extensions, which was the `interaction` note and is
+merged here: both sections are kept below verbatim)
 
 **Needed by:** nothing required directly. Self-improvement needs a human's approval of every
 self-change (SPEC §6); whether that approval is this component or the git host's review is open
 below. The dashboard answers approvals only when this exists (SPEC §5).
+[Google Chat](channel-google-chat.md)'s phase 2 draws its questions.
 
 ## What it gives
-A decision the agent cannot take alone is recorded, shown to a person where they can answer it, and
-resumed when they answer, minutes or days later, across restarts and deploys. The lifecycle is
-deterministic: proposed → approved/rejected → executed → verified, with reminders, escalation when
-it stalls, and expiry.
+Something the agent cannot decide alone ("allow this `rm -rf`?", "which of these three?", "approve
+this spend?") goes to a person where they can answer it, with buttons, a select, a form or plain text,
+and the work resumes with the answer, a minute or days later, across restarts and deploys. Three kinds
+of asker, one mechanism:
+
+- **`askUser`**, a tool: the agent asks what it needs to go on.
+- **Pi's extensions** asking their user (`ctx.ui.select` / `confirm` / `input`, Pi's
+  `permission-gate`), answered from the chat, unmodified.
+- **Decisions** with a lifecycle: proposed → approved/rejected → executed → verified, with reminders,
+  escalation when it stalls, and expiry; approval by rule, or after a veto window, is a component's
+  policy.
+
+## Decisions
+- **One contract, `approvals`.** A question answered now and a decision answered in days differ only
+  in their deadline, a value of each question. The split into `interaction` (an answer now) and
+  `approvals` (days) came from runs that waited in the worker's memory and died with it. On pi-durable a
+  run waits durably (its tasks, `sleep(until)`, below), and on Cloudflare a wait in memory does not
+  survive an evicted Durable Object, so every question waits the same durable way.
+- **Not `proposals`.** `proposals` (SPEC §6, `packages/contracts/src/proposals.ts`) is the agent's
+  change to itself: a branch an operator reviews in the dashboard or on the git host, deployed when
+  approved. What is approved there is a diff, by an operator; here it is a question, by the person in
+  the conversation (or a role), in the chat. Whether a self-change's approval is also an `approvals`
+  decision is open below.
+- **What is asked is shared vocabulary, in `@pikit/contracts`.** Who asks, who draws the question and
+  who waits for the answer are components that must not know each other, and the question travels in
+  the kit's delivery. A question carries a `fallback` text; a channel draws what it can (`draws`,
+  [rich content](rich-content.md)) and sends the rest as text, and a text answer comes back as an
+  ordinary message.
+- **The askers are components on it**: a tool `askUser`, the adapter's `ui` for Pi's extensions, and
+  decision components with their policy. Absent, nothing waits for a person: there is no `askUser`,
+  extensions keep a no-op UI (`hasUI: false`), and `permission-gate` blocks.
 
 ## How it fits pikit
-- Components: `approvals-sql` on `storage.sql` (server) and `approvals-workflows` on Cloudflare
-  Workflows, which the former SPEC §9.2 named for "anything that waits > 15 min" (an alarm gets 15
-  minutes of wall clock, C4). The kind `approvals` is new: a naming decision (`KINDS` in
-  `packages/cli/src/registry/checks.ts`).
-- Capability `approvals` (`ApprovalStore`), its conformance suite written first.
-- It binds a decision to the message that carries it by reading `outbound.queue`'s `receipts` feed
+- Capability `approvals` (`ApprovalStore`), its conformance suite written first. Providers:
+  `approvals-sql` on `storage.sql` (server); on Cloudflare, Workflows (which the former SPEC §9.2 named
+  for "anything that waits > 15 min": an alarm gets 15 minutes of wall clock, C4) or the Durable
+  Object's own storage with `wakeups`, to decide. The kind `approvals` is new: a naming decision
+  (`KINDS` in `packages/cli/src/registry/checks.ts`).
+- With `approvals` installed, the adapter gives extensions `hasUI: true` and a `ui` backed by it.
+- It binds a question to the message that carries it by reading `outbound.queue`'s `receipts` feed
   and `answerKey` (`Feed`, SPEC K3; `packages/contracts/src/outbound.ts`). The answer comes back as
-  an `InboundMessage` with `replyTo` to a `choice` part ([rich content](rich-content.md)).
-- A tool that waits for a decision is `replay: "never"`, and the decision is keyed by
+  an `InboundMessage` with `replyTo` to the question's part ([rich content](rich-content.md)).
+- A tool that waits for an answer is `replay: "never"`, and the question is keyed by
   `${conversationId}:${runId}:${toolCallId}`.
-- Absent, nothing waits for a person. A question that needs an answer now is
-  [interaction](interaction.md), not an approval.
 
 ## Pi first
 Pi's durable runtime has durable tasks with phases, waits (`sleep(until)`), memos and an abort
-protocol (`pico-v5.md` §5): a run can wait days for a decision with no task engine in pikit. pikit
+protocol (`pico-v5.md` §5): a run can wait days for an answer with no task engine in pikit. pikit
 builds only the surface (where the question goes, how the answer comes back) and the record of
-decisions across conversations. `pi-durable` 1.0 ships these tasks, and the kit runs on it
+questions across conversations. `pi-durable` 1.0 ships these tasks, and the kit runs on it
 (`features/completed/pi-durable-migration.md`, which leaves open how its tasks map onto approvals).
+
+Pi's `ctx.ui.select` / `confirm` / `input` / `notify` are how an extension asks, and Pi's own RPC mode
+already answers them from a client (`docs/rpc-extension-ui.md` of `pi-coding-agent`): pikit answers
+that API from a chat and adds no question API of its own for extensions (`askUser` is the agent's, a
+tool). The dashboard (SPEC §5) is another place to answer: RPC's dialog records
+(`extension_ui_request` / `extension_ui_response`) are the shape to follow for its card, as for a
+chat. Running unmodified Pi coding-agent extensions was dropped with the move to pi-durable: whether
+pi-durable's own extensions have that API is to check.
 
 ## Open questions
 - Is the approval of a self-change (SPEC §6) an `approvals` decision, or the git host's
@@ -44,6 +80,10 @@ decisions across conversations. `pi-durable` 1.0 ships these tasks, and the kit 
   plus a cross-session index (as `agent.submissions` does for messages)?
 - Who may answer: the conversation's actor, or a role ([policy tools](policy-tools.md),
   [pairing](pairing.md))?
+- The vocabulary: Pi's `select`, `confirm` and `input`, or a form of several fields (`select`,
+  `multiselect`, `text`, `confirm`, `date`), which Google Chat draws as cards and dialogs.
+- What the run sees when a deadline passes (`undefined`, as with no UI).
+- Several questions in flight in one conversation.
 
 ## Moved from the former SPEC
 The former SPEC §18, "Higher-level components":
@@ -51,3 +91,33 @@ The former SPEC §18, "Higher-level components":
 | Component | What it encodes |
 |---|---|
 | `approvals` | Deterministic decision lifecycle: proposed → approved/rejected → executed → verified, with retries, reminders, stalled escalation, TTL/abandonment, and **delivery-time binding** of a decision to the message/thread where a human can answer it (a decision created by a scheduled job cannot know its answer surface until the result is sent). It binds by reading `outbound.queue`'s receipts (§4.8, §5). |
+
+The former SPEC §6.2b, verbatim (section numbers and S3 are the former SPEC's and ROADMAP's; §18 is
+now `features/`). Its separate `interaction` capability and its wait in the worker's memory are
+superseded by the decisions above:
+
+**Questions from extensions, in the chat.** `[planned]` (tier B), with the first `interaction-*`
+component. Pi's `ctx.ui.select` / `confirm` / `input` / `notify` are how an extension asks its user
+something. pikit answers them in the conversation's chat rather than inventing an `askUser` of its
+own, so an unmodified extension that asks (Pi's `permission-gate`) works from Telegram:
+
+```ts
+interface Interaction {           // capability `interaction`; runtime-pi uses it optionally
+  ask(conversation: ConversationRef, question: Question, ctx: Context): Promise<string | undefined>;
+  notify(conversation: ConversationRef, text: string, level: "info" | "warning" | "error", ctx: Context): Promise<void>;
+}
+
+type Question =
+  | { kind: "select"; title: string; options: string[] }
+  | { kind: "confirm"; title: string; message: string }
+  | { kind: "input"; title: string; placeholder?: string };
+```
+
+- With `interaction` installed, the adapter gives extensions `hasUI: true` and a `ui` backed by it.
+  Without it they get today's no-op UI (absence, S3), and `permission-gate` blocks as it does now.
+- A question wants an answer now: the run waits for it, with a deadline, and the question waits in
+  the worker's memory. If the process dies the run dies with it, and the resumed run asks again.
+  An answer that may take days is not a question: it is a decision recorded by a component
+  (`approvals`, §18) that resumes the work when the answer arrives.
+- The question goes out as a message with a `choice` part, and the answer comes back with `replyTo`
+  (§5, "Rich content").
