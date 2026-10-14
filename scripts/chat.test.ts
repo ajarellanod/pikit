@@ -190,35 +190,65 @@ describe("live events", () => {
   const fold = (actions: Action[], from: LiveState = INITIAL): LiveState => actions.reduce(reduce, from);
   const event = (value: Extract<Action, { type: "event" }>["event"]): Action => ({ type: "event", event: value });
 
-  test("the state follows a run: busy, the answer as written, the tools running, then the answer kept until the messages have it", () => {
+  test("the state follows a run: busy, the answer as written, the tools running, then the answer kept until the messages have the stored answer its message event named", () => {
     const running = fold([
       { type: "connected" },
       event({ type: "state", busy: true }),
-      event({ type: "partial", text: "" }),
+      event({ type: "partial", text: "", requests: ["web:r1"] }),
       event({ type: "tool", name: "websearch", state: "running" }),
       event({ type: "tool", name: "fetch", state: "running" }),
       event({ type: "tool", name: "websearch", state: "done" }),
-      event({ type: "partial", text: "Hel" }),
-      event({ type: "partial", text: "Hello" }),
+      event({ type: "partial", text: "Hel", requests: ["web:r1"] }),
+      event({ type: "partial", text: "Hello", requests: ["web:r1"] }),
     ]);
-    expect(running).toMatchObject({ connected: true, busy: true, partial: "Hello", tools: ["fetch"], ended: [], changes: 0 });
+    expect(running).toMatchObject({ connected: true, busy: true, partial: "Hello", requests: ["web:r1"], tools: ["fetch"], ended: [], changes: 0 });
 
-    const stored = fold([event({ type: "message", id: "a1" }), event({ type: "state", busy: false })], running);
-    expect(stored).toMatchObject({ busy: false, partial: undefined, tools: [], ended: [{ text: "Hello", at: 1 }], changes: 1 });
-    expect(liveTexts(stored, [])).toEqual({ ended: ["Hello"], partial: undefined });
-    // A read that has the answer shows it: the live copy goes.
-    expect(liveTexts(stored, ["Hello"])).toEqual({ ended: [], partial: undefined });
-    expect(fold([{ type: "read", changes: 1, texts: ["Hello"] }], stored).ended).toEqual([]);
-    // A read begun before it was stored keeps it; one begun after a later change drops it (its run failed).
-    expect(fold([{ type: "read", changes: 1, texts: [] }], stored).ended).toHaveLength(1);
-    expect(fold([{ type: "read", changes: 2, texts: [] }], stored).ended).toEqual([]);
+    // The run ends; its user's message is answered (a message event): the live text stays, whatever the read says.
+    const ended = fold([event({ type: "state", busy: false }), event({ type: "message", id: "web:r1" })], running);
+    expect(ended).toMatchObject({ busy: false, partial: undefined, tools: [], ended: [{ text: "Hello", requests: ["web:r1"] }], changes: 1 });
+    const answeredOnly = fold([{ type: "read", messages: [{ id: "web:r1", role: "user", state: "answered" }] }], ended);
+    expect(liveTexts(answeredOnly, ["web:r1"])).toEqual({ ended: ["Hello"], partial: undefined });
+
+    // Its answer is stored: the event names it and the request it answers; a read with it replaces the live text.
+    const stored = fold([event({ type: "message", id: "s1:web:r1#0", answers: "web:r1" })], answeredOnly);
+    expect(stored.ended).toEqual([{ text: "Hello", requests: ["web:r1"], answer: "s1:web:r1#0" }]);
+    expect(liveTexts(stored, ["web:r1"])).toEqual({ ended: ["Hello"], partial: undefined });
+    expect(liveTexts(stored, ["web:r1", "s1:web:r1#0"])).toEqual({ ended: [], partial: undefined });
+    expect(fold([{ type: "read", messages: [{ id: "s1:web:r1#0", role: "assistant" }, { id: "web:r1", role: "user", state: "answered" }] }], stored).ended).toEqual([]);
+    // Another answer with the same text replaces nothing: identity, never text.
+    const other = fold([event({ type: "message", id: "s1:web:r2#0", answers: "web:r2" }), { type: "read", messages: [{ id: "s1:web:r2#0", role: "assistant" }] }], ended);
+    expect(other.ended).toEqual([{ text: "Hello", requests: ["web:r1"] }]);
   });
 
-  test("a new answer in the same run leaves the one before as ended; a tool's end it never saw changes nothing", () => {
-    const state = fold([event({ type: "state", busy: true }), event({ type: "partial", text: "First" }), event({ type: "partial", text: "" }), event({ type: "tool", name: "x", state: "done" })]);
+  test("an answer stored before the run's end reached the page replaces the partial; a failed or stopped run's text goes; one whose requests are unknown takes the next answer", () => {
+    const writing = fold([event({ type: "state", busy: true }), event({ type: "partial", text: "Hi", requests: ["web:r1"] })]);
+    const early = fold([event({ type: "message", id: "s1:web:r1#0", answers: "web:r1" })], writing);
+    expect(early).toMatchObject({ partial: undefined, ended: [{ text: "Hi", answer: "s1:web:r1#0" }] });
+    expect(fold([event({ type: "state", busy: false })], early).ended).toHaveLength(1);
 
-    expect(state).toMatchObject({ partial: "", tools: [], ended: [{ text: "First", at: 0 }] });
-    expect(liveTexts(state, ["First"])).toEqual({ ended: [], partial: "" });
+    const failed = fold([event({ type: "state", busy: false }), { type: "read", messages: [{ id: "web:r1", role: "user", state: "failed" }] }], writing);
+    expect(failed.ended).toEqual([]);
+
+    // A run going before the stream opened: its requests unknown.
+    const unknown = fold([event({ type: "state", busy: true }), event({ type: "partial", text: "Hey" }), event({ type: "state", busy: false })]);
+    expect(unknown.ended).toEqual([{ text: "Hey" }]);
+    expect(fold([event({ type: "message", id: "web:r9" })], unknown).ended).toEqual([{ text: "Hey" }]);
+    expect(fold([event({ type: "message", id: "s1:web:r9#0", answers: "web:r9" })], unknown).ended).toEqual([{ text: "Hey", answer: "s1:web:r9#0" }]);
+    expect(fold([{ type: "read", messages: [{ id: "web:r9", role: "user", state: "aborted" }] }], unknown).ended).toEqual([]);
+  });
+
+  test("a new answer in the same run leaves the one before as ended; the run's answer replaces them all; a tool's end it never saw changes nothing", () => {
+    const state = fold([
+      event({ type: "state", busy: true }),
+      event({ type: "partial", text: "First", requests: ["web:r1"] }),
+      event({ type: "partial", text: "", requests: ["web:r1"] }),
+      event({ type: "tool", name: "x", state: "done" }),
+      event({ type: "partial", text: "Second", requests: ["web:r1"] }),
+      event({ type: "state", busy: false }),
+    ]);
+    expect(state).toMatchObject({ partial: undefined, tools: [], ended: [{ text: "First" }, { text: "Second" }] });
+    const answered = fold([event({ type: "message", id: "s1:web:r1#0", answers: "web:r1" })], state);
+    expect(liveTexts(answered, ["s1:web:r1#0"])).toEqual({ ended: [], partial: undefined });
   });
 
   test("a reconnection asks for the messages again (the first connection does not); a drop forgets the tools; reset forgets all", () => {

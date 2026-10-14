@@ -7,8 +7,9 @@ import GlideMenu from "./GlideMenu";
  * SIDEBAR NAV
  * Beautiful UI's harness sidebar, fed by the app: the workspace
  * (its mark and name), primary navigation, a searchable list of
- * chats (each with its actions, archived ones apart), settings
- * at the foot, and a collapse that keeps every icon in place.
+ * chats (each with its actions, archived ones apart), a menu
+ * at the foot (Settings, or the caller's label and icon; none
+ * without `menu`), and a collapse that keeps every icon in place.
  * Icons: iconoir.
  * --------------------------------------------------------- */
 
@@ -120,6 +121,8 @@ function WorkspaceMenu({ position, children, width = "w-64" }: { position: { top
 export default function SidebarNav({
   workspace,
   menu,
+  menuLabel = "Settings",
+  menuIcon = <Settings width={17} height={17} strokeWidth={1.8} className="shrink-0" />,
   items,
   chats,
   onPickChat,
@@ -130,8 +133,12 @@ export default function SidebarNav({
   className = "",
 }: {
   workspace: { name: string; logo: ReactNode };
-  /** the settings menu's rows (`MenuRow`, `MenuSeparator`), opened from the foot; `close` closes it */
-  menu: (close: () => void) => ReactNode;
+  /** the settings menu's rows (`MenuRow`, `MenuSeparator`), opened from the foot; `close` closes it. Absent: no button at the foot */
+  menu?: (close: () => void) => ReactNode;
+  /** the foot button's label ("Settings") */
+  menuLabel?: string;
+  /** the foot button's icon (a gear) */
+  menuIcon?: ReactNode;
   /** the chats put away: listed apart, read when opened (`onOpen`); `undefined` until read */
   archived?: { chats: SidebarChat[] | undefined; onOpen: () => void };
   items: SidebarItem[];
@@ -356,28 +363,30 @@ export default function SidebarNav({
         </div>
 
         {/* settings, at the foot: as round as the chat's composer, its border and its shade */}
-        <div className="shrink-0 px-2 pt-2">
-          <button
-            ref={workspaceButtonRef}
-            data-workspace-trigger
-            type="button"
-            aria-label="Settings"
-            aria-expanded={workspaceOpen}
-            title="Settings"
-            onClick={() => {
-              if (!workspaceOpen && workspaceButtonRef.current) {
-                const rect = workspaceButtonRef.current.getBoundingClientRect();
-                setWorkspacePosition({ bottom: window.innerHeight - rect.top + 8, left: rect.left });
-              }
-              setWorkspaceOpen((open) => !open);
-            }}
-            className={`sidebar-settings flex h-9 w-full items-center gap-2 rounded-[14px] border bg-surface px-[9px] text-[13.5px] font-medium text-ink-2 shadow-card transition-[border-color,color,transform] duration-150 hover:border-line-strong hover:text-ink active:scale-[0.98] ${workspaceOpen ? "border-line-strong text-ink" : "border-line"}`}
-          >
-            <Settings width={17} height={17} strokeWidth={1.8} className="shrink-0" />
-            <span className="sidebar-copy min-w-0 truncate">Settings</span>
-          </button>
-          {workspaceOpen && <WorkspaceMenu position={workspacePosition}>{menu(() => setWorkspaceOpen(false))}</WorkspaceMenu>}
-        </div>
+        {menu !== undefined && (
+          <div className="shrink-0 px-2 pt-2">
+            <button
+              ref={workspaceButtonRef}
+              data-workspace-trigger
+              type="button"
+              aria-label={menuLabel}
+              aria-expanded={workspaceOpen}
+              title={menuLabel}
+              onClick={() => {
+                if (!workspaceOpen && workspaceButtonRef.current) {
+                  const rect = workspaceButtonRef.current.getBoundingClientRect();
+                  setWorkspacePosition({ bottom: window.innerHeight - rect.top + 8, left: rect.left });
+                }
+                setWorkspaceOpen((open) => !open);
+              }}
+              className={`sidebar-settings flex h-9 w-full items-center gap-2 rounded-[14px] border bg-surface px-[9px] text-[13.5px] font-medium text-ink-2 shadow-card transition-[border-color,color,transform] duration-150 hover:border-line-strong hover:text-ink active:scale-[0.98] ${workspaceOpen ? "border-line-strong text-ink" : "border-line"}`}
+            >
+              {menuIcon}
+              <span className="sidebar-copy min-w-0 truncate">{menuLabel}</span>
+            </button>
+            {workspaceOpen && <WorkspaceMenu position={workspacePosition}>{menu(() => setWorkspaceOpen(false))}</WorkspaceMenu>}
+          </div>
+        )}
       </div>
 
       {rowMenu !== undefined && (

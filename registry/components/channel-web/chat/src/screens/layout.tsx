@@ -1,7 +1,7 @@
 /**
  * The signed-in page, in the dashboard's harness: Beautiful UI's sidebar (the assistant's name; New
  * chat, Conversations, Account; the user's conversations, each with Rename and Delete; at its foot the
- * theme and Sign out), and the screen in a window beside it. On a narrow screen the sidebar starts
+ * user's name, opening Account, the theme and Sign out), and the screen in a window beside it. On a narrow screen the sidebar starts
  * folded to its icons, and Conversations lists them full width.
  *
  * Renaming and deleting ask in a dialog, from the sidebar, the list or a conversation alike
@@ -48,7 +48,7 @@ export const titleOf = (conversation: ChatConversation): string => (conversation
 const href = (path: string): string => `${import.meta.env.BASE_URL}#${path}`;
 
 export function Layout({ route, children }: { route: Route; children: ReactNode }) {
-  const { config, signOut } = useSession();
+  const { config, me, signOut } = useSession();
   const conversations = useConversations();
   const narrow = useNarrow();
   const [renaming, setRenaming] = useState<ChatConversation>();
@@ -104,6 +104,8 @@ export function Layout({ route, children }: { route: Route; children: ReactNode 
               </button>
             ) : undefined
           }
+          menuLabel={me.user.name.trim() === "" ? me.user.email : me.user.name}
+          menuIcon={<User width={17} height={17} strokeWidth={1.8} className="shrink-0" />}
           menu={(close) => (
             <>
               <MenuRow

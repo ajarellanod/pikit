@@ -80,7 +80,7 @@ export function NewChatScreen() {
         </h1>
 
         <div className="chat new-chat-reveal relative mt-7" style={revealStyle(stage >= 3)}>
-          <PromptBar autoFocus placeholder={`Ask ${config.name} anything…`} images={imageLimits(config.target)} onSend={start} />
+          <PromptBar autoFocus commandsMenu={false} placeholder={`Ask ${config.name} anything…`} images={imageLimits(config.target)} onSend={start} />
           {error !== undefined && (
             <div className="mt-3">
               <ErrorNote error={error} title="Not started" />

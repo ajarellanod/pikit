@@ -35,7 +35,7 @@ again. A bundle that names the admin API (`/admin/api`) is refused.
 | `src/screens/` | sign-in, make an account, forgot password, an invitation's or reset's landing, "confirm your email", the layout (sidebar), a new chat, a conversation, the conversations, the account |
 | `src/lib/chat-api.ts` | the chat API's JSON: a copy of channel-web's `api.ts` |
 | `src/lib/client.ts`, `auth.ts` | the API (`fetch`, the session cookie, `x-pikit-chat: 1` on changes) and better-auth's routes |
-| `src/lib/live.ts`, `live-state.ts`, `sse.ts` | a conversation live: its server-sent events read with `fetch`, folded into a state |
+| `src/lib/live.ts`, `live-state.ts`, `sse.ts` | a conversation live: its server-sent events read with `fetch`, folded into a state; a finished answer's live text stays until the messages read have the stored answer its `message` event named (by id, never by text) |
 | `src/lib/outbox.ts` | messages sent from here not shown yet: sending, queued, failed (send again) |
 | `src/lib/location.ts` | the hash routes (`#/c/<id>`, `#/set-password?token=…`) |
 | `src/components/bui/`, `src/components/pikit/`, `src/lib/{activity,format,messages,names,sounds,theme,utils}.ts`, `src/index.css`, `public/` | the dashboard's shared pieces and look, copied |

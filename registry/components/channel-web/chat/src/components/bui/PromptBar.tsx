@@ -6,7 +6,8 @@ import { useEffect, useLayoutEffect, useRef, useState, type ReactNode } from "re
  * menu (add images, web search for the next message), the
  * "/" menu (the commands the App registered, filtered as you
  * type; none: a quiet "No commands", and the text is sent as
- * a message), and a picker where the harness picks its
+ * a message; `commandsMenu={false}`: no menu, a "/" is text),
+ * and a picker where the harness picks its
  * model, a dropdown even with one option. While a run goes
  * the send button stops it. Enter sends (or runs "/name
  * args" when it names a command), Shift+Enter breaks a line;
@@ -108,6 +109,7 @@ export default function PromptBar({
   commands = [],
   onCommand,
   commandsNote = "Type to search commands",
+  commandsMenu = true,
 }: {
   placeholder?: string;
   picker?: Picker;
@@ -130,6 +132,8 @@ export default function PromptBar({
   onCommand?: (name: string, args: string) => Promise<void> | void;
   /** the line under the commands */
   commandsNote?: string;
+  /** the "/" menu at all; `false`: a "/" is only text (a composer with no commands) */
+  commandsMenu?: boolean;
 }) {
   const [draft, setDraft] = useState("");
   const [sending, setSending] = useState(false);
@@ -162,7 +166,7 @@ export default function PromptBar({
   const webSearchOn = searching && canSearch;
 
   /* a "/" typed at the start opens the commands, filtered by what follows it */
-  const slash = dismissed || plusOpen ? null : /^\/([\w:-]*)$/.exec(draft);
+  const slash = dismissed || plusOpen || !commandsMenu ? null : /^\/([\w:-]*)$/.exec(draft);
   const query = slash?.[1]?.toLowerCase() ?? "";
   const menu: "plus" | "slash" | null = plusOpen ? "plus" : slash !== null ? "slash" : null;
 

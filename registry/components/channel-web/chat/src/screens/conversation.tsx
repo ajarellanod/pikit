@@ -50,29 +50,26 @@ const newestFirst = (page: ChatMessage[], kept: ChatMessage[]): ChatMessage[] =>
 };
 
 /**
- * The messages' latest page, read again on `read()`, and older pages on demand; what was read stays.
- * `onRead` is told each read's messages and the `changes` it started at.
+ * The messages' latest page, read again on `read()` and at each of the live view's `changes`, and older
+ * pages on demand; what was read stays. `onRead` is told each read's messages (newest first).
  */
-function useMessages(chatId: string, changes: number, onRead: (changes: number, messages: ChatMessage[]) => void) {
+function useMessages(chatId: string, changes: number, onRead: (messages: ChatMessage[]) => void) {
   const [kept, setKept] = useState<ChatMessage[]>([]);
   const [loaded, setLoaded] = useState(false);
   const [error, setError] = useState<Error>();
   const [cursor, setCursor] = useState<string | null>();
-  const changesNow = useRef(changes);
-  changesNow.current = changes;
   const told = useRef(onRead);
   told.current = onRead;
   const base = `/conversations/${encodeURIComponent(chatId)}/messages?limit=${PAGE}`;
 
   const read = useCallback(() => {
-    const at = changesNow.current;
     get<ChatPage<ChatMessage>>(base).then(
       (page) => {
         setKept((items) => newestFirst(page.items, items));
         setCursor((current) => (current === undefined ? (page.next ?? null) : current));
         setLoaded(true);
         setError(undefined);
-        told.current(at, page.items);
+        told.current(page.items);
       },
       (thrown: unknown) => setError(asError(thrown)),
     );
@@ -184,8 +181,8 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
     chatId,
     live.changes,
     useCallback(
-      (changes: number, messages: ChatMessage[]) => {
-        dispatch({ type: "read", changes, texts: messages.filter((message) => message.role === "assistant").map((message) => message.text) });
+      (messages: ChatMessage[]) => {
+        dispatch({ type: "read", messages });
         settle(chatId, new Set(messages.map((message) => message.id)));
       },
       [chatId, dispatch],
@@ -221,8 +218,8 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
 
   const read = new Set(thread.messages.map((message) => message.id));
   const unsent = outbox.filter((item) => !read.has(item.requestId));
-  const answers = thread.messages.filter((message) => message.role === "assistant").map((message) => message.text);
-  const { ended, partial } = liveTexts(live, answers);
+  // The live texts the stored answers do not replace yet (matched by the answers' ids, `live-state.ts`).
+  const { ended, partial } = liveTexts(live, thread.messages.map((message) => message.id));
   const busy = live.connected ? live.busy : (conversation?.busy ?? false);
   const lastUser = [...thread.messages].reverse().find((message) => message.role === "user");
   const awaiting = lastUser?.state === "pending" || unsent.some((item) => item.status !== "failed");
@@ -357,7 +354,7 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
       <div ref={composerRef} className="absolute inset-x-0 bottom-0 px-3 pb-[max(1rem,env(safe-area-inset-bottom))] sm:px-8 sm:pb-6 lg:px-12">
         <div className="mx-auto flex max-w-[720px] flex-col gap-2">
           {actionError !== undefined && <ErrorNote error={actionError} title="That did not work" />}
-          <PromptBar compact placeholder={busy ? "Reply: it runs after the answer going" : "Reply"} images={imageLimits(config.target)} busy={busy} onStop={stop} onSend={send} />
+          <PromptBar compact commandsMenu={false} placeholder={busy ? "Reply: it runs after the answer going" : "Reply"} images={imageLimits(config.target)} busy={busy} onStop={stop} onSend={send} />
         </div>
       </div>
     </div>
