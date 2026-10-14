@@ -321,6 +321,23 @@ describe("an answer's images", () => {
   });
 });
 
+describe("the composer", () => {
+  const installed = existsSync(join(CHAT, "node_modules/react-dom"));
+  // The "+" button was named "Add images or web search" on the chat page, whose menu has images only.
+  test.skipIf(!installed)('its "+" button is named by what its menu offers: the chat page\'s "Add images"', async () => {
+    const { default: PromptBar } = await import(join(CHAT, "src/components/bui/PromptBar.tsx"));
+    const { createElement } = await import(join(CHAT, "node_modules/react/index.js"));
+    const { renderToStaticMarkup } = await import(join(CHAT, "node_modules/react-dom/server.js"));
+    const render = (props: Record<string, unknown>) => renderToStaticMarkup(createElement(PromptBar, { onSend: () => {}, ...props })) as string;
+    const images = imageLimits("server");
+    expect(render({ images })).toContain('aria-label="Add images"');
+    expect(render({ images })).not.toContain("web search");
+    expect(render({ images, webSearch: { available: true } })).toContain('aria-label="Add images or web search"');
+    expect(render({ webSearch: { available: true } })).toContain('aria-label="Web search"');
+    expect(render({})).not.toContain("aria-expanded");
+  });
+});
+
 describe("images", () => {
   const image = (bytes: number, mimeType = "image/png") => ({ mimeType, data: Buffer.alloc(bytes).toString("base64") });
 

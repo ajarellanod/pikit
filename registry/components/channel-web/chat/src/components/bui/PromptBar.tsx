@@ -95,6 +95,10 @@ function base64Of(file: File): Promise<string> {
 
 let nextId = 0;
 
+/** The "+" button's name: what its menu offers, and only that. */
+const plusLabel = (images: boolean, webSearch: boolean): string =>
+  images && webSearch ? "Add images or web search" : images ? "Add images" : "Web search";
+
 export default function PromptBar({
   placeholder,
   picker,
@@ -585,7 +589,7 @@ export default function PromptBar({
             {images !== undefined || webSearch !== undefined ? (
               <button
                 type="button"
-                aria-label="Add images or web search"
+                aria-label={plusLabel(images !== undefined, webSearch !== undefined)}
                 aria-expanded={plusOpen}
                 disabled={disabled}
                 onClick={() => {
