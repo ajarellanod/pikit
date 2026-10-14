@@ -116,7 +116,7 @@
       "name": "PIKIT_PUBLIC_URL",
       "secret": false,
       "required": false,
-      "description": "The App's public origin (https://chat.example.com), when a proxy hides it: OAuth redirect URIs and the links of invitations and resets are made under it. Absent, each request's origin."
+      "description": "The chat's public origin (https://chat.example.com): OAuth redirect URIs and the links of emails, invitations and resets are made under it. Needed to serve the chat publicly from a server: absent, a server signs in and makes links only at a loopback host (localhost, 127.0.0.1, [::1]); on Cloudflare, the Worker's own host."
     }
   ]
 }
