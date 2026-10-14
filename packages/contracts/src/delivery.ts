@@ -285,7 +285,7 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
     for (const [index, { fact }] of items.entries()) {
       const instance = answersOnlyTheDashboard(fact) ? undefined : options.route(fact.conversation.key);
       const transport = instance === undefined ? undefined : transports.get(instance);
-      const content = transport === undefined ? undefined : contentOf(fact, options.text(fact));
+      const content = transport === undefined ? undefined : answerContent(fact, options.text(fact));
       // The dashboard's run, another channel's conversation, a bot that does not run, or nothing to tell: passed over.
       if (instance === undefined || transport === undefined || content === undefined) {
         settled[index] = true;
@@ -402,9 +402,11 @@ export async function startAnswerDelivery(ctx: AppContext, options: AnswerDelive
 
 /**
  * What a run's answer is: the channel's text (`said`, `undefined` for nothing) and a completed run's
- * parts; `undefined` when it has neither. A failed or aborted run's parts are not its answer.
+ * parts; `undefined` when it has neither, and answer delivery sends nothing. A failed or aborted run's
+ * parts are not its answer. Exported so a channel that acts on "nothing to send" (deleting a
+ * placeholder) decides it as delivery does, never by a copy of this rule.
  */
-function contentOf(fact: RunSettlement, said: string | undefined): MessageContent | undefined {
+export function answerContent(fact: Pick<RunSettlement, "kind" | "parts">, said: string | undefined): MessageContent | undefined {
   const parts = fact.kind === "completed" ? (fact.parts ?? []) : [];
   if (said === undefined && parts.length === 0) return undefined;
   return { text: said ?? "", ...(parts.length > 0 && { parts }) };

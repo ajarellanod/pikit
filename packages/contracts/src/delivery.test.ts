@@ -6,7 +6,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type App, type AppContext, defineApp, defineComponent, type Logger } from "@pikit/core";
-import { type AnswerDelivery, type DeliveryPolicy, startAnswerDelivery } from "./delivery.ts";
+import { type AnswerDelivery, answerContent, type DeliveryPolicy, startAnswerDelivery } from "./delivery.ts";
 import { type ChannelTransport, DeliveryError, type OutboundMessage, type OutboundPiece, type OutboundQueue } from "./outbound.ts";
 import type { MessagePart } from "./parts.ts";
 import type { KeyValueStore } from "./storage.ts";
@@ -382,4 +382,13 @@ test("with wakeups, a run cut by its slice deadline mid-send asks for the next, 
     ["s-chat:1:r1#0", false],
     ["s-chat:1:r1#0", true],
   ]);
+});
+
+test("answerContent: the channel's text and a completed run's parts; nothing when it has neither, and a failed or aborted run's parts are not its answer", () => {
+  const part = { type: "question", fallback: "Deploy?" } as unknown as MessagePart;
+  expect(answerContent({ kind: "completed" }, "hi")).toEqual({ text: "hi" });
+  expect(answerContent({ kind: "completed", parts: [part] }, undefined)).toEqual({ text: "", parts: [part] });
+  expect(answerContent({ kind: "completed", parts: [] }, undefined)).toBeUndefined();
+  expect(answerContent({ kind: "aborted", parts: [part] }, undefined)).toBeUndefined();
+  expect(answerContent({ kind: "failed", parts: [part] }, "it failed")).toEqual({ text: "it failed" });
 });

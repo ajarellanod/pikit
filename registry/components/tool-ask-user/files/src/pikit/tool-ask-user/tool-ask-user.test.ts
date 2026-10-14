@@ -9,7 +9,7 @@
 
 import { expect, test } from "bun:test";
 import { BACKGROUND_CONTEXT, defineApp, silentLogger, withContextValue } from "@pikit/core";
-import { answerProblem, answerText, CONVERSATION, type QuestionPart, questionFallback, RUN_REQUESTS } from "@pikit/contracts";
+import { answerProblem, answerText, CONVERSATION, type QuestionPart, questionPart, RUN_REQUESTS } from "@pikit/contracts";
 import { callTool, runToolCalls } from "@pikit/pi-adapter/execution/testing";
 import { PARTS_DETAIL } from "@pikit/pi-adapter/tools";
 import toolAskUser, { ASK_USER_TOOL, createAskUserTool } from "./index.ts";
@@ -53,7 +53,7 @@ test("a call gives the question as a part, its id the conversation, the run's fi
     title: "Deploy now?",
     description: "The build passed.",
     fields: [{ kind: "confirm", name: "go", label: "Deploy", required: true }],
-    fallback: questionFallback({ id: "c7:spaces/AAA/messages/m1:call-1", ...deploy } as never),
+    fallback: questionPart({ id: "c7:spaces/AAA/messages/m1:call-1", ...deploy } as never).fallback,
   });
   expect(outcome.text).toBe('Asked "Deploy now?" (question c7:spaces/AAA/messages/m1:call-1). Your turn ends here: the answer will arrive as a new message.');
   // Its answer, said in words, names the question.

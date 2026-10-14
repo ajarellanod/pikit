@@ -3,12 +3,12 @@
  * - `replyText`: a run's answer, or that it failed; nothing for an aborted or empty one. A message
  *   the runtime abandoned is never answered: the user is asked to send it again. A failed run's words
  *   replace its placeholder.
- * - `nothingToSend`: whether answer delivery sends nothing for a run, as `startAnswerDelivery` decides
- *   it (`delivery.ts`): `replyText` says nothing and it has no parts (a completed run's parts go
- *   without text: a question). The placeholder of such a run is deleted.
+ * - `nothingToSend`: whether answer delivery sends nothing for a run, decided by delivery's own rule
+ *   (`answerContent` from `@pikit/contracts`) on `replyText`: it says nothing and the run has no parts
+ *   (a completed run's parts go without text: a question). The placeholder of such a run is deleted.
  */
 
-import type { RunSettlement } from "@pikit/contracts";
+import { answerContent, type RunSettlement } from "@pikit/contracts";
 
 /** What a chat is told about a run (above), or `undefined` for nothing. */
 export function replyText(answer: Pick<RunSettlement, "kind" | "text" | "error">): string | undefined {
@@ -20,6 +20,5 @@ export function replyText(answer: Pick<RunSettlement, "kind" | "text" | "error">
 
 /** Whether answer delivery sends nothing for `run` (above): an aborted run, an empty answer with no parts. */
 export function nothingToSend(run: Pick<RunSettlement, "kind" | "text" | "error" | "parts">): boolean {
-  const parts = run.kind === "completed" ? (run.parts ?? []) : [];
-  return replyText(run) === undefined && parts.length === 0;
+  return answerContent(run, replyText(run)) === undefined;
 }

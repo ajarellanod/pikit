@@ -41,6 +41,7 @@ import type { AppContext } from "@pikit/core";
 import { admitInbound, answerKey, type InboundMessage, type InboundOutcome } from "@pikit/contracts";
 import { readAttachments, writeFiles } from "./attachments.ts";
 import { type AddOnEvent, type ChatMessage, type ChatSpace, type ChatUser, eventKind, spaceOf } from "./event.ts";
+import { type PieceIds, pieceIds } from "./ids.ts";
 import { NAME, parseConversationKey } from "./instance.ts";
 import { createSpaceThreading, threadOf } from "./key.ts";
 import { quoteOf } from "./quote.ts";
@@ -98,17 +99,11 @@ export function isNewCommand(message: ChatMessage): boolean {
 
 /**
  * The ids of the handler's own reply to `seed` (a message's name and what the reply is): a `requestId`
- * (a UUID) and a `messageId` (`client-` and 56 hexadecimal characters), both from the seed's SHA-256,
- * as ids.ts makes a piece's. The same seed, the same message, however often Google repeats the event.
+ * (a UUID) and a `messageId` (`client-` and 56 hexadecimal characters), made by ids.ts's `pieceIds`
+ * from `<NAME>:reply:<seed>` (never a piece's key: those start with a conversation id). The same seed, the same message, however often Google repeats the event.
  */
-export async function replyIds(seed: string): Promise<{ requestId: string; messageId: string }> {
-  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(`${NAME}:reply:${seed}`)));
-  const hex = (bytes: Uint8Array) => [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("");
-  const uuid = hash.slice(0, 16);
-  uuid[6] = ((uuid[6] ?? 0) & 0x0f) | 0x40;
-  uuid[8] = ((uuid[8] ?? 0) & 0x3f) | 0x80;
-  const u = hex(uuid);
-  return { requestId: `${u.slice(0, 8)}-${u.slice(8, 12)}-${u.slice(12, 16)}-${u.slice(16, 20)}-${u.slice(20)}`, messageId: `client-${hex(hash).slice(0, 56)}` };
+export function replyIds(seed: string): Promise<PieceIds> {
+  return pieceIds(`${NAME}:reply:${seed}`);
 }
 
 /** A signal aborted after `ms`, or with the caller's. */

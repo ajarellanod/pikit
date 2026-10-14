@@ -379,7 +379,9 @@ Not a capability: the outbound protocol every chat channel calls in `start`. The
 cursor (`answers-cursor`) per channel, one lane per conversation, retries, idempotency keys, and a
 dashboard-only run never sent to a chat. An answer is the channel's `text(answer)` and a completed
 run's `parts`, cut by `messagePieces` on both paths (the queue cuts it the same way); one with parts
-and no text is still delivered, one with neither is passed over. Its header states the direct and queued guarantees and what
+and no text is still delivered, one with neither is passed over: `answerContent(run, said)` is that
+rule, exported so a channel that acts on "nothing to send" (channel-google-chat deletes its
+placeholder) decides it as delivery does. Its header states the direct and queued guarantees and what
 survives a crash at each step. See [message-flow.md](message-flow.md). The dashboard's request ids
 start with `DASHBOARD_REQUEST_PREFIX` (`dashboard:`).
 
