@@ -106,8 +106,8 @@
     {
       "name": "GOOGLE_CHAT_ALLOWED_SPACES",
       "secret": false,
-      "required": true,
-      "description": "The spaces the app answers (spaces/AAA, or their ids), separated by commas. Any other space is told it is not allowed, with its id to add here. Empty: none yet."
+      "required": false,
+      "description": "The spaces the app answers (spaces/AAA, or their ids), separated by commas. Any other space is told it is not allowed, with its id to add here. Empty or unset: none yet (the app runs and tells each space its id). A named app reads GOOGLE_CHAT_<NAME>_ALLOWED_SPACES."
     }
   ]
 }
