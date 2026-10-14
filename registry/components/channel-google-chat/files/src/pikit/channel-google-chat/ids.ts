@@ -20,8 +20,16 @@ export interface PieceIds {
 
 /** The ids of the piece whose key is `pieceKey`. Pure: the same key, the same ids, everywhere. */
 export async function pieceIds(pieceKey: string): Promise<PieceIds> {
-  void pieceKey;
-  throw new Error("not implemented: transport (ids.ts pieceIds)");
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(pieceKey)));
+  const hex = (bytes: Uint8Array): string => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const uuid = hash.slice(0, 16);
+  uuid[6] = ((uuid[6] ?? 0) & 0x0f) | 0x40;
+  uuid[8] = ((uuid[8] ?? 0) & 0x3f) | 0x80;
+  const u = hex(uuid);
+  return {
+    requestId: `${u.slice(0, 8)}-${u.slice(8, 12)}-${u.slice(12, 16)}-${u.slice(16, 20)}-${u.slice(20, 32)}`,
+    messageId: `client-${hex(hash).slice(0, 56)}`,
+  };
 }
 
 /** The name of the message created in `space` under `messageId`: `<space>/messages/<messageId>`. */
