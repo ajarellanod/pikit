@@ -1,5 +1,5 @@
 /**
- * better-auth's database over pikit's `storage.sql` (features/channel-web.md, "Accounts: better-auth").
+ * better-auth's database over pikit's `storage.sql` (features/completed/channel-web.md, "Accounts: better-auth").
  *
  * - **The adapter** (`sqlAdapter`): `createAdapterFactory` over `SqlDatabase`'s `query` / `run`, in
  *   the SQL subset SQLite and Postgres share (`?` parameters, `RETURNING`, no `AUTOINCREMENT`, no

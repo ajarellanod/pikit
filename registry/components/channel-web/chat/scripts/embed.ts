@@ -8,7 +8,7 @@
  * (the kit's registry) `dist/` is all the build makes. The module changes only when the built files do.
  *
  * A bundle that names the admin API (`/admin/api`) is refused, written nowhere: the users' page never
- * carries the operator's client (features/channel-web.md, "The UI split").
+ * carries the operator's client (features/completed/channel-web.md, "The UI split").
  */
 
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from "node:fs";

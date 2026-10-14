@@ -5,7 +5,10 @@ conversations, the same look as the dashboard, no admin in sight. They sign in w
 password, a link by email, Google, GitHub or any OAuth/OIDC platform. OpenClaw has WebChat (its
 Control UI's chat tab and native apps over the Gateway's WebSocket).
 
-**Specified:** yes (this note is the build guide)
+**Status:** built, on both targets: the UI split (`@pikit/lib-ui`, `@pikit/admin-client`), `email.send`
+with `email-ses` and `email-resend`, UI projects of a component, and `channel-web` with its page
+(`src/chat/`), the operator's view, Settings section and command. This note was its build guide;
+"Where it is" and "Open" are at its end.
 
 **Needed by:** nothing required.
 
@@ -69,7 +72,8 @@ component may now ship a UI project of its own:
   `CHAT_FILES`, as admin-api's `DASHBOARD_FILES`), which the component's routes serve. The kit's copy of
   that module is empty: the routes then say no page is built.
 - Every deploy builds every UI project the project has (the dashboard and these) before bundling:
-  the Dockerfile stage and wrangler's build command loop over them; `pikit dev` rebuilds on change.
+  the Dockerfile stage and wrangler's build command loop over them; `pikit dev` builds each at start
+  (on a server) and again on change.
 - `registry validate` checks it as browser code (its own `package.json`, never App imports), and the
   project's `tsc` and `bun test` skip it as they skip `src/dashboard/`.
 
@@ -152,7 +156,7 @@ settings-store do.
 
 ### The channel
 - **The sender** of each message is `{ channel: "web", id: <user id> }` (`InboundMessage.actor`), so a
-  role by actor ([policy tools](policy-tools.md)) and the steward's "only operators may ask it"
+  role by actor ([policy tools](../policy-tools.md)) and the steward's "only operators may ask it"
   (SPEC §6) see a user, not an operator.
 - **Keys**: `web:<user id>:<chat id>`, `<chat id>` a UUID the server makes. The page names a
   conversation by its chat id only; every route builds the key from the authenticated user's id and
@@ -261,12 +265,30 @@ A Vite + React + Tailwind v4 project of its own (section 3), built from the shar
 
 ## Pi first
 Nothing in Pi: serving a chat page and authenticating its users is ingress, pikit's (SPEC P1). Pi
-removed `pi-server` and `pi-client` in 1.2.0 ([kit follow-ups](kit-follow-ups.md)); when Pi serves
+removed `pi-server` and `pi-client` in 1.2.0 ([kit follow-ups](../kit-follow-ups.md)); when Pi serves
 sessions to a browser with authentication again, re-check whether the live part should use it.
+
+## Where it is
+- `packages/contracts/src/email.ts` and `createEmailSenderConformance`; `registry/components/email-ses/`,
+  `registry/components/email-resend/`.
+- `registry/dashboard/files/src` (the shared pieces), `scripts/ui-shared.ts`, `scripts/chat-shared.ts`
+  (the chat's copies), `scripts/ui-registry.ts`.
+- The CLI's UI projects: `packages/cli/src/project/ui-project.ts` (`pikit dev` builds each at start on a
+  server and again on change), `registry/commands.ts` and `checks.ts` (`registry validate`).
+- `registry/components/channel-web/`: `files/src/pikit/channel-web/` (routes, accounts, store, delivery,
+  live view, the Worker's half), `chat/` (the page), `view/`, `settings/`, `command.ts`; its README
+  says what it guarantees and how each part is tested. The workerd lane:
+  `tests/workerd/test/channel-web.workerd.ts`.
+
+## Open
+- No automated browser test of the page, the view or the Settings section: they were tested end to
+  end by hand in a browser (sign-up, sign-in, links, a conversation live, the operator's actions);
+  their pure logic is in `scripts/chat.test.ts`.
+- Rate limits and the per-user message count are in memory: a restart or an eviction forgets them.
 
 ## Not in it
 - One person across channels (a web user and their Telegram chat as one actor): keys stay per channel.
-- Tenants: users of different clients on one App are [multi-tenant isolation](multi-tenant-isolation.md);
+- Tenants: users of different clients on one App are [multi-tenant isolation](../multi-tenant-isolation.md);
   routing is not isolation.
 - The chat hosted apart from the App (static files against `/chat/api`): CORS and cookies then need care.
 - Passkeys, two-factor: better-auth plugins, later, on the same accounts.

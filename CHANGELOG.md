@@ -64,6 +64,19 @@ there.
   `createProposalsConformance` (the id as the provider lists it, no id reaching a branch outside the
   prefix, `checks_failing` held unless `override` where checks run before an approval, through the
   fixture's `failChecks`).
+- `email.send`: one email to one person (`EmailSender.send({ to, subject, text, html? }, ctx)` gives
+  `{ id }`), from the provider's `EMAIL_FROM` (a component never picks a sender); `EmailError`'s
+  `invalid`, `rejected` and `unavailable`, checked first by every provider (`emailMessageProblem`);
+  never a subject, body or link in an error or a log. Suite `createEmailSenderConformance`, against a
+  fake of each provider's HTTP API.
+- `http.route`: a handler reads the client's address the server saw in `x-pikit-client-address`
+  (`CLIENT_ADDRESS_HEADER`): server-bun's socket peer, the Worker's `cf-connecting-ip`; a client's own
+  copy never reaches a handler (a conformance case on the in-memory server, server-bun and the Worker's).
+- `InboundMessage.images`: a message's images, dispatched by `admitInbound` as the request's images;
+  `inbound.normalize` stages keep them unless they mean to change them.
+- `agent.observe` is read-only for a reader its consumer authorized for that conversation: an operator
+  (`admin.auth`), or a channel's user for their own conversation, to whom the consumer shows only a
+  projection of what that user may see (channel-web's live view).
 
 ### Pi adapter (`@pikit/pi-adapter`, the only package that imports Pi)
 - On `@earendil-works/pi-durable` 1.2.0 (with `chord`, `pi-ai` and `pi-mcp` 1.2.0, exact pins):
@@ -119,6 +132,22 @@ there.
   Delivery: `outbound-durable` (on `wakeups` on both targets: a retry is a timer on a server and the
   object's alarm on Cloudflare; transient failures never abandon, only an age of 24 hours does, also for a removed channel's pieces,
   which no transport sends).
+- `channel-web` (server and durable, one code): a chat page at `/chat/` for people who are not
+  operators, with accounts of its own (better-auth 1.7.7 over `storage.sql`, `CHANNEL_WEB_AUTH_SECRET`):
+  email and password, a link by email, better-auth's built-in providers and any OAuth2/OIDC platform;
+  who may sign up (`invite`, an allow list, `open`) decided in one hook for every method, a live
+  setting; no unverified password. Each user sees only their own conversations (`web:<user>:<chat>`,
+  built from the session: another's is `404` on every route), with images, the answer live as it is
+  written (a projection of `agent.observe`, only for runs that took the user's message), stop, rename
+  and delete; answers through `startAnswerDelivery` into its own table. Links only under
+  `PIKIT_PUBLIC_URL` or a trusted host, rate limits by the server's client address, a per-user message
+  rate, a CSP. The operator invites (a link shown once, emailed with `email.send`), resets, bans and
+  removes users from the dashboard's Web users view or `pikit channel-web`, and sets sign-up in
+  Settings, Web chat; last seen is kept through a ban. Its page is a UI project (`src/chat/`) made of
+  the dashboard's shared pieces. On Cloudflare the accounts and the users' index are one actor's.
+- Email: `email-ses` (SES v2 `SendEmail` signed with SigV4 over Web Crypto, checked against AWS's
+  test vectors) and `email-resend` (Resend's `POST /emails`): `email.send` on both targets, with
+  variables only (no SMTP, no SDK).
 - Conversations and storage: `conversations-file`, `conversations-kv`, `storage-sqlite`, `storage-do`,
   `storage-kv-sql`, `secrets-env`, `secrets-workers`, `mailbox-local`, `wakeups-timers`,
   `actors-do` (mailbox, inbox and wakeups over one alarm; a stream is one RPC whose byte
@@ -172,7 +201,9 @@ there.
   `pikit/self/*` branch is the proposal.
 - `outbound-durable` implements `pending` (50 per page, at most 500); a piece cut by a crash records
   why it is sent again.
-- Serving and operating: `server-bun` (`/health` answers `{ status }`, 503 when `health` says `down`; `/ready`), `admin-auth-token` (operators by a bearer
+- Serving and operating: `server-bun` (`/health` answers `{ status }`, 503 when `health` says `down`; `/ready`;
+  a request body up to 32 MiB by default, `maxRequestBodyBytes`, above the largest message the chat page
+  or the dashboard sends: 4 images of 5 MB), `admin-auth-token` (operators by a bearer
   token from `secrets`, and browser sessions: a signed, expiring HttpOnly SameSite=Strict cookie,
   `x-pikit-admin` required on unsafe methods), `admin-api` (the operator's HTTP API under
   `/admin/api/*`: the composition, config values that look like secrets redacted; conversations from
@@ -199,8 +230,9 @@ there.
   `deployment-cloudflare` (the Worker and one Durable Object per conversation running the project's
   two Apps; `up` waits for the new version on `/health`, then runs `afterDeploy` hooks, C8; while an
   object's App cannot start, a guard alarm wakes it again, from 30 s doubling up to 1 h, past
-  Cloudflare's 6 retries). Its `wrangler.jsonc`'s `build.command` builds a project's dashboard before
-  every bundle, whoever runs wrangler: a failed build stops the deploy.
+  Cloudflare's 6 retries). Its `wrangler.jsonc`'s `build.command` builds every UI project (the
+  dashboard, a component's) before every bundle, whoever runs wrangler: a failed build stops the deploy;
+  `wrangler dev` watches the Worker's sources and the modules those builds write, never `src/`.
   `deployment-docker` also adds the Compose file a component declares (`compose`) after its own, and
   runs `afterDeploy` hooks once the containers are healthy, with `PIKIT_PUBLIC_URL`.
 - Expose: `expose-cloudflare-tunnel` gives a server project a public HTTPS URL (features/completed/expose.md):
@@ -227,6 +259,11 @@ there.
   pieces, views and the components' views are shadcn items too (`@pikit`, `registry/ui/r/`, generated by
   `scripts/ui-registry.ts`): `shadcn add @pikit/<item>`. The skill `pikit-view` teaches an AI agent to add
   a view and its routes, and to prefer a new view to editing a base one.
+- Its shadcn items split the helpers from the operator's client: `@pikit/lib-ui` (generic: `utils`,
+  `format`, `theme`, `messages`, `activity`, `names`, `sounds`) and `@pikit/admin-client` (the admin API's
+  client and the shell). The shared pieces (`bui`, `markdown`, `message`, `PromptBar`, `error-note`) need
+  `lib-ui` only and take everything by props (a test keeps them off the admin client), so another UI
+  project (channel-web's page) carries copies of them.
 - `/admin/?settings=<id>` opens the Settings dialog at a component's section (repo-github-app's setup
   comes back there). The CSP lets a form post to `https://github.com` (repo-github-app's Connect).
 
@@ -250,8 +287,8 @@ there.
   `bun install` in it, lists it where the project's `tsc` and `bun test` skip it, and `remove` takes it
   all away; `registry validate` checks its `package.json` `build`, `bun.lock` and the module its build
   writes. Every folder of `src/` with a `package.json` is a UI project: deployment-docker's `ui` stage
-  and deployment-cloudflare's `build.command` build each one, and `pikit dev` builds one again when its
-  files change.
+  and deployment-cloudflare's `build.command` build each one; `pikit dev` builds each at start on a server
+  (wrangler's build command does on Cloudflare) and again when its files change.
 - `new` (guided in a terminal: target, preset, channels, several at once, then what it can do: the
   dashboard and the preset's features; `--with` answers both in a script), `add` (one or several names, one
   transaction), `remove`, `upgrade` (three-way merge

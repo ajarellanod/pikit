@@ -1,6 +1,6 @@
 /**
  * channel-web: people who are not operators talk to the assistant from a web page, `/chat/`, with
- * accounts of their own (features/channel-web.md). Each user sees and continues only their own
+ * accounts of their own (features/completed/channel-web.md). Each user sees and continues only their own
  * conversations, watches the answer as it is written, attaches images and stops a run. The routes are
  * in `routes.ts`, their JSON in `api.ts`; the operator's (users, invitations, bans) in
  * `admin-routes.ts`, their JSON in `admin-api.ts`.

@@ -1,5 +1,5 @@
 /**
- * UI projects (features/channel-web.md §3): a Vite app with its own `package.json`, `bun.lock` and
+ * UI projects (features/completed/channel-web.md §3): a Vite app with its own `package.json`, `bun.lock` and
  * toolchain in a folder of `src/`. The dashboard is one (`src/dashboard/`, `dashboard.ts`); a component
  * may ship another, its manifest's `ui` (channel-web's `src/chat/`).
  *

@@ -12,7 +12,7 @@ const PROVIDER_ID = "^[a-z][a-z0-9-]{0,39}$";
 
 export const SignUpMode = Type.Union([Type.Literal("invite"), Type.Literal("allowlist"), Type.Literal("open")]);
 
-/** Who may have an account (features/channel-web.md, "Who may have an account"); also a live setting. */
+/** Who may have an account (features/completed/channel-web.md, "Who may have an account"); also a live setting. */
 export const SignUp = Type.Object(
   {
     /** `invite`: only users an operator invited; `allowlist`: also anyone whose verified email `allow` matches; `open`: anyone. */

@@ -1,6 +1,6 @@
 /**
  * channel-web's chat page (`registry/components/channel-web/chat/`, a UI project of its own:
- * features/channel-web.md sections 1 and 5) carries copies of what it shares with the dashboard, made
+ * features/completed/channel-web.md sections 1 and 5) carries copies of what it shares with the dashboard, made
  * from the dashboard's sources, never written by hand:
  *
  *   bun scripts/chat-shared.ts generate   write the copies

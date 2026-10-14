@@ -188,7 +188,7 @@ export function checkSettingsSection(componentDir: string, name: string, manifes
 }
 
 /**
- * A component's UI project (its manifest's `ui`, features/channel-web.md "UI projects of a component"):
+ * A component's UI project (its manifest's `ui`, features/completed/channel-web.md "UI projects of a component"):
  * a folder of the component, outside `files/`, with its `package.json` (a `build` script, which the
  * deployments run) and its `bun.lock` (they install from it, frozen); its target one of `src/` no other
  * UI project takes (`uiProblems`); and the module its build writes (`uiModule`: `chat-files.ts` for

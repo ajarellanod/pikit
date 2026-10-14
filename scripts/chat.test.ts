@@ -1,5 +1,5 @@
 /**
- * channel-web's chat page (`registry/components/channel-web/chat/`, features/channel-web.md sections 1
+ * channel-web's chat page (`registry/components/channel-web/chat/`, features/completed/channel-web.md sections 1
  * and 5): its copies of the dashboard's shared pieces and of channel-web's `api.ts` are the sources,
  * byte for byte; it never reaches the admin client; its build embeds into channel-web's
  * `chat-files.ts` only where channel-web is installed, and refuses a bundle naming the admin API; and

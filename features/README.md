@@ -32,7 +32,6 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [browser](browser.md) | ⭐ | A tool to read and act on web pages | No |
 | [channel-discord](channel-discord.md) | ⭐ | A Discord bot, in DMs, channels and threads | No |
 | [channel-email](channel-email.md) | ⭐ | An address for the agent; replies in the thread | No |
-| [channel-web](channel-web.md) | ⭐ | A chat page for users who are not operators, with the dashboard's UI pieces; admin stays apart | No |
 | [channel-slack](channel-slack.md) | ⭐ | A Slack app, by Events API or Socket Mode | No |
 | [channel-whatsapp](channel-whatsapp.md) | ⭐ | WhatsApp, by the Cloud API or a linked device | No |
 | [cli-features](cli-features.md) | ⭐ | `pikit new` with several channels and a step of features (dashboard, multi-agent, subagents, MCP…); several channels, features and groups of them (agents from the dashboard) built; subagents not | Yes: the launch |
@@ -90,4 +89,5 @@ how it fits pikit, what Pi already does, where the code and its tests are, and w
 | [storage-kv](completed/storage-kv.md) | `storage.kv`: small JSON values per component, by key; `storage-kv-sql` provides it, `channel-telegram` keeps its cursor there |
 | [skills-catalog](completed/skills-catalog.md) | Skills installed once (`agent.skill`, the project's catalog) and named by agents, live agents and overrides, as tools are |
 | [expose](completed/expose.md) | A public HTTPS URL for a server project: `pikit expose`, `expose-cloudflare-tunnel`'s command (a Cloudflare Tunnel run beside the app by `deployment-docker`); only the listed paths public, no Cloudflare credential in `.env` |
+| [channel-web](completed/channel-web.md) | A chat page (`/chat/`) for users who are not operators, on both targets: accounts with better-auth (password, a link by email, any OAuth/OIDC provider), each user's own conversations live, the dashboard's UI pieces; with `email.send` (`email-ses`, `email-resend`) and UI projects of a component |
 | [tool-component](completed/tool-component.md) | A tool of your own: pi-durable's `defineTool` (from `@pikit/pi-adapter/tools`) in a component providing `agent.tool`, with its `replay`; `tool-fetch` and `tool-websearch-brave` are the references |

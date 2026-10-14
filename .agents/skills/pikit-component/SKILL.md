@@ -97,6 +97,7 @@ preset (`{{PIKIT_ROOT}}/features/building-components.md`, "How big a component i
 | Tool with a secret | `tool-websearch-brave` | a key through `secrets` at each call, `configure.ts`, `environment` in `component.json` |
 | Agent extension | `extension-house-rules` | a section from config, a `beforeTool` hook, `agent.extension`, tests through runtime-pi |
 | Channel | `channel-telegram` (server), `channel-telegram-webhook` (Cloudflare, two halves), `channel-http` | `admitInbound`, `startAnswerDelivery`, the channel suite |
+| Channel with accounts and a page | `channel-web` (both targets from one code, `actor.inbox`'s `scope`) | users of its own (better-auth over `storage.sql`), a key built from the session's user, `agent.observe` projected for a non-operator, a UI project (`ui`), a dashboard view and a command |
 | Pipeline stage | `router-basic`, `router-rules` | `pikit.pipeline("route.resolve", …)`, refusing to start on bad config |
 | Store | `storage-sqlite`, `storage-kv-sql`, `conversations-kv` | providing a storage contract; state in `storage.kv` with `setIfAbsent` |
 | Actor messages, calls and streams | `mailbox-local` (what `send` / `call` / `stream` promise) | `actor.inbox`'s `handle`, `answer` and `answerStream` in `start` |
@@ -181,7 +182,7 @@ the app on a server names its Compose file in `"compose"`. A page of its own for
 operators (a Vite app, not a dashboard view) is a UI project: `"ui": { "source": "<folder>", "target":
 "src/<name>" }`, the folder with its `package.json` (a `build` script) and `bun.lock`, whose build writes
 `src/pikit/<component>/<name>-files.ts`, shipped empty and listed in `generated`, which the component
-serves; every deploy builds it. See `docs/components.md`, Hooks, Commands, Services beside the app and
+serves; every deploy builds it (channel-web's `chat/` is the reference). See `docs/components.md`, Hooks, Commands, Services beside the app and
 A UI project.
 
 A component only the project needs can be a single file in `src/extensions/` listed in
@@ -251,7 +252,7 @@ From `@pikit/contracts/testing`: `createChannelConformance`, `createHttpRouteCon
 `createSqlDatabaseConformance`, `createKeyValueConformance`, `createConversationRegistryConformance`,
 `createAdminAuthConformance`, `createAgentObserveConformance`, `createWakeupsConformance`,
 `createMailboxConformance`, `createSecretStoreConformance`, `createOutboundQueueConformance`,
-`createFeedConformance`, `createHealthConformance`; doubles: `createMemoryMailbox()`, `createMemoryKeyValueStorage()`,
+`createFeedConformance`, `createHealthConformance`, `createEmailSenderConformance`; doubles: `createMemoryMailbox()`, `createMemoryKeyValueStorage()`,
 `createMemoryWakeups()`, `createMemorySubmissions()`. `createLifecycleConformance` from
 `@pikit/core/testing` when it owns resources. A channel's suite includes the durability cases it must
 pass: an answer that ends while the channel is stopped, or whose event was lost, reaches its sender

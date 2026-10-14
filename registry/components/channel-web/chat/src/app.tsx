@@ -1,5 +1,5 @@
 /**
- * The users' chat page (`/chat/`, channel-web, features/channel-web.md section 5): reads what the App
+ * The users' chat page (`/chat/`, channel-web, features/completed/channel-web.md section 5): reads what the App
  * offers (`GET /chat/api/config`) and who is signed in (`GET /chat/api/me`, a `401` when nobody is),
  * then shows the signed-out screens (sign in, make an account, forgot password, an invitation's or a
  * reset's landing, "confirm your email") or the signed-in page (a new chat, a conversation, the

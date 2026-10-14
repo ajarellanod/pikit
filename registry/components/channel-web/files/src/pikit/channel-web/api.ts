@@ -1,5 +1,5 @@
 /**
- * The chat API's JSON (`/chat/api`, features/channel-web.md): what every route of channel-web answers,
+ * The chat API's JSON (`/chat/api`, features/completed/channel-web.md): what every route of channel-web answers,
  * typed. The page (`src/chat/`, a project of its own) keeps an identical copy, `src/chat/src/lib/chat-api.ts`:
  * no imports, so it compiles there too. Change both together; the kit's tests check they are the same.
  *

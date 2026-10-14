@@ -1,5 +1,5 @@
 /**
- * The dashboard's shared UI pieces (features/channel-web.md, "The UI split"): what a UI project other
+ * The dashboard's shared UI pieces (features/completed/channel-web.md, "The UI split"): what a UI project other
  * than the dashboard (channel-web's chat page) may carry, because none of it knows the admin API.
  *
  * - `LIB_UI` (`@pikit/lib-ui`): the generic helpers of `src/lib/`. shadcn's `utils.ts` (`SHADCN_UTILS`)

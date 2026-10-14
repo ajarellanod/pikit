@@ -1,5 +1,5 @@
 /**
- * What the channel asks of its accounts (features/channel-web.md, "Accounts: better-auth"), apart
+ * What the channel asks of its accounts (features/completed/channel-web.md, "Accounts: better-auth"), apart
  * from better-auth: the routes (`routes.ts`) and the admin routes are written over this interface.
  *
  * - **Local** (`accounts/local.ts`, `createLocalAccounts`): better-auth in this App, over its
