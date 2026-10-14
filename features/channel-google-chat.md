@@ -85,10 +85,13 @@ and `wakeups`, and provides `http.route`; it uses `outbound.queue`, `settings`, 
 requires `secrets` and `actor.mailbox`, and uses `settings`.
 
 **On a server**, what it runs with: `server-bun` serving the route; `storage-sqlite` under
-`storage.kv`; `wakeups-timers`; `outbound-durable`, so an answer survives a restart (without it an
-answer cut by a restart is lost, as `delivery.ts` says of direct delivery); `workspace-local` for
+`storage.kv`; `wakeups-timers`; `outbound-durable`, which stores each answer and keeps a receipt for each piece (both paths survive a
+restart, as `delivery.ts` says: without it, direct delivery sends an answer cut by a restart again from
+its marks); `workspace-local` for
 files. Google calls an HTTPS URL: `pikit expose` (expose-cloudflare-tunnel) gives one, or the
-operator's own proxy; that URL plus the path is `GOOGLE_CHAT_AUDIENCE`.
+operator's own proxy; that URL plus the path is `GOOGLE_CHAT_AUDIENCE`. A proxy in front never logs
+the `Authorization` header: Google's token is not bound to the body, so it is replayable for its life.
+The component's README is the server's setup guide, command by command.
 
 **The app.** The assistant has a Chat app of its own, in its own Google Cloud project, never one
 shared with another service: the app's endpoint is this channel's. It is built as a Google Workspace
@@ -103,7 +106,7 @@ ingress for nothing a user sees.
 **Secrets, per instance** (`GOOGLE_CHAT_<NAME>_…` for a named one): the service account's JSON key
 (`GOOGLE_CHAT_SERVICE_ACCOUNT`), the project number (`GOOGLE_CHAT_PROJECT_NUMBER`, for the token's
 `email`), the endpoint URL as configured (`GOOGLE_CHAT_AUDIENCE`) and the allowed spaces
-(`GOOGLE_CHAT_ALLOWED_SPACES`).
+(`GOOGLE_CHAT_ALLOWED_SPACES`, optional: the app must run with none, to tell each space its id).
 
 **Ingress.**
 - `POST <path>`, an `http.route`, the endpoint URL of every trigger. Google's bearer token is
@@ -111,7 +114,9 @@ ingress for nothing a user sees.
   Google (RS256), checked with WebCrypto, not with `googleapis` or `google-auth-library`, which do
   not run in a Worker:
   - the signature, against the JWKs at the `jwks_uri` of Google's OpenID discovery document
-    (`https://www.googleapis.com/oauth2/v3/certs` today), cached as their `Cache-Control` says;
+    (`https://www.googleapis.com/oauth2/v3/certs` today), cached as their `Cache-Control` says; a
+    failed fetch is tried again at most once a minute, the expired keys used meanwhile for an hour
+    (`JWKS_GRACE_MS`), then requests answer `500` until Google answers;
   - `iss` is `https://accounts.google.com` or `accounts.google.com`;
   - `aud` is the endpoint URL exactly as configured in the Chat API;
   - `email` is the app's service account,
@@ -158,8 +163,9 @@ ingress for nothing a user sees.
   keeps its key.
 - The key is the channel's own (`AdmitOptions.key`, [conversation routing](conversation-routing.md)):
   `googlechat:spaces/AAA:threads/BBB` for a thread, `googlechat:spaces/AAA` for a whole chat. The
-  route builds it, reading the setting: on a server in the one App, on Cloudflare in the Worker's
-  half (settings-store answers in the Worker's App too).
+  route builds a message's, reading the setting: on a server in the one App, on Cloudflare in the
+  Worker's half (settings-store answers in the Worker's App too). A click's is the key its action
+  carries (Questions, below), never the setting of now.
 - In a whole chat the answer still goes to its message's thread: the thread is kept in
   `storage.kv` under the answer's key, since the conversation's key does not hold it.
 - A chat whose `spaceThreadingState` is `UNTHREADED_MESSAGES` (a meeting's chat, a group chat from
@@ -171,7 +177,7 @@ app is added to it (`ADDED_TO_SPACE`), and on each message from it, the app answ
 not allowed there and gives the space's id for the operator (as channel-telegram-webhook tells a
 stranger their id), and admits nothing. Approving a space from the chat or the dashboard is
 [pairing](pairing.md). `REMOVED_FROM_SPACE` is logged; answers still owed to that space fail
-`permanent`. `/new` resets the conversation, as in channel-telegram.
+`permanent`. `/new` (or its alias `/reset`) resets the conversation, as in channel-telegram.
 
 **"Thinking…", written as the model writes, edited into the answer.**
 - On `agent.started` for a conversation of the channel (`route(key)`), and not for a dashboard request
@@ -185,7 +191,10 @@ stranger their id), and admits nothing. Approving a space from the chat or the d
   every app in it. A preview lost costs nothing: previews never go through answer delivery.
 - The transport's `send` for piece `#0` edits the placeholder (a PATCH: repeating it is harmless),
   and creates the message under the same `messageId` when there is none (the channel was down when
-  the run started); the other pieces are created after it. Messages queued behind a run get no
+  the run started; Google may hand the placeholder back for the same `requestId`, edited when its
+  text or cards are not the piece's); the other pieces are created after it. A preview whose call
+  timed out may land after that edit: piece `#0` is then applied again after a short wait (a value,
+  `REAPPLY_AFTER_MS`). Messages queued behind a run get no
   placeholder of their own: the next run's `agent.started` names the first of them.
 - A run with nothing to send (aborted, an empty answer) deletes its placeholder on `agent.settled`;
   a failed run's placeholder becomes the channel's failure text. The channel marks each placeholder
@@ -200,7 +209,14 @@ stranger their id), and admits nothing. Approving a space from the chat or the d
   whole (its text and cards); 4096 characters is a size that has worked in practice, and a piece
   whose message as JSON would pass 32,000 bytes is cut further.
   `send` turns each piece's markdown into Google Chat's text format, tables and code blocks into
-  `cardsV2`, and markdown images with a public URL into image cards.
+  `cardsV2`, and markdown images with a public URL into image cards. The 32,000 bytes are measured on
+  the complete message, the drawn question cards of the last piece too: past them, the drawn cards go
+  as a message of their own right after the text, under ids from `<piece key>:parts` (the same on every
+  retry), and the questions' records point at that message. Cards that pass the bytes alone are
+  `permanent`, logged by delivery as an error: a question is never lost silently.
+- A run an operator's dashboard message led (a user's message queued behind it: its answer's key is
+  the dashboard request's, which recorded no thread) answers a whole chat in the thread of the first
+  of its `requestIds` that is not the dashboard's, read from its settlement.
 - The transport is `idempotent`. Each create carries two ids from the piece's key: a `requestId`, a
   UUID from its SHA-256 hash (Google recommends a UUID and documents no other format), and a
   `messageId`, `client-` and 56 hexadecimal characters of the same hash (Google: up to 63 lowercase
@@ -210,8 +226,11 @@ stranger their id), and admits nothing. Approving a space from the chat or the d
   A repeat must be identical and come from the same service account.
 - Failures: `429` is `rate_limited` (with `Retry-After` when given; Google allows one message write
   a second in a space, shared by every app in it, and asks for exponential backoff), network errors
-  and `5xx` are `transient` (`maybeSent` after a timeout), `400`, `403` and `404` are `permanent`
-  (the app removed, the space gone).
+  and `5xx` are `transient` (`maybeSent` after a timeout), `400`, `401`, `403` and `404` from the Chat
+  API are `permanent` (a message refused; a token Google refused, which it issued a minute before at
+  least; the app removed; the space gone). The token endpoint refusing the service account's key
+  (`invalid_grant`, or a key that cannot be read) is `transient`: a misconfigured secret is the app's,
+  not the answer's, so the answers wait (logged, never the key) and go once it is fixed.
 - The REST API is called as the service account: its JSON key from `secrets`, an access token from a
   signed JWT (RS256, WebCrypto) for the `chat.bot` scope, kept in memory until it expires.
 
@@ -245,22 +264,32 @@ app cannot read is named as unread.
 - This transport draws it (`draws: ["question"]`): one `confirm` or `select` field as a card with
   buttons; anything else as a card whose button opens a dialog with the form. The card's message is
   recorded in `storage.kv` under the question's id.
-- Every action of a card or a dialog carries the conversation's key (the action parameter `key`,
-  key.ts's `KEY_PARAMETER`), besides the question's id: a click inside a dialog carries no message, so
-  the route keys it by that parameter (a key of this app in the click's space only).
+- Every action of a card or a dialog carries the key of the conversation the card was drawn in (the
+  action parameter `key`, key.ts's `KEY_PARAMETER`), besides the question's id. **Every click is
+  keyed by that parameter** (a key of this app in the click's space only, checked by the route),
+  never by the `conversations` setting of now: a click inside a dialog carries no message, and a card
+  drawn in a thread stays its thread's when the setting makes the chat one conversation. The click
+  is refused (told the question is unknown, nothing admitted, no card touched) unless its question's
+  record names that same conversation key (on a server every record shares one `storage.kv`: a forged
+  `key` must not carry an answer into another conversation).
 - A click or a submitted form is admitted as a message whose text says it in words ("Answer to
   …: …", the question's id and each field's value) for the model: that text is the whole answer, as
-  one typed back to a folded question is. Its id is one per question (the card's message and
-  `:answer`), so concurrent and repeated clicks are the runtime's `duplicate`; the record is marked
-  answered once the message is durable. The card is updated to say who answered what (the click's
-  response; for a form, by `spaces.messages.patch` as the dialog closes). A question already
-  answered, or unknown, answers the click with that, and admits nothing. A click that admits an
-  answer wakes answer delivery, as a message does.
+  one typed back to a folded question is. Its id is one per question
+  (`<card message>:<question id>:answer`: a message may carry several questions), so concurrent and
+  repeated clicks are the runtime's `duplicate`; the record is marked answered (a claim, which keeps
+  the answer and who gave it) once the message is durable, and a `duplicate` whose claim is missing (a
+  stop in between) claims it and updates the card, so the question closes. A whole chat's answer
+  thread is recorded in `beforeDispatch`, awaited: a failure admits nothing. The card is updated to
+  say who answered what, only the question's card replaced (the click's response with the message it
+  carries; for a form, whose submit carries none, the message is read and patched with
+  `spaces.messages.patch` as the dialog closes). A question whose claim exists is drawn answered if its
+  piece is sent again. A question already answered, or unknown, answers the click with that, and
+  admits nothing. A click that admits an answer wakes answer delivery, as a message does.
 - Anyone the channel admits in that conversation may answer, as anyone there may talk to the agent;
   the answer carries their `actor`. Several questions may be open in a conversation; each is
   answered once. A question stays open until answered or the conversation is reset: its record keeps
-  the key of the answer that drew it (`<conversation id>:<request id>`), and a click once the key's
-  conversation is another one (`/new`) is told the question was asked in a conversation that was
+  the key of the answer that drew it (`<conversation id>:<request id>`), and a click once the key has
+  no conversation, or another one (`/new`), is told the question was asked in a conversation that was
   reset, and admits nothing.
 
 ## The contract changes
@@ -312,7 +341,9 @@ Values in the component's source, the same on both targets:
 | A piece | 4096 characters, 32,000 bytes as a message |
 | Pieces per run's answer | 20 (`DELIVERY.piecesPerRun`: a Durable Object's subrequests) |
 | Retries | after 1 s, 5 s, 30 s, then every minute, or Google's `Retry-After` |
-| The ID token's clock skew; Google's keys fetched again for an unknown `kid` | a minute; at most once a minute |
+| The ID token's clock skew; Google's keys fetched again for an unknown `kid`, or after a failed fetch | a minute; at most once a minute |
+| Google's expired keys used while their endpoint fails | an hour (`JWKS_GRACE_MS`) |
+| Piece `#0` applied again after a preview that timed out | 3 s (`REAPPLY_AFTER_MS`) |
 | Stranger spaces told, per process or isolate | once each, 1,000 remembered |
 
 ## Decisions taken while building
@@ -321,8 +352,14 @@ Values in the component's source, the same on both targets:
   (`createMessageAction`), once per space while the process or isolate lives; the handler's add of a
   stranger space is a guard that says the same.
 - **One rule for "nothing to send"** (`reply.ts`): `replyText` says what a chat is told about a run, and
-  `nothingToSend` is answer delivery's own decision (no text and no completed run's parts), which the
-  placeholder reads to delete itself.
+  `nothingToSend` is answer delivery's own decision, read from `@pikit/contracts`' `answerContent` (no
+  text and no completed run's parts), which the placeholder reads to delete itself.
+- **After review**: clicks keyed by their action's key and checked against their question's record;
+  one answer id per question; the drawn cards measured against the 32,000 bytes and sent apart past
+  them; a dashboard-led run answered in its user's thread; a preview that lands late overwritten; the
+  token endpoint's refusals transient (a key to fix, the answers waiting) and the Chat API's `401`
+  permanent; Google's keys kept for an hour past their expiry while the endpoint fails;
+  `GOOGLE_CHAT_ALLOWED_SPACES` optional.
 - **A stop past its deadline** cuts an answer's send: its piece stays `sending`, and the next App sends
   it again under the same ids (outbound-durable, or the runtime's record without it).
 - **The Worker's half has no `storage.kv`**: whether a space has threads is kept in memory per isolate
