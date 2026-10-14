@@ -65,6 +65,7 @@ import {
   type AgentRequest,
   type AgentResult,
   type AgentRuntime,
+  type AgentSkill,
   type AgentState,
   type AgentSubmissions,
   CONVERSATION,
@@ -118,6 +119,11 @@ export interface DurableRuntimeOptions {
    * time an agent is applied. Without it, an agent that names an extension cannot run.
    */
   extension?(name: string): DurableExtension | undefined;
+  /**
+   * An installed skill by name (`agent.skill`, the project's catalog), for the skills agents name; read
+   * each time an agent is applied. Without it, only skill objects work.
+   */
+  skill?(name: string): AgentSkill | undefined;
   /** pi-ai 1.0's models: every model the agents may name (`provider/modelId`). */
   models: DurableModels;
   /**
@@ -340,6 +346,7 @@ export function createDurableRuntime(options: DurableRuntimeOptions): DurableRun
     registry,
     tool: options.tool,
     extension: options.extension,
+    skill: options.skill,
     // Each tool, section and hook runs with its conversation, its state and the run's requests in its context.
     scope: async (conversationId, ctx) => {
       const ref = await refOf(conversationId);

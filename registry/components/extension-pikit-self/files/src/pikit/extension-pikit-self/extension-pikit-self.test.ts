@@ -114,13 +114,13 @@ test("the section is the same text on every request: it is built once, when the 
   expect(await section?.render({} as never, {} as never)).toBe(await section?.render({} as never, {} as never));
 });
 
-test("an agent is said by its model and the names of its tools, its own tool objects included, and of its skills", () => {
-  expect(agentSummary("a", { model: "x/y", tools: ["read", { name: "mine" }, 3], extensions: ["memory"], skills: [{ name: "review" }, 4] })).toEqual({
+test("an agent is said by its model and the names of its tools, its own tool objects included, and of its skills, the catalog's by name", () => {
+  expect(agentSummary("a", { model: "x/y", tools: ["read", { name: "mine" }, 3], extensions: ["memory"], skills: ["faq", { name: "review" }, 4] })).toEqual({
     name: "a",
     model: "x/y",
     tools: ["read", "mine"],
     extensions: ["memory"],
-    skills: ["review"],
+    skills: ["faq", "review"],
     steward: false,
   });
   expect(agentSummary("b", undefined)).toEqual({ name: "b", model: "", tools: [], extensions: [], skills: [], steward: false });

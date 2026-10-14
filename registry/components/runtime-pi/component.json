@@ -23,6 +23,7 @@
       "secrets",
       "agent.tool",
       "agent.extension",
+      "agent.skill",
       "execution",
       "workspace",
       "wakeups",

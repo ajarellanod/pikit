@@ -20,6 +20,8 @@
  *   them the steward (`steward: true`, SPEC §6);
  * - `model.provider`: the model providers your agents name as `provider/modelId`;
  * - `agent.tool`: the installed tools (`tool-*` components) that agents name in their `tools`;
+ * - `agent.skill`: the project's skills (its catalog) that agents name in their `skills`; a skill
+ *   installed and named by no agent is no agent's;
  * - `agent.extension`: the installed agent extensions (Pi's `defineExtension`: prompt sections, hooks,
  *   wrappers, durable tasks, tools) that agents name in their `extensions`, each run with the agents
  *   that name it, in that order, after the agent's own tools. Only the agents name them: no extension
@@ -33,8 +35,8 @@
  * - `wakeups`, if installed: runs are driven inside wakeups, in slices (SPEC §4.1, C4), for a host
  *   that keeps running only while an event is in progress (a Durable Object). See `createDriver` below.
  * - `settings`, if installed (settings-store): the agents' live overrides, an operator's system prompt,
- *   model and tools per agent (`overrides.ts`), declared at start and read before every admission, every
- *   resume and compaction, and every run of the driving wakeup; on a server also at start, before what
+ *   model, tools and skills per agent (`overrides.ts`), declared at start and read before every admission, every
+ *   resume and compaction, and every run of the driving wakeup (skills too: those its definition names); on a server also at start, before what
  *   is pending resumes (in a Durable Object's start it is not: the object cannot call while it starts,
  *   and the first wakeup reads them before it opens anything). What was read last applies until the
  *   next read; one that fails keeps it, logged. Without `settings`, every agent is its definition.
@@ -71,6 +73,7 @@ import {
   AgentUnavailableError,
   type ConversationRef,
   defineAgent,
+  skillProblem,
   stewardProblem,
   type Wakeups,
 } from "@pikit/contracts";
@@ -146,6 +149,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
       const secrets = pikit.useOptional("secrets");
       const tools = pikit.useKeyed("agent.tool");
       const extensions = pikit.useKeyed("agent.extension");
+      const skills = pikit.useKeyed("agent.skill");
       const execution = pikit.useOptional("execution");
       const workspace = pikit.useOptional("workspace");
       // Optional: with it, runs are driven inside wakeups, in slices, instead of in the background.
@@ -157,7 +161,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
 
       /** Whether an `execution` or a `workspace` is installed: tools that work on files and commands need one. */
       let environment = false;
-      /** Why `agent` cannot run in this App (a model, tool or extension nothing provides), or `undefined`. */
+      /** Why `agent` cannot run in this App (a model, tool, extension or skill nothing provides), or `undefined`. */
       const problemOf = (agent: AgentDefinition): string | undefined => {
         for (const tool of agent.tools ?? []) {
           if (typeof tool === "string" && tools.get(tool) === undefined) {
@@ -175,6 +179,11 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
         }
         for (const extension of agent.extensions ?? []) {
           if (extensions.get(extension) === undefined) return `agent "${agent.name}" names the extension "${extension}", which no agent.extension provides`;
+        }
+        for (const skill of agent.skills ?? []) {
+          if (typeof skill === "string" && skills.get(skill) === undefined) {
+            return `agent "${agent.name}" names the skill "${skill}", which no agent.skill provides: provide it with the project's skills, or take "${skill}" out of the agent's skills`;
+          }
         }
         const ref = parseModelName(agent.model);
         if (ref === undefined || models?.getModel(ref.provider, ref.modelId) === undefined) return `agent "${agent.name}" names model "${agent.model}", which no model.provider provides`;
@@ -204,6 +213,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
                 ...(agent.systemPrompt !== undefined && { systemPrompt: agent.systemPrompt }),
                 ...(agent.tools !== undefined && { tools: agent.tools }),
                 ...(agent.extensions !== undefined && { extensions: agent.extensions }),
+                ...(agent.skills !== undefined && { skills: agent.skills }),
               });
               // Never the steward (SPEC §6): the data has no such field, and names no steward's extension.
               problem =
@@ -357,6 +367,14 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             }
             if (key.startsWith("pikit.")) throw new Error(`runtime-pi: the agent.extension "${key}" has a reserved name (pikit.*: the runtime's own)`);
           }
+          for (const key of skills.keys()) {
+            const skill = skills.get(key);
+            const problem = skill === undefined ? undefined : skillProblem(skill);
+            if (problem !== undefined) throw new Error(`runtime-pi: the agent.skill "${key}" is not a skill: ${problem}`);
+            if (skill !== undefined && skill.name !== key) {
+              throw new Error(`runtime-pi: the agent.skill "${key}" is a skill named "${skill.name}"; a skill is provided under its own name`);
+            }
+          }
           environment = execution.get() !== undefined || workspace.get() !== undefined;
           for (const name of agents.keys()) {
             const model = agents.get(name)?.model ?? "";
@@ -376,7 +394,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           const store = settings.get();
           if (store !== undefined) {
             const modelNames = made.getModels().map((model) => `${model.provider}/${model.id}`);
-            const live = directory.get() === undefined ? undefined : { tools: tools.keys() };
+            const live = directory.get() === undefined ? undefined : { tools: tools.keys(), skills: skills.keys() };
             store.declare("runtime-pi", overridesSchema(agents.keys().flatMap((name) => agents.get(name) ?? []), modelNames, live), {});
             declared = true;
           }
@@ -402,6 +420,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
             agent: definition,
             tool: (name) => tools.get(name),
             extension: (name) => extensions.get(name),
+            skill: (name) => skills.get(name),
             models: made,
             events: background,
             now,

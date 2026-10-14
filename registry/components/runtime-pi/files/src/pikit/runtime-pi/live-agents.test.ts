@@ -13,6 +13,7 @@ import {
   type AgentUnavailableError,
   type ConversationRef,
   defineAgent,
+  defineSkill,
   type DirectoryAgent,
   isAgentUnavailable,
   type Settings,
@@ -27,22 +28,32 @@ import runtimePi from "./index.ts";
 
 const lookup = defineTool({ name: "lookup", description: "Looks up", parameters: Type.Object({}), execute: async () => ({ output: [{ type: "text", text: "found" }] }) }) as unknown as AgentTool;
 
-/** What each model request was told: its system prompt's instructions. */
-type SystemEntry = { role: string; sections?: { instructions?: string } };
+/** What each model request was told: its system prompt's instructions, and the skills section. */
+type SystemEntry = { role: string; sections?: { instructions?: string; skills?: string | null } };
 
-/** The App's other parts: the code's agent, a provider recording what it was told, a tool, and the directory (a list). */
+const faq = defineSkill("---\nname: faq\ndescription: Answers the product's common questions.\n---\nRead the FAQ first.");
+
+/** The App's other parts: the code's agent, a provider recording what it was told, a tool, a skill, and the directory (a list). */
 function project() {
   const told: string[] = [];
+  /** Per request, the skills section it was shown ("" for none). */
+  const skilled: string[] = [];
   const onRequest = (request: ModelRequest) => {
     let system = "";
-    for (const message of request.messages as unknown as SystemEntry[]) if (message.role === "system" && message.sections?.instructions !== undefined) system = message.sections.instructions;
+    let skills = "";
+    for (const message of request.messages as unknown as SystemEntry[]) {
+      if (message.role === "system" && message.sections?.instructions !== undefined) system = message.sections.instructions;
+      if (message.role === "system" && message.sections?.skills !== undefined) skills = message.sections.skills ?? "";
+    }
     told.push(system);
+    skilled.push(skills);
   };
   const agents: DirectoryAgent[] = [];
   let reads = 0;
   let failing = false;
   return {
     told,
+    skilled,
     agents,
     reads: () => reads,
     fail: (on: boolean) => void (failing = on),
@@ -52,6 +63,7 @@ function project() {
         pikit.provideKeyed("agent.definition", "assistant", defineAgent({ name: "assistant", model: "faux/scripted", systemPrompt: "The code's." }));
         pikit.provideKeyed("model.provider", "faux", scriptedProvider({ onRequest }));
         pikit.provideKeyed("agent.tool", "lookup", lookup);
+        pikit.provideKeyed("agent.skill", "faq", faq);
         pikit.provide("agent.directory", {
           async list() {
             reads++;
@@ -145,11 +157,24 @@ test("a live agent answers with no restart, as the directory says it is now; the
   await app.stop();
 }, 30_000);
 
+test("a live agent knows the project's skills it names, and only those", async () => {
+  const parts = project();
+  parts.agents.push({ name: "support", model: "faux/scripted", skills: ["faq"] }, { name: "billing", model: "faux/scripted" });
+  const { app, conversation, ask } = await started([parts.component]);
+
+  await ask(await conversation("support"), "r1", "hello");
+  expect(parts.skilled.at(-1)).toContain("<name>faq</name>");
+  await ask(await conversation("billing"), "r2", "hello");
+  expect(parts.skilled.at(-1)).toBe("");
+  await app.stop();
+}, 30_000);
+
 test("a name that is no agent, or a live agent that cannot run here, fails its admission saying why; start checked neither", async () => {
   const parts = project();
   parts.agents.push(
     { name: "shell", model: "faux/scripted", tools: ["bash"] },
     { name: "elsewhere", model: "gone/model" },
+    { name: "unskilled", model: "faux/scripted", skills: ["nope"] },
     { name: "knows", model: "faux/scripted", extensions: ["pikit-self"] },
     { name: "boss", model: "faux/scripted", steward: true } as DirectoryAgent,
   );
@@ -160,6 +185,7 @@ test("a name that is no agent, or a live agent that cannot run here, fails its a
   );
   await expect(dispatch(await conversation("shell"), "r2", "hi")).rejects.toThrow('runtime-pi: live agent "shell" names the tool "bash", which no agent.tool provides');
   await expect(dispatch(await conversation("elsewhere"), "r3", "hi")).rejects.toThrow('runtime-pi: live agent "elsewhere" names model "gone/model", which no model.provider provides');
+  await expect(dispatch(await conversation("unskilled"), "r6", "hi")).rejects.toThrow('runtime-pi: live agent "unskilled" names the skill "nope", which no agent.skill provides');
   // Never the steward (SPEC §6): not marked so, and not naming what only the steward may.
   await expect(dispatch(await conversation("knows"), "r4", "hi")).rejects.toThrow('runtime-pi: live agent "knows" names "pikit-self", which only the steward may name');
   await expect(dispatch(await conversation("boss"), "r5", "hi")).rejects.toThrow('runtime-pi: live agent "boss" is marked steward; a live agent never is');
@@ -168,12 +194,15 @@ test("a name that is no agent, or a live agent that cannot run here, fails its a
 
 test("a live agent gets the operator's overrides, as a code agent does", async () => {
   const parts = project();
-  parts.agents.push({ name: "support", model: "faux/scripted", systemPrompt: "Help customers." });
+  parts.agents.push({ name: "support", model: "faux/scripted", systemPrompt: "Help customers.", skills: ["faq"] });
   const settings = memorySettings();
   const { app, conversation, ask } = await started([parts.component, settings.component]);
-  await settings.set("runtime-pi", { support: { systemPrompt: "Overridden." } });
+  await settings.set("runtime-pi", { support: { systemPrompt: "Overridden.", skills: [] } });
   await ask(await conversation("support"), "r1", "hello");
   expect(parts.told.at(-1)).toContain("Overridden.");
+  // Its skills off: it knows none.
+  expect(parts.skilled.at(-1)).toBe("");
+  await expect(settings.set("runtime-pi", { support: { skills: ["nope"] } })).rejects.toThrow("the schema refuses");
   // An override's fields are checked against the App, a live agent's too.
   await expect(settings.set("runtime-pi", { support: { model: "gone/model" } })).rejects.toThrow("the schema refuses");
   await app.stop();

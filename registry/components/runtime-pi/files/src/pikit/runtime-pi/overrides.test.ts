@@ -7,7 +7,7 @@
 
 import { expect, test } from "bun:test";
 import { type AppContext, type AppEvents, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentRuntime, type AgentTool, type ConversationRef, defineAgent, type Settings, SettingsError, type SettingsValue } from "@pikit/contracts";
+import { type AgentRuntime, type AgentTool, type ConversationRef, defineAgent, defineSkill, type Settings, SettingsError, type SettingsValue } from "@pikit/contracts";
 import { type ModelRequest, scriptedProvider, sqliteStorage } from "@pikit/pi-adapter/testing";
 import { defineTool } from "@pikit/pi-adapter/tools";
 import Type from "typebox";
@@ -172,7 +172,7 @@ test("runtime-pi declares an override per agent, among the installed providers' 
     expect(Value.Check(schema, { stranger: {} })).toBe(false);
     // What the dashboard shows when nothing is overridden: the definition's.
     const fields = (settings.schema() as { properties: { assistant: { properties: Record<string, { default?: unknown }> } } }).properties.assistant.properties;
-    expect([fields.systemPrompt?.default, fields.model?.default, fields.tools?.default]).toEqual(["Be brief.", "faux/scripted", ["lookup", "notes"]]);
+    expect([fields.systemPrompt?.default, fields.model?.default, fields.tools?.default, fields.skills?.default]).toEqual(["Be brief.", "faux/scripted", ["lookup", "notes"], []]);
   } finally {
     await app.stop();
   }
@@ -190,4 +190,16 @@ test("an override goes over what prepare gives; a tool prepare adds beyond the d
   expect(turn?.systemPrompt).toBe("From the operator.");
   expect(turn?.tools?.map((each) => (typeof each === "string" ? each : each.name))).toEqual(["notes", "extra"]);
   expect(changed?.model).toBe("faux/scripted");
+});
+
+test("an override turns off skills among those the definition names (catalog names or its own); one prepare adds stays", () => {
+  const own = defineSkill("---\nname: notes\ndescription: Takes notes.\n---\nWrite them down.");
+  const agent = defineAgent({ name: "assistant", model: "faux/scripted", skills: ["faq", own], prepare: () => ({ skills: ["faq", own, "extra"] }) });
+  const ref = { conversation: { key: "k", agent: "assistant", conversationId: "c" } };
+
+  const names = (skills: readonly unknown[] | undefined) => skills?.map((each) => (typeof each === "string" ? each : (each as { name: string }).name));
+  expect(names(withOverride(agent, { skills: ["notes"] })?.prepare?.({}, ref)?.skills)).toEqual(["notes", "extra"]);
+  expect(names(withOverride(agent, { skills: [] })?.prepare?.({}, ref)?.skills)).toEqual(["extra"]);
+  // Skills not overridden: what prepare gives, untouched.
+  expect(names(withOverride(agent, { systemPrompt: "Hi." })?.prepare?.({}, ref)?.skills)).toEqual(["faq", "notes", "extra"]);
 });

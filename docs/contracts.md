@@ -29,6 +29,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.definition` | keyed | the project | admin-api?, agents-live?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
+| `agent.skill` | keyed | the project | agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
 | `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createConversationRegistryConformance` |
@@ -119,23 +120,24 @@ the project's main agent, the one its operators may ask to change it (SPEC §6):
 (the runtime refuses to start with two: `stewardProblem`, which the `agent.runtime` suite checks),
 and only it may name `pikit-self` (extension-pikit-self
 refuses to start otherwise). `tools` names `agent.tool`
-keys or holds tool objects; `extensions` names `agent.extension` keys. An agent gets only what it
-names. `skills` are `AgentSkill`s (`defineSkill` over a `SKILL.md`, [skill.ts](../packages/contracts/src/skill.ts):
+keys or holds tool objects; `extensions` names `agent.extension` keys; `skills` names `agent.skill`
+keys (the project's catalog) or holds skills of the agent's own. An agent gets only what it
+names. A skill is an `AgentSkill` (`defineSkill` over a `SKILL.md`, [skill.ts](../packages/contracts/src/skill.ts):
 the Agent Skills format Pi's coding agent reads): the runtime lists each one's name, description and
 location in a system prompt section and gives the agent the tool `skill` (`SKILL_TOOL`), which loads
 one's instructions; an agent with skills may not have a tool of its own named `skill`
 (`skillsProblem`). `prepare` is pure and synchronous: from the conversation's state it returns the
 fields that change for this run (`skills` among them). The project provides agents (`src/extensions/agents.ts`); runtime-pi refuses to
-start when an agent names a model, tool or extension nothing provides.
+start when an agent names a model, tool, extension or skill nothing provides.
 
 ### `agent.directory` ([agent-directory.ts](../packages/contracts/src/agent-directory.ts), optional)
 
 Agents that are data: names no component provided at setup (an operator's, made in the dashboard).
 `list(ctx)` (by name) and `get(name, ctx)` of `DirectoryAgent`s, JSON: `{ name, description?, model,
-systemPrompt?, tools?, extensions? }`, each one `defineAgent` accepts. Never an `agent.definition`
+systemPrompt?, tools?, extensions?, skills? }`, each one `defineAgent` accepts. Never an `agent.definition`
 key, never the steward (no `steward` field, no `pikit-self`); answers are copies; a change applies to
 the next read. runtime-pi resolves a name from `agent.definition` first, then here, and checks a live
-agent when used (a model, installed tools and extensions), failing that admission otherwise;
+agent when used (a model, installed tools, extensions and skills), failing that admission otherwise;
 router-rules checks a rule's agent here when a message matches it; admin-api lists them (`live:
 true`). Provider: agents-live (its settings). Suite: `createAgentDirectoryConformance` (agents-live,
 and in workerd over settings-store on storage-do).
@@ -157,6 +159,24 @@ the system prompt sections and hooks (generation, tool, compaction) of its agent
   joined it), each with its `sender`, read when asked; empty with no run going. Whose memory, which
   rules: code decides with it, never with the model (extension-house-rules' `senderTools`). Suite: the
   `agent.runtime` suite's sender cases (a request's sender, queued requests, a steer joining).
+
+### `agent.skill` (keyed, provided by the project)
+
+The project's skills, its catalog: one `AgentSkill` per name, keyed by `AgentSkill.name`
+(`defineSkill(text, { name: <its folder> })`). Agents name the ones they know in `skills`
+(`skills: ["review"]`); a skill installed and named by no agent is no agent's, as with tools. runtime-pi
+refuses to start when an agent names a skill nothing provides, or when a key is not its skill's name;
+a live agent (`agent.directory`) names skills too, checked when used, and agents-live offers the
+installed ones. runtime-pi's overrides turn off, live, skills an agent's definition names. Adding or
+changing a skill is a change to the project (SPEC §6); choosing which installed skills an agent has is
+configuration, as its tools are.
+
+```ts
+// a project component, as src/extensions/agents.ts provides the agents:
+import review from "../skills/review/SKILL.md" with { type: "text" };
+const skill = defineSkill(review, { name: "review" });
+pikit.provideKeyed("agent.skill", skill.name, skill);
+```
 
 ### `agent.tool` (keyed)
 

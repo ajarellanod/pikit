@@ -9,7 +9,7 @@ string in it), registered by hand in the project's `src/extensions/agents.ts`
 (`defineSkill(text)`, `packages/contracts/src/skill.ts`).
 
 **Needed by:** nothing required. [Channel context](channel-context.md) and the
-[skills catalog](skills-catalog.md) use it when both are built.
+[skills catalog](completed/skills-catalog.md) (built) use it.
 
 ## What it gives
 What an agent may do is written in one place, and what it knows sits next to it, as files:
@@ -29,7 +29,7 @@ keeps today's form: `agent.ts` alone, its prompt in it.
 
 ## How it fits pikit
 - **What it may do stays TypeScript.** `agent.ts` keeps `defineAgent`'s allow-lists (`tools`,
-  `extensions`, and skills by name once the [skills catalog](skills-catalog.md) is built): installing
+  `extensions`, and skills by name: the [skills catalog](completed/skills-catalog.md)): installing
   a tool, an extension or a skill gives no agent anything until it names it, and the runtime refuses to
   start on a name nothing provides. A YAML file would lose both checks ([config files](config-files.md)
   is undecided and holds values, never strategies).

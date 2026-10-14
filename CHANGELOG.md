@@ -25,14 +25,16 @@ there.
   steer with `whenBusy: "steer"`; `agent.*` events), `agent.conversations`, `agent.submissions`
   (read-only: `pending`, `get` and the `answers` feed), `agent.state`,
   `agent.observe` (conversations with agent, busy state and cost; a transcript; a live event stream;
-  usage), `agent.tool`, `agent.definition`.
+  usage), `agent.tool`, `agent.skill` (the project's skills, its catalog: an agent names the ones it
+  knows in `skills`, as it names tools; live agents and overrides too), `agent.definition`.
 - Inbound and outbound: `admitInbound` (`inbound.normalize`, `route.resolve`; it refuses a message
   whose id starts with `dashboard:`, the operator's, which channel-http answers `400`) and its outbound
   counterpart `startAnswerDelivery` (a channel's answers from the `answers` feed and its own cursor,
   one ordered lane per conversation, retries with the channel's own waits, idempotency keys, a crash
   resends at most the piece in flight, marked; on `wakeups` in slices or a timer in the process; its
   header says once what direct and queued delivery each guarantee),
-  `conversations.registry` (a key's runtime conversation, resolve and reset), `outbound.queue` with
+  `conversations.registry` (a key's runtime conversation, resolve and reset, and the channel the
+  conversation belongs to for good: `ConversationRef.channel`, which every run sees), `outbound.queue` with
   `ChannelTransport` and `DeliveryError`, `Feed` (what must not be missed, read with a cursor, K3).
 - Platform: `http.route` (fetch handlers by `"METHOD /path"`, parameters and prefix keys such as
   `GET /admin/*`), `admin.auth` (whether a request is an operator's), `secrets`, `storage.sql`,
@@ -126,7 +128,8 @@ there.
   `tool-mcp` (remote MCP servers, with a deploy-time seed); each tool's `replay` is in its own source
   and a tool on `api.env` uses `execution` (checked by `registry validate`). `execution-local` (its
   commands run the image's plain git: no built-in, no token),
-  `workspace-local` (a directory per agent under `execution`'s, with its variables and shell),
+  `workspace-local` (a directory per agent under `execution`'s, or per channel of each agent with
+  `per: "channel"`, with its variables and shell),
   `execution-do` (files in the object's SQL, a shell without processes, `git`, `node` in QuickJS;
   pi-durable 1.0.3's environment: positional and directory readers, argv `exec`, no `watch`).
 - Health: `health-registry` (server and durable): a degraded component, or a non-essential one down,

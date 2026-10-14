@@ -5,7 +5,7 @@
  */
 
 import { afterEach, describe, expect, test } from "bun:test";
-import { type AgentDefinition, defineAgent, defineSkill, SKILL_TOOL } from "@pikit/contracts";
+import { type AgentDefinition, type AgentSkill, defineAgent, defineSkill, SKILL_TOOL } from "@pikit/contracts";
 import { skillsText, skillText } from "./agent.ts";
 import { databaseFile, type ModelRequest, openWorker, scriptedProvider } from "./test-support.ts";
 
@@ -19,13 +19,15 @@ const review = defineSkill("---\nname: code-review\ndescription: Reviews a diff 
 });
 const deploy = defineSkill("---\nname: deploy\ndescription: Deploys a service.\n---\nSay which environment first.\n");
 
-async function worker(agent: AgentDefinition) {
+/** A worker running `agent`, with `catalog` the installed skills (`agent.skill`), by name. */
+async function worker(agent: AgentDefinition, catalog: Record<string, AgentSkill> = {}) {
   const file = databaseFile();
   cleanup.push(file.dispose);
   const requests: ModelRequest[] = [];
   const w = await openWorker(file.path, {
     agents: [agent],
     providers: [scriptedProvider({ onRequest: (request) => void requests.push(structuredClone(request)) })],
+    runtime: { skill: (name) => catalog[name] },
   });
   cleanup.push(w.close);
   return { ...w, requests };
@@ -67,6 +69,43 @@ describe("skills", () => {
 
     const result = w.requests[1]?.messages.find((message) => message.role === "toolResult");
     expect(JSON.stringify(result)).toContain('there is no skill \\"nope\\"; the skills are: deploy');
+  });
+
+  test("a skill named from the catalog (agent.skill) is the agent's; one installed and not named is not offered", async () => {
+    const w = await worker(defineAgent({ name: "scripted", model: "faux/scripted", skills: ["deploy"] }), { "code-review": review, deploy });
+    const conversation = await w.conversation();
+
+    await w.dispatch("r1", `call: ${SKILL_TOOL} {"name":"code-review"}`, conversation);
+    await w.result("r1");
+
+    expect(seen(w.requests[0])).toEqual({ skills: skillsText([deploy]), tools: [SKILL_TOOL] });
+    const result = w.requests[1]?.messages.find((message) => message.role === "toolResult");
+    expect(JSON.stringify(result)).toContain('there is no skill \\"code-review\\"; the skills are: deploy');
+  });
+
+  test("names and an agent's own skills together, and prepare may name catalog skills too", async () => {
+    const agent = defineAgent<{ phase: string }>({
+      name: "scripted",
+      model: "faux/scripted",
+      skills: ["deploy", review],
+      state: { phase: "review" },
+      prepare: (state) => (state.phase === "ship" ? { skills: ["deploy"] } : {}),
+    });
+    const w = await worker(agent as AgentDefinition, { deploy });
+    const conversation = await w.conversation();
+    await w.dispatch("r1", "hello", conversation);
+    await w.result("r1");
+    await w.runtime.state(conversation).update({ phase: "ship" }, w.ctx);
+    await w.dispatch("r2", "hello", conversation);
+    await w.result("r2");
+
+    expect(w.requests.map((request) => seen(request).skills)).toEqual([skillsText([deploy, review]), skillsText([deploy])]);
+  });
+
+  test("an agent naming a skill nothing installed cannot run, saying which", async () => {
+    const w = await worker(defineAgent({ name: "scripted", model: "faux/scripted", skills: ["nope"] }), { deploy });
+
+    await expect(w.dispatch("r1", "hello", await w.conversation())).rejects.toThrow('agent "scripted" names the skill "nope", which no agent.skill provides');
   });
 
   test("an agent without skills has no section and no skill tool", async () => {

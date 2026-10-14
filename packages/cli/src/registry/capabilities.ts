@@ -237,6 +237,13 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "One tool per name the model calls it by; an agent gets only the tools it names.",
   },
+  "agent.skill": {
+    mode: "keyed",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    providedBy: "project",
+    summary: "One skill per name (an Agent Skills SKILL.md): the project's catalog; an agent knows only the skills it names.",
+  },
   "agent.extension": {
     mode: "keyed",
     definedIn: "@pikit/pi-adapter",

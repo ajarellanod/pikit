@@ -7,7 +7,7 @@
 
 import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type AgentDirectory, type AgentTool, defineAgent, type DirectoryAgent, type Settings, SettingsError, type SettingsValue } from "@pikit/contracts";
+import { type AgentDirectory, type AgentTool, defineAgent, defineSkill, type DirectoryAgent, type Settings, SettingsError, type SettingsValue } from "@pikit/contracts";
 import { createAgentDirectoryConformance } from "@pikit/contracts/testing";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { scriptedProvider } from "@pikit/pi-adapter/testing";
@@ -48,7 +48,7 @@ function memorySettings() {
 
 const lookup = defineTool({ name: "lookup", description: "Looks up", parameters: Type.Object({}), execute: async () => ({ output: [{ type: "text", text: "found" }] }) }) as unknown as AgentTool;
 
-/** The App's other parts: a code agent, a model provider (`faux/scripted`), a tool. */
+/** The App's other parts: a code agent, a model provider (`faux/scripted`), a tool, a skill. */
 const project = defineComponent({
   name: "project-test",
   setup(pikit) {
@@ -56,6 +56,7 @@ const project = defineComponent({
     pikit.provideKeyed("model.provider", "faux", scriptedProvider());
     pikit.provideKeyed("agent.tool", "lookup", lookup);
     for (const name of ["plan", "pikit-self"]) pikit.provideKeyed("agent.extension", name, defineExtension({ name }));
+    pikit.provideKeyed("agent.skill", "faq", defineSkill("---\nname: faq\ndescription: Answers the product's common questions.\n---\nRead the FAQ first."));
   },
 });
 
@@ -81,7 +82,7 @@ async function started(settings = memorySettings()) {
 
 for (const c of createAgentDirectoryConformance(async () => {
   const { app, ctx, put, directory } = await started();
-  return { directory, ctx, put, model: "faux/scripted", tool: "lookup", definedAgent: "assistant", dispose: () => app.stop() };
+  return { directory, ctx, put, model: "faux/scripted", tool: "lookup", skill: "faq", definedAgent: "assistant", dispose: () => app.stop() };
 })) {
   test(`agents-live ${c.group}: ${c.name}`, () => c.run());
 }
@@ -95,11 +96,11 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(app.describe().components.find((component) => component.name === "agents-live")).toMatchObject({
     provides: ["agent.directory"],
     requires: ["settings"],
-    optional: ["agent.definition", "model.provider", "agent.tool", "agent.extension"],
+    optional: ["agent.definition", "model.provider", "agent.tool", "agent.extension", "agent.skill"],
   });
 });
 
-test("its settings accept only this App's models, tools and extensions (not pikit-self), no steward, and no code agent's name", async () => {
+test("its settings accept only this App's models, tools, extensions (not pikit-self) and skills, no steward, and no code agent's name", async () => {
   const { app, settings } = await started();
   const schema = settings.schema() as never;
   try {
@@ -109,6 +110,9 @@ test("its settings accept only this App's models, tools and extensions (not piki
     expect(Value.Check(schema, { support: { model: "faux/scripted", tools: ["bash"] } })).toBe(false);
     expect(Value.Check(schema, { support: { model: "faux/scripted", extensions: ["plan"] } })).toBe(true);
     expect(Value.Check(schema, { support: { model: "faux/scripted", extensions: ["other"] } })).toBe(false);
+    expect(Value.Check(schema, { support: { model: "faux/scripted", skills: ["faq"] } })).toBe(true);
+    expect(Value.Check(schema, { support: { model: "faux/scripted", skills: ["other"] } })).toBe(false);
+    expect(Value.Check(schema, { support: { model: "faux/scripted", skills: ["faq", "faq"] } })).toBe(false);
     // Never the steward (SPEC §6): not marked so, and not what only the steward may name.
     expect(Value.Check(schema, { support: { model: "faux/scripted", extensions: ["pikit-self"] } })).toBe(false);
     expect(Value.Check(schema, { support: { model: "faux/scripted", steward: true } })).toBe(false);

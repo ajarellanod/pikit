@@ -20,7 +20,7 @@
 
 import type { AppContext } from "@pikit/core";
 import { isJsonObject } from "./json.ts";
-import { type AgentSkill, skillProblem } from "./skill.ts";
+import { type AgentSkill, isSkillName, skillProblem } from "./skill.ts";
 
 /**
  * Pi payload types, filled in by `@pikit/pi-adapter`:
@@ -86,8 +86,8 @@ export interface TurnConfig {
   tools: readonly (AgentTool | string)[];
   /** As in `AgentDefinition.extensions`: names of installed agent extensions. */
   extensions: readonly string[];
-  /** As in `AgentDefinition.skills`. */
-  skills: readonly AgentSkill[];
+  /** As in `AgentDefinition.skills`: names of installed skills, or skill objects. */
+  skills: readonly (AgentSkill | string)[];
 }
 
 /**
@@ -143,16 +143,19 @@ export interface AgentDefinition<S extends object = object> {
    */
   extensions?: readonly string[];
   /**
-   * The skills it knows (the Agent Skills format: `defineSkill` over a `SKILL.md`): instructions for a
-   * kind of task, which it loads when a task matches a skill's description. The runtime lists each
-   * one's name and description in the system prompt and gives the agent the tool `skill`, which
-   * returns a skill's instructions by name (and where its files are, when it has a `location`). A
-   * skill is data the project ships, read when the agent is defined: changing one is a change to the
-   * project, through its deploy (SPEC §6), never something a run writes. Absent or empty: no skills,
-   * no section and no `skill` tool, so an agent that has a tool of its own named `skill` has no
-   * skills.
+   * The skills it knows, and only these (the Agent Skills format: `defineSkill` over a `SKILL.md`):
+   * instructions for a kind of task, which it loads when a task matches a skill's description. A
+   * string names a skill the project installed under the keyed capability `agent.skill` (its catalog:
+   * `"review"`); an object is a skill of the agent's own. As with tools, installing a skill gives no
+   * agent anything until it names it, and the runtime refuses to start when a name has no provider. The
+   * runtime lists each one's name and description in the system prompt and gives the agent the tool
+   * `skill`, which returns a skill's instructions by name (and where its files are, when it has a
+   * `location`). A skill is data the project ships, read when the agent is defined: changing one is a
+   * change to the project, through its deploy (SPEC §6), never something a run writes. Absent or empty:
+   * no skills, no section and no `skill` tool, so an agent that has a tool of its own named `skill` has
+   * no skills.
    */
-  skills?: readonly AgentSkill[];
+  skills?: readonly (AgentSkill | string)[];
   /**
    * The initial state of each conversation: a JSON object. Tools update it through `AGENT_STATE`;
    * it is stored in the runtime's conversation and starts again from here after a reset. Absent,
@@ -213,19 +216,21 @@ export function defineAgent<S extends object = object>(definition: AgentDefiniti
 }
 
 /**
- * What is wrong with an agent's skills, or `undefined`: each must be a skill (`defineSkill`), no two of
- * one name, and none beside a tool the agent names `skill` (the runtime's own tool for them). `tools`:
- * the names of the agent's tools. `defineAgent` checks the definition; the runtime checks what `prepare`
- * returns with it too.
+ * What is wrong with an agent's skills, or `undefined`: each must be a skill's name (an installed
+ * `agent.skill`) or a skill (`defineSkill`), no two of one name, and none beside a tool the agent names
+ * `skill` (the runtime's own tool for them). `tools`: the names of the agent's tools. `defineAgent`
+ * checks the definition; the runtime checks what `prepare` returns with it too, once names are skills.
  */
-export function skillsProblem(skills: readonly AgentSkill[], tools: readonly string[]): string | undefined {
-  if (!Array.isArray(skills)) return "skills must be a list of skills (defineSkill)";
+export function skillsProblem(skills: readonly (AgentSkill | string)[], tools: readonly string[]): string | undefined {
+  if (!Array.isArray(skills)) return "skills must be a list of skills' names or skills (defineSkill)";
   const names: string[] = [];
   for (const skill of skills) {
-    const problem = skillProblem(skill);
+    if (typeof skill === "string" && !isSkillName(skill)) return `skill name ${JSON.stringify(skill)} must be lowercase letters, digits and single hyphens, at most 64 characters`;
+    const problem = typeof skill === "string" ? undefined : skillProblem(skill);
     if (problem !== undefined) return problem;
-    if (names.includes(skill.name)) return `skill "${skill.name}" is given twice`;
-    names.push(skill.name);
+    const name = typeof skill === "string" ? skill : skill.name;
+    if (names.includes(name)) return `skill "${name}" is given twice`;
+    names.push(name);
   }
   if (names.length > 0 && tools.includes(SKILL_TOOL)) return `it has skills and a tool named "${SKILL_TOOL}", the runtime's tool that loads them: rename the tool`;
   return undefined;
@@ -399,5 +404,10 @@ declare module "@pikit/core" {
     "agent.definition": AgentDefinition;
     /** One per tool, keyed by the name the model calls it by; provided by `tool-*` components. */
     "agent.tool": AgentTool;
+    /**
+     * One per skill, keyed by its name (`AgentSkill.name`): the project's catalog, which agents name in
+     * their `skills`; provided by the project (`defineSkill` over each `SKILL.md`).
+     */
+    "agent.skill": AgentSkill;
   }
 }

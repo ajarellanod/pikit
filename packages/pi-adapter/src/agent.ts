@@ -117,6 +117,8 @@ export interface AgentConfigSource {
   tool?: ((name: string) => DurableTool | undefined) | undefined;
   /** An installed agent extension by name (`agent.extension`). */
   extension?: ((name: string) => DurableExtension | undefined) | undefined;
+  /** An installed skill by name (`agent.skill`): the project's catalog. */
+  skill?: ((name: string) => AgentSkill | undefined) | undefined;
   /**
    * `context` in the scope of the conversation `conversationId`: what a tool, a section or a hook of its
    * agent runs with (`CONVERSATION`, `AGENT_STATE`, `RUN_REQUESTS`); `context` itself when it has none.
@@ -147,8 +149,8 @@ export class AgentConfigs {
   constructor(private readonly source: AgentConfigSource) {}
 
   /**
-   * The static fields of `agent` with `prepare`'s changes over them. Throws when a model, a tool or an
-   * extension name cannot be resolved, or when two tools share a name.
+   * The static fields of `agent` with `prepare`'s changes over them. Throws when a model, a tool, an
+   * extension or a skill name cannot be resolved, or when two tools share a name.
    */
   resolve(agent: AgentDefinition, changes: Partial<Record<keyof TurnConfig, unknown>> = {}): Turn {
     const tools = ((changes.tools as TurnConfig["tools"] | undefined) ?? agent.tools ?? []).map((entry) => this.toolOf(agent.name, entry));
@@ -162,7 +164,11 @@ export class AgentConfigs {
       throw new Error(`agent "${agent.name}": model "${name}" is not provided by any model.provider`);
     }
     const extensions = ((changes.extensions as TurnConfig["extensions"] | undefined) ?? agent.extensions ?? []).map((entry) => this.extensionOf(agent.name, entry));
-    const skills = (changes.skills as TurnConfig["skills"] | undefined) ?? agent.skills ?? [];
+    const given = (changes.skills as TurnConfig["skills"] | undefined) ?? agent.skills ?? [];
+    // Names first, as given (one name twice is the agent's mistake), then each name's skill.
+    const named = skillsProblem(given, names);
+    if (named !== undefined) throw new Error(`agent "${agent.name}": ${named}`);
+    const skills = given.map((entry) => this.skillOf(agent.name, entry));
     const problem = skillsProblem(skills, names);
     if (problem !== undefined) throw new Error(`agent "${agent.name}": ${problem}`);
     return { model, systemPrompt: (changes.systemPrompt as string | undefined) ?? agent.systemPrompt, tools, extensions, skills };
@@ -333,6 +339,13 @@ export class AgentConfigs {
   }
 
   /** A tool of the definition as pi-durable's: a name resolved through `agent.tool`, an object as it is. */
+  private skillOf(agent: string, entry: AgentSkill | string): AgentSkill {
+    if (typeof entry !== "string") return entry;
+    const resolved = this.source.skill?.(entry);
+    if (resolved === undefined) throw new Error(`agent "${agent}" names the skill "${entry}", which no agent.skill provides`);
+    return resolved;
+  }
+
   private toolOf(agent: string, entry: unknown): DurableTool {
     if (typeof entry === "string") {
       const resolved = this.source.tool?.(entry);

@@ -27,7 +27,7 @@ export type {
   Usage,
 } from "./agent.ts";
 export type { AgentSkill } from "./skill.ts";
-export { defineSkill, skillProblem } from "./skill.ts";
+export { defineSkill, isSkillName, skillProblem } from "./skill.ts";
 export type { RunRequest, RunRequests } from "./run-requests.ts";
 export { RUN_REQUESTS } from "./run-requests.ts";
 

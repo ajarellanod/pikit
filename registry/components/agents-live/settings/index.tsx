@@ -5,7 +5,7 @@
  * tools changed in Agent (router-basic's section).
  *
  * What agents-live's schema says is all it offers: the models the installed providers have, the
- * installed tools and extensions (each agent's `patternProperties`), and no code agent's name
+ * installed tools and extensions, the project's skills (each agent's `patternProperties`), and no code agent's name
  * (`propertyNames`). A save stores every live agent at once (`PUT`), refused whole when one is wrong.
  */
 
@@ -23,7 +23,7 @@ import { useShell } from "@/lib/shell";
 const AGENT_NAME = /^[a-z][a-z0-9]*(-[a-z0-9]+)*$/;
 
 /** A live agent's fields, as stored under its name. */
-type Fields = { description?: string; model: string; systemPrompt?: string; tools?: string[]; extensions?: string[] };
+type Fields = { description?: string; model: string; systemPrompt?: string; tools?: string[]; extensions?: string[]; skills?: string[] };
 
 /** The agent being edited: `name` undefined while it is new and unnamed. */
 type Draft = { original?: string; name: string; fields: Fields };
@@ -37,6 +37,7 @@ function Editor({ draft, schema, taken, saving, onSave, onCancel }: { draft: Dra
   const models = choicesOf(properties.model) ?? [];
   const tools = choicesOf(properties.tools?.items) ?? [];
   const extensions = choicesOf(properties.extensions?.items) ?? [];
+  const skills = choicesOf(properties.skills?.items) ?? [];
   const isNew = draft.original === undefined;
   const nameProblem = !isNew
     ? undefined
@@ -93,6 +94,16 @@ function Editor({ draft, schema, taken, saving, onSave, onCancel }: { draft: Dra
           ))}
         </>
       )}
+      {skills.length > 0 && (
+        <>
+          <SettingsHeading>Skills</SettingsHeading>
+          {skills.map((skill) => (
+            <SettingsRow key={skill} label={skill} description={fields.skills?.includes(skill) ? "The agent knows it, and loads it when a task needs it." : "Off: the agent does not know it."}>
+              <Switch checked={fields.skills?.includes(skill) === true} label={skill} onChange={(on) => set({ skills: toggle(fields.skills ?? [], skills, skill, on) })} />
+            </SettingsRow>
+          ))}
+        </>
+      )}
       <div className="flex justify-end gap-2 py-3">
         <Button size="sm" variant="quiet" disabled={saving} onClick={onCancel}>
           Cancel
@@ -113,6 +124,7 @@ function storedFields(fields: Fields): Fields {
     ...(fields.systemPrompt !== undefined && fields.systemPrompt !== "" && { systemPrompt: fields.systemPrompt }),
     ...(fields.tools !== undefined && fields.tools.length > 0 && { tools: fields.tools }),
     ...(fields.extensions !== undefined && fields.extensions.length > 0 && { extensions: fields.extensions }),
+    ...(fields.skills !== undefined && fields.skills.length > 0 && { skills: fields.skills }),
   };
 }
 
@@ -166,7 +178,7 @@ function AgentsSettings() {
       <SettingsHeading
         aside={
           draft === undefined && (
-            <Button size="sm" variant="secondary" disabled={models.length === 0} onClick={() => setDraft({ name: "", fields: { model: models[0] ?? "", tools: [], extensions: [] } })}>
+            <Button size="sm" variant="secondary" disabled={models.length === 0} onClick={() => setDraft({ name: "", fields: { model: models[0] ?? "", tools: [], extensions: [], skills: [] } })}>
               <Plus width={14} height={14} strokeWidth={2} />
               New agent
             </Button>
@@ -215,7 +227,7 @@ function AgentsSettings() {
       <SettingsHeading>In the project's code</SettingsHeading>
       {code.length === 0 && <p className="py-3 text-[13px] text-ink-3">Loading</p>}
       {code.map((agent) => (
-        <SettingsRow key={agent.name} label={assistantName(agent.name)} description={`${agent.model} · defined in src/agents/; its prompt, model and tools are changed in Agent.`}>
+        <SettingsRow key={agent.name} label={assistantName(agent.name)} description={`${agent.model} · defined in src/agents/; its prompt, model, tools and skills are changed in Agent.`}>
           <Button size="sm" variant="quiet" onClick={() => openSection("router-basic")}>
             Open in Agent
           </Button>
@@ -232,6 +244,6 @@ export default defineSettings({
   group: "Agents",
   order: 1,
   requires: ["settings", "agent.directory"],
-  keywords: ["agents", "new agent", "create", "live", "prompt", "model", "tools", "extensions"],
+  keywords: ["agents", "new agent", "create", "live", "prompt", "model", "tools", "extensions", "skills"],
   component: AgentsSettings,
 });

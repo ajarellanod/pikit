@@ -1,7 +1,7 @@
 # settings-store
 
 The values an operator changes live, from the dashboard's Settings dialog: the agent's system prompt,
-model and tools, which agent answers by default, a channel's options ([features/settings.md](https://github.com/ajarellanod/pikit/blob/main/features/settings.md)). Each
+model, tools and skills, which agent answers by default, a channel's options ([features/settings.md](https://github.com/ajarellanod/pikit/blob/main/features/settings.md)). Each
 component declares its own; a change applies to the next run, with no deploy and no restart.
 
 - **Provides:** `settings` (`@pikit/contracts`' `settings.ts`: a component declares and reads), and

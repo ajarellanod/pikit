@@ -21,7 +21,7 @@ label, a line saying what it does, and its control (a segmented choice, a select
 a prompt editor). A change applies to the next run, with no deploy and no restart.
 
 - **router-basic** (always installed) brings **Agent**: which agent answers by default, and that
-  agent's system prompt, model and tools (among those its definition names). The basic version.
+  agent's system prompt, model, tools and skills (among those its definition names). The basic version.
 - **The multi-agent feature** (below) brings **Agents** (create, edit, remove agents as data) and
   **Routing** (router-rules' rules: this channel, chat or person → that agent, or denied). Without
   it these sections do not exist: one agent needs neither.
@@ -93,7 +93,7 @@ the dashboard applies to the next run of every conversation.
   sounds), `defineSettings` and `useSettings` (`lib/settings.ts`), the rows and controls and
   `SchemaSettings` (`components/pikit/settings.tsx`). Opened from the sidebar's foot menu.
 - **router-basic**: `defaultAgent` is also its setting (default: the config's), used while it names an
-  agent; its section, Agent: the default agent, then any agent's system prompt, model and tools.
+  agent; its section, Agent: the default agent, then any agent's system prompt, model, tools and skills.
 - **runtime-pi** (`overrides.ts`): its settings are an override per agent; read before every
   admission, resume, `/compact` and driving wakeup (on a server also at start), applied after
   `prepare`.

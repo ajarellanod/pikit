@@ -20,6 +20,7 @@ it into the app.
   - `agent.tool`: the installed tools (`tool-read`, `tool-bash`…) the agents name in `tools`;
   - `agent.extension`: the installed agent extensions the agents name in `extensions` ("Agent
     extensions" below);
+  - `agent.skill`: the project's skills (its catalog) the agents name in `skills` ("Skills" below);
   - `execution` and `workspace`, if installed: where tools work. Each tool call gets its
     conversation's workspace when a `workspace` provider is installed (`workspace-local`: a directory
     per agent), otherwise `execution`;
@@ -31,7 +32,7 @@ it into the app.
   - `wakeups`, if installed: runs are driven inside wakeups, in slices, instead of by promises left
     running, which is what a Durable Object needs ("Cloudflare" below). Without it, nothing changes;
   - `settings`, if installed (`settings-store`): the agents' live overrides, an operator's system
-    prompt, model and tools per agent, set from the dashboard ("Live overrides" below). Without it,
+    prompt, model, tools and skills per agent, set from the dashboard ("Live overrides" below). Without it,
     every agent is its definition;
   - `agent.directory`, if installed (`agents-live`): agents that are data, an operator's, for a name
     no `agent.definition` has ("Live agents" below).
@@ -247,13 +248,13 @@ or must see each model request or tool call is an extension.
 ## Live overrides
 
 With `settings` installed (`settings-store`, installed with the dashboard), an operator changes an
-agent's **system prompt**, **model** (one an installed provider has) and **tools** (on or off, among
-those its definition names) from the dashboard's Settings, Agent (router-basic's section), with no
+agent's **system prompt**, **model** (one an installed provider has), **tools** and **skills** (on or
+off, among those its definition names) from the dashboard's Settings, Agent (router-basic's section), with no
 deploy and no restart ([features/settings.md](https://github.com/ajarellanod/pikit/blob/main/features/settings.md)). The definition still owns the agent (SPEC §6): the
 overrides are data over it (`overrides.ts`).
 
 - **Declared at start** as runtime-pi's settings: one optional object per agent, its schema built from
-  the App (the installed providers' models, the tools the definition names), its `default`s the
+  the App (the installed providers' models, the tools and skills the definition names), its `default`s the
   definition's (what the dashboard shows), its defaults none. A value outside it is refused when set,
   and left out when read (a deploy removed the model).
 - **Read** before every admission, every resume and `/compact`, and every run of the driving wakeup; on
@@ -273,11 +274,11 @@ conversation's agent is its `agent.definition`, else the directory's agent of th
   server also at start), so a new agent answers its first message with no restart and a change applies
   to the next run. A directory that cannot be read keeps the agents read last, logged.
 - **Checked when used, not at start**: a live agent must name a model an installed provider has, and
-  installed tools and extensions (`read`, `write`, `edit`, `bash` with an execution), as the code's
-  agents must at start. A message to an agent that is neither the code's nor a live one that checks
+  installed tools, extensions and skills (`read`, `write`, `edit`, `bash` with an execution), as the
+  code's agents must at start. A message to an agent that is neither the code's nor a live one that checks
   fails its admission (`dispatch` rejects), saying why.
 - **Overrides** apply to a live agent as to any: with a directory, runtime-pi's settings accept an
-  override for any other agent name, among the installed models and tools.
+  override for any other agent name, among the installed models, tools and skills.
 - Until the directory was read once in this App, a conversation of a name the code does not have is not
   resumed at start, nor abandoned as having no agent: its agent may be live.
 
@@ -310,13 +311,23 @@ a section or a hook, after a restart too.
 ## Skills
 
 An agent's skills are `SKILL.md` files (the Agent Skills format Pi's coding agent reads), given as
-data:
+data. The project installs them once, as its catalog (`agent.skill`, one per name), and each agent
+names the ones it knows, as it names its tools:
 
 ```ts
-import review from "./skills/review/SKILL.md" with { type: "text" };
-defineAgent({ name: "assistant", model: "…", skills: [defineSkill(review)] });
-// on a server, a skill whose folder has scripts: defineSkill(text, { location: "/app/src/agents/assistant/skills/review" })
+// a project component (src/extensions/skills.ts), as src/extensions/agents.ts provides the agents:
+import review from "../skills/review/SKILL.md" with { type: "text" };
+const skill = defineSkill(review, { name: "review" });
+pikit.provideKeyed("agent.skill", skill.name, skill);
+// on a server, a skill whose folder has scripts: defineSkill(text, { name: "review", location: "/app/src/skills/review" })
+
+// an agent:
+defineAgent({ name: "assistant", model: "…", skills: ["review"] });
 ```
+
+A skill installed and named by no agent is no agent's. The runtime refuses to start when an agent names
+a skill nothing provides, or when a skill is provided under a name that is not its own. An agent may
+also hold a skill of its own (`skills: [defineSkill(text)]`), which no other agent has.
 
 The runtime lists each skill's name, description and location in a system prompt section (the same
 text on every request) and gives the agent the tool `skill`, which returns a skill's instructions by
@@ -339,16 +350,19 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
   several slices, each cut asking again at once; a model retry's backoff as a wakeup at its time, with
   pi-durable suspended meanwhile; stop cancelling a waiting handler, which asks again;
 - the start failures above, and a stored credential reaching the provider;
+- an agent's named tools and skills being the installed ones (a skill loaded by name), and the start
+  failures for a skill nothing provides or provided under another name;
 - an agent whose `prepare` gives it a tool once another tool moved its state on.
 
 `overrides.test.ts` covers the live overrides (with a `settings` double): an override changing the next
 run's system prompt, model and tools, the same agent after a restart, and the definition again once it
-is taken away; the declared schema (the providers' models, the definition's tools); an override over
-what `prepare` gives.
+is taken away; the declared schema (the providers' models, the definition's tools and skills); an
+override over what `prepare` gives, skills turned off among the definition's.
 
 `live-agents.test.ts` covers the live agents (with a directory double): one made after start answering
 its first message, a change applying to the next run, a name that is no agent and live agents that
-cannot run here failing their admission, a live agent's override, a directory that cannot be read.
+cannot run here failing their admission (a skill nothing provides among them), a live agent knowing
+only the skills it names, a live agent's override (its skills off), a directory that cannot be read.
 
 `extensions.test.ts` takes an agent extension through a real App: an async section reading a
 document its tool wrote, a `beforeTool` hook that blocks, a `beforeRequest` hook, per-agent selection,

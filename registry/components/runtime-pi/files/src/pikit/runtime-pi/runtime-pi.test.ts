@@ -9,7 +9,7 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type App, type AppEvents, BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withCancel } from "@pikit/core";
-import { AGENT_STATE, type AgentCommand, type AgentRuntime, type AgentSubmissions, type AgentTool, type ConversationRef, defineAgent, type WakeupHandler } from "@pikit/contracts";
+import { AGENT_STATE, type AgentCommand, type AgentRuntime, type AgentSubmissions, type AgentTool, type ConversationRef, defineAgent, defineSkill, type WakeupHandler } from "@pikit/contracts";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { createAgentCommandConformance, createAgentRuntimeConformance, createMemoryWakeups, createModelCompleteConformance } from "@pikit/contracts/testing";
 import type { Credential, CredentialStore } from "@pikit/pi-adapter";
@@ -123,7 +123,7 @@ test("what setup declares: component.json's provides / requires / optional come 
   expect(described).toMatchObject({
     provides: ["agent.runtime", "agent.conversations", "agent.submissions", "agent.observe", "model.complete", "agent.command"],
     requires: ["storage.sql"],
-    optional: ["agent.definition", "model.provider", "model.credentials", "secrets", "agent.tool", "agent.extension", "execution", "workspace", "wakeups", "settings", "agent.directory"],
+    optional: ["agent.definition", "model.provider", "model.credentials", "secrets", "agent.tool", "agent.extension", "agent.skill", "execution", "workspace", "wakeups", "settings", "agent.directory"],
   });
 });
 
@@ -697,6 +697,44 @@ test("it refuses to start when a tool is provided under another name", async () 
   const app = await defineApp({ components: [storage, agents, provider, bashComponent([], "shell"), runtimePi], logger: silentLogger }).create();
 
   expect(await startFailure(app)).toContain('the agent.tool "shell" is a tool named "bash"');
+});
+
+const faq = defineSkill("---\nname: faq\ndescription: Answers the product's common questions.\n---\nRead the FAQ first.");
+
+/** Provides `skills` as the project's catalog (`agent.skill`), each under `key` or its own name. */
+function skillsComponent(skills: readonly ReturnType<typeof defineSkill>[], key?: string) {
+  return defineComponent({ name: "skills-test", setup: (pikit) => skills.forEach((skill) => pikit.provideKeyed("agent.skill", key ?? skill.name, skill)) });
+}
+
+test("an agent's named skills are the installed agent.skill ones: it loads one by name", async () => {
+  const requests: string[] = [];
+  const recording = defineComponent({
+    name: "provider-recording",
+    setup: (pikit) => pikit.provideKeyed("model.provider", "faux", scriptedProvider({ onRequest: (request) => void requests.push(JSON.stringify(request.messages)) })),
+  });
+  const { storage, agents } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", skills: ["faq"] })] });
+  const { app, ask } = await talk([storage, agents, recording, skillsComponent([faq])]);
+
+  await ask("r1", 'call: skill {"name":"faq"}');
+
+  // The first request lists the skill; the second has the skill tool's result: its instructions.
+  expect(requests[0]).toContain("<name>faq</name>");
+  expect(requests[1]).toContain("Read the FAQ first.");
+  await app.stop();
+});
+
+test("it refuses to start when an agent names a skill no agent.skill provides", async () => {
+  const { storage, agents, provider } = testComponents({ agents: [defineAgent({ name: "scripted", model: "faux/scripted", skills: ["faq"] })] });
+  const app = await defineApp({ components: [storage, agents, provider, runtimePi], logger: silentLogger }).create();
+
+  expect(await startFailure(app)).toContain('agent "scripted" names the skill "faq", which no agent.skill provides');
+});
+
+test("it refuses to start when a skill is provided under another name", async () => {
+  const { storage, agents, provider } = testComponents();
+  const app = await defineApp({ components: [storage, agents, provider, skillsComponent([faq], "questions"), runtimePi], logger: silentLogger }).create();
+
+  expect(await startFailure(app)).toContain('the agent.skill "questions" is a skill named "faq"');
 });
 
 /** Moves the conversation's state to the phase it is called with (`agent.state`). */

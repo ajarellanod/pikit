@@ -86,8 +86,9 @@ export function agentSummary(
     return typeof named === "string" ? [named] : [];
   });
   const extensions = (definition?.extensions ?? []).filter((extension): extension is string => typeof extension === "string");
+  // A catalog skill by its name (agent.skill), a skill of the agent's own by its `name`.
   const skills = (definition?.skills ?? []).flatMap((skill) => {
-    const named = (skill as { name?: unknown } | null)?.name;
+    const named = typeof skill === "string" ? skill : (skill as { name?: unknown } | null)?.name;
     return typeof named === "string" ? [named] : [];
   });
   return { name, model: typeof definition?.model === "string" ? definition.model : "", tools, extensions, skills, steward: definition?.steward === true };

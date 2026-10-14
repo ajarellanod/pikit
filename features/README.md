@@ -70,7 +70,6 @@ look for, not what comes first; matching them feature for feature is a non-goal 
 | [pipeline-anchors](pipeline-anchors.md) | | The planned pipelines, and `agent.state` outside a run | No |
 | [policy-tools](policy-tools.md) | | Tool rules by role, in one place | No |
 | [replicas](replicas.md) | | Several server processes, one owner per conversation | No |
-| [skills-catalog](skills-catalog.md) | | Skills installed once and named by agents, live agents and overrides, like tools (`agent.skill`) | No |
 | [slash-commands](slash-commands.md) | | Pi extensions' commands from a chat | No |
 | [storage-postgres](storage-postgres.md) | | Postgres behind `storage.sql`; conversations need a Postgres backend of pi-durable's storage | No (it was the former roadmap's swap proof) |
 | [threads](threads.md) | | Platform threads as conversations; replies in their thread | No |
@@ -89,4 +88,5 @@ how it fits pikit, what Pi already does, where the code and its tests are, and w
 | [pi-durable-migration](completed/pi-durable-migration.md) | The kit on Pi's durable runtime: what moved to Pi, the switch-over's decisions, the gaps proposed upstream |
 | [mcp](completed/mcp.md) | Tools of remote MCP servers for the agents that name them: `tool-mcp` over Pi's `pi-mcp` (Streamable HTTP, both targets); OAuth and stdio still open |
 | [storage-kv](completed/storage-kv.md) | `storage.kv`: small JSON values per component, by key; `storage-kv-sql` provides it, `channel-telegram` keeps its cursor there |
+| [skills-catalog](completed/skills-catalog.md) | Skills installed once (`agent.skill`, the project's catalog) and named by agents, live agents and overrides, as tools are |
 | [tool-component](completed/tool-component.md) | A tool of your own: pi-durable's `defineTool` (from `@pikit/pi-adapter/tools`) in a component providing `agent.tool`, with its `replay`; `tool-fetch` and `tool-websearch-brave` are the references |

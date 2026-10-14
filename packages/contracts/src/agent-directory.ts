@@ -9,7 +9,7 @@
  *   const agent = await directory.get()?.get("support", ctx);   // a DirectoryAgent, or undefined
  *
  * A directory's agent is plain data (JSON): a name, a description, a model, a system prompt, and the
- * names of installed tools and extensions. It has no `prepare` and no tool objects: what needs code is
+ * names of installed tools, extensions and skills. It has no `prepare` and no tool objects: what needs code is
  * an `agent.definition`. A runtime builds it as it builds a definition (`DirectoryAgent` is one), with
  * the same overrides.
  *
@@ -20,9 +20,9 @@
  * - **A live agent is never the steward** (SPEC §6, `AgentDefinition.steward`): it has no `steward`
  *   field (a provider refuses one), and names no extension only the steward may (`pikit-self`, what
  *   the project is made of): a provider refuses it when stored, and a runtime when used.
- * - **Each agent is one `defineAgent` accepts**: a model named `provider/modelId`, tools and extensions
- *   by name, each named once. A provider checks what it can against the App when an agent is stored
- *   (a model an installed provider has, installed tools and extensions); a runtime checks again when
+ * - **Each agent is one `defineAgent` accepts**: a model named `provider/modelId`, tools, extensions and
+ *   skills by name, each named once. A provider checks what it can against the App when an agent is
+ *   stored (a model an installed provider has, installed tools, extensions and skills); a runtime checks again when
  *   it uses one, since a deploy may take a model away. A name nothing lists is no agent.
  * - **`list` is every agent now, by name; `get(name)` is `list`'s entry, or `undefined`.** A change
  *   applies to the next read, within the provider's bound (its settings', a second at most on
@@ -46,6 +46,8 @@ export interface DirectoryAgent {
   tools?: string[];
   /** Names of `agent.extension` keys, in order. */
   extensions?: string[];
+  /** Names of `agent.skill` keys: the project's skills it knows. */
+  skills?: string[];
 }
 
 /** The `agent.directory` capability. */

@@ -15,8 +15,9 @@ it loads instructions instead of rediscovering them; a skill that proves wrong i
 ## How it fits pikit
 - A skill is a file of the project: `src/agents/{name}/skills/` (a folder with a `SKILL.md`, the
   format Pi's coding agent uses). pi-durable has no skills, so pikit loads them as data, and this part
-  is built: `AgentDefinition.skills` holds `AgentSkill`s (`defineSkill(text, { location? })`,
-  `packages/contracts/src/skill.ts`), and the runtime gives an agent with skills its own extension
+  is built: `AgentDefinition.skills` names the project's skills (its catalog, `agent.skill`:
+  [skills catalog](completed/skills-catalog.md)) or holds `AgentSkill`s of the agent's own
+  (`defineSkill(text, { location? })`, `packages/contracts/src/skill.ts`), and the runtime gives an agent with skills its own extension
   (`pikit.skills.<agent>.<hash>`): a system prompt section listing each skill's name, description
   and location, as Pi's coding agent lists them, and a read-only, replay-safe tool `skill` that
   returns one's instructions (`packages/pi-adapter/src/agent.ts`). Nothing in a skill is executed by

@@ -6,7 +6,7 @@ and no restart.
 - **Provides:** `agent.directory`, the agents an operator made, by name.
 - **Requires:** `settings` (settings-store, which comes with the dashboard).
 - **Uses:** `agent.definition` (the code's agents: no live agent takes one of their names),
-  `model.provider`, `agent.tool` and `agent.extension` (what a live agent may name).
+  `model.provider`, `agent.tool`, `agent.extension` and `agent.skill` (what a live agent may name).
 - **Targets:** `server` and `durable`.
 - **Installs to:** `src/pikit/agents-live/`, and its Settings section to
   `src/dashboard/src/settings/agents-live/` when the project has a dashboard.
@@ -15,14 +15,15 @@ and no restart.
 ## What it does
 
 A live agent is a name (kebab-case), a description, a system prompt, a model (one an installed
-provider has), and tools and extensions by name (installed ones). It is made in the dashboard's
-Settings, **Agents**: "New agent", then Edit or remove each. The project's own agents (`src/agents/`)
-are listed there too, read-only: their prompt, model and tools are changed in **Agent**
+provider has), and tools, extensions and skills by name (installed ones; skills are the project's,
+`agent.skill`). It is made in the dashboard's Settings, **Agents**: "New agent", then Edit or remove
+each. The project's own agents (`src/agents/`) are listed there too, read-only: their prompt, model,
+tools and skills are changed in **Agent**
 (router-basic's section), as overrides of their definition.
 
 - **Stored** as agents-live's settings, one key per agent (`{ support: { model, systemPrompt, … } }`),
-  validated against a schema declared at start from what the App has: a value naming a model, tool or
-  extension it does not have, or a code agent's name, is refused (`400 invalid_value`).
+  validated against a schema declared at start from what the App has: a value naming a model, tool,
+  extension or skill it does not have, or a code agent's name, is refused (`400 invalid_value`).
 - **Read when used.** runtime-pi asks the directory for a conversation's agent its definitions do not
   have, at every admission (on Cloudflare at most once a second per object), and checks it then: a new
   agent answers its first message, and a change applies to the next run. A message to an agent that
@@ -54,7 +55,7 @@ rules naming them halt.
 
 `agents-live.test.ts` is copied with the component and runs in your project (a `settings` double): the
 `agent.directory` conformance suite, the lifecycle suite, what setup declares, the schema (the App's
-models, tools and extensions, not `pikit-self`, no steward, no code agent's name), a stored agent a
+models, tools, extensions and skills, not `pikit-self`, no steward, no code agent's name), a stored agent a
 deploy made invalid, and the directory before start.
 
 `component.json` is generated from `setup` by the CLI and is not written by hand. The test "what

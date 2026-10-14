@@ -40,7 +40,7 @@ stage routed goes to it, with no deploy and no restart. Its default is `defaultA
 deployed value: the setting overrides it while it names an agent. One that does not anymore (a deploy
 removed it), or settings that cannot be read, fall back to `defaultAgent`, logged.
 
-The same section changes that agent's system prompt, model and tools, which are runtime-pi's settings
+The same section changes that agent's system prompt, model, tools and skills, which are runtime-pi's settings
 (its README, "Live overrides"): router-basic is always installed, so its section is where an operator
 finds the agent.
 

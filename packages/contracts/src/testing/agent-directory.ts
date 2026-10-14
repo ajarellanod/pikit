@@ -25,6 +25,8 @@ export interface AgentDirectoryFixture {
   model: string;
   /** A tool the App has, when it has one. */
   tool?: string;
+  /** A skill the App has (`agent.skill`), when it has one. */
+  skill?: string;
   /** The name of one of the App's `agent.definition`s: a directory never holds it. */
   definedAgent: string;
   dispose?(): Promise<void>;
@@ -64,6 +66,7 @@ export function createAgentDirectoryConformance(factory: () => AgentDirectoryFix
       model: fixture.model,
       systemPrompt: "Be kind.",
       ...(fixture.tool !== undefined && { tools: [fixture.tool] }),
+      ...(fixture.skill !== undefined && { skills: [fixture.skill] }),
     },
     { name: "billing", model: fixture.model },
   ];

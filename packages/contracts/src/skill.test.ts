@@ -59,7 +59,12 @@ test("an agent has skills, once each, and never beside a tool of its own named s
   const review = defineSkill(REVIEW);
   expect(defineAgent({ name: "coder", model: "faux/scripted", skills: [review] }).skills).toEqual([review]);
   expect(() => defineAgent({ name: "coder", model: "faux/scripted", skills: [review, review] })).toThrow('skill "code-review" is given twice');
-  expect(() => defineAgent({ name: "coder", model: "faux/scripted", skills: ["code-review" as never] })).toThrow("must be an object");
+  // A name is an installed skill's (agent.skill), resolved by the runtime; it is still one name once.
+  expect(defineAgent({ name: "coder", model: "faux/scripted", skills: ["deploy", review] }).skills).toEqual(["deploy", review]);
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", skills: ["code-review", review] })).toThrow('skill "code-review" is given twice');
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", skills: ["Review"] })).toThrow("must be lowercase letters");
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", skills: [3 as never] })).toThrow("must be an object");
+  expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: [SKILL_TOOL], skills: ["deploy"] })).toThrow(`a tool named "${SKILL_TOOL}"`);
   expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: [SKILL_TOOL], skills: [review] })).toThrow(`a tool named "${SKILL_TOOL}"`);
   const own = { name: SKILL_TOOL } as unknown as AgentTool;
   expect(() => defineAgent({ name: "coder", model: "faux/scripted", tools: [own], skills: [review] })).toThrow("rename the tool");

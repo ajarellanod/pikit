@@ -21,7 +21,8 @@
       "agent.definition",
       "model.provider",
       "agent.tool",
-      "agent.extension"
+      "agent.extension",
+      "agent.skill"
     ]
   },
   "provides": [

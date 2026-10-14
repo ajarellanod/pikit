@@ -6,12 +6,12 @@
  * `agent.definition`s do not have, and router-rules checks the agent a rule names.
  *
  * - **An agent** is a name (kebab-case), a description, a system prompt, a model (one an installed
- *   `model.provider` has), and tools and extensions by name (installed `agent.tool` and
- *   `agent.extension` keys only, never `pikit-self`: a live agent is never the steward, SPEC §6, and has
+ *   `model.provider` has), and tools, extensions and skills by name (installed `agent.tool`,
+ *   `agent.extension` and `agent.skill` keys only, never `pikit-self`: a live agent is never the steward, SPEC §6, and has
  *   no `steward` field). What needs code (`prepare`, a tool of the project's own) is an agent
  *   of `src/agents/`, which stays as it is: the project's agents are listed beside these, read-only.
  * - **Its settings** are one key per agent (`{ support: { model, systemPrompt, … } }`), declared at
- *   start with what this App has: the models, the tools, the extensions, and the names of the code's
+ *   start with what this App has: the models, the tools, the extensions, the skills, and the names of the code's
  *   agents, which no live agent may take. A change the schema refuses is refused (`invalid_value`); a
  *   stored agent a deploy made invalid (its model gone, a code agent of its name) is left out when read,
  *   logged by settings-store, and is no agent until an operator saves it again.
@@ -51,6 +51,8 @@ export interface AgentChoices {
   models: readonly string[];
   tools: readonly string[];
   extensions: readonly string[];
+  /** The project's skills (`agent.skill`). */
+  skills: readonly string[];
   /** The code's agents (`agent.definition`). */
   defined: readonly string[];
 }
@@ -59,7 +61,7 @@ const choice = (values: readonly string[], options: Record<string, unknown> = {}
   values.length === 0 ? Type.Never(options) : Type.Union([...values].sort().map((value) => Type.Literal(value)), options);
 
 /** agents-live's settings: one key per agent, its value the agent's fields (a `DirectoryAgent` without its name). */
-export function agentsSchema({ models, tools, extensions, defined }: AgentChoices): TSchema {
+export function agentsSchema({ models, tools, extensions, skills, defined }: AgentChoices): TSchema {
   const agent = Type.Object(
     {
       description: Type.Optional(Type.String({ maxLength: MAX_DESCRIPTION, title: "Description", description: "One line: what it is for." })),
@@ -67,6 +69,7 @@ export function agentsSchema({ models, tools, extensions, defined }: AgentChoice
       systemPrompt: Type.Optional(Type.String({ maxLength: MAX_PROMPT, title: "System prompt", description: "What the agent is told before every conversation." })),
       tools: Type.Optional(Type.Array(choice(tools), { uniqueItems: true, title: "Tools", description: "The tools it may call, among the installed ones." })),
       extensions: Type.Optional(Type.Array(choice(extensions), { uniqueItems: true, title: "Extensions", description: "The agent extensions it runs with, in order, among the installed ones." })),
+      skills: Type.Optional(Type.Array(choice(skills), { uniqueItems: true, title: "Skills", description: "The skills it knows, among the project's." })),
     },
     { additionalProperties: false },
   );
@@ -94,6 +97,7 @@ export default defineComponent({
     const providers = pikit.useKeyed("model.provider");
     const tools = pikit.useKeyed("agent.tool");
     const extensions = pikit.useKeyed("agent.extension");
+    const skills = pikit.useKeyed("agent.skill");
     let declared = false;
 
     const read = async (ctx: AppContext): Promise<DirectoryAgent[]> => {
@@ -113,7 +117,7 @@ export default defineComponent({
           .getModels()
           .map((model) => `${model.provider}/${model.id}`);
         const offered = extensions.keys().filter((name) => !STEWARD_EXTENSIONS.includes(name));
-        const schema = agentsSchema({ models, tools: tools.keys(), extensions: offered, defined: definitions.keys() });
+        const schema = agentsSchema({ models, tools: tools.keys(), extensions: offered, skills: skills.keys(), defined: definitions.keys() });
         settings.get().declare("agents-live", schema, {});
         declared = true;
       },

@@ -478,7 +478,7 @@ made if users need it.
 an operator makes in the dashboard is a name no component provided: the optional capability
 `agent.directory` (`packages/contracts/src/agent-directory.ts`, with its suite; provider
 `agents-live`, from its settings) holds such agents as data (name, description, prompt, a model,
-installed tools and extensions by name), never a code agent's name and never the steward. The runtime
+installed tools, extensions and the project's skills (`agent.skill`) by name), never a code agent's name and never the steward. The runtime
 resolves a name from `agent.definition` first, then the directory, and checks a live agent when used,
 not at start: one that cannot run fails that admission, saying why. Its definition is that data, so the
 rule above holds for it too.

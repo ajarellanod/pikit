@@ -155,7 +155,7 @@ at it (github-app's setup comes back to `/admin/?settings=github-app`).
 
 | Section | Component | `requires` | What |
 |---|---|---|---|
-| Agent | router-basic | `settings` | the default agent; any code agent's prompt, model and tools (runtime-pi's overrides) |
+| Agent | router-basic | `settings` | the default agent; any code agent's prompt, model, tools and skills (runtime-pi's overrides) |
 | Agents | agents-live | `settings`, `agent.directory` | create, edit, remove live agents; the code's listed read-only, linking to Agent |
 | Routing | router-rules | `settings` | the ordered rules: channel, chat, sender; an agent (the code's or a live one) or deny with a reason |
 | GitHub | github-token | `settings`, `github` | the repository (the token is the `GITHUB_TOKEN` secret, never here) |

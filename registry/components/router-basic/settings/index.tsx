@@ -1,12 +1,12 @@
 /**
  * router-basic's section of the Settings dialog, Agent (features/settings.md): which agent answers by
  * default (router-basic's own setting, its default the config's `defaultAgent`), and that agent's
- * system prompt, model and tools (runtime-pi's settings: an operator's override over the agent's
+ * system prompt, model, tools and skills (runtime-pi's settings: an operator's override over the agent's
  * definition, applied from its next run). With several agents, any one of them is edited here.
  *
  * What runtime-pi's schema says is all it reads: the agents (its properties), each one's definition
- * (the `default`s), the models the installed providers have and the tools the definition names (the
- * options). It stores only what differs from the definition, so "Use the definition" takes an override
+ * (the `default`s), the models the installed providers have and the tools and skills the definition
+ * names (the options). It stores only what differs from the definition, so "Use the definition" takes an override
  * away.
  */
 
@@ -20,7 +20,7 @@ import { assistantName } from "@/lib/names";
 import { choicesOf, defineSettings, type SettingsValue, useSettings } from "@/lib/settings";
 
 /** One agent's override (runtime-pi's settings): absent, the definition's. */
-type Override = { systemPrompt?: string; model?: string; tools?: string[] };
+type Override = { systemPrompt?: string; model?: string; tools?: string[]; skills?: string[] };
 
 const sameSet = (a: readonly string[], b: readonly string[]) => a.length === b.length && a.every((each) => b.includes(each));
 
@@ -48,10 +48,13 @@ function AgentSettings() {
     systemPrompt: typeof fields.systemPrompt?.default === "string" ? fields.systemPrompt.default : "",
     model: typeof fields.model?.default === "string" ? fields.model.default : "",
     tools: Array.isArray(fields.tools?.default) ? (fields.tools.default as string[]) : [],
+    skills: Array.isArray(fields.skills?.default) ? (fields.skills.default as string[]) : [],
   };
   const models = choicesOf(fields.model) ?? [definition.model];
   const toolOptions = choicesOf(fields.tools?.items) ?? definition.tools;
   const tools = override.tools ?? definition.tools;
+  const skillOptions = choicesOf(fields.skills?.items) ?? definition.skills;
+  const skills = override.skills ?? definition.skills;
 
   /** Saves `next` as `agent`'s override, without what is the definition's. */
   const saveOverride = (next: Override): Promise<void> => {
@@ -60,6 +63,7 @@ function AgentSettings() {
       ...(next.systemPrompt !== undefined && next.systemPrompt !== definition.systemPrompt && { systemPrompt: next.systemPrompt }),
       ...(next.model !== undefined && next.model !== definition.model && { model: next.model }),
       ...(next.tools !== undefined && !sameSet(next.tools, definition.tools) && { tools: next.tools }),
+      ...(next.skills !== undefined && !sameSet(next.skills, definition.skills) && { skills: next.skills }),
     };
     const all: SettingsValue = { ...agents.value };
     if (Object.keys(kept).length === 0) delete all[agent];
@@ -86,7 +90,7 @@ function AgentSettings() {
         />
       </SettingsRow>
       {agentNames.length > 1 && (
-        <SettingsRow label="Agent to change" description="The agent whose prompt, model and tools are below." htmlFor="settings-agent">
+        <SettingsRow label="Agent to change" description="The agent whose prompt, model, tools and skills are below." htmlFor="settings-agent">
           <SelectControl id="settings-agent" label="Agent to change" value={agent} options={agentNames.map((name) => ({ value: name, label: assistantName(name) }))} onChange={setEditing} />
         </SettingsRow>
       )}
@@ -151,6 +155,20 @@ function AgentSettings() {
               ))}
             </>
           )}
+          {skillOptions.length > 0 && (
+            <>
+              <SettingsHeading>Skills</SettingsHeading>
+              {skillOptions.map((skill) => (
+                <SettingsRow key={skill} label={skill} description={skills.includes(skill) ? "The agent knows it, and loads it when a task needs it." : "Off: the agent does not know it."}>
+                  <Switch
+                    checked={skills.includes(skill)}
+                    label={skill}
+                    onChange={(on) => saving(saveOverride({ ...override, skills: skillOptions.filter((each) => (each === skill ? on : skills.includes(each))) }))}
+                  />
+                </SettingsRow>
+              ))}
+            </>
+          )}
         </>
       )}
     </div>
@@ -164,6 +182,6 @@ export default defineSettings({
   group: "Agents",
   order: 0,
   requires: ["settings"],
-  keywords: ["default agent", "system prompt", "prompt", "model", "tools", "routing"],
+  keywords: ["default agent", "system prompt", "prompt", "model", "tools", "skills", "routing"],
   component: AgentSettings,
 });

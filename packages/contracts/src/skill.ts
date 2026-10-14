@@ -5,14 +5,23 @@
  * instructions. Other files of the folder (scripts, references) are read or run by the agent's own
  * tools, from the skill's `location`, when it has one there.
  *
- * A skill is data the project ships (SPEC §6): `defineSkill` reads one when the agent is defined, the
- * agent names it in `AgentDefinition.skills`, and the runtime lists every skill an agent has in its
- * system prompt (name and description) and gives it the tool `skill` (`SKILL_TOOL`), which returns a
- * skill's instructions. pi-durable has no skills of its own: this is the loader Pi's coding agent has,
- * as small (features/learned-skills.md).
+ * A skill is data the project ships (SPEC §6): `defineSkill` reads one when the App is defined, the
+ * project installs it in its catalog (the keyed capability `agent.skill`, under its name), each agent
+ * names the ones it has in `AgentDefinition.skills`, and the runtime lists every skill an agent has in
+ * its system prompt (name and description) and gives it the tool `skill` (`SKILL_TOOL`), which returns
+ * a skill's instructions. Installing a skill gives no agent anything until it names it, as with tools.
+ * pi-durable has no skills of its own: this is the loader Pi's coding agent has, as small
+ * (features/learned-skills.md, features/skills-catalog.md).
  *
- *   import review from "./skills/review/SKILL.md" with { type: "text" };
- *   defineAgent({ name: "assistant", model: "…", skills: [defineSkill(review)] });
+ *   // the project's skills (a project component, as its agents are):
+ *   import review from "../skills/review/SKILL.md" with { type: "text" };
+ *   const skill = defineSkill(review, { name: "review" });
+ *   pikit.provideKeyed("agent.skill", skill.name, skill);
+ *   // an agent names it:
+ *   defineAgent({ name: "assistant", model: "…", skills: ["review"] });
+ *
+ * An agent may also hold a skill object of its own (`skills: [defineSkill(text)]`), which no other
+ * agent has.
  *
  * On a server, a skill whose folder has files the agent runs gives its folder as `location`
  * (`defineSkill(text, { location: "/app/skills/review" })`); on Cloudflare a skill is its text only.
@@ -41,11 +50,16 @@ const NAME = /^[a-z0-9]+(-[a-z0-9]+)*$/;
 const MAX_NAME = 64;
 const MAX_DESCRIPTION = 1024;
 
+/** Whether `name` is a skill's name: lowercase letters, digits and single hyphens, at most 64 characters. */
+export function isSkillName(name: unknown): name is string {
+  return typeof name === "string" && name.length <= MAX_NAME && NAME.test(name);
+}
+
 /** What is wrong with `skill` as an `AgentSkill`, or `undefined`. */
 export function skillProblem(skill: unknown): string | undefined {
   if (typeof skill !== "object" || skill === null) return "a skill must be an object (defineSkill)";
   const { name, description, instructions, location } = skill as Partial<Record<keyof AgentSkill, unknown>>;
-  if (typeof name !== "string" || name.length > MAX_NAME || !NAME.test(name)) {
+  if (!isSkillName(name)) {
     return `skill name ${JSON.stringify(name)} must be lowercase letters, digits and single hyphens, at most ${MAX_NAME} characters`;
   }
   if (typeof description !== "string" || description.trim() === "" || description.length > MAX_DESCRIPTION) {
