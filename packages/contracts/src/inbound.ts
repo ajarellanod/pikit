@@ -121,21 +121,25 @@ export interface AdmitOptions {
   key: string;
   /**
    * Called with the conversation once it resolved, right before `dispatch`: the last moment to start
-   * waiting for the run's events (`agent.settled`), which may arrive before `dispatch` returns. Called
-   * again, with the new conversation, when the first one's agent is gone (below): a later call replaces
-   * what an earlier one started. Whatever it starts, the caller ends when the outcome is not `admitted`
-   * or `admitInbound` throws.
+   * waiting for the run's events (`agent.settled`), which may arrive before `dispatch` returns, and to
+   * prepare what the run reads in that conversation (a file the message brings, written to its
+   * workspace). A promise it returns is awaited before `dispatch`; a rejection is `admitInbound`'s
+   * (nothing is dispatched), so the platform delivers the message again: what it prepares must be
+   * harmless to repeat (written under the message's own id). Called again, with the new conversation,
+   * when the first one's agent is gone (below): a later call replaces what an earlier one started.
+   * Whatever it starts, the caller ends when the outcome is not `admitted` or `admitInbound` throws.
    */
-  beforeDispatch?(conversation: ConversationRef): void;
+  beforeDispatch?(conversation: ConversationRef): void | Promise<void>;
 }
 
 /**
  * The inbound path after authentication: `inbound.normalize`, `route.resolve`, the
- * conversation, `dispatch` (with the message's actor as its sender and its images, as a stage left
- * them). Resolves once the message is durable (the ack point) or stopped; throws
+ * conversation, `beforeDispatch` (awaited), `dispatch` (with the message's actor as its sender and its
+ * images, as a stage left them). Resolves once the message is durable (the ack point) or stopped; throws
  * when the message's id is the dashboard's (`DASHBOARD_REQUEST_PREFIX`: a channel that takes ids from
  * its clients refuses those first), when a stage breaks the path's rules (it changed which message or
- * conversation this is), or when a capability fails, as the channel's own code would.
+ * conversation this is), when `beforeDispatch` rejects (nothing dispatched), or when a capability
+ * fails, as the channel's own code would.
  *
  * **A conversation whose agent is gone** (`dispatch` rejects with `AgentUnavailableError`: removed by a
  * deploy, a live agent deleted) is permanent, so it never throws: the key moves to a new conversation
@@ -168,7 +172,7 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
   if (decision.access === "deny") return { kind: "denied", message: normalized, ...(decision.reason !== undefined && { reason: decision.reason }) };
 
   const dispatch = async (conversation: ConversationRef) => {
-    options.beforeDispatch?.(conversation);
+    await options.beforeDispatch?.(conversation);
     const sender = { channel: normalized.channel, id: normalized.actor.id };
     const images = normalized.images ?? [];
     return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text, ...(images.length > 0 && { images }), sender }, ctx);

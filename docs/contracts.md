@@ -255,7 +255,10 @@ Both use `agent.conversations`, so the runtime starts first.
 
 Not a capability: a function and two pipelines every channel shares. `admitInbound(ctx, message,
 { conversations, runtime, key, beforeDispatch? })` runs `inbound.normalize`, then `route.resolve`,
-then `conversations.resolve(key, agent)`, then `runtime.dispatch`, and returns an `InboundOutcome`:
+then `conversations.resolve(key, agent)`, then `beforeDispatch(conversation)` (awaited: a channel
+starts waiting for the run there, or writes the message's files to that conversation's workspace; a
+rejection dispatches nothing and is thrown, so the platform delivers the message again, and what it
+does must be harmless to repeat), then `runtime.dispatch`, and returns an `InboundOutcome`:
 `admitted`, `duplicate`, `halted` (a stage halted), `denied` (the router said deny) or `no_route` (no
 stage decided). It throws when a stage changed the message's `id`, `channel` or `conversationId`, or
 when a capability fails. A dispatch rejected with `AgentUnavailableError` (the conversation's agent

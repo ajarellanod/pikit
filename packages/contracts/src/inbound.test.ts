@@ -187,6 +187,31 @@ test("admitInbound: beforeDispatch sees the conversation after it resolves and b
   expect([seen?.conversationId, seen?.channel]).toEqual(["conversation-of-test:c1", "test"]);
 });
 
+test("admitInbound: a beforeDispatch that returns a promise is awaited before dispatch; one that rejects dispatches nothing and throws", async () => {
+  const e = ends();
+  const ctx = await appWith(() => {});
+  await admitInbound(ctx, message, {
+    ...e,
+    key: "test:c1",
+    beforeDispatch: async () => {
+      await new Promise((resolve) => setTimeout(resolve, 5));
+      e.steps.push("files written");
+    },
+  });
+  expect(e.steps).toEqual(["resolve test:c1 support test", "files written", "dispatch m1"]);
+
+  const failing = ends();
+  const rejected = admitInbound(ctx, { ...message, id: "m2" }, {
+    ...failing,
+    key: "test:c1",
+    beforeDispatch: async () => {
+      throw new Error("the disk is full");
+    },
+  });
+  await expect(rejected).rejects.toThrow("the disk is full");
+  expect(failing.dispatched).toEqual([]);
+});
+
 
 /** A registry of one key whose conversation's agent is `retired`, and a runtime for which `retired` (and `gone`) are gone for good. */
 function goneEnds(routed: string) {
