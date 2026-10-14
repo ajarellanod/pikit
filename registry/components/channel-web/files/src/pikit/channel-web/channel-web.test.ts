@@ -294,6 +294,24 @@ test("a run's end whose event was lost: the message's state comes from agent.sub
   expect(message).toMatchObject({ id: requestId, state: "aborted" });
 });
 
+// Found in a browser on a durable project with faux/scripted: the list said "Running" for good.
+test("a run that ends before its admission returns (a quick model): the list and the conversation are not busy, its message answered, a first message and a next one alike", async () => {
+  const c = await chat();
+  c.runtime.runsAtOnce = true;
+  const listed = async () => ((await (await c.served.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items;
+  const { id, requestId } = await start(c, "ana", "hello");
+  expect((await listed()).map((each) => each.busy)).toEqual([false]);
+  expect(await (await c.served.fetch(`${API}/conversations/${id}`, as("ana"))).json()).toMatchObject({ busy: false });
+  const sent = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "and now?" }))).json()) as { requestId: string };
+  expect((await listed()).map((each) => each.busy)).toEqual([false]);
+  const states = Object.fromEntries((await messagesOf(c, "ana", id)).filter((each) => each.role === "user").map((each) => [each.id, each.state]));
+  expect(states).toEqual({ [requestId]: "answered", [sent.requestId]: "answered" });
+  // A run going (started, not ended) is still busy in the list.
+  c.runtime.runsAtOnce = false;
+  await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "a long one" }));
+  expect((await listed()).map((each) => each.busy)).toEqual([true]);
+});
+
 test("an operator's follow-up (dashboard:) in a user's conversation never appears in its messages or its live events", async () => {
   const c = await chat();
   const { id, requestId } = await start(c, "ana", "hello");

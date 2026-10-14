@@ -235,8 +235,9 @@ under an https `PIKIT_PUBLIC_URL`).
 - `channel-web.test.ts`: every route on a server, over the runtime's doubles (`runtime.test-support.ts`)
   and a double of the accounts: config, sessions and the page's header, conversations, the list and
   its cursor, isolation (another user's chat id `404` on every route), answers and states, a lost run
-  end, an operator's follow-up never shown, live events, stop, duplicates, request ids, images and
-  body limits, refusals, the operator's routes, the live `signUp` setting, what setup declares, the
+  end, a run that ends before its admission returns (a quick model: not busy, its message answered),
+  an operator's follow-up never shown, live events, stop, duplicates, request ids, images and body
+  limits, refusals, the operator's routes, the live `signUp` setting, what setup declares, the
   lifecycle suite.
 - Security cases: a spoofed `Host` gets no link nor email and `400` (accounts, the operator's routes),
   loopback hosts and `PIKIT_PUBLIC_URL` work; a client's `x-forwarded-for` never resets a rate limit,
@@ -249,7 +250,8 @@ under an https `PIKIT_PUBLIC_URL`).
   table (its writes failed or left hanging by the fixture).
 - `remote.test.ts`: the Worker's half over a fake platform of one App per key (`scope: "one"`), each
   conversation's object and the accounts actor: start, list, rename, messages, answers, delete,
-  isolation, live events, image limits, an unreachable object, the index's versions, removal.
+  isolation, live events, image limits, an unreachable object, the index's versions (not busy after a
+  run that ended before its admission returned), removal.
 - `accounts-wiring.test.ts`: the real accounts (better-auth) through the routes, on a server and
   forwarded to the accounts actor on Cloudflare (the cookie cache first, its renewal sent back after a
   database read); chat and admin sessions never open each other's routes; every better-auth route the

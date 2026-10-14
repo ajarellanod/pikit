@@ -137,6 +137,11 @@ export class Runtime {
   readonly record = createMemorySubmissions();
   /** The next dispatches that throw (the runtime cannot take messages for a while). */
   failing = 0;
+  /**
+   * A started run starts and ends inside `dispatch`, before it returns: Pi announces a quick run's
+   * `agent.started` and its end as `dispatch` returns (a model that answers at once).
+   */
+  runsAtOnce = false;
   /** The App's context, for the events of runs a test ends. */
   events: AppContext | undefined;
   private listeners = new Set<(event: ObservedEvent) => void>();
@@ -202,6 +207,10 @@ export class Runtime {
       const admission = { kind: duplicate ? "duplicate" : busy ? "queued" : "started", requestId: request.requestId } as const;
       if (!duplicate) await this.record.submissions.admitted(request.conversation, request.requestId, ctx);
       await ctx.emit("agent.dispatched", { conversation: request.conversation, admission });
+      if (this.runsAtOnce && admission.kind === "started") {
+        await this.start(request.conversation.key, [request.requestId]);
+        await this.end(request.conversation.key, [request.requestId], { text: `answer: ${request.prompt}` });
+      }
       return admission;
     },
     abort: async (conversation) => void this.aborted.push(conversation),

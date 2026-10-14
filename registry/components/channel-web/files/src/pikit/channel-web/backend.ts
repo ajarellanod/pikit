@@ -159,11 +159,29 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
       // The live view first, before telling the index (on Cloudflare a call to another object, while the
       // run, in this object's alarm, may already go on).
       store.notify(ref.key, { type: "message", id: message.requestId });
-      const row = await store.change(ref.key, { activity: at, ...(admitted && { busy: true }) });
+      let row = await store.change(ref.key, { activity: at, ...(admitted && { busy: true }) });
+      if (admitted && row !== undefined) row = await endedEarly(ref, message.requestId, outcome.conversation.conversationId, row, ctx);
       if (row !== undefined) await contracts.changed(row, ctx);
     }
     if (admitted) await contracts.wake(ctx);
     return { requestId: message.requestId, admission: outcome.kind === "duplicate" ? "duplicate" : outcome.admission.kind };
+  };
+
+  /**
+   * A run can end before its admission returns (Pi announces a quick run's `agent.started` and its end
+   * as `dispatch` returns), so its end's `busy: false` and its message's state came before the row and
+   * the message were written: they are set again from `agent.submissions`. Then, once more, from a run
+   * started since (`startedBy`, set before its `busy: true` is written): whichever comes last, the row
+   * says what goes.
+   */
+  const endedEarly = async (ref: ChatRef, requestId: string, conversationId: string, row: ConversationRow, ctx: AppContext): Promise<ConversationRow> => {
+    if (store.startedBy(conversationId) !== undefined) return row;
+    const status = await contracts.submissions().get({ conversationId }, requestId, ctx);
+    if (status?.kind !== "settled") return row;
+    for (const id of await store.settle(ref.key, [requestId], stateOf(status.run.kind))) store.notify(ref.key, { type: "message", id });
+    let now = (await store.change(ref.key, { busy: false })) ?? row;
+    if (store.startedBy(conversationId) !== undefined) now = (await store.change(ref.key, { busy: true })) ?? now;
+    return now;
   };
 
   /**

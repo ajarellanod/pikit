@@ -44,6 +44,8 @@ class Platform {
   readonly objects = new Map<string, Promise<FakeObject>>();
   readonly calls: string[] = [];
   readonly unreachable = new Set<string>();
+  /** Each object's runtime ends a started run before its dispatch returns (`Runtime.runsAtOnce`). */
+  runsAtOnce = false;
   constructor(
     readonly accounts: FakeAccounts,
     /** channel-web's config in every object's App (the default App's). */
@@ -87,6 +89,7 @@ class Platform {
 
   private async start(_key: string): Promise<FakeObject> {
     const runtime = new Runtime(String);
+    runtime.runsAtOnce = this.runsAtOnce;
     const answers = new Map<string, ActorCallHandler>();
     const handlers = new Map<string, ActorInboxHandler>();
     const streams = new Map<string, ActorStreamHandler>();
@@ -184,6 +187,17 @@ test("a conversation on the Worker: started by one call to its key's object, lis
   expect((await w.fetch(`${API}/conversations/${started.id}`, as("ana", { method: "DELETE" }))).status).toBe(204);
   expect(await (await w.fetch(`${API}/conversations`, as("ana"))).json()).toEqual({ items: [] });
   expect((await w.fetch(`${API}/conversations/${started.id}/messages`, as("ana"))).status).toBe(404);
+});
+
+// Found in a browser on a durable project with faux/scripted: the list said "Running" for good.
+test("a run that ends before its object's admission returns: the accounts actor's index says not busy", async () => {
+  const { platform, worker: w } = await cloud();
+  platform.runsAtOnce = true;
+  const busy = async () => (((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items.map((each) => each.busy));
+  const started = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "quick" }))).json()) as { id: string };
+  expect(await busy()).toEqual([false]);
+  await w.fetch(`${API}/conversations/${started.id}/messages`, post("ana", { text: "again" }));
+  expect(await busy()).toEqual([false]);
 });
 
 test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every route; A's object is never called", async () => {
