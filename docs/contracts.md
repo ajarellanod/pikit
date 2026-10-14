@@ -22,9 +22,9 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 
 | Capability | Mode | Provided by | Used by (`?` = optional) | Suite |
 |---|---|---|---|---|
-| `agent.runtime` | single | runtime-pi | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createAgentRuntimeConformance` |
+| `agent.runtime` | single | runtime-pi | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook | `createAgentRuntimeConformance` |
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
-| `agent.submissions` | single | runtime-pi | channel-telegram, channel-telegram-webhook, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
+| `agent.submissions` | single | runtime-pi | channel-google-chat, channel-telegram, channel-telegram-webhook, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
 | `agent.observe` | single | runtime-pi | admin-api | `createAgentObserveConformance` |
 | `agent.definition` | keyed | the project | admin-api?, agents-live?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
@@ -32,26 +32,26 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.skill` | keyed | the project | agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
-| `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createConversationRegistryConformance` |
-| `outbound.queue` | single | outbound-durable | admin-api?, channel-telegram?, channel-telegram-webhook? | `createOutboundQueueConformance` |
+| `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook | `createConversationRegistryConformance` |
+| `outbound.queue` | single | outbound-durable | admin-api?, channel-google-chat?, channel-telegram?, channel-telegram-webhook? | `createOutboundQueueConformance` |
 | `storage.sql` | single | storage-do, storage-sqlite | admin-api, repo-github-app, outbound-durable, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
-| `storage.kv` | single | storage-kv-sql | channel-telegram, channel-telegram-webhook, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | mailbox-local, actors-do | admin-api, channel-telegram-webhook, repo-github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | mailbox-local, actors-do | channel-telegram-webhook, repo-github-app, admin-api?, settings-store? | `createMailboxConformance` |
-| `wakeups` | single | actors-do, wakeups-timers | channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, repo-github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `storage.kv` | single | storage-kv-sql | channel-google-chat, channel-telegram, channel-telegram-webhook, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
+| `actor.mailbox` | single | mailbox-local, actors-do | admin-api, channel-google-chat, channel-telegram-webhook, repo-github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | mailbox-local, actors-do | channel-google-chat?, channel-telegram-webhook, repo-github-app, admin-api?, settings-store? | `createMailboxConformance` |
+| `wakeups` | single | actors-do, wakeups-timers | channel-google-chat, channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
+| `http.route` | keyed | admin-api, admin-proposals, channel-google-chat, channel-http, channel-telegram-webhook, repo-github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, repo-github-app?, health-registry?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-workers, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
-| `settings` | single | settings-store | agents-live, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
+| `secrets` | single | secrets-workers, secrets-env | admin-auth-token, channel-google-chat, channel-http, channel-telegram, channel-telegram-webhook, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `settings` | single | settings-store | agents-live, channel-google-chat?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
-| `execution` | single | execution-do, execution-local | tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
+| `execution` | single | execution-do, execution-local | channel-google-chat?, tool-edit, tool-read, tool-write, workspace-local, runtime-pi? | `createDurableExecutionConformance` (`@pikit/pi-adapter/execution/testing`) |
 | `execution.shell` | single | execution-do, execution-local | tool-bash | same |
-| `workspace` | single | workspace-local | runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
+| `workspace` | single | workspace-local | channel-google-chat?, runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 
 Two more suites check behaviour rather than one capability: `createChannelConformance` (what every
 channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook)

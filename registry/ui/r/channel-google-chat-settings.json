@@ -1,0 +1,21 @@
+{
+  "$schema": "https://ui.shadcn.com/schema/registry-item.json",
+  "name": "channel-google-chat-settings",
+  "type": "registry:file",
+  "title": "channel-google-chat-settings",
+  "description": "channel-google-chat's section of the Settings dialog: A Google Chat app of your own (a Workspace add-on) answers in each message's thread: Thinking… written as the model writes, tables and code as cards, photos and files read, questions asked with buttons and forms. On a server or on Cloudflare. Its settings come with the component (pikit add channel-google-chat), stored by settings-store.",
+  "dependencies": [
+    "iconoir-react@7.12.1"
+  ],
+  "registryDependencies": [
+    "@pikit/settings"
+  ],
+  "files": [
+    {
+      "path": "registry/components/channel-google-chat/settings/index.tsx",
+      "type": "registry:file",
+      "target": "~/src/settings/channel-google-chat/index.tsx",
+      "content": "// Owner: admission. channel-google-chat's section of the Settings dialog: each Chat app's `conversations` setting.\n/**\n * What it edits (instance.ts `settingsSchemaOf`): per instance (`googlechat`, `googlechat:ops`), its\n * `conversations`: `default` (each thread a conversation, or the whole chat one) and `chats`, the spaces\n * that differ (`spaces/AAA` → `\"thread\"` or `\"chat\"`). Its defaults are the config's `conversations`. A\n * change applies to the next message: a conversation already going keeps its key.\n *\n * For now the schema's generic form (`SchemaSettings`), which shows no nested object, so nothing yet:\n * the admission work replaces it with a default per app and a list of chats to add and remove.\n */\n\nimport { ChatBubble } from \"iconoir-react\";\nimport { SchemaSettings } from \"@/components/pikit/settings\";\nimport { defineSettings } from \"@/lib/settings\";\n\nfunction GoogleChatSettings() {\n  return <SchemaSettings component=\"channel-google-chat\" title=\"Conversations\" />;\n}\n\nexport default defineSettings({\n  id: \"channel-google-chat\",\n  title: \"Google Chat\",\n  icon: ChatBubble,\n  order: 20,\n  requires: [\"settings\"],\n  keywords: [\"google chat\", \"threads\", \"conversations\", \"spaces\", \"chat\"],\n  component: GoogleChatSettings,\n});\n"
+    }
+  ]
+}

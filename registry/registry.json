@@ -54,6 +54,15 @@
       ],
       "path": "components/agents-live"
     },
+    "channel-google-chat": {
+      "version": "0.0.0",
+      "description": "A Google Chat app of your own (a Workspace add-on) answers in each message's thread: Thinking… written as the model writes, tables and code as cards, photos and files read, questions asked with buttons and forms. On a server or on Cloudflare.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/channel-google-chat"
+    },
     "channel-http": {
       "version": "0.0.0",
       "description": "Talk to an agent over HTTP: send a message, get the answer in the response.",
