@@ -11,7 +11,7 @@ import { liveEvents } from "./live.ts";
 import type { ChatStore, StoreNote } from "./store.ts";
 
 /** A watch whose events the test pushes, and the store's notes. */
-async function view(snapshot: ObservedEvent) {
+async function view(snapshot: ObservedEvent, startedBy?: string) {
   let deliver: ((event: ObservedEvent | "end") => void) | undefined;
   const queued: (ObservedEvent | "end")[] = [];
   const push = (event: ObservedEvent | "end"): void => {
@@ -37,6 +37,8 @@ async function view(snapshot: ObservedEvent) {
     notify: (_key: string, note: StoreNote) => {
       for (const listener of listeners) listener(note);
     },
+    // The request that started the run going, as `agent.started` told the App (`index.ts`).
+    startedBy: (conversationId: string) => (conversationId === "c1" ? startedBy : undefined),
   } as unknown as ChatStore;
   const app = await defineApp({ components: [], logger: silentLogger }).create();
   const events = liveEvents({ observe, store, key: "web:ana:x", conversationId: "c1" }, app.context());
@@ -91,6 +93,46 @@ test("FAIL CLOSED: a view opened while an operator-only run goes, the user's mes
     { type: "partial", text: "Hi", requests: ["web:m1"] },
   ]);
   expect(JSON.stringify(v.seen)).not.toMatch(/refund|fraud|crm_lookup|internal_admin_tool/);
+  await v.end();
+});
+
+test("a view opened mid-run streams the run the user's message started (the page opens it after the first message), named by agent.started", async () => {
+  const v = await view(
+    {
+      type: "snapshot",
+      entries: [],
+      run: { inputs: [3] },
+      generation: { attempt: 1, message: { role: "assistant", content: [{ type: "text", text: "Hel" }] } },
+      tools: [{ callId: "t1", name: "websearch", status: "running" }],
+    },
+    "web:first",
+  );
+  expect(await v.take(3)).toEqual([
+    { type: "state", busy: true },
+    { type: "partial", text: "Hel", requests: ["web:first"] },
+    { type: "tool", name: "websearch", state: "running" },
+  ]);
+  v.push({ type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: "lo" }] });
+  expect(await v.take(1)).toEqual([{ type: "partial", text: "Hello", requests: ["web:first"] }]);
+  await v.end();
+});
+
+test("FAIL CLOSED: a view opened mid-run of a run the operator started streams nothing of it, even with the start heard", async () => {
+  const v = await view(
+    {
+      type: "snapshot",
+      entries: [],
+      run: { inputs: [7] },
+      generation: { attempt: 1, message: { role: "assistant", content: [{ type: "text", text: "Operator only: secret plan" }] } },
+      tools: [{ callId: "c1", name: "crm_lookup", status: "running" }],
+    },
+    "dashboard:op-1",
+  );
+  expect(await v.take(1)).toEqual([{ type: "state", busy: true }]);
+  v.push({ type: "message_update", changes: [{ type: "text_delta", contentIndex: 0, delta: " more" }] });
+  v.push({ type: "run_end", inputs: [7] });
+  expect(await v.take(1)).toEqual([{ type: "state", busy: false }]);
+  expect(JSON.stringify(v.seen)).not.toMatch(/secret|crm_lookup/);
   await v.end();
 });
 

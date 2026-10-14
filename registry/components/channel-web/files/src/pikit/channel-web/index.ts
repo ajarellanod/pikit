@@ -173,10 +173,12 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         }
       };
 
-      pikit.on("agent.started", ({ conversation }, ctx) =>
+      pikit.on("agent.started", ({ conversation, requestId }, ctx) =>
         parseKey(conversation.key) === undefined
           ? undefined
           : guarded("a run's start was not recorded", async (now) => {
+              // Before anything awaits: a view opened from now on names this run by it (`live.ts`).
+              store.runStarted(conversation.conversationId, requestId);
               const row = await store.change(conversation.key, { busy: true });
               if (row !== undefined) await changed(row, now);
             })(ctx),
@@ -186,6 +188,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
           ? undefined
           : guarded("a run's end was not recorded; the page reads it from agent.submissions", async (now) => {
               const key = result.conversation.key;
+              store.runEnded(result.conversation.conversationId);
               for (const id of await store.settle(key, result.requestIds, stateOf(result.kind))) store.notify(key, { type: "message", id });
               const row = await store.change(key, { busy: false });
               if (row !== undefined) await changed(row, now);

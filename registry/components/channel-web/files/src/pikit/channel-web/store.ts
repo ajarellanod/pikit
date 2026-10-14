@@ -86,6 +86,16 @@ export interface ChatStore {
   /** Hears what is stored in `key` from now on, until the returned function is called. */
   subscribe(key: string, listener: (note: StoreNote) => void): () => void;
   notify(key: string, note: StoreNote): void;
+
+  /**
+   * The request that started the run going in runtime conversation `conversationId` (`agent.started`),
+   * until it ends: in memory, in the App that runs it (a server, or the conversation's object), where
+   * the live view is made. A view opened mid-run names the run by it (a snapshot names its inputs by
+   * submission id only). Lost with the process, and so is the run's watch: nothing stale outlives it.
+   */
+  runStarted(conversationId: string, requestId: string): void;
+  runEnded(conversationId: string): void;
+  startedBy(conversationId: string): string | undefined;
 }
 
 const invalidCursor = (): ActorCallError => new ActorCallError("invalid_cursor", "the cursor is not one this API gave");
@@ -164,6 +174,8 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
     return database;
   };
   const followers = new Map<string, Set<(note: StoreNote) => void>>();
+  /** The request that started each runtime conversation's run going (`runStarted`). */
+  const starters = new Map<string, string>();
 
   const conversation = async (key: string): Promise<ConversationRow | undefined> => {
     const [row] = await (await db()).query<ConversationSqlRow>(`SELECT ${COLUMNS} FROM ${CONVERSATIONS} WHERE key = ?`, [key]);
@@ -299,6 +311,16 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
         if (set.size === 0 && followers.get(key) === set) followers.delete(key);
       };
     },
+
+    runStarted(conversationId, requestId) {
+      starters.set(conversationId, requestId);
+    },
+
+    runEnded(conversationId) {
+      starters.delete(conversationId);
+    },
+
+    startedBy: (conversationId) => starters.get(conversationId),
 
     notify(key, note) {
       for (const listener of followers.get(key) ?? []) {

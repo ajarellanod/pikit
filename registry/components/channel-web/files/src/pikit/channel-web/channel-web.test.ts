@@ -439,6 +439,37 @@ test("live: a run is the user's by its inputs' request ids: a fast run whose mes
   await events.reader.cancel();
 });
 
+test("live: the page opens the view after its first message's run started (a snapshot names no inputs): the run streams, named by its agent.started; an operator's run so opened does not", async () => {
+  const c = await chat();
+  const { id, requestId } = await start(c, "ana", "hello");
+  const key = `web:ana:${id}`;
+  // The run starts before the page follows it.
+  await c.runtime.start(key, [requestId], null);
+  const client = new AbortController();
+  const events = sse(await c.served.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
+  expect(await events.take(1)).toEqual([{ type: "state", busy: true }]);
+  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "Hi" }] } });
+  expect(await events.take(1)).toEqual([{ type: "partial", text: "Hi", requests: [requestId] }]);
+  await c.runtime.end(key, [requestId], { text: "Hi" });
+  client.abort();
+  await events.reader.cancel();
+
+  // The operator's follow-up starts a run; the page opens the view during it, its user waiting: nothing streams.
+  const waiting = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "and?" }))).json()) as { requestId: string };
+  await c.runtime.start(key, ["dashboard:op-1"], null);
+  const second = new AbortController();
+  const more = sse(await c.served.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: second.signal })));
+  expect(await more.take(1)).toEqual([{ type: "state", busy: true }]);
+  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "operator only" }] } });
+  c.runtime.push({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash" });
+  await c.runtime.end(key, ["dashboard:op-1"], { text: "operator only" });
+  const after = await more.take(1);
+  expect(after).toEqual([{ type: "state", busy: false }]);
+  expect(waiting.requestId.startsWith("web:")).toBe(true);
+  second.abort();
+  await more.reader.cancel();
+});
+
 test("RATE: a user's messages a minute (messagesPerMinute), every conversation together; one too many is 429 with retry-after, before anything is admitted; another user is not", async () => {
   const c = await chat({ config: { messagesPerMinute: 2 } });
   const first = await start(c, "ana", "one");

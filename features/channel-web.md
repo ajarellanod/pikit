@@ -189,9 +189,11 @@ settings-store do.
   `partial` and `tool` only during a run whose inputs are known to include a message of the user's
   (a `web:` request id, from the watch's `submission` events, which come before the run that takes
   them). A run that answers both the user's message and an operator's follow-up is the user's, as
-  delivery is. Fail closed: a run whose inputs the view cannot name (going when it opened: a snapshot
-  names inputs by submission id, which `agent.submissions` cannot turn into request ids) streams
-  nothing, its answer arriving as a `message`; the next run is named. So a run of the operator's own
+  delivery is. A run going when the view opened (a snapshot names inputs by submission id, which
+  `agent.submissions` cannot turn into request ids) is named by the request that started it, which
+  the App holding the conversation heard (`agent.started`). Fail closed: a run the view cannot name
+  (its start not heard: a restart) streams nothing, its answer arriving as a `message`; the next run
+  is named. So a run of the operator's own
   follow-up streams nothing to the user, even while the user's message waits. Never transcript
   entries, system prompts, tool results or operator notes.
 - **Titles**: the first message, cleaned (`cleanTitle`); the user renames it.

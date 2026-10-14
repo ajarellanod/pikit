@@ -16,10 +16,12 @@
  * messages (a `web:` request id: this conversation's key is the user's), known from the watch's own
  * `submission` events, which the runtime sends before the run that takes them starts. A run that
  * answers both a user's message and an operator's follow-up is the user's, as `startAnswerDelivery`
- * delivers its answer to them. It fails closed: a run whose inputs it cannot name (going when the view
- * opened: a snapshot names its inputs by submission id only, and `agent.submissions` cannot turn one
- * into a request id) streams nothing, its answer comes as a `message` once stored; the next run that
- * starts is named. So a run the operator's own follow-up started never streams to the user, even
+ * delivers its answer to them. A run going when the view opened (a snapshot names its inputs by
+ * submission id only, and `agent.submissions` cannot turn one into a request id) is named by the request
+ * that started it, which this App heard (`agent.started`, kept by the store until the run ends): a
+ * user's first message streams its answer even when the page opens the view after the run started. It
+ * fails closed: a run it cannot name (its start not heard: the process restarted) streams nothing, its
+ * answer comes as a `message` once stored; the next run that starts is named. So a run the operator's own follow-up started never streams to the user, even
  * while the user's message waits, and a fast run is streamed even when its user's message was stored
  * after it ended. Never a transcript entry, a system prompt, a tool's arguments or results, or an
  * operator's note.
@@ -182,7 +184,11 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
         case "snapshot": {
           const generation = event.generation as { message?: Assistant } | undefined;
           const running = Array.isArray(event.tools) ? (event.tools as { callId?: unknown; name?: unknown; status?: unknown }[]) : [];
-          runRequests = requestsOf((event.run as { inputs?: unknown } | null | undefined)?.inputs);
+          const run = event.run as { inputs?: unknown } | null | undefined;
+          // A snapshot names its run's inputs by submission id: the request that started it, as this App
+          // heard it (`agent.started`), names it when the watch has not.
+          const starter = run === undefined || run === null || conversationId === undefined ? undefined : store.startedBy(conversationId);
+          runRequests = requestsOf(run?.inputs) ?? (starter === undefined ? undefined : [starter]);
           yield* changes({ busy: event.run !== undefined && event.run !== null, partial: generation?.message?.role === "assistant" ? generation.message : undefined });
           const now = new Map(running.filter((tool) => tool.status !== "done" && typeof tool.callId === "string" && typeof tool.name === "string").map((tool) => [tool.callId as string, tool.name as string]));
           for (const [callId, name] of tools) if (!now.has(callId) && streams()) yield { type: "tool", name, state: "done" };

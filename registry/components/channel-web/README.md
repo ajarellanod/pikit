@@ -148,7 +148,9 @@ send it over a channel you trust. Without `email.send`, sending it is yours.
   answer as written and the tools' names only during a run whose inputs are known to include one of
   the user's messages (by the request ids the runtime's own events give before the run starts). A run
   that answers both the user's message and an operator's follow-up is the user's, as delivery is. It
-  fails closed: a run already going when the view opened (its inputs unnamed) streams nothing, and its
+  names a run already going when the view opened by the request that started it, which its App heard
+  (`agent.started`), so a first message's answer streams even when the page follows it late. It fails
+  closed: a run it cannot name (its start not heard: the process restarted) streams nothing, and its
   answer comes as a message once stored. Never thinking, tool arguments or results, system prompts or
   transcript entries (`live.ts`).
 - **Live text and stored answer by identity.** A `partial` event carries its run's request ids
