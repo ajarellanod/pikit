@@ -21,7 +21,7 @@
  */
 
 import { type AppContext, Halt } from "@pikit/core";
-import type { Admission, AgentRuntime, ConversationRef } from "./agent.ts";
+import type { Admission, AgentImage, AgentRuntime, ConversationRef } from "./agent.ts";
 import type { ConversationRegistry } from "./conversations.ts";
 import { DASHBOARD_REQUEST_PREFIX, isDashboardRequest } from "./delivery.ts";
 
@@ -44,6 +44,13 @@ export interface InboundMessage {
    */
   actor: { id: string };
   text: string;
+  /**
+   * Images the message carries, in order (a photo sent in the chat): `admitInbound` dispatches them as
+   * the request's `AgentRequest.images`, so the model reads them with the text. Whoever builds the
+   * message bounds their number and size, as `AgentRequest.images` says: the runtime stores them as
+   * they are. A stage of `inbound.normalize` may keep or drop them. Absent or empty: text only.
+   */
+  images?: readonly AgentImage[];
 }
 
 /** Which agent answers a message, and whether it may. */
@@ -57,7 +64,10 @@ export interface RouteDecision {
 
 declare module "@pikit/core" {
   interface AppPipelines {
-    /** The message as the channel built it; stages may rewrite it, and must keep `id` and `channel`. */
+    /**
+     * The message as the channel built it; stages may rewrite it (its text, its images), and must keep
+     * `id`, `channel` and `conversationId`.
+     */
     "inbound.normalize": InboundMessage;
     /** A router fills in `decision`; a stage that finds one already there leaves it. */
     "route.resolve": { message: InboundMessage; decision?: RouteDecision };
@@ -121,7 +131,8 @@ export interface AdmitOptions {
 
 /**
  * The inbound path after authentication: `inbound.normalize`, `route.resolve`, the
- * conversation, `dispatch` (with the message's actor as its sender, as a stage left it). Resolves once the message is durable (the ack point) or stopped; throws
+ * conversation, `dispatch` (with the message's actor as its sender and its images, as a stage left
+ * them). Resolves once the message is durable (the ack point) or stopped; throws
  * when the message's id is the dashboard's (`DASHBOARD_REQUEST_PREFIX`: a channel that takes ids from
  * its clients refuses those first), when a stage breaks the path's rules (it changed which message or
  * conversation this is), or when a capability fails, as the channel's own code would.
@@ -159,7 +170,8 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
   const dispatch = async (conversation: ConversationRef) => {
     options.beforeDispatch?.(conversation);
     const sender = { channel: normalized.channel, id: normalized.actor.id };
-    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text, sender }, ctx);
+    const images = normalized.images ?? [];
+    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text, ...(images.length > 0 && { images }), sender }, ctx);
   };
   const gone = (error: AgentUnavailableError): InboundOutcome => {
     ctx.logger.warn("admitInbound: the message's agent is no agent now, and routing names it: denied", { key: options.key, agent: error.agent });

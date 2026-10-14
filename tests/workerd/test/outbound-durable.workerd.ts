@@ -11,7 +11,7 @@
 import { evictDurableObject, runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
 import { env } from "cloudflare:workers";
 import { defineComponent } from "@pikit/core";
-import { type ChannelTransport, DeliveryError, type OutboundPiece, type OutboundQueue } from "@pikit/contracts";
+import { type ChannelTransport, DeliveryError, type MessagePart, type OutboundMessage, type OutboundPiece, type OutboundQueue } from "@pikit/contracts";
 import { afterEach, expect, it, vi } from "vitest";
 import outboundDurable from "../../../registry/components/outbound-durable/files/src/pikit/outbound-durable/index.ts";
 import { BACKOFF_MS } from "../../../registry/components/outbound-durable/files/src/pikit/outbound-durable/queue.ts";
@@ -51,12 +51,12 @@ function channel(transport: ChannelTransport) {
 /** What a test calls on the class: its `health` RPC starts the object's App. */
 type Started = { health(): Promise<{ ok: true }> };
 
-/** Starts a new object's App and enqueues one answer there. */
-async function enqueueInNewObject(seen: { queue?: OutboundQueue }): Promise<DurableObjectStub> {
+/** Starts a new object's App and enqueues one answer there (`the answer`, unless `message` says otherwise). */
+async function enqueueInNewObject(seen: { queue?: OutboundQueue }, message: Partial<OutboundMessage> = {}): Promise<DurableObjectStub> {
   const stub = env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.newUniqueId());
   await runInDurableObject(stub, async (instance: DurableObject) => {
     await (instance as unknown as Started).health();
-    await seen.queue?.enqueue({ idempotencyKey: "c1:r1", channel: "chat", conversationKey: "chat:1", text: "the answer" });
+    await seen.queue?.enqueue({ idempotencyKey: "c1:r1", channel: "chat", conversationKey: "chat:1", text: "the answer", ...message });
   });
   return stub;
 }
@@ -134,4 +134,35 @@ it("a send cut by the slice's deadline is sent again by the next alarm, after an
     ["c1:r1#0", true],
   ]);
   expect(await pieces(stub)).toEqual([{ key: "c1:r1#0", state: "delivered", attempts: 2, possible_duplicate: 1 }]);
+});
+
+it("a message's parts are stored in the object: the part the transport draws is sent with the last piece again after an eviction, the other folded into the text", async () => {
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + DAY, shouldAdvanceTime: true });
+  const card = { type: "card", fallback: "A card", title: "Pick one" } as unknown as MessagePart;
+  const note = { type: "note", fallback: "A note" } as unknown as MessagePart;
+  const sends: OutboundPiece[] = [];
+  const { component, seen } = channel({
+    idempotent: true,
+    draws: ["card"],
+    split: (text) => text.split("|"),
+    async send(piece) {
+      sends.push(piece);
+      if (sends.length === 2) throw new DeliveryError("transient", "503 from the platform");
+      return { platformMessageId: `p${sends.length}` };
+    },
+  });
+  composeObjects([storageDo, actorsDo, outboundDurable, component]);
+  const stub = await enqueueInNewObject(seen, { text: "one|two", parts: [note, card] });
+
+  // The last piece fails; the object goes before its retry.
+  await runDurableObjectAlarm(stub);
+  await evictDurableObject(stub);
+  vi.setSystemTime(Date.now() + BACKOFF_MS[0]);
+  await runDurableObjectAlarm(stub);
+
+  expect(sends.map((p) => [p.key, p.text, p.parts ?? null])).toEqual([
+    ["c1:r1#0", "one", null],
+    ["c1:r1#1", "two\n\nA note", [card]],
+    ["c1:r1#1", "two\n\nA note", [card]],
+  ]);
 });

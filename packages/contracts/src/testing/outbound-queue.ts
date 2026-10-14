@@ -9,7 +9,8 @@
  * the provider declares it (`retry`), and the suite holds it to what it declared. What every queue
  * must do is the rest: order, retry after a transient failure for as long as the piece is young enough
  * (never abandoned for their number), no retry after a permanent one, rate limits that do not count
- * as failures, possible duplicates marked, receipts.
+ * as failures, possible duplicates marked, receipts, and a message's parts cut as `messagePieces` cuts them
+ * (the ones its transport does not draw folded into its text, the others kept with its last piece).
  *
  * The suite owns the clock (`createManualClock`), so retries are checked to the millisecond without
  * waiting, and the transport, which it scripts: a piece's send succeeds, fails with a given kind, or
@@ -39,6 +40,7 @@ import {
   type OutboundQueue,
   type PendingPiece,
 } from "../outbound.ts";
+import type { MessagePart } from "../parts.ts";
 import { checker, expecter } from "./assert.ts";
 import { createFeedConformance } from "./feed.ts";
 import { type ConformanceCase, createManualClock, type ManualClock } from "@pikit/core/testing";
@@ -227,6 +229,55 @@ export function createOutboundQueueConformance(
       for (let waited = step; waited <= maxAgeMs + 2 * step && w.abandoned.length === 0; waited += step) await s.clock.advance(step);
       await eventually(() => w.abandoned.length === 1, "the piece abandoned for its age");
       expect(w.delivered, [], "never delivered");
+    }),
+
+    queueCase("a message's parts: those its transport does not draw folded into its text before the split, those it draws stored and sent with its last piece, also by the next process", async (s) => {
+      const card = part("card", "A card");
+      const note = part("note", "three|four");
+      const first = await s.open();
+      const before = scripted({ "m1#2": ["hang"] }, false, ["card"]);
+      first.queue.attach("chat", before);
+      await first.queue.enqueue({ ...message("m1", "chat:1", "one|two"), parts: [note, card] });
+      await eventually(() => before.calls.length === 3, "the last piece sent, and left hanging");
+      expect(
+        before.calls.map((p) => [p.key, p.text, p.parts ?? "none"]),
+        [
+          ["m1#0", "one", "none"],
+          ["m1#1", "two\n\nthree", "none"],
+          ["m1#2", "four", [card]],
+        ],
+        "the fallback cut with the text, the drawn part with the last piece only",
+      );
+      // The process goes during the last send: the next one sends that piece again, from its records.
+      await s.stopAll();
+      const second = await s.open();
+      const after = scripted({}, false, ["card"]);
+      second.queue.attach("chat", after);
+      await eventually(() => second.delivered.length === 1, "the last piece sent again");
+      expect(
+        after.calls.map((p) => [p.key, p.text, p.parts ?? "none"]),
+        [["m1#2", "four", [card]]],
+        "the last piece again, with its part",
+      );
+    }),
+
+    queueCase("a message of drawn parts and no text is one piece that carries them; one with nothing to send is no piece", async (s) => {
+      const w = await s.open();
+      const transport = scripted({}, false, ["card"]);
+      w.queue.attach("chat", transport);
+      const card = part("card", "A card");
+      await w.queue.enqueue({ ...message("m1", "chat:1", ""), parts: [card] });
+      await w.queue.enqueue(message("m2", "chat:1", ""));
+      await w.queue.enqueue({ ...message("m3", "chat:1", ""), parts: [part("note", "a note")] });
+      await eventually(() => w.delivered.length === 2, "two pieces delivered");
+      expect(
+        transport.calls.map((p) => [p.key, p.text, p.parts ?? "none"]),
+        [
+          ["m1#0", "", [card]],
+          ["m3#0", "a note", "none"],
+        ],
+        "the parts alone, then the fallback alone; nothing for the empty message",
+      );
     }),
 
     queueCase(`a channel's pieces left when it is gone (never attached again) are abandoned at the declared age, with no new message`, async (s) => {
@@ -545,10 +596,11 @@ interface Scripted extends ChannelTransport {
 }
 
 /** A transport that splits on `|` and answers each piece's sends by `script[key]`, in order; then "ok". */
-function scripted(script: Record<string, Step[]> = {}, idempotent = false): Scripted {
+function scripted(script: Record<string, Step[]> = {}, idempotent = false, draws?: readonly string[]): Scripted {
   const left = new Map(Object.entries(script).map(([key, steps]) => [key, [...steps]]));
   const transport: Scripted = {
     idempotent,
+    ...(draws !== undefined && { draws }),
     calls: [],
     aborted: 0,
     split: (text) => text.split("|"),
@@ -571,6 +623,9 @@ function scripted(script: Record<string, Step[]> = {}, idempotent = false): Scri
 }
 
 const transient = () => new DeliveryError("transient", "503 from the platform");
+
+/** A part of a kind only the suite knows (the contracts declare none). */
+const part = (type: string, fallback: string): MessagePart => ({ type, fallback }) as unknown as MessagePart;
 
 function message(key: string, conversationKey: string, text: string, channel = "chat"): OutboundMessage {
   return { idempotencyKey: key, channel, conversationKey, text };

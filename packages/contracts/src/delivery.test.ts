@@ -7,7 +7,8 @@
 import { afterEach, expect, test } from "bun:test";
 import { type App, type AppContext, defineApp, defineComponent, type Logger } from "@pikit/core";
 import { type AnswerDelivery, type DeliveryPolicy, startAnswerDelivery } from "./delivery.ts";
-import { type ChannelTransport, DeliveryError, type OutboundPiece, type OutboundQueue } from "./outbound.ts";
+import { type ChannelTransport, DeliveryError, type OutboundMessage, type OutboundPiece, type OutboundQueue } from "./outbound.ts";
+import type { MessagePart } from "./parts.ts";
 import type { KeyValueStore } from "./storage.ts";
 import type { RunSettlement } from "./submissions.ts";
 import type { Wakeups } from "./wakeups.ts";
@@ -21,12 +22,16 @@ function answer(chat: string, requestId: string, text = `to ${requestId}`): RunS
   return { conversation: { key: chat, agent: "assistant", conversationId: `s-${chat}` }, requestId, requestIds: [requestId], kind: "completed", text };
 }
 
+/** A part of a kind only the tests know (the contracts declare none). */
+const part = (type: string, fallback: string): MessagePart => ({ type, fallback }) as unknown as MessagePart;
+
 /** A platform whose sends the test scripts per conversation: `ok`, an error, or `hang` (it got the piece, and never answers). */
-function fakePlatform() {
+function fakePlatform(draws?: readonly string[]) {
   const sent: OutboundPiece[] = [];
   const script = new Map<string, (Error | "hang" | "ok")[]>();
   const transport: ChannelTransport = {
     idempotent: true,
+    ...(draws !== undefined && { draws }),
     split: (text) => text.split("|"),
     async send(piece, signal) {
       const next = script.get(piece.conversationKey)?.shift();
@@ -145,6 +150,48 @@ test("each answer of its conversations is sent once, in order, with its key; oth
   await h.wake();
   await Bun.sleep(30);
   expect(h.platform.sent).toHaveLength(3);
+});
+
+test("a completed run's parts: those the transport does not draw folded into the text before the split, those it draws on the last piece; parts alone are delivered, a failed run's are not", async () => {
+  const question = part("question", "Pick one: yes, no");
+  const note = part("note", "three|four");
+  const h = await harness({ platform: fakePlatform(["question"]) });
+  h.feed.append({ ...answer("chat:1", "r1", "one|two"), parts: [note, question] });
+  h.feed.append({ ...answer("chat:1", "r2", ""), parts: [question] });
+  const failed: RunSettlement = { ...answer("chat:1", "r3"), kind: "failed", error: { code: "model_error", message: "it broke" }, parts: [question] };
+  const { text: _none, ...noText } = failed;
+  const last = h.feed.append(noText);
+  await h.wake();
+
+  await until(async () => (await h.store.get("answers-cursor")) === last, "the cursor at the end");
+  expect(h.platform.sent).toEqual([
+    { key: "s-chat:1:r1#0", conversationKey: "chat:1", text: "one", possibleDuplicate: false },
+    { key: "s-chat:1:r1#1", conversationKey: "chat:1", text: "two\n\nthree", possibleDuplicate: false },
+    { key: "s-chat:1:r1#2", conversationKey: "chat:1", text: "four", parts: [question], possibleDuplicate: false },
+    { key: "s-chat:1:r2#0", conversationKey: "chat:1", text: "", parts: [question], possibleDuplicate: false },
+  ]);
+});
+
+test("with outbound.queue: a completed run's parts are enqueued with its text, for the queue to cut the same way", async () => {
+  const enqueued: OutboundMessage[] = [];
+  const queue: OutboundQueue = {
+    enqueue: async (message) => void enqueued.push(message),
+    attach: () => {},
+    detach: async () => {},
+    receipts: createMemoryFeed<never>().feed,
+    pending: async () => ({ items: [] }),
+  };
+  const question = part("question", "Pick one");
+  const h = await harness({ queue });
+  h.feed.append({ ...answer("chat:1", "r1", ""), parts: [question] });
+  const end = h.feed.append(answer("chat:1", "r2"));
+  await h.wake();
+
+  await until(async () => (await h.store.get("answers-cursor")) === end, "the cursor past both");
+  expect(enqueued).toEqual([
+    { idempotencyKey: "s-chat:1:r1", channel: "chat", conversationKey: "chat:1", text: "", parts: [question] },
+    { idempotencyKey: "s-chat:1:r2", channel: "chat", conversationKey: "chat:1", text: "to r2" },
+  ]);
 });
 
 test("an answer that ended before the delivery started is delivered at start, from the feed's oldest answer", async () => {

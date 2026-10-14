@@ -98,6 +98,26 @@ test("admitInbound: the sender is the actor a normalize stage leaves (it may res
   expect(e.dispatched[0]?.sender).toEqual({ channel: "test", id: "person:someone" });
 });
 
+test("admitInbound: the message's images are the request's, in order, as a normalize stage leaves them; none when it drops them", async () => {
+  const photo = { mimeType: "image/png", data: "iVBORw0KGgo=" };
+  const other = { mimeType: "image/jpeg", data: "/9j/4AAQ" };
+  const withImages: InboundMessage = { ...message, images: [photo, other] };
+
+  const kept = ends();
+  await admitInbound(await appWith(() => {}), withImages, { ...kept, key: "test:c1" });
+  expect(kept.dispatched[0]?.images).toEqual([photo, other]);
+
+  const dropped = ends();
+  const ctx = await appWith((pikit) => pikit.pipeline("inbound.normalize", ({ images: _images, ...rest }) => rest));
+  await admitInbound(ctx, withImages, { ...dropped, key: "test:c1" });
+  expect(dropped.dispatched[0]).not.toHaveProperty("images");
+
+  // A message of text only dispatches no images at all, not an empty list.
+  const none = ends();
+  await admitInbound(await appWith(() => {}), { ...message, images: [] }, { ...none, key: "test:c1" });
+  expect(none.dispatched[0]).not.toHaveProperty("images");
+});
+
 test("admitInbound: a redelivered message is a duplicate, and runs once", async () => {
   const e = ends();
   const ctx = await appWith(() => {});

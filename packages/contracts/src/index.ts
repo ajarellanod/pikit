@@ -1,7 +1,7 @@
 // Public surface of @pikit/contracts (SPEC §3): the vocabulary components share. Types, identities,
 // names of events and pipelines, capability interfaces, two protocol functions (`admitInbound` in,
-// `startAnswerDelivery` out: the paths every channel must get right, written and tested once), the
-// check of what the contracts take as a JSON object (`isJsonObject`), the grammar of `http.route`
+// `startAnswerDelivery` out: the paths every channel must get right, written and tested once), how a
+// message's parts fold into its text for a transport (`foldParts`, `messagePieces`), the check of what the contracts take as a JSON object (`isJsonObject`), the grammar of `http.route`
 // keys (`parseHttpRouteKey`, `matchesHttpRoute`) and the envelopes of an actor's call and stream
 // (`answerCall`, `callResult`, `answerStream`, `streamResult`), so that no provider has its own. No policy: what a protocol waits, retries and says
 // is its caller's, passed in. Each contract has a stability level (SPEC K8); the capabilities'
@@ -107,5 +107,7 @@ export type {
   PendingPiece,
 } from "./outbound.ts";
 export { answerKey, DeliveryError } from "./outbound.ts";
+export type { AppMessageParts, MessageContent, MessagePart, MessagePiece } from "./parts.ts";
+export { foldParts, messagePieces } from "./parts.ts";
 export type { AnswerDelivery, AnswerDeliveryOptions, DeliveryPolicy } from "./delivery.ts";
 export { answersOnlyTheDashboard, DASHBOARD_REQUEST_PREFIX, isDashboardRequest, startAnswerDelivery } from "./delivery.ts";

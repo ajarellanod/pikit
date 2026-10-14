@@ -9,7 +9,7 @@
  * @pikit/contracts' feed.ts).
  */
 
-import type { DeliveryReceipt, FeedPage, Page, PendingPiece, SqlDatabase, SqlRow, SqlStatements } from "@pikit/contracts";
+import type { DeliveryReceipt, FeedPage, MessagePart, Page, PendingPiece, SqlDatabase, SqlRow, SqlStatements } from "@pikit/contracts";
 
 /** `pending` → `sending` → `delivered` | `abandoned` (@pikit/contracts' outbound.ts). */
 export type PieceState = "pending" | "sending" | "delivered" | "abandoned";
@@ -22,6 +22,8 @@ export interface Piece {
   channel: string;
   conversationKey: string;
   text: string;
+  /** The parts its transport draws: on a message's last piece only (`messagePieces`). */
+  parts?: readonly MessagePart[];
   state: PieceState;
   /** Sends tried, whatever came of them. */
   attempts: number;
@@ -40,6 +42,7 @@ interface PieceRow extends SqlRow {
   channel: string;
   conversation_key: string;
   text: string;
+  parts: string | null;
   state: string;
   attempts: number;
   failures: number;
@@ -75,7 +78,7 @@ interface PendingRow extends SqlRow {
   created_at: number;
 }
 
-const COLUMNS = "seq, key, channel, conversation_key, text, state, attempts, failures, next_attempt_at, possible_duplicate, created_at";
+const COLUMNS = "seq, key, channel, conversation_key, text, parts, state, attempts, failures, next_attempt_at, possible_duplicate, created_at";
 
 /** `pending`'s page when it names none, and the most it gives. */
 export const PENDING_PAGE = 50;
@@ -101,6 +104,7 @@ const MIGRATIONS: readonly ((tx: SqlStatements) => Promise<void>)[] = [
       channel TEXT NOT NULL,
       conversation_key TEXT NOT NULL,
       text TEXT NOT NULL,
+      parts TEXT,
       state TEXT NOT NULL,
       attempts INTEGER NOT NULL DEFAULT 0,
       failures INTEGER NOT NULL DEFAULT 0,
@@ -196,13 +200,13 @@ export function createStore(db: SqlDatabase) {
       }
     },
 
-    /** Stores a message's pieces in one transaction; keys already stored are left as they are. */
-    async add(pieces: { key: string; channel: string; conversationKey: string; text: string }[], now: number): Promise<void> {
+    /** Stores a message's pieces in one transaction; keys already stored are left as they are. Parts are kept as JSON. */
+    async add(pieces: { key: string; channel: string; conversationKey: string; text: string; parts?: readonly MessagePart[] }[], now: number): Promise<void> {
       await db.transaction(async (tx) => {
         for (const p of pieces) {
           await tx.run(
-            "INSERT INTO outbound_durable_pieces (key, channel, conversation_key, text, state, next_attempt_at, created_at) VALUES (?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT (key) DO NOTHING",
-            [p.key, p.channel, p.conversationKey, p.text, now, now],
+            "INSERT INTO outbound_durable_pieces (key, channel, conversation_key, text, parts, state, next_attempt_at, created_at) VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT (key) DO NOTHING",
+            [p.key, p.channel, p.conversationKey, p.text, p.parts === undefined ? null : JSON.stringify(p.parts), now, now],
           );
         }
       });
@@ -359,6 +363,7 @@ function toPiece(row: PieceRow): Piece {
     channel: row.channel,
     conversationKey: row.conversation_key,
     text: row.text,
+    ...(row.parts !== null && { parts: JSON.parse(row.parts) as MessagePart[] }),
     state: row.state as PieceState,
     attempts: row.attempts,
     failures: row.failures,

@@ -19,6 +19,8 @@
  * The rules under test:
  * - a message reaches the agent only through the whole path, and a sender whose message does not
  *   reach it is told, never left without an answer;
+ * - an answer's parts the channel does not draw reach its sender as their fallback text, also when
+ *   the answer has no text of its own (`messagePieces`, `foldParts`);
  * - the dashboard's answers stay in the dashboard: a run that only an operator's messages from the
  *   dashboard started (request ids `DASHBOARD_REQUEST_PREFIX`) is never sent to the conversation's
  *   chat, and one that also answers a user's message is;
@@ -49,6 +51,7 @@ import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition
 import type { ConversationRegistry } from "../conversations.ts";
 import { AgentUnavailableError } from "../inbound.ts";
 import { DASHBOARD_REQUEST_PREFIX } from "../delivery.ts";
+import type { MessagePart } from "../parts.ts";
 import type { AgentSubmissions, PendingConversation, RunSettlement, SubmissionStatus } from "../submissions.ts";
 import { checker } from "./assert.ts";
 import { createMemoryFeed, type MemoryFeed } from "./feed.ts";
@@ -144,6 +147,12 @@ const HALT_NORMALIZE = "[halt at normalize]";
 const HALT_ROUTE = "[halt at route]";
 const DENY = "[deny]";
 const MOVE = "[move to another conversation]";
+/** Words in a message's text that make the suite's runtime answer it with a part too, or with a part alone. */
+const WITH_PART = "[answer with a part]";
+const ONLY_PART = "[answer with a part alone]";
+/** The fallback of the suite's part, a kind no channel draws (the contracts declare none). */
+const PART_FALLBACK = "conformance: a part's fallback";
+const PART = { type: "conformance-part", fallback: PART_FALLBACK } as unknown as MessagePart;
 
 /** How many admissions in a row fail in the case of a transient failure: more than a few quick tries survive. */
 const TRANSIENT_FAILURES = 3;
@@ -219,6 +228,22 @@ export function createChannelConformance(
       await s.fixture.deliver({ id: "m2", conversation: "beta", text: "two" });
       const both = await s.eventually(() => (s.dispatched.length >= 2 ? s.dispatched : undefined), "both messages to be dispatched");
       check(both[0]?.conversation.key !== both[1]?.conversation.key, `two conversation keys, got ${JSON.stringify(both.map((r) => r.conversation.key))}`);
+    }),
+
+    channelCase("an answer's part the channel does not draw reaches its sender as its fallback text, also in an answer of the part alone", async (s) => {
+      await s.fixture.deliver({ id: "m1", conversation: "alpha", text: `hello ${WITH_PART}` });
+      await s.fixture.deliver({ id: "m2", conversation: "beta", text: `hello ${ONLY_PART}` });
+      const told = (conversation: string, what: string) =>
+        s.eventually(async () => {
+          const lines = await s.fixture.told(conversation);
+          return lines.some((line) => line.includes(PART_FALLBACK)) ? lines : undefined;
+        }, what);
+      const alpha = await told("alpha", "the part's fallback with the answer's text");
+      check(
+        alpha.some((line) => line.includes(CONFORMANCE_ANSWER)),
+        `the answer's text too, told ${JSON.stringify(alpha)}`,
+      );
+      await told("beta", "the part's fallback, the answer's only content");
     }),
 
     channelCase("a message delivered twice runs once", async (s) => {
@@ -583,6 +608,7 @@ async function settle(durable: Durable, result: AgentResult): Promise<void> {
     requestIds: result.requestIds,
     kind: result.kind,
     ...(result.text !== undefined && { text: result.text }),
+    ...(result.parts !== undefined && { parts: result.parts }),
     ...(result.error !== undefined && { error: result.error }),
   };
   // Every request the run took is settled by it.
@@ -733,12 +759,14 @@ async function dispatchFake(durable: Durable, request: AgentRequest): Promise<Ad
   for (const requestId of requestIds) {
     durable.statuses.set(`${request.conversation.conversationId}\u0000${requestId}`, { kind: "pending", conversation: request.conversation, requestId });
   }
+  const alone = request.prompt.includes(ONLY_PART);
   const result: AgentResult & { kind: "completed" } = {
     conversation: request.conversation,
     requestId: requestIds[0] as string,
     requestIds,
     kind: "completed",
-    text: `${CONFORMANCE_ANSWER} (${number})`,
+    text: alone ? "" : `${CONFORMANCE_ANSWER} (${number})`,
+    ...((alone || request.prompt.includes(WITH_PART)) && { parts: [PART] }),
     messages: [],
   };
   // After dispatch returns, as a run starts and ends after its admission.
