@@ -272,7 +272,8 @@ config is the setting. A change applies to the next message: a conversation alre
   apiBase: "https://chat.googleapis.com",         // values, for a test double
   jwksUrl: "https://www.googleapis.com/oauth2/v3/certs",
 },
-// On Cloudflare, the Worker's half (workerConfig): the same instances, conversations, apiBase and jwksUrl.
+// On Cloudflare, the Worker's half (workerConfig): the same instances, conversations, apiBase and jwksUrl
+// (defaults included). `pikit doctor`, and so `pikit dev` and `pikit up`, fails while they differ (doctor.ts).
 "channel-google-chat-worker": { instances: [], conversations: { default: "thread", chats: {} } },
 ```
 
@@ -290,12 +291,15 @@ double and on a local port, ID tokens signed with a test key pair, event builder
 - `transport.test.ts`: the access token, the API client, markdown to text and cards, pieces, both ids,
   the placeholder, previews and the sweep, each failure classified.
 - `questions.test.ts`: cards, dialogs, clicks and answers, a reset closing a question.
-- `conformance.test.ts`: the channel conformance suite (`@pikit/contracts/testing`) and the lifecycle
-  suite, on a server's App and on Cloudflare's two halves.
+- `conformance.test.ts`: the channel conformance suite (`@pikit/contracts/testing`; a question it
+  draws reaching Google as its card) and the lifecycle suite, on a server's App and on Cloudflare's two
+  halves.
+- `doctor.test.ts`: the `pikit doctor` step, both halves' config compared, defaults included.
 
 In the registry, beside `files/`: `server.test.ts`, the server lane (the default export composed as
 `pikit add` composes it on a server, over real HTTP: a message answered in its thread, the setting, an
-image and a PDF, a question clicked, a restart in the middle of an answer, a refused token). The
+image and a PDF, a question clicked, a restart in the middle of an answer, a refused token; and with
+`mailbox-local` installed, `actor.inbox` scope `"all"`, events handled in process as with none). The
 workerd lane's `tests/workerd/test/google-chat.workerd.ts` runs the Worker half and a real Durable
-Object. What only the real Google Chat can show (a DM's thread, the errors Google gives a repeated id,
+Object, with execution-do: a message's PDF written to the workspace in the object's SQLite. What only the real Google Chat can show (a DM's thread, the errors Google gives a repeated id,
 the look of cards) is checked live, once: the feature note's "Checked live".

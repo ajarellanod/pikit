@@ -106,8 +106,8 @@ interface AgentRuntime {
 - Events `agent.dispatched` (every admission) and `agent.started` (with `resumed`) are emitted too, and
   `agent.partial` (`{ conversation, requestId, text }`) while a run goes: the text so far of the response
   the model is writing, for a preview (a placeholder a channel edits). runtime-pi re-emits it from
-  pi-durable's live state (`pi.live`'s `generation.message`), at most once per `partialEveryMs` (1 s) per
-  conversation, and never after the run's end. A notice: one lost costs nothing; the answer is the
+  pi-durable's live state (`pi.live`'s `generation.message`), at most once per `partialEveryMs` (runtime-pi's
+  config, default 1 s) per conversation, and never after the run's end. A notice: one lost costs nothing; the answer is the
   run's result. channel-google-chat writes it into its "Thinking…" placeholder.
 
 Provider: runtime-pi (on pi-durable, through `@pikit/pi-adapter`'s `createDurableRuntime`), the only
@@ -292,7 +292,8 @@ interface AgentSubmissions {
 is settled `failed` with `error.code: "abandoned"`. runtime-pi keeps `answers` in `runtime_pi_answers`
 (`packages/pi-adapter/src/answers.ts`), appended once per run before `agent.settled`/`agent.failed`,
 kept `keepSettledDays` (7). Suites: `createSubmissionsConformance` (on the memory double and on
-runtime-pi over storage-sqlite and storage-do), `createFeedConformance` for `answers`.
+runtime-pi over storage-sqlite and storage-do; a settlement keeps the run's kind, text, error and
+parts, a completed run's parts given by a tool on runtime-pi), `createFeedConformance` for `answers`.
 
 ### `Feed<T>` ([feed.ts](../packages/contracts/src/feed.ts))
 
@@ -351,7 +352,9 @@ it); a channel that answers in its response folds with `foldParts` (channel-http
 transport draws `question` (`draws: ["question"]`); every other transport sends its fallback. What a platform draws
 from markdown (tables, images) is its transport's, not a part. Tests: `parts.test.ts`, the
 `outbound.queue` suite, and the channel suite (a part no channel draws reaches its sender as its
-fallback, also in an answer of the part alone).
+fallback, also in an answer of the part alone; a part of each kind the transport draws, which the
+fixture gives in `drawnParts`, reaches the platform drawn, `ReceivedPiece.drawn`, never dropped:
+channel-google-chat's question).
 
 ### The `question` part ([question.ts](../packages/contracts/src/question.ts))
 
@@ -360,7 +363,7 @@ description?, fields }`, each field `{ kind, name, label, required?, options? }`
 `select`, `multiselect` (with `options: { value, label }[]`), `text` or `date`. Declared in the
 contracts, not by a component: the tool that asks (`tool-ask-user`) and the channels that draw it
 must not know each other (features/approvals.md); the core declares no kind. Its protocol is here,
-once: `questionProblem` (the one check), `questionPart` (a question with its fallback, which lists the
+once: `QUESTION_FIELD_NAME` (a field name's pattern, which an asker's schema states), `questionProblem` (the one check), `questionPart` (a question with its fallback, which lists the
 fields, their options and says to reply in text), `answerProblem` (an answer checked against its
 question) and `answerText` (the answer said in words, `Answer to "<title>" (question <id>):` and each field's value, the text of
 the message that brings it back). No field of `InboundMessage` carries an answer: what the model reads
@@ -368,7 +371,8 @@ is its text, the same whether a button was clicked or the fallback answered in a
 drawn and who may answer are the channel's: channel-google-chat draws one `confirm` or `select` field
 as buttons and anything else as a dialog's form, and takes the first answer of anyone it admits in the
 question's conversation, once, and none once that conversation was reset. Producer: tool-ask-user
-(`askUser`). Tests: `question.test.ts`, tool-ask-user's and channel-google-chat's.
+(`askUser`), whose model is told the outcome only (a form or its own words, later, as a new message),
+never how a channel draws it. Tests: `question.test.ts`, tool-ask-user's and channel-google-chat's.
 
 ### `startAnswerDelivery` ([delivery.ts](../packages/contracts/src/delivery.ts))
 

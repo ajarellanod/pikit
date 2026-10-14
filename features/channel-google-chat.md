@@ -77,7 +77,10 @@ tested there first.
 - **Cloudflare** (`"one"`, each conversation's Durable Object): the Worker's half
   (`export const worker`, `channel-google-chat-worker`) serves the route, verifies and hands each
   event to its conversation's object through `actor.mailbox`; the object admits, answers and draws.
-  The default export registers the routes too, where no server serves them.
+  The default export registers the routes too, where no server serves them. Both halves read the
+  same `apiBase`, `jwksUrl`, `instances` and `conversations` (`WorkerConfig`), each from its own
+  entry; the component's `doctor` hook (doctor.ts) fails `pikit doctor`, `dev` and `up` while the
+  two entries differ, defaults included (the hook gets the Worker half's config as `workerConfig`).
 
 It requires `secrets`, `conversations.registry`, `agent.runtime`, `agent.submissions`, `storage.kv`
 and `wakeups`, and provides `http.route`; it uses `outbound.queue`, `settings`, `workspace`,
@@ -253,7 +256,9 @@ app cannot read is named as unread.
 **Questions.**
 - The tool `askUser` (component `tool-ask-user`, both targets, `replay: "safe"`) asks one question:
   a title, a description, and fields (`confirm`, `select`, `multiselect`, `text`, `date`, each
-  named, with options where they apply). It never waits for the answer: it ends the run
+  named, with options where they apply). The model is told the outcome only (the person answers with
+  a form or in their own words, later, as a new message), never how a channel draws it. It never
+  waits for the answer: it ends the run
   (`control.terminate`) with the question as a part of the run's answer (`AgentResult.parts`), and
   the answer comes back later as a new message. A run that waits days would hold a Durable Object
   awake for days, and pi-durable has no wait on an outside signal.
@@ -320,8 +325,8 @@ rules of `AGENTS.md`).
   with the first stage or tool that reads it ([rich content](rich-content.md)'s shape stays).
 - **`agent.partial`** (`{ conversation, requestId, text }`): the answer as written so far (the text of
   the response the model is writing now: each model call of a run starts again), emitted by
-  runtime-pi from pi-durable's live state, at most once a second per conversation, never after the
-  run's end. A notice: one lost costs nothing. Producer:
+  runtime-pi from pi-durable's live state, at most once per `partialEveryMs` per conversation
+  (runtime-pi's config, default a second), never after the run's end. A notice: one lost costs nothing. Producer:
   runtime-pi; consumer: this channel ([streaming replies](streaming-replies.md)).
 
 ## Bounds
@@ -400,7 +405,9 @@ over to the objects' through a mailbox in memory), the module tests, and
 - **The server lane, first:** an App composed as `pikit add` composes it on a server (the default
   export only, `server-bun` serving real HTTP, `storage-sqlite`, `wakeups-timers`, `outbound-durable`,
   `workspace-local`, no `actor.*`): a signed request in, admitted, answered by the fake API, a card
-  clicked; a restart in the middle of an answer, the answer delivered after it.
+  clicked; a restart in the middle of an answer, the answer delivered after it. The same with
+  `mailbox-local` installed (`actor.inbox` scope `"all"`): events handled in process, no handler
+  registered with the inbox.
 - `createChannelConformance` (`@pikit/contracts/testing`) and `createLifecycleConformance`, on the
   server's App, then on both halves of Cloudflare's.
 - The transport against the fake API: pieces, cards, both ids (a late repeat refused, read, counted
@@ -415,8 +422,12 @@ over to the objects' through a mailbox in memory), the module tests, and
 - Questions: drawn as a card or a dialog; folded to text by a transport that does not draw; a click
   admitted once, its answer in its text; a second click told it is answered; the run ended by `askUser`.
 - The contract changes: each with a test in its package; a case of the channel suite that a broken
-  provider fails (mutate it, see it fail, restore).
-- The `durable` lane in workerd: the Worker verifies, the object admits, answers and draws.
+  provider fails (mutate it, see it fail, restore): a drawn question reaches Google as its card
+  (`drawnParts`, `ReceivedPiece.drawn`), which a transport dropping `piece.parts` fails; the
+  `agent.submissions` suite keeps a completed run's parts.
+- The halves' config compared by the `doctor` hook (`doctor.test.ts`).
+- The `durable` lane in workerd: the Worker verifies, the object admits, answers and draws, and a
+  message's PDF is written to the workspace by execution-do, in the object's SQLite.
 
 ## Checked live, once, with the real app
 Before it is called done, with a test project's app, on a server first (`pikit up`, the URL from
