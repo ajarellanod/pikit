@@ -15,8 +15,8 @@
  * **`storage.kv`**: one namespace, the component's (`NAME`), shared. Each module writes under its own
  * prefix, and only there: `answers-cursor`, `piece:`, `answer:` (startAnswerDelivery's own),
  * `thread:` (key.ts, AnswerTargets), `space:` (key.ts, the threading state cache), `placeholder:` /
- * `placeholders` (placeholder.ts), `question:` (click.ts, QuestionRecords), `attachment:` (attachments.ts,
- * if it needs any).
+ * `placeholders` (placeholder.ts), `question:` (click.ts, QuestionRecords), `command:` (handler.ts, what
+ * `/new` said for a message), `attachment:` (attachments.ts, if it needs any).
  */
 
 import type { AppContext, Clock } from "@pikit/core";
