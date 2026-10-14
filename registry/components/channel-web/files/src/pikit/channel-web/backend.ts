@@ -162,7 +162,7 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
 
   /**
    * The page's pending messages whose run ended while no event reached this App (K3): their state
-   * from `agent.submissions`, written back.
+   * from `agent.submissions`, written back, and told to who follows the conversation live.
    */
   const reconcile = async (ref: ChatRef, items: StoredMessage[], ctx: AppContext): Promise<StoredMessage[]> => {
     const settled = new Map<string, MessageState>();
@@ -172,7 +172,7 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
       if (status?.kind === "settled") settled.set(item.id, stateOf(status.run.kind));
     }
     if (settled.size === 0) return items;
-    for (const [id, state] of settled) await store.settle(ref.key, [id], state);
+    for (const [id, state] of settled) for (const moved of await store.settle(ref.key, [id], state)) store.notify(ref.key, { type: "message", id: moved });
     return items.map((item) => (settled.has(item.id) ? { ...item, state: settled.get(item.id) as MessageState } : item));
   };
 

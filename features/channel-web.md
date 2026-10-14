@@ -103,7 +103,9 @@ settings-store do.
 - **Session checks** (every `/chat/api/*` but auth): better-auth's signed cookie cache
   (`session.cookieCache`, `maxAge` from config, 5 minutes by default) is checked without a database
   read (`getCookieCache`); past it, the session is read from the database (on Cloudflare a call to
-  the accounts actor). A ban or removal takes effect within `maxAge`: said in the README.
+  the accounts actor), and the route sends back the cache better-auth's `getSession` renewed after that
+  read (never `refreshCache`, which re-signs without reading). A ban or removal takes effect within
+  `maxAge`: said in the README.
 - **Base URL**: `PIKIT_PUBLIC_URL` when set, else the request's origin; `trustedOrigins` is that
   origin. `basePath` is `/chat/api/auth`, so an OAuth redirect URI is
   `<origin>/chat/api/auth/callback/<provider>` (the README's table for each provider's console).
@@ -160,8 +162,10 @@ settings-store do.
 - **Live view**: `GET /chat/api/conversations/:id/events`, server-sent events of `ChatEvent`s, a
   projection of `agent.observe`'s `watch` of the conversation's current runtime conversation, made in
   the App that holds it (on Cloudflare a stream from the object, `actor.mailbox.stream`): `state`
-  (busy or not), `partial` (the answer as written: text only, no thinking), `tool` (a tool's name
-  while it runs: no arguments, no results), `message` (a message or answer stored: read again).
+  (busy or not), `partial` (the answer as written: text only, no thinking; with its run's request
+  ids when known), `tool` (a tool's name while it runs: no arguments, no results), `message` (a
+  message or answer stored, or a message's state changed: read again; an answer's names the request it
+  answers, so the page swaps the live text for it by identity, never by text).
   `partial` and `tool` only while the user has a message not answered yet in the conversation (so a
   run of the operator's own follow-up streams nothing to the user). Never transcript entries, system
   prompts, tool results or operator notes.

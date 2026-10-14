@@ -5,7 +5,8 @@
  *
  * - **A session first.** Every `/chat/api/*` route but `GET /chat/api/config` and better-auth's own
  *   (`/chat/api/auth/*`, forwarded to the accounts as they come) asks the accounts for the session's
- *   user: none, `401`, nothing read.
+ *   user: none, `401`, nothing read. The cookies the accounts renewed on the way (better-auth's cookie
+ *   cache, when the session was read from the database) go back with the route's answer.
  * - **The key is the session's.** A route names a conversation by the chat id in its path only, and the
  *   key is `keyOf(user, chat id)`, built in one place (`refOf`): another user's chat id names no
  *   conversation of theirs, and is `404` as one that never existed.
@@ -87,6 +88,14 @@ const json = <T>(status: number, body: T, headers: Record<string, string> = {}):
   Response.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
 export const failure = (status: number, error: string, message?: string): Response =>
   json<ChatError>(status, { error, ...(message !== undefined && message !== "" && { message }) });
+
+/** `response` with `cookies` (`set-cookie` values) added. */
+function withCookies(response: Response, cookies: readonly string[]): Response {
+  if (cookies.length === 0) return response;
+  const headers = new Headers(response.headers);
+  for (const cookie of cookies) headers.append("set-cookie", cookie);
+  return new Response(response.body, { status: response.status, statusText: response.statusText, headers });
+}
 
 /** A refusal to answer with its status (thrown by a handler). */
 class Refused extends Error {
@@ -292,9 +301,9 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
       key,
       answering(key, async (request, ctx) => {
         if (changes && request.headers.get(CHAT_CLIENT_HEADER) !== "1") return failure(400, "invalid_request", `send the header ${CHAT_CLIENT_HEADER}: 1`);
-        const found = await options.accounts().user(request, ctx);
-        if (found === undefined) return failure(401, "unauthorized");
-        return handler(request, ctx, found);
+        const session = await options.accounts().user(request, ctx);
+        if (session === undefined) return failure(401, "unauthorized");
+        return withCookies(await handler(request, ctx, session.user), session.cookies);
       }),
     );
   };

@@ -218,6 +218,28 @@ test("live events on the Worker: the object's stream, state first, the answer as
   expect([runtime.watching, runtime.released]).toEqual([1, 1]);
 });
 
+test("message events on the Worker come from the conversation's object: its answer (naming the request it answers) and a run end found by the page's read", async () => {
+  const { platform, worker: w } = await cloud();
+  const { id, requestId } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string; requestId: string };
+  const key = `web:ana:${id}`;
+  const { runtime } = await platform.object(key);
+  const client = new AbortController();
+  const events = sse(await w.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
+  expect(await events.take(1)).toEqual([{ type: "state", busy: false }]);
+  await runtime.end(key, [requestId], { text: "Hello" });
+  const seen = await events.take(2);
+  expect(seen).toContainEqual({ type: "message", id: requestId });
+  expect(seen).toContainEqual({ type: "message", id: `1:${requestId}#0`, answers: requestId });
+
+  const sent = (await (await w.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "again" }))).json()) as { requestId: string };
+  expect(await events.take(1)).toEqual([{ type: "message", id: sent.requestId }]);
+  await runtime.end(key, [sent.requestId], { kind: "aborted", quiet: true });
+  expect(((await (await w.fetch(`${API}/conversations/${id}/messages`, as("ana"))).json()) as { items: ChatMessage[] }).items[0]).toMatchObject({ id: sent.requestId, state: "aborted" });
+  expect(await events.take(1)).toEqual([{ type: "message", id: sent.requestId }]);
+  client.abort();
+  await events.reader.cancel();
+});
+
 test("on the Worker images over 1 MB in all are 413 before any call; an object that cannot be reached is 503", async () => {
   const { platform, worker: w } = await cloud();
   const big = await w.fetch(`${API}/conversations`, post("ana", { text: "x", images: [imageOf(MAX_DURABLE_IMAGE_BYTES / 2), imageOf(MAX_DURABLE_IMAGE_BYTES / 2 + 1)] }));

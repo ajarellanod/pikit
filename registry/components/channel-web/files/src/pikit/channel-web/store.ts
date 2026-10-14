@@ -45,8 +45,11 @@ export type StoredMessage = ChatMessage & { conversation?: string };
 
 export type MessageState = NonNullable<ChatMessage["state"]>;
 
-/** What a follower hears: a message stored, or a user's message whose state changed. */
-export type StoreNote = { type: "message"; id: string };
+/**
+ * What a follower hears: a message stored, or a user's message whose state changed. `answer`: it is an
+ * answer the transport stored (its id the piece's key, `answerKey(...)#<index>`).
+ */
+export type StoreNote = { type: "message"; id: string; answer?: true };
 
 export type Paged<T> = { items: T[]; next?: string };
 

@@ -45,6 +45,24 @@ test("a sign-up forwarded both ways: the request arrives whole, both set-cookie 
   expect(((await response.json()) as { user: { email: string } }).user.email).toBe("ana@example.com");
 });
 
+test("what better-auth reads of a request crosses whole: Origin, Referer, Cookie, User-Agent, the client's address headers, a form's body", async () => {
+  const headers = {
+    origin: "https://chat.example.com",
+    referer: "https://chat.example.com/chat/#/account",
+    cookie: "__Secure-pikit_chat.session_token=t.s; __Secure-pikit_chat.session_data=d",
+    "user-agent": "Mozilla/5.0 (test)",
+    "cf-connecting-ip": "198.51.100.7",
+    "x-forwarded-for": "198.51.100.7, 10.0.0.1",
+    "content-type": "application/x-www-form-urlencoded",
+  };
+  const request = new Request("https://chat.example.com/chat/api/auth/callback/corp", { method: "POST", headers, body: "code=c&state=s" });
+  const arrived = requestOf(checkForwardedRequest(overTheWire(await forwardRequest(request))) as never);
+  for (const [name, value] of Object.entries(headers)) expect({ name, value: arrived.headers.get(name) }).toEqual({ name, value });
+  expect(arrived.method).toBe("POST");
+  expect(arrived.url).toBe("https://chat.example.com/chat/api/auth/callback/corp");
+  expect(await arrived.text()).toBe("code=c&state=s");
+});
+
 test("a redirect keeps its location and cookies, with no body", async () => {
   const headers = new Headers({ location: "/chat/" });
   headers.append("set-cookie", "a=1; Path=/chat/");

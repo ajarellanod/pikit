@@ -67,4 +67,6 @@ test("past its lifetime the cache is none: the caller asks the accounts", async 
   await Bun.sleep(1100);
   expect(await cachedUser(withCookies(b), SECRET)).toBeUndefined();
   expect((await b.user())?.email).toBe("ana@example.com");
+  // The accounts read it from the database and renewed the cache (the browser kept the cookie): no call again.
+  expect((await cachedUser(withCookies(b), SECRET))?.email).toBe("ana@example.com");
 });

@@ -132,8 +132,15 @@ export class Browser {
     }
   }
 
-  user() {
-    return this.accounts.user(this.build("/chat/api/me"), this.ctx);
+  /** The session's user, as a route asks; the cookies renewed on the way are kept, as a browser does. */
+  async user() {
+    return (await this.session())?.user;
+  }
+
+  async session() {
+    const found = await this.accounts.user(this.build("/chat/api/me"), this.ctx);
+    if (found !== undefined) this.keep(new Response(null, { headers: found.cookies.map((cookie): [string, string] => ["set-cookie", cookie]) }));
+    return found;
   }
 }
 

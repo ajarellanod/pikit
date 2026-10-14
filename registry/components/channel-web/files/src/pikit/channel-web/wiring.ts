@@ -14,7 +14,7 @@
  * | Type | Message | Answer |
  * |---|---|---|
  * | `channel-web.auth.handle` | `ForwardedRequest` (under `/chat/api/auth/`) | `ForwardedResponse` |
- * | `channel-web.auth.user` | `{ url, cookie }` | `AccountUser` or `null` |
+ * | `channel-web.auth.user` | `{ url, cookie }` | `AccountSession` (the user, the renewed cookies) or `null` |
  * | `channel-web.auth.methods` | `{ userId }` | `string[]` |
  * | `channel-web.auth.list` | `{ limit, cursor? }` | `AccountsPage` |
  * | `channel-web.auth.invite` | `{ email, name?, origin }` | `AccountLink & { userId }` |
@@ -28,7 +28,7 @@ import { ActorCallError, type ActorInbox, type ActorMailbox, type EmailSender, t
 import { checkForwardedRequest, checkForwardedResponse, forwardRequest, forwardResponse, requestOf, responseOf, TooLarge } from "./accounts/forward.ts";
 import { createLocalAccounts } from "./accounts/local.ts";
 import { cachedUser } from "./accounts/session.ts";
-import type { AccountLink, AccountsPage, AccountUser, Accounts } from "./accounts/types.ts";
+import type { AccountLink, AccountSession, AccountsPage, Accounts } from "./accounts/types.ts";
 import { ACCOUNTS_KEY } from "./calls.ts";
 import type { AccountSecrets, ChannelWebConfig, SignUpSettings } from "./config.ts";
 
@@ -87,6 +87,24 @@ const origin = (fields: Fields): string => {
 };
 const json = (value: unknown): JsonValue => value as JsonValue;
 
+/** The accounts actor's answer to `channel-web.auth.user`, checked on arrival at the Worker. */
+function sessionOf(value: unknown): AccountSession | undefined {
+  if (value === null) return undefined;
+  const { user, cookies } = fieldsOf(value as JsonValue);
+  const fields = fieldsOf((user ?? null) as JsonValue);
+  const valid =
+    typeof fields.id === "string" &&
+    typeof fields.name === "string" &&
+    typeof fields.email === "string" &&
+    typeof fields.emailVerified === "boolean" &&
+    (fields.image === undefined || typeof fields.image === "string") &&
+    Array.isArray(cookies) &&
+    cookies.length <= 20 &&
+    cookies.every((cookie) => typeof cookie === "string");
+  if (!valid) throw new ActorCallError("failed", "channel-web: the accounts actor answered something that is not a session");
+  return value as AccountSession;
+}
+
 /** The accounts better-auth makes. */
 export const BETTER_AUTH: AccountsWiring = {
   local: ({ sql, config, secrets, signUp, email, logger }) =>
@@ -128,10 +146,11 @@ export const BETTER_AUTH: AccountsWiring = {
       async user(request, ctx) {
         const cookie = request.headers.get("cookie");
         if (cookie === null) return undefined;
-        // The signed cookie cache first: no call while it vouches for the session.
+        // The signed cookie cache first: no call while it vouches for the session. Past it, the actor's
+        // answer carries the renewed cache, which the route sends back: the next requests cost no call.
         const cached = await cachedUser(request, secret, publicUrl);
-        if (cached !== undefined) return cached;
-        return (await call<AccountUser | null>(AUTH_CALL.user, { url: request.url, cookie }, ctx)) ?? undefined;
+        if (cached !== undefined) return { user: cached, cookies: [] };
+        return sessionOf(await call<JsonValue>(AUTH_CALL.user, { url: request.url, cookie }, ctx));
       },
       methods: (userId, ctx) => call<string[]>(AUTH_CALL.methods, { userId }, ctx),
       list: (page, ctx) => call<AccountsPage>(AUTH_CALL.list, json(page), ctx),

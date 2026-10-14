@@ -356,8 +356,16 @@ it("an invitation's link sets a password and signs in; a ban takes effect once t
   vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 301_000, shouldAdvanceTime: true });
   expect((await cleo.send("/chat/api/me")).status).toBe(401);
   expect((await cleo.send("/chat/api/conversations", { json: { text: "hello?" } })).status).toBe(401);
-  // Dan's cache expired too: the actor vouches for his session.
-  expect((await meOf(dan)).user.email).toBe("dan@example.com");
+  // Dan's cache expired too: the actor vouches for his session, and its answer renews his cache (sent back by the route).
+  const renewed = await dan.send("/chat/api/me");
+  expect(((await renewed.json()) as { user: { email: string } }).user.email).toBe("dan@example.com");
+  const fresh = renewed.headers.getSetCookie().filter((cookie) => cookie.startsWith("__Secure-pikit_chat.session_data=") && !/max-age=0/i.test(cookie));
+  expect(fresh).toHaveLength(1);
+  expect(fresh[0]).toContain("Path=/chat/");
+  // better-auth's origin check through the forwarder: a change from another site's page, with his cookies, is refused.
+  const foreign = await dan.send("/chat/api/auth/update-user", { json: { name: "Mallory" }, headers: { origin: "https://evil.example" } });
+  expect(foreign.status).toBe(403);
+  expect((await dan.send("/chat/api/auth/update-user", { json: { name: "Dan" } })).status).toBe(200);
   // Signing in again is refused while she is banned.
   const again = await browser(fetch, HTTPS, "10.1.0.5").send("/chat/api/auth/sign-in/email", { json: { email: "cleo@example.com", password: "cleo-sets-her-own-1" } });
   expect(again.status).toBe(403);

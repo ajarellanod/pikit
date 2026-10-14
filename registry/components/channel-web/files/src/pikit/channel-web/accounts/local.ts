@@ -26,6 +26,10 @@
  *   link and the assistant's name. A failure is the route's error; nothing retries it.
  * - **Rate limits**: better-auth's, in memory, on (sign-in, sign-up 3 per 10 s; reset and verification
  *   3 per minute; magic link 5 per minute), per client address from `ipHeaders`.
+ * - **Origin and CSRF checks** always on (better-auth's default turns them off under `NODE_ENV=test`): a
+ *   request with the cookies whose `Origin` (else `Referer`) is not the base URL's is refused (403).
+ * - **Sessions**: `user` is better-auth's `getSession`; read from the database (the cookie cache
+ *   expired), its renewed cookies come back with it, for the route to send.
  */
 
 import type { ActorCallErrorCode, SqlDatabase } from "@pikit/contracts";
@@ -38,7 +42,7 @@ import { magicLink } from "better-auth/plugins/magic-link";
 import { ACCOUNT_TABLE, MODEL_NAMES, migrate, SESSION_TABLE, sqlAdapter, USER_TABLE } from "./adapter.ts";
 import { MAX_AUTH_BODY } from "./forward.ts";
 import { AUTH_BASE_PATH, CHAT_LINKS, setPasswordLink } from "./links.ts";
-import type { AccountLink, AccountSummary, AccountsPage, AccountUser, Accounts } from "./types.ts";
+import type { AccountLink, AccountSession, AccountSummary, AccountsPage, AccountUser, Accounts } from "./types.ts";
 
 /** The cookies' name prefix: `pikit_chat.session_token`, `pikit_chat.session_data`. */
 export const COOKIE_PREFIX = "pikit_chat";
@@ -147,7 +151,9 @@ function build(options: LocalAccountsOptions, secure: boolean, ready: () => Prom
         invitedAt: { type: "date", required: false, input: false, returned: false },
       },
     },
-    session: { ...MODEL_NAMES.session, cookieCache: { enabled: cacheSeconds > 0, maxAge: Math.max(cacheSeconds, 1) } },
+    // Never refreshCache: it would re-sign the cache without a database read, and a ban would never cut a
+    // page that keeps asking. The cache is renewed only by getSession's database read (`user`).
+    session: { ...MODEL_NAMES.session, cookieCache: { enabled: cacheSeconds > 0, maxAge: Math.max(cacheSeconds, 1), refreshCache: false } },
     account: { ...MODEL_NAMES.account, accountLinking: { enabled: true, trustedProviders: [], allowDifferentEmails: false } },
     verification: MODEL_NAMES.verification,
     emailAndPassword: {
@@ -200,6 +206,9 @@ function build(options: LocalAccountsOptions, secure: boolean, ready: () => Prom
       useSecureCookies: secure,
       defaultCookieAttributes: { path: COOKIE_PATH, sameSite: "lax", httpOnly: true, secure },
       ipAddress: { ipAddressHeaders: options.ipHeaders ?? ["cf-connecting-ip", "x-forwarded-for"] },
+      // Said, never left to better-auth's default, which turns both off when NODE_ENV is "test" or TEST is set.
+      disableOriginCheck: false,
+      disableCSRFCheck: false,
     },
     databaseHooks: {
       user: {
@@ -313,10 +322,13 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
     },
 
     async user(request) {
-      const found = await instance(secureFor(request.url)).api.getSession({ headers: request.headers });
+      // better-auth's getSession: the cookie cache when it vouches; else the database, and then its
+      // set-cookie renews the cache (and the session, past its updateAge), sent back by the route.
+      const { headers, response: found } = await instance(secureFor(request.url)).api.getSession({ headers: request.headers, returnHeaders: true });
       if (found === null || (found.user as { banned?: boolean | null }).banned === true) return undefined;
       const { id, name, email, emailVerified, image } = found.user;
-      return { id, name, email, emailVerified, ...(typeof image === "string" && image !== "" && { image }) } satisfies AccountUser;
+      const user: AccountUser = { id, name, email, emailVerified, ...(typeof image === "string" && image !== "" && { image }) };
+      return { user, cookies: headers.getSetCookie() } satisfies AccountSession;
     },
 
     async methods(userId) {

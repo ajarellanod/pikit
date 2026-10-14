@@ -6,9 +6,11 @@
  * What the user sees, and only that:
  * - `state`: whether a run goes. The first event, then on each change.
  * - `partial`: the answer as written, its text only (no thinking, no tool calls), the whole text so
- *   far; `""` when a new one starts.
+ *   far; `""` when a new one starts. With the request ids of its run's inputs when the watch reported
+ *   them (`submission` events): the page knows which stored answer replaces it.
  * - `tool`: a tool's name while it runs (`running`), and when it ends (`done`): no arguments, no output.
- * - `message`: a message or an answer was stored, or a message's state changed: read them again.
+ * - `message`: a message or an answer was stored, or a message's state changed: read them again. For
+ *   an answer, the request its key names (`answers`, `answeredRequest`).
  *
  * `partial` and `tool` come only during a run one of whose inputs is not an operator's (a request id
  * not `dashboard:`, as `startAnswerDelivery` decides what to deliver), known from the watch's own
@@ -20,7 +22,7 @@
  */
 
 import { type AppContext, withAbortSignal } from "@pikit/core";
-import { type AgentObserver, DASHBOARD_REQUEST_PREFIX, type ObservedEvent } from "@pikit/contracts";
+import { type AgentObserver, answerKey, DASHBOARD_REQUEST_PREFIX, type ObservedEvent } from "@pikit/contracts";
 import type { ChatEvent } from "./api.ts";
 import type { ChatStore, StoreNote } from "./store.ts";
 
@@ -55,6 +57,17 @@ function applyChanges(message: Assistant | undefined, changes: unknown): Assista
     current = { ...current, content };
   }
   return current;
+}
+
+/**
+ * The request an answer's piece key names (`answerKey(conversation, requestId)#<index>`, the transport's
+ * message id), when it is an answer of `conversationId`.
+ */
+export function answeredRequest(conversationId: string | undefined, pieceKey: string): string | undefined {
+  if (conversationId === undefined) return undefined;
+  const prefix = answerKey({ conversationId }, "");
+  if (!pieceKey.startsWith(prefix)) return undefined;
+  return /^(.+)#[0-9]+$/.exec(pieceKey.slice(prefix.length))?.[1];
 }
 
 export interface LiveOptions {
@@ -108,15 +121,15 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
   let pending = await store.pending(key);
   /** The request id of each submission the watch reported, by its id: what a run's inputs are. */
   const requests = new Map<number, string>();
-  /** Whether the run going is the user's, by its inputs; `undefined` when they are not all known (then `pending`). */
-  let usersRun: boolean | undefined;
-  const runOf = (inputs: unknown): boolean | undefined => {
+  /** The request ids of the run going, by its inputs; `undefined` when they are not all known. */
+  let runRequests: string[] | undefined;
+  const requestsOf = (inputs: unknown): string[] | undefined => {
     if (!Array.isArray(inputs) || inputs.length === 0) return undefined;
     const ids = inputs.map((input) => (typeof input === "number" ? requests.get(input) : undefined));
-    if (ids.some((id) => id === undefined)) return undefined;
-    return ids.some((id) => !(id as string).startsWith(DASHBOARD_REQUEST_PREFIX));
+    return ids.some((id) => id === undefined) ? undefined : (ids as string[]);
   };
-  const streams = (): boolean => usersRun ?? pending;
+  /** Whether the run going is the user's: one of its inputs is not an operator's; unknown inputs, while the user waits (`pending`). */
+  const streams = (): boolean => (runRequests === undefined ? pending : runRequests.some((id) => !id.startsWith(DASHBOARD_REQUEST_PREFIX)));
   let partial: Assistant | undefined;
   let shown: string | undefined;
   const tools = new Map<string, string>();
@@ -132,7 +145,7 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
     const text = partial === undefined ? undefined : textOf(partial);
     if (text !== undefined && (text !== shown || next.started === true)) {
       shown = text;
-      yield { type: "partial", text };
+      yield { type: "partial", text, ...(runRequests !== undefined && { requests: runRequests }) };
     }
     if (text === undefined) shown = undefined;
   }
@@ -153,7 +166,8 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
       }
       if (item.kind === "note") {
         pending = await store.pending(key);
-        yield { type: "message", id: item.note.id };
+        const answers = item.note.answer === true ? answeredRequest(conversationId, item.note.id) : undefined;
+        yield { type: "message", id: item.note.id, ...(answers !== undefined && { answers }) };
         continue;
       }
       const event = item.event;
@@ -166,7 +180,7 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
         case "snapshot": {
           const generation = event.generation as { message?: Assistant } | undefined;
           const running = Array.isArray(event.tools) ? (event.tools as { callId?: unknown; name?: unknown; status?: unknown }[]) : [];
-          usersRun = runOf((event.run as { inputs?: unknown } | null | undefined)?.inputs);
+          runRequests = requestsOf((event.run as { inputs?: unknown } | null | undefined)?.inputs);
           yield* changes({ busy: event.run !== undefined && event.run !== null, partial: generation?.message?.role === "assistant" ? generation.message : undefined });
           const now = new Map(running.filter((tool) => tool.status !== "done" && typeof tool.callId === "string" && typeof tool.name === "string").map((tool) => [tool.callId as string, tool.name as string]));
           for (const [callId, name] of tools) if (!now.has(callId) && streams()) yield { type: "tool", name, state: "done" };
@@ -176,13 +190,13 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
           break;
         }
         case "run_start":
-          usersRun = runOf(event.inputs);
+          runRequests = requestsOf(event.inputs);
           yield* changes({ busy: true });
           break;
         case "run_end":
           yield* changes({ busy: false, partial: undefined });
           tools.clear();
-          usersRun = undefined;
+          runRequests = undefined;
           if (Array.isArray(event.inputs)) for (const input of event.inputs) if (typeof input === "number") requests.delete(input);
           break;
         case "message_start": {

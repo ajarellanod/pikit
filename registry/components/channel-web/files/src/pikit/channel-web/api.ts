@@ -164,18 +164,29 @@ export interface ChatAbortResponse {
 }
 
 /**
- * One live event of a conversation. The first is a `state`. `partial` and `tool` come only while the
- * user has a message not answered yet; `message` says something was stored: read the messages again.
+ * One live event of a conversation. The first is a `state`. `partial` and `tool` come only during a run
+ * of the user's; `message` says something was stored or changed: read the messages again.
+ *
+ * A run's live text and its stored answer are matched by identity, never by text: the `partial`s of a
+ * run name its requests (`requests`), and the `message` of its answer names the request the answer is
+ * keyed by (`answers`), one of them.
  */
 export type ChatEvent =
   /** Whether a run is going. */
   | { type: "state"; busy: boolean }
-  /** The answer as written so far (the whole text, not a delta); `""` when a new one starts. */
-  | { type: "partial"; text: string }
+  /**
+   * The answer as written so far (the whole text, not a delta); `""` when a new one starts. `requests`:
+   * the request ids of the messages its run answers, when known (absent for a run going before the
+   * stream opened).
+   */
+  | { type: "partial"; text: string; requests?: string[] }
   /** A tool runs (`running`) or ended (`done`): its name only. */
   | { type: "tool"; name: string; state: "running" | "done" }
-  /** A message or an answer was stored. */
-  | { type: "message"; id: string };
+  /**
+   * A message or an answer was stored, or a message's state changed (`id` the message's). For an answer,
+   * `answers`: the request id of the run it answers (one of its `partial`s' `requests`).
+   */
+  | { type: "message"; id: string; answers?: string };
 
 export interface ChatError {
   /**

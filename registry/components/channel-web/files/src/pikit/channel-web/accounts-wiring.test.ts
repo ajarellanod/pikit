@@ -7,31 +7,56 @@
  */
 
 import { afterEach, expect, test } from "bun:test";
-import { type App, type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type ActorCallHandler, type ActorMailbox, ActorCallError, answerCall, callResult, type JsonValue } from "@pikit/contracts";
+import { type App, type AppContext, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import { type ActorCallHandler, type ActorMailbox, ActorCallError, answerCall, callResult, type EmailMessage, type JsonValue } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
+import { fakeOidc, type Profile } from "./accounts/accounts.test-support.ts";
 import { createChannelWeb, NAME } from "./index.ts";
-import { adminAuth, kvOf, OPERATOR, Runtime, router, type Served, secretsOf, serve } from "./runtime.test-support.ts";
-import { AUTH_CALL } from "./wiring.ts";
+import { adminAuth, kvOf, OPERATOR, Runtime, router, SECRETS, type Served, secretsOf, serve } from "./runtime.test-support.ts";
+import { AUTH_CALL, BETTER_AUTH } from "./wiring.ts";
 import { createChannelWebWorker } from "./worker.ts";
 
 const served: Served[] = [];
 const objects: App[] = [];
+const stops: Array<() => unknown> = [];
 afterEach(async () => {
   for (const each of served.splice(0)) await each.app.stop();
   for (const app of objects.splice(0)) await app.stop();
+  for (const stop of stops.splice(0)) await stop();
 });
+
+/** The origin the test Apps serve (`serve`'s). */
+const ORIGIN = "http://pikit.test";
+
+type Send = {
+  method?: string;
+  json?: unknown;
+  /** An `application/x-www-form-urlencoded` body (an OIDC platform's form_post). */
+  form?: Record<string, string>;
+  /** Over the browser's own; `""` leaves one out. */
+  headers?: Record<string, string>;
+  /** `false`: the cookies stay home (a cross-site POST, SameSite=Lax). */
+  cookies?: boolean;
+};
 
 /** A browser: its cookies, sent back on every request, and the page's headers. */
 function browser(fetch: (path: string, init?: RequestInit) => Promise<Response>, ip = "10.0.0.1") {
   const jar = new Map<string, string>();
   return {
     jar,
-    async send(path: string, init: { method?: string; json?: unknown } = {}): Promise<Response> {
-      const headers: Record<string, string> = { origin: "http://pikit.test", "x-forwarded-for": ip, "x-pikit-chat": "1" };
-      if (jar.size > 0) headers.cookie = [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
+    /** `path` on the App, or a URL of it (where a redirect leads). */
+    async send(path: string, init: Send = {}): Promise<Response> {
+      const url = new URL(path, ORIGIN);
+      const headers: Record<string, string> = { origin: ORIGIN, "x-forwarded-for": ip, "x-pikit-chat": "1", "user-agent": "pikit-test-browser" };
+      if (jar.size > 0 && init.cookies !== false) headers.cookie = [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
       if (init.json !== undefined) headers["content-type"] = "application/json";
-      const response = await fetch(path, { method: init.method ?? (init.json === undefined ? "GET" : "POST"), headers, ...(init.json !== undefined && { body: JSON.stringify(init.json) }) });
+      if (init.form !== undefined) headers["content-type"] = "application/x-www-form-urlencoded";
+      for (const [name, value] of Object.entries(init.headers ?? {})) {
+        if (value === "") delete headers[name];
+        else headers[name] = value;
+      }
+      const body = init.json !== undefined ? JSON.stringify(init.json) : init.form !== undefined ? new URLSearchParams(init.form).toString() : undefined;
+      const response = await fetch(`${url.pathname}${url.search}`, { method: init.method ?? (body === undefined ? "GET" : "POST"), headers, ...(body !== undefined && { body }) });
       for (const cookie of response.headers.getSetCookie()) {
         const [pair = ""] = cookie.split(";");
         const at = pair.indexOf("=");
@@ -65,14 +90,21 @@ test("on a server: a person signs up through /chat/api/auth (better-auth), then 
   const users = (await (await app.fetch("/admin/api/channel-web/users", { headers: OPERATOR })).json()) as { items: { id: string; email: string }[] };
   expect(users.items.map((each) => each.email)).toEqual(["ana@example.com"]);
 
+  // Past the cookie cache, the session is read from the database, and the route renews the cache.
+  ana.jar.delete("pikit_chat.session_data");
+  const renewed = await ana.send("/chat/api/conversations");
+  expect(renewed.status).toBe(200);
+  expect(renewed.headers.getSetCookie().map((cookie) => cookie.split("=")[0])).toEqual(["pikit_chat.session_data"]);
+  expect([...ana.jar.keys()]).toContain("pikit_chat.session_data");
+
   // Banned: every session revoked; the cookie cache vouches no more once read from the database.
   expect((await app.fetch(`/admin/api/channel-web/users/${me.user.id}/ban`, { method: "POST", headers: OPERATOR })).status).toBe(200);
   ana.jar.delete("pikit_chat.session_data");
   expect((await ana.send("/chat/api/me")).status).toBe(401);
 });
 
-/** Cloudflare: each key an App of its own (scope "one"), the Worker's App over them. */
-async function cloud(config: Record<string, unknown>) {
+/** Cloudflare: each key an App of its own (scope "one"), the Worker's App over them; `extra` in the objects' Apps (email.send). */
+async function cloud(config: Record<string, unknown>, secrets: Record<string, string> = SECRETS, extra: ComponentDefinition[] = [], channel: () => ComponentDefinition = () => createChannelWeb()) {
   const apps = new Map<string, Promise<{ app: App; answers: Map<string, ActorCallHandler>; ctx: AppContext }>>();
   const calls: string[] = [];
   const mailbox: ActorMailbox = {
@@ -91,7 +123,7 @@ async function cloud(config: Record<string, unknown>) {
             },
           });
           const app = await defineApp({
-            components: [secretsOf(), new Runtime(String).component(), kvOf(), sqliteStorage(), router, platform, createChannelWeb()],
+            components: [secretsOf(secrets), new Runtime(String).component(), kvOf(), sqliteStorage(), router, platform, ...extra, channel()],
             config,
             target: "durable",
             logger: silentLogger,
@@ -111,7 +143,7 @@ async function cloud(config: Record<string, unknown>) {
       throw new Error("no streams here");
     },
   };
-  const worker = await serve([secretsOf(), defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", mailbox) }), adminAuth, createChannelWebWorker()], { "channel-web-worker": config[NAME] }, "durable");
+  const worker = await serve([secretsOf(secrets), defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", mailbox) }), adminAuth, createChannelWebWorker()], { "channel-web-worker": config[NAME] }, "durable");
   served.push(worker);
   return { worker, calls };
 }
@@ -134,8 +166,162 @@ test("on Cloudflare: auth is forwarded to the accounts actor (every set-cookie k
   ana.jar.delete("pikit_chat.session_data");
   expect((await ana.send("/chat/api/conversations")).status).toBe(200);
   expect(calls).toEqual([`channel-web:accounts ${AUTH_CALL.user}`, `channel-web:accounts channel-web.list`]);
+  // The actor's answer renewed the cookie cache, which the route sent back: the next request costs no call for the session.
+  expect([...ana.jar.keys()]).toContain("pikit_chat.session_data");
+  calls.length = 0;
+  expect((await ana.send("/chat/api/conversations")).status).toBe(200);
+  expect(calls).toEqual([`channel-web:accounts channel-web.list`]);
 
   const users = (await (await worker.fetch("/admin/api/channel-web/users", { headers: OPERATOR })).json()) as { items: { email: string }[] };
   expect(users.items.map((each) => each.email)).toEqual(["ana@example.com"]);
   expect((await worker.fetch("/chat/api/me", { headers: OPERATOR })).status).toBe(401);
+});
+
+// Every better-auth route the page uses (chat/src/lib/auth.ts, sign-in.tsx, set-password.tsx), on both
+// targets: reachable through GET|POST /chat/api/auth/*, the headers better-auth reads kept on the way,
+// its redirects and cookies back whole, its origin check on.
+
+const OIDC_ID = "corp";
+const PASSWORD = "a-long-password-1";
+const SIGN_IN_CONFIG = {
+  [NAME]: {
+    name: "Ada",
+    signUp: { mode: "open" },
+    signIn: { password: true, magicLink: true, social: ["google"], oidc: [{ id: OIDC_ID, name: "Corp", discoveryUrl: "https://sso.example.com/.well-known/openid-configuration" }] },
+  },
+};
+
+/**
+ * The config and secrets of an App with every sign-in method, and its channel-web, whose OIDC platform
+ * is found at `discoveryUrl` (the fake one, on http: the config takes https only).
+ */
+function everyMethod(discoveryUrl: string) {
+  const config = SIGN_IN_CONFIG;
+  const channel = () =>
+    createChannelWeb({
+      accounts: { ...BETTER_AUTH, local: (deps) => BETTER_AUTH.local({ ...deps, secrets: { ...deps.secrets, oidc: deps.secrets.oidc.map((each) => ({ ...each, discoveryUrl })) } }) },
+    });
+  const secrets = {
+    ...SECRETS,
+    CHANNEL_WEB_GOOGLE_CLIENT_ID: "google-client",
+    CHANNEL_WEB_GOOGLE_CLIENT_SECRET: "google-secret",
+    CHANNEL_WEB_OIDC_CORP_CLIENT_ID: "corp-client",
+    CHANNEL_WEB_OIDC_CORP_CLIENT_SECRET: "corp-secret",
+  };
+  return { config, secrets, channel };
+}
+
+/** `email.send` that keeps what it is asked to send. */
+function emailOf(sent: EmailMessage[]): ComponentDefinition {
+  return defineComponent({ name: "email-test", setup: (pikit) => pikit.provide("email.send", { send: async (message: EmailMessage) => (sent.push(message), { id: `e${sent.length}` }) }) });
+}
+
+/** Both targets, each with every sign-in method and email: `fetch` its routes. */
+async function targets(discoveryUrl: string): Promise<{ name: string; fetch: Served["fetch"] }[]> {
+  const { config, secrets, channel } = everyMethod(discoveryUrl);
+  const server = await serve([secretsOf(secrets), new Runtime().component(), kvOf(), sqliteStorage(), router, adminAuth, emailOf([]), channel()], config);
+  served.push(server);
+  const { worker } = await cloud(config, secrets, [emailOf([])], channel);
+  return [
+    { name: "server", fetch: server.fetch },
+    { name: "cloudflare", fetch: worker.fetch },
+  ];
+}
+
+const nameOf = (cookie: string): string => cookie.split("=")[0] ?? "";
+
+/** A browser signed in as `email`, invited by the operator (verified), its password set from the invitation's link. */
+async function signedIn(target: { fetch: Served["fetch"] }, email: string, ip: string) {
+  const person = browser(target.fetch, ip);
+  const invited = await target.fetch("/admin/api/channel-web/invitations", { method: "POST", headers: { ...OPERATOR, "content-type": "application/json" }, body: JSON.stringify({ email }) });
+  const { link } = (await invited.json()) as { link: string };
+  const token = new URL(link.slice(link.indexOf("#") + 1), ORIGIN).searchParams.get("token");
+  expect((await person.send("/chat/api/auth/reset-password", { json: { token, newPassword: PASSWORD } })).status).toBe(200);
+  expect((await person.send("/chat/api/auth/sign-in/email", { json: { email, password: PASSWORD } })).status).toBe(200);
+  expect(person.jar.has("pikit_chat.session_token")).toBe(true);
+  return person;
+}
+
+test("every better-auth route the page uses is reachable through /chat/api/auth/* on both targets (never the API's 404)", async () => {
+  const oidc = await fakeOidc("corp-client");
+  stops.push(oidc.stop);
+  for (const target of await targets(oidc.discoveryUrl)) {
+    const ana = await signedIn(target, "ana@example.com", `10.1.0.${target.name === "server" ? 1 : 2}`);
+    const routes: [string, string, unknown?][] = [
+      ["POST", "/sign-in/email", { email: "ana@example.com", password: PASSWORD, callbackURL: "/chat/" }],
+      ["POST", "/sign-up/email", { email: "bo@example.com", password: PASSWORD, name: "Bo", callbackURL: "/chat/" }],
+      ["POST", "/sign-in/social", { provider: "google", callbackURL: "/chat/", disableRedirect: true }],
+      ["POST", "/sign-in/social", { provider: OIDC_ID, callbackURL: "/chat/", disableRedirect: true }],
+      ["POST", "/sign-in/magic-link", { email: "ana@example.com", callbackURL: "/chat/" }],
+      ["GET", "/magic-link/verify?token=not-a-token&callbackURL=%2Fchat%2F"],
+      ["GET", "/verify-email?token=not-a-token"],
+      ["POST", "/send-verification-email", { email: "ana@example.com", callbackURL: "/chat/" }],
+      ["POST", "/request-password-reset", { email: "ana@example.com", redirectTo: "/chat/#/set-password" }],
+      ["POST", "/reset-password", { token: "not-a-token", newPassword: "another-long-password" }],
+      ["POST", "/change-password", { currentPassword: "not-the-password", newPassword: "another-long-password" }],
+      ["POST", "/update-user", { name: "Ana B" }],
+      ["GET", "/list-accounts"],
+      ["POST", "/link-social", { provider: "google", callbackURL: "/chat/#/account", disableRedirect: true }],
+      ["POST", "/unlink-account", { accountId: "not-an-account" }],
+      ["GET", "/list-sessions"],
+      ["GET", "/get-session"],
+      ["POST", "/revoke-session", { token: "not-a-token" }],
+      ["POST", "/revoke-other-sessions", {}],
+      ["GET", `/callback/${OIDC_ID}?code=not-a-code&state=not-a-state`],
+      ["POST", "/revoke-sessions", {}],
+      ["POST", "/sign-out", {}],
+    ];
+    for (const [method, path, json] of routes) {
+      const response = await ana.send(`/chat/api/auth${path}`, { method, ...(json !== undefined && { json }) });
+      const body = await response.text();
+      expect({ target: target.name, method, path, status: response.status === 404 ? `404 ${body}` : "reachable" }).toEqual({ target: target.name, method, path, status: "reachable" });
+    }
+    const form = await ana.send(`/chat/api/auth/callback/${OIDC_ID}`, { form: { code: "c", state: "s" }, cookies: false, headers: { origin: oidc.base } });
+    expect({ target: target.name, status: form.status }).toEqual({ target: target.name, status: 302 });
+  }
+});
+
+test("an OIDC sign-in through the Worker: the platform's redirect back lands as better-auth made it (302, Location, both session cookies); form_post redirects to the GET callback", async () => {
+  const oidc = await fakeOidc("corp-client");
+  stops.push(oidc.stop);
+  const { config, secrets, channel } = everyMethod(oidc.discoveryUrl);
+  const { worker, calls } = await cloud(config, secrets, [emailOf([])], channel);
+  const cy = browser(worker.fetch, "10.2.0.1");
+  const profile: Profile = { sub: "cy", email: "cy@example.com", email_verified: true, name: "Cy" };
+
+  const started = await cy.send("/chat/api/auth/sign-in/social", { json: { provider: OIDC_ID, callbackURL: "/chat/", errorCallbackURL: "/chat/#/sign-in" } });
+  expect(started.status).toBe(200);
+  const { url } = (await started.json()) as { url: string };
+  // The platform posts the code back (form_post): no cookies cross sites; better-auth sends the browser to the GET callback.
+  const posted = await cy.send(`/chat/api/auth/callback/${OIDC_ID}`, { form: Object.fromEntries(new URL(oidc.approve(url, profile)).searchParams), cookies: false, headers: { origin: oidc.base } });
+  expect(posted.status).toBe(302);
+  const callback = new URL(posted.headers.get("location") ?? "");
+  expect(`${callback.origin}${callback.pathname}`).toBe(`${ORIGIN}/chat/api/auth/callback/${OIDC_ID}`);
+
+  calls.length = 0;
+  const landed = await cy.send(callback.toString());
+  expect(landed.status).toBe(302);
+  expect(landed.headers.get("location")).toBe("/chat/");
+  expect(await landed.text()).toBe("");
+  const cookies = landed.headers.getSetCookie();
+  expect(cookies.map(nameOf)).toEqual(expect.arrayContaining(["pikit_chat.session_token", "pikit_chat.session_data"]));
+  for (const cookie of cookies) expect(cookie).toContain("Path=/chat/");
+  expect(calls).toEqual([`channel-web:accounts ${AUTH_CALL.handle}`]);
+  expect(((await (await cy.send("/chat/api/me")).json()) as { user: { email: string }; methods: string[] })).toMatchObject({ user: { email: "cy@example.com" }, methods: [OIDC_ID] });
+});
+
+test("better-auth's origin check holds through the forwarder: a change with the session's cookies from another site's page is 403, from the chat's own 200", async () => {
+  const oidc = await fakeOidc("corp-client");
+  stops.push(oidc.stop);
+  for (const target of await targets(oidc.discoveryUrl)) {
+    const ana = await signedIn(target, "ana@example.com", `10.3.0.${target.name === "server" ? 1 : 2}`);
+
+    const foreign = await ana.send("/chat/api/auth/update-user", { json: { name: "Mallory" }, headers: { origin: "https://evil.example" } });
+    expect({ target: target.name, status: foreign.status, code: ((await foreign.json()) as { code?: string }).code }).toEqual({ target: target.name, status: 403, code: "INVALID_ORIGIN" });
+    const referred = await ana.send("/chat/api/auth/sign-out", { json: {}, headers: { origin: "", referer: "https://evil.example/page" } });
+    expect({ target: target.name, status: referred.status }).toEqual({ target: target.name, status: 403 });
+    const own = await ana.send("/chat/api/auth/update-user", { json: { name: "Ana B" } });
+    expect({ target: target.name, status: own.status }).toEqual({ target: target.name, status: 200 });
+    expect(((await (await ana.send("/chat/api/me")).json()) as { user: { name: string } }).user.name).toBe("Ana B");
+  }
 });

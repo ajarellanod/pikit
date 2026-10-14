@@ -349,12 +349,77 @@ test("live events: state first; while the user waits, the answer as written (tex
   expect(rest).toContainEqual({ type: "state", busy: false });
   expect(rest).toContainEqual({ type: "message", id: requestId });
   const answer = rest.some((each) => (each as { id?: string }).id === `c1:${requestId}#0`) ? [] : await events.take(1);
-  expect([...rest, ...answer]).toContainEqual({ type: "message", id: `c1:${requestId}#0` });
+  // The answer's event names the request its run answered: the page swaps its live text for it.
+  expect([...rest, ...answer]).toContainEqual({ type: "message", id: `c1:${requestId}#0`, answers: requestId });
   expect(JSON.stringify([...seen, ...rest, ...answer])).not.toMatch(/private|secret|tool output|tool result|system prompt/);
   client.abort();
   await events.reader.cancel();
   for (let i = 0; i < 50 && c.runtime.released < c.runtime.watching; i++) await Bun.sleep(5);
   expect([c.runtime.watching, c.runtime.released]).toEqual([1, 1]);
+});
+
+test("live: a user's message changing state is a message event, at its run's end and when the page's read finds a run end no event brought", async () => {
+  const c = await chat();
+  const { id, requestId } = await start(c, "ana", "hello");
+  const key = `web:ana:${id}`;
+  const client = new AbortController();
+  const events = sse(await c.served.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
+  expect(await events.take(1)).toEqual([{ type: "state", busy: false }]);
+  // Its end announced by no event: the page's read finds it (agent.submissions), and the live view hears it.
+  await c.runtime.end(key, [requestId], { kind: "aborted", quiet: true });
+  expect((await messagesOf(c, "ana", id))[0]).toMatchObject({ id: requestId, state: "aborted" });
+  expect(await events.take(1)).toEqual([{ type: "message", id: requestId }]);
+
+  const sent = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "again" }))).json()) as { requestId: string };
+  expect(await events.take(1)).toEqual([{ type: "message", id: sent.requestId }]);
+  await c.runtime.end(key, [sent.requestId], { kind: "failed" });
+  expect(await events.take(1)).toEqual([{ type: "message", id: sent.requestId }]);
+  expect((await messagesOf(c, "ana", id))[0]).toMatchObject({ id: sent.requestId, state: "failed" });
+  client.abort();
+  await events.reader.cancel();
+});
+
+test("live: a run is the user's by its inputs' request ids: a fast run whose message is not stored yet streams, with its requests; an operator's run streams nothing while the user waits", async () => {
+  const c = await chat();
+  const { id, requestId } = await start(c, "ana", "hello");
+  const key = `web:ana:${id}`;
+  await c.runtime.end(key, [requestId], { text: "first" });
+  await eventually(async () => ((await messagesOf(c, "ana", id)).length === 2 ? true : undefined), "the first answer");
+  const client = new AbortController();
+  const events = sse(await c.served.fetch(`${API}/conversations/${id}/events`, as("ana", { signal: client.signal })));
+  expect(await events.take(1)).toEqual([{ type: "state", busy: false }]);
+
+  // A fast run: it starts (and could end) before its user's message is stored; nothing of the user's is pending.
+  const fast = "web:fast-1";
+  await c.runtime.start(key, [fast], c.runtime.submit([fast]));
+  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [] } });
+  c.runtime.push({ type: "message_update", changes: [{ type: "text_start", contentIndex: 0, block: { type: "text", text: "" } }, { type: "text_delta", contentIndex: 0, delta: "Quick" }] });
+  expect(await events.take(3)).toEqual([
+    { type: "state", busy: true },
+    { type: "partial", text: "", requests: [fast] },
+    { type: "partial", text: "Quick", requests: [fast] },
+  ]);
+  c.runtime.push({ type: "run_end" });
+  expect(await events.take(1)).toEqual([{ type: "state", busy: false }]);
+
+  // The user waits (a message pending), but the run going took only the operator's follow-up: nothing streams.
+  const waiting = (await (await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: "and?" }))).json()) as { requestId: string };
+  expect(await events.take(1)).toEqual([{ type: "message", id: waiting.requestId }]);
+  await c.runtime.start(key, ["dashboard:op-1"], c.runtime.submit(["dashboard:op-1"]));
+  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "operator only" }] } });
+  c.runtime.push({ type: "tool_execution_start", toolCallId: "t1", toolName: "bash" });
+  c.runtime.push({ type: "run_end" });
+  // A run of both, the operator's first: the user's.
+  await c.runtime.start(key, ["dashboard:op-2", waiting.requestId], c.runtime.submit(["dashboard:op-2", waiting.requestId]));
+  c.runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "both" }] } });
+  expect(await events.take(4)).toEqual([
+    { type: "state", busy: true },
+    { type: "state", busy: false },
+    { type: "state", busy: true },
+    { type: "partial", text: "both", requests: ["dashboard:op-2", waiting.requestId] },
+  ]);
+  client.abort();
+  await events.reader.cancel();
 });
 
 test("stop: the run of the key's current conversation is aborted", async () => {

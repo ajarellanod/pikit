@@ -95,6 +95,29 @@ test("session: the cookie cache answers without the database; past it, the datab
   expect((await bo.user())?.email).toBe("bo@example.com"); // the database: still there
 });
 
+test("session: read from the database, it comes with a renewed cookie cache, which then vouches without the database; from the cache, no cookie", async () => {
+  const f = make({ withEmail: false, sessionCacheSeconds: 1 });
+  const ana = f.browser();
+  await signUp(ana, "ana@example.com");
+  expect((await ana.session())?.cookies).toEqual([]); // the cache vouched: nothing to renew
+
+  await Bun.sleep(1100);
+  const renewed = await ana.session();
+  expect(renewed?.user.email).toBe("ana@example.com");
+  // The expired cache cleared, then the new one (a browser keeps the last).
+  expect(renewed?.cookies.map((cookie) => cookie.split("=")[0])).toEqual(["pikit_chat.session_data", "pikit_chat.session_data"]);
+  expect(renewed?.cookies[0]).toMatch(/Max-Age=0/i);
+  expect(renewed?.cookies[1]).not.toMatch(/Max-Age=0/i);
+  for (const cookie of renewed?.cookies ?? []) expect(cookie).toContain("Path=/chat/");
+
+  // The renewed cache answers alone: the session row gone, the user is still vouched for (within its lifetime).
+  await f.sql.run(`DELETE FROM channel_web_session WHERE "userId" = ?`, [renewed?.user.id ?? ""]);
+  expect(await ana.session()).toMatchObject({ user: { email: "ana@example.com" }, cookies: [] });
+  // A cache hit renews nothing: past its lifetime the database answers, and the session is gone.
+  await Bun.sleep(1100);
+  expect(await ana.user()).toBeUndefined();
+});
+
 test("signUp invite: password, magic link and OIDC sign-ups are all refused", async () => {
   const oidc = await fakeOidc("corp-client");
   stops.push(oidc.stop);

@@ -22,7 +22,7 @@ import {
   type Usage,
 } from "@pikit/contracts";
 import { createMemoryKeyValueStorage, createMemorySubmissions } from "@pikit/contracts/testing";
-import type { AccountLink, AccountSummary, AccountUser, Accounts } from "./accounts/types.ts";
+import type { AccountLink, AccountSession, AccountSummary, AccountUser, Accounts } from "./accounts/types.ts";
 import type { AccountsWiring } from "./wiring.ts";
 
 export const ZERO = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 } } as unknown as Usage;
@@ -81,12 +81,12 @@ export class FakeAccounts implements Accounts {
     return Response.json({ path: url.pathname }, { headers: [["set-cookie", "pikit_chat_a=1; Path=/chat/"], ["set-cookie", "pikit_chat_b=2; Path=/chat/"]] });
   }
 
-  async user(request: Request): Promise<AccountUser | undefined> {
+  async user(request: Request): Promise<AccountSession | undefined> {
     const id = /(?:^|;\s*)pikit_chat_test=([^;]+)/.exec(request.headers.get("cookie") ?? "")?.[1];
     const found = id === undefined ? undefined : this.users.get(id);
     if (found === undefined || found.banned) return undefined;
     const { methods: _methods, createdAt: _created, banned: _banned, lastSeenAt: _seen, ...user } = found;
-    return user;
+    return { user, cookies: [] };
   }
 
   async methods(userId: string): Promise<string[]> {
@@ -228,11 +228,25 @@ export class Runtime {
     },
   };
 
-  /** A run of `key`'s conversation starts with `requestIds` (busy, `agent.started`, `run_start`). */
-  async start(key: string, requestIds: string[]): Promise<void> {
+  private submissions = 0;
+
+  /** The watch's `submission` events for `requestIds`, as Pi reports each request it took: their submission ids. */
+  submit(requestIds: string[]): number[] {
+    return requestIds.map((requestId) => {
+      const id = ++this.submissions;
+      this.push({ type: "submission", record: { id, requestId } });
+      return id;
+    });
+  }
+
+  /**
+   * A run of `key`'s conversation starts with `requestIds` (busy, `agent.started`, `run_start`); its
+   * `run_start` names `inputs` (submission ids, `submit`) when given, else none.
+   */
+  async start(key: string, requestIds: string[], inputs?: number[]): Promise<void> {
     const conversation = this.pointers.get(key) as ConversationRef;
     this.conversations.set(conversation.conversationId, { ...(this.conversations.get(conversation.conversationId) as ObservedConversation), busy: true });
-    this.push({ type: "run_start" });
+    this.push({ type: "run_start", ...(inputs !== undefined && { inputs }) });
     await this.events?.emit("agent.started", { conversation, requestId: requestIds[0] as string, resumed: false });
   }
 

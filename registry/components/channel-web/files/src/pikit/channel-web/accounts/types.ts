@@ -23,6 +23,13 @@ export type AccountUser = {
   image?: string;
 };
 
+/**
+ * The user of a request's session, and the `set-cookie` values to send back with the route's answer:
+ * better-auth's own (`getSession`), a renewed cookie cache when the session was read from the database
+ * (none when the cache vouched for it), so the next requests cost no database read again.
+ */
+export type AccountSession = { user: AccountUser; cookies: string[] };
+
 /** A user as the operator lists them. */
 export type AccountSummary = AccountUser & {
   /** `password`, and the provider ids linked. */
@@ -44,8 +51,8 @@ export type AccountsRefusal = "not_found" | "exists" | "invalid_request";
 export interface Accounts {
   /** better-auth's own routes (`/chat/api/auth/*`): the response as it made it, every `set-cookie` kept. */
   handle(request: Request, ctx: AppContext): Promise<Response>;
-  /** The user whose session `request` carries, or `undefined`: none, expired, revoked, banned. */
-  user(request: Request, ctx: AppContext): Promise<AccountUser | undefined>;
+  /** The user whose session `request` carries, with the cookies to send back, or `undefined`: none, expired, revoked, banned. */
+  user(request: Request, ctx: AppContext): Promise<AccountSession | undefined>;
   /** How `userId` signs in: `password` and the provider ids linked. */
   methods(userId: string, ctx: AppContext): Promise<string[]>;
 

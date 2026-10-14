@@ -101,11 +101,22 @@ send it over a channel you trust. Without `email.send`, sending it is yours.
   user's session (`401`). A route that changes something also needs `x-pikit-chat: 1` (`400`): a page
   of another site cannot send it. Cookies `pikit_chat.*`, path `/chat/`, `HttpOnly`, `SameSite=Lax`,
   `Secure` on https. A chat session never opens `/admin/api/*`, an operator's credential never opens
-  `/chat/api/*`.
+  `/chat/api/*`. better-auth's origin and CSRF checks are on (said in its config, never left to its
+  default, which turns them off under `NODE_ENV=test`): a request to `/chat/api/auth/*` carrying the
+  cookies whose `Origin` (else `Referer`) is another site's is `403`, on a server and through the
+  Worker's forwarding alike.
 - **Ban latency.** A ban or a removal revokes the user's sessions at once, but a session already
   vouched for by its signed cookie cache stays good until the cache expires: at most
   `sessionCacheSeconds` (5 minutes by default). Set it lower, or `0`, for an immediate effect at the
   cost of a database read (on Cloudflare a call to the accounts actor) per request.
+- **Cache renewal.** Once the cache expired, a route reads the session from the database (on
+  Cloudflare one call to the accounts actor) with better-auth's own `getSession`, and sends back the
+  renewed cache cookie it set (`Accounts.user` returns the user and those `set-cookie` values; the
+  accounts actor's answer carries them to the Worker): one read per browser per `sessionCacheSeconds`,
+  not one per request. Renewed only after a real database read: better-auth's `refreshCache` (which
+  re-signs the cache without reading) stays off, so a ban or a removal still takes effect within
+  `sessionCacheSeconds`. (Done on the server, not by the page polling `/chat/api/auth/get-session`: no
+  timer, and every route renews it, the live stream included.)
 - **What a user sees** of their conversation: their own messages, and the answers delivered to it.
   The sender of each message is `{ channel: "web", id: <user id> }`, so roles by actor see a user, not
   an operator. An operator's follow-up from the dashboard (`dashboard:` request ids) is never
@@ -114,6 +125,12 @@ send it over a channel you trust. Without `email.send`, sending it is yours.
   request ids the runtime's own events give; a run already going when the view opened, while the user
   has a message not answered yet), and never thinking, tool arguments or results, system prompts or
   transcript entries (`live.ts`).
+- **Live text and stored answer by identity.** A `partial` event carries its run's request ids
+  (`requests`, when the runtime's events gave them), the `message` event of a stored answer the request
+  its key names (`answers`), and every change of a user's message's state (its run's end, or a run end
+  found when the page reads) is a `message` event too, sent where the live view is made (on Cloudflare
+  the conversation's object). The page keeps a finished answer's live text until the messages it reads
+  have that answer's id, never by comparing texts.
 - **Messages** go through `admitInbound` (the router, `inbound.normalize`, duplicates by request id),
   with their images (at most 4 PNG, JPEG, WebP or GIF, 5 MB each; 1 MB in all on Cloudflare). The
   page may name its request (`web:` then 1 to 118 of `A-Z a-z 0-9 . _ ~ : -`): sent again, it runs
@@ -185,8 +202,10 @@ Content-Security-Policy: same origin only, images also `data:`, `blob:` and `htt
   conversation's object and the accounts actor: start, list, rename, messages, answers, delete,
   isolation, live events, image limits, an unreachable object, the index's versions, removal.
 - `accounts-wiring.test.ts`: the real accounts (better-auth) through the routes, on a server and
-  forwarded to the accounts actor on Cloudflare (the cookie cache first); chat and admin sessions never
-  open each other's routes. `accounts/*.test.ts` test the accounts themselves.
+  forwarded to the accounts actor on Cloudflare (the cookie cache first, its renewal sent back after a
+  database read); chat and admin sessions never open each other's routes; every better-auth route the
+  page uses reachable on both targets; an OIDC sign-in through the Worker (form_post, then the GET
+  callback's `302` with its Location and both session cookies); a foreign `Origin` or `Referer` refused. `accounts/*.test.ts` test the accounts themselves.
 - `command.test.ts`: `pikit channel-web` against a fake of the operator's routes (`Bun.serve`): the
   list page by page, invite (the link printed once, emailed or not), reset, ban and unban by id or
   email, remove asked first (`--yes` without a terminal), the App's origin, and each failure said
@@ -202,7 +221,8 @@ Content-Security-Policy: same origin only, images also `data:`, `blob:` and `htt
   view (`state`, `partial`, `message`), another user's every route on a chat `404`, an operator's
   follow-up never in the user's messages or live view, the accounts' tables in the accounts actor only;
   an invitation's link setting a password, a ban refused once the cookie cache expired (the actor asked
-  then); `email.send` in the default App only: the config says so, a magic link signs a new user in, a
+  then, its answer renewing the cache cookie; a foreign `Origin` refused through the forwarder);
+  `email.send` in the default App only: the config says so, a magic link signs a new user in, a
   password sign-up verifies first, an invitation is emailed.
 
 Not covered yet: the page, the view and the Settings section in a browser.

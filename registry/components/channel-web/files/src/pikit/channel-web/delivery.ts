@@ -50,7 +50,7 @@ export function createTransport({ store, now, changed }: TransportOptions): Chan
         const row = await store.change(piece.conversationKey, { activity: at });
         if (row !== undefined) await changed(row);
       }
-      store.notify(piece.conversationKey, { type: "message", id: piece.key });
+      store.notify(piece.conversationKey, { type: "message", id: piece.key, answer: true });
       return { platformMessageId: piece.key };
     },
   };
