@@ -3,7 +3,8 @@
  * and 5): its copies of the dashboard's shared pieces and of channel-web's `api.ts` are the sources,
  * byte for byte; it never reaches the admin client; its build embeds into channel-web's
  * `chat-files.ts` only where channel-web is installed, and refuses a bundle naming the admin API; and
- * its pure modules (the live events' parser and state, errors, image limits) do what the page needs.
+ * its pure modules (the live events' parser and state, errors, image limits, routes and the links that
+ * land on them, the config read when the tab comes back) do what the page needs.
  * Building it needs its npm packages, so it is built by hand (`bun install && bun run build` there);
  * a built `dist/` is checked when there is one.
  */
@@ -12,12 +13,15 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { appendFileSync, cpSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { setPasswordLink } from "../registry/components/channel-web/files/src/pikit/channel-web/accounts/links.ts";
 import { type ChatFiles, createAssets } from "../registry/components/channel-web/files/src/pikit/channel-web/assets.ts";
 import { IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "../registry/components/channel-web/chat/src/lib/chat-api.ts";
 import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../registry/components/channel-web/chat/src/lib/errors.ts";
 import { base64Bytes, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
 import { type Action, INITIAL, type LiveState, liveTexts, reduce } from "../registry/components/channel-web/chat/src/lib/live-state.ts";
+import { parseRoute, screenKey, setPasswordOf } from "../registry/components/channel-web/chat/src/lib/routes.ts";
 import { SseParser } from "../registry/components/channel-web/chat/src/lib/sse.ts";
+import { onVisibleAgain } from "../registry/components/channel-web/chat/src/lib/visible.ts";
 import { CHAT, chatBoundaryViolations, chatCopies, staleCopies } from "./chat-shared.ts";
 import { SHARED_UI_FILES } from "./ui-shared.ts";
 
@@ -358,5 +362,77 @@ describe("images", () => {
     const two = [image(600 * 1024), image(600 * 1024)];
     expect(messageProblem("", two, "server")).toBeUndefined();
     expect(messageProblem("", two, "durable")).toContain("1 MB in all");
+  });
+});
+
+describe("routes", () => {
+  test("a signed-out screen is keyed by its route: another route (or query) starts it anew, the same one keeps it", () => {
+    const home = parseRoute("#/");
+    expect(home.path).toBe("/");
+    expect(screenKey(parseRoute(""))).toBe(screenKey(home));
+    // "Check your email" shown at #/ is gone at #/sign-in, both the sign-in screen.
+    expect(screenKey(parseRoute("#/sign-in"))).not.toBe(screenKey(home));
+    expect(screenKey(parseRoute("#/forgot?email=a%40b.c"))).not.toBe(screenKey(parseRoute("#/forgot")));
+    expect(screenKey(parseRoute("#/sign-in"))).toBe(screenKey(parseRoute("/sign-in")));
+    expect(read("src/app.tsx")).toContain("key={key}");
+  });
+
+  test("a link that sets a password, as channel-web makes it, lands with its token, its kind and the account's email", () => {
+    const landing = (link: string) => setPasswordOf(parseRoute(new URL(link).hash).query);
+    expect(landing(setPasswordLink("https://bot.example.com", "tok-1_x", "invite", "ana+chat@example.com"))).toEqual({ token: "tok-1_x", kind: "invite", email: "ana+chat@example.com" });
+    expect(landing(setPasswordLink("https://bot.example.com/", "tok", "welcome", "bo@example.com"))).toEqual({ token: "tok", kind: "welcome", email: "bo@example.com" });
+    expect(landing(setPasswordLink("http://localhost:3000", "tok", "reset", "cy@example.com"))).toEqual({ token: "tok", kind: "reset", email: "cy@example.com" });
+    // A link without the email (or an empty one) asks it; without a token it is not complete.
+    expect(setPasswordOf(new URLSearchParams("token=t&email=%20"))).toEqual({ token: "t", kind: "reset" });
+    expect(setPasswordOf(new URLSearchParams("invite=1")).token).toBeNull();
+  });
+});
+
+describe("the config, read again", () => {
+  type Visibility = "visible" | "hidden";
+  /** A document whose visibility the test sets. */
+  const page = (state: Visibility) => {
+    const listeners = new Set<() => void>();
+    const doc = {
+      visibilityState: state,
+      addEventListener: (_type: string, listener: () => void) => listeners.add(listener),
+      removeEventListener: (_type: string, listener: () => void) => listeners.delete(listener),
+    };
+    const set = (next: Visibility) => {
+      doc.visibilityState = next;
+      for (const listener of listeners) listener();
+    };
+    return { doc, set, listeners };
+  };
+
+  test("each time the tab comes back, never at once, nor for a change that keeps it visible; stopped, never again", () => {
+    const { doc, set, listeners } = page("visible");
+    let reads = 0;
+    const stop = onVisibleAgain(doc, () => reads++);
+    expect(reads).toBe(0);
+    set("visible");
+    expect(reads).toBe(0);
+    set("hidden");
+    set("visible");
+    expect(reads).toBe(1);
+    set("hidden");
+    set("hidden");
+    set("visible");
+    set("visible");
+    expect(reads).toBe(2);
+    stop();
+    expect(listeners.size).toBe(0);
+    set("hidden");
+    set("visible");
+    expect(reads).toBe(2);
+  });
+
+  test("a page opened hidden reads it when first shown; the app does so only while signed out", () => {
+    const { doc, set } = page("hidden");
+    let reads = 0;
+    onVisibleAgain(doc, () => reads++);
+    set("visible");
+    expect(reads).toBe(1);
+    expect(read("src/app.tsx")).toMatch(/if \(!signedOut\) return;\s+return onVisibleAgain\(document/);
   });
 });

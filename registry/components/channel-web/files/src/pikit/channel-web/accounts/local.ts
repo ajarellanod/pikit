@@ -194,7 +194,7 @@ function build(options: LocalAccountsOptions, secure: boolean, { ready, contexts
       resetPasswordTokenExpiresIn: options.resetTtlSeconds ?? 3600,
       ...(email !== undefined && {
         sendResetPassword: async ({ user, url, token }, request) =>
-          send(request, resetMessage(options.name, user.email, setPasswordLink(new URL(url).origin, token, "reset"))),
+          send(request, resetMessage(options.name, user.email, setPasswordLink(new URL(url).origin, token, "reset", user.email))),
       }),
       // A link that sets a password reached the address (or the operator handed it): the email is the
       // person's. Not through better-auth's updateUser: nothing else runs on it.
@@ -212,7 +212,7 @@ function build(options: LocalAccountsOptions, secure: boolean, { ready, contexts
         autoSignInAfterVerification: false,
         sendVerificationEmail: async ({ user, url }, request) => {
           const { token } = await resetToken(user.id, (options.resetTtlSeconds ?? 3600) * 1000);
-          await send(request, verificationMessage(options.name, user.email, setPasswordLink(new URL(url).origin, token, "welcome")));
+          await send(request, verificationMessage(options.name, user.email, setPasswordLink(new URL(url).origin, token, "welcome", user.email)));
         },
       },
     }),
@@ -452,7 +452,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
         userId = created.id;
       }
       const { token, expiresAt } = await resetToken(userId, (options.inviteTtlHours ?? 72) * 3_600_000);
-      const link = setPasswordLink(origin, token, "invite");
+      const link = setPasswordLink(origin, token, "invite", address);
       if (options.email !== undefined) await options.email(invitationMessage(options.name, address, link), ctx);
       return { link, expiresAt, emailed: options.email !== undefined, userId } satisfies AccountLink & { userId: string };
     },
@@ -461,7 +461,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
       const row = await userRow(userId);
       if (row === undefined) throw refusal("not_found", "no such user");
       const { token, expiresAt } = await resetToken(userId, (options.resetTtlSeconds ?? 3600) * 1000);
-      const link = setPasswordLink(origin, token, "reset");
+      const link = setPasswordLink(origin, token, "reset", row.email);
       if (options.email !== undefined) await options.email(resetMessage(options.name, row.email, link), ctx);
       return { link, expiresAt, emailed: options.email !== undefined };
     },

@@ -17,7 +17,8 @@ import { ErrorNote } from "@/components/pikit/error-note";
 import { type ChatConversation, TITLE_MAX } from "@/lib/chat-api";
 import { useConversations } from "@/lib/conversations";
 import { asError } from "@/lib/errors";
-import { chatIdOf, chatPath, go, type Route } from "@/lib/location";
+import { chatIdOf, chatPath, go } from "@/lib/location";
+import type { Route } from "@/lib/routes";
 import { useSession } from "@/lib/session";
 import { AssistantBadge } from "./auth-card";
 

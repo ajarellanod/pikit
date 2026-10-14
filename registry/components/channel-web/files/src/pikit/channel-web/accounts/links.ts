@@ -4,11 +4,16 @@
  *
  * | Link | Lands on | What the page does |
  * |---|---|---|
- * | invitation (operator's, emailed or copied) | `/chat/#/set-password?token=…&invite=1` | asks a password (or offers the providers), `POST /chat/api/auth/reset-password` `{ token, newPassword }`, then signs in with it |
- * | password reset (operator's, or "forgot password") | `/chat/#/set-password?token=…` | the same, worded as a reset |
- * | a self-made account's confirmation (its email's verification) | `/chat/#/set-password?token=…&welcome=1` | the same, worded as the account's first password: setting it verifies the email (`onPasswordReset`) |
+ * | invitation (operator's, emailed or copied) | `/chat/#/set-password?token=…&email=…&invite=1` | asks a password (or offers the providers), `POST /chat/api/auth/reset-password` `{ token, newPassword }`, then signs in with it and the email |
+ * | password reset (operator's, or "forgot password") | `/chat/#/set-password?token=…&email=…` | the same, worded as a reset |
+ * | a self-made account's confirmation (its email's verification) | `/chat/#/set-password?token=…&email=…&welcome=1` | the same, worded as the account's first password: setting it verifies the email (`onPasswordReset`) |
  * | magic link | `/chat/api/auth/magic-link/verify?token=…&callbackURL=…` | better-auth signs in and redirects to the page's `callbackURL` (`/chat/`); `errorCallbackURL` (`/chat/#/sign-in`) gets `?error=…` |
  * | OAuth / OIDC callback | `/chat/api/auth/callback/<provider>` | better-auth signs in and redirects to `callbackURL` (`/chat/`), or `errorCallbackURL` with `?error=<code>` (`SIGN_UP_NOT_ALLOWED`, `BANNED`, `account_not_linked`…) |
+ *
+ * A link that sets a password names its account's email (the page shows it, read-only, and signs in
+ * with it right after): only its owner gets the link (sent to that address, or handed over by the
+ * operator), and the token alone decides whose password is set, so an `email` changed by hand only
+ * fails the sign-in after.
  *
  * better-auth adds `?error=` to the URL's query, before its `#`: the page reads `location.search`.
  * The page sends `callbackURL: CHAT_LINKS.home` and `errorCallbackURL: CHAT_LINKS.signIn` with
@@ -21,7 +26,7 @@ export const CHAT_LINKS = {
   home: "/chat/",
   /** The sign-in view: where a failed OAuth or magic link sign-in lands, with `?error=<code>`. */
   signIn: "/chat/#/sign-in",
-  /** Sets a password with a `token` (`?token=…`, and `&invite=1` for an invitation). */
+  /** Sets a password with a `token` (`?token=…&email=…`, and `&invite=1` for an invitation, `&welcome=1` for a confirmation). */
   setPassword: "/chat/#/set-password",
 } as const;
 
@@ -31,9 +36,11 @@ export const AUTH_BASE_PATH = "/chat/api/auth";
 /** Why a link sets a password: the page words it so. */
 export type SetPasswordKind = "invite" | "reset" | "welcome";
 
-/** The link that sets a password with `token`, on `origin` (`https://bot.example.com`, no trailing `/`). */
-export function setPasswordLink(origin: string, token: string, kind: SetPasswordKind): string {
-  return `${origin.replace(/\/+$/, "")}${CHAT_LINKS.setPassword}?token=${encodeURIComponent(token)}${kind === "reset" ? "" : `&${kind}=1`}`;
+/** The link that sets `email`'s password with `token`, on `origin` (`https://bot.example.com`, no trailing `/`). */
+export function setPasswordLink(origin: string, token: string, kind: SetPasswordKind, email: string): string {
+  const query = new URLSearchParams({ token, email });
+  if (kind !== "reset") query.set(kind, "1");
+  return `${origin.replace(/\/+$/, "")}${CHAT_LINKS.setPassword}?${query}`;
 }
 
 /** Whether `url`'s host is this machine (`localhost`, `127.0.0.1`, `[::1]`, any port). */

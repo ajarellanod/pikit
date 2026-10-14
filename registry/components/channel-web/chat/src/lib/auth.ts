@@ -6,7 +6,7 @@
  * - a sign-in by a provider or a magic link comes back to `/chat/` (`callbackURL`), or to the sign-in
  *   view with `?error=<code>` (`errorCallbackURL`), the code in the address's query, before its `#`;
  * - linking a provider comes back to the account view, likewise;
- * - an invitation, a reset and a new account's confirmation land on `#/set-password?token=…`
+ * - an invitation, a reset and a new account's confirmation land on `#/set-password?token=…&email=…`
  *   (`&invite=1` for an invitation, `&welcome=1` for a confirmation).
  */
 

@@ -37,7 +37,8 @@ again. A bundle that names the admin API (`/admin/api`) is refused.
 | `src/lib/client.ts`, `auth.ts` | the API (`fetch`, the session cookie, `x-pikit-chat: 1` on changes) and better-auth's routes |
 | `src/lib/live.ts`, `live-state.ts`, `sse.ts` | a conversation live: its server-sent events read with `fetch`, folded into a state; a finished answer's live text stays until the messages read have the stored answer its `message` event named (by id, never by text) |
 | `src/lib/outbox.ts` | messages sent from here not shown yet: sending, queued, failed (send again) |
-| `src/lib/location.ts` | the hash routes (`#/c/<id>`, `#/set-password?token=…`) |
+| `src/lib/location.ts`, `routes.ts` | the hash routes (`#/c/<id>`, `#/set-password?token=…&email=…`); each signed-out screen keyed by its route, so another route starts it anew |
+| `src/lib/visible.ts` | signed out, the config read again when the tab comes back (a sign-up mode changed meanwhile) |
 | `src/components/bui/`, `src/components/pikit/`, `src/lib/{activity,format,messages,names,sounds,theme,utils}.ts`, `src/index.css`, `public/` | the dashboard's shared pieces and look, copied |
 
 The copies are the dashboard's own files: in the kit, `bun scripts/chat-shared.ts generate` makes them
@@ -52,7 +53,7 @@ and `scripts/chat.test.ts` checks them; in your project `pikit upgrade` merges t
 | `#/chats` | the conversations |
 | `#/account` | the account |
 | `#/sign-in`, `#/sign-up`, `#/forgot` | signing in |
-| `#/set-password?token=…[&invite=1]` | where an invitation and a password reset land |
+| `#/set-password?token=…&email=…[&invite=1]` | where an invitation, a confirmation and a password reset land (the email shown read-only) |
 | `#/verify?email=…` | "confirm your email" |
 
 It asks the API only while its tab is visible and the person was there in the last 5 minutes

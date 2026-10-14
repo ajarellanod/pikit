@@ -20,6 +20,7 @@ export function TextField({
   help,
   problem,
   disabled = false,
+  readOnly = false,
 }: {
   label: string;
   value: string;
@@ -34,6 +35,8 @@ export function TextField({
   help?: ReactNode;
   problem?: string;
   disabled?: boolean;
+  /** Shown, not to be changed (an email a link names). */
+  readOnly?: boolean;
 }) {
   const id = useId();
   const [shown, setShown] = useState(false);
@@ -58,10 +61,11 @@ export function TextField({
           maxLength={maxLength}
           placeholder={placeholder}
           disabled={disabled}
+          readOnly={readOnly}
           spellCheck={false}
           aria-invalid={problem !== undefined}
           aria-describedby={described}
-          className="h-full min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3 disabled:opacity-60"
+          className="h-full min-w-0 flex-1 bg-transparent text-[14px] text-ink outline-none placeholder:text-ink-3 disabled:opacity-60 read-only:text-ink-2"
         />
         {type === "password" && (
           <button

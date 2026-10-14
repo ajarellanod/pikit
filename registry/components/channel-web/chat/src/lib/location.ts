@@ -9,7 +9,7 @@
  * | `#/chats` | the conversations |
  * | `#/account` | the account |
  * | `#/sign-in`, `#/sign-up`, `#/forgot` | signing in |
- * | `#/set-password?token=…[&invite=1]` | an invitation's or a reset's landing |
+ * | `#/set-password?token=…&email=…[&invite=1]` | an invitation's, a confirmation's or a reset's landing |
  * | `#/verify?email=…` | "confirm your email" |
  *
  * better-auth puts `?error=<code>` in the address's query (before the `#`) when a sign-in by a provider
@@ -17,12 +17,7 @@
  */
 
 import { useSyncExternalStore } from "react";
-
-export interface Route {
-  /** `/c/abc`, never empty. */
-  path: string;
-  query: URLSearchParams;
-}
+import { parseRoute, type Route } from "./routes.ts";
 
 const subscribe = (listener: () => void): (() => void) => {
   window.addEventListener("hashchange", listener);
@@ -31,13 +26,6 @@ const subscribe = (listener: () => void): (() => void) => {
 
 /** The current hash, `#/` when there is none. */
 const hash = (): string => (window.location.hash.length > 1 ? window.location.hash : "#/");
-
-export function parseRoute(value: string): Route {
-  const raw = value.replace(/^#/, "");
-  const at = raw.indexOf("?");
-  const path = at === -1 ? raw : raw.slice(0, at);
-  return { path: path === "" ? "/" : path, query: new URLSearchParams(at === -1 ? "" : raw.slice(at + 1)) };
-}
 
 export function useRoute(): Route {
   return parseRoute(useSyncExternalStore(subscribe, hash));

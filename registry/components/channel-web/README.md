@@ -93,7 +93,8 @@ installed (`admin-auth-token`). Three ways in, the same routes behind each:
 **A link is shown once.** An invitation or a reset link is in the dialog (or the command's output)
 that made it, with whether it was emailed too (`email.send`) and until when it works
 (`inviteTtlHours`); never in the list, a log or the API again. Anyone with it can set the password:
-send it over a channel you trust. Without `email.send`, sending it is yours.
+send it over a channel you trust. Without `email.send`, sending it is yours. It names the account's
+email (`&email=`), which the page shows read-only and signs in with once the password is set.
 
 ## What it guarantees
 

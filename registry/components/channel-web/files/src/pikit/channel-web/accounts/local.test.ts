@@ -219,7 +219,7 @@ test("a sign-up cannot mark itself invited (invitedAt is not an input)", async (
 test("invite: a link that sets a password, then signs in; emailed; exists once in use", async () => {
   const f = make({ mode: "invite" });
   const invited = await f.accounts.invite({ email: "Ana@Example.com", name: "Ana" }, "https://bot.example.com", f.ctx);
-  expect(invited.link).toMatch(/^https:\/\/bot\.example\.com\/chat\/#\/set-password\?token=[\w-]+&invite=1$/);
+  expect(invited.link).toMatch(/^https:\/\/bot\.example\.com\/chat\/#\/set-password\?token=[\w-]+&email=ana%40example\.com&invite=1$/);
   expect(invited.emailed).toBe(true);
   expect(invited.expiresAt).toBeGreaterThan(Date.now() + 71 * 3_600_000);
   expect(f.emails).toHaveLength(1);
@@ -275,7 +275,7 @@ test("resetLink: a new password works, the old does not; not_found for no user",
   await signUp(b, "ana@example.com");
   const id = (await b.user())?.id ?? "";
   const reset = await f.accounts.resetLink(id, ORIGIN, f.ctx);
-  expect(reset.link).toMatch(/\/chat\/#\/set-password\?token=[\w-]+$/);
+  expect(reset.link).toMatch(/\/chat\/#\/set-password\?token=[\w-]+&email=ana%40example\.com$/);
   const token = new URL(reset.link.replace("#/", "")).searchParams.get("token");
   expect((await b.send("/chat/api/auth/reset-password", { json: { token, newPassword: "a brand new password" } })).status).toBe(200);
   expect(await b.user()).toBeUndefined(); // sessions revoked on reset
@@ -292,6 +292,7 @@ test("forgot password by email: a link to the page that sets it", async () => {
   expect((await b.send("/chat/api/auth/request-password-reset", { json: { email: "ana@example.com", redirectTo: "/chat/" } })).status).toBe(200);
   const link = linkIn(f.emails[0]?.message.text ?? "");
   expect(link.startsWith(`${ORIGIN}/chat/#/set-password?token=`)).toBe(true);
+  expect(new URL(link.replace("#/", "")).searchParams.get("email")).toBe("ana@example.com");
   expect(f.emails[0]?.message.subject).toBe("Set your password for Ada");
   const token = new URL(link.replace("#/", "")).searchParams.get("token");
   expect((await b.send("/chat/api/auth/reset-password", { json: { token, newPassword: PASSWORD } })).status).toBe(200);
@@ -308,7 +309,7 @@ test("a password sign-up with email: its password is nobody's; the emailed link 
   expect((await signIn(f.browser(), "ana@example.com")).status).toBe(401);
   expect(f.emails.map((e) => e.message.subject)).toEqual(["Confirm your email for Ada"]);
   const link = linkIn(f.emails[0]?.message.text ?? "");
-  expect(link).toMatch(new RegExp(`^${ORIGIN}/chat/#/set-password\\?token=[\\w-]+&welcome=1$`));
+  expect(link).toMatch(new RegExp(`^${ORIGIN}/chat/#/set-password\\?token=[\\w-]+&email=ana%40example\\.com&welcome=1$`));
   const token = new URL(link.replace("#/", "")).searchParams.get("token");
   expect((await b.send("/chat/api/auth/reset-password", { json: { token, newPassword: "ana's own password" } })).status).toBe(200);
   expect((await signIn(b, "ana@example.com", "ana's own password")).status).toBe(200);

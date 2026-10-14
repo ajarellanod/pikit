@@ -4,6 +4,9 @@
  * then shows the signed-out screens (sign in, make an account, forgot password, an invitation's or a
  * reset's landing, "confirm your email") or the signed-in page (a new chat, a conversation, the
  * conversations, the account). A session that ends meanwhile (a `401`) shows the sign-in again.
+ * Each signed-out screen starts anew on another route (`screenKey`), and while nobody is signed in
+ * the config is read again whenever the tab comes back (`onVisibleAgain`): a sign-up mode changed
+ * meanwhile shows.
  *
  * The tab is titled with the assistant's name; the theme is the dashboard's, light or dark.
  */
@@ -18,7 +21,9 @@ import { get, onUnauthorized } from "@/lib/client";
 import { ConversationsProvider } from "@/lib/conversations";
 import { asError, ChatFailure, landingText } from "@/lib/errors";
 import { chatIdOf, go, takeLandingError, useRoute } from "@/lib/location";
+import { screenKey, setPasswordOf } from "@/lib/routes";
 import { type ChatSession, SessionContext } from "@/lib/session";
+import { onVisibleAgain } from "@/lib/visible";
 import { AccountScreen } from "./screens/account";
 import { ChatsScreen } from "./screens/chats";
 import { ConversationScreen } from "./screens/conversation";
@@ -67,6 +72,17 @@ export function App() {
   useEffect(() => onUnauthorized(() => setMe(undefined)), [setMe]);
 
   const signedIn = state.kind === "ready" && state.me !== undefined;
+  const signedOut = state.kind === "ready" && state.me === undefined;
+  // Signed out, what one may do here is read again when the tab comes back; a failed read keeps the last.
+  useEffect(() => {
+    if (!signedOut) return;
+    return onVisibleAgain(document, () => {
+      get<ChatConfig>("/config").then(
+        (config) => setState((current) => (current.kind === "ready" ? { ...current, config } : current)),
+        () => undefined,
+      );
+    });
+  }, [signedOut]);
   // Signed in, the signed-out screens lead to a new chat.
   useEffect(() => {
     if (signedIn && SIGNED_OUT.has(route.path)) go("/", true);
@@ -96,14 +112,15 @@ export function App() {
   };
 
   if (route.path === "/set-password") {
-    return <SetPasswordScreen config={config} onSignedIn={enter} token={route.query.get("token")} invite={route.query.get("invite") === "1"} welcome={route.query.get("welcome") === "1"} />;
+    return <SetPasswordScreen key={screenKey(route)} config={config} onSignedIn={enter} link={setPasswordOf(route.query)} />;
   }
   if (me === undefined) {
+    const key = screenKey(route);
     const props = { config, onSignedIn: enter };
-    if (route.path === "/sign-up") return <SignUpScreen {...props} />;
-    if (route.path === "/forgot") return <ForgotScreen {...props} initialEmail={route.query.get("email") ?? undefined} />;
-    if (route.path === "/verify") return <VerifyScreen {...props} email={route.query.get("email")} again={route.query.get("again") === "1"} />;
-    return <SignInScreen {...props} {...(landing !== undefined && { landing })} />;
+    if (route.path === "/sign-up") return <SignUpScreen key={key} {...props} />;
+    if (route.path === "/forgot") return <ForgotScreen key={key} {...props} initialEmail={route.query.get("email") ?? undefined} />;
+    if (route.path === "/verify") return <VerifyScreen key={key} {...props} email={route.query.get("email")} again={route.query.get("again") === "1"} />;
+    return <SignInScreen key={key} {...props} {...(landing !== undefined && { landing })} />;
   }
 
   const session: ChatSession = {

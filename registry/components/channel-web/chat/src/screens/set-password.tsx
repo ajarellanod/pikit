@@ -2,7 +2,8 @@
  * Where an invitation (`#/set-password?token=…&invite=1`), a new account's confirmation
  * (`&welcome=1`: setting its first password confirms the email) and a password reset (`#/set-password?token=…`)
  * land: a new password for the link's account (`POST /chat/api/auth/reset-password`), then a sign-in
- * with it when the email is given (setting it ends every session). An invitation also offers the
+ * with it and the email (setting it ends every session). The link names the email (`&email=`): shown
+ * read-only; a link without it asks it, and without one the person signs in after. An invitation also offers the
  * providers: one whose verified email is the invited one signs in to the same account.
  *
  * And "confirm your email" (`#/verify?email=…`), after making an account or signing in with one not
@@ -16,12 +17,16 @@ import { FormNote, Spinner, TextField } from "@/components/chat/field";
 import { resetPassword, sendVerificationEmail, signInWithPassword, signInWithProvider } from "@/lib/auth";
 import { asError } from "@/lib/errors";
 import { go } from "@/lib/location";
+import type { SetPasswordLink } from "@/lib/routes";
 import { providersOf, usePageTitle } from "@/lib/session";
 import { AuthCard, Or, ScreenLink } from "./auth-card";
 import type { SignedOutProps } from "./sign-in";
 
-export function SetPasswordScreen({ config, onSignedIn, token, invite, welcome = false }: SignedOutProps & { token: string | null; invite: boolean; welcome?: boolean }) {
-  const [email, setEmail] = useState("");
+export function SetPasswordScreen({ config, onSignedIn, link }: SignedOutProps & { link: SetPasswordLink }) {
+  const { token } = link;
+  const invite = link.kind === "invite";
+  const welcome = link.kind === "welcome";
+  const [email, setEmail] = useState(link.email ?? "");
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
@@ -112,7 +117,11 @@ export function SetPasswordScreen({ config, onSignedIn, token, invite, welcome =
           void submit();
         }}
       >
-        <TextField label="Your email" type="email" value={email} onChange={setEmail} autoComplete="username" help="To sign you in right after. Leave it empty to sign in later." />
+        {link.email === undefined ? (
+          <TextField label="Your email" type="email" value={email} onChange={setEmail} autoComplete="username" help="To sign you in right after. Leave it empty to sign in later." />
+        ) : (
+          <TextField label="Your email" type="email" value={link.email} onChange={() => undefined} autoComplete="username" readOnly />
+        )}
         <TextField label="New password" type="password" value={password} onChange={setPassword} autoComplete="new-password" required minLength={8} maxLength={128} autoFocus help="At least 8 characters." />
         <TextField label="The same again" type="password" value={again} onChange={setAgain} autoComplete="new-password" required minLength={8} maxLength={128} />
         <Button type="submit" variant="primary" className="mt-1 h-10 w-full gap-2 py-0" disabled={busy} aria-busy={busy}>
