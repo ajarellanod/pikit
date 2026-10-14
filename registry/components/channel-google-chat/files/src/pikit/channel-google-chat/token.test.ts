@@ -4,14 +4,14 @@
  * pair, on a clock the tests move: every claim the feature note names refused when wrong, a malformed
  * token refused, the keys kept as `Cache-Control` says, fetched again for an unknown `kid` at most once
  * a minute and once for concurrent requests, and a failed fetch a rejection (the route's 500), never a
- * refusal.
+ * refusal, tried again a minute later at the soonest, the expired keys used meanwhile for a while.
  */
 
 import { afterEach, expect, test } from "bun:test";
 import { createManualClock, type ManualClock } from "@pikit/core/testing";
 import { base64url, createIdTokens, type FakeGoogleChat, startFakeGoogleChat, type TestIdTokens } from "./fake-google-chat.test-support.ts";
 import { addOnEmail } from "./instance.ts";
-import { CLOCK_SKEW_MS, createIdTokenVerifier, createJwks, REFETCH_MS } from "./token.ts";
+import { CLOCK_SKEW_MS, createIdTokenVerifier, createJwks, JWKS_GRACE_MS, REFETCH_MS } from "./token.ts";
 import type { IdTokenVerifier, Verification } from "./types.ts";
 
 const fakes: FakeGoogleChat[] = [];
@@ -206,7 +206,7 @@ test("a kid the keys lack fetches them again at most once a minute: a rotated ke
   expect(google.fetches()).toBe(4);
 });
 
-test("Google's keys unreachable: verify rejects (the route answers 500, Google retries), never refuses; the next request fetches again", async () => {
+test("Google's keys unreachable: verify rejects (the route answers 500, Google retries), never refuses; fetched again a minute after a failure", async () => {
   const clock = createManualClock(Date.now());
   const options = { audience: "https://pikit.test/google-chat", projectNumber: "123456789012", now: clock.now };
   const tokens = await createIdTokens(options);
@@ -216,14 +216,52 @@ test("Google's keys unreachable: verify rejects (the route answers 500, Google r
 
   google.fail(503);
   await expect(verifier.verify(await tokens.bearer())).rejects.toThrow(/answered 503/);
+  // Within the minute, every request is refused the same way, and nothing is fetched.
   google.fail("network");
+  await expect(verifier.verify(await tokens.bearer())).rejects.toThrow(/answered 503/);
+  expect(google.fetches()).toBe(1);
+  await clock.advance(REFETCH_MS);
   await expect(verifier.verify(await tokens.bearer())).rejects.toThrow(/could not be fetched/);
   google.fail(undefined);
   google.serve();
+  await clock.advance(REFETCH_MS);
   await expect(verifier.verify(await tokens.bearer())).rejects.toThrow(/no RS256 key/);
   google.serve(tokens);
+  await clock.advance(REFETCH_MS);
   expect((await verifier.verify(await tokens.bearer())).ok).toBe(true);
   expect(google.fetches()).toBe(4);
+});
+
+test("keys expired while Google's endpoint fails: the keys kept serve for JWKS_GRACE_MS, fetched again once a minute, then the requests fail until it answers", async () => {
+  const clock = createManualClock(Date.now());
+  const options = { audience: "https://pikit.test/google-chat", projectNumber: "123456789012", now: clock.now };
+  const tokens = await createIdTokens(options);
+  const google = servedKeys(clock);
+  google.serve(tokens);
+  const verifier = createIdTokenVerifier({ jwks: google.jwks, audience: options.audience, email: addOnEmail(options.projectNumber), clock });
+  expect((await verifier.verify(await tokens.bearer())).ok).toBe(true);
+
+  // The keys' max-age (6 h) passed, and Google's endpoint is down.
+  await clock.advance(21_600_000);
+  google.fail(503);
+  for (let i = 0; i < 5; i++) expect((await verifier.verify(await tokens.bearer())).ok).toBe(true);
+  expect(google.fetches()).toBe(2);
+  await clock.advance(REFETCH_MS);
+  expect((await verifier.verify(await tokens.bearer())).ok).toBe(true);
+  expect(google.fetches()).toBe(3);
+
+  // Past the grace: refused as unreachable (500), still once a minute.
+  await clock.advance(JWKS_GRACE_MS);
+  await expect(verifier.verify(await tokens.bearer())).rejects.toThrow(/answered 503/);
+  await expect(verifier.verify(await tokens.bearer())).rejects.toThrow(/answered 503/);
+  expect(google.fetches()).toBe(4);
+
+  // Google answers again: fetched a minute after the last failure, and kept.
+  google.fail(undefined);
+  await clock.advance(REFETCH_MS);
+  expect((await verifier.verify(await tokens.bearer())).ok).toBe(true);
+  expect((await verifier.verify(await tokens.bearer())).ok).toBe(true);
+  expect(google.fetches()).toBe(5);
 });
 
 test("concurrent first requests share one fetch; a caller that gives up does not fail the others", async () => {

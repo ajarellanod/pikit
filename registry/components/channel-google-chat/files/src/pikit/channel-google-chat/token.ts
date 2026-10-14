@@ -28,6 +28,8 @@ export const ISSUERS: readonly string[] = ["https://accounts.google.com", "accou
 export const CLOCK_SKEW_MS = 60_000;
 /** Google's keys are fetched again for an unknown `kid` at most this often (ms), and kept at least this long. */
 export const REFETCH_MS = 60_000;
+/** While Google's keys cannot be fetched, the keys kept are used this long (ms) past their expiry. */
+export const JWKS_GRACE_MS = 3_600_000;
 /** The deadline, in ms, of a fetch of Google's keys. */
 export const JWKS_TIMEOUT_MS = 10_000;
 /** A longer `Authorization` header is no ID token of Google's. */
@@ -41,6 +43,8 @@ export interface JwksOptions {
   clock: Clock;
   /** A value, for tests; the global `fetch` by default. */
   fetch?: typeof fetch;
+  /** How long, in ms, the keys kept are used past their expiry while the fetch fails: `JWKS_GRACE_MS` by default. */
+  graceMs?: number;
 }
 
 /** `work`, or a rejection with `signal`'s reason once it is aborted (`work` goes on for whoever else waits). */
@@ -67,7 +71,10 @@ const isObject = (value: unknown): value is Record<string, unknown> => typeof va
  * imported as RS256 `CryptoKey`s (`crypto.subtle.importKey("jwk", …, { name: "RSASSA-PKCS1-v1_5",
  * hash: "SHA-256" }, false, ["verify"])`), kept until their `max-age` (a minute at least, also without
  * one), fetched again for an unknown `kid` at most once a minute. Concurrent callers share one fetch.
- * A failed fetch rejects (`key`), and the route answers 500 (Google retries), never 401.
+ * **A failed fetch** is not tried again for a minute (`REFETCH_MS`): meanwhile, and while it keeps
+ * failing, the keys kept are used up to `JWKS_GRACE_MS` past their expiry (`graceMs`, a value). With
+ * no key usable, `key` rejects with the fetch's failure, and the route answers 500 (Google retries),
+ * never 401.
  */
 export function createJwks(options: JwksOptions): Jwks {
   const { url, clock } = options;
@@ -76,6 +83,9 @@ export function createJwks(options: JwksOptions): Jwks {
   let pending: Promise<void> | undefined;
   /** When the last fetch began: an unknown `kid` fetches again only `REFETCH_MS` after it. */
   let lastFetch = Number.NEGATIVE_INFINITY;
+  /** The last fetch's failure, until one succeeds: no fetch again before `REFETCH_MS` after it began. */
+  let failure: unknown;
+  const graceMs = options.graceMs ?? JWKS_GRACE_MS;
 
   const load = async (): Promise<void> => {
     let response: Response;
@@ -104,9 +114,19 @@ export function createJwks(options: JwksOptions): Jwks {
   const refresh = (signal: AbortSignal | undefined): Promise<void> => {
     if (pending === undefined) {
       lastFetch = clock.now();
-      pending = load().finally(() => {
-        pending = undefined;
-      });
+      pending = load()
+        .then(
+          () => {
+            failure = undefined;
+          },
+          (error: unknown) => {
+            failure = error;
+            throw error;
+          },
+        )
+        .finally(() => {
+          pending = undefined;
+        });
       // Whoever waits sees the failure; a fetch nobody waits for any more (all aborted) is not unhandled.
       pending.catch(() => {});
     }
@@ -116,8 +136,18 @@ export function createJwks(options: JwksOptions): Jwks {
   return {
     async key(kid, signal) {
       const now = clock.now();
-      if (cache === undefined || now >= cache.expires) await refresh(signal);
-      else if (!cache.keys.has(kid) && (pending !== undefined || now - lastFetch >= REFETCH_MS)) await refresh(signal);
+      const due = pending !== undefined || now - lastFetch >= REFETCH_MS;
+      if (cache === undefined || now >= cache.expires) {
+        // Expired: fetched again, at most once a minute after a failure; the keys kept serve a while meanwhile.
+        const usable = cache !== undefined && now < cache.expires + graceMs;
+        if (failure === undefined || due) {
+          try {
+            await refresh(signal);
+          } catch (error) {
+            if (!usable || signal?.aborted === true) throw error;
+          }
+        } else if (!usable) throw failure;
+      } else if (!cache.keys.has(kid) && due) await refresh(signal);
       return cache?.keys.get(kid);
     },
   };
