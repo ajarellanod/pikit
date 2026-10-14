@@ -19,19 +19,24 @@
  * never answers; an answer's sends are the creations that are not "Thinking…" and the edits of the
  * text and cards (a preview edits the text only), under the piece's `messageId`: a send again is
  * under the same key. What it took is what it answered 2xx, or never answered (an edit of a
- * placeholder that is not there, answered 404, is followed by its creation).
+ * placeholder that is not there, answered 404, is followed by its creation). The transport draws
+ * `question`: the fixture gives the suite a question to answer with (`drawnParts`), and a send's
+ * cards drawn from a question (`questionCardId`) are its drawn parts (`ReceivedPiece.drawn`).
  */
 
 import { afterAll, test } from "bun:test";
 import { type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
-import type { ActorCallHandler, ActorInboxHandler, ActorMailbox, AgentRuntime, ConversationRegistry, JsonValue } from "@pikit/contracts";
+import { type ActorCallHandler, type ActorInboxHandler, type ActorMailbox, type AgentRuntime, type ConversationRegistry, type JsonValue, questionPart } from "@pikit/contracts";
 import { type ChannelFixture, createChannelConformance, createMemoryKeyValueStorage, createMemorySubmissions, createMemoryWakeups } from "@pikit/contracts/testing";
 import type { AddOnEvent, ChatMessage } from "./event.ts";
 import { eventRequest, type FakeCall, type FakeGoogleChat, googleError, messageEvent, startFakeGoogleChat } from "./fake-google-chat.test-support.ts";
 import channelGoogleChat, { NAME, worker, WORKER_NAME } from "./index.ts";
+import { questionCardId } from "./question-cards.ts";
 
 const THINKING = "Thinking…";
+/** The part of each kind the transport draws, for the suite's case of drawn parts. */
+const DRAWN_QUESTION = questionPart({ id: "conformance-question", title: "Deploy now?", fields: [{ kind: "confirm", name: "go", label: "Deploy", required: true }] });
 
 const secretsOf = (values: Record<string, string>): ComponentDefinition =>
   defineComponent({ name: "secrets-test", setup: (pikit) => pikit.provide("secrets", { get: async (name: string) => values[name] || undefined }) });
@@ -160,6 +165,7 @@ async function fixtureOn(target: "server" | "cloudflare", conversations: readonl
       if (status === 0 || status >= 500) void postUntilTaken(event);
     },
     told,
+    drawnParts: [DRAWN_QUESTION],
     platform: {
       fail: (conversation, count) => google.fail(answerSend(spaceOf(conversation)), googleError(503, "UNAVAILABLE", "The service is currently unavailable."), count),
       hang: (conversation) => google.fail(answerSend(spaceOf(conversation)), "hang", 1),
@@ -168,7 +174,8 @@ async function fixtureOn(target: "server" | "cloudflare", conversations: readonl
         google.callsTo(answerSend(spaceOf(conversation))).flatMap((call) => {
           if (call.status !== undefined && call.status >= 300) return [];
           const body = call.body as ChatMessage | undefined;
-          return [{ text: body?.text ?? "", possibleDuplicate: false, key: call.method === "POST" ? (call.query.messageId ?? "") : (call.path.split("/").at(-1) ?? "") }];
+          const drawn = (body?.cardsV2 ?? []).filter((card) => card.cardId === questionCardId(DRAWN_QUESTION)).map(() => "question");
+          return [{ text: body?.text ?? "", possibleDuplicate: false, key: call.method === "POST" ? (call.query.messageId ?? "") : (call.path.split("/").at(-1) ?? ""), drawn }];
         }),
     },
     async dispose() {
