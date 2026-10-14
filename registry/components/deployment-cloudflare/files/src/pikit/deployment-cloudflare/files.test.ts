@@ -49,9 +49,11 @@ test("/health can report the version, nodejs_compat is on, and .md and .wasm are
   ]);
 });
 
-test("whoever runs wrangler builds the dashboard of a project with a UI first (bundle.test.ts runs it)", () => {
-  expect(config.build?.command).toBe("if [ -f src/dashboard/package.json ]; then cd src/dashboard && bun install --frozen-lockfile && bun run build; fi");
-  expect(config.build?.watch_dir).toBe("src/dashboard/src");
+test("whoever runs wrangler builds every UI project first (bundle.test.ts runs it); wrangler watches nothing a build writes", () => {
+  expect(config.build?.command).toContain("for project in src/*/package.json");
+  expect(config.build?.command).toContain("bun install --frozen-lockfile && bun run build");
+  // Never src/: every UI project's node_modules, and its build's output, which would start it again.
+  expect(config.build?.watch_dir).toBe("wrangler.jsonc");
 });
 
 test("a name in the file (a Deploy to Cloudflare template's, for Workers Builds) is one Cloudflare accepts; pikit's has none", () => {

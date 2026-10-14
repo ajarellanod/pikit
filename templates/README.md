@@ -24,11 +24,11 @@ It needs what `pikit new` needs (Bun >= 1.4, the npm registry) and npm. It:
    - `wrangler.jsonc` gets the Worker's `name` (`pikit-telegram-bot`), which the button's setup page
      lets its user change. Workers Builds runs wrangler without `--name`, and `deployment-cloudflare`'s
      commands use that name too, so `pikit up` from a clone deploys the same Worker;
-   - `wrangler.jsonc`'s `build.command`, which builds the dashboard before every bundle, runs Bun
-     through npx (`npx -y bun@<template's bun>`, the installer's pin): Workers Builds' own Bun
-     (1.2.15) cannot read the dashboard's `bun.lock`, and a template cannot set the build's
-     `BUN_VERSION`. The dashboard's packages and build (`src/dashboard/node_modules`, `dist`) are left
-     out: the build makes them;
+   - `wrangler.jsonc`'s `build.command`, which builds every UI project (the dashboard, a component's
+     own) before every bundle, runs Bun through npx (`npx -y bun@<template's bun>`, the installer's
+     pin): Workers Builds' own Bun (1.2.15) cannot read a UI project's `bun.lock`, and a template
+     cannot set the build's `BUN_VERSION`. Their packages and builds (`src/dashboard/node_modules`,
+     `dist`) are left out: the build makes them;
    - `.dev.vars.example` lists the secrets the button asks for (no values), and `package.json`'s
      `cloudflare.bindings` describes each one, and the `CONVERSATION` Durable Object, for the setup
      page. pikit's `.env.example` is removed, so there is one list: it also names

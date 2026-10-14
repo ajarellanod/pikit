@@ -35,12 +35,12 @@
  * `pikit.json`, `pikit.config.ts`, `.env.example`, the copied files, the bases and the new tarballs.
  */
 
-import { copyFileSync, existsSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { hasDefaultExport } from "../registry/imports.ts";
 import { kitRangeProblems } from "../registry/checks.ts";
 import { adapterVersion, contractsVersion, coreVersion } from "../registry/commands.ts";
-import { BOTH_APPS, commandProblems, HOOKS, type Manifest } from "../registry/manifest.ts";
+import { BOTH_APPS, commandProblems, HOOKS, type Manifest, uiProblems } from "../registry/manifest.ts";
 import { APP_LABEL, declaredByApp, hasWorkerApp, workerHalfName } from "../project/apps.ts";
 import { BASES_DIR, basePath, unreferencedBases } from "../project/bases.ts";
 import { componentUiFiles, settingsDir, viewDir } from "../project/dashboard.ts";
@@ -79,6 +79,7 @@ import {
 } from "../project/offers.ts";
 import { probe } from "../project/run.ts";
 import { Undo } from "../project/undo.ts";
+import { syncUiExclusions, uiGenerated, uiProjectFiles } from "../project/ui-project.ts";
 import { confinedPath } from "../project/paths.ts";
 import { assertNoIncompleteOperation, beginOperation, finishOperation, OPERATION_MARKER } from "../project/operation.ts";
 import { kitCommit, kitOrder, pruneVendor, refreshKit, staleKit, VENDOR_DIR } from "../project/vendor.ts";
@@ -211,6 +212,11 @@ export async function applyInstall(projectDir: string, command: string, draft: D
   // Only now: until the install rewrote bun.lock, it named the old tarballs.
   if (refreshed.length > 0) pruneVendor(projectDir);
   finishOperation(projectDir);
+  // A UI project's own packages, when its package.json was written: not the command's to fail.
+  for (const plan of plans) {
+    const ui = plan.manifest.ui?.target;
+    if (ui !== undefined && plan.writes.has(`${ui}/package.json`)) await installUiPackages(projectDir, ui);
+  }
   return refreshed;
 }
 
@@ -386,6 +392,7 @@ export function planInstall(
   if (draft.provided !== undefined) draft.provided = mergeProvided(draft.provided, providedByManifests([manifest], project.targets));
 
   const files = componentFiles(registry, name, project);
+  checkUiProject(projectDir, project, manifest, options.force === true);
   checkConflicts(projectDir, project, name, files, options.force === true);
 
   // An app component has a default export; a `deployment-*` does not, and is not listed.
@@ -477,8 +484,12 @@ export function recordInstall(
     ...(manifest.commands !== undefined && { commands: projectCommands(name, manifest.commands) }),
     // The services `deployment-docker` runs beside the app, by its project path.
     ...(manifest.compose !== undefined && { compose: `${ownDir(name)}${manifest.compose}` }),
-    // Files a hook rewrites: never reported as the user's edits.
-    ...(manifest.generated !== undefined && { generated: manifest.generated.map((file) => `${ownDir(name)}${file}`) }),
+    // Files a hook rewrites, and its UI project's lockfile: never reported as the user's edits.
+    ...((manifest.generated !== undefined || manifest.ui !== undefined) && {
+      generated: [...(manifest.generated ?? []).map((file) => `${ownDir(name)}${file}`), ...(manifest.ui === undefined ? [] : uiGenerated(manifest.ui.target))],
+    }),
+    // Its UI project's folder, which the project's tsc and bun test skip.
+    ...(manifest.ui !== undefined && { ui: manifest.ui.target }),
     // Where it goes on Cloudflare: `pikit upgrade` rewires the Worker's App only when this changes.
     ...(manifest.apps !== undefined && { apps: manifest.apps }),
   };
@@ -550,19 +561,54 @@ export function checkKit(projectDir: string, project: ProjectManifest, force: bo
 async function confirmPlans(plans: readonly Plan[], options: AddOptions): Promise<void> {
   if (options.yes === true) return;
   if (!isInteractive()) throw new CliError("pikit add asks for confirmation; pass --yes when it runs without a terminal");
-  const question = `Install ${plans.map((plan) => plan.name).join(", ")}?${plans.map((plan) => alsoWrites(plan.name, plan.files)).join("")}`;
+  const question = `Install ${plans.map((plan) => plan.name).join(", ")}?${plans.map((plan) => alsoWrites(plan.name, plan.files, plan.manifest.ui?.target)).join("")}`;
   if (!(await confirm(question))) throw new CliError("cancelled", 1);
 }
 
 /**
- * Every file the component installs in this project: its files, and its view when the project has a
- * UI (`componentUiFiles`: its view in `src/dashboard/src/views/<name>/`, its section of the Settings
+ * Every file the component installs in this project: its files, its UI project when it ships one
+ * (`uiProjectFiles`: its manifest's `ui`, in `src/<folder>/`), and its view when the project has a UI
+ * (`componentUiFiles`: its view in `src/dashboard/src/views/<name>/`, its section of the Settings
  * dialog in `src/dashboard/src/settings/<name>/`).
  */
 export function componentFiles(registry: Registry, name: string, project: ProjectManifest): Map<string, string> {
   const files = registry.files(name);
+  for (const [target, source] of uiProjectFiles(registry, name)) files.set(target, source);
   if (project.dashboard !== undefined) for (const [target, source] of componentUiFiles(registry, name)) files.set(target, source);
   return files;
+}
+
+/**
+ * Refuses a UI project (its manifest's `ui`) whose folder is reserved (a registry need not be
+ * validated), is another installed component's, or exists and is not this component's (unless `force`).
+ */
+export function checkUiProject(projectDir: string, project: ProjectManifest, manifest: Manifest, force: boolean): void {
+  const target = manifest.ui?.target;
+  if (target === undefined) return;
+  const own = uiProblems(manifest);
+  if (own.length > 0) throw new CliError(`${manifest.name}'s component.json: ${own.join("; ")}`);
+  const owner = Object.entries(project.components).find(([other, c]) => other !== manifest.name && c.ui === target)?.[0];
+  if (owner !== undefined) throw new CliError(`${manifest.name}'s UI project goes to ${target}/, which is ${owner}'s: only one of them can be installed`);
+  const dir = confinedPath(projectDir, target);
+  if (!force && project.components[manifest.name]?.ui !== target && existsSync(dir) && readdirSync(dir).length > 0) {
+    throw new CliError(`${manifest.name}'s UI project goes to ${target}/, which exists and is not ${manifest.name}'s: move it away, or pass --force to write over it`);
+  }
+}
+
+/**
+ * `bun install` in a UI project; a failure is said, with what to run, and is not the command's.
+ * Without its `package.json` there is nothing to install (Bun would walk up to the project's).
+ */
+export async function installUiPackages(projectDir: string, dir: string, quiet = false): Promise<boolean> {
+  if (!existsSync(confinedPath(projectDir, `${dir}/package.json`))) return false;
+  try {
+    await bunInstall(confinedPath(projectDir, dir), { quiet: true });
+    if (!quiet) log.ok(`${dir}: its packages are installed`);
+    return true;
+  } catch {
+    log.warn(`${dir}: \`bun install\` failed there (no network?): run it yourself, in ${dir}/`);
+    return false;
+  }
 }
 
 /** A manifest's `hooks` (files of the component's own directory) by project path, in the order they run. */
@@ -596,14 +642,16 @@ export function ownDir(name: string): string {
   return `src/pikit/${name}/`;
 }
 
-/** The targets outside the component's own directory, sorted (so grouped by directory). */
-function outside(name: string, files: Map<string, unknown>): string[] {
-  return [...files.keys()].filter((target) => !target.startsWith(ownDir(name)) && !target.startsWith(viewDir(name)) && !target.startsWith(settingsDir(name))).sort();
+/** The targets outside the component's own directory, its view and its UI project (`ui`, its folder), sorted (so grouped by directory). */
+export function outside(name: string, files: Map<string, unknown>, ui?: string): string[] {
+  return [...files.keys()]
+    .filter((target) => !target.startsWith(ownDir(name)) && !target.startsWith(viewDir(name)) && !target.startsWith(settingsDir(name)) && (ui === undefined || !target.startsWith(`${ui}/`)))
+    .sort();
 }
 
 /** What a confirmation adds when the component writes outside its directory: the files, by name. */
-export function alsoWrites(name: string, files: Map<string, unknown>): string {
-  const others = outside(name, files);
+export function alsoWrites(name: string, files: Map<string, unknown>, ui?: string): string {
+  const others = outside(name, files, ui);
   return others.length === 0 ? "" : ` It also writes, outside ${ownDir(name)}: ${others.join(", ")}`;
 }
 
@@ -662,6 +710,10 @@ export function applyPlans(projectDir: string, draft: Draft, plans: readonly Pla
     undo.keep(ENV_EXAMPLE);
     writeFileSync(join(projectDir, ENV_EXAMPLE), draft.example.after);
   }
+  // The UI projects, listed where the project's tsc and bun test skip them; one a new version moved is taken out.
+  const uiAdded = plans.flatMap((plan) => draft.project.components[plan.name]?.ui ?? []);
+  const uiMoved = plans.flatMap((plan) => (plan.previous?.ui !== undefined && !uiAdded.includes(plan.previous.ui) ? [plan.previous.ui] : []));
+  syncUiExclusions(projectDir, uiAdded, uiMoved, undo);
   undo.keep(PIKIT_JSON);
   writeProjectManifest(projectDir, draft.project);
   // A reinstall (--force) replaces the component's hashes: the bases of the old ones may be nobody's now.
@@ -791,8 +843,11 @@ export function describePlan({ registry, manifest, files, obsolete }: Plan): voi
     log.warn(`the registry has uncommitted changes: its commit does not name these files (pikit-bases/ keeps them as installed, for \`pikit upgrade\`)`);
   }
   // A registry may be anyone's: a file outside the component's directory is shown by its path, marked.
-  const others = outside(manifest.name, files);
-  log.info(`  files: ${files.size - others.length} in ${ownDir(manifest.name)}`);
+  const ui = manifest.ui?.target;
+  const others = outside(manifest.name, files, ui);
+  const inUi = ui === undefined ? 0 : [...files.keys()].filter((target) => target.startsWith(`${ui}/`)).length;
+  log.info(`  files: ${files.size - others.length - inUi} in ${ownDir(manifest.name)}`);
+  if (ui !== undefined) log.info(`  its UI project: ${inUi} files in ${ui}/ (built at every deploy)`);
   if (others.length > 0) {
     log.info(`  files outside ${ownDir(manifest.name)}: ${others.length}`);
     for (const target of others) log.info(`    ! ${target}`);

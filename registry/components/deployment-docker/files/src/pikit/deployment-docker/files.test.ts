@@ -8,8 +8,9 @@
  */
 
 import { expect, test } from "bun:test";
-import { existsSync, readFileSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, dirname, join } from "node:path";
 import { START_DEADLINE_MS, STOP_DEADLINE_MS } from "./entrypoint.ts";
 
 const ROOT = join(import.meta.dir, "..", "..", "..");
@@ -76,27 +77,83 @@ test(".dockerignore keeps secrets, state and node_modules out of the build", () 
   expect(ignored).toContain(".env");
   expect(ignored).toContain(".pikit");
   expect(ignored).toContain("node_modules");
-  // The dashboard's too (src/dashboard/node_modules), and its local build: the image makes its own.
+  // Each UI project's too (src/dashboard/node_modules), and its local build: the image makes its own.
   expect(ignored).toContain("**/node_modules");
-  expect(ignored).toContain("src/dashboard/dist");
+  expect(ignored).toContain("src/*/dist");
 });
 
-test("Dockerfile: the dashboard, when the project has one, is built in its own stage and only its module in admin-api reaches the app", () => {
+test("Dockerfile: the UI projects are built in their own stage, and only their modules reach the app, after its files", () => {
   const dockerfile = lines("Dockerfile");
-  const stage = dockerfile.findIndex((line) => /^FROM\s.*\sAS dashboard$/.test(line));
+  const stage = dockerfile.findIndex((line) => /^FROM\s.*\sAS ui$/.test(line));
   const app = dockerfile.findLastIndex((line) => line.startsWith("FROM "));
 
   expect(stage).toBeGreaterThan(-1);
   expect(stage).toBeLessThan(app);
-  const build = dockerfile.slice(stage, app).join("\n");
-  expect(build).toContain("if [ -f src/dashboard/package.json ]");
-  expect(build).toContain("bun install --frozen-lockfile");
-  // Without a UI (or without admin-api) out/ is empty, and the copy still succeeds.
-  expect(build).toContain("mkdir -p out");
-  expect(build).toContain("cp src/pikit/admin-api/dashboard-files.ts out/src/pikit/admin-api/");
-  const copy = dockerfile.slice(app).indexOf("COPY --from=dashboard /build/out/ ./");
+  expect(dockerfile.slice(stage, app).join("\n")).toContain("bun install --frozen-lockfile");
+  const copy = dockerfile.slice(app).indexOf("COPY --from=ui /build/out/ ./");
   expect(copy).toBeGreaterThan(dockerfile.slice(app).indexOf("COPY . ."));
 });
+
+/** The `ui` stage's RUN, as the image's shell runs it in its WORKDIR (Docker joins the `\` lines). */
+function uiStage(): string {
+  const text = read("Dockerfile");
+  const stage = text.slice(text.search(/^FROM\s.*\sAS ui$/m));
+  const run = /^RUN ((?:.*\\\n)*.*)$/m.exec(stage)?.[1];
+  if (run === undefined) throw new Error("the ui stage has no RUN");
+  return run.replaceAll("\\\n", "");
+}
+
+/** A UI project at `src/<name>/` whose build writes `text` as `src/pikit/<component>/<name>-files.ts`, or fails. */
+const uiProject = (name: string, component: string, text: string | undefined): Record<string, string> => ({
+  [`src/${name}/package.json`]: JSON.stringify({ name, private: true, scripts: { build: "bun build.ts" } }),
+  [`src/${name}/build.ts`]:
+    text === undefined ? 'console.error("vite: broken"); process.exit(3);\n' : `await Bun.write("../pikit/${component}/${name}-files.ts", ${JSON.stringify(text)});\n`,
+  // What the repository holds: an old build, which the image must not ship.
+  [`src/pikit/${component}/${name}-files.ts`]: "OLD\n",
+});
+
+/** The `ui` stage run on a build context of `files`: its exit code and the files of `out/`. */
+async function runUiStage(files: Record<string, string>): Promise<{ code: number; out: Record<string, string>; stderr: string }> {
+  const build = mkdtempSync(join(tmpdir(), "pikit-docker-ui-"));
+  try {
+    for (const [file, text] of Object.entries(files)) {
+      mkdirSync(dirname(join(build, file)), { recursive: true });
+      writeFileSync(join(build, file), text);
+    }
+    const child = Bun.spawn(["sh", "-c", uiStage()], {
+      cwd: build,
+      env: { ...process.env, PATH: `${dirname(process.execPath)}${delimiter}${process.env.PATH ?? ""}` },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const [code, , stderr] = await Promise.all([child.exited, new Response(child.stdout).text(), new Response(child.stderr).text()]);
+    const out: Record<string, string> = {};
+    for (const file of new Bun.Glob("**/*").scanSync({ cwd: join(build, "out"), dot: true })) out[file] = readFileSync(join(build, "out", file), "utf8");
+    return { code, out, stderr };
+  } finally {
+    rmSync(build, { recursive: true, force: true });
+  }
+}
+
+test("Dockerfile's ui stage builds every UI project, the dashboard and a component's, and puts only their modules in out/", async () => {
+  const { code, out, stderr } = await runUiStage({
+    ...uiProject("dashboard", "admin-api", "DASHBOARD_BUILD\n"),
+    ...uiProject("chat", "channel-web", "CHAT_BUILD\n"),
+    // A component's own files, and a folder of src/ that is no UI project: never in out/.
+    "src/pikit/channel-web/index.ts": "export default {};\n",
+    "src/notes/todo.md": "mine\n",
+  });
+  expect({ code, stderr }).toEqual({ code: 0, stderr: expect.any(String) });
+  expect(out).toEqual({ "src/pikit/admin-api/dashboard-files.ts": "DASHBOARD_BUILD\n", "src/pikit/channel-web/chat-files.ts": "CHAT_BUILD\n" });
+}, 60_000);
+
+test("Dockerfile's ui stage: nothing to build leaves out/ empty; a build that fails stops the image", async () => {
+  expect(await runUiStage({ "src/pikit/tool-read/index.ts": "export default {};\n" })).toEqual({ code: 0, out: {}, stderr: "" });
+
+  const failed = await runUiStage({ ...uiProject("dashboard", "admin-api", "DASHBOARD_BUILD\n"), ...uiProject("chat", "channel-web", undefined) });
+  expect(failed.code).not.toBe(0);
+  expect(failed.stderr).toContain("vite: broken");
+}, 60_000);
 
 test("compose.yaml: a 503 from /health (the app is down) stops PID 1, so Docker restarts the process; nothing else does", () => {
   const check = lines("compose.yaml").find((line) => line.trimStart().startsWith("test:")) ?? "";

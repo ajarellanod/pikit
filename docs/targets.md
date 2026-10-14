@@ -121,8 +121,9 @@ optional exports. A project has exactly one.
 | `dev` | not exported (the CLI runs `main.ts --watch`) | `wrangler dev` |
 | `exec` | a one-off container of the app (used by `pikit configure --login` and `up`'s credential check) | not exported |
 
-The dashboard is built by every deploy of a project with `src/dashboard/`: in a stage of the Docker
-image, or by `wrangler.jsonc`'s `build.command` ([dashboard.md](dashboard.md)).
+Every UI project (a folder of `src/` with a `package.json`: the dashboard's `src/dashboard/`, a
+component's own such as channel-web's `src/chat/`) is built by every deploy: in a stage of the Docker
+image, or by `wrangler.jsonc`'s `build.command` ([dashboard.md](dashboard.md#other-ui-projects)).
 
 On Cloudflare, a deploy without pikit's CLI (a Deploy to Cloudflare template's Workers Builds, which
 deploys every merge) runs `node src/pikit/deployment-cloudflare/deploy.mjs` instead of `pikit up`: the

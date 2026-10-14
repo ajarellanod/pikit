@@ -443,7 +443,10 @@ anywhere. A run that also answers a user's message is delivered to the user, as 
   deploy runs it in a project with a UI (Cloudflare: wrangler's `build.command`, whoever runs
   wrangler; a server: the image's build), so a deploy never ships an old or empty dashboard, and a
   project without one builds nothing more (no magic, principle 9). In development it runs with hot
-  reload against a running app's API.
+  reload against a running app's API. It is not the only UI project: a component may ship one of its
+  own (its manifest's `ui`: channel-web's page for the assistant's users, `src/chat/`), installed,
+  upgraded and removed as the component's files, built by every deploy by the same rule (a folder of
+  `src/` with a `package.json`), and served by that component under its own path, never `/admin/`.
 - **It is safe by default.** Authenticated; never shows a secret or a credential. Operational logs
   stay without message text; the transcript views are an explicit, authenticated read of the
   conversation.

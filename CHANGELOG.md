@@ -245,6 +245,13 @@ there.
   `tool-websearch-brave` (Brave's key optional), and the starter agent names them.
 
 ### CLI (`pikit`)
+- A component may ship a UI project of its own (`component.json`'s `ui`: `{ source, target: "src/<name>" }`,
+  channel-web's `src/chat/`): `add` writes it as the component's files (so `upgrade` merges it) and runs
+  `bun install` in it, lists it where the project's `tsc` and `bun test` skip it, and `remove` takes it
+  all away; `registry validate` checks its `package.json` `build`, `bun.lock` and the module its build
+  writes. Every folder of `src/` with a `package.json` is a UI project: deployment-docker's `ui` stage
+  and deployment-cloudflare's `build.command` build each one, and `pikit dev` builds one again when its
+  files change.
 - `new` (guided in a terminal: target, preset, channels, several at once, then what it can do: the
   dashboard and the preset's features; `--with` answers both in a script), `add` (one or several names, one
   transaction), `remove`, `upgrade` (three-way merge

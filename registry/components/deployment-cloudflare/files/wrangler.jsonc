@@ -10,14 +10,19 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "main": "src/pikit/deployment-cloudflare/worker.ts",
-  // The dashboard (SPEC §5), when the project has a UI (src/dashboard/, `pikit ui on`): built before
-  // every bundle, by whoever runs wrangler (`pikit up`, `pikit dev`, a `wrangler deploy` by hand,
-  // Workers Builds from Git). Its build writes src/pikit/admin-api/dashboard-files.ts, which the
-  // Worker bundles: a build that fails stops the deploy, so no Worker ships an old or empty dashboard.
-  // Without src/dashboard/ it does nothing. `pikit dev` builds it again when its source changes.
+  // The UI projects, every folder of src/ with a package.json but src/pikit/: the dashboard (SPEC §5),
+  // when the project has a UI (src/dashboard/, `pikit ui on`), and a component's own (its
+  // component.json's `ui`: channel-web's src/chat/). Each is built before every bundle, by whoever runs
+  // wrangler (`pikit up`, `pikit dev`, a `wrangler deploy` by hand, Workers Builds from Git), and its
+  // build writes its component's module, src/pikit/<component>/<folder>-files.ts (admin-api's
+  // dashboard-files.ts, channel-web's chat-files.ts), which the Worker bundles: a build that fails
+  // stops the deploy, so no Worker ships an old or empty page. Without one it does nothing.
+  // `watch_dir` is what wrangler watches to build them again: only this file, never src/ (every UI
+  // project's node_modules, and what its build writes, which would start it again). `pikit dev`
+  // builds a UI project again itself when its files change.
   "build": {
-    "command": "if [ -f src/dashboard/package.json ]; then cd src/dashboard && bun install --frozen-lockfile && bun run build; fi",
-    "watch_dir": "src/dashboard/src"
+    "command": "for project in src/*/package.json; do dir=\"${project%/package.json}\"; if [ ! -f \"$project\" ] || [ \"$dir\" = src/pikit ]; then continue; fi; (cd \"$dir\" && bun install --frozen-lockfile && bun run build) || exit 1; done",
+    "watch_dir": "wrangler.jsonc"
   },
   "compatibility_date": "2026-09-01",
   // Components and Pi use node:* APIs that Workers provide with it (Buffer, crypto, process.env).

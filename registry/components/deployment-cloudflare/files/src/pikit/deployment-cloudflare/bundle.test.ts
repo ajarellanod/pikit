@@ -1,8 +1,9 @@
 /**
  * The Worker bundles: `wrangler deploy --dry-run` on a throwaway project with this component where
  * `pikit add` puts it and a two-App `pikit.config.ts`. It uploads nothing and needs no account, only
- * the project's wrangler (`node_modules/.bin/wrangler`, which runs on Node). With a UI
- * (`src/dashboard/`), wrangler's `build.command` builds the dashboard first, whoever runs wrangler.
+ * the project's wrangler (`node_modules/.bin/wrangler`, which runs on Node). With UI projects (the
+ * dashboard's `src/dashboard/`, a component's `src/chat/`), wrangler's `build.command` builds each first,
+ * whoever runs wrangler.
  */
 
 import { expect, test } from "bun:test";
@@ -13,9 +14,9 @@ import { dirname, join } from "node:path";
 const ROOT = join(import.meta.dir, "..", "..", "..");
 
 /**
- * A throwaway project with this component, its `wrangler.jsonc` and `files` (a fake dashboard), whose
- * Worker serves `GET /hello` with what `src/pikit/admin-api/dashboard-files.ts` holds, if anything;
- * `wrangler deploy --dry-run` on it.
+ * A throwaway project with this component, its `wrangler.jsonc` and `files` (fake UI projects), whose
+ * Worker serves `GET /hello` with what the modules of `files` (`src/pikit/<component>/<name>-files.ts`)
+ * hold, if anything; `wrangler deploy --dry-run` on it.
  */
 async function dryRun(files: Record<string, string> = {}): Promise<{ code: number; stdout: string; stderr: string; bundle: string }> {
   const project = mkdtempSync(join(tmpdir(), "pikit-deployment-cloudflare-"));
@@ -24,16 +25,17 @@ async function dryRun(files: Record<string, string> = {}): Promise<{ code: numbe
     mkdirSync(installed, { recursive: true });
     for (const file of ["worker.ts", "entrypoint.ts", "host.ts"]) copyFileSync(join(import.meta.dir, file), join(installed, file));
     copyFileSync(join(ROOT, "wrangler.jsonc"), join(project, "wrangler.jsonc"));
-    const modules = nodeModules();
-    symlinkSync(modules, join(project, "node_modules"), "dir");
+    const installedModules = nodeModules();
+    symlinkSync(installedModules, join(project, "node_modules"), "dir");
     writeFileSync(join(project, "package.json"), JSON.stringify({ name: "bundle-check", type: "module" }));
-    const dashboard = "src/pikit/admin-api/dashboard-files.ts" in files;
+    const modules = Object.keys(files).filter((file) => /^src\/pikit\/[^/]+\/[^/]+-files\.ts$/.test(file));
     writeFileSync(
       join(project, "pikit.config.ts"),
       [
         'import { defineApp, defineComponent } from "@pikit/core";',
-        dashboard ? 'import { DASHBOARD_FILES } from "./src/pikit/admin-api/dashboard-files.ts";' : "const DASHBOARD_FILES = {};",
-        'const hello = defineComponent({ name: "hello", setup(pikit) { pikit.provideKeyed("http.route", "GET /hello", () => new Response(JSON.stringify(DASHBOARD_FILES))); } });',
+        ...modules.map((file, i) => `import * as built${i} from "./${file}";`),
+        `const BUILT = [${modules.map((_, i) => `built${i}`).join(", ")}];`,
+        'const hello = defineComponent({ name: "hello", setup(pikit) { pikit.provideKeyed("http.route", "GET /hello", () => new Response(JSON.stringify(BUILT))); } });',
         "export const worker = defineApp({ components: [hello] });",
         "export default defineApp({ components: [] });",
         "",
@@ -44,7 +46,7 @@ async function dryRun(files: Record<string, string> = {}): Promise<{ code: numbe
       writeFileSync(join(project, file), text);
     }
 
-    const child = Bun.spawn([join(modules, ".bin", "wrangler"), "deploy", "--dry-run", "--outdir", "out", "--name", "bundle-check"], {
+    const child = Bun.spawn([join(installedModules, ".bin", "wrangler"), "deploy", "--dry-run", "--outdir", "out", "--name", "bundle-check"], {
       cwd: project,
       env: { ...process.env, WRANGLER_SEND_METRICS: "false" },
       stdout: "pipe",
@@ -67,27 +69,34 @@ test("wrangler bundles worker.ts with the project's two Apps, and exports the Co
   expect(bundle).not.toContain("child_process");
 }, 60_000);
 
-/** A dashboard whose build writes admin-api's module (as `scripts/embed.ts` does), or fails. */
-const DASHBOARD_FILES_MODULE = "src/pikit/admin-api/dashboard-files.ts";
-const fakeDashboard = (build: string): Record<string, string> => ({
-  "src/dashboard/package.json": JSON.stringify({ name: "dashboard", private: true, scripts: { build: "bun build.ts" } }),
-  "src/dashboard/build.ts": build,
-  // What the repository holds: an old build, which the deploy must not ship.
-  [DASHBOARD_FILES_MODULE]: 'export const DASHBOARD_FILES = { "index.html": "OLD_BUILD" };\n',
-});
+/**
+ * A UI project at `src/<name>/` whose build writes its component's module (as the dashboard's
+ * `scripts/embed.ts` does), exporting `marker`; or, without one, fails.
+ */
+const fakeUi = (name: string, component: string, marker: string | undefined): Record<string, string> => {
+  const module = `src/pikit/${component}/${name}-files.ts`;
+  const text = (value: string) => `export const FILES = { "index.html": "${value}" };\n`;
+  return {
+    [`src/${name}/package.json`]: JSON.stringify({ name, private: true, scripts: { build: "bun build.ts" } }),
+    [`src/${name}/build.ts`]:
+      marker === undefined ? 'console.error("vite: broken view"); process.exit(3);\n' : `await Bun.write("../pikit/${component}/${name}-files.ts", ${JSON.stringify(text(marker))});\n`,
+    // What the repository holds: an old build, which the deploy must not ship.
+    [module]: text(`OLD_${name.toUpperCase()}`),
+  };
+};
 
-test("with a UI, any wrangler deploy builds the dashboard before it bundles: the Worker has the new build", async () => {
-  const { code, stdout, bundle } = await dryRun(
-    fakeDashboard(`await Bun.write("../pikit/admin-api/dashboard-files.ts", 'export const DASHBOARD_FILES = { "index.html": "NEW_BUILD" };\\n');\n`),
-  );
+test("with UI projects, any wrangler deploy builds each (the dashboard, a component's) before it bundles: the Worker has the new builds", async () => {
+  const { code, stdout, bundle } = await dryRun({ ...fakeUi("dashboard", "admin-api", "NEW_DASHBOARD"), ...fakeUi("chat", "channel-web", "NEW_CHAT") });
   expect(code).toBe(0);
   expect(stdout).toContain("[custom build]");
-  expect(bundle).toContain("NEW_BUILD");
-  expect(bundle).not.toContain("OLD_BUILD");
+  expect(bundle).toContain("NEW_DASHBOARD");
+  expect(bundle).toContain("NEW_CHAT");
+  expect(bundle).not.toContain("OLD_DASHBOARD");
+  expect(bundle).not.toContain("OLD_CHAT");
 }, 60_000);
 
-test("with a UI, a dashboard build that fails stops the deploy: nothing is bundled", async () => {
-  const { code, stdout, stderr, bundle } = await dryRun(fakeDashboard('console.error("vite: broken view"); process.exit(3);\n'));
+test("with UI projects, one build that fails stops the deploy: nothing is bundled", async () => {
+  const { code, stdout, stderr, bundle } = await dryRun({ ...fakeUi("chat", "channel-web", undefined), ...fakeUi("dashboard", "admin-api", "NEW_DASHBOARD") });
   expect(code).not.toBe(0);
   expect(`${stdout}${stderr}`).toContain("Running custom build");
   expect(bundle).toBe("");

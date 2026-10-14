@@ -20,8 +20,8 @@ export const DASHBOARD_DIR = "src/dashboard";
 export const DASHBOARD_SOURCE = "dashboard/files";
 /** The dashboard's built files, which `admin-api` serves (its `assets` default). */
 export const DASHBOARD_DIST = `${DASHBOARD_DIR}/dist`;
-/** Made by its toolchain, never the dashboard's source. */
-const BUILT = new Set(["node_modules", "dist"]);
+/** Made by its toolchain, never the source of the dashboard (nor of any UI project, `ui-project.ts`). */
+export const BUILT: ReadonlySet<string> = new Set(["node_modules", "dist"]);
 
 /** Where a component's view goes: `src/dashboard/src/views/<component>/`. */
 export function viewDir(component: string): string {
@@ -61,7 +61,7 @@ export function dashboardFiles(registry: Registry): Map<string, string> | undefi
 }
 
 /** The files under `dir`, relative, but what its toolchain makes. `strict`: anything else than files and folders is refused (a registry's). */
-function listSource(dir: string, strict = true, prefix = ""): string[] {
+export function listSource(dir: string, strict = true, prefix = ""): string[] {
   const files: string[] = [];
   for (const entry of readdirSync(prefix === "" ? dir : confinedPath(dir, prefix), { withFileTypes: true })) {
     const relative = prefix === "" ? entry.name : `${prefix}/${entry.name}`;
@@ -69,7 +69,7 @@ function listSource(dir: string, strict = true, prefix = ""): string[] {
       if (prefix === "" && BUILT.has(entry.name)) continue;
       files.push(...listSource(dir, strict, relative));
     } else if (entry.isFile()) files.push(relative);
-    else if (strict) throw new Error(`the dashboard's ${relative} is not a regular file or directory`);
+    else if (strict) throw new Error(`${dir}: ${relative} is not a regular file or directory`);
   }
   return files.sort();
 }

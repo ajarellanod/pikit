@@ -321,6 +321,27 @@
       "pattern": "^[a-z0-9][a-z0-9-]*$",
       "description": "A folder of the component holding its section of the dashboard's Settings dialog (features/settings.md): its index.tsx default-exports defineSettings({ id: <component name>, … }). `pikit add` copies it to src/dashboard/src/settings/<name>/ when the project has a UI (`pikit ui on`), recorded as the component's files."
     },
+    "ui": {
+      "type": "object",
+      "required": [
+        "source",
+        "target"
+      ],
+      "properties": {
+        "source": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9-]*$",
+          "description": "A folder of the component (never `files`): the UI project, with its package.json (a `build` script) and its bun.lock."
+        },
+        "target": {
+          "type": "string",
+          "pattern": "^src/[a-z0-9][a-z0-9-]*$",
+          "description": "Where it goes in the project: src/<name>, never src/pikit, src/dashboard, src/agents, src/extensions."
+        }
+      },
+      "additionalProperties": false,
+      "description": "A UI project of the component's own (channel-web's chat page): a Vite app with its own toolchain, which `pikit add` copies to `target`, recorded as the component's files (`pikit upgrade` merges it, `pikit remove` deletes it; `pikit ui on`/`off` never touch it). Its `build` writes the component's files module, src/pikit/<name>/<target's name>-files.ts (`src/chat` → chat-files.ts), which the component ships empty, lists in `generated` and serves. Every deploy builds it before bundling, as it builds the dashboard; the project's tsc and bun test skip it."
+    },
     "replay": {
       "type": "object",
       "required": [

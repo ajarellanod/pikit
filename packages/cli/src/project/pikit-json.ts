@@ -93,6 +93,11 @@ export const InstalledComponentSchema = Type.Object(
      */
     generated: Type.Optional(Type.Array(Type.String())),
     /**
+     * Its manifest's `ui.target`: the folder of its UI project (`src/chat`), whose files are among
+     * `files`, which the project's tsc and bun test skip. Absent when it ships none.
+     */
+    ui: Type.Optional(Type.String()),
+    /**
      * Its manifest's `apps`: where it went in a project on Cloudflare (SPEC C1). `pikit upgrade` changes
      * the Worker's App only when a new version says otherwise. Absent when it declared none.
      */

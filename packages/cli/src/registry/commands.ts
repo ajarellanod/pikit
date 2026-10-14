@@ -27,6 +27,7 @@ import {
   checkManifest,
   checkNaming,
   checkSettingsSection,
+  checkUiProject,
   checkStorageNames,
   checkView,
 } from "./checks.ts";
@@ -299,15 +300,17 @@ export async function validate(root: string, options: { coreVersion?: string; co
     const dir = join(root, "components", name);
     const report = (message: string) => problems.push(`${name}: ${message}`);
     checkNaming(name, catalogue).forEach(report);
-    checkLayout(dir, name).forEach(report);
 
     let manifest: Manifest | undefined;
     try {
       manifest = readManifest(dir);
     } catch (error) {
+      checkLayout(dir, name).forEach(report);
       report(`component.json is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
       continue;
     }
+    const uiSource = (manifest?.ui as { source?: unknown } | undefined)?.source;
+    checkLayout(dir, name, typeof uiSource === "string" ? uiSource : undefined).forEach(report);
     if (manifest === undefined) {
       report(`component.json is missing: run \`${regenerate}\`, then fill in its hand-written fields`);
       continue;
@@ -323,6 +326,7 @@ export async function validate(root: string, options: { coreVersion?: string; co
     checkDevDependencies(manifest).forEach(report);
     checkView(dir, name, manifest).forEach(report);
     checkSettingsSection(dir, name, manifest).forEach(report);
+    checkUiProject(dir, name, manifest).forEach(report);
 
     checkDescriptionReaders(dir, name).forEach(report);
     checkTargetReaders(dir).forEach(report);
@@ -347,6 +351,16 @@ export async function validate(root: string, options: { coreVersion?: string; co
     checkComposeFile(dir, name, manifest).forEach(report);
     (await checkDeploymentExports(dir, name)).forEach(report);
     checkGeneratedFiles(dir, name, manifest).forEach(report);
+  }
+
+  // One UI project per folder of src/: two components of the registry never take the same one.
+  const uiOwners = new Map<string, string>();
+  for (const m of manifests) {
+    const target = (m.ui as { target?: unknown } | undefined)?.target;
+    if (typeof target !== "string") continue;
+    const owner = uiOwners.get(target);
+    if (owner === undefined) uiOwners.set(target, m.name);
+    else problems.push(`${m.name}: ui.target "${target}" is ${owner}'s UI project: each takes a folder of its own`);
   }
 
   const indexPath = join(root, "registry.json");

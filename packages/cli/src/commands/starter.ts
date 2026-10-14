@@ -113,7 +113,8 @@ export function tsconfig(): string {
 
 export const BUNFIG = `[test]
 # ${PROJECT_REGISTRY}/ holds the source of your own components; their installed copies in src/pikit/ are the ones tested.
-# ${DASHBOARD_DIR}/, when the project has a UI, is a project of its own, with its own toolchain.
+# ${DASHBOARD_DIR}/, when the project has a UI, is a project of its own, with its own toolchain; so is a
+# component's UI project (src/chat/), which pikit add lists here and pikit remove takes out.
 pathIgnorePatterns = ["${PROJECT_REGISTRY}/**", "${DASHBOARD_DIR}/**"]
 `;
 
@@ -127,13 +128,16 @@ export const GITIGNORE = `node_modules/
 `;
 
 /**
- * `.gitattributes`: the dashboard's built files, a module of ~1 MB that its build writes into admin-api
- * (when the project has a UI), are generated: GitHub collapses them in a diff, and `git diff` says
- * only that they changed. Committed, so a clone runs and type-checks as it is; every deploy builds
- * them again (deployment-cloudflare's wrangler `build.command`, deployment-docker's image).
+ * `.gitattributes`: a UI project's built files, a module of ~1 MB that its build writes into its
+ * component (`ui-project.ts`: the dashboard's into admin-api, `dashboard-files.ts`; channel-web's
+ * `src/chat/` into `chat-files.ts`), are generated: GitHub collapses them in a diff, and `git diff`
+ * says only that they changed. One pattern for every UI project, those a component brings later
+ * included. Committed, so a clone runs and type-checks as it is; every deploy builds them again
+ * (deployment-cloudflare's wrangler `build.command`, deployment-docker's image).
  */
-export const GITATTRIBUTES = `# The dashboard's build writes this (src/dashboard/: bun run build); every deploy builds it again.
-src/pikit/admin-api/dashboard-files.ts linguist-generated=true -diff
+export const GITATTRIBUTES = `# What a UI project's build writes into its component (src/dashboard/ into admin-api's dashboard-files.ts,
+# a component's own, src/chat/, into its chat-files.ts: bun run build there); every deploy builds it again.
+src/pikit/*/*-files.ts linguist-generated=true -diff
 `;
 
 /** `.gitignore` for a project on `target`. */

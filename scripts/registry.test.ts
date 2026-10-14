@@ -589,6 +589,77 @@ test("generated: files of the component's own directory that a hook rewrites; no
   expect(await problems(f)).toContain("component.json /generated/0:");
 });
 
+/** A fixture with a UI project in `web/`, to `src/web`: a Vite app's files, its package.json and lockfile, and the module its build writes. */
+async function withUiProject(name = "channel-paged"): Promise<Fixture> {
+  const f = await fixture({ name });
+  const web = join(f.dir, "web");
+  mkdirSync(join(web, "src"), { recursive: true });
+  writeFileSync(join(web, "package.json"), JSON.stringify({ name: "web", private: true, scripts: { build: "vite build && bun scripts/embed.ts" }, dependencies: { react: "19.3.0" } }));
+  writeFileSync(join(web, "bun.lock"), "{}\n");
+  // Browser code: React, the page's own aliases, a DOM global; none of it is the App's to check.
+  writeFileSync(join(web, "src", "main.tsx"), 'import { createRoot } from "react-dom/client";\nimport { api } from "@/lib/api";\nimport "node:fs";\ncreateRoot(document.body);\nvoid api;\n');
+  writeFileSync(join(f.own, "web-files.ts"), "export const WEB_FILES = {};\n");
+  f.writeManifest({ ...f.manifest(), generated: ["web-files.ts"], ui: { source: "web", target: "src/web" } });
+  expect((await generate(f.root)).problems).toEqual([]);
+  return f;
+}
+
+test("ui: a UI project validates as browser code of its own: its package.json has a build script and scripts, its imports are not the App's", async () => {
+  expect(await problems(await withUiProject())).toBe("");
+});
+
+test("ui: refused without its folder, package.json, build script or lockfile, or without the module its build writes in generated", async () => {
+  const noPackage = await withUiProject();
+  rmSync(join(noPackage.dir, "web", "package.json"));
+  expect(await problems(noPackage)).toContain("web/package.json is missing");
+
+  const noBuild = await withUiProject();
+  writeFileSync(join(noBuild.dir, "web", "package.json"), JSON.stringify({ name: "web", scripts: { dev: "vite" } }));
+  expect(await problems(noBuild)).toContain('web/package.json has no "build" script');
+
+  const noLock = await withUiProject();
+  rmSync(join(noLock.dir, "web", "bun.lock"));
+  expect(await problems(noLock)).toContain("web/bun.lock is missing");
+
+  const noFolder = await withUiProject();
+  rmSync(join(noFolder.dir, "web"), { recursive: true });
+  expect(await problems(noFolder)).toContain('its UI project\'s folder "web/" is missing');
+
+  const noModule = await withUiProject();
+  rmSync(join(noModule.own, "web-files.ts"));
+  noModule.writeManifest({ ...noModule.manifest(), generated: [] });
+  expect(await problems(noModule)).toContain("files/src/pikit/channel-paged/web-files.ts is missing");
+
+  const notGenerated = await withUiProject();
+  notGenerated.writeManifest({ ...notGenerated.manifest(), generated: [] });
+  expect(await problems(notGenerated)).toContain('generated does not list "web-files.ts"');
+});
+
+test("ui: a target is a folder of src/ of its own: never src/pikit/ or under it, the dashboard's, nor another component's", async () => {
+  const pikit = await withUiProject();
+  pikit.writeManifest({ ...pikit.manifest(), ui: { source: "web", target: "src/pikit" } });
+  expect(await problems(pikit)).toContain('ui.target "src/pikit" is reserved');
+  pikit.writeManifest({ ...pikit.manifest(), ui: { source: "web", target: "src/pikit/channel-paged" } });
+  expect(await problems(pikit)).toContain("component.json /ui/target:");
+
+  const dashboard = await withUiProject();
+  dashboard.writeManifest({ ...dashboard.manifest(), ui: { source: "web", target: "src/dashboard" } });
+  expect(await problems(dashboard)).toContain('ui.target "src/dashboard" is reserved');
+
+  // A second component of the same registry, with a UI project to the same folder.
+  const taken = await withUiProject();
+  const other = join(taken.root, "components", "channel-other");
+  cpSync(taken.dir, other, { recursive: true });
+  const ownOther = join(other, "files", "src", "pikit", "channel-other");
+  cpSync(join(other, "files", "src", "pikit", "channel-paged"), ownOther, { recursive: true });
+  rmSync(join(other, "files", "src", "pikit", "channel-paged"), { recursive: true });
+  writeFileSync(join(ownOther, "index.ts"), readFileSync(join(ownOther, "index.ts"), "utf8").replace('name: "channel-paged"', 'name: "channel-other"'));
+  const otherManifest = JSON.parse(readFileSync(join(other, "component.json"), "utf8")) as Manifest;
+  writeFileSync(join(other, "component.json"), `${JSON.stringify({ ...otherManifest, name: "channel-other" }, null, 2)}\n`);
+  expect((await generate(taken.root)).problems).toEqual([]);
+  expect(await problems(taken)).toBe('channel-paged: ui.target "src/web" is channel-other\'s UI project: each takes a folder of its own');
+});
+
 test("tools: replay is generated, and a tool without one fails", async () => {
   const safe = await fixture({ name: "tool-safe", setup: `\n    pikit.provideKeyed("agent.tool", "look", { replay: "safe" });` });
   expect(safe.manifest().replay).toEqual({ tools: { look: "safe" } });

@@ -144,22 +144,29 @@ export function nameWorker(wrangler: string, name: string): string {
   return lines.join("\n");
 }
 
-/** What deployment-cloudflare's `build.command` runs for the dashboard, with the Bun on the PATH. */
-const DASHBOARD_BUILD = "cd src/dashboard && bun install --frozen-lockfile && bun run build";
+/** What deployment-cloudflare's `build.command` runs in each UI project (the dashboard's), with the Bun on the PATH. */
+const UI_BUILD = "bun install --frozen-lockfile && bun run build";
 
 /**
- * `wrangler.jsonc` whose dashboard build runs Bun `version` through npx: Workers Builds has an older
- * Bun (1.2.15), which cannot read the dashboard's `bun.lock`, and a template cannot set the build's
+ * `wrangler.jsonc` whose UI projects' builds run Bun `version` through npx: Workers Builds has an older
+ * Bun (1.2.15), which cannot read a UI project's `bun.lock`, and a template cannot set the build's
  * `BUN_VERSION`. Node and npx are there.
  */
 export function pinBun(wrangler: string, version: string): string {
-  if (!wrangler.includes(DASHBOARD_BUILD)) throw new Error("wrangler.jsonc's build.command no longer runs `" + DASHBOARD_BUILD + "`: update scripts/template.ts's pinBun");
+  if (!wrangler.includes(UI_BUILD)) throw new Error("wrangler.jsonc's build.command no longer runs `" + UI_BUILD + "`: update scripts/template.ts's pinBun");
   const bun = `npx -y bun@${version}`;
-  const pinned = wrangler.replace(DASHBOARD_BUILD, `cd src/dashboard && ${bun} install --frozen-lockfile && ${bun} run build`);
+  const pinned = wrangler.replace(UI_BUILD, `${bun} install --frozen-lockfile && ${bun} run build`);
   return pinned.replace(
     /^( {2})"build": \{$/m,
-    `$1// A template's: Workers Builds' Bun (1.2.15) cannot read the dashboard's bun.lock, so Bun ${version} runs through npx.\n$1"build": {`,
+    `$1// A template's: Workers Builds' Bun (1.2.15) cannot read a UI project's bun.lock, so Bun ${version} runs through npx.\n$1"build": {`,
   );
+}
+
+/** The project's UI projects: the folders of `src/` with a package.json, `src/pikit/` aside (the CLI's `uiProjects`). */
+function uiProjects(projectDir: string): string[] {
+  const src = join(projectDir, "src");
+  if (!existsSync(src)) return [];
+  return readdirSync(src).filter((name) => name !== "pikit" && existsSync(join(src, name, "package.json"))).map((name) => `src/${name}`);
 }
 
 /** `.dev.vars.example`: the secrets the button asks for (dotenv), without a value. */
@@ -237,7 +244,8 @@ export function adjust(projectDir: string, key: string, template: Template, kitR
   const path = (file: string) => join(projectDir, file);
   const edit = (file: string, change: (text: string) => string) => writeFileSync(path(file), change(readFileSync(path(file), "utf8")));
   edit("wrangler.jsonc", (text) => nameWorker(text, template.name));
-  if (existsSync(path("src/dashboard/package.json"))) edit("wrangler.jsonc", (text) => pinBun(text, template.bun));
+  const ui = uiProjects(projectDir);
+  if (ui.length > 0) edit("wrangler.jsonc", (text) => pinBun(text, template.bun));
   edit("package.json", (text) => templatePackageJson(text, template));
   edit(".gitignore", templateGitignore);
   // One place the button reads the secrets from: pikit's `.env.example` also lists what it does not ask.
@@ -246,9 +254,11 @@ export function adjust(projectDir: string, key: string, template: Template, kitR
   writeFileSync(path("README.md"), templateReadme(key, template));
   rmSync(path("bun.lock"), { force: true });
   rmSync(path("node_modules"), { recursive: true, force: true });
-  // The dashboard's packages and build: the build makes them again.
-  rmSync(path("src/dashboard/node_modules"), { recursive: true, force: true });
-  rmSync(path("src/dashboard/dist"), { recursive: true, force: true });
+  // The UI projects' packages and builds (the dashboard's): the build makes them again.
+  for (const dir of ui) {
+    rmSync(path(`${dir}/node_modules`), { recursive: true, force: true });
+    rmSync(path(`${dir}/dist`), { recursive: true, force: true });
+  }
   portableSkills(projectDir, kitRoot);
 }
 

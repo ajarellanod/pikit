@@ -4,19 +4,24 @@
 # .dockerignore keeps .env out of the build context. State is never in the image either: .pikit/
 # is a volume.
 
-# The dashboard (SPEC §5), when the project has a UI (`pikit ui on`): built in a stage of its own,
-# with its own packages. Its build writes its files into admin-api as a module
-# (src/pikit/admin-api/dashboard-files.ts), which admin-api serves at /admin/: only that file reaches
-# the app's image, in out/. A project without src/dashboard/ builds nothing here, and out/ stays empty.
-FROM oven/bun:1.4-slim AS dashboard
+# The UI projects, built in a stage of their own, each with its own packages: every folder of src/
+# with a package.json but src/pikit/. The dashboard (SPEC §5), when the project has a UI (`pikit ui on`),
+# and a component's own (its component.json's `ui`: channel-web's src/chat/). Each one's build writes
+# its files into its component as a module, src/pikit/<component>/<folder>-files.ts (src/dashboard/
+# into admin-api's dashboard-files.ts, served at /admin/; src/chat/ into chat-files.ts): only those
+# modules reach the app's image, in out/. A build that fails stops the image. A project without a UI
+# project builds nothing here, and out/ stays empty.
+FROM oven/bun:1.4-slim AS ui
 WORKDIR /build
 COPY src/ ./src/
-RUN mkdir -p out && if [ -f src/dashboard/package.json ]; then \
-      (cd src/dashboard && bun install --frozen-lockfile && bun --bun run build) && \
-      if [ -f src/pikit/admin-api/dashboard-files.ts ]; then \
-        mkdir -p out/src/pikit/admin-api && cp src/pikit/admin-api/dashboard-files.ts out/src/pikit/admin-api/; \
-      fi; \
-    fi
+RUN mkdir -p out && for project in src/*/package.json; do \
+      dir="${project%/package.json}"; name="${dir#src/}"; \
+      if [ ! -f "$project" ] || [ "$name" = pikit ]; then continue; fi; \
+      (cd "$dir" && bun install --frozen-lockfile && bun --bun run build) || exit 1; \
+      for module in src/pikit/*/"$name"-files.ts; do \
+        if [ -f "$module" ]; then mkdir -p "out/${module%/*}" && cp "$module" "out/$module"; fi; \
+      done; \
+    done
 
 # What the app and the deployer share: Bun >= 1.4 (older Bun never fires an `AbortSignal.timeout()`
 # whose last listener was removed, oven-sh/bun#37666, so a stop deadline would hang instead of firing)
@@ -59,7 +64,7 @@ COPY vendor/ ./vendor/
 RUN bun install --frozen-lockfile --production
 
 COPY . .
-COPY --from=dashboard /build/out/ ./
+COPY --from=ui /build/out/ ./
 
 # .pikit/ holds the app's state: the database (conversations, the registry), model credentials, the agent's workspace.
 # compose.yaml mounts a volume here. The directory is created owned by the unprivileged user, and a

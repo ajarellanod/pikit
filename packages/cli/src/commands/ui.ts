@@ -32,8 +32,7 @@ import { registryPath } from "../project/registry-location.ts";
 import { openRegistry, type Registry } from "../project/registry-source.ts";
 import { Undo } from "../project/undo.ts";
 import { CliError, confirm, isInteractive, log } from "../ui.ts";
-import { add } from "./add.ts";
-import { bunInstall } from "./install.ts";
+import { add, installUiPackages } from "./add.ts";
 import { remove } from "./remove.ts";
 import { type FileChanges, mergeShipped, type UpgradeOptions } from "./upgrade.ts";
 
@@ -113,15 +112,7 @@ export function writeDashboard(projectDir: string, project: ProjectManifest, reg
  * Without its `package.json` there is nothing to install (Bun would walk up to the project's).
  */
 export async function installDashboardPackages(projectDir: string, quiet = false): Promise<boolean> {
-  if (!existsSync(confinedPath(projectDir, `${DASHBOARD_DIR}/package.json`))) return false;
-  try {
-    await bunInstall(confinedPath(projectDir, DASHBOARD_DIR), { quiet: true });
-    if (!quiet) log.ok(`${DASHBOARD_DIR}: its packages are installed`);
-    return true;
-  } catch {
-    log.warn(`${DASHBOARD_DIR}: \`bun install\` failed there (no network?): run it yourself, in ${DASHBOARD_DIR}/`);
-    return false;
-  }
+  return await installUiPackages(projectDir, DASHBOARD_DIR, quiet);
 }
 
 /** What to run next, once a project has a UI. */

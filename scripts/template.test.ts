@@ -79,16 +79,17 @@ test("wrangler.jsonc: pikit's names no Worker; the template's names it, keeping 
   expect(() => nameWorker(WRANGLER.replace('// No "name"', "// Nameless"), "x")).toThrow(/update scripts\/template.ts/);
 });
 
-test("the dashboard's build runs the installer's Bun through npx, the rest of wrangler.jsonc as it was", () => {
+test("the UI projects' builds run the installer's Bun through npx, the rest of wrangler.jsonc as it was", () => {
   const installer = readFileSync(join(import.meta.dir, "..", "installer", "install.sh"), "utf8");
   expect(TEMPLATE.bun).toBe(/BUN_PINNED="\$\{PIKIT_BUN_VERSION:-([^}]+)\}"/.exec(installer)?.[1] as string);
   const pinned = pinBun(WRANGLER, "1.4.2");
   const build = (Bun.JSONC.parse(pinned) as { build: { command: string } }).build.command;
-  expect(build).toBe("if [ -f src/dashboard/package.json ]; then cd src/dashboard && npx -y bun@1.4.2 install --frozen-lockfile && npx -y bun@1.4.2 run build; fi");
+  expect(build).toContain('(cd "$dir" && npx -y bun@1.4.2 install --frozen-lockfile && npx -y bun@1.4.2 run build) || exit 1');
+  expect(build).not.toMatch(/\bbun (install|run)\b/);
   const { build: _, ...rest } = Bun.JSONC.parse(pinned) as Record<string, unknown>;
   const { build: __, ...before } = Bun.JSONC.parse(WRANGLER) as Record<string, unknown>;
   expect(rest).toEqual(before);
-  expect(pinned).toContain("// A template's: Workers Builds' Bun (1.2.15) cannot read the dashboard's bun.lock, so Bun 1.4.2 runs through npx.\n  \"build\": {");
+  expect(pinned).toContain("// A template's: Workers Builds' Bun (1.2.15) cannot read a UI project's bun.lock, so Bun 1.4.2 runs through npx.\n  \"build\": {");
   expect(() => pinBun(pinned, "1.4.2")).toThrow(/update scripts\/template.ts's pinBun/);
 });
 

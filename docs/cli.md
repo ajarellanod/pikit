@@ -59,8 +59,9 @@ pikit add <component>... [--registry <path>] [--force] [--yes]
 
 Copies components and wires them, as one transaction: files and README into `src/pikit/<name>/`, npm
 packages, the entry in `pikit.config.ts` (both Apps on Cloudflare), `.env.example`, the record in
-`pikit.json`, the bases in `pikit-bases/`, a view into `src/dashboard/` when the project has a UI; then
-`bun install` and `doctor`. It offers missing providers. `--yes` skips the confirmation (needed
+`pikit.json`, the bases in `pikit-bases/`, a view into `src/dashboard/` when the project has a UI, its
+UI project into `src/<name>/` when it ships one (listed in `tsconfig.json` and `bunfig.toml` so `tsc` and
+`bun test` skip it); then `bun install` (and in that UI project) and `doctor`. It offers missing providers. `--yes` skips the confirmation (needed
 without a terminal). `--force` reinstalls an installed component (overwriting your edits), overwrites
 differing files, and accepts a kit it would otherwise refuse. Details: [components.md](components.md#install-pikit-add).
 
@@ -145,7 +146,9 @@ It never prints a value, and never touches Pi's own `~/.pi/agent/auth.json`.
 
 Runs the project here after `doctor` passes and the model credentials of this machine are checked:
 the deployment's `dev` when it exports one (`wrangler dev` on Cloudflare), else `bun --watch
-src/pikit/<deployment>/main.ts` with `.env` loaded (deployment-docker).
+src/pikit/<deployment>/main.ts` with `.env` loaded (deployment-docker). Either way, a UI project (the
+dashboard, a component's `src/chat/`) is built again (`bun run build` in it) when one of its files
+changes, and the app reloads with the module its build writes.
 
 ## pikit up | down | restart | logs | status
 

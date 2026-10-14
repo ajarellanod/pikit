@@ -46,7 +46,7 @@ import { initRepository } from "../project/git.ts";
 import { kitCommit, vendorKit } from "../project/vendor.ts";
 import { kindOf, TARGETS } from "../registry/manifest.ts";
 import { CliError, log } from "../ui.ts";
-import { checkCompatible, installComponent, notPortable, warnUnchosen } from "./add.ts";
+import { checkCompatible, installComponent, installUiPackages, notPortable, warnUnchosen } from "./add.ts";
 import { DASHBOARD_DIR, dashboardFiles } from "../project/dashboard.ts";
 import { Undo } from "../project/undo.ts";
 import { doctor } from "./doctor.ts";
@@ -193,6 +193,12 @@ export async function newProject(dir: string, options: NewOptions = {}): Promise
     if (dashboard !== undefined) {
       step(`bun install in ${DASHBOARD_DIR}/`);
       await installDashboardPackages(projectDir, true);
+    }
+    // The installed components' UI projects (their manifest's `ui`), each with its own packages.
+    for (const component of Object.values(readProjectManifest(projectDir).components)) {
+      if (component.ui === undefined) continue;
+      step(`bun install in ${component.ui}/`);
+      await installUiPackages(projectDir, component.ui, true);
     }
 
     step("pikit doctor");

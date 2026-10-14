@@ -18,11 +18,12 @@ registry/components/<name>/
   files/src/pikit/<name>/*.test.ts     its tests, installed and run in the project
   files/...                            other files it installs (a Dockerfile, wrangler.jsonc)
   view/index.tsx                       optional: its dashboard view
+  chat/                                optional: its UI project (`ui`, below), a Vite app of its own
 ```
 
 `registry validate` requires the README, `files/src/pikit/<name>/index.ts`, at least one `*.test.ts`
-there, and no `package.json` with `scripts` anywhere in the folder (`checkLayout` in
-[checks.ts](../packages/cli/src/registry/checks.ts)).
+there, and no `package.json` with `scripts` anywhere in the folder but its UI project's (`checkLayout`
+in [checks.ts](../packages/cli/src/registry/checks.ts)).
 
 - **`index.ts`** default-exports the component. A component that runs the App rather than running in
   it (`deployment-*`) has no default export, provides nothing, and is not listed in `pikit.config.ts`.
@@ -72,6 +73,7 @@ target (K1).
 | `compose` | hand | a Compose file of `src/pikit/<name>/` whose services run beside the app on a server: `deployment-docker` adds it after its compose.yaml (below) |
 | `generated` | hand | files of `src/pikit/<name>/` a hook or build rewrites |
 | `view` | hand | a folder holding its dashboard view |
+| `ui` | hand | `{ "source": "<folder>", "target": "src/<name>" }`: a UI project of its own (below) |
 | `replay.tools` | generated | each `agent.tool` it provides with the default config → `safe` or `unsafe` |
 | `modelProviders` | generated | the `model.provider` keys it provides with the default config |
 | `dependencies` | hand | exactly the npm packages its shipped files import, pinned |
@@ -101,6 +103,36 @@ listed in `generated`); `channel-telegram-webhook` has `afterDeploy` (sets the T
 
 A `generated` file is never reported as modified by `pikit doctor`, is kept as the project has it by
 `pikit upgrade`, and is deleted by `pikit remove` without `--force`.
+
+### A UI project
+
+A component may ship a page of its own besides the dashboard (channel-web's chat page): a Vite app
+with its own `package.json` and `bun.lock`, built at every deploy and served by the component from a
+files module, as admin-api serves the dashboard ([dashboard.md](dashboard.md#building-and-embedding)).
+
+```jsonc
+"ui": { "source": "chat", "target": "src/chat" },
+"generated": ["chat-files.ts"]
+```
+
+- **The folder** (`source`, never `files`) holds the app: `package.json` with a `build` script, its
+  `bun.lock`, its sources. Its files are browser code with their own toolchain: `registry validate`
+  checks neither their imports, targets nor dependencies, and its `package.json` may have scripts.
+- **`target`** is a folder of `src/`, `src/<name>`: never `src/pikit`, `src/dashboard`, `src/agents` or
+  `src/extensions`, and no other component's (`validate`, and `pikit add` for a registry that was not
+  validated).
+- **Its build** (`bun install --frozen-lockfile && bun run build` in it) writes the module
+  `src/pikit/<name>/<target's name>-files.ts` (`src/chat` → `chat-files.ts`), which the component
+  ships empty (its routes then say no page is built), lists in `generated` and serves.
+- **`pikit add`** copies it, `node_modules/` and `dist/` aside, recorded as the component's files (so
+  `pikit upgrade` merges your edits, P6), its lockfile `generated`, then runs `bun install` in it, and
+  lists it in `tsconfig.json`'s `exclude` and `bunfig.toml`'s `pathIgnorePatterns`, so the project's
+  `tsc` and `bun test` skip it. `pikit remove` deletes it with what its toolchain made, and takes it out
+  of both. `pikit ui on` and `off` never touch it.
+- **Every deploy builds it**: any folder of `src/` with a `package.json` (`src/pikit` aside) is a UI
+  project, and deployment-docker's image and deployment-cloudflare's `build.command` build each one
+  before they bundle; a build that fails stops the deploy. `pikit dev` builds it again when its files
+  change. `.gitattributes` marks every `src/pikit/*/*-files.ts` as generated.
 
 ### Commands
 

@@ -8,7 +8,7 @@ import { isBuiltin } from "node:module";
 import { dirname, join, relative, resolve, sep } from "node:path";
 import { capabilityEntry, KIT_CATALOGUE, type RegistryCatalogue } from "./capabilities.ts";
 import { isRelative, packageName, runtimeScheme, SERVER_ONLY_EXPORTS, scanImports, stripComments } from "./imports.ts";
-import { commandProblems, type Manifest, ManifestSchema, schemaProblems } from "./manifest.ts";
+import { commandProblems, type Manifest, ManifestSchema, schemaProblems, uiModule, uiProblems } from "./manifest.ts";
 import { isInside, isProtected } from "../project/registry-source.ts";
 import { confinedPath } from "../project/paths.ts";
 
@@ -139,15 +139,19 @@ export function checkManifest(
   return problems;
 }
 
-/** The layout: README, the installed directory, an entry point, tests, no install scripts. */
-export function checkLayout(componentDir: string, name: string): string[] {
+/**
+ * The layout: README, the installed directory, an entry point, tests, no install scripts. `ui`: the
+ * folder of its UI project (its manifest's `ui.source`), whose package.json is a Vite app's, with its
+ * `build` (`checkUiProject`), never installed in the project's own packages.
+ */
+export function checkLayout(componentDir: string, name: string, ui?: string): string[] {
   const problems: string[] = [];
   if (!existsSync(join(componentDir, "README.md"))) problems.push("README.md is missing");
   const own = join(componentDir, "files", "src", "pikit", name);
   if (!isDirectory(own)) return [...problems, `files/src/pikit/${name}/ is missing (a component installs to src/pikit/<name>/)`];
   if (!existsSync(join(own, "index.ts"))) problems.push(`files/src/pikit/${name}/index.ts is missing`);
   if (!listFiles(own).some((f) => TEST.test(f))) problems.push(`files/src/pikit/${name}/ has no *.test.ts (tests ship with the component)`);
-  for (const file of listFiles(componentDir).filter((f) => f.endsWith("package.json"))) {
+  for (const file of listFiles(componentDir).filter((f) => f.endsWith("package.json") && (ui === undefined || !f.startsWith(`${ui}/`)))) {
     const scripts = (JSON.parse(readFileSync(join(componentDir, file), "utf8")) as { scripts?: unknown }).scripts;
     if (scripts !== undefined) problems.push(`${file} has scripts: components have no install scripts, ever`);
   }
@@ -181,6 +185,41 @@ export function checkSettingsSection(componentDir: string, name: string, manifes
   if (!existsSync(index)) return [`${manifest.settings}/index.tsx is missing: a section default-exports defineSettings({ id: "${name}", … })`];
   if (!readFileSync(index, "utf8").includes(`id: "${name}"`)) return [`${manifest.settings}/index.tsx must define its section under the component's name: defineSettings({ id: "${name}", … })`];
   return [];
+}
+
+/**
+ * A component's UI project (its manifest's `ui`, features/channel-web.md "UI projects of a component"):
+ * a folder of the component, outside `files/`, with its `package.json` (a `build` script, which the
+ * deployments run) and its `bun.lock` (they install from it, frozen); its target one of `src/` no other
+ * UI project takes (`uiProblems`); and the module its build writes (`uiModule`: `chat-files.ts` for
+ * `src/chat`) a file of the component's own directory, listed in `generated`. Its files are browser
+ * code, held to its own toolchain: no check of App imports, targets or dependencies reads them.
+ */
+export function checkUiProject(componentDir: string, name: string, manifest: Manifest): string[] {
+  const ui = manifest.ui;
+  if (ui === undefined) return [];
+  const problems = uiProblems(manifest);
+  const dir = join(componentDir, ui.source);
+  if (!isDirectory(dir)) return [...problems, `its UI project's folder "${ui.source}/" is missing`];
+  const pkg = join(dir, "package.json");
+  if (!existsSync(pkg)) problems.push(`${ui.source}/package.json is missing: a UI project has its own, with a "build" script`);
+  else {
+    let build: unknown;
+    try {
+      build = (JSON.parse(readFileSync(pkg, "utf8")) as { scripts?: Record<string, unknown> | null }).scripts?.build;
+    } catch (error) {
+      return [...problems, `${ui.source}/package.json is not valid JSON: ${error instanceof Error ? error.message : String(error)}`];
+    }
+    if (typeof build !== "string" || build.trim() === "") problems.push(`${ui.source}/package.json has no "build" script: every deploy runs it, and it writes ${uiModule(ui)}`);
+  }
+  if (!existsSync(join(dir, "bun.lock"))) problems.push(`${ui.source}/bun.lock is missing: the deployments install its packages from it (bun install --frozen-lockfile)`);
+  const module = uiModule(ui);
+  if (!existsSync(join(componentDir, "files", "src", "pikit", name, module))) {
+    problems.push(`files/src/pikit/${name}/${module} is missing: the module its UI project's build writes, shipped empty`);
+  } else if (!(manifest.generated ?? []).includes(module)) {
+    problems.push(`generated does not list "${module}", which its UI project's build rewrites`);
+  }
+  return problems;
 }
 
 export interface ImportScan {

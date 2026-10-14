@@ -77,6 +77,22 @@ const OWN_FILE = "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ts$";
 const OWN_COMPOSE_FILE = "^[A-Za-z0-9_-]+(\\.[A-Za-z0-9_-]+)*\\.ya?ml$";
 /** One line of text. */
 const ONE_LINE = "^[^\\n]*\\S[^\\n]*$";
+/** Where a component's UI project goes: a folder of `src/`. */
+const UI_TARGET = "^src/[a-z0-9][a-z0-9-]*$";
+
+/**
+ * Folders of `src/` no component's UI project takes: the components' own (`src/pikit`), the dashboard's
+ * (SPEC §5), and the project's own agents and extensions.
+ */
+export const RESERVED_UI_TARGETS: readonly string[] = ["src/pikit", "src/dashboard", "src/agents", "src/extensions"];
+
+/**
+ * The module a component's UI project builds: `src/pikit/<name>/<target's name>-files.ts`, a file of
+ * the component's own directory (`chat-files.ts` for `src/chat`), shipped empty and listed in `generated`.
+ */
+export function uiModule(ui: { target: string }): string {
+  return `${ui.target.slice("src/".length)}-files.ts`;
+}
 
 /**
  * The CLI's own commands (`main.ts`): what it runs, the deployment's (`DEPLOYMENT_COMMANDS`), and the
@@ -305,6 +321,25 @@ export const ManifestSchema = Type.Object(
           "A folder of the component holding its section of the dashboard's Settings dialog (features/settings.md): its index.tsx default-exports defineSettings({ id: <component name>, … }). `pikit add` copies it to src/dashboard/src/settings/<name>/ when the project has a UI (`pikit ui on`), recorded as the component's files.",
       }),
     ),
+    ui: Type.Optional(
+      Type.Object(
+        {
+          source: Type.String({
+            pattern: "^[a-z0-9][a-z0-9-]*$",
+            description: "A folder of the component (never `files`): the UI project, with its package.json (a `build` script) and its bun.lock.",
+          }),
+          target: Type.String({
+            pattern: UI_TARGET,
+            description: `Where it goes in the project: src/<name>, never ${RESERVED_UI_TARGETS.join(", ")}.`,
+          }),
+        },
+        {
+          additionalProperties: false,
+          description:
+            "A UI project of the component's own (channel-web's chat page): a Vite app with its own toolchain, which `pikit add` copies to `target`, recorded as the component's files (`pikit upgrade` merges it, `pikit remove` deletes it; `pikit ui on`/`off` never touch it). Its `build` writes the component's files module, src/pikit/<name>/<target's name>-files.ts (`src/chat` → chat-files.ts), which the component ships empty, lists in `generated` and serves. Every deploy builds it before bundling, as it builds the dashboard; the project's tsc and bun test skip it.",
+        },
+      ),
+    ),
     replay: Type.Optional(
       Type.Object(
         {
@@ -362,6 +397,17 @@ export function commandProblems(manifest: Pick<Manifest, "commands">): string[] 
   return Object.keys(manifest.commands ?? {})
     .filter((name) => BUILT_IN_COMMANDS.includes(name))
     .map((name) => `commands.${name}: "pikit ${name}" is one of the CLI's own commands; a component's command takes another name`);
+}
+/**
+ * What the schema does not say of `ui`: its target is none of `RESERVED_UI_TARGETS`, and its source is
+ * not `files` (the component's installed files). Checked by `registry validate` and by `pikit add`.
+ */
+export function uiProblems(manifest: Pick<Manifest, "ui">): string[] {
+  if (manifest.ui === undefined) return [];
+  const problems: string[] = [];
+  if (RESERVED_UI_TARGETS.includes(manifest.ui.target)) problems.push(`ui.target "${manifest.ui.target}" is reserved (${RESERVED_UI_TARGETS.join(", ")}): a UI project takes a folder of its own in src/`);
+  if (manifest.ui.source === "files") problems.push('ui.source "files" is the component\'s installed files: a UI project is a folder of its own');
+  return problems;
 }
 export type EnvironmentVariable = Static<typeof EnvironmentVariableSchema>;
 export type Half = Static<typeof HalfSchema>;

@@ -46,6 +46,7 @@ import { assertNoIncompleteOperation, beginOperation, finishOperation, OPERATION
 import { brokenReferences } from "../project/references.ts";
 import { probe } from "../project/run.ts";
 import { servingGaps } from "../project/serving.ts";
+import { removeUiLeftovers, syncUiExclusions } from "../project/ui-project.ts";
 import { Undo } from "../project/undo.ts";
 import { CliError, log } from "../ui.ts";
 import { doctor, projectSources } from "./doctor.ts";
@@ -143,6 +144,8 @@ async function removeOne(projectDir: string, name: string, force: boolean, begin
     }
 
     for (const file of Object.keys(installed.files)) undo.delete(file);
+    // Its UI project: no longer listed where the project's tsc and bun test skip it.
+    if (installed.ui !== undefined) syncUiExclusions(projectDir, [], [installed.ui], undo);
 
     const examplePath = confinedPath(projectDir, ENV_EXAMPLE);
     if (existsSync(examplePath)) {
@@ -186,6 +189,11 @@ async function removeOne(projectDir: string, name: string, force: boolean, begin
     throw error;
   }
 
+  // What its UI project's toolchain made goes with it; files of yours there stay.
+  if (installed.ui !== undefined) {
+    const yours = removeUiLeftovers(projectDir, installed.ui);
+    if (yours.length > 0) log.warn(`${installed.ui}/ is kept: it has files ${name} did not install (${yours.join(", ")})`);
+  }
   log.ok(`${name} removed${removed.length > 0 ? ` (and the npm packages only it used: ${removed.join(", ")})` : ""}`);
 }
 

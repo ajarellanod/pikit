@@ -12,7 +12,9 @@
  *
  * `pikit dev` runs the app locally: the deployment component's `dev` when it exports one
  * (`deployment-cloudflare`: `wrangler dev`), or else its process entrypoint, `src/pikit/<name>/main.ts`,
- * with Bun's `--watch` and `.env` loaded (`deployment-docker`).
+ * with Bun's `--watch` and `.env` loaded (`deployment-docker`). Either way it builds a UI project again
+ * when its files change (`watchUiProjects`: the dashboard, a component's `src/chat/`), so the app
+ * reloads with the module that build writes.
  */
 
 import { existsSync } from "node:fs";
@@ -28,6 +30,7 @@ import {
 import { apiKeyHint, checkModelCredentials, providersNamed } from "../project/model-credentials.ts";
 import type { ProbeResult } from "../project/probe.ts";
 import { projectEnv } from "../project/run.ts";
+import { watchUiProjects } from "../project/ui-project.ts";
 import { CliError, log } from "../ui.ts";
 import { doctor } from "./doctor.ts";
 
@@ -145,9 +148,11 @@ export async function dev(projectDir: string): Promise<number> {
     // stays until it has exited.
     const wait = () => {};
     process.on("SIGINT", wait);
+    const ui = watchUiProjects(projectDir);
     try {
       return await (own as (args: Record<string, unknown>) => Promise<number>)({ cwd: projectDir });
     } finally {
+      ui.close();
       process.off("SIGINT", wait);
     }
   }
@@ -167,5 +172,10 @@ export async function dev(projectDir: string): Promise<number> {
   const forward = (signal: NodeJS.Signals) => () => child.kill(signal);
   process.on("SIGINT", forward("SIGINT"));
   process.on("SIGTERM", forward("SIGTERM"));
-  return await child.exited;
+  const ui = watchUiProjects(projectDir);
+  try {
+    return await child.exited;
+  } finally {
+    ui.close();
+  }
 }

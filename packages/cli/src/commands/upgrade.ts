@@ -51,7 +51,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { hasWorkerApp } from "../project/apps.ts";
 import { basePath } from "../project/bases.ts";
-import { settingsDir, viewDir } from "../project/dashboard.ts";
 import { setWorkerWiring } from "../project/config-file.ts";
 import { exampleBlock, replaceExampleBlock } from "../project/env-file.ts";
 import { mergeFile } from "../project/merge.ts";
@@ -71,11 +70,12 @@ import {
   checkCompatible,
   checkConflicts,
   checkKit,
+  checkUiProject,
   componentFiles,
   composedProvides,
   describePlan,
   type Draft,
-  ownDir,
+  outside,
   type Plan,
   planInstall,
   readDraft,
@@ -278,6 +278,7 @@ async function planUpgrade(projectDir: string, draft: Draft, registry: Registry,
 
   checkCompatible(project.targets, manifest, force);
   checkCommands(project, manifest);
+  checkUiProject(projectDir, project, manifest, force);
   if (Bun.semver.order(manifest.version, previous.version) < 0) {
     const what = `${name}'s registry has ${manifest.version}, older than the installed ${previous.version}`;
     if (!force) throw new CliError(`${what}; pass --force to go back to it`);
@@ -378,7 +379,8 @@ function describeUpgrade({ name, registry, manifest, previous, changes, notes, d
   list("merged with your edits", changes.merged);
   list("conflicts with your edits", changes.conflicted);
   // A registry may be anyone's: a new file outside the component's directory is marked.
-  list("added", changes.added.map((file) => (file.startsWith(ownDir(name)) || file.startsWith(viewDir(name)) || file.startsWith(settingsDir(name)) ? file : `! ${file}`)));
+  const outsideFiles = new Set(outside(name, new Map(changes.added.map((file) => [file, file])), manifest.ui?.target));
+  list("added", changes.added.map((file) => (outsideFiles.has(file) ? `! ${file}` : file)));
   list("deleted, no longer shipped", changes.removed);
   list("kept, no longer shipped but modified by you", changes.kept);
   list("not restored, deleted by you (`pikit add --force` restores it)", changes.notRestored);
@@ -403,9 +405,9 @@ function describeUpgrade({ name, registry, manifest, previous, changes, notes, d
 async function confirmUpgrade(plans: readonly UpgradePlan[], kit: KitPlan | undefined, options: UpgradeOptions): Promise<void> {
   if (options.yes === true) return;
   if (!isInteractive()) throw new CliError("pikit upgrade asks for confirmation; pass --yes when it runs without a terminal (--dry-run shows what it does)");
-  const outside = plans.map((plan) => alsoWrites(plan.name, plan.writes)).join("");
+  const writesOutside = plans.map((plan) => alsoWrites(plan.name, plan.writes, plan.manifest.ui?.target)).join("");
   const what = [...(kit === undefined ? [] : ["the kit (vendor/)"]), ...plans.map((plan) => plan.name)];
-  if (!(await confirm(`Upgrade ${what.join(", ")}?${outside}`))) throw new CliError("cancelled", 1);
+  if (!(await confirm(`Upgrade ${what.join(", ")}?${writesOutside}`))) throw new CliError("cancelled", 1);
 }
 
 /** Whether a file still has the conflict markers `upgrade` wrote. */

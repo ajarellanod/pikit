@@ -101,11 +101,22 @@ and serves it from memory, the same on a server and in a Worker: no disk, no bin
 module is empty and `/admin/` says no dashboard is built. It is listed in admin-api's `generated`
 (never your edits), committed, and marked generated in `.gitattributes`.
 
-Every deploy builds it: deployment-docker's Dockerfile in a stage of its own, deployment-cloudflare's
-`wrangler.jsonc` `build.command` (`bun install --frozen-lockfile && bun run build` in `src/dashboard/`)
-whoever runs wrangler. A project without `src/dashboard/` builds nothing. On a server's `pikit dev`,
-rebuild after a change; `bun run dev` in `src/dashboard/` serves it with hot reload on
-`http://localhost:5173/admin/` against `PIKIT_URL`.
+Every deploy builds it: deployment-docker's Dockerfile in a stage of its own (`ui`), deployment-cloudflare's
+`wrangler.jsonc` `build.command` (`bun install --frozen-lockfile && bun run build` in it) whoever runs
+wrangler. A project without `src/dashboard/` builds nothing. `pikit dev` builds it again when its files
+change (and the app reloads with the new module); `bun run dev` in `src/dashboard/` serves it with hot
+reload on `http://localhost:5173/admin/` against `PIKIT_URL`.
+
+### Other UI projects
+
+The dashboard is one UI project; a component may ship another of its own (its manifest's `ui`:
+channel-web's chat page in `src/chat/`, [components.md](components.md#a-ui-project)). The rule the
+deployments and `pikit dev` follow is the same for all: a folder of `src/` with a `package.json`
+(`src/pikit` aside) is a UI project, built with `bun run build`, which writes its component's module
+`src/pikit/<component>/<folder>-files.ts`. The deploy builds every one, and only those modules reach
+the image or the Worker. Each page is served by its own component under its own path, never with the
+dashboard's: the operator's `/admin/` and a component's page share no code at run time (the shared
+pieces are copies, below).
 
 Every response of the files carries a Content-Security-Policy (`default-src 'self'`, no inline
 script; images also `data:` and `blob:`; forms post only to itself and to `https://github.com`, where

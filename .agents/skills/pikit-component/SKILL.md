@@ -177,8 +177,12 @@ as `pikit <name> [args...]` in the project: `"commands": { "<name>": { "file": "
 resolves with its problems (`CommandIO` in `packages/cli/src/project/component-command.ts`;
 `config()` imports `pikit.config.ts` only when called). The name is kebab-case and never one of the
 CLI's own; those files may import `node:*` whatever the targets. A component that runs services beside
-the app on a server names its Compose file in `"compose"`. See `docs/components.md`, Hooks, Commands
-and Services beside the app.
+the app on a server names its Compose file in `"compose"`. A page of its own for people who are not
+operators (a Vite app, not a dashboard view) is a UI project: `"ui": { "source": "<folder>", "target":
+"src/<name>" }`, the folder with its `package.json` (a `build` script) and `bun.lock`, whose build writes
+`src/pikit/<component>/<name>-files.ts`, shipped empty and listed in `generated`, which the component
+serves; every deploy builds it. See `docs/components.md`, Hooks, Commands, Services beside the app and
+A UI project.
 
 A component only the project needs can be a single file in `src/extensions/` listed in
 `pikit.config.ts`, like `src/extensions/agents.ts`; make it a registry component when it should be

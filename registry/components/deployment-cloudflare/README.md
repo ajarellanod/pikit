@@ -181,11 +181,15 @@ the Worker after `package.json`'s `name`. Running wrangler by hand, pass `--name
 Cloudflare template adds a `name` (Workers Builds runs wrangler without `--name`); the commands then
 use that one, so `pikit up` and the builds deploy the same Worker.
 
-Its `build.command` builds the dashboard of a project with a UI (`src/dashboard/`: `bun install
---frozen-lockfile`, then `bun run build`, which writes `src/pikit/admin-api/dashboard-files.ts`)
-before wrangler bundles; without `src/dashboard/` it does nothing. Wrangler runs it whoever runs
-wrangler: `pikit up`, `pikit dev` (again when `src/dashboard/src/` changes), a `wrangler deploy` by
-hand, Workers Builds from Git. So no deploy ships an old or empty dashboard, and a build that fails
+Its `build.command` builds every UI project of the project, each folder of `src/` with a
+`package.json` but `src/pikit/` (the dashboard's `src/dashboard/`, a component's own such as
+channel-web's `src/chat/`: `bun install --frozen-lockfile`, then `bun run build`, which writes its
+component's module, `src/pikit/admin-api/dashboard-files.ts`, `src/pikit/channel-web/chat-files.ts`)
+before wrangler bundles; without one it does nothing. Wrangler runs it whoever runs wrangler: `pikit
+up`, `pikit dev`, a `wrangler deploy` by hand, Workers Builds from Git. Its `watch_dir` is
+`wrangler.jsonc` alone, never `src/` (every UI project's `node_modules`, and what a build writes,
+which would start it again): `pikit dev` builds a UI project again itself when its files change. So
+no deploy ships an old or empty page, and a build that fails
 stops the deploy (`Running custom build … failed`). It needs Bun where wrangler runs.
 
 This file is yours: add bindings, routes, a custom domain. Keep the migration: a migration is
