@@ -20,7 +20,7 @@ interface WranglerConfig {
   migrations: { tag: string; new_sqlite_classes?: string[]; new_classes?: string[] }[];
   version_metadata?: { binding: string };
   rules?: { type: string; globs: string[] }[];
-  build?: { command: string; watch_dir?: string };
+  build?: { command: string; watch_dir?: string | string[] };
 }
 
 const config = Bun.JSONC.parse(readFileSync(join(ROOT, "wrangler.jsonc"), "utf8")) as WranglerConfig;
@@ -49,11 +49,16 @@ test("/health can report the version, nodejs_compat is on, and .md and .wasm are
   ]);
 });
 
-test("whoever runs wrangler builds every UI project first (bundle.test.ts runs it); wrangler watches nothing a build writes", () => {
+test("whoever runs wrangler builds every UI project first (bundle.test.ts runs it); wrangler dev watches the Worker's sources and the UI builds' modules, never a UI project nor this file", () => {
   expect(config.build?.command).toContain("for project in src/*/package.json");
   expect(config.build?.command).toContain("bun install --frozen-lockfile && bun run build");
-  // Never src/: every UI project's node_modules, and its build's output, which would start it again.
-  expect(config.build?.watch_dir).toBe("wrangler.jsonc");
+  // With a build command, wrangler dev re-bundles only on a change in watch_dir: watching this file
+  // alone, a source edit or a UI build's new module (src/pikit/<component>/<folder>-files.ts) never
+  // reached the running Worker, and an edit of this file ran two builds at once (their installs failed).
+  const watched = [config.build?.watch_dir ?? []].flat();
+  expect(watched).toEqual(["pikit.config.ts", "src/pikit", "src/agents", "src/extensions"]);
+  // Never src/ nor a UI project: their node_modules and dist/, which a build writes, would start it again.
+  for (const path of watched) expect(path === "src" || path === "src/" || path === "wrangler.jsonc" || /^src\/(?!pikit|agents|extensions)/.test(path)).toBe(false);
 });
 
 test("a name in the file (a Deploy to Cloudflare template's, for Workers Builds) is one Cloudflare accepts; pikit's has none", () => {

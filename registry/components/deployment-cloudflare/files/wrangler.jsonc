@@ -17,12 +17,15 @@
   // build writes its component's module, src/pikit/<component>/<folder>-files.ts (admin-api's
   // dashboard-files.ts, channel-web's chat-files.ts), which the Worker bundles: a build that fails
   // stops the deploy, so no Worker ships an old or empty page. Without one it does nothing.
-  // `watch_dir` is what wrangler watches to build them again: only this file, never src/ (every UI
-  // project's node_modules, and what its build writes, which would start it again). `pikit dev`
-  // builds a UI project again itself when its files change.
+  // `watch_dir` is what `wrangler dev` watches to build and bundle again (with a build command it
+  // watches nothing else): the Worker's own sources, src/pikit/ where each UI build writes its
+  // module, so the app reloads with it (`pikit dev` builds a UI project again itself when its files
+  // change). Never src/ (every UI project's node_modules and dist/, which a build writes, would start
+  // it again), nor this file (wrangler builds again on its change already: twice at once failed).
+  // A folder of src/ of your own that the Worker imports: add it here.
   "build": {
     "command": "for project in src/*/package.json; do dir=\"${project%/package.json}\"; if [ ! -f \"$project\" ] || [ \"$dir\" = src/pikit ]; then continue; fi; (cd \"$dir\" && bun install --frozen-lockfile && bun run build) || exit 1; done",
-    "watch_dir": "wrangler.jsonc"
+    "watch_dir": ["pikit.config.ts", "src/pikit", "src/agents", "src/extensions"]
   },
   "compatibility_date": "2026-09-01",
   // Components and Pi use node:* APIs that Workers provide with it (Buffer, crypto, process.env).

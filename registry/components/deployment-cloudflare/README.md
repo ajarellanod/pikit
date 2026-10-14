@@ -187,9 +187,13 @@ Its `build.command` builds every UI project of the project, each folder of `src/
 channel-web's `src/chat/`: `bun install --frozen-lockfile`, then `bun run build`, which writes its
 component's module, `src/pikit/admin-api/dashboard-files.ts`, `src/pikit/channel-web/chat-files.ts`)
 before wrangler bundles; without one it does nothing. Wrangler runs it whoever runs wrangler: `pikit
-up`, `pikit dev`, a `wrangler deploy` by hand, Workers Builds from Git. Its `watch_dir` is
-`wrangler.jsonc` alone, never `src/` (every UI project's `node_modules`, and what a build writes,
-which would start it again): `pikit dev` builds a UI project again itself when its files change. So
+up`, `pikit dev`, a `wrangler deploy` by hand, Workers Builds from Git. Its `watch_dir` is the
+Worker's own sources (`pikit.config.ts`, `src/pikit`, `src/agents`, `src/extensions`): with a build
+command `wrangler dev` watches nothing else, so a change there builds and bundles again, and a UI
+build's module (written in `src/pikit/`) reloads the app (`pikit dev` builds a UI project again itself
+when its files change). Never `src/` (every UI project's `node_modules` and `dist/`, which a build
+writes, would start it again), nor `wrangler.jsonc` (wrangler builds again on its change already: two
+builds at once fail). A folder of `src/` of yours that the Worker imports goes in it too. So
 no deploy ships an old or empty page, and a build that fails
 stops the deploy (`Running custom build … failed`). It needs Bun where wrangler runs.
 
