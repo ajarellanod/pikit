@@ -68,3 +68,6 @@ export { createModelCompleteConformance } from "./model-complete.ts";
 
 export type { ProposalsFixture } from "./proposals.ts";
 export { createProposalsConformance } from "./proposals.ts";
+
+export type { EmailApiFailure, EmailApiFake, EmailSenderFixture, SentEmail } from "./email.ts";
+export { createEmailSenderConformance } from "./email.ts";

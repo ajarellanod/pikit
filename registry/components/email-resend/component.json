@@ -1,0 +1,48 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "email-resend",
+  "version": "0.0.0",
+  "title": "Email with Resend: your app sends sign-in links and invitations (needs an API key)",
+  "description": "`email.send` with Resend's API: one email to one person, from the sender in EMAIL_FROM. Variables only (RESEND_API_KEY, EMAIL_FROM), so both targets.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": [
+      "secrets"
+    ]
+  },
+  "optional": {
+    "capabilities": []
+  },
+  "provides": [
+    "email.send"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "typebox": "1.3.27"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "RESEND_API_KEY",
+      "secret": true,
+      "required": true,
+      "description": "A Resend API key with sending access, from resend.com/api-keys. Read through secrets at start; sent only to Resend."
+    },
+    {
+      "name": "EMAIL_FROM",
+      "secret": false,
+      "required": true,
+      "description": "The sender of every email: `bot@example.com` or `Assistant <bot@example.com>`, on a domain verified in Resend (resend.com/domains)."
+    }
+  ]
+}

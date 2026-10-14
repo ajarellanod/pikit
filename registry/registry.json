@@ -119,6 +119,24 @@
       ],
       "path": "components/deployment-docker"
     },
+    "email-resend": {
+      "version": "0.0.0",
+      "description": "`email.send` with Resend's API: one email to one person, from the sender in EMAIL_FROM. Variables only (RESEND_API_KEY, EMAIL_FROM), so both targets.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/email-resend"
+    },
+    "email-ses": {
+      "version": "0.0.0",
+      "description": "`email.send` with Amazon SES v2: one email to one person, from the sender in EMAIL_FROM, each request signed with SigV4 over Web Crypto (no AWS SDK). Variables only, so both targets.",
+      "targets": [
+        "server",
+        "durable"
+      ],
+      "path": "components/email-ses"
+    },
     "execution-do": {
       "version": "0.0.0",
       "description": "The agent's workspace and shell inside its Durable Object, on Cloudflare: files in the object's SQL, a bash without processes, git with fenced pushes, and node in QuickJS.",

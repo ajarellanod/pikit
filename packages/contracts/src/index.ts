@@ -56,6 +56,8 @@ export type { ComponentHealth, HealthRegistry, HealthReporter, HealthSnapshot, H
 export type { Settings, SettingsErrorCode, SettingsSchema, SettingsValue } from "./settings.ts";
 export { credentialSettingProblem, SettingsError, secretSettingProblem } from "./settings.ts";
 export type { GitHubAccess } from "./github.ts";
+export type { EmailErrorCode, EmailMessage, EmailReceipt, EmailSender } from "./email.ts";
+export { EmailError, emailErrorDetail, emailMessageProblem, isEmailAddress, isEmailFrom } from "./email.ts";
 export { GITHUB_REPOSITORY, GITHUB_TOKEN_MIN_LIFE_MS, GitHubNotConnectedError, isGitHubNotConnected } from "./github.ts";
 export type {
   ActionRefusal,

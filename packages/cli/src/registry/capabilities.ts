@@ -123,6 +123,13 @@ export const CAPABILITIES: Catalogue = {
     stability: "experimental",
     summary: "What is up, degraded or down: components report their own state, and /health fails when an essential one stays down.",
   },
+  "email.send": {
+    mode: "single",
+    definedIn: "@pikit/contracts",
+    stability: "experimental",
+    // Which service sends is a choice (email-ses, email-resend): never offered.
+    summary: "Send one email to one person from the provider's own sender (a verification, a reset, a sign-in link): invalid, rejected or unavailable when it fails.",
+  },
   proposals: {
     mode: "single",
     definedIn: "@pikit/contracts",

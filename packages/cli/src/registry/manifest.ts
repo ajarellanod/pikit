@@ -55,6 +55,8 @@ export const KINDS: readonly string[] = [
   "proposals",
   // A public URL for a server project, `pikit expose` (features/completed/expose.md): `expose-cloudflare-tunnel`.
   "expose",
+  // One email to one person (`email.send`): `email-ses`, `email-resend`.
+  "email",
 ];
 
 /** Where the registry's JSON Schemas live, relative to its root. */

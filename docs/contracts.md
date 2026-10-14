@@ -41,11 +41,12 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `wakeups` | single | actors-do, wakeups-timers | channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
 | `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, repo-github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
 | `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, repo-github-app?, health-registry?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-workers, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `secrets` | single | secrets-workers, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, email-resend, email-ses, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
 | `settings` | single | settings-store | agents-live, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
+| `email.send` | single | email-resend, email-ses | none | `createEmailSenderConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
@@ -635,6 +636,36 @@ down past the grace period is `down`. Reporting never throws or waits. Component
 `useOptional("health")`. Provider: health-registry (also `GET /admin/api/health-registry` and a
 dashboard view). Users: channel-telegram (each bot), server-bun (`/health` answers its status). Suite:
 `createHealthConformance`.
+
+### `email.send` ([email.ts](../packages/contracts/src/email.ts))
+
+One email to one person, for a component that must reach someone by email (a verification, a
+password reset, a sign-in link, an invitation).
+
+```ts
+interface EmailSender {
+  send({ to, subject, text, html? }, ctx): Promise<{ id: string }>;   // the provider's id, once it accepted it
+}
+```
+
+- One recipient per call, a plain address; `subject` and `text` not empty, the subject on one line.
+  Anything else is `invalid` before a request is made (`emailMessageProblem`, which every provider
+  runs first).
+- The sender is the provider's (its `EMAIL_FROM` variable): a component never picks one.
+- Every rejection is an `EmailError` with a `code`: `invalid` (the address or the message: never
+  retry), `rejected` (the provider refused: an unverified sender, a suppressed address, a suspended
+  account, its credentials) or `unavailable` (the network, a timeout, a cancelled `ctx`, 429, 5xx:
+  retry later; one after the request left may have been sent). The provider retries nothing and
+  stores nothing.
+- No error message or log line holds the subject, the text, the html or a link (a link is a sign-in):
+  what the provider's API says is cleaned by `emailErrorDetail` first.
+- `ctx` bounds it (a cancelled one sends nothing, or stops waiting), and so does the provider's own
+  timeout.
+
+Providers, variables only (a `fetch` to an HTTP API, both targets): email-resend (Resend's
+`POST /emails`, `RESEND_API_KEY`) and email-ses (Amazon SES v2 `SendEmail`, signed with SigV4 over Web
+Crypto, `AWS_SES_*`). Consumer: channel-web's accounts (being built). Suite:
+`createEmailSenderConformance`, against a fake of each provider's HTTP API (both providers).
 
 ## A registry's own contracts
 
