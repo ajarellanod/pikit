@@ -64,6 +64,17 @@ server and on Cloudflare.
 - If the generated file cannot be imported any more (an agent's folder deleted), `pikit doctor` cannot
   compose the App: run `pikit agents`, which does not need it.
 
+## With agents-live
+
+The two work together: a folder's agent is the code's (`agent.definition`), an operator's is data
+(`agent.directory`), and runtime-pi looks a name up in the code first.
+- The catalog (`src/skills/`) is what a live agent's Skills switches offer; an agent's own skills
+  (`src/agents/<name>/skills/`) are its alone. A new catalog skill is code (`pikit agents`, a deploy);
+  giving it to a live agent is live.
+- A live agent never takes a folder's name, and a folder added later under a live agent's name wins:
+  the stored live agent is left out, and its conversations go to the folder's agent.
+- Channel texts and own skills are a folder's: a live agent has neither.
+
 ## Removing it
 
 `pikit remove agents-folders` removes the command and the check. `src/extensions/agents.ts` stays as it
@@ -82,3 +93,8 @@ small project next to it and runs the command there:
 - a skill's location on a server, none on Cloudflare;
 - `doctor` passing when the file is current and failing, naming the command, once a folder changed;
 - the command writing only when the text changes, and taking no arguments; stable output.
+
+`app.test.ts`, a repository test (not copied: it imports agents-live and runtime-pi), runs the
+generated file with agents-live and runtime-pi in a real App: a live agent given a catalog skill loads
+it in a run and knows no other, the folder's agent keeps its prompt, channel text and skills, a live
+agent cannot take a folder's name, and a folder added under a live agent's name wins.

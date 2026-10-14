@@ -61,7 +61,9 @@ Adding an agent is adding a folder and running `pikit agents`; adding a skill is
 - **Removing it** (`pikit remove agents-folders`) leaves `src/extensions/agents.ts` as it was last
   generated: plain code that needs nothing of the component, kept from then on by hand (§7).
 - **Live agents stay data** ([agents-live](../registry/components/agents-live/README.md)): an
-  operator's agent is not a folder.
+  operator's agent is not a folder. The two work together: the catalog is what a live agent's Skills
+  switches offer, a live agent never takes a folder's name, and a folder added later under a live
+  agent's name wins (runtime-pi looks the code up first; agents-live leaves the stored one out).
 
 ## Pi first
 Pi's coding agent reads `SYSTEM.md` (it replaces its system prompt) and Agent Skills folders
@@ -80,6 +82,8 @@ instructions, so the agent's context lives in `SYSTEM.md`.
   folder named after another agent refused, the catalog provided as `agent.skill`.
 - The hooks: `pikit agents` writes the file and says so; `doctor` passes when current and fails, naming
   the command, when a folder changed.
+- With agents-live and runtime-pi (`app.test.ts`, a repository test): a live agent given a catalog
+  skill loads it in a run and knows no other; the folder's agent keeps its own; the names' rules.
 
 ## Open questions
 - `context/`, files an agent's workspace starts with: a `seed` of workspace-local, copied the first
