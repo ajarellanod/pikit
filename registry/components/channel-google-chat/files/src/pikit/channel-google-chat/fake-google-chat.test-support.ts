@@ -21,7 +21,8 @@
  *     (`googleError`), a `429` with `retry-after`, `"hang"` (until the caller aborts, or `stop()`), or
  *     `"network"` (the `fetch` double rejects with a `TypeError`, as `fetch` does; through the port, a
  *     `502`).
- *   - Every call is recorded (`calls`), and `waitForCall` waits for one.
+ *   - Every call is recorded (`calls`, with the status it was answered with), and `waitForCall` waits
+ *     for one.
  * - **`createIdTokens()`**: a test key pair, its JWKs, and ID tokens signed for an audience and a project
  *   number with the claims Google gives (`iss`, `aud`, `email` the add-on's service account,
  *   `email_verified`, `iat`, `exp`), any of them overridden, signed by another key, or with another `kid`.
@@ -190,6 +191,8 @@ export interface FakeCall {
   /** Parsed JSON, the form's text for `/token`, or `undefined`. */
   body: unknown;
   authorization: string | null;
+  /** The status the fake answered with, once it did; absent while it hangs (or when it cut the connection). */
+  status?: number;
 }
 
 /** How a call fails: a status with a body and headers, `"hang"`, or `"network"`. */
@@ -304,7 +307,15 @@ export async function startFakeGoogleChat(options: FakeGoogleChatOptions = {}): 
     return made;
   };
 
+  /** `respond`, its status recorded on the call it made. */
   async function handle(request: Request, via: "fetch" | "port"): Promise<Response> {
+    let made: FakeCall | undefined;
+    const response = await respond(request, via, (call) => (made = call));
+    if (made !== undefined) made.status = response.status;
+    return response;
+  }
+
+  async function respond(request: Request, via: "fetch" | "port", record: (call: FakeCall) => void): Promise<Response> {
     const target = new URL(request.url);
     const path = decodeURIComponent(target.pathname);
     const raw = request.method === "GET" || request.method === "DELETE" ? "" : await request.text();
@@ -318,6 +329,7 @@ export async function startFakeGoogleChat(options: FakeGoogleChatOptions = {}): 
     }
     const call: FakeCall = { method: request.method, path, query: Object.fromEntries(target.searchParams), body, authorization: request.headers.get("authorization") };
     calls.push(call);
+    record(call);
     for (const wake of [...waiters]) wake();
 
     const failing = failures.find((each) => each.left > 0 && matches(each.match, call));
