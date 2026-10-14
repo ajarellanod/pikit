@@ -148,7 +148,7 @@ function jsonPart(part: string): Record<string, unknown> | undefined {
   const bytes = base64url(part);
   if (bytes === undefined) return undefined;
   try {
-    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true }).decode(bytes));
+    const value: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: false }).decode(bytes));
     return isObject(value) ? value : undefined;
   } catch {
     return undefined;
