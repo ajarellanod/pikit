@@ -5,13 +5,15 @@
  * SQLite-backed `PlatformConversation` composed as the telegram-cloudflare preset composes one, with
  * the default export instead of a Telegram channel: storage-do, storage-kv-sql, actors-do (its
  * `actor.inbox`, scope `"one"`, and `wakeups`), runtime-pi on the scripted model, conversations-kv,
- * router-basic and tool-ask-user. The object admits, creates "Thinking…" and edits it into the answer
- * (answer delivery sending directly, its runs in the object's alarms), and draws `askUser`'s question
- * as a card, whose click the Worker asks the object to answer (`actor.mailbox.call`).
+ * router-basic, tool-ask-user and execution-do. The object admits, creates "Thinking…" and edits it
+ * into the answer (answer delivery sending directly, its runs in the object's alarms), draws
+ * `askUser`'s question as a card, whose click the Worker asks the object to answer
+ * (`actor.mailbox.call`), and writes a message's file that is not an image (a PDF) to its workspace:
+ * execution-do's files, in the conversation's object's own SQLite.
  *
  * Google is a fake behind `globalThis.fetch` (the tests and the objects share one isolate): its signing
- * keys, its token endpoint (any signed assertion gets a token) and the Chat REST API's messages (a
- * `requestId` repeated returns the first message, a `messageId` that exists is refused). Events are
+ * keys, its token endpoint (any signed assertion gets a token), the Chat REST API's messages (a
+ * `requestId` repeated returns the first message, a `messageId` that exists is refused) and its media. Events are
  * built here as Google posts them: the channel's own fake (`fake-google-chat.test-support.ts`) serves
  * over Bun, which workerd has not.
  */
@@ -20,10 +22,13 @@ import { BACKGROUND_CONTEXT, defineApp, defineComponent, silentLogger, withConte
 import { defineAgent } from "@pikit/contracts";
 import { WORKERS_HOST } from "@pikit/contracts/cloudflare";
 import { scriptedProvider } from "@pikit/pi-adapter/testing/neutral";
+import { runInDurableObject } from "cloudflare:test";
+import { env } from "cloudflare:workers";
 import { afterEach, expect, it, vi } from "vitest";
 import actorsDo from "../../../registry/components/actors-do/files/src/pikit/actors-do/index.ts";
 import channelGoogleChat, { NAME, worker as googleChatWorker, WORKER_NAME } from "../../../registry/components/channel-google-chat/files/src/pikit/channel-google-chat/index.ts";
 import conversationsKv from "../../../registry/components/conversations-kv/files/src/pikit/conversations-kv/index.ts";
+import executionDo from "../../../registry/components/execution-do/files/src/pikit/execution-do/index.ts";
 import routerBasic from "../../../registry/components/router-basic/files/src/pikit/router-basic/index.ts";
 import runtimePi from "../../../registry/components/runtime-pi/files/src/pikit/runtime-pi/index.ts";
 import storageDo from "../../../registry/components/storage-do/files/src/pikit/storage-do/index.ts";
@@ -80,6 +85,8 @@ async function fakeGoogle() {
   });
   const messages = new Map<string, Message>();
   const requests = new Map<string, string>();
+  /** Uploaded files, by their resource name (`attachmentDataRef.resourceName`). */
+  const media = new Map<string, { bytes: Uint8Array; type: string }>();
   const calls: { method: string; path: string; body: unknown }[] = [];
   let made = 0;
 
@@ -111,6 +118,10 @@ async function fakeGoogle() {
       if (requestId !== null) requests.set(requestId, name);
       return Response.json(message);
     }
+    if (request.method === "GET" && path.startsWith("media/")) {
+      const file = media.get(path.slice("media/".length));
+      return file === undefined ? notFound() : new Response(file.bytes, { headers: { "content-type": file.type, "content-length": String(file.bytes.byteLength) } });
+    }
     const found = messages.get(path);
     if (request.method === "PATCH") {
       if (found === undefined) return notFound();
@@ -131,7 +142,7 @@ async function fakeGoogle() {
     const claims = { iss: "https://accounts.google.com", aud: AUDIENCE, email: `service-${PROJECT_NUMBER}@gcp-sa-gsuiteaddons.iam.gserviceaccount.com`, email_verified: true, iat: now, exp: now + 3_600, ...overrides };
     return `Bearer ${await signJwt({ kid }, claims, signing.privateKey)}`;
   };
-  return { fetch: fetch as typeof globalThis.fetch, serviceAccount, messages, calls, bearer };
+  return { fetch: fetch as typeof globalThis.fetch, serviceAccount, messages, media, calls, bearer };
 }
 
 const secretsOf = (values: Record<string, string>) =>
@@ -140,11 +151,27 @@ const secretsOf = (values: Record<string, string>) =>
 /** A DM as Google has it. */
 const space = { name: DM, spaceType: "DIRECT_MESSAGE", singleUserBotDm: true, spaceThreadingState: "THREADED_MESSAGES" };
 
-/** A message to the app in the DM's thread `thread`, as Google posts it. */
-const messageEvent = (id: string, thread: string, text: string) => ({
+/** A file uploaded with a message, as Google describes it. */
+interface Attachment {
+  contentName: string;
+  contentType: string;
+  attachmentDataRef: { resourceName: string };
+  source: "UPLOADED_CONTENT";
+}
+
+/** A message to the app in the DM's thread `thread`, as Google posts it, with its `attachment`s. */
+const messageEvent = (id: string, thread: string, text: string, attachment: Attachment[] = []) => ({
   commonEventObject: { hostApp: "CHAT" },
-  chat: { user: USER, space, eventTime: new Date().toISOString(), messagePayload: { space, message: { name: `${DM}/messages/${id}`, sender: USER, text, argumentText: text, thread: { name: `${DM}/threads/${thread}` }, space } } },
+  chat: {
+    user: USER,
+    space,
+    eventTime: new Date().toISOString(),
+    messagePayload: { space, message: { name: `${DM}/messages/${id}`, sender: USER, text, argumentText: text, thread: { name: `${DM}/threads/${thread}` }, space, ...(attachment.length > 0 && { attachment }) } },
+  },
 });
+
+/** A conversation's object, by its key, as actors-do reaches it. */
+const objectOf = (key: string) => env.PLATFORM_CONVERSATION.get(env.PLATFORM_CONVERSATION.idFromName(key));
 
 /** A click on a card's button, with its parameters. */
 const clickEvent = (message: Message, parameters: Record<string, string>) => ({
@@ -184,7 +211,7 @@ async function workerApp(secrets: Record<string, string>) {
   };
 }
 
-it("the Worker verifies and hands each event to its conversation's object, which admits, writes Thinking… into the answer, and draws askUser's question, whose click it answers", async () => {
+it("the Worker verifies and hands each event to its conversation's object, which admits, writes Thinking… into the answer, draws askUser's question, whose click it answers, and writes a message's PDF to its workspace (execution-do)", async () => {
   const google = await fakeGoogle();
   globalThis.fetch = google.fetch;
   const secrets = {
@@ -206,6 +233,7 @@ it("the Worker verifies and hands each event to its conversation's object, which
       conversationsKv,
       routerBasic,
       toolAskUser,
+      executionDo,
       channelGoogleChat,
     ],
     { "router-basic": { defaultAgent: "assistant" }, [NAME]: { apiBase: API, jwksUrl: `${ACCOUNTS}/certs` } },
@@ -247,6 +275,20 @@ it("the Worker verifies and hands each event to its conversation's object, which
     await vi.waitFor(() => expect(inThread("Q1").some((message) => message.text?.startsWith("answer: Answer to \"Deploy now?\"") === true)).toBe(true), { timeout: 15_000 });
     // Clicked again: told, nothing admitted.
     expect(JSON.stringify((await worker.post(clickEvent(card, { ...parameters, value: "false" }), await google.bearer())).body)).toContain("already answered");
+
+    // A PDF with a message: written to the conversation's workspace (execution-do, in its object's SQLite), and named to the model.
+    const pdf = new Uint8Array([37, 80, 68, 70, 45, 49]);
+    google.media.set(`${DM}/attachments/report`, { bytes: pdf, type: "application/pdf" });
+    const report: Attachment = { contentName: "report.pdf", contentType: "application/pdf", attachmentDataRef: { resourceName: `${DM}/attachments/report` }, source: "UPLOADED_CONTENT" };
+    expect(await worker.post(messageEvent("M3", "F1", "read this", [report]), await google.bearer())).toEqual({ status: 200, body: {} });
+    await vi.waitFor(() => expect(inThread("F1").map((message) => message.text)).toEqual([expect.stringContaining("report.pdf (application/pdf, 6 bytes): saved in your workspace at attachments/M3/report.pdf")]), {
+      timeout: 15_000,
+    });
+    const saved = await runInDurableObject(objectOf(`googlechat:${DM}:threads/F1`), async (_instance, state) => ({
+      node: state.storage.sql.exec("SELECT kind, size FROM execution_do_nodes WHERE path = '/work/attachments/M3/report.pdf'").toArray(),
+      bytes: state.storage.sql.exec("SELECT data FROM execution_do_chunks WHERE path = '/work/attachments/M3/report.pdf' ORDER BY seq").toArray().map((row) => [...new Uint8Array(row.data as ArrayBuffer)]),
+    }));
+    expect(saved).toEqual({ node: [{ kind: "file", size: 6 }], bytes: [[...pdf]] });
   } finally {
     await worker.stop();
   }

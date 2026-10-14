@@ -15,6 +15,9 @@
  * - A restart in the middle of an answer's send: the next process delivers it (outbound-durable), with
  *   no new run.
  * - A token refused is 401, and nothing is admitted.
+ * - With `mailbox-local` installed (`actor.inbox`, scope `"all"`: a server's App is every key's actor),
+ *   events are handled in process as with no inbox: answered, a question drawn and its click answered,
+ *   and no handler of the channel's registered with the inbox (nothing goes through the mailbox).
  *
  * A repository test, not copied with the component: a component's files never import another's (SPEC
  * P4), so this one lives beside `files/`.
@@ -24,11 +27,12 @@ import { afterEach, expect, test } from "bun:test";
 import { mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { type App, type AppEvents, BACKGROUND_CONTEXT, type Context, defineApp, defineComponent, silentLogger, withAbortSignal } from "@pikit/core";
-import { defineAgent } from "@pikit/contracts";
+import { type App, type AppEvents, BACKGROUND_CONTEXT, type ComponentDefinition, type Context, defineApp, defineComponent, silentLogger, withAbortSignal } from "@pikit/core";
+import { type ActorMailbox, defineAgent } from "@pikit/contracts";
 import { fauxAssistantMessage, fauxProvider, type FauxResponseFactory, fauxToolCall } from "@pikit/pi-adapter/providers/faux";
 import conversationsKv from "../conversations-kv/files/src/pikit/conversations-kv/index.ts";
 import executionLocal from "../execution-local/files/src/pikit/execution-local/index.ts";
+import mailboxLocal from "../mailbox-local/files/src/pikit/mailbox-local/index.ts";
 import outboundDurable from "../outbound-durable/files/src/pikit/outbound-durable/index.ts";
 import { scriptedReply } from "../provider-faux/files/src/pikit/provider-faux/index.ts";
 import routerBasic from "../router-basic/files/src/pikit/router-basic/index.ts";
@@ -43,7 +47,7 @@ import workspaceLocal from "../workspace-local/files/src/pikit/workspace-local/i
 import type { AddOnEvent, ChatAttachment, ChatMessage } from "./files/src/pikit/channel-google-chat/event.ts";
 import { clickEvent, eventRequest, type FakeCall, type FakeGoogleChat, messageEvent, startFakeGoogleChat } from "./files/src/pikit/channel-google-chat/fake-google-chat.test-support.ts";
 import { messageNameOf, pieceIds, pieceKeyOf } from "./files/src/pikit/channel-google-chat/ids.ts";
-import channelGoogleChat, { NAME } from "./files/src/pikit/channel-google-chat/index.ts";
+import channelGoogleChat, { CLICK_TYPE, EVENT_TYPE, NAME } from "./files/src/pikit/channel-google-chat/index.ts";
 
 const AGENT = "assistant";
 const THREADED = "spaces/AAA";
@@ -95,8 +99,8 @@ interface Server {
   started: AppEvents["agent.started"][];
 }
 
-/** The App over `dataDir`, started, serving on a free port. */
-async function serve(dataDir: string, google: FakeGoogleChat, calls: ModelCall[]): Promise<Server> {
+/** The App over `dataDir`, started, serving on a free port; with `extra` components (mailbox-local). */
+async function serve(dataDir: string, google: FakeGoogleChat, calls: ModelCall[], extra: ComponentDefinition[] = []): Promise<Server> {
   let listened!: (url: URL) => void;
   const listening = new Promise<URL>((resolve) => (listened = resolve));
   const started: AppEvents["agent.started"][] = [];
@@ -118,6 +122,7 @@ async function serve(dataDir: string, google: FakeGoogleChat, calls: ModelCall[]
       channelGoogleChat,
       createServerBun({ onListening: listened }),
       defineComponent({ name: "runs-test", setup: (pikit) => pikit.on("agent.started", (event) => void started.push(event)) }),
+      ...extra,
     ],
     config: {
       "storage-sqlite": { path: join(dataDir, "pikit.db") },
@@ -140,13 +145,13 @@ async function serve(dataDir: string, google: FakeGoogleChat, calls: ModelCall[]
   return { app, stop, url: await listening, started };
 }
 
-async function setup() {
+async function setup(extra: ComponentDefinition[] = []) {
   const dataDir = mkdtempSync(join(tmpdir(), "pikit-google-chat-server-"));
   const google = await startFakeGoogleChat();
   cleanup.push(() => rmSync(dataDir, { recursive: true, force: true }));
   cleanup.push(() => google.stop());
   const calls: ModelCall[] = [];
-  const server = await serve(dataDir, google, calls);
+  const server = await serve(dataDir, google, calls, extra);
   return {
     dataDir,
     google,
@@ -306,4 +311,40 @@ test("a token refused (another audience, another key, none) is 401, and nothing 
   await Bun.sleep(300);
   expect(s.server.started).toEqual([]);
   expect(s.google.callsTo({ path: /\/messages/ })).toEqual([]);
+}, 30_000);
+
+test("with mailbox-local installed (actor.inbox, scope \"all\"), events are handled in process as with no inbox: answered, a question clicked, nothing through the mailbox", async () => {
+  let mailbox: ActorMailbox | undefined;
+  const reader = defineComponent({
+    name: "mailbox-reader-test",
+    setup(pikit) {
+      const box = pikit.use("actor.mailbox");
+      return { start: () => void (mailbox = box.get()) };
+    },
+  });
+  const s = await setup([mailboxLocal, reader]);
+  expect(s.server.app.describe().capabilities["actor.inbox"]).toBeDefined();
+
+  // A message: admitted, Thinking… edited into the answer in its thread.
+  await s.post(messageEvent({ space: THREADED, thread: `${THREADED}/threads/T1`, name: `${THREADED}/messages/M1`, text: "hello" }));
+  await until(() => (inThread(s.google, `${THREADED}/threads/T1`).some((message) => message.text === "faux: Ada Lovelace: hello") ? true : undefined), "the answer");
+  expect(inThread(s.google, `${THREADED}/threads/T1`)).toHaveLength(1);
+
+  // A question drawn, clicked, its answer admitted and run.
+  const thread = `${DM}/threads/Q1`;
+  const question = { title: "Deploy now?", fields: [{ kind: "confirm", name: "go", label: "Deploy", required: true }] };
+  await s.post(messageEvent({ space: DM, spaceType: "DIRECT_MESSAGE", thread, text: `call: ${ASK_USER_TOOL} ${JSON.stringify(question)}` }));
+  const card = await until(() => inThread(s.google, thread).find((message) => message.cardsV2?.some((each) => each.cardId.startsWith("question:"))), "the question's card");
+  const yes = card.cardsV2?.flatMap((each) => each.card.sections?.flatMap((section) => section.widgets.flatMap((widget) => widget.buttonList?.buttons ?? [])) ?? []).find((button) => button.text === "Yes");
+  const parameters = Object.fromEntries((yes?.onClick?.action?.parameters ?? []).map((each) => [each.key, each.value]));
+  const clicked = await s.post(clickEvent({ space: DM, spaceType: "DIRECT_MESSAGE", message: card, parameters, invokedFunction: s.google.idTokens.audience }));
+  expect(clicked.status).toBe(200);
+  expect(JSON.stringify(clicked.body)).toContain("Answered by Ada Lovelace");
+  await until(() => inThread(s.google, thread).find((message) => message.text?.startsWith("faux: Answer to") === true), "the new run's answer");
+  expect(s.server.started.map((run) => run.conversation.key)).toEqual([`googlechat:${THREADED}:threads/T1`, `googlechat:${DM}:threads/Q1`, `googlechat:${DM}:threads/Q1`]);
+
+  // In process: the channel registered no handler with the inbox, so nothing could have gone through the mailbox.
+  const ctx = s.server.app.context();
+  await expect(mailbox!.send(`googlechat:${THREADED}:threads/T1`, EVENT_TYPE, {}, ctx)).rejects.toThrow(`no actor.inbox handler for the type "${EVENT_TYPE}"`);
+  await expect(mailbox!.call(`googlechat:${DM}:threads/Q1`, CLICK_TYPE, {}, ctx)).rejects.toMatchObject({ code: "no_handler" });
 }, 30_000);
