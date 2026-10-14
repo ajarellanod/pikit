@@ -12,7 +12,7 @@
 
 import type { AppContext } from "@pikit/core";
 import type { ActorMailbox, JsonValue } from "@pikit/contracts";
-import type { ChatConversation, ChatEvent, ChatMessage, ChatPage, ChatSendResponse } from "./api.ts";
+import type { ChatConversation, ChatEvent, ChatImage, ChatMessage, ChatPage, ChatSendResponse } from "./api.ts";
 import type { ChatBackend, ChatRef, NewMessage } from "./backend.ts";
 import { ACCOUNTS_KEY, CALL, LIVE } from "./calls.ts";
 
@@ -31,6 +31,7 @@ export function createRemoteBackend(mailbox: () => ActorMailbox): ChatBackend {
       await call<JsonValue>(ref.key, CALL.hide, named(ref), ctx);
     },
     messages: (ref, page, ctx) => call<ChatPage<ChatMessage>>(ref.key, CALL.messages, { ...named(ref), ...page }, ctx),
+    image: (ref, messageId, index, ctx) => call<ChatImage>(ref.key, CALL.image, { ...named(ref), messageId, index }, ctx),
     // Refused before the stream starts: an unknown conversation is a 404, not an empty stream.
     live: async (ref, ctx) => (await mailbox().stream(ref.key, LIVE, named(ref), ctx)) as AsyncIterable<ChatEvent>,
     async abort(ref, ctx) {

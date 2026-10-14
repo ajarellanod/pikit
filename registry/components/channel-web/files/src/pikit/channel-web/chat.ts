@@ -53,6 +53,10 @@ export async function chatIdFor(userId: string, requestId: string): Promise<stri
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+/** Where the bytes of image `index` of message `messageId` (a user's: its request id) of chat `chatId` are. */
+export const imagePath = (chatId: string, messageId: string, index: number): string =>
+  `/chat/api/conversations/${chatId}/messages/${encodeURIComponent(messageId)}/images/${index}`;
+
 /** The request id of a user's message: the page's own (checked by the route), or a new one. */
 export const requestIdOf = (given: string | undefined): string => given ?? `${CHAT_REQUEST_PREFIX}${crypto.randomUUID()}`;
 

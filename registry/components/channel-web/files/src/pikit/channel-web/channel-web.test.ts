@@ -9,10 +9,11 @@ import { afterEach, expect, test } from "bun:test";
 import { type ComponentDefinition, defineApp, defineComponent, halt, silentLogger } from "@pikit/core";
 import { createLifecycleConformance } from "@pikit/core/testing";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
-import { type ChatConversation, type ChatMessage, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, TITLE_MAX } from "./api.ts";
+import { type ChatConversation, type ChatMessage, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, PAGE_TEXT_MAX, TITLE_MAX } from "./api.ts";
 import { chatIdFor, cleanTitle, keyOf, parseKey } from "./chat.ts";
 import channelWeb, { createChannelWeb, NAME } from "./index.ts";
-import { MAX_BODY } from "./routes.ts";
+import { avatarHosts, cspOf } from "./assets.ts";
+import { maxBodyOf } from "./routes.ts";
 import { adminAuth, eventually, FakeAccounts, imageOf, kvOf, OPERATOR, PIXEL, Runtime, router, SECRETS, type Served, secretsOf, serve, sse } from "./runtime.test-support.ts";
 
 const apps: Served[] = [];
@@ -158,7 +159,8 @@ test("every route but config and auth needs a session (401); every change also n
 test("a conversation: started with its first message through admitInbound (the user its sender, the images with it), listed, read, renamed, its messages; an unknown /chat/api path is a JSON 404", async () => {
   const c = await chat();
   const started = await start(c, "ana", "  What is   the plan\nfor today?", { images: [{ mimeType: "image/png", data: PIXEL }] });
-  expect(started).toMatchObject({ admission: "started", requestId: expect.stringMatching(/^web:[0-9a-f-]{36}$/) });
+  const sent = started.requestId;
+  expect({ ...started }).toMatchObject({ admission: "started", requestId: expect.stringMatching(/^web:[0-9a-f-]{36}$/) });
   const key = `web:ana:${started.id}`;
   expect(c.runtime.dispatched).toEqual([
     {
@@ -174,9 +176,24 @@ test("a conversation: started with its first message through admitInbound (the u
 
   const one = (await (await c.served.fetch(`${API}/conversations/${started.id}`, as("ana"))).json()) as ChatConversation;
   expect(one).toMatchObject({ id: started.id, title: "What is the plan", busy: false });
+  // A page names its images by URL, never their bytes; each URL serves one image, to its owner only.
   const [message] = await messagesOf(c, "ana", started.id);
-  expect(message).toMatchObject({ id: started.requestId, role: "user", state: "pending", images: [{ mimeType: "image/png", data: PIXEL }] });
+  const url = `/chat/api/conversations/${started.id}/messages/${encodeURIComponent(sent)}/images/0`;
+  expect(message).toMatchObject({ id: sent, role: "user", state: "pending", images: [{ mimeType: "image/png", url }] });
   expect(message).not.toHaveProperty("conversation");
+  expect(JSON.stringify(message)).not.toContain(PIXEL);
+  const image = await c.served.fetch(url, as("ana"));
+  expect([image.status, image.headers.get("content-type"), image.headers.get("x-content-type-options"), image.headers.get("cache-control")]).toEqual([200, "image/png", "nosniff", "private, max-age=31536000, immutable"]);
+  expect(Buffer.from(await image.arrayBuffer()).toString("base64")).toBe(PIXEL);
+  for (const [who, path] of [
+    ["ben", url],
+    ["ana", url.replace(/0$/, "1")],
+    ["ana", url.replace(/0$/, "x")],
+    ["ana", url.replace(encodeURIComponent(sent), "web%3Anone")],
+  ] as const) {
+    expect({ who, path, status: (await c.served.fetch(path, as(who))).status }).toEqual({ who, path, status: 404 });
+  }
+  expect((await c.served.fetch(url)).status).toBe(401);
 
   const renamed = await c.served.fetch(`${API}/conversations/${started.id}`, post("ana", { title: "  Plans  " }, "PATCH"));
   expect(await renamed.json()).toMatchObject({ id: started.id, title: "Plans" });
@@ -337,9 +354,9 @@ test("live events: state first; while the user waits, the answer as written (tex
   const seen = await events.take(6);
   expect(seen).toEqual([
     { type: "state", busy: true },
-    { type: "partial", text: "" },
-    { type: "partial", text: "Hel" },
-    { type: "partial", text: "Hello" },
+    { type: "partial", text: "", requests: [requestId] },
+    { type: "partial", text: "Hel", requests: [requestId] },
+    { type: "partial", text: "Hello", requests: [requestId] },
     { type: "tool", name: "websearch", state: "running" },
     { type: "tool", name: "websearch", state: "done" },
   ]);
@@ -422,6 +439,30 @@ test("live: a run is the user's by its inputs' request ids: a fast run whose mes
   await events.reader.cancel();
 });
 
+test("RATE: a user's messages a minute (messagesPerMinute), every conversation together; one too many is 429 with retry-after, before anything is admitted; another user is not", async () => {
+  const c = await chat({ config: { messagesPerMinute: 2 } });
+  const first = await start(c, "ana", "one");
+  await start(c, "ana", "two");
+  const third = await c.served.fetch(`${API}/conversations/${first.id}/messages`, post("ana", { text: "three" }));
+  expect({ status: third.status, body: await third.json() }).toMatchObject({ status: 429, body: { error: "rate_limited" } });
+  expect(Number(third.headers.get("retry-after"))).toBeGreaterThan(0);
+  expect((await c.served.fetch(`${API}/conversations`, post("ana", { text: "four" }))).status).toBe(429);
+  expect(c.runtime.dispatched.length).toBe(2);
+  expect((await start(c, "ben", "mine")).admission).toBe("started");
+});
+
+test("a page of messages holds at most PAGE_TEXT_MAX of text (at least one message); its cursor reads on from there", async () => {
+  const c = await chat({ config: { messagesPerMinute: 100 } });
+  const { id } = await start(c, "ana", "x".repeat(30_000));
+  for (let i = 0; i < 40; i++) await c.served.fetch(`${API}/conversations/${id}/messages`, post("ana", { text: `${i}`.padEnd(30_000, "y") }));
+  const page = (await (await c.served.fetch(`${API}/conversations/${id}/messages?limit=100`, as("ana"))).json()) as { items: ChatMessage[]; next?: string };
+  expect(page.items.length).toBe(Math.floor(PAGE_TEXT_MAX / 30_000));
+  expect(page.next).toBeDefined();
+  const rest = (await (await c.served.fetch(`${API}/conversations/${id}/messages?limit=100&cursor=${encodeURIComponent(page.next ?? "")}`, as("ana"))).json()) as { items: ChatMessage[]; next?: string };
+  expect(page.items.length + rest.items.length).toBe(41);
+  expect(rest.next).toBeUndefined();
+});
+
 test("stop: the run of the key's current conversation is aborted", async () => {
   const c = await chat();
   const { id } = await start(c, "ana", "hello");
@@ -472,9 +513,13 @@ test("images and bodies: at most 4, of the image types, base64, 5 MB each (413);
     const response = await c.served.fetch(`${API}/conversations`, post("ana", body));
     expect({ status: response.status }).toEqual({ status });
   }
-  const huge = await c.served.fetch(`${API}/conversations`, as("ana", { method: "POST", headers: { "content-length": String(MAX_BODY + 1) }, body: "{}" }));
+  const max = maxBodyOf("server");
+  // What 4 images of 5 MB in base64 and 32,000 characters each escaped need, and under 4 KiB of JSON around them.
+  expect(max - (4 * Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 32_000 * 6)).toBeLessThan(4 * 1024);
+  expect(maxBodyOf("durable")).toBeLessThan(Math.ceil(MAX_DURABLE_IMAGE_BYTES / 3) * 4 + 32_000 * 6 + 4 * 1024);
+  const huge = await c.served.fetch(`${API}/conversations`, as("ana", { method: "POST", headers: { "content-length": String(max + 1) }, body: "{}" }));
   expect(huge.status).toBe(413);
-  const streamed = await c.served.fetch(`${API}/conversations`, as("ana", { method: "POST", body: "x".repeat(MAX_BODY + 1) }));
+  const streamed = await c.served.fetch(`${API}/conversations`, as("ana", { method: "POST", body: "x".repeat(max + 1) }));
   expect(streamed.status).toBe(413);
   expect(c.runtime.dispatched).toEqual([]);
   // On a server 4 images of 1 MB pass (Cloudflare's limit is the Worker's and the object's).
@@ -522,7 +567,10 @@ test("the page's files: /chat redirects to /chat/, which says no page is built (
   expect(page.status).toBe(404);
   expect(await page.text()).toContain("no chat page is built");
   expect(page.headers.get("content-security-policy")).toContain("default-src 'self'");
-  expect(page.headers.get("content-security-policy")).toContain("img-src 'self' data: blob: https:");
+  // Images of its own only: an answer's image of another site loads nothing (no https: at large).
+  expect(page.headers.get("content-security-policy")).toContain("img-src 'self' data: blob:;");
+  // With providers, their avatars' hosts, and only theirs: an OIDC platform's (an unknown id) none.
+  expect(cspOf(avatarHosts(["google", "github", "corp"]))).toContain("img-src 'self' data: blob: https://*.googleusercontent.com https://avatars.githubusercontent.com;");
 });
 
 test("the operator's routes: absent without admin.auth (404); with it 401 without an operator; list, invite (the link answered once, never logged), ban, unban, reset, remove (their conversations leave the list)", async () => {
@@ -536,11 +584,26 @@ test("the operator's routes: absent without admin.auth (404); with it 401 withou
   expect(listed.items.map((each) => each.id)).toEqual(["ben"]);
   expect(listed.next).toBe("1");
 
-  const admin = (path: string, init: RequestInit = {}) => c.served.fetch(`/admin/api/channel-web${path}`, { ...init, headers: { ...OPERATOR, "content-type": "application/json" } });
+  // Without PIKIT_PUBLIC_URL a server makes links only for a loopback host: any other Host (a client
+  // writes it) is 400, and nothing is made.
+  const spoofed = (path: string, init: RequestInit = {}) => c.served.fetch(`http://evil.example/admin/api/channel-web${path}`, { ...init, headers: { ...OPERATOR, "content-type": "application/json" } });
+  for (const [path, body] of [
+    ["/invitations", { email: "cleo@example.com" }],
+    ["/users/ben/password-reset", undefined],
+  ] as const) {
+    const refused = await spoofed(path, { method: "POST", ...(body !== undefined && { body: JSON.stringify(body) }) });
+    expect({ path, status: refused.status, error: ((await refused.json()) as { error: string }).error }).toEqual({ path, status: 400, error: "public_url_required" });
+  }
+  expect(c.accounts.invited).toEqual([]);
+  const admin = (path: string, init: RequestInit = {}) => c.served.fetch(`http://localhost:3000/admin/api/channel-web${path}`, { ...init, headers: { ...OPERATOR, "content-type": "application/json" } });
   const invited = await admin("/invitations", { method: "POST", body: JSON.stringify({ email: " Cleo@Example.com ", name: "Cleo" }) });
   expect(invited.status).toBe(201);
-  expect(await invited.json()).toEqual({ userId: "u3", link: "http://pikit.test/chat/invite?token=secret-token", expiresAt: 1_000, emailed: false });
-  expect(c.accounts.invited).toEqual([{ email: "cleo@example.com", name: "Cleo", origin: "http://pikit.test" }]);
+  expect(await invited.json()).toEqual({ userId: "u3", link: "http://localhost:3000/chat/invite?token=secret-token", expiresAt: 1_000, emailed: false });
+  expect(c.accounts.invited).toEqual([{ email: "cleo@example.com", name: "Cleo", origin: "http://localhost:3000" }]);
+  // With PIKIT_PUBLIC_URL every link is under it, whatever the Host.
+  const pub = await chat({ admin: true, secrets: { ...SECRETS, PIKIT_PUBLIC_URL: "https://chat.example.com/" } });
+  const made = await pub.served.fetch("http://evil.example/admin/api/channel-web/users/ana/password-reset", { method: "POST", headers: OPERATOR });
+  expect(((await made.json()) as { link: string }).link).toBe("https://chat.example.com/chat/reset?token=secret-token");
   expect((await admin("/invitations", { method: "POST", body: JSON.stringify({ email: "cleo@example.com" }) })).status).toBe(409);
   expect((await admin("/invitations", { method: "POST", body: JSON.stringify({ email: "nope" }) })).status).toBe(400);
 

@@ -28,7 +28,7 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
 | Variable | | What |
 |---|---|---|
 | `CHANNEL_WEB_AUTH_SECRET` | secret, required | What sessions are signed with: at least 32 random characters (`openssl rand -base64 48`). Never the admin token. Changing it signs every user out. It refuses to start without it. |
-| `PIKIT_PUBLIC_URL` | optional | The public origin (`https://chat.example.com`) when a proxy hides it: redirect URIs and links are made under it. Absent, each request's origin. |
+| `PIKIT_PUBLIC_URL` | needed to serve the chat publicly from a server | The chat's public origin (`https://chat.example.com`): every link (an email's, an OAuth redirect URI, an invitation) is made under it. Absent, a server answers sign-in and makes links only at a loopback host (`localhost`, `127.0.0.1`, `[::1]`): any other `Host` is `400 public_url_required`, since a client writes it (it says so at start). On Cloudflare, absent, the Worker's own host (Cloudflare routes by it). |
 | `CHANNEL_WEB_<ID>_CLIENT_ID`, `_CLIENT_SECRET` | secret, per provider | For each id of `signIn.social` (`google` → `CHANNEL_WEB_GOOGLE_CLIENT_ID`; `-` becomes `_`). |
 | `CHANNEL_WEB_OIDC_<ID>_CLIENT_ID`, `_CLIENT_SECRET` | secret, per platform | For each `signIn.oidc` entry. |
 
@@ -51,6 +51,8 @@ OIDC platform alike).
   sessionCacheSeconds: 300,                      // how long the signed cookie vouches without a database read
   inviteTtlHours: 72,
   heartbeatMs: 15000,                            // a comment on idle live streams
+  messagesPerMinute: 20,                         // a user's messages a minute, all conversations: 429 past it
+  trustedProxyHeaders: [],                       // e.g. ["x-forwarded-for"]: only behind a proxy that sets it
 }
 ```
 
@@ -93,6 +95,28 @@ send it over a channel you trust. Without `email.send`, sending it is yours.
 
 ## What it guarantees
 
+- **Links under a trusted origin.** Every absolute URL the accounts make (an email's link, an OAuth
+  redirect URI, better-auth's trusted origin, an operator's invitation or reset) is under
+  `PIKIT_PUBLIC_URL`, or without it under the request's own origin only when that is trusted: a
+  loopback host on a server, the Worker's host on Cloudflare. A request with another `Host` is `400`
+  before anything is made (`accounts/links.ts`, `linkOrigin`): no reset or magic link ever goes out
+  under a host a client chose.
+- **Client addresses.** better-auth's rate limits (sign-in, sign-up, links) count by the address the
+  server saw (`x-pikit-client-address`, `http.route`): a client's `x-forwarded-for` changes nothing.
+  Behind a proxy every request has the proxy's address and they share one count: name the header the
+  proxy sets in `trustedProxyHeaders` (`x-forwarded-for` when it sets one address, `cf-connecting-ip`
+  behind a Cloudflare tunnel), never one a client can reach the App without.
+- **Per-user rate.** At most `messagesPerMinute` messages a user a minute, every conversation together:
+  past it `429 rate_limited` with `retry-after`, before the body is read. In memory: the App's on a
+  server, the accounts actor's on Cloudflare (the Worker asks it before each message). A restart or an
+  eviction forgets it.
+- **No unverified password.** With `email.send`, a password sign-up's password is random (the page
+  asks none) and the confirmation email is a link that sets the first one; setting a password with a
+  link verifies the email. Someone who signs up with another person's address never holds a password
+  that works once its owner comes (by that link, a magic link or a provider). Without `email.send` no
+  address is verified: a provider never links to such an account (better-auth's rule), and an operator
+  removes a squatted one.
+
 - **Isolation.** A conversation's key is `web:<user id>:<chat id>`, the chat id a UUID the server
   makes. Every route builds it from the session's user and the path's chat id, in one function
   (`keyOf`, `chat.ts`): a user can name no other user's conversation. Another user's chat id is `404`
@@ -121,9 +145,11 @@ send it over a channel you trust. Without `email.send`, sending it is yours.
   The sender of each message is `{ channel: "web", id: <user id> }`, so roles by actor see a user, not
   an operator. An operator's follow-up from the dashboard (`dashboard:` request ids) is never
   delivered (`startAnswerDelivery`'s own rule) and streams nothing live: the live view sends the
-  answer as written and the tools' names only during a run one of whose inputs is the user's (by the
-  request ids the runtime's own events give; a run already going when the view opened, while the user
-  has a message not answered yet), and never thinking, tool arguments or results, system prompts or
+  answer as written and the tools' names only during a run whose inputs are known to include one of
+  the user's messages (by the request ids the runtime's own events give before the run starts). A run
+  that answers both the user's message and an operator's follow-up is the user's, as delivery is. It
+  fails closed: a run already going when the view opened (its inputs unnamed) streams nothing, and its
+  answer comes as a message once stored. Never thinking, tool arguments or results, system prompts or
   transcript entries (`live.ts`).
 - **Live text and stored answer by identity.** A `partial` event carries its run's request ids
   (`requests`, when the runtime's events gave them), the `message` event of a stored answer the request
@@ -132,7 +158,10 @@ send it over a channel you trust. Without `email.send`, sending it is yours.
   the conversation's object). The page keeps a finished answer's live text until the messages it reads
   have that answer's id, never by comparing texts.
 - **Messages** go through `admitInbound` (the router, `inbound.normalize`, duplicates by request id),
-  with their images (at most 4 PNG, JPEG, WebP or GIF, 5 MB each; 1 MB in all on Cloudflare). The
+  with their images (at most 4 PNG, JPEG, WebP or GIF, 5 MB each; 1 MB in all on Cloudflare; the body
+  at most what those and the text need, `maxBodyOf`). A page of messages names each image by its URL
+  (`GET .../messages/:messageId/images/:n`: the owner only, its type, `nosniff`, cached privately) and
+  holds at most 1 MiB of text; image bytes are read one at a time, never in a page. The
   page may name its request (`web:` then 1 to 118 of `A-Z a-z 0-9 . _ ~ : -`): sent again, it runs
   once. A first message sent again reaches the same conversation (its chat id comes from the request
   id). A refusal is the route's status (`403` denied, `422` a stage halted it, `500` no router); a
@@ -163,7 +192,8 @@ In `start`, `actor.inbox`'s `scope` says where it runs:
   admits the Worker's messages, answers its calls about this conversation (`calls.ts`), keeps its
   messages, delivers its answers and tells the users' index (`channel-web.seen`) of each change. One
   object, `channel-web:accounts`, holds the accounts and the index, and answers the Worker's
-  `channel-web.auth.*` calls (`wiring.ts`). The Worker's half (`export const worker`, config key
+  `channel-web.auth.*` calls (`wiring.ts`). Every object registers those handlers and the index's
+  (one class), but only `channel-web:accounts` answers them: any other refuses (`no_handler`). The Worker's half (`export const worker`, config key
   `channel-web-worker`) serves the routes: a call to the conversation's object, the list one call to
   the index, live events a stream from the object, better-auth's routes forwarded as JSON with every
   `set-cookie`, and the session from the signed cookie cache when it can (no call), else a call. The
@@ -186,7 +216,17 @@ export default defineApp({ components: [/* … */ channelWeb] });
 
 `/chat/` serves `chat-files.ts`, the module the page's build writes (`src/chat/`). The kit's copy is
 empty: `/chat/` then says no page is built, and the API works alone. Every file is served under a
-Content-Security-Policy: same origin only, images also `data:`, `blob:` and `https:` (avatars).
+Content-Security-Policy: same origin only, images also `data:`, `blob:` and the avatar hosts of the
+configured built-in providers (`google`: `*.googleusercontent.com`, `github`:
+`avatars.githubusercontent.com`…; an OIDC platform's are not shown). An answer's markdown image of
+another site is shown as a link, never loaded: an answer cannot carry what it read out in an image's
+address. A failed sign-in's `?error=` shows its code's known text, else a generic one, never the
+address's own words.
+
+**Use https.** On plain http the cookies have no `__Secure-` prefix and no `Secure` flag, and anyone on
+the network reads the session: http is for `localhost` only. Serve any other deployment over https
+(`PIKIT_PUBLIC_URL=https://…`; behind a proxy that ends TLS, the App still makes `__Secure-` cookies
+under an https `PIKIT_PUBLIC_URL`).
 
 ## How it is tested
 
@@ -196,6 +236,13 @@ Content-Security-Policy: same origin only, images also `data:`, `blob:` and `htt
   end, an operator's follow-up never shown, live events, stop, duplicates, request ids, images and
   body limits, refusals, the operator's routes, the live `signUp` setting, what setup declares, the
   lifecycle suite.
+- Security cases: a spoofed `Host` gets no link nor email and `400` (accounts, the operator's routes),
+  loopback hosts and `PIKIT_PUBLIC_URL` work; a client's `x-forwarded-for` never resets a rate limit,
+  distinct addresses never share one; a squatter's password never works once the owner comes (magic
+  link, confirmation); a user's `messagesPerMinute` (server and Worker); images by URL, never in a page,
+  the owner only; a page's text bound; the accounts' and index's calls refused on any key but the
+  accounts actor's; `live.test.ts`: a view opened during an operator-only run, the user's message
+  queued, streams nothing of it (the reviewer's probe), the user's next run streams.
 - `conformance.test.ts`: the channel conformance suite (`answers: "pushed"`), the platform being the
   table (its writes failed or left hanging by the fixture).
 - `remote.test.ts`: the Worker's half over a fake platform of one App per key (`scope: "one"`), each

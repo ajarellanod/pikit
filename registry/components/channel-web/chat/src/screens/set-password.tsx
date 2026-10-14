@@ -1,11 +1,12 @@
 /**
- * Where an invitation (`#/set-password?token=…&invite=1`) and a password reset (`#/set-password?token=…`)
+ * Where an invitation (`#/set-password?token=…&invite=1`), a new account's confirmation
+ * (`&welcome=1`: setting its first password confirms the email) and a password reset (`#/set-password?token=…`)
  * land: a new password for the link's account (`POST /chat/api/auth/reset-password`), then a sign-in
  * with it when the email is given (setting it ends every session). An invitation also offers the
  * providers: one whose verified email is the invited one signs in to the same account.
  *
  * And "confirm your email" (`#/verify?email=…`), after making an account or signing in with one not
- * confirmed yet: its link signs in and comes back to `/chat/`; it can be sent again.
+ * confirmed yet: its link chooses the password (above); it can be sent again.
  */
 
 import { ArrowRight } from "iconoir-react";
@@ -19,14 +20,14 @@ import { providersOf, usePageTitle } from "@/lib/session";
 import { AuthCard, Or, ScreenLink } from "./auth-card";
 import type { SignedOutProps } from "./sign-in";
 
-export function SetPasswordScreen({ config, onSignedIn, token, invite }: SignedOutProps & { token: string | null; invite: boolean }) {
+export function SetPasswordScreen({ config, onSignedIn, token, invite, welcome = false }: SignedOutProps & { token: string | null; invite: boolean; welcome?: boolean }) {
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [again, setAgain] = useState("");
   const [busy, setBusy] = useState(false);
   const [problem, setProblem] = useState<string>();
   const [done, setDone] = useState(false);
-  usePageTitle(config.name, invite ? "Welcome" : "New password");
+  usePageTitle(config.name, invite || welcome ? "Welcome" : "New password");
   const providers = invite ? providersOf(config) : [];
 
   if (token === null || token === "") {
@@ -80,8 +81,12 @@ export function SetPasswordScreen({ config, onSignedIn, token, invite }: SignedO
   return (
     <AuthCard
       name={config.name}
-      title={invite ? "You are invited" : "Set a new password"}
-      lead={invite ? `Choose a password to talk with ${config.name}.` : "Choose a new password: every browser signed in with the old one is signed out."}
+      title={invite ? "You are invited" : welcome ? "Choose your password" : "Set a new password"}
+      lead={
+        invite || welcome
+          ? `${welcome ? "Your email is confirmed. " : ""}Choose a password to talk with ${config.name}.`
+          : "Choose a new password: every browser signed in with the old one is signed out."
+      }
       footer={<ScreenLink to="/sign-in">Sign in instead</ScreenLink>}
     >
       {problem !== undefined && <FormNote>{problem}</FormNote>}
@@ -145,7 +150,7 @@ export function VerifyScreen({ config, email, again }: SignedOutProps & { email:
       title="Confirm your email"
       lead={
         <>
-          {again ? "Your email is not confirmed yet. " : ""}We sent a link to {address === "" ? "your email" : <span className="font-medium text-ink">{address}</span>}: open it to sign in.
+          {again ? "Your email is not confirmed yet. " : ""}We sent a link to {address === "" ? "your email" : <span className="font-medium text-ink">{address}</span>}: open it to choose your password.
         </>
       }
       footer={<ScreenLink to="/sign-in">Back to sign in</ScreenLink>}

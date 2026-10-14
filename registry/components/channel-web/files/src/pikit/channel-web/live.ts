@@ -12,18 +12,22 @@
  * - `message`: a message or an answer was stored, or a message's state changed: read them again. For
  *   an answer, the request its key names (`answers`, `answeredRequest`).
  *
- * `partial` and `tool` come only during a run one of whose inputs is not an operator's (a request id
- * not `dashboard:`, as `startAnswerDelivery` decides what to deliver), known from the watch's own
- * `submission` events; for a run whose inputs it did not see (it was going when the view opened),
- * while the user has a message not answered yet (`store.pending`). A run the operator's own follow-up
- * started streams nothing to the user, and a fast run is streamed even when its user's message was
- * stored after it ended. Never a transcript entry, a system prompt, a tool's arguments or results, or an
+ * `partial` and `tool` come only during a run whose inputs are known to include one of the user's
+ * messages (a `web:` request id: this conversation's key is the user's), known from the watch's own
+ * `submission` events, which the runtime sends before the run that takes them starts. A run that
+ * answers both a user's message and an operator's follow-up is the user's, as `startAnswerDelivery`
+ * delivers its answer to them. It fails closed: a run whose inputs it cannot name (going when the view
+ * opened: a snapshot names its inputs by submission id only, and `agent.submissions` cannot turn one
+ * into a request id) streams nothing, its answer comes as a `message` once stored; the next run that
+ * starts is named. So a run the operator's own follow-up started never streams to the user, even
+ * while the user's message waits, and a fast run is streamed even when its user's message was stored
+ * after it ended. Never a transcript entry, a system prompt, a tool's arguments or results, or an
  * operator's note.
  */
 
 import { type AppContext, withAbortSignal } from "@pikit/core";
-import { type AgentObserver, answerKey, DASHBOARD_REQUEST_PREFIX, type ObservedEvent } from "@pikit/contracts";
-import type { ChatEvent } from "./api.ts";
+import { type AgentObserver, answerKey, type ObservedEvent } from "@pikit/contracts";
+import { CHAT_REQUEST_PREFIX, type ChatEvent } from "./api.ts";
 import type { ChatStore, StoreNote } from "./store.ts";
 
 type Item = { kind: "observed"; event: ObservedEvent } | { kind: "note"; note: StoreNote } | { kind: "end"; error?: unknown };
@@ -118,7 +122,6 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
   }
 
   let busy: boolean | undefined;
-  let pending = await store.pending(key);
   /** The request id of each submission the watch reported, by its id: what a run's inputs are. */
   const requests = new Map<number, string>();
   /** The request ids of the run going, by its inputs; `undefined` when they are not all known. */
@@ -128,8 +131,8 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
     const ids = inputs.map((input) => (typeof input === "number" ? requests.get(input) : undefined));
     return ids.some((id) => id === undefined) ? undefined : (ids as string[]);
   };
-  /** Whether the run going is the user's: one of its inputs is not an operator's; unknown inputs, while the user waits (`pending`). */
-  const streams = (): boolean => (runRequests === undefined ? pending : runRequests.some((id) => !id.startsWith(DASHBOARD_REQUEST_PREFIX)));
+  /** Whether the run going is the user's: its inputs are known, and one of them is a message of the user's. Unknown inputs: no. */
+  const streams = (): boolean => runRequests?.some((id) => id.startsWith(CHAT_REQUEST_PREFIX)) === true;
   let partial: Assistant | undefined;
   let shown: string | undefined;
   const tools = new Map<string, string>();
@@ -165,7 +168,6 @@ export async function* liveEvents(options: LiveOptions, ctx: AppContext): AsyncG
         return;
       }
       if (item.kind === "note") {
-        pending = await store.pending(key);
         const answers = item.note.answer === true ? answeredRequest(conversationId, item.note.id) : undefined;
         yield { type: "message", id: item.note.id, ...(answers !== undefined && { answers }) };
         continue;

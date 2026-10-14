@@ -106,8 +106,15 @@ settings-store do.
   the accounts actor), and the route sends back the cache better-auth's `getSession` renewed after that
   read (never `refreshCache`, which re-signs without reading). A ban or removal takes effect within
   `maxAge`: said in the README.
-- **Base URL**: `PIKIT_PUBLIC_URL` when set, else the request's origin; `trustedOrigins` is that
-  origin. `basePath` is `/chat/api/auth`, so an OAuth redirect URI is
+- **Base URL**: every absolute URL the accounts make (an email's link, an OAuth redirect URI,
+  `trustedOrigins`, an operator's invitation or reset) is under a trusted origin (`linkOrigin`):
+  `PIKIT_PUBLIC_URL` when set; without it, the request's own origin only when its host is trusted. On
+  a server that is a loopback host (`localhost`, `127.0.0.1`, `[::1]`, any port): a client writes
+  `Host`, so any other is `400 public_url_required` on `/chat/api/auth/*` and on the operator's
+  invitation and reset, before anything is made, and the start-up log says public access needs
+  `PIKIT_PUBLIC_URL`. On Cloudflare the Worker's own host is trusted: Cloudflare routes a request to a
+  Worker by its host (a route or `workers.dev` of the operator's), so a client cannot make it
+  another's. `basePath` is `/chat/api/auth`, so an OAuth redirect URI is
   `<origin>/chat/api/auth/callback/<provider>` (the README's table for each provider's console).
 - **Sign-in methods** (config `signIn`):
   - `password`: email and password (better-auth's `emailAndPassword`), on by default.
@@ -122,13 +129,21 @@ settings-store do.
   matches `allow`: `ana@x.com` or `@company.com`), `open`. Enforced in one place,
   `databaseHooks.user.create.before`, for every method (password, link, OAuth); tests for each.
   An OAuth account links to an existing user only when the provider says the email is verified.
-- **Email, when `email.send` is installed**: verification of a self-made account (required before
-  its first session), "forgot password", the magic link, and the invitation itself. Never inside a
+- **Email, when `email.send` is installed**: a self-made account's confirmation (required before its
+  first session), "forgot password", the magic link, and the invitation itself.
+- **No unverified password.** With email, a password sign-up's password is a random one nobody knows
+  (the request's is replaced), and its confirmation is a link that sets the first password
+  (`#/set-password?…&welcome=1`); setting a password with a link (an invitation, a reset, a
+  confirmation) verifies the email. So whoever signs up with another person's address never holds a
+  password that works once the owner confirms it (by that link, a magic link or a provider). Never inside a
   `storage.sql` transaction (there are none, above), never retried by better-auth: a failure is the
   route's error. **Without it**: no self-service reset or link; the operator's invitation and reset
   are links the operator copies (the dashboard shows them once).
 - **Rate limits**: better-auth's own, in memory (one process on a server; the one accounts actor on
-  Cloudflare), on sign-in, sign-up, reset and link routes.
+  Cloudflare), on sign-in, sign-up, reset and link routes, per client address: the one the server saw
+  (`http.route`'s `x-pikit-client-address`: a server's socket peer, Cloudflare's `cf-connecting-ip`),
+  never a header the client wrote, unless the operator names a proxy's header
+  (`trustedProxyHeaders`: `x-forwarded-for`, or `cf-connecting-ip` behind a Cloudflare tunnel).
 - **What the operator does** (`/admin/api/channel-web/*`, behind `admin.auth`, optional: without it
   the routes are absent): list users (id, name, email, methods, created, last seen, banned), invite
   (`{ email, name? }` → a link valid `inviteTtl`, emailed when `email.send` is installed), ban /
@@ -147,7 +162,12 @@ settings-store do.
 - **Request ids**: `web:<uuid>` (the page may send its own, for retries: `web:` then 1 to 118 of
   `A-Z a-z 0-9 . _ ~ : -`). Never `dashboard:`: `admitInbound` refuses it.
 - **Admission** through `admitInbound` (the router, `inbound.normalize`, duplicates), images with
-  the dashboard composer's limits (`attachmentsProblem`; on Cloudflare 1 MB in all).
+  the dashboard composer's limits (`attachmentsProblem`; on Cloudflare 1 MB in all), the body at most
+  what they and the text need on that target (`maxBodyOf`).
+- **Per-user rate**: `messagesPerMinute` (20 by default) of a user's messages, every conversation
+  together; one too many is `429 rate_limited` with `retry-after`, before its body is read. Counted in
+  memory where every message of a user passes: on a server the App; on Cloudflare the accounts actor,
+  which the Worker asks before each message (`channel-web.rate`). A restart forgets it.
 - **Answers take the channels' path**: `startAnswerDelivery` (with `outbound.queue` when installed)
   whose transport delivers to the channel's own store: table `channel_web_messages` (the user's
   messages, written when admitted, and each answer, written by the transport, idempotent by its
@@ -166,9 +186,14 @@ settings-store do.
   ids when known), `tool` (a tool's name while it runs: no arguments, no results), `message` (a
   message or answer stored, or a message's state changed: read again; an answer's names the request it
   answers, so the page swaps the live text for it by identity, never by text).
-  `partial` and `tool` only while the user has a message not answered yet in the conversation (so a
-  run of the operator's own follow-up streams nothing to the user). Never transcript entries, system
-  prompts, tool results or operator notes.
+  `partial` and `tool` only during a run whose inputs are known to include a message of the user's
+  (a `web:` request id, from the watch's `submission` events, which come before the run that takes
+  them). A run that answers both the user's message and an operator's follow-up is the user's, as
+  delivery is. Fail closed: a run whose inputs the view cannot name (going when it opened: a snapshot
+  names inputs by submission id, which `agent.submissions` cannot turn into request ids) streams
+  nothing, its answer arriving as a `message`; the next run is named. So a run of the operator's own
+  follow-up streams nothing to the user, even while the user's message waits. Never transcript
+  entries, system prompts, tool results or operator notes.
 - **Titles**: the first message, cleaned (`cleanTitle`); the user renames it.
 - **Actions**: stop the run (`agent.runtime`'s `abort`, the conversation's current one); delete from
   the list (the index only: nothing of the runtime's is deleted). No reset and no slash commands:
@@ -196,11 +221,12 @@ cannot send it without CORS, which nothing allows).
 | `GET /chat/api/conversations/:id` | `ChatConversation` (`id`, `title`, `busy`, `lastActivity`) |
 | `PATCH /chat/api/conversations/:id` | `{ title }` → `200 ChatConversation` |
 | `DELETE /chat/api/conversations/:id` | `204` (the list only) |
-| `GET /chat/api/conversations/:id/messages?limit&cursor` | `ChatPage<ChatMessage>`, newest first: `{ id, role: "user" \| "assistant", text, images?, at, state? }` (`state` of a user's message: `pending`, `answered`, `failed`, `aborted`) |
-| `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`{ requestId, admission }`) |
+| `GET /chat/api/conversations/:id/messages?limit&cursor` | `ChatPage<ChatMessage>`, newest first: `{ id, role: "user" \| "assistant", text, images?, at, state? }` (`state` of a user's message: `pending`, `answered`, `failed`, `aborted`; `images` `{ mimeType, url }`, never bytes), at most `PAGE_TEXT_MAX` (1 MiB) of text a page |
+| `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | one image's bytes: the conversation's owner only, its type, `nosniff`, `cache-control: private, immutable` |
+| `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` (`{ requestId, admission }`); `429` past `messagesPerMinute` |
 | `GET /chat/api/conversations/:id/events` | server-sent `ChatEvent`s, heartbeats; ends when the client goes |
 | `POST /chat/api/conversations/:id/abort` | `200` |
-| `GET /chat/*` | the page's files, under a Content-Security-Policy (`default-src 'self'`, images `data:` and the providers' avatars) |
+| `GET /chat/*` | the page's files, under a Content-Security-Policy (`default-src 'self'`, images `'self'`, `data:`, `blob:` and the configured built-in providers' avatar hosts only) |
 
 ## 5. The page: `src/chat/`
 A Vite + React + Tailwind v4 project of its own (section 3), built from the shared pieces (section 1):
@@ -212,6 +238,9 @@ A Vite + React + Tailwind v4 project of its own (section 3), built from the shar
   written, the tool running, stop), a new one, the composer with images.
 - Account: name, password, linked methods (link Google…), sessions (sign out everywhere), sign out.
 - Light and dark theme as the dashboard's; no admin code, route or import in its bundle.
+- An answer's markdown image of another site is a link, never loaded (`MarkdownImages` `same-origin`;
+  the CSP refuses it too): an answer cannot carry what it read out in an image's address. A failed
+  sign-in's `?error=` is said by its code's known text only, never the address's own words.
 - Reads the API with `fetch` and the session cookie; follows events with `fetch` (no `EventSource`).
   Polls only while the tab is visible (`lib-ui`'s `activity`).
 

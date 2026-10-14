@@ -84,7 +84,7 @@ export function SignInScreen({ config, onSignedIn, landing }: SignedOutProps) {
       await signInWithPassword(email.trim(), password);
       onSignedIn();
     } catch (error) {
-      if (error instanceof ChatFailure && normalCode(error.code) === "EMAIL_NOT_VERIFIED") go(`/verify?email=${encodeURIComponent(email.trim())}&again=1`);
+      if (error instanceof ChatFailure && normalCode(error.code) === "EMAIL_NOT_VERIFIED") go(`/verify?email=${encodeURIComponent(email.trim())}`);
       else setProblem(asError(error).message);
     } finally {
       setBusy(undefined);
@@ -195,7 +195,8 @@ export function SignUpScreen({ config, onSignedIn }: SignedOutProps) {
     setBusy(true);
     setProblem(undefined);
     try {
-      const made = await signUp(name.trim(), email.trim(), password);
+      // With email, the password is chosen from the confirmation's link: only the address's owner sets it.
+      const made = await signUp(name.trim(), email.trim(), config.email ? undefined : password);
       if (made.verify) go(`/verify?email=${encodeURIComponent(email.trim())}`, true);
       else onSignedIn();
     } catch (error) {
@@ -226,7 +227,11 @@ export function SignUpScreen({ config, onSignedIn }: SignedOutProps) {
       >
         <TextField label="Your name" value={name} onChange={setName} autoComplete="name" required autoFocus maxLength={100} />
         <TextField label="Email" type="email" value={email} onChange={setEmail} autoComplete="email" required />
-        <TextField label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" required minLength={8} maxLength={128} help="At least 8 characters." />
+        {config.email ? (
+          <p className="text-[12.5px] leading-[1.5] text-ink-3">We email you a link: open it to choose your password.</p>
+        ) : (
+          <TextField label="Password" type="password" value={password} onChange={setPassword} autoComplete="new-password" required minLength={8} maxLength={128} help="At least 8 characters." />
+        )}
         <Submit busy={busy}>Make the account</Submit>
       </form>
     </AuthCard>

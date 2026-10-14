@@ -33,8 +33,9 @@
 import { type AppContext, defineComponent } from "@pikit/core";
 import { type ActorInbox, type ActorMailbox, type AgentResult, type AnswerDelivery, type ChannelTransport, startAnswerDelivery } from "@pikit/contracts";
 import Type from "typebox";
+import { linkOrigin } from "./accounts/links.ts";
 import type { Accounts } from "./accounts/types.ts";
-import { createAssets } from "./assets.ts";
+import { avatarHosts, createAssets } from "./assets.ts";
 import { createLocalBackend, stateOf } from "./backend.ts";
 import { ACCOUNTS_KEY, answerConversationCalls, answerIndexCalls, SEEN } from "./calls.ts";
 import { CHAT_FILES } from "./chat-files.ts";
@@ -42,6 +43,7 @@ import { parseKey } from "./chat.ts";
 import { type AccountSecrets, Config, configProblem, SignUp, type SignUpSettings, secretsOf } from "./config.ts";
 import { answerText, createTransport, DELIVERY, INSTANCE, routeOf } from "./delivery.ts";
 import { provideAdminRoutes } from "./admin-routes.ts";
+import { createRateLimiter } from "./rate.ts";
 import { chatConfigOf, provideRoutes } from "./routes.ts";
 import { type ConversationRow, createChatStore } from "./store.ts";
 import { type AccountsWiring, BETTER_AUTH } from "./wiring.ts";
@@ -87,8 +89,12 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       const auth = pikit.useOptional("admin.auth");
 
       const store = createChatStore(() => sql.get());
-      const assets = createAssets(CHAT_FILES);
+      const assets = createAssets(CHAT_FILES, () => avatarHosts(config.signIn.social));
+      /** Every message of a user passes here on a server, and through the accounts actor on Cloudflare. */
+      const rate = createRateLimiter(config.messagesPerMinute);
       let declared = false;
+      /** Whether a request's own host is trusted for links without PIKIT_PUBLIC_URL: on Cloudflare (the Worker's route), never on a server. */
+      let trustHost = false;
 
       /** Who may sign up now: the operator's setting, else the config's. */
       const signUp = async (ctx: AppContext): Promise<SignUpSettings> => {
@@ -142,7 +148,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       const localAccounts = async (ctx: AppContext): Promise<Accounts> => {
         if (accounts !== undefined) return accounts;
         secretsRead ??= await secretsOf(config, (name) => secrets.get().get(name));
-        accounts = wiring.local({ sql: () => sql.get(), config, secrets: secretsRead, signUp, email: email.get(), logger: ctx.logger });
+        accounts = wiring.local({ sql: () => sql.get(), config, secrets: secretsRead, signUp, email: email.get(), logger: ctx.logger, trustRequestHost: trustHost });
         ctx.logger.info("channel-web: the accounts are ready", { methods: [config.signIn.password && "password", config.signIn.magicLink && "magic-link", ...config.signIn.social, ...config.signIn.oidc.map((each) => each.id)].filter(Boolean) });
         return accounts;
       };
@@ -150,12 +156,12 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
       /** The page's config, as this App's accounts make it (on Cloudflare the accounts actor answers the Worker with it). */
       const chatConfig = (ctx: AppContext) => chatConfigOf({ config, target: limits, signUp, email: email.get() !== undefined }, ctx);
 
-      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => limits, assets });
+      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => limits, rate: async (userId, ctx) => rate.take(userId, ctx.clock.now()), assets });
       provideAdminRoutes(pikit, {
         auth,
         accounts: accountsNow,
         backend: () => backend,
-        origin: (request) => secretsRead?.publicUrl ?? new URL(request.url).origin,
+        origin: (request) => linkOrigin(request.url, secretsRead?.publicUrl, trustHost),
       });
 
       /** Logged, never thrown: an event's other listeners and the run go on. */
@@ -208,6 +214,9 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         async all(ctx: AppContext): Promise<void> {
           if (config.signIn.magicLink && email.get() === undefined) throw new Error("channel-web: signIn.magicLink sends links by email: install an email.send provider (email-resend, email-ses), or turn it off");
           await localAccounts(ctx);
+          if (secretsRead?.publicUrl === undefined) {
+            ctx.logger.warn("channel-web: PIKIT_PUBLIC_URL is not set: sign-in and the accounts' links work only at localhost; set it to the chat's public origin to serve it to others");
+          }
           await startDelivery(ctx);
           if (assets.built()) ctx.logger.info("channel-web: the chat page is served at /chat/", { files: assets.size() });
           else ctx.logger.info("channel-web: no chat page is built; the API alone is served at /chat/api/");
@@ -215,9 +224,11 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
         /** One key's actor (a Durable Object): this object's conversation, or the accounts actor. */
         async one(calls: ActorInbox, send: ActorMailbox, ctx: AppContext): Promise<void> {
           limits = "durable";
+          // The Worker forwards the request as it reached it: its host is the Worker's route.
+          trustHost = true;
           tell = (rows, now) => send.send(ACCOUNTS_KEY, SEEN, { rows: rows.map((row) => ({ ...row })) }, now);
           answerConversationCalls(calls, backend);
-          answerIndexCalls(calls, store, chatConfig);
+          answerIndexCalls(calls, store, chatConfig, rate);
           wiring.answer(calls, localAccounts);
           await startDelivery(ctx);
         },
@@ -244,6 +255,7 @@ export function createChannelWeb(options: ChannelWebOptions = {}) {
           accounts = undefined;
           secretsRead = undefined;
           declared = false;
+          trustHost = false;
           // A write in flight is cut, and goes again (idempotent) at the next start.
           await stopping?.stop(ctx.abortSignal);
         },

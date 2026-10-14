@@ -17,11 +17,11 @@ import PromptBar, { type ComposerMessage } from "@/components/bui/PromptBar";
 import { ErrorNote } from "@/components/pikit/error-note";
 import { Reply, UserBubble, type UserMessage } from "@/components/pikit/message";
 import { every, usePolling } from "@/lib/activity";
-import type { ChatConversation, ChatImage, ChatMessage, ChatPage } from "@/lib/chat-api";
+import type { ChatConversation, ChatImage, ChatImageRef, ChatMessage, ChatPage } from "@/lib/chat-api";
 import { get, post, useGet } from "@/lib/client";
 import { useConversations } from "@/lib/conversations";
 import { asError, ChatFailure } from "@/lib/errors";
-import { imageLimits, messageProblem } from "@/lib/images";
+import { imageLimits, imagesOf, messageProblem } from "@/lib/images";
 import { useLive } from "@/lib/live";
 import { liveTexts } from "@/lib/live-state";
 import { discard, type Outgoing, sendTo, settle, useOutbox } from "@/lib/outbox";
@@ -37,6 +37,17 @@ export const userMessageOf = (text: string, images: readonly ChatImage[] = []): 
   role: "user",
   content: [...(text === "" ? [] : [{ type: "text" as const, text }]), ...images.map((image) => ({ type: "image" as const, mimeType: image.mimeType, data: image.data }))],
 });
+
+/** A stored message's images, from their URLs (the session's cookies), as the shared bubble shows them. */
+function StoredImages({ images }: { images: readonly ChatImageRef[] }) {
+  return (
+    <div className="flex max-w-full flex-wrap justify-end gap-2 self-end pl-10 sm:pl-24">
+      {images.map((image, i) => (
+        <img key={image.url} className="max-h-56 max-w-[min(100%,320px)] rounded-xl object-contain shadow-hairline" alt={`Image ${i + 1}`} src={image.url} loading="lazy" />
+      ))}
+    </div>
+  );
+}
 
 /** An answer, as the shared reply shows one: its markdown. */
 function Answer({ text, streaming = false }: { text: string; streaming?: boolean }) {
@@ -243,7 +254,10 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
     // Read again once it is taken, in case the live stream is not there to say so.
     void sendTo(chatId, { text, images: chatImages }).then(thread.read);
   };
-  const sendAgain = (message: ChatMessage) => void sendTo(chatId, { text: message.text, images: message.images ?? [] }).then(thread.read);
+  const sendAgain = (message: ChatMessage) =>
+    void imagesOf(message.images ?? [])
+      .then((images) => sendTo(chatId, { text: message.text, images }))
+      .then(thread.read, (thrown: unknown) => setActionError(asError(thrown)));
   const stop = () => {
     post(`/conversations/${encodeURIComponent(chatId)}/abort`).then(
       () => setActionError(undefined),
@@ -314,7 +328,8 @@ export function ConversationScreen({ chatId }: { chatId: string }) {
             <div key={message.id} className="mx-auto flex w-full max-w-[720px] flex-col gap-1">
               {message.role === "user" ? (
                 <>
-                  <UserBubble message={userMessageOf(message.text, message.images)} />
+                  {message.images !== undefined && message.images.length > 0 && <StoredImages images={message.images} />}
+                  {message.text !== "" && <UserBubble message={userMessageOf(message.text)} />}
                   {message.state === "failed" && (
                     <MessageNote tone="problem" actions={<NoteButton onClick={() => sendAgain(message)}>Send again</NoteButton>}>
                       Not answered: something failed

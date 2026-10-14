@@ -5,6 +5,7 @@
  */
 
 import Type, { type Static } from "typebox";
+import { publicUrlOf } from "./accounts/links.ts";
 
 /** A provider's id: better-auth's built-in ones (`google`, `github`…), or an OIDC platform's own. */
 const PROVIDER_ID = "^[a-z][a-z0-9-]{0,39}$";
@@ -68,13 +69,30 @@ export const Config = Type.Object({
   inviteTtlHours: Type.Integer({ minimum: 1, maximum: 24 * 30, default: 72 }),
   /** How often an idle event stream gets a comment, so that nothing between closes it. */
   heartbeatMs: Type.Integer({ minimum: 1000, default: 15_000 }),
+  /**
+   * How many messages one user may send in a minute, every conversation of theirs together: past it,
+   * `429 rate_limited` with `retry-after`. Counted in memory: on a server the App's, on Cloudflare the
+   * accounts actor's (the default App's config).
+   */
+  messagesPerMinute: Type.Integer({ minimum: 1, maximum: 10_000, default: 20 }),
+  /**
+   * Headers a proxy in front of the App sets with the client's address (`x-forwarded-for`,
+   * `cf-connecting-ip` behind a Cloudflare tunnel), read for the accounts' rate limits before the
+   * address the server saw (`x-pikit-client-address`). Empty by default: a client's own header is
+   * never trusted. Name one only when every request comes through a proxy that sets it.
+   */
+  trustedProxyHeaders: Type.Array(Type.String({ pattern: "^[a-z0-9-]{1,64}$" }), { default: [], maxItems: 8, uniqueItems: true }),
 });
 export type ChannelWebConfig = Static<typeof Config>;
 
 /** The secret better-auth signs with: at least `MIN_AUTH_SECRET` characters. */
 export const AUTH_SECRET = "CHANNEL_WEB_AUTH_SECRET";
 export const MIN_AUTH_SECRET = 32;
-/** The public origin, when the App is behind a proxy that changes it (optional). */
+/**
+ * The public origin (optional): every link the accounts make is under it. Without it, a server makes
+ * links only for a request to a loopback host (`localhost`, `127.0.0.1`, `[::1]`); on Cloudflare,
+ * under the Worker's own host.
+ */
 export const PUBLIC_URL = "PIKIT_PUBLIC_URL";
 
 /** `google` → `GOOGLE`, `my-sso` → `MY_SSO`: a provider id in a variable's name. */
@@ -109,7 +127,7 @@ export type AccountSecrets = {
   secret: string;
   social: ProviderClient[];
   oidc: OidcClient[];
-  /** `PIKIT_PUBLIC_URL`, when set: the base URL; else each request's origin. */
+  /** `PIKIT_PUBLIC_URL`, when set: the base URL; else a trusted request's origin (`linkOrigin`). */
   publicUrl?: string;
 };
 
@@ -137,8 +155,8 @@ export async function secretsOf(config: ChannelWebConfig, get: (name: string) =>
   }
   if (missing.length > 0) throw new Error(`channel-web: set ${missing.join(", ")} (the sign-in methods in its config need them): pikit configure, or the deployment's secrets`);
   if (secret.length < MIN_AUTH_SECRET) throw new Error(`channel-web: ${AUTH_SECRET} is at least ${MIN_AUTH_SECRET} characters (a random one: openssl rand -base64 48)`);
-  const publicUrl = (await get(PUBLIC_URL))?.trim();
-  return { secret, social, oidc, ...(publicUrl !== undefined && publicUrl !== "" && { publicUrl: publicUrl.replace(/\/+$/, "") }) };
+  const publicUrl = publicUrlOf(await get(PUBLIC_URL));
+  return { secret, social, oidc, ...(publicUrl !== undefined && { publicUrl }) };
 }
 
 /** Whether the OIDC ids are unique and none is a built-in provider's: two with one id would share a callback. */

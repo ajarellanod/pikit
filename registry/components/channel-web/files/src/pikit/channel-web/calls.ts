@@ -14,7 +14,8 @@
  * | `channel-web.conversation` | `{ userId, chatId }` | `ChatConversation` |
  * | `channel-web.rename` | `{ userId, chatId, title }` | `ChatConversation` |
  * | `channel-web.hide` | `{ userId, chatId }` | `{}` |
- * | `channel-web.messages` | `{ userId, chatId, limit, cursor? }` | `ChatPage<ChatMessage>`, shorter than `limit` when it would not fit in an answer (`ANSWER_CHARS`) |
+ * | `channel-web.messages` | `{ userId, chatId, limit, cursor? }` | `ChatPage<ChatMessage>`: images by URL, at most `PAGE_TEXT_MAX` of text (`store.ts`) |
+ * | `channel-web.image` | `{ userId, chatId, messageId, index }` | `ChatImage`: one image's bytes (base64), at most 5 MB |
  * | `channel-web.abort` | `{ userId, chatId }` | `{}` |
  *
  * And one stream: `channel-web.live` `{ userId, chatId }`, the conversation's `ChatEvent`s, refused
@@ -27,6 +28,7 @@
  * | `channel-web.list` | `{ userId, limit, cursor? }` | `ChatPage<ChatConversation>` |
  * | `channel-web.forget` | `{ userId }` | `{}`: the user's conversations leave the index |
  * | `channel-web.config` | `{}` | `ChatConfig`: the page's config as the accounts' App makes it (its methods, its live sign-up mode, whether it sends email) |
+ * | `channel-web.rate` | `{ userId }` | `{ retryAfter? }`: one message of the user's counted (`messagesPerMinute`); `retryAfter` (seconds) when it is one too many |
  *
  * And one message (`send`, `actor.inbox.handle`), from each conversation's object to the accounts
  * actor: `channel-web.seen` `{ rows: ConversationRow[] }`, each row's newest version.
@@ -37,9 +39,10 @@
 
 import type { AppContext } from "@pikit/core";
 import { ActorCallError, type ActorInbox, type JsonValue } from "@pikit/contracts";
-import type { ChatConfig, ChatImage } from "./api.ts";
+import { type ChatConfig, type ChatImage, MAX_IMAGES } from "./api.ts";
 import { type ChatBackend, type ChatRef, conversationOf, type NewMessage, refusal } from "./backend.ts";
 import { isChatId, keyOf, REQUEST_ID } from "./chat.ts";
+import type { RateLimiter } from "./rate.ts";
 import type { ChatStore, ConversationRow } from "./store.ts";
 
 /** The accounts actor: an object of the conversations' class, never a conversation. Its storage holds the accounts and the users' index. */
@@ -56,14 +59,14 @@ export const CALL = {
   list: "channel-web.list",
   forget: "channel-web.forget",
   config: "channel-web.config",
+  image: "channel-web.image",
+  rate: "channel-web.rate",
 } as const;
 export const LIVE = "channel-web.live";
 export const SEEN = "channel-web.seen";
 
 /** The largest page read through a call. */
 export const PAGE_MAX = 100;
-/** The longest answer a call makes, in JSON characters: well under what a call carries (32 MiB). */
-export const ANSWER_CHARS = 16 * 1024 * 1024;
 const SEEN_MAX = 100;
 
 type Fields = Record<string, unknown>;
@@ -133,16 +136,13 @@ export function answerConversationCalls(inbox: ActorInbox, backend: ChatBackend)
     await backend.hide(refOf(key, message), ctx);
     return {};
   });
-  // A page too long for an answer (images inline) is read again, half as long, until it fits.
-  inbox.answer(CALL.messages, async (key, message, ctx) => {
-    const ref = refOf(key, message);
-    const page = pageOf(message);
-    let limit = page.limit;
-    for (;;) {
-      const read = await backend.messages(ref, { ...page, limit }, ctx);
-      if (limit === 1 || JSON.stringify(read).length <= ANSWER_CHARS) return json(read);
-      limit = Math.max(1, Math.floor(limit / 2));
-    }
+  // A page carries no image's bytes and at most PAGE_TEXT_MAX of text: well under what a call carries (32 MiB).
+  inbox.answer(CALL.messages, async (key, message, ctx) => json(await backend.messages(refOf(key, message), pageOf(message), ctx)));
+  inbox.answer(CALL.image, async (key, message, ctx) => {
+    const { messageId, index } = fieldsOf(message);
+    if (typeof messageId !== "string" || !REQUEST_ID.test(messageId)) throw refusal("invalid_request", 'channel-web: "messageId" is a user\'s message id');
+    if (typeof index !== "number" || !Number.isInteger(index) || index < 0 || index >= MAX_IMAGES) throw refusal("invalid_request", `channel-web: "index" is an integer from 0 to ${MAX_IMAGES - 1}`);
+    return json(await backend.image(refOf(key, message), messageId, index, ctx));
   });
   inbox.answer(CALL.abort, async (key, message, ctx) => {
     await backend.abort(refOf(key, message), ctx);
@@ -152,10 +152,38 @@ export function answerConversationCalls(inbox: ActorInbox, backend: ChatBackend)
 }
 
 /**
- * Registers the users' index's answers over `store`, and the page's config made by `config` (used in
- * the accounts actor, whose App sends the accounts' email). Call it in `start`.
+ * `inbox` whose handlers answer only in the accounts actor: on any other key a call is refused
+ * (`no_handler`, as if absent) and a message dropped with an error, before the handler runs. Every
+ * object registers the accounts' and the index's handlers (one class): only `ACCOUNTS_KEY` answers.
  */
-export function answerIndexCalls(inbox: ActorInbox, store: ChatStore, config: (ctx: AppContext) => Promise<ChatConfig>): void {
+export function accountsOnly(inbox: ActorInbox): Pick<ActorInbox, "answer" | "handle"> {
+  const refuse = (key: string, type: string): ActorCallError => new ActorCallError("no_handler", `channel-web: only ${ACCOUNTS_KEY} answers ${type}, not ${key}`);
+  return {
+    answer: (type, handler) =>
+      inbox.answer(type, (key, message, ctx) => {
+        if (key !== ACCOUNTS_KEY) throw refuse(key, type);
+        return handler(key, message, ctx);
+      }),
+    handle: (type, handler) =>
+      inbox.handle(type, (key, message, ctx) => {
+        if (key !== ACCOUNTS_KEY) throw refuse(key, type);
+        return handler(key, message, ctx);
+      }),
+  };
+}
+
+/**
+ * Registers the users' index's answers over `store`, the page's config made by `config` (used in the
+ * accounts actor, whose App sends the accounts' email) and the users' message rate (`rate`), answered
+ * only there (`accountsOnly`).
+ * Call it in `start`.
+ */
+export function answerIndexCalls(calls: ActorInbox, store: ChatStore, config: (ctx: AppContext) => Promise<ChatConfig>, rate: RateLimiter): void {
+  const inbox = accountsOnly(calls);
+  inbox.answer(CALL.rate, async (_key, message, ctx) => {
+    const retryAfter = rate.take(text(fieldsOf(message), "userId"), ctx.clock.now());
+    return retryAfter === undefined ? {} : { retryAfter };
+  });
   inbox.answer(CALL.config, async (_key, _message, ctx) => json(await config(ctx)));
   inbox.handle(SEEN, async (_key, message) => store.seen(rowsOf(message)));
   inbox.answer(CALL.list, async (_key, message) => {

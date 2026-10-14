@@ -4,9 +4,13 @@
  * shows as it is. While a message streams each new text is parsed again and the last parse shown, so
  * the newest words never wait on an animation. Parsed texts are kept, so a message shown again (a
  * page read again, a tab back) is rendered at once.
+ *
+ * Which images a text may show is its page's (`MarkdownImages`): any (the dashboard), or its own
+ * site's only (the chat page: an image of another site is a link, so a text never makes the page load
+ * an address it chose).
  */
 
-import { useEffect, useRef, useState } from "react";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
 import type { Parsed } from "@/components/pikit/markdown-engine";
 
 type Engine = typeof import("@/components/pikit/markdown-engine");
@@ -16,6 +20,10 @@ let loading: Promise<Engine> | undefined;
 const load = () => (loading ??= import("@/components/pikit/markdown-engine").then((loaded) => (engine = loaded)));
 // Asked for as soon as a view that shows messages loads, not when the first one shows.
 void load().catch(() => {});
+
+/** The images a text shows: `all`, or `same-origin` (another site's is a link). Provided by the page. */
+export type ImagePolicy = "all" | "same-origin";
+export const MarkdownImages = createContext<ImagePolicy>("all");
 
 /** Parses kept, by text: the most recent last. */
 const KEPT = 200;
@@ -27,6 +35,7 @@ function keep(text: string, document: Parsed) {
 }
 
 export function Markdown({ text, streaming = false, className = "" }: { text: string; streaming?: boolean; className?: string }) {
+  const images = useContext(MarkdownImages);
   const [shown, setShown] = useState<{ text: string; document: Parsed } | undefined>(() => {
     const document = parsed.get(text);
     return document === undefined ? undefined : { text, document };
@@ -58,5 +67,5 @@ export function Markdown({ text, streaming = false, className = "" }: { text: st
   }, [text, streaming]);
 
   if (shown === undefined || engine === undefined) return <div className={`markdown whitespace-pre-wrap ${className}`}>{text}</div>;
-  return <engine.Render document={shown.document} className={`markdown ${className}`} />;
+  return <engine.Render document={shown.document} className={`markdown ${className}`} images={images} />;
 }

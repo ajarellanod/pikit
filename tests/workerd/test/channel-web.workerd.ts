@@ -16,7 +16,8 @@
  * - An invitation's link sets a password (`/chat/api/auth/reset-password`), then signs in; a ban is
  *   refused once the signed cookie cache expired (`Date` faked past it), the actor asked then.
  * - With `email.send` in the objects' App only (a fake), `GET /chat/api/config` says email is sent and
- *   offers the magic link, which signs a new user in; a password sign-up verifies its email first.
+ *   offers the magic link, which signs a new user in; a password sign-up's emailed link sets its first
+ *   password (the sign-up's own never works).
  */
 
 import { type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
@@ -396,14 +397,19 @@ it("email.send in the objects' App only: the config says email is sent and offer
   expect(opened.headers.get("location")).toBe(`${HTTPS}/chat/`);
   expect((await meOf(dana)).user.email).toBe("dana@example.com");
 
-  // A password sign-up: no session until the email is verified, by the link it was sent.
+  // A password sign-up: no session, and its password (anyone's) never works; the link it was sent sets
+  // the first password, which verifies the email.
   const eli = browser(fetch, HTTPS, "10.2.0.2");
   expect((await eli.send("/chat/api/auth/sign-up/email", { json: { email: "eli@example.com", password: PASSWORD, name: "Eli" } })).status).toBe(200);
   expect((await eli.send("/chat/api/me")).status).toBe(401);
+  expect((await eli.send("/chat/api/auth/sign-in/email", { json: { email: "eli@example.com", password: PASSWORD } })).status).toBe(401);
   const verification = email.sent.at(-1);
   expect(verification).toMatchObject({ to: "eli@example.com", subject: "Confirm your email for Ada" });
-  const verified = await eli.send(pathOf(linkIn(verification)));
-  expect(verified.status).toBe(302);
+  const confirmation = linkIn(verification);
+  expect(confirmation.startsWith(`${HTTPS}/chat/#/set-password?token=`) && confirmation.endsWith("&welcome=1")).toBe(true);
+  const token = new URL(confirmation.replace("#/", "")).searchParams.get("token");
+  expect((await eli.send("/chat/api/auth/reset-password", { json: { token, newPassword: "eli-chose-this-1" } })).status).toBe(200);
+  expect((await eli.send("/chat/api/auth/sign-in/email", { json: { email: "eli@example.com", password: "eli-chose-this-1" } })).status).toBe(200);
   expect((await meOf(eli)).user.email).toBe("eli@example.com");
 
   // The operator's invitation is emailed too.

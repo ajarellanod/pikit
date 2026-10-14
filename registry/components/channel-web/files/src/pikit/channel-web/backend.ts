@@ -31,7 +31,7 @@ import {
   type InboundOutcome,
 } from "@pikit/contracts";
 import type { ChatConversation, ChatEvent, ChatImage, ChatMessage, ChatPage, ChatSendResponse } from "./api.ts";
-import { CHANNEL, firstTitle, imagesProblem } from "./chat.ts";
+import { CHANNEL, firstTitle, imagePath, imagesProblem } from "./chat.ts";
 import { liveEvents } from "./live.ts";
 import type { ChatStore, ConversationRow, MessageState, StoredMessage } from "./store.ts";
 
@@ -51,8 +51,10 @@ export interface ChatBackend {
   rename(ref: ChatRef, title: string, ctx: AppContext): Promise<ChatConversation>;
   /** Out of the user's list, and gone for them: nothing of the runtime's is deleted. */
   hide(ref: ChatRef, ctx: AppContext): Promise<void>;
-  /** Newest first. Throws `not_found`, `invalid_cursor`. */
+  /** Newest first, a user's images as their URLs. Throws `not_found`, `invalid_cursor`. */
   messages(ref: ChatRef, page: { limit: number; cursor?: string }, ctx: AppContext): Promise<ChatPage<ChatMessage>>;
+  /** Image `index` of the user's message `messageId` (its request id). Throws `not_found`. */
+  image(ref: ChatRef, messageId: string, index: number, ctx: AppContext): Promise<ChatImage>;
   /** Throws `not_found` and the admission's refusals. */
   send(ref: ChatRef, message: NewMessage, ctx: AppContext): Promise<ChatSendResponse>;
   /** The live events (`live.ts`), a `state` first, until `ctx` is cancelled. Throws `not_found` before the first. */
@@ -95,7 +97,11 @@ export const conversationOf = (row: ConversationRow, busy = row.busy): ChatConve
   createdAt: row.createdAt,
 });
 
-const messageOf = ({ conversation: _runtime, ...message }: StoredMessage): ChatMessage => message;
+/** A stored message as the API says it: its images by URL (`imagePath`), never their bytes. */
+const messageOf = (chatId: string, { conversation: _runtime, images: _bytes, imageTypes, ...message }: StoredMessage): ChatMessage => ({
+  ...message,
+  ...(imageTypes !== undefined && imageTypes.length > 0 && { images: imageTypes.map((mimeType, i) => ({ mimeType, url: imagePath(chatId, message.id, i) })) }),
+});
 
 /** The backend over the contracts of the App it runs in. */
 export function createLocalBackend(contracts: LocalContracts): ChatBackend {
@@ -211,7 +217,14 @@ export function createLocalBackend(contracts: LocalContracts): ChatBackend {
       await owned(ref);
       const read = await store.messages(ref.key, page);
       const items = await reconcile(ref, read.items, ctx);
-      return { items: items.map(messageOf), ...(read.next !== undefined && { next: read.next }) };
+      return { items: items.map((item) => messageOf(ref.chatId, item)), ...(read.next !== undefined && { next: read.next }) };
+    },
+
+    async image(ref, messageId, index) {
+      await owned(ref);
+      const found = await store.image(ref.key, messageId, index);
+      if (found === undefined) throw refusal("not_found", "no such image");
+      return found;
     },
 
     async send(ref, message, ctx) {

@@ -9,7 +9,8 @@ afterEach(async () => {
   for (const f of open.splice(0)) await f.close();
 });
 const make = (options: Parameters<typeof fixture>[0] = {}): Fixture => {
-  const f = fixture({ withEmail: false, ...options });
+  // The accounts actor's, as on Cloudflare: the Worker's host is trusted.
+  const f = fixture({ withEmail: false, trustRequestHost: true, ...options });
   open.push(f);
   return f;
 };

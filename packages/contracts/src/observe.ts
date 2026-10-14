@@ -22,8 +22,8 @@
  * `admin.auth` (admin-api: every conversation), or a user of a channel for their own conversation
  * only (channel-web: the key built from the session's user). A consumer that shows it to someone who
  * is not an operator projects what that person may see (channel-web's live view: the answer's text
- * and the tools' names while their message waits; never thinking, tool arguments or results, system
- * prompts or an operator's messages). A transcript holds what people wrote: logs never carry it.
+ * and the tools' names during a run known to take their message; never thinking, tool arguments or
+ * results, system prompts or an operator's messages). A transcript holds what people wrote: logs never carry it.
  * Nothing here changes anything: actions (abort, reset) go through the contracts that own them
  * (`agent.runtime`, `conversations.registry`).
  *

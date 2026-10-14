@@ -12,8 +12,13 @@
  *   conversation of theirs, and is `404` as one that never existed.
  * - **A change needs the page's header** (`x-pikit-chat: 1`, `CHAT_CLIENT_HEADER`): `400` without, so a
  *   page of another site cannot make a signed-in browser send, rename, delete or stop anything.
- * - **Bodies are bounded**: a message at most its images in base64, its text and some room (`413`
- *   before more is read); its images checked (`imagesProblem`: number and types `400`, size `413`).
+ * - **Bodies are bounded**: a message at most what its images in base64 and its text need on this
+ *   target (`maxBodyOf`: `413` before more is read); its images checked (`imagesProblem`: number and
+ *   types `400`, size `413`).
+ * - **A user's messages are rated** (`messagesPerMinute`, every conversation together): one too many
+ *   is `429 rate_limited` with `retry-after`, before its body is read (`RouteOptions.rate`).
+ * - **Images are read one at a time** (`GET .../messages/:messageId/images/:n`), never inline in a page:
+ *   the conversation's owner only, its own type, `nosniff`, cached privately (an image never changes).
  * - **A refusal is its status**: `not_found` `404`, `invalid_request` and `invalid_cursor` `400`,
  *   `too_large` `413`, `denied` `403` (the router refused it), `rejected` `422` (a stage stopped it),
  *   `no_route` `500`. Anything else (the runtime could not take the message for a while, an object
@@ -42,6 +47,8 @@ import {
   type ChatSendResponse,
   type ChatSignInMethod,
   type ChatStartResponse,
+  IMAGE_TYPES,
+  MAX_DURABLE_IMAGE_BYTES,
   MAX_IMAGE_BYTES,
   MAX_IMAGES,
   MAX_TEXT,
@@ -57,8 +64,21 @@ export const API = "/chat/api";
 /** The largest page a client may ask for, and the default. */
 const MAX_LIMIT = 100;
 const DEFAULT_LIMIT = 50;
-/** The largest body a message can be: its images in base64, its text, and room for the rest. */
-export const MAX_BODY = MAX_IMAGES * Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + MAX_TEXT * 6 + 64 * 1024;
+const base64Length = (bytes: number): number => Math.ceil(bytes / 3) * 4;
+/** One image's JSON besides its data: `{"mimeType":"…","data":""},`, its type at most 100 characters, each escaped (6 bytes). */
+const IMAGE_JSON = '{"mimeType":"","data":""},'.length + 100 * 6;
+/** A message's JSON besides its text and images (its request id is ASCII), and 1 KiB of whitespace. */
+const MESSAGE_JSON = '{"text":"","images":[],"requestId":""}'.length + 122 + 1024;
+
+/**
+ * The largest body a message can be on `target`: its images in base64 (`MAX_IMAGES` of
+ * `MAX_IMAGE_BYTES`; on `durable` `MAX_DURABLE_IMAGE_BYTES` in all), its text with every character
+ * escaped (`\u0000`, 6 bytes), and the JSON around them.
+ */
+export function maxBodyOf(target: string): number {
+  const images = target === "durable" ? base64Length(MAX_DURABLE_IMAGE_BYTES + 2 * MAX_IMAGES) : MAX_IMAGES * base64Length(MAX_IMAGE_BYTES);
+  return images + MAX_IMAGES * IMAGE_JSON + MAX_TEXT * 6 + MESSAGE_JSON;
+}
 /** The largest body of any other change (a title). */
 const MAX_SMALL_BODY = 16 * 1024;
 
@@ -171,7 +191,7 @@ function checked<S extends typeof SendBody | typeof RenameBody>(schema: S, value
 
 /** A message from the request's body, checked: something written or attached, images the API takes. */
 async function messageOf(request: Request, target: string): Promise<Omit<NewMessage, "requestId"> & { requestId?: string }> {
-  const body = checked(SendBody, await bodyOf(request, MAX_BODY));
+  const body = checked(SendBody, await bodyOf(request, maxBodyOf(target)));
   const images = body.images ?? [];
   if (body.text.trim() === "" && images.length === 0) throw new Refused(400, "invalid_request", "/text: write something, or attach an image");
   const wrong = imagesProblem(images, target);
@@ -245,6 +265,11 @@ export interface RouteOptions {
   chatConfig(ctx: AppContext): Promise<ChatConfig>;
   /** Where the conversations are, for the image limits: `server`, or `durable` (Cloudflare). */
   limits(): "server" | "durable";
+  /**
+   * One message of `userId` counted (`messagesPerMinute`): `undefined` when it may go, else the
+   * seconds until one may. On a server the App's own count; on Cloudflare the accounts actor's.
+   */
+  rate(userId: string, ctx: AppContext): Promise<number | undefined>;
   assets: Assets;
 }
 
@@ -328,7 +353,17 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
 
   user(`GET ${API}/conversations`, async (request, ctx, me) => json<ChatPage<ChatConversation>>(200, await backend().list(me.id, pageOf(request), ctx)));
 
+  /** `429` when `me` sent too many messages this minute; `undefined` when this one may go. */
+  const limited = async (me: AccountUser, ctx: AppContext): Promise<Response | undefined> => {
+    const retryAfter = await options.rate(me.id, ctx);
+    if (retryAfter === undefined) return undefined;
+    ctx.logger.info("channel-web: a user sent too many messages", { user: me.id, retryAfter });
+    return json<ChatError>(429, { error: "rate_limited", message: `too many messages: send again in ${retryAfter} s` }, { "retry-after": String(retryAfter) });
+  };
+
   user(`POST ${API}/conversations`, async (request, ctx, me) => {
+    const refused = await limited(me, ctx);
+    if (refused !== undefined) return refused;
     const { requestId: given, ...message } = await messageOf(request, options.limits());
     // The page's request id names the conversation too: a retry reaches the same one.
     const chatId = given === undefined ? newChatId() : await chatIdFor(me.id, given);
@@ -360,7 +395,34 @@ export function provideRoutes(pikit: Pikit, options: RouteOptions): void {
     json<ChatPage<ChatMessage>>(200, await backend().messages(refOf(me, chatIdOf(request)), pageOf(request), ctx)),
   );
 
+  user(`GET ${API}/conversations/:id/messages/:messageId/images/:n`, async (request, ctx, me) => {
+    const chatId = chatIdOf(request);
+    const [, , , , , , rawId = "", , rawIndex = ""] = new URL(request.url).pathname.split("/");
+    let messageId = "";
+    try {
+      messageId = decodeURIComponent(rawId);
+    } catch {
+      // Below.
+    }
+    const index = Number(rawIndex);
+    if (!REQUEST_ID.test(messageId) || !/^[0-9]$/.test(rawIndex) || index >= MAX_IMAGES) throw new Refused(404, "not_found", "no such image");
+    const image = await backend().image(refOf(me, chatId), messageId, index, ctx);
+    const bytes = Uint8Array.from(atob(image.data), (char) => char.charCodeAt(0));
+    return new Response(bytes, {
+      headers: {
+        "content-type": IMAGE_TYPES.includes(image.mimeType) ? image.mimeType : "application/octet-stream",
+        "content-length": String(bytes.byteLength),
+        // An image of a message never changes; the session's only.
+        "cache-control": "private, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        "content-security-policy": "default-src 'none'; sandbox",
+      },
+    });
+  });
+
   user(`POST ${API}/conversations/:id/messages`, async (request, ctx, me) => {
+    const refused = await limited(me, ctx);
+    if (refused !== undefined) return refused;
     const chatId = chatIdOf(request);
     const { requestId: given, ...message } = await messageOf(request, options.limits());
     const requestId = requestIdOf(given);

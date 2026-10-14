@@ -10,7 +10,10 @@
  *   repeated version changes nothing with.
  * - **`channel_web_messages`**: the user's messages, written once admitted (with their images, state
  *   `pending`), and each answer, written by the delivery transport under its idempotency key (written
- *   twice, stored once). A user message's state moves from `pending` to `answered`, `failed` or
+ *   twice, stored once). A message's images' types are a column of their own (`image_types`): a page
+ *   of messages never reads their bytes, which only `image` does, one image at a time. A page holds at
+ *   most `PAGE_TEXT_MAX` characters of text (at least one message): past it, it ends early, its cursor
+ *   where the next starts. A user message's state moves from `pending` to `answered`, `failed` or
  *   `aborted` when its run ends. On Cloudflare, in the conversation's object.
  *
  * Who follows a conversation live (`live.ts`) hears of each message stored or changed (`notify`), in
@@ -18,7 +21,7 @@
  */
 
 import { ActorCallError, type SqlDatabase } from "@pikit/contracts";
-import type { ChatImage, ChatMessage } from "./api.ts";
+import { type ChatImage, type ChatMessage, PAGE_TEXT_MAX } from "./api.ts";
 
 const CONVERSATIONS = "channel_web_conversations";
 const MESSAGES = "channel_web_messages";
@@ -40,8 +43,12 @@ export type ConversationRow = {
   version: number;
 };
 
-/** A message and the runtime conversation a user's message went to (to ask `agent.submissions` about it). */
-export type StoredMessage = ChatMessage & { conversation?: string };
+/**
+ * A message as stored: its images with their bytes when written (`add`), their types only when read
+ * (`messages`: `imageTypes`); and the runtime conversation a user's message went to (to ask
+ * `agent.submissions` about it).
+ */
+export type StoredMessage = Omit<ChatMessage, "images"> & { images?: ChatImage[]; imageTypes?: string[]; conversation?: string };
 
 export type MessageState = NonNullable<ChatMessage["state"]>;
 
@@ -69,12 +76,12 @@ export interface ChatStore {
 
   /** Stores `message` in `key` unless it has a message of its id: whether it did. */
   add(key: string, message: StoredMessage): Promise<boolean>;
-  /** Newest first. Throws `invalid_cursor`. */
+  /** Newest first, their images' types only (`imageTypes`), at most `PAGE_TEXT_MAX` of text. Throws `invalid_cursor`. */
   messages(key: string, page: { limit: number; cursor?: string }): Promise<Paged<StoredMessage>>;
+  /** Image `index` of the user's message `id` in `key`, or `undefined`. */
+  image(key: string, id: string, index: number): Promise<ChatImage | undefined>;
   /** Moves the user's messages `ids` still `pending` to `state`: the ids it moved. */
   settle(key: string, ids: readonly string[], state: MessageState): Promise<string[]>;
-  /** Whether the user has a message not answered yet in `key`. */
-  pending(key: string): Promise<boolean>;
 
   /** Hears what is stored in `key` from now on, until the returned function is called. */
   subscribe(key: string, listener: (note: StoreNote) => void): () => void;
@@ -107,7 +114,7 @@ type ConversationSqlRow = {
   busy: number;
   version: number;
 };
-type MessageSqlRow = { id: string; role: string; text: string; images: string | null; at: number; state: string | null; conversation: string | null };
+type MessageSqlRow = { id: string; role: string; text: string; image_types: string | null; at: number; state: string | null; conversation: string | null };
 
 const rowOf = (row: ConversationSqlRow): ConversationRow => ({
   key: row.key,
@@ -125,7 +132,7 @@ const messageOf = (row: MessageSqlRow): StoredMessage => ({
   id: row.id,
   role: row.role === "assistant" ? "assistant" : "user",
   text: row.text,
-  ...(row.images !== null && { images: JSON.parse(row.images) as ChatImage[] }),
+  ...(row.image_types !== null && { imageTypes: JSON.parse(row.image_types) as string[] }),
   at: Number(row.at),
   ...(row.state !== null && { state: row.state as MessageState }),
   ...(row.conversation !== null && { conversation: row.conversation }),
@@ -145,7 +152,7 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${CONVERSATIONS}_user ON ${CONVERSATIONS} (user_id, last_activity, chat_id)`);
       await database.run(
-        `CREATE TABLE IF NOT EXISTS ${MESSAGES} (key TEXT NOT NULL, id TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, images TEXT, ` +
+        `CREATE TABLE IF NOT EXISTS ${MESSAGES} (key TEXT NOT NULL, id TEXT NOT NULL, role TEXT NOT NULL, text TEXT NOT NULL, images TEXT, image_types TEXT, ` +
           "at BIGINT NOT NULL, state TEXT, conversation TEXT, PRIMARY KEY (key, id))",
       );
       await database.run(`CREATE INDEX IF NOT EXISTS ${MESSAGES}_at ON ${MESSAGES} (key, at, id)`);
@@ -230,13 +237,14 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
 
     async add(key, message) {
       const { changes } = await (await db()).run(
-        `INSERT INTO ${MESSAGES} (key, id, role, text, images, at, state, conversation) VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key, id) DO NOTHING`,
+        `INSERT INTO ${MESSAGES} (key, id, role, text, images, image_types, at, state, conversation) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (key, id) DO NOTHING`,
         [
           key,
           message.id,
           message.role,
           message.text,
           message.images === undefined || message.images.length === 0 ? null : JSON.stringify(message.images),
+          message.images === undefined || message.images.length === 0 ? null : JSON.stringify(message.images.map((image) => image.mimeType)),
           Math.floor(message.at),
           message.state ?? null,
           message.conversation ?? null,
@@ -248,14 +256,28 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
     async messages(key, { limit, cursor }) {
       const after = cursor === undefined ? undefined : parseCursor(cursor);
       const rows = await (await db()).query<MessageSqlRow>(
-        `SELECT id, role, text, images, at, state, conversation FROM ${MESSAGES} WHERE key = ?` +
+        `SELECT id, role, text, image_types, at, state, conversation FROM ${MESSAGES} WHERE key = ?` +
           (after === undefined ? "" : " AND (at < ? OR (at = ? AND id < ?))") +
           " ORDER BY at DESC, id DESC LIMIT ?",
         after === undefined ? [key, limit + 1] : [key, after.at, after.at, after.id, limit + 1],
       );
-      const items = rows.slice(0, limit).map(messageOf);
+      // At most PAGE_TEXT_MAX of text, but always one message: a page that ends early has a cursor.
+      let text = 0;
+      let kept = 0;
+      for (const row of rows.slice(0, limit)) {
+        text += row.text.length;
+        if (kept > 0 && text > PAGE_TEXT_MAX) break;
+        kept++;
+      }
+      const items = rows.slice(0, kept).map(messageOf);
       const last = items.at(-1);
-      return { items, ...(rows.length > limit && last !== undefined && { next: cursorOf(last.at, last.id) }) };
+      return { items, ...(rows.length > kept && last !== undefined && { next: cursorOf(last.at, last.id) }) };
+    },
+
+    async image(key, id, index) {
+      const [row] = await (await db()).query<{ images: string | null }>(`SELECT images FROM ${MESSAGES} WHERE key = ? AND id = ? AND role = 'user'`, [key, id]);
+      if (row?.images === null || row?.images === undefined) return undefined;
+      return (JSON.parse(row.images) as ChatImage[])[index];
     },
 
     async settle(key, ids, state) {
@@ -266,11 +288,6 @@ export function createChatStore(sql: () => SqlDatabase): ChatStore {
         if (changes > 0) moved.push(id);
       }
       return moved;
-    },
-
-    async pending(key) {
-      const rows = await (await db()).query<{ id: string }>(`SELECT id FROM ${MESSAGES} WHERE key = ? AND role = 'user' AND state = 'pending' LIMIT 1`, [key]);
-      return rows.length > 0;
     },
 
     subscribe(key, listener) {

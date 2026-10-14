@@ -6,11 +6,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { AppContext, Logger } from "@pikit/core";
+import { CLIENT_ADDRESS_HEADER } from "@pikit/contracts";
 import { openSqliteDatabase, type SqliteDatabase } from "@pikit/pi-adapter/testing";
 import { createLocalAccounts, type EmailMessage, type LocalAccountsOptions, type SignUpPolicy } from "./local.ts";
 import type { Accounts } from "./types.ts";
 
-export const ORIGIN = "http://chat.test";
+/** A loopback origin: without `publicUrl`, a server's accounts serve only this machine's host. */
+export const ORIGIN = "http://localhost:3000";
 export const SECRET = "test-secret-of-at-least-thirty-two-characters";
 
 export const silent: Logger = { debug() {}, info() {}, warn() {}, error() {} };
@@ -92,7 +94,7 @@ export async function fakeOidc(clientId: string) {
   };
 }
 
-/** A browser on the chat page: its cookies, its address. */
+/** A browser on the chat page: its cookies, its address (as the server saw it: `x-pikit-client-address`). */
 export class Browser {
   readonly jar = new Map<string, string>();
   constructor(
@@ -104,7 +106,7 @@ export class Browser {
 
   /** A request as the browser sends it (cookies, origin, address). */
   build(path: string, init: { method?: string; json?: unknown } = {}): Request {
-    const headers = new Headers({ origin: this.origin, "x-forwarded-for": this.ip });
+    const headers = new Headers({ origin: this.origin, [CLIENT_ADDRESS_HEADER]: this.ip });
     if (this.jar.size > 0) headers.set("cookie", [...this.jar].map(([k, v]) => `${k}=${v}`).join("; "));
     let body: string | undefined;
     if (init.json !== undefined) {

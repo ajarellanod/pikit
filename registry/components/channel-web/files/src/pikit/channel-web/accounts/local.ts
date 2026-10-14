@@ -5,11 +5,13 @@
  * - **Routes** under `/chat/api/auth` (`AUTH_BASE_PATH`). Cookies `pikit_chat.*` (`__Secure-pikit_chat.*`
  *   on https), path `/chat/`, `HttpOnly`, `SameSite=Lax`, `Secure` on https. The signed cookie cache
  *   (`session_data`) holds a session `sessionCacheSeconds`: a ban or a removal takes effect within it.
- * - **Base URL**: `publicUrl` (`PIKIT_PUBLIC_URL`) when set; else each request's origin, which
- *   better-auth then derives per request (links in its emails, `trustedOrigins`). `Secure` is fixed
- *   when an instance is made, so there is one instance per scheme the requests come with (http, https).
- *   Without `publicUrl`, a link in an email is built from the request's `Host`: set it on a server
- *   behind a proxy that does not set `Host` itself.
+ * - **Base URL**: `publicUrl` (`PIKIT_PUBLIC_URL`) when set; else the request's origin, which
+ *   better-auth then derives per request (links in its emails, OAuth redirect URIs, `trustedOrigins`),
+ *   only when its host is trusted (`linkOrigin`): with `trustRequestHost` (Cloudflare: the Worker's
+ *   route, which a client cannot make another's), else only a loopback host (a server: a client writes
+ *   `Host`). Any other request is `400 public_url_required` before better-auth sees it, so no link is
+ *   ever made under a host a client chose. `Secure` is fixed when an instance is made, so there is one
+ *   instance per scheme the requests come with (http, https).
  * - **Who may have an account** is decided in one place, `databaseHooks.user.create.before`, for
  *   every method (password, magic link, OAuth, OIDC): `invite` refuses every user but the operator's
  *   (`invite()` marks them with `invitedAt`, a field no request can set: `input: false`),
@@ -21,11 +23,19 @@
  * - **Invitations** make the user with `emailVerified: true` (the operator vouches for the address; a
  *   provider's verified email then links to it) and a password-reset token: the link sets a password
  *   (`links.ts`). A crash between the user and the token leaves a user to invite again.
- * - **Email** (when `email` is given): verification of a self-made account (required before its first
- *   session), "forgot password", the magic link, invitations and operator's resets. Plain, short, the
- *   link and the assistant's name. A failure is the route's error; nothing retries it.
+ * - **Email** (when `email` is given): a self-made account's confirmation, "forgot password", the
+ *   magic link, invitations and operator's resets. Plain, short, the link and the assistant's name. A
+ *   failure is the route's error; nothing retries it.
+ * - **No unverified password** (when `email` is given): a password sign-up (`/sign-up/email`) gets a
+ *   random password nobody knows, whatever the request said (a `before` hook on that endpoint, after
+ *   better-auth's routing: no spelling of the path escapes it), and its confirmation email is a link that
+ *   sets the account's first password (`welcome`). Setting a password with a link (an invitation, a
+ *   reset, a confirmation) verifies the email (`onPasswordReset`): a link reached that address, or the
+ *   operator vouched. So someone who signs up with another person's address never holds a password
+ *   that works once its owner confirms it (by that link, a magic link or a provider).
  * - **Rate limits**: better-auth's, in memory, on (sign-in, sign-up 3 per 10 s; reset and verification
- *   3 per minute; magic link 5 per minute), per client address from `ipHeaders`.
+ *   3 per minute; magic link 5 per minute), per client address from `ipHeaders`: by default the
+ *   server's (`x-pikit-client-address`, `http.route`), never a header the client wrote.
  * - **Origin and CSRF checks** always on (better-auth's default turns them off under `NODE_ENV=test`): a
  *   request with the cookies whose `Origin` (else `Referer`) is not the base URL's is refused (403).
  * - **Sessions**: `user` is better-auth's `getSession`; read from the database (the cookie cache
@@ -33,15 +43,15 @@
  */
 
 import type { ActorCallErrorCode, SqlDatabase } from "@pikit/contracts";
-import { ActorCallError } from "@pikit/contracts";
+import { ActorCallError, CLIENT_ADDRESS_HEADER } from "@pikit/contracts";
 import type { AppContext, Logger } from "@pikit/core";
-import { APIError } from "better-auth/api";
+import { APIError, createAuthMiddleware } from "better-auth/api";
 import { betterAuth } from "better-auth/minimal";
 import { genericOAuth } from "better-auth/plugins/generic-oauth";
 import { magicLink } from "better-auth/plugins/magic-link";
 import { ACCOUNT_TABLE, MODEL_NAMES, migrate, SESSION_TABLE, sqlAdapter, USER_TABLE } from "./adapter.ts";
 import { MAX_AUTH_BODY } from "./forward.ts";
-import { AUTH_BASE_PATH, CHAT_LINKS, setPasswordLink } from "./links.ts";
+import { AUTH_BASE_PATH, linkOrigin, PUBLIC_URL_REQUIRED, setPasswordLink } from "./links.ts";
 import type { AccountLink, AccountSession, AccountSummary, AccountsPage, AccountUser, Accounts } from "./types.ts";
 
 /** The cookies' name prefix: `pikit_chat.session_token`, `pikit_chat.session_data`. */
@@ -58,8 +68,10 @@ export type LocalAccountsOptions = {
   sql: () => SqlDatabase;
   /** better-auth's secret (`CHANNEL_WEB_AUTH_SECRET`), at least 32 characters. */
   secret: string;
-  /** `PIKIT_PUBLIC_URL` (an origin, `https://bot.example.com`): the base URL; else each request's origin. */
+  /** `PIKIT_PUBLIC_URL` (an origin, `https://bot.example.com`): the base URL; else a trusted request's origin. */
   publicUrl?: string;
+  /** Without `publicUrl`, whether any request's host is trusted (Cloudflare: the Worker's route), not only a loopback one. */
+  trustRequestHost?: boolean;
   /** The assistant's name, in emails. */
   name: string;
   /** Email and password sign-in. */
@@ -80,7 +92,7 @@ export type LocalAccountsOptions = {
   inviteTtlHours?: number;
   /** How long a password-reset link works. Default 3600. */
   resetTtlSeconds?: number;
-  /** The headers holding the client's address, for rate limits. Default `cf-connecting-ip`, `x-forwarded-for`. */
+  /** The headers holding the client's address, for rate limits, first found first. Default the server's, `x-pikit-client-address`. */
   ipHeaders?: string[];
   /** Where better-auth's warnings and errors go. */
   logger?: Logger;
@@ -118,7 +130,15 @@ type Instance = ReturnType<typeof build>;
  */
 const CALL_HEADER = "x-pikit-chat-call";
 
-function build(options: LocalAccountsOptions, secure: boolean, ready: () => Promise<SqlDatabase>, contexts: Map<string, AppContext>) {
+/** What `build` needs of the accounts around it. */
+type Around = {
+  ready: () => Promise<SqlDatabase>;
+  contexts: Map<string, AppContext>;
+  /** A token that sets `userId`'s password (`reset-password`), valid `ttlMs`. */
+  resetToken: (userId: string, ttlMs: number) => Promise<{ token: string; expiresAt: number }>;
+};
+
+function build(options: LocalAccountsOptions, secure: boolean, { ready, contexts, resetToken }: Around) {
   const { email } = options;
   const appContext = (request: Request | undefined): AppContext | undefined => {
     const call = request?.headers.get(CALL_HEADER);
@@ -130,6 +150,10 @@ function build(options: LocalAccountsOptions, secure: boolean, ready: () => Prom
     await email(message, ctx);
   };
   const verificationRequired = options.password && email !== undefined;
+  /** A password sign-up whose password is nobody's: the confirmation emailed sets the first one. */
+  const unknowable = createAuthMiddleware(async (ctx) =>
+    ctx.path === "/sign-up/email" ? { context: { body: { ...(ctx.body as Record<string, unknown>), password: randomToken() } } } : undefined,
+  );
   const cacheSeconds = options.sessionCacheSeconds ?? 300;
   const logger = options.logger;
 
@@ -164,18 +188,25 @@ function build(options: LocalAccountsOptions, secure: boolean, ready: () => Prom
       resetPasswordTokenExpiresIn: options.resetTtlSeconds ?? 3600,
       ...(email !== undefined && {
         sendResetPassword: async ({ user, url, token }, request) =>
-          send(request, resetMessage(options.name, user.email, setPasswordLink(new URL(url).origin, token, false))),
+          send(request, resetMessage(options.name, user.email, setPasswordLink(new URL(url).origin, token, "reset"))),
       }),
+      // A link that sets a password reached the address (or the operator handed it): the email is the
+      // person's. Not through better-auth's updateUser: nothing else runs on it.
+      onPasswordReset: async ({ user }) => {
+        await (await ready()).run(`UPDATE ${USER_TABLE} SET "emailVerified" = 1, "updatedAt" = ? WHERE "id" = ? AND "emailVerified" = 0`, [new Date().toISOString(), user.id]);
+      },
     },
     ...(email !== undefined && {
+      // A self-made account is confirmed by setting its first password with the emailed link, never
+      // by better-auth's verify-email link (whose token nobody is sent): the password a sign-up came with
+      // is a random one (`handle`).
       emailVerification: {
         sendOnSignUp: true,
-        sendOnSignIn: true,
-        autoSignInAfterVerification: true,
+        sendOnSignIn: false,
+        autoSignInAfterVerification: false,
         sendVerificationEmail: async ({ user, url }, request) => {
-          const link = new URL(url);
-          link.searchParams.set("callbackURL", CHAT_LINKS.home);
-          await send(request, verificationMessage(options.name, user.email, link.toString()));
+          const { token } = await resetToken(user.id, (options.resetTtlSeconds ?? 3600) * 1000);
+          await send(request, verificationMessage(options.name, user.email, setPasswordLink(new URL(url).origin, token, "welcome")));
         },
       },
     }),
@@ -200,12 +231,13 @@ function build(options: LocalAccountsOptions, secure: boolean, ready: () => Prom
           ]
         : []),
     ],
+    ...(verificationRequired && { hooks: { before: unknowable } }),
     rateLimit: { enabled: true, storage: "memory", window: 60, max: 100 },
     advanced: {
       cookiePrefix: COOKIE_PREFIX,
       useSecureCookies: secure,
       defaultCookieAttributes: { path: COOKIE_PATH, sameSite: "lax", httpOnly: true, secure },
-      ipAddress: { ipAddressHeaders: options.ipHeaders ?? ["cf-connecting-ip", "x-forwarded-for"] },
+      ipAddress: { ipAddressHeaders: options.ipHeaders ?? [CLIENT_ADDRESS_HEADER] },
       // Said, never left to better-auth's default, which turns both off when NODE_ENV is "test" or TEST is set.
       disableOriginCheck: false,
       disableCSRFCheck: false,
@@ -249,7 +281,7 @@ const resetMessage = (name: string, to: string, link: string): EmailMessage => (
 const verificationMessage = (name: string, to: string, link: string): EmailMessage => ({
   to,
   subject: `Confirm your email for ${name}`,
-  text: `Open this link to confirm your email and sign in:\n\n${link}\n\nIf you did not sign up, ignore this email.${signature(name)}`,
+  text: `Open this link to confirm your email and choose your password:\n\n${link}\n\nIf you did not sign up, ignore this email.${signature(name)}`,
 });
 const magicLinkMessage = (name: string, to: string, link: string): EmailMessage => ({
   to,
@@ -286,7 +318,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
   const instance = (secure: boolean): Instance => {
     let made = instances.get(secure);
     if (made === undefined) {
-      made = build(options, secure, ready, contexts);
+      made = build(options, secure, { ready, contexts, resetToken });
       instances.set(secure, made);
     }
     return made;
@@ -298,24 +330,30 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
   const userRow = async (userId: string): Promise<UserRow | undefined> =>
     (await (await ready()).query<UserRow>(`SELECT * FROM ${USER_TABLE} WHERE "id" = ?`, [userId]))[0];
 
-  const resetToken = async (userId: string, ttlMs: number): Promise<{ token: string; expiresAt: number }> => {
+  async function resetToken(userId: string, ttlMs: number): Promise<{ token: string; expiresAt: number }> {
     const token = randomToken();
     const expiresAt = Date.now() + ttlMs;
     const context = await any().$context;
     await context.internalAdapter.createVerificationValue({ identifier: `reset-password:${token}`, value: userId, expiresAt: new Date(expiresAt) });
     return { token, expiresAt };
-  };
+  }
 
   return {
     async handle(request, ctx) {
       const length = Number(request.headers.get("content-length") ?? "0");
       if (length > MAX_AUTH_BODY) return Response.json({ error: "too_large" }, { status: 413 });
+      // Every link better-auth makes for this request is under its origin: only a trusted one.
+      if (linkOrigin(request.url, options.publicUrl, options.trustRequestHost === true) === undefined) {
+        return Response.json(PUBLIC_URL_REQUIRED, { status: 400, headers: { "cache-control": "no-store" } });
+      }
       const call = crypto.randomUUID();
       const headers = new Headers(request.headers);
       headers.set(CALL_HEADER, call);
       contexts.set(call, ctx);
       try {
-        return await instance(secureFor(request.url)).handler(new Request(request, { headers }));
+        // From the URL (Bun 1.4 keeps a request's own headers over new ones in `new Request(request, …)` when they are empty).
+        const body = request.body;
+        return await instance(secureFor(request.url)).handler(new Request(request.url, { method: request.method, headers, body, ...(body !== null && { duplex: "half" }) } as RequestInit));
       } finally {
         contexts.delete(call);
       }
@@ -375,6 +413,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
     },
 
     async invite(person, origin, ctx) {
+      // `origin` is the caller's `linkOrigin` (the admin routes'): checked there, before anything is made.
       const address = person.email.trim().toLowerCase();
       if (address.length > 254 || !EMAIL.test(address)) throw refusal("invalid_request", "that is not an email address");
       const context = await any().$context;
@@ -391,7 +430,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
         userId = created.id;
       }
       const { token, expiresAt } = await resetToken(userId, (options.inviteTtlHours ?? 72) * 3_600_000);
-      const link = setPasswordLink(origin, token, true);
+      const link = setPasswordLink(origin, token, "invite");
       if (options.email !== undefined) await options.email(invitationMessage(options.name, address, link), ctx);
       return { link, expiresAt, emailed: options.email !== undefined, userId } satisfies AccountLink & { userId: string };
     },
@@ -400,7 +439,7 @@ export function createLocalAccounts(options: LocalAccountsOptions): Accounts {
       const row = await userRow(userId);
       if (row === undefined) throw refusal("not_found", "no such user");
       const { token, expiresAt } = await resetToken(userId, (options.resetTtlSeconds ?? 3600) * 1000);
-      const link = setPasswordLink(origin, token, false);
+      const link = setPasswordLink(origin, token, "reset");
       if (options.email !== undefined) await options.email(resetMessage(options.name, row.email, link), ctx);
       return { link, expiresAt, emailed: options.email !== undefined };
     },

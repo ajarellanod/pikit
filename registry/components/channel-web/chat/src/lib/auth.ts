@@ -6,8 +6,8 @@
  * - a sign-in by a provider or a magic link comes back to `/chat/` (`callbackURL`), or to the sign-in
  *   view with `?error=<code>` (`errorCallbackURL`), the code in the address's query, before its `#`;
  * - linking a provider comes back to the account view, likewise;
- * - an invitation and a reset land on `#/set-password?token=…` (`&invite=1` for an invitation);
- * - an email's verification signs in and lands on `/chat/`.
+ * - an invitation, a reset and a new account's confirmation land on `#/set-password?token=…`
+ *   (`&invite=1` for an invitation, `&welcome=1` for a confirmation).
  */
 
 import { post, request } from "./client.ts";
@@ -25,9 +25,12 @@ export async function signInWithPassword(email: string, password: string): Promi
   await auth("/sign-in/email", { email, password, callbackURL: HOME, rememberMe: true });
 }
 
-/** A new account; `verify`: it must confirm its email before its first session (no session yet). */
-export async function signUp(name: string, email: string, password: string): Promise<{ verify: boolean }> {
-  const made = await auth<{ token: string | null }>("/sign-up/email", { name, email, password, callbackURL: HOME });
+/**
+ * A new account. With email (`ChatConfig.email`) no password is sent: the server gives it none anyone
+ * knows, and the confirmation emailed sets the first (`verify`: no session yet). Without, `password` is it.
+ */
+export async function signUp(name: string, email: string, password?: string): Promise<{ verify: boolean }> {
+  const made = await auth<{ token: string | null }>("/sign-up/email", { name, email, ...(password !== undefined && { password }), callbackURL: HOME });
   return { verify: made.token === null };
 }
 
@@ -53,7 +56,7 @@ export async function resetPassword(token: string, newPassword: string): Promise
   await auth("/reset-password", { token, newPassword });
 }
 
-/** Sends the email's verification link again. */
+/** Sends the account's confirmation (a link that sets its first password) again. */
 export async function sendVerificationEmail(email: string): Promise<void> {
   await auth("/send-verification-email", { email, callbackURL: HOME });
 }

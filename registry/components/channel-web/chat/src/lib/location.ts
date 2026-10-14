@@ -66,18 +66,20 @@ export function chatIdOf(path: string): string | undefined {
   }
 }
 
-/** The `?error=` better-auth left in the address (its query, else the hash's), taken out of it; read once. */
-export function takeLandingError(): { code: string; description?: string } | undefined {
+/**
+ * The `?error=` code better-auth left in the address (its query, else the hash's), taken out of it with
+ * any `error_description`; read once. Only the code: a description is words anyone can put in a link.
+ */
+export function takeLandingError(): { code: string } | undefined {
   const url = new URL(window.location.href);
   const route = parseRoute(url.hash);
   const code = url.searchParams.get("error") ?? route.query.get("error");
   if (code === null || code === "") return undefined;
-  const description = url.searchParams.get("error_description") ?? route.query.get("error_description") ?? undefined;
   for (const name of ["error", "error_description"]) {
     url.searchParams.delete(name);
     route.query.delete(name);
   }
   const query = route.query.toString();
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}#${route.path}${query === "" ? "" : `?${query}`}`);
-  return { code, ...(description !== undefined && description !== "" && { description }) };
+  return { code };
 }

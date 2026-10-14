@@ -10,6 +10,8 @@
  *   JSON (`accounts/forward.ts`), every `set-cookie` kept.
  * - `answer`: the accounts actor answers those calls with its local accounts, each message checked on
  *   arrival. A refusal (`not_found`, `exists`, `invalid_request`) is an `ActorCallError` and crosses whole.
+ *   Every object registers them (one class), but only `channel-web:accounts` answers: any other key is
+ *   refused (`no_handler`, `accountsOnly`) before the accounts are made or read.
  *
  * | Type | Message | Answer |
  * |---|---|---|
@@ -24,12 +26,12 @@
  */
 
 import type { AppContext, Logger } from "@pikit/core";
-import { ActorCallError, type ActorInbox, type ActorMailbox, type EmailSender, type JsonValue, type SqlDatabase } from "@pikit/contracts";
+import { ActorCallError, type ActorInbox, type ActorMailbox, CLIENT_ADDRESS_HEADER, type EmailSender, type JsonValue, type SqlDatabase } from "@pikit/contracts";
 import { checkForwardedRequest, checkForwardedResponse, forwardRequest, forwardResponse, requestOf, responseOf, TooLarge } from "./accounts/forward.ts";
 import { createLocalAccounts } from "./accounts/local.ts";
 import { cachedUser } from "./accounts/session.ts";
 import type { AccountLink, AccountSession, AccountsPage, Accounts } from "./accounts/types.ts";
-import { ACCOUNTS_KEY } from "./calls.ts";
+import { ACCOUNTS_KEY, accountsOnly } from "./calls.ts";
 import type { AccountSecrets, ChannelWebConfig, SignUpSettings } from "./config.ts";
 
 /** What the local accounts are made with. */
@@ -42,6 +44,8 @@ export type LocalAccountsDeps = {
   /** `email.send`, when installed. */
   email: EmailSender | undefined;
   logger: Logger;
+  /** Without `PIKIT_PUBLIC_URL`, whether any request's host is trusted for links (Cloudflare), not only a loopback one (a server). */
+  trustRequestHost: boolean;
 };
 
 /** What the Worker's accounts are made with. */
@@ -107,11 +111,14 @@ function sessionOf(value: unknown): AccountSession | undefined {
 
 /** The accounts better-auth makes. */
 export const BETTER_AUTH: AccountsWiring = {
-  local: ({ sql, config, secrets, signUp, email, logger }) =>
+  local: ({ sql, config, secrets, signUp, email, logger, trustRequestHost }) =>
     createLocalAccounts({
       sql,
       secret: secrets.secret,
       ...(secrets.publicUrl !== undefined && { publicUrl: secrets.publicUrl }),
+      trustRequestHost,
+      // A proxy's header only when the operator says every request comes through it; then the server's.
+      ipHeaders: [...config.trustedProxyHeaders, CLIENT_ADDRESS_HEADER],
       name: config.name,
       password: config.signIn.password,
       magicLink: config.signIn.magicLink,
@@ -165,7 +172,8 @@ export const BETTER_AUTH: AccountsWiring = {
     };
   },
 
-  answer(inbox, accountsOf) {
+  answer(calls, accountsOf) {
+    const inbox = accountsOnly(calls);
     inbox.answer(AUTH_CALL.handle, async (_key, message, ctx) => {
       const forwarded = checkForwardedRequest(message);
       if (forwarded === undefined) throw invalid("not a request to /chat/api/auth/");

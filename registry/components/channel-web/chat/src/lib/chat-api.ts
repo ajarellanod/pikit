@@ -18,11 +18,12 @@
  * | `/chat/api/auth/*` | better-auth's own routes (sign in, sign up, OAuth callbacks, links, sessions) |
  * | `GET /chat/api/me` | `ChatMe` |
  * | `GET /chat/api/conversations?limit&cursor` | `ChatPage<ChatConversation>`, newest activity first |
- * | `POST /chat/api/conversations` | `ChatSendRequest` → `201 ChatStartResponse` |
+ * | `POST /chat/api/conversations` | `ChatSendRequest` → `201 ChatStartResponse` (`429` past `ChatConfig`'s rate) |
  * | `GET /chat/api/conversations/:id` | `ChatConversation` |
  * | `PATCH /chat/api/conversations/:id` | `ChatRenameRequest` → `200 ChatConversation` |
  * | `DELETE /chat/api/conversations/:id` | `204`: out of the list (nothing of the runtime's is deleted) |
- * | `GET /chat/api/conversations/:id/messages?limit&cursor` | `ChatPage<ChatMessage>`, newest first |
+ * | `GET /chat/api/conversations/:id/messages?limit&cursor` | `ChatPage<ChatMessage>`, newest first, at most `PAGE_TEXT_MAX` characters of text (then fewer than `limit`, and `next`) |
+ * | `GET /chat/api/conversations/:id/messages/:messageId/images/:n` | the bytes of a message's image `n` (`ChatImageRef.url`), its type, cached privately |
  * | `POST /chat/api/conversations/:id/messages` | `ChatSendRequest` → `202 ChatSendResponse` |
  * | `GET /chat/api/conversations/:id/events` | server-sent events, one `ChatEvent` per `data:` line, `state` first |
  * | `POST /chat/api/conversations/:id/abort` | `200 ChatAbortResponse` |
@@ -44,6 +45,8 @@ export const MAX_DURABLE_IMAGE_BYTES = 1024 * 1024;
 export const MAX_TEXT = 32_000;
 /** The longest title, in characters. */
 export const TITLE_MAX = 60;
+/** The most text a page of messages carries, in characters: past it a page is shorter than its `limit`. */
+export const PAGE_TEXT_MAX = 1024 * 1024;
 
 /** One way to sign in, as the sign-in page offers it. */
 export type ChatSignInMethod =
@@ -107,12 +110,20 @@ export interface ChatConversation {
   createdAt: number;
 }
 
-/** An image attached to a message. */
+/** An image a message is sent with. */
 export interface ChatImage {
   /** One of `IMAGE_TYPES`. */
   mimeType: string;
   /** Its bytes, base64 (standard, padded), without a `data:` prefix. */
   data: string;
+}
+
+/** An image of a stored message: its type, and where its bytes are (`GET`, the session's cookies). */
+export interface ChatImageRef {
+  /** One of `IMAGE_TYPES`. */
+  mimeType: string;
+  /** `/chat/api/conversations/:id/messages/:messageId/images/:n`. */
+  url: string;
 }
 
 /** One message of a conversation: the user's, or an answer. */
@@ -122,7 +133,8 @@ export interface ChatMessage {
   role: "user" | "assistant";
   /** Markdown, for an answer. */
   text: string;
-  images?: ChatImage[];
+  /** A user's message's images: read each from its `url` (with the session), never inline. */
+  images?: ChatImageRef[];
   /** Epoch ms. */
   at: number;
   /**
@@ -190,7 +202,8 @@ export type ChatEvent =
 
 export interface ChatError {
   /**
-   * `unauthorized` (401), `invalid_request` (400), `not_found` (404), `too_large` (413), `denied`
+   * `unauthorized` (401), `invalid_request` (400), `not_found` (404), `too_large` (413), `rate_limited`
+   * (429: too many messages a minute, `retry-after` says when to send again), `denied`
    * (403: the router refused the message, `message` says why), `rejected` (422: a stage refused it),
    * `no_route` (500: no router installed), `unavailable` (503: on Cloudflare an object did not answer).
    */

@@ -4,8 +4,9 @@
  * The code is the chat API's (`ChatError.error`), better-auth's (`{ code }`), or `http_<status>`.
  *
  * Codes also come back in the page's address after a sign-in by a provider or a link
- * (`?error=SIGN_UP_NOT_ALLOWED`, `?error=account_not_linked`): `errorText` says those too. Pure
- * (`scripts/chat.test.ts` reads it).
+ * (`?error=SIGN_UP_NOT_ALLOWED`, `?error=account_not_linked`): `landingText` says those, a known
+ * code's text or a generic one, never words from the address (anyone can make a link that carries
+ * some). Pure (`scripts/chat.test.ts` reads it).
  */
 
 export class ChatFailure extends Error {
@@ -30,7 +31,7 @@ const TEXTS: Record<string, string> = {
   INVALID_EMAIL_OR_PASSWORD: "That email and password do not match an account.",
   INVALID_EMAIL: "That is not an email address.",
   INVALID_PASSWORD: "That is not your current password.",
-  EMAIL_NOT_VERIFIED: "Confirm your email first: open the link we sent you (a new one is on its way).",
+  EMAIL_NOT_VERIFIED: "Confirm your email first: open the link we sent you, or ask for a new one.",
   USER_ALREADY_EXISTS: "There is already an account with that email: sign in instead.",
   USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL: "There is already an account with that email: sign in instead.",
   PASSWORD_TOO_SHORT: "The password is too short: at least 8 characters.",
@@ -69,6 +70,8 @@ const TEXTS: Record<string, string> = {
   SESSION_EXPIRED: "For that, sign in again first.",
   // The chat API.
   UNAUTHORIZED: "Your session ended: sign in again.",
+  RATE_LIMITED: "You are sending messages too fast: wait a moment, then send again.",
+  PUBLIC_URL_REQUIRED: "Signing in is not set up for this address yet: ask whoever runs this assistant.",
   NOT_FOUND: "This conversation is not here: it was deleted, or the link is not yours.",
   TOO_LARGE: "That message is too large.",
   NO_ROUTE: "This assistant cannot take messages right now.",
@@ -84,6 +87,11 @@ export function errorText(code: string, fallback?: string): string {
   const key = normalCode(code);
   if (SAYS_WHY.has(key) && fallback !== undefined && fallback !== "") return fallback;
   return TEXTS[key] ?? (fallback !== undefined && fallback !== "" ? fallback : `That did not work (${code}).`);
+}
+
+/** What a failed sign-in by a provider or a link left in the address (`?error=<code>`), said: a known code's text, else a generic one. */
+export function landingText(code: string): string {
+  return TEXTS[normalCode(code)] ?? "That sign-in did not work. Try again, or sign in another way.";
 }
 
 /** The failure of an answer with `status` and the JSON `body` it had (or `undefined`). */

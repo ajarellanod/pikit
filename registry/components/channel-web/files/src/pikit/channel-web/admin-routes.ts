@@ -6,7 +6,9 @@
  *
  * - Every action is logged with the operator's id and the user's id, never an email's body, a link or
  *   a token. A link is answered once, to the operator who asked.
- * - A link's origin is `PIKIT_PUBLIC_URL` when set, else the request's.
+ * - A link's origin is `PIKIT_PUBLIC_URL` when set, else the request's when its host is trusted
+ *   (`linkOrigin`: on a server a loopback host only, on Cloudflare the Worker's): else `400
+ *   public_url_required`, before anything is made, so no link goes out under a host a client wrote.
  * - Removing a user removes their sessions and accounts (the accounts), and their conversations leave
  *   the users' list (`ChatBackend.forget`); the runtime keeps the conversations.
  */
@@ -16,6 +18,7 @@ import type { AdminAuth, Operator } from "@pikit/contracts";
 import type { Accounts } from "./accounts/types.ts";
 import type { AdminChatInvitation, AdminChatLink, AdminChatUsersPage, AdminChatUserState } from "./admin-api.ts";
 import type { ChatBackend } from "./backend.ts";
+import { PUBLIC_URL_REQUIRED } from "./accounts/links.ts";
 import { failure } from "./routes.ts";
 
 export const ADMIN = "/admin/api/channel-web";
@@ -43,8 +46,8 @@ export interface AdminRouteOptions {
   auth: Handle<AdminAuth | undefined>;
   accounts(): Accounts;
   backend(): ChatBackend;
-  /** The origin links are made under: `PIKIT_PUBLIC_URL`, else the request's. */
-  origin(request: Request): string;
+  /** The origin links are made under (`linkOrigin`); `undefined` when the request's host is not trusted. */
+  origin(request: Request): string | undefined;
 }
 
 /** The `:id` of `/admin/api/channel-web/users/:id/…`. */
@@ -94,6 +97,11 @@ export function provideAdminRoutes(pikit: Pikit, options: AdminRouteOptions): vo
     });
   };
   const accounts = () => options.accounts();
+  const originOf = (request: Request): string => {
+    const origin = options.origin(request);
+    if (origin === undefined) throw new Refused(400, PUBLIC_URL_REQUIRED.error, PUBLIC_URL_REQUIRED.message);
+    return origin;
+  };
 
   admin(`GET ${ADMIN}/users`, async (request, ctx) => {
     const params = new URL(request.url).searchParams;
@@ -111,7 +119,7 @@ export function provideAdminRoutes(pikit: Pikit, options: AdminRouteOptions): vo
     if (!EMAIL.test(email) || email.length > 254) throw new Refused(400, "invalid_request", "/email: an email address");
     if (body.name !== undefined && (typeof body.name !== "string" || body.name.length > 120)) throw new Refused(400, "invalid_request", "/name: at most 120 characters");
     const name = typeof body.name === "string" && body.name.trim() !== "" ? body.name.trim() : undefined;
-    const invited = await accounts().invite({ email, ...(name !== undefined && { name }) }, options.origin(request), ctx);
+    const invited = await accounts().invite({ email, ...(name !== undefined && { name }) }, originOf(request), ctx);
     ctx.logger.info("channel-web: an operator invited a user", { operator: operator.id, user: invited.userId, emailed: invited.emailed });
     return json<AdminChatInvitation>(201, { userId: invited.userId, link: invited.link, expiresAt: invited.expiresAt, emailed: invited.emailed });
   });
@@ -130,7 +138,7 @@ export function provideAdminRoutes(pikit: Pikit, options: AdminRouteOptions): vo
 
   admin(`POST ${ADMIN}/users/:id/password-reset`, async (request, ctx, operator) => {
     const id = userIdOf(request);
-    const link = await accounts().resetLink(id, options.origin(request), ctx);
+    const link = await accounts().resetLink(id, originOf(request), ctx);
     ctx.logger.info("channel-web: an operator made a password reset link", { operator: operator.id, user: id, emailed: link.emailed });
     return json<AdminChatLink>(200, { link: link.link, expiresAt: link.expiresAt, emailed: link.emailed });
   });

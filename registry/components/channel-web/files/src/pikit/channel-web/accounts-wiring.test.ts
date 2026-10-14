@@ -8,7 +8,7 @@
 
 import { afterEach, expect, test } from "bun:test";
 import { type App, type AppContext, type ComponentDefinition, defineApp, defineComponent, silentLogger } from "@pikit/core";
-import { type ActorCallHandler, type ActorMailbox, ActorCallError, answerCall, callResult, type EmailMessage, type JsonValue } from "@pikit/contracts";
+import { type ActorCallHandler, type ActorMailbox, ActorCallError, answerCall, CLIENT_ADDRESS_HEADER, callResult, type EmailMessage, type JsonValue } from "@pikit/contracts";
 import { sqliteStorage } from "@pikit/pi-adapter/testing";
 import { fakeOidc, type Profile } from "./accounts/accounts.test-support.ts";
 import { createChannelWeb, NAME } from "./index.ts";
@@ -25,8 +25,8 @@ afterEach(async () => {
   for (const stop of stops.splice(0)) await stop();
 });
 
-/** The origin the test Apps serve (`serve`'s). */
-const ORIGIN = "http://pikit.test";
+/** The origin the test Apps serve: a loopback one (without PIKIT_PUBLIC_URL a server's accounts answer only this machine's). */
+const ORIGIN = "http://localhost:3000";
 
 type Send = {
   method?: string;
@@ -47,7 +47,7 @@ function browser(fetch: (path: string, init?: RequestInit) => Promise<Response>,
     /** `path` on the App, or a URL of it (where a redirect leads). */
     async send(path: string, init: Send = {}): Promise<Response> {
       const url = new URL(path, ORIGIN);
-      const headers: Record<string, string> = { origin: ORIGIN, "x-forwarded-for": ip, "x-pikit-chat": "1", "user-agent": "pikit-test-browser" };
+      const headers: Record<string, string> = { origin: ORIGIN, [CLIENT_ADDRESS_HEADER]: ip, "x-pikit-chat": "1", "user-agent": "pikit-test-browser" };
       if (jar.size > 0 && init.cookies !== false) headers.cookie = [...jar].map(([name, value]) => `${name}=${value}`).join("; ");
       if (init.json !== undefined) headers["content-type"] = "application/json";
       if (init.form !== undefined) headers["content-type"] = "application/x-www-form-urlencoded";
@@ -71,9 +71,45 @@ function browser(fetch: (path: string, init?: RequestInit) => Promise<Response>,
 
 const OPEN = { [NAME]: { name: "Ada", signUp: { mode: "open" } } };
 
+test("only the accounts actor answers the accounts' calls: any other object refuses each (no_handler) before the accounts are made", async () => {
+  const answers = new Map<string, ActorCallHandler>();
+  let made = 0;
+  BETTER_AUTH.answer({ scope: "one", handle: () => {}, answer: (type, handler) => void answers.set(type, handler), answerStream: () => {} }, async () => {
+    made++;
+    throw new Error("the accounts are not made here");
+  });
+  const app = await defineApp({ components: [], logger: silentLogger }).create();
+  const messages: Record<string, JsonValue> = {
+    [AUTH_CALL.handle]: { method: "GET", url: "http://localhost:3000/chat/api/auth/get-session", headers: [] },
+    [AUTH_CALL.user]: { url: "http://localhost:3000/chat/api/me", cookie: "x=1" },
+    [AUTH_CALL.methods]: { userId: "ana" },
+    [AUTH_CALL.list]: { limit: 10 },
+    [AUTH_CALL.invite]: { email: "eve@example.com", origin: "http://localhost:3000" },
+    [AUTH_CALL.reset]: { userId: "ana", origin: "http://localhost:3000" },
+    [AUTH_CALL.ban]: { userId: "ana", banned: true },
+    [AUTH_CALL.remove]: { userId: "ana" },
+  };
+  expect([...answers.keys()].sort()).toEqual(Object.values(AUTH_CALL).sort());
+  for (const [type, handler] of answers) {
+    const refused = await Promise.resolve()
+      .then(() => answerCall(handler, `web:ana:${crypto.randomUUID()}`, messages[type] ?? {}, app.context()))
+      .then(callResult)
+      .catch((error: unknown) => error);
+    expect({ type, code: (refused as ActorCallError).code }).toEqual({ type, code: "no_handler" });
+  }
+  expect(made).toBe(0);
+  // In the accounts actor the same handler reaches the accounts.
+  const list = answers.get(AUTH_CALL.list) as ActorCallHandler;
+  const reached = await Promise.resolve()
+    .then(() => answerCall(list, "channel-web:accounts", { limit: 10 }, app.context()))
+    .then(callResult)
+    .catch((error: unknown) => error);
+  expect([made, String(reached)]).toEqual([1, expect.stringContaining("not made here")]);
+});
+
 test("on a server: a person signs up through /chat/api/auth (better-auth), then has a session for the chat's routes; it never opens the admin's, nor the admin's credential the chat's", async () => {
   const runtime = new Runtime();
-  const app = await serve([secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, adminAuth, createChannelWeb()], OPEN);
+  const app = await serve([secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, adminAuth, createChannelWeb()], OPEN, "server", ORIGIN);
   served.push(app);
   const ana = browser(app.fetch);
   const signedUp = await ana.send("/chat/api/auth/sign-up/email", { json: { email: "ana@example.com", password: "a-long-password-1", name: "Ana" } });
@@ -143,7 +179,7 @@ async function cloud(config: Record<string, unknown>, secrets: Record<string, st
       throw new Error("no streams here");
     },
   };
-  const worker = await serve([secretsOf(secrets), defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", mailbox) }), adminAuth, createChannelWebWorker()], { "channel-web-worker": config[NAME] }, "durable");
+  const worker = await serve([secretsOf(secrets), defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", mailbox) }), adminAuth, createChannelWebWorker()], { "channel-web-worker": config[NAME] }, "durable", ORIGIN);
   served.push(worker);
   return { worker, calls };
 }
@@ -219,7 +255,7 @@ function emailOf(sent: EmailMessage[]): ComponentDefinition {
 /** Both targets, each with every sign-in method and email: `fetch` its routes. */
 async function targets(discoveryUrl: string): Promise<{ name: string; fetch: Served["fetch"] }[]> {
   const { config, secrets, channel } = everyMethod(discoveryUrl);
-  const server = await serve([secretsOf(secrets), new Runtime().component(), kvOf(), sqliteStorage(), router, adminAuth, emailOf([]), channel()], config);
+  const server = await serve([secretsOf(secrets), new Runtime().component(), kvOf(), sqliteStorage(), router, adminAuth, emailOf([]), channel()], config, "server", ORIGIN);
   served.push(server);
   const { worker } = await cloud(config, secrets, [emailOf([])], channel);
   return [

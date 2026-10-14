@@ -71,7 +71,7 @@ test("cookies: pikit_chat.*, path /chat/, HttpOnly, SameSite=Lax; __Secure- and 
     expect(cookie).not.toContain("/admin");
   }
 
-  const secure = f.browser(undefined, "https://chat.test");
+  const secure = f.browser(undefined, "https://localhost:3443");
   const response = await signUp(secure, "bo@example.com");
   const names = response.headers.getSetCookie().map((c) => c.split("=")[0]).sort();
   expect(names).toEqual(["__Secure-pikit_chat.session_data", "__Secure-pikit_chat.session_token"]);
@@ -299,18 +299,82 @@ test("forgot password by email: a link to the page that sets it", async () => {
   expect((await b.user())?.id).toBe(ana.userId);
 });
 
-test("email verification: the emailed link verifies, signs in and lands on /chat/", async () => {
+test("a password sign-up with email: its password is nobody's; the emailed link sets the first one, which verifies the email", async () => {
   const f = make({ mode: "open" });
   const b = f.browser();
-  await signUp(b, "ana@example.com");
+  expect((await signUp(b, "ana@example.com")).status).toBe(200);
   expect(await b.user()).toBeUndefined();
-  expect((await signIn(f.browser(), "ana@example.com")).status).toBe(403); // not verified yet
+  // The password the sign-up came with never works, verified or not.
+  expect((await signIn(f.browser(), "ana@example.com")).status).toBe(401);
+  expect(f.emails.map((e) => e.message.subject)).toEqual(["Confirm your email for Ada"]);
   const link = linkIn(f.emails[0]?.message.text ?? "");
-  expect(link.startsWith(`${ORIGIN}/chat/api/auth/verify-email?token=`)).toBe(true);
-  const landing = await b.send(link);
-  expect(landing.status).toBe(302);
-  expect(landing.headers.get("location")).toBe("/chat/");
+  expect(link).toMatch(new RegExp(`^${ORIGIN}/chat/#/set-password\\?token=[\\w-]+&welcome=1$`));
+  const token = new URL(link.replace("#/", "")).searchParams.get("token");
+  expect((await b.send("/chat/api/auth/reset-password", { json: { token, newPassword: "ana's own password" } })).status).toBe(200);
+  expect((await signIn(b, "ana@example.com", "ana's own password")).status).toBe(200);
   expect(await b.user()).toMatchObject({ email: "ana@example.com", emailVerified: true });
+  // Signing in again sends nothing (no verification email on sign-in).
+  expect(f.emails).toHaveLength(1);
+});
+
+test("SQUATTING: a sign-up with another person's address and a password of the attacker's never lets the attacker in once the owner comes", async () => {
+  const f = make({ mode: "open" });
+  const attacker = f.browser();
+  expect((await signUp(attacker, "victim@example.com", "attacker's password")).status).toBe(200);
+  // The owner signs in with a magic link: the address is verified, the account theirs.
+  const owner = await magicLinkLanding(f, "victim@example.com");
+  expect(owner.status).toBe(302);
+  const late = f.browser();
+  expect((await signIn(late, "victim@example.com", "attacker's password")).status).toBe(401);
+  expect(await late.user()).toBeUndefined();
+
+  // Or the owner opens the confirmation the sign-up sent them, and sets their own password.
+  const g = make({ mode: "open" });
+  await signUp(g.browser(), "owner@example.com", "attacker's password");
+  const token = new URL(linkIn(g.emails[0]?.message.text ?? "").replace("#/", "")).searchParams.get("token");
+  expect((await g.browser().send("/chat/api/auth/reset-password", { json: { token, newPassword: "the owner's password" } })).status).toBe(200);
+  expect((await signIn(g.browser(), "owner@example.com", "attacker's password")).status).toBe(401);
+  expect((await signIn(g.browser(), "owner@example.com", "the owner's password")).status).toBe(200);
+  // However the sign-up is spelled (a form, a trailing slash), its password is nobody's.
+  for (const [path, type, body] of [
+    ["/chat/api/auth/sign-up/email", "application/x-www-form-urlencoded", "email=form%40example.com&password=attackers-pass&name=x"],
+    ["/chat/api/auth/sign-up/email/", "application/json", JSON.stringify({ email: "slash@example.com", password: "attackers-pass", name: "x" })],
+  ] as const) {
+    await g.accounts.handle(new Request(`${ORIGIN}${path}`, { method: "POST", headers: { origin: ORIGIN, "content-type": type }, body }), g.ctx);
+  }
+  for (const email of ["form@example.com", "slash@example.com"]) expect({ email, status: (await signIn(g.browser(), email, "attackers-pass")).status }).toEqual({ email, status: 401 });
+});
+
+test("HOST: without publicUrl, a server's accounts answer only a loopback host; another (a spoofed Host) is 400 and makes no link nor email", async () => {
+  const f = make({ mode: "open" });
+  await f.accounts.invite({ email: "victim@example.com" }, ORIGIN, f.ctx);
+  f.emails.length = 0;
+  const evil = f.browser(undefined, "http://evil.example");
+  for (const [path, json] of [
+    ["/chat/api/auth/request-password-reset", { email: "victim@example.com", redirectTo: "/chat/" }],
+    ["/chat/api/auth/sign-in/magic-link", { email: "victim@example.com", callbackURL: "/chat/" }],
+    ["/chat/api/auth/sign-up/email", { email: "new@example.com", password: PASSWORD, name: "x" }],
+  ] as const) {
+    const response = await evil.send(path, { json });
+    expect({ path, status: response.status, body: await response.json() }).toEqual({ path, status: 400, body: { error: "public_url_required", message: expect.any(String) } });
+  }
+  expect(f.emails).toEqual([]);
+  // Each loopback host works, any port: development.
+  for (const origin of ["http://localhost:5173", "http://127.0.0.1:3000", "http://[::1]:8080"]) {
+    expect((await f.browser(undefined, origin).send("/chat/api/auth/request-password-reset", { json: { email: "victim@example.com", redirectTo: "/chat/" } })).status).toBe(200);
+    expect(linkIn(f.emails.at(-1)?.message.text ?? "").startsWith(`${origin}/chat/#/set-password?token=`)).toBe(true);
+  }
+  // On Cloudflare the Worker's own host is trusted (Cloudflare routes by it).
+  const cloud = make({ mode: "open", trustRequestHost: true });
+  await cloud.browser(undefined, "https://chat.example.workers.dev").send("/chat/api/auth/sign-in/magic-link", { json: { email: "ana@example.com", callbackURL: "/chat/" } });
+  expect(linkIn(cloud.emails[0]?.message.text ?? "").startsWith("https://chat.example.workers.dev/chat/api/auth/magic-link/verify?")).toBe(true);
+  // With publicUrl, any host is answered and every link is under publicUrl.
+  const pub = make({ mode: "open", publicUrl: "https://bot.example.com" });
+  const spoofed = new Browser(pub.accounts, pub.ctx, "https://bot.example.com", "10.9.9.9");
+  const request = spoofed.build("/chat/api/auth/sign-in/magic-link", { json: { email: "ana@example.com", callbackURL: "/chat/" } });
+  const evilUrl = new Request(request.url.replace("bot.example.com", "evil.example"), { method: "POST", headers: request.headers, body: await request.text() });
+  expect((await pub.accounts.handle(evilUrl, pub.ctx)).status).toBe(200);
+  expect(linkIn(pub.emails[0]?.message.text ?? "").startsWith("https://bot.example.com/chat/api/auth/magic-link/verify?")).toBe(true);
 });
 
 test("magic link: the emailed link signs in", async () => {
@@ -390,6 +454,28 @@ test("rate limits: a fourth sign-in from one address within 10 s is refused", as
   for (let i = 0; i < 4; i++) statuses.push((await signIn(b, "nobody@example.com")).status);
   expect(statuses).toEqual([401, 401, 401, 429]);
   expect((await signIn(f.browser("198.51.100.8"), "nobody@example.com")).status).toBe(401);
+});
+
+test("rate limits are by the address the server saw: a client's x-forwarded-for changes nothing, unless a proxy's header is trusted", async () => {
+  const f = make({ withEmail: false });
+  const statuses: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    const request = f.browser("198.51.100.20").build("/chat/api/auth/sign-in/email", { json: { email: "nobody@example.com", password: PASSWORD } });
+    request.headers.set("x-forwarded-for", `203.0.113.${i + 1}`);
+    request.headers.set("cf-connecting-ip", `203.0.113.${i + 1}`);
+    statuses.push((await f.accounts.handle(request, f.ctx)).status);
+  }
+  expect(statuses).toEqual([401, 401, 401, 429]);
+
+  // Behind a proxy that sets it (trustedProxyHeaders), its header is the client's.
+  const proxied = make({ withEmail: false, ipHeaders: ["x-forwarded-for", "x-pikit-client-address"] });
+  const behind: number[] = [];
+  for (let i = 0; i < 4; i++) {
+    const request = proxied.browser("198.51.100.21").build("/chat/api/auth/sign-in/email", { json: { email: "nobody@example.com", password: PASSWORD } });
+    request.headers.set("x-forwarded-for", `203.0.113.${50 + i}`);
+    behind.push((await proxied.accounts.handle(request, proxied.ctx)).status);
+  }
+  expect(behind).toEqual([401, 401, 401, 401]);
 });
 
 test("built-in providers: each configured, sign-in goes to it with the chat's callback", async () => {

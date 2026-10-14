@@ -241,12 +241,13 @@ export class Runtime {
 
   /**
    * A run of `key`'s conversation starts with `requestIds` (busy, `agent.started`, `run_start`); its
-   * `run_start` names `inputs` (submission ids, `submit`) when given, else none.
+   * `run_start` names `inputs` (submission ids), by default new ones whose `submission` events come
+   * first, as Pi's do in the commit that starts the run; `null`: none (inputs the watch cannot name).
    */
-  async start(key: string, requestIds: string[], inputs?: number[]): Promise<void> {
+  async start(key: string, requestIds: string[], inputs: number[] | null = this.submit(requestIds)): Promise<void> {
     const conversation = this.pointers.get(key) as ConversationRef;
     this.conversations.set(conversation.conversationId, { ...(this.conversations.get(conversation.conversationId) as ObservedConversation), busy: true });
-    this.push({ type: "run_start", ...(inputs !== undefined && { inputs }) });
+    this.push({ type: "run_start", ...(inputs !== null && { inputs }) });
     await this.events?.emit("agent.started", { conversation, requestId: requestIds[0] as string, resumed: false });
   }
 
@@ -313,8 +314,11 @@ export interface Served {
   keys(): string[];
 }
 
-/** An App of `components`, started, whose `http.route`s are served as a server serves them; `stop` it. */
-export async function serve(components: ComponentDefinition[], config: Record<string, unknown> = {}, target: Target = "server"): Promise<Served> {
+/**
+ * An App of `components`, started, whose `http.route`s are served as a server serves them at `origin`
+ * (a path, or a whole URL of another host); `stop` it.
+ */
+export async function serve(components: ComponentDefinition[], config: Record<string, unknown> = {}, target: Target = "server", origin = "http://pikit.test"): Promise<Served> {
   const logged: Logged[] = [];
   const logger: Logger = {
     ...silentLogger,
@@ -337,7 +341,7 @@ export async function serve(components: ComponentDefinition[], config: Record<st
     logged,
     keys: () => routes?.keys() ?? [],
     async fetch(path, init = {}) {
-      const request = new Request(`http://pikit.test${path}`, init);
+      const request = new Request(/^https?:/.test(path) ? path : `${origin}${path}`, init);
       const { pathname } = new URL(request.url);
       const key = (routes?.keys() ?? [])
         .map((each) => ({ each, parsed: parseHttpRouteKey(each) }))

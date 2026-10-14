@@ -16,10 +16,11 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
+import { linkOrigin, publicUrlOf } from "./accounts/links.ts";
 import type { Accounts } from "./accounts/types.ts";
 import { provideAdminRoutes } from "./admin-routes.ts";
 import type { ChatConfig } from "./api.ts";
-import { createAssets } from "./assets.ts";
+import { avatarHosts, createAssets } from "./assets.ts";
 import { ACCOUNTS_KEY, CALL } from "./calls.ts";
 import { CHAT_FILES } from "./chat-files.ts";
 import { AUTH_SECRET, Config, configProblem, MIN_AUTH_SECRET, PUBLIC_URL } from "./config.ts";
@@ -41,7 +42,7 @@ export function createChannelWebWorker(wiring: AccountsWiring = BETTER_AUTH) {
       const secrets = pikit.use("secrets");
       const mailbox = pikit.use("actor.mailbox");
       const auth = pikit.useOptional("admin.auth");
-      const assets = createAssets(CHAT_FILES);
+      const assets = createAssets(CHAT_FILES, () => avatarHosts(config.signIn.social));
       const backend = createRemoteBackend(() => mailbox.get());
       let accounts: Accounts | undefined;
       let publicUrl: string | undefined;
@@ -60,8 +61,13 @@ export function createChannelWebWorker(wiring: AccountsWiring = BETTER_AUTH) {
         return accounts;
       };
 
-      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => "durable", assets });
-      provideAdminRoutes(pikit, { auth, accounts: accountsNow, backend: () => backend, origin: (request) => publicUrl ?? new URL(request.url).origin });
+      // A user's messages are counted where every one of them passes: the accounts actor.
+      const rate = async (userId: string, ctx: AppContext): Promise<number | undefined> =>
+        ((await mailbox.get().call(ACCOUNTS_KEY, CALL.rate, { userId }, ctx)) as { retryAfter?: number }).retryAfter;
+
+      provideRoutes(pikit, { accounts: accountsNow, backend: () => backend, config, chatConfig, limits: () => "durable", rate, assets });
+      // The Worker's host is its route's: Cloudflare routes by it, so a client cannot make it another's.
+      provideAdminRoutes(pikit, { auth, accounts: accountsNow, backend: () => backend, origin: (request) => linkOrigin(request.url, publicUrl, true) });
 
       return {
         async start(ctx) {
@@ -69,8 +75,7 @@ export function createChannelWebWorker(wiring: AccountsWiring = BETTER_AUTH) {
           if (problem !== undefined) throw new Error(problem);
           const secret = (await secrets.get().get(AUTH_SECRET))?.trim() ?? "";
           if (secret.length < MIN_AUTH_SECRET) throw new Error(`channel-web: set ${AUTH_SECRET}, at least ${MIN_AUTH_SECRET} characters (a random one: openssl rand -base64 48)`);
-          const url = (await secrets.get().get(PUBLIC_URL))?.trim();
-          publicUrl = url === undefined || url === "" ? undefined : url.replace(/\/+$/, "");
+          publicUrl = publicUrlOf(await secrets.get().get(PUBLIC_URL));
           accounts = wiring.remote({ mailbox: () => mailbox.get(), config, secret, ...(publicUrl !== undefined && { publicUrl }) });
           if (assets.built()) ctx.logger.info("channel-web: the chat page is served at /chat/", { files: assets.size() });
           else ctx.logger.info("channel-web: no chat page is built; the API alone is served at /chat/api/");

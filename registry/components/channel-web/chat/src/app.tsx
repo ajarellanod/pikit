@@ -16,7 +16,7 @@ import { signOut as endSession } from "@/lib/auth";
 import type { ChatConfig, ChatMe } from "@/lib/chat-api";
 import { get, onUnauthorized } from "@/lib/client";
 import { ConversationsProvider } from "@/lib/conversations";
-import { asError, ChatFailure, errorText } from "@/lib/errors";
+import { asError, ChatFailure, landingText } from "@/lib/errors";
 import { chatIdOf, go, takeLandingError, useRoute } from "@/lib/location";
 import { type ChatSession, SessionContext } from "@/lib/session";
 import { AccountScreen } from "./screens/account";
@@ -47,7 +47,7 @@ export function App() {
   const [state, setState] = useState<State>({ kind: "loading" });
   const [landing, setLanding] = useState<string | undefined>(() => {
     const found = takeLandingError();
-    return found === undefined ? undefined : errorText(found.code, found.description);
+    return found === undefined ? undefined : landingText(found.code);
   });
   const route = useRoute();
 
@@ -96,7 +96,7 @@ export function App() {
   };
 
   if (route.path === "/set-password") {
-    return <SetPasswordScreen config={config} onSignedIn={enter} token={route.query.get("token")} invite={route.query.get("invite") === "1"} />;
+    return <SetPasswordScreen config={config} onSignedIn={enter} token={route.query.get("token")} invite={route.query.get("invite") === "1"} welcome={route.query.get("welcome") === "1"} />;
   }
   if (me === undefined) {
     const props = { config, onSignedIn: enter };

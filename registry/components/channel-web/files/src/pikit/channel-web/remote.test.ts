@@ -44,7 +44,11 @@ class Platform {
   readonly objects = new Map<string, Promise<FakeObject>>();
   readonly calls: string[] = [];
   readonly unreachable = new Set<string>();
-  constructor(readonly accounts: FakeAccounts) {}
+  constructor(
+    readonly accounts: FakeAccounts,
+    /** channel-web's config in every object's App (the default App's). */
+    readonly config: Record<string, unknown> = {},
+  ) {}
 
   readonly mailbox: ActorMailbox = {
     send: async (key, type, message) => {
@@ -100,6 +104,7 @@ class Platform {
     });
     const app = await defineApp({
       components: [secretsOf(), runtime.component(), kvOf(), sqliteStorage(), router, platform, createChannelWeb({ accounts: this.accounts.wiring() })],
+      config: { [NAME]: this.config },
       target: "durable",
       logger: silentLogger,
     }).create();
@@ -119,11 +124,11 @@ afterEach(async () => {
   for (const platform of platforms.splice(0)) await platform.stop();
 });
 
-async function cloud(): Promise<{ platform: Platform; worker: Served; accounts: FakeAccounts }> {
+async function cloud(config: Record<string, unknown> = {}): Promise<{ platform: Platform; worker: Served; accounts: FakeAccounts }> {
   const accounts = new FakeAccounts();
   accounts.add("ana");
   accounts.add("ben");
-  const platform = new Platform(accounts);
+  const platform = new Platform(accounts, config);
   platforms.push(platform);
   const mailbox = defineComponent({ name: "mailbox-test", setup: (pikit) => pikit.provide("actor.mailbox", platform.mailbox) });
   const served = await serve([secretsOf(), mailbox, adminAuth, createChannelWebWorker(accounts.wiring())], {}, "durable");
@@ -143,7 +148,8 @@ test("a conversation on the Worker: started by one call to its key's object, lis
   const started = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "plan the trip", images: [{ mimeType: "image/png", data: PIXEL }] }))).json()) as { id: string; requestId: string; admission: string };
   const key = `web:ana:${started.id}`;
   expect(started.admission).toBe("started");
-  expect(platform.calls).toEqual([`${key} ${CALL.start}`, `${ACCOUNTS_KEY} ${SEEN}`]);
+  // The user's message counted by the accounts actor first, then the conversation's object.
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`, `${key} ${CALL.start}`, `${ACCOUNTS_KEY} ${SEEN}`]);
   const { runtime } = await platform.object(key);
   expect(runtime.dispatched).toMatchObject([{ requestId: started.requestId, conversation: { key, conversationId: "1" }, sender: { channel: "web", id: "ana" }, images: [{ mimeType: "image/png", data: PIXEL }] }]);
 
@@ -162,10 +168,16 @@ test("a conversation on the Worker: started by one call to its key's object, lis
     const read = (await (await w.fetch(`${API}/conversations/${started.id}/messages`, as("ana"))).json()) as { items: ChatMessage[] };
     return read.items.length === 2 ? read.items : undefined;
   }, "the answer in the object");
+  const url = `/chat/api/conversations/${started.id}/messages/${encodeURIComponent(started.requestId)}/images/0`;
   expect(messages).toMatchObject([
     { role: "assistant", text: "Here is a plan" },
-    { id: started.requestId, role: "user", state: "answered", images: [{ mimeType: "image/png", data: PIXEL }] },
+    { id: started.requestId, role: "user", state: "answered", images: [{ mimeType: "image/png", url }] },
   ]);
+  // Its bytes one call to its object, apart from the page.
+  platform.calls.length = 0;
+  const image = await w.fetch(url, as("ana"));
+  expect([image.status, image.headers.get("content-type"), Buffer.from(await image.arrayBuffer()).toString("base64")]).toEqual([200, "image/png", PIXEL]);
+  expect(platform.calls).toEqual([`${key} ${CALL.image}`]);
   // The index was told the run ended and the answer came: busy no more.
   await eventually(async () => (((await (await w.fetch(`${API}/conversations`, as("ana"))).json()) as { items: ChatConversation[] }).items[0]?.busy === false ? true : undefined), "the index's busy flag");
 
@@ -186,12 +198,13 @@ test("ISOLATION on the Worker: user B with user A's chat id gets 404 on every ro
     ["POST", "/messages", { text: "hi" }],
     ["GET", "/events"],
     ["POST", "/abort"],
+    ["GET", "/messages/web%3Ax/images/0"],
   ];
   for (const [method, path, body] of attempts) {
     const response = await w.fetch(`${API}/conversations/${id}${path}`, as("ben", { method, ...(body !== undefined && { body: JSON.stringify(body) }) }));
     expect({ method, path, status: response.status }).toEqual({ method, path, status: 404 });
   }
-  expect(platform.calls.every((each) => each.startsWith(`web:ben:${id} `))).toBe(true);
+  expect(platform.calls.filter((each) => each !== `${ACCOUNTS_KEY} ${CALL.rate}`).every((each) => each.startsWith(`web:ben:${id} `))).toBe(true);
   expect((await platform.object(`web:ana:${id}`)).runtime.dispatched.length).toBe(1);
   // An object answers only of itself: a call naming another conversation is refused.
   const other = await platform.mailbox.call(`web:ben:${id}`, CALL.conversation, { userId: "ana", chatId: id }, w.app.context()).catch((error: unknown) => error);
@@ -210,7 +223,7 @@ test("live events on the Worker: the object's stream, state first, the answer as
   runtime.push({ type: "message_start", message: { role: "assistant", content: [{ type: "text", text: "He" }] } });
   expect(await events.take(2)).toEqual([
     { type: "state", busy: true },
-    { type: "partial", text: "He" },
+    { type: "partial", text: "He", requests: [requestId] },
   ]);
   client.abort();
   await events.reader.cancel();
@@ -244,11 +257,45 @@ test("on the Worker images over 1 MB in all are 413 before any call; an object t
   const { platform, worker: w } = await cloud();
   const big = await w.fetch(`${API}/conversations`, post("ana", { text: "x", images: [imageOf(MAX_DURABLE_IMAGE_BYTES / 2), imageOf(MAX_DURABLE_IMAGE_BYTES / 2 + 1)] }));
   expect(big.status).toBe(413);
-  expect(platform.calls).toEqual([]);
+  // Counted by the accounts actor (before its body is read), never sent to an object.
+  expect(platform.calls).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`]);
   const { id } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string };
   platform.unreachable.add(`web:ana:${id}`);
   const down = await w.fetch(`${API}/conversations/${id}`, as("ana"));
   expect({ status: down.status, body: await down.json() }).toMatchObject({ status: 503, body: { error: "unavailable" } });
+});
+
+test("RATE on the Worker: a user's messages are counted by the accounts actor, every conversation together; one too many is 429 with retry-after; another user is not", async () => {
+  const { platform, worker: w } = await cloud({ messagesPerMinute: 2 });
+  const first = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "one" }))).json()) as { id: string };
+  expect((await w.fetch(`${API}/conversations`, post("ana", { text: "two" }))).status).toBe(201);
+  const calls = platform.calls.length;
+  const third = await w.fetch(`${API}/conversations/${first.id}/messages`, post("ana", { text: "three" }));
+  expect({ status: third.status, retry: Number(third.headers.get("retry-after")), body: await third.json() }).toMatchObject({ status: 429, retry: expect.any(Number), body: { error: "rate_limited" } });
+  expect(Number(third.headers.get("retry-after"))).toBeGreaterThan(0);
+  // Refused before its conversation's object hears of it.
+  expect(platform.calls.slice(calls)).toEqual([`${ACCOUNTS_KEY} ${CALL.rate}`]);
+  expect((await platform.object(`web:ana:${first.id}`)).runtime.dispatched.length).toBe(1);
+  expect((await w.fetch(`${API}/conversations`, post("ben", { text: "mine" }))).status).toBe(201);
+});
+
+test("only the accounts actor answers the index's calls: a conversation's object refuses them (no_handler) and reads nothing", async () => {
+  const { platform, worker: w } = await cloud();
+  const { id } = (await (await w.fetch(`${API}/conversations`, post("ana", { text: "hi" }))).json()) as { id: string };
+  const key = `web:ana:${id}`;
+  for (const [type, message] of [
+    [CALL.list, { userId: "ana", limit: 10 }],
+    [CALL.forget, { userId: "ana" }],
+    [CALL.config, {}],
+    [CALL.rate, { userId: "ana" }],
+  ] as const) {
+    const refused = await platform.mailbox.call(key, type, message, w.app.context()).catch((error: unknown) => error);
+    expect({ type, code: (refused as ActorCallError).code }).toEqual({ type, code: "no_handler" });
+  }
+  const seen = await platform.mailbox.send(key, SEEN, { rows: [] }, w.app.context()).catch((error: unknown) => error);
+  expect((seen as ActorCallError).code).toBe("no_handler");
+  // The accounts actor answers them.
+  expect(await platform.mailbox.call(ACCOUNTS_KEY, CALL.list, { userId: "ana", limit: 10 }, w.app.context())).toMatchObject({ items: [{ id }] });
 });
 
 test("the index keeps each conversation's newest version: a late or repeated one changes nothing; a row whose key is not its user's is refused", async () => {
