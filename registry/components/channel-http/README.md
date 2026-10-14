@@ -39,7 +39,7 @@ The POST waits for the answer, up to `replyTimeoutMs` (120 s by default):
 
 | Status | Body | When |
 |---|---|---|
-| `200` | `{ requestId, text }` | The agent answered. |
+| `200` | `{ requestId, text }` | The agent answered. The parts of its answer (a question a tool asked) are in `text` too, after it, as their fallbacks. |
 | `202` | `{ requestId }` | No answer in time, or the server is stopping. The answer still lands in the conversation. |
 | `400` | `{ error: "invalid_request", message }` | The body is not a message. |
 | `401` | `{ error: "unauthorized" }` | Missing or wrong token. |

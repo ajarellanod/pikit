@@ -191,9 +191,10 @@ component.
   that components never import Pi, not to make the runtime swappable, so they never wait for a second
   provider: their stability is decided here. *Why:* P1, Pi is the agent; a second loop would make
   every agent feature the lowest common denominator of two runtimes.
-- **A contracts helper is protocol, with the policy passed in.** `admitInbound` and
-  `startAnswerDelivery` are what every provider must do alike for a guarantee to hold (one admission
-  per message, a cursor per channel, a lane per conversation, idempotency keys). What may differ (the
+- **A contracts helper is protocol, with the policy passed in.** `admitInbound`,
+  `startAnswerDelivery` and `messagePieces` are what every provider must do alike for a guarantee to
+  hold (one admission per message, a cursor per channel, a lane per conversation, idempotency keys, a
+  part a transport does not draw folded into the text as its fallback before the split). What may differ (the
   route, the text, how to send, the backoff) is the calling component's, passed in. *Why:* a guarantee
   each component writes again is one each can break; a choice made inside the helper would be policy
   the user cannot edit (P3).

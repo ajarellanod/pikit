@@ -26,14 +26,14 @@ posted and edited as the model writes, then replaced by the final answer.
   (SPEC §5).
 - Absent: "typing…", then the answer, as today.
 - Built first with [Google Chat](channel-google-chat.md): runtime-pi emits `agent.partial` (the
-  answer as written so far, throttled), and that channel edits its own "Thinking…" placeholder with
-  it. The generic `edit` and `stream-to-edit` stay for the other channels.
+  text of the response the model is writing now, from `pi.live`'s `generation.message`, at most once
+  per `partialEveryMs`, one second, and never after the run's end), and that channel edits its own
+  "Thinking…" placeholder with it. The generic `edit` and `stream-to-edit` stay for the other channels.
 
 ## Pi first
 Pi streams: pi-durable commits the partial answer to the conversation's live state (`pi.live`) as
 it streams, throttled, which a preview can read (a conversation's `watch()`). pikit forwards what Pi
-emits; it builds no streaming of model calls. The adapter needs to re-emit that live state as an
-`agent.*` event, which today it does not.
+emits; it builds no streaming of model calls. The adapter re-emits that live state as `agent.partial`.
 
 ## Open questions
 - Edit rate limits (Telegram allows about one edit per second per chat) and long answers split

@@ -20,6 +20,10 @@ guarantees, and how they differ (receipts here; retries that never give up there
 - **Stored before sent.** A channel enqueues each answer; it is split into the pieces the platform
   accepts and stored in one transaction, one row per piece. Enqueuing the same answer twice sends it
   once.
+- **Parts** (a question drawn as buttons, `@pikit/contracts`' `parts.ts`): an answer is cut as
+  `messagePieces` cuts it with the channel's transport. A part the transport does not draw is folded
+  into the text as its fallback before the split; the parts it draws are stored with the last piece
+  (as JSON, in its `parts` column) and sent with it, also after a restart.
 - **In order, per conversation.** One conversation's pieces go out one at a time. A piece waiting to
   be retried holds the ones behind it; other conversations do not wait.
 - **Failures** are classified by the channel, handled here:

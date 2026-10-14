@@ -3,7 +3,7 @@
 **Public appeal:** — (OpenClaw has it; it is not what draws the public)
 
 **Specified:** yes: this note, the final version, built in one change: the component, the tool
-`askUser`, and the contract changes they bring (images in, parts out, answers back, the answer
+`askUser`, and the contract changes they bring (images in, parts out, the answer
 while it is written). Keys and idempotency were decided in the former SPEC §5.
 
 **Needed by:** nothing required. It is the next channel.
@@ -39,7 +39,7 @@ a contract, added here with its first producer and its first consumer.
 | Text files read; other files left in the workspace for the agent's tools | the channel, before dispatch (`beforeDispatch`) | none |
 | A quoted message as the reply's context | the channel reads it (`spaces.messages.get`) and quotes it in the text | none |
 | Questions: confirm and select cards, dialogs with forms | the tool `askUser`, a `question` part, drawn by the transport | **parts, `draws`, `AgentResult.parts`** |
-| A question's answer back to the agent | a click or a form, admitted as a message | **`InboundMessage.replyTo`** |
+| A question's answer back to the agent | a click or a form, admitted as a message whose text says it | none (`InboundMessage.replyTo` waits for a reader: below) |
 
 Out of this feature, with why:
 - **Questions from Pi's extensions** (`ctx.ui.select`, `confirm`, `input`): pi-durable has no UI API
@@ -240,9 +240,9 @@ app cannot read is named as unread.
 - This transport draws it (`draws: ["question"]`): one `confirm` or `select` field as a card with
   buttons; anything else as a card whose button opens a dialog with the form. The card's message is
   recorded in `storage.kv` under the question's id.
-- A click or a submitted form is admitted as a message whose `replyTo` names the question's message
-  and holds the answer (`value`, the fields as JSON), and whose text says it in words ("Answer to
-  …: …") for the model. The card is updated to say who answered what (the click's response). A
+- A click or a submitted form is admitted as a message whose text says it in words ("Answer to
+  …: …", the question's id and each field's value) for the model: that text is the whole answer, as
+  one typed back to a folded question is. The card is updated to say who answered what (the click's response). A
   question already answered, or unknown, answers the click with that, and admits nothing.
 - Anyone the channel admits in that conversation may answer, as anyone there may talk to the agent;
   the answer carries their `actor`. Several questions may be open in a conversation; each is
@@ -264,11 +264,15 @@ rules of `AGENTS.md`).
   last piece. Producer: `tool-ask-user`; consumer: this transport.
 - **`AgentResult.parts`** (and `RunSettlement`'s): the parts the run's tools gave, in order.
   runtime-pi collects what a tool returns as parts; an answer with parts and no text is still delivered.
-- **`InboundMessage.replyTo?: { platformMessageId: string; value?: string }`**, as rich content
-  shaped it: `admitInbound` keeps it on the request for the run's tools and stages. Producer: this
-  channel; consumer: the agent, through the text, and any stage.
-- **`agent.partial`** (`{ conversation, requestId, text }`): the answer as written so far, emitted
-  by runtime-pi from pi-durable's live state, throttled. A notice: one lost costs nothing. Producer:
+- **`InboundMessage.replyTo` is not added.** Its only reader would be the model, which reads the
+  message's text, and "any stage": nothing in this change reads the field (the channel knows a
+  question is answered from its own record of the card, by the click's question id, not from the
+  message). A field with no reader is speculative (the contract rules of `AGENTS.md`, 1): it comes
+  with the first stage or tool that reads it ([rich content](rich-content.md)'s shape stays).
+- **`agent.partial`** (`{ conversation, requestId, text }`): the answer as written so far (the text of
+  the response the model is writing now: each model call of a run starts again), emitted by
+  runtime-pi from pi-durable's live state, at most once a second per conversation, never after the
+  run's end. A notice: one lost costs nothing. Producer:
   runtime-pi; consumer: this channel ([streaming replies](streaming-replies.md)).
 
 ## How it is built: work for parallel agents
@@ -276,7 +280,7 @@ rules of `AGENTS.md`).
 One branch, one worktree per agent where they write in parallel. The contracts come first, since
 every other part builds on their types; then the rest in parallel; then one review of the whole.
 
-1. **Contracts** (one agent, first): the five changes above in `@pikit/contracts` and
+1. **Contracts** (one agent, first): the changes above in `@pikit/contracts` and
    `@pikit/pi-adapter`, delivery folding parts, runtime-pi emitting `agent.partial` and collecting
    parts, their tests, `docs/contracts.md`, SPEC, the capability catalogue. Gate: the whole suite.
 2. **Then in parallel:**
@@ -313,7 +317,7 @@ every other part builds on their types; then the rest in parallel; then one revi
 - Attachments: images reach `AgentRequest.images`, text files the text, other files the workspace;
   every bound; a Drive file named.
 - Questions: drawn as a card or a dialog; folded to text by a transport that does not draw; a click
-  admitted once, with `replyTo`; a second click told it is answered; the run ended by `askUser`.
+  admitted once, its answer in its text; a second click told it is answered; the run ended by `askUser`.
 - The contract changes: each with a test in its package; a case of the channel suite that a broken
   provider fails (mutate it, see it fail, restore).
 - The `durable` lane in workerd: the Worker verifies, the object admits, answers and draws.

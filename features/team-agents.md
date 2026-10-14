@@ -77,7 +77,7 @@ contracts:
   kit's code. With [channel-google-chat](channel-google-chat.md).
 - **`approvals`** (questions now and decisions in days, one contract): what is asked is shared by who
   asks, who draws it and who waits for the answer, three components that must not know each other.
-  Questions (`askUser`, the `question` part, `replyTo`) come with channel-google-chat; decisions
+  Questions (`askUser`, the `question` part) come with channel-google-chat; decisions
   that wait days stay approvals'.
 - **`AgentDelegation`** (`@pikit/pi-adapter`): status, steer, cancel and the list of started tasks,
   for an orchestrator. Stitching `agent.runtime`, `agent.observe` and the mailbox together could do

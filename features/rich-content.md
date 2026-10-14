@@ -17,6 +17,8 @@ text where it cannot.
 - The contract is the shape below: `OutboundMessage.parts` typed by declaration merging on
   `AppMessageParts`, a `fallback` text per part, `ChannelTransport.draws`, and
   `InboundMessage.replyTo`. What is not built:
+  - `InboundMessage.replyTo`, added with the first stage or tool that reads it: Google Chat's answers
+    to its questions say it in their text, which is all the model reads;
   - the first part kinds (`choice`, `image`, `file`), each declared by the component that needs it;
   - `InboundMessage.attachments`, added with the first channel that downloads media
     (`packages/contracts/src/inbound.ts`: "adding one is compatible, removing one is not"). Images in
@@ -28,8 +30,9 @@ text where it cannot.
 - Absent: text only, as today; a part folds into its fallback.
 - Decided with [Google Chat](channel-google-chat.md), built with it: a channel's images reach the
   model by `InboundMessage.images` (`AgentImage`), which `admitInbound` passes to
-  `AgentRequest.images`; the parts' shape below, `ChannelTransport.draws`, `AgentResult.parts` and
-  `InboundMessage.replyTo`, with a first kind, `question` (`tool-ask-user`). Google Chat writes other
+  `AgentRequest.images`; the parts' shape below (`parts.ts`: `messagePieces` folds them, in one place),
+  `ChannelTransport.draws` and `AgentResult.parts` (a pi-durable tool returns `withParts(result,
+  parts)`), with a first kind, `question` (`tool-ask-user`). Google Chat writes other
   files to the conversation's workspace for the agent's tools. `attachments` and `storage.blob`
   stay for files that must be kept.
 - What a platform draws from markdown (Google Chat's cards for tables and code, image cards for

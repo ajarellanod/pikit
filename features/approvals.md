@@ -12,7 +12,7 @@ self-change (SPEC §6); whether that approval is this component or the git host'
 below. The dashboard answers approvals only when this exists (SPEC §5).
 [Google Chat](channel-google-chat.md) brings its first part: the tool `askUser`, which ends its run
 with a `question` part instead of waiting, drawn as cards and dialogs, its answer a new message
-with `replyTo`. What stays here: Pi's extensions' questions (pi-durable has no UI API yet) and
+that says it in its text. What stays here: Pi's extensions' questions (pi-durable has no UI API yet) and
 decisions that wait days.
 
 ## What it gives

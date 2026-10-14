@@ -78,6 +78,20 @@ next process resumes them.
 
 A conversation key points to a pi-durable conversation id (`ConversationRef.conversationId`).
 
+**Images** a message carries (`AgentRequest.images`: a channel's `InboundMessage.images`, the
+dashboard's attachments) go to the model after its text, and stay in the transcript.
+
+**Parts.** A tool gives its run's answer a part (a question to draw as buttons, a kind its component
+declares on `AppMessageParts`) by returning `withParts(result, parts)` (`@pikit/pi-adapter/tools`):
+the run's result (`AgentResult.parts`, and the `answers` log) carries every successful tool result's
+parts, in order, and the channels deliver them with the answer, drawn or folded into its text. A tool
+that also ends the run (`control: { terminate: true }`) gives an answer of parts and no text.
+
+**The answer as it is written.** While a run goes, `agent.partial` (`{ conversation, requestId, text }`)
+carries the text so far of the response the model is writing, read from pi-durable's live state, at
+most once a second per conversation, and never after the run's end: what a channel's preview (a
+"Thinking…" placeholder edited as it grows) reads. A notice: one lost costs nothing.
+
 ## Nothing admitted goes unanswered
 
 pi-durable keeps every message it admitted and how it ended; `agent.submissions` reads them

@@ -97,9 +97,18 @@ interface AgentRuntime {
   at its next tool round.
 - The answer is not returned. A run's end is the event `agent.settled` (completed or aborted) or
   `agent.failed`, with an `AgentResult` (`requestId` that started it, every `requestIds` it answered,
-  `text`, `messages`, `usage`, `error`), and is recorded in `agent.submissions.answers`. A run resumed
-  after a crash has no caller, which is why.
-- Events `agent.dispatched` (every admission) and `agent.started` (with `resumed`) are emitted too.
+  `text`, `parts`, `messages`, `usage`, `error`), and is recorded in `agent.submissions.answers`. A run
+  resumed after a crash has no caller, which is why.
+- `parts` are the parts the run's tools gave ([Parts](#parts)), in the order their results were
+  written. runtime-pi collects them from its tool results: a tool returns `withParts(result, parts)`
+  (`@pikit/pi-adapter/tools`), which checks each part and carries them in the result's `details`
+  (`pikit.parts`); a tool that ends the run (`control.terminate`) gives an answer of parts and no text.
+- Events `agent.dispatched` (every admission) and `agent.started` (with `resumed`) are emitted too, and
+  `agent.partial` (`{ conversation, requestId, text }`) while a run goes: the text so far of the response
+  the model is writing, for a preview (a placeholder a channel edits). runtime-pi re-emits it from
+  pi-durable's live state (`pi.live`'s `generation.message`), at most once per `partialEveryMs` (1 s) per
+  conversation, and never after the run's end. A notice: one lost costs nothing; the answer is the
+  run's result.
 
 Provider: runtime-pi (on pi-durable, through `@pikit/pi-adapter`'s `createDurableRuntime`), the only
 one for good: Pi is the only agent runtime (SPEC §3.3), as for every runtime contract below.
@@ -252,8 +261,10 @@ stage decided). It throws when a stage changed the message's `id`, `channel` or 
 when a capability fails. A dispatch rejected with `AgentUnavailableError` (the conversation's agent
 is gone for good: removed, a live agent deleted) is not thrown: the key moves to a new conversation of
 the agent routed now and the message goes there, or, when routing names the gone agent, it is
-`denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text }` (a field is
-added, optional, with the component that reads it); its `id` becomes the request id. See [pipelines.md](pipelines.md).
+`denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text, images? }` (a
+field is added, optional, with the component that reads it); its `id` becomes the request id, and its
+`images` (`AgentImage`, bounded by whoever builds the message) the request's `images`, as an
+`inbound.normalize` stage leaves them (it may drop them). See [pipelines.md](pipelines.md).
 
 Authentication is not here: each channel proves its senders its own way.
 
@@ -273,7 +284,7 @@ interface AgentSubmissions {
 }
 ```
 
-`RunSettlement` is an `AgentResult` without `messages` and `usage`. A message the runtime gives up on
+`RunSettlement` is an `AgentResult` without `messages` and `usage` (its `text` and `parts` are its answer). A message the runtime gives up on
 is settled `failed` with `error.code: "abandoned"`. runtime-pi keeps `answers` in `runtime_pi_answers`
 (`packages/pi-adapter/src/answers.ts`), appended once per run before `agent.settled`/`agent.failed`,
 kept `keepSettledDays` (7). Suites: `createSubmissionsConformance` (on the memory double and on
@@ -291,7 +302,7 @@ Stores an answer before sending it, and delivers it.
 
 ```ts
 interface OutboundQueue {
-  enqueue(message: OutboundMessage): Promise<void>;    // { idempotencyKey, channel, conversationKey, text }
+  enqueue(message: OutboundMessage): Promise<void>;    // { idempotencyKey, channel, conversationKey, text, parts? }
   attach(channel, transport: ChannelTransport): void;  // a channel hands its transport while it runs
   detach(channel, signal?): Promise<void>;
   readonly receipts: Feed<DeliveryReceipt>;           // every piece that settled
@@ -300,6 +311,8 @@ interface OutboundQueue {
 ```
 
 - The same `idempotencyKey` enqueued twice is stored once. Each conversation's pieces go in order.
+- A message is cut by `messagePieces` with its channel's transport ([Parts](#parts)): the parts it does
+  not draw folded into the text before the split, the ones it draws stored and sent with the last piece.
 - At-least-once: a piece whose send may have reached the platform goes again with
   `possibleDuplicate`.
 - A piece is abandoned at the provider's maximum age whatever the reason, also when its channel
@@ -309,13 +322,29 @@ interface OutboundQueue {
 - Transports attach rather than being a keyed capability, which would be a cycle (the queue would use
   the channels, the channels the queue).
 
-A **`ChannelTransport`** is the channel's: `{ idempotent, split(text), send(piece, signal) }`. A failed
+A **`ChannelTransport`** is the channel's: `{ idempotent, draws?, split(text), send(piece, signal) }`;
+`draws` lists the kinds of part it draws, which `send` receives on a message's last piece
+(`OutboundPiece.parts`). A failed
 send throws `DeliveryError(kind)`: `transient`, `rate_limited` (with `retryAfterMs`, not counted as a
 failure) or `permanent`, with `maybeSent`. `answerKey(conversation, requestId)` is
 `${conversationId}:${requestId}`, and piece keys are `${key}#${index}`.
 
 Provider: outbound-durable (on `storage.sql` and `wakeups`; gives up on `permanent` or after 24 h).
 Suite: `createOutboundQueueConformance`, and the convergence suite.
+
+### Parts ([parts.ts](../packages/contracts/src/parts.ts))
+
+What an answer carries besides its markdown text, for a channel to draw its platform's way (a
+question as buttons). A kind of part is declared by the component that introduces it, by declaration
+merging on `AppMessageParts` (the core and the contracts declare none); `MessagePart` is
+`{ type, fallback }` and the kind's fields. Every part has a `fallback` text. A transport draws the
+kinds in its `draws`; every other part is folded into the text as its fallback, after the text, a
+paragraph each, before the split, and the drawn ones go with the last piece. `messagePieces(transport,
+{ text, parts })` is the one place that does it (answer delivery's direct path and outbound-durable call
+it); a channel that answers in its response folds with `foldParts` (channel-http). What a platform draws
+from markdown (tables, images) is its transport's, not a part. Tests: `parts.test.ts`, the
+`outbound.queue` suite, and the channel suite (a part no channel draws reaches its sender as its
+fallback, also in an answer of the part alone).
 
 ### `startAnswerDelivery` ([delivery.ts](../packages/contracts/src/delivery.ts))
 
@@ -324,7 +353,9 @@ Not a capability: the outbound protocol every chat channel calls in `start`. The
 (answer)`, `queue?`, `wakeups?` and a `DeliveryPolicy` (`retryMs`, `blockedAfter`, `window`,
 `piecesPerRun`, `sendTimeoutMs`). It returns `{ wake(ctx), stop(signal) }`. What it guarantees: a
 cursor (`answers-cursor`) per channel, one lane per conversation, retries, idempotency keys, and a
-dashboard-only run never sent to a chat. Its header states the direct and queued guarantees and what
+dashboard-only run never sent to a chat. An answer is the channel's `text(answer)` and a completed
+run's `parts`, cut by `messagePieces` on both paths (the queue cuts it the same way); one with parts
+and no text is still delivered, one with neither is passed over. Its header states the direct and queued guarantees and what
 survives a crash at each step. See [message-flow.md](message-flow.md). The dashboard's request ids
 start with `DASHBOARD_REQUEST_PREFIX` (`dashboard:`).
 
