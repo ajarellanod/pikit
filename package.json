@@ -18,11 +18,13 @@
     "pikit": "bun packages/cli/src/main.ts"
   },
   "devDependencies": {
+    "@better-auth/test-utils": "1.7.7",
     "@jitl/quickjs-wasmfile-release-sync": "0.32.0",
     "@pikit/contracts": "workspace:*",
     "@pikit/core": "workspace:*",
     "@pikit/pi-adapter": "workspace:*",
     "@types/bun": "^1.4.2",
+    "better-auth": "1.7.7",
     "diff": "8.0.4",
     "hono": "4.13.9",
     "isomorphic-git": "1.42.3",
