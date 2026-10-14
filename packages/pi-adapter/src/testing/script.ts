@@ -50,11 +50,17 @@ export interface ScriptedProviderOptions {
    * run, until it resolves: the run is at its end and has not ended yet.
    */
   atEnd?(): Promise<void> | undefined;
+  /** Streams each answer at this many tokens a second, one token at a time (the answer as it is written). Default: at once. */
+  tokensPerSecond?: number;
 }
 
 /** The scripted provider, model `<id>/scripted`. */
 export function scriptedProvider(options: ScriptedProviderOptions = {}): Provider {
-  const faux = fauxProvider({ provider: options.id ?? "faux", models: [{ id: "scripted" }] });
+  const faux = fauxProvider({
+    provider: options.id ?? "faux",
+    models: [{ id: "scripted" }],
+    ...(options.tokensPerSecond !== undefined && { tokensPerSecond: options.tokensPerSecond, tokenSize: { min: 1, max: 1 } }),
+  });
   const step: FauxResponseFactory = (context, streamOptions) => {
     options.onRequest?.(context, streamOptions);
     const failing = options.fail?.();

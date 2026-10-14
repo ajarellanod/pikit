@@ -96,7 +96,7 @@ there.
   execution-do (bun and workerd) pass it.
 - A tool gives its run's answer parts with `withParts` (`@pikit/pi-adapter/tools`), collected in order
   into `AgentResult.parts`; runtime-pi re-emits pi-durable's partial answer as `agent.partial`, at most
-  once a second per conversation, never after the run's end.
+  once per `partialEveryMs` (its config, default a second) per conversation, never after the run's end.
 - `agent.extension` (keyed): a component adds agent behaviour as a pi-durable extension (system
   prompt sections, hooks, tool wraps, tasks), from `@pikit/pi-adapter/extensions`; agents select
   them by name.

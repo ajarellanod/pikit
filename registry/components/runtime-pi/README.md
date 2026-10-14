@@ -89,7 +89,8 @@ that also ends the run (`control: { terminate: true }`) gives an answer of parts
 
 **The answer as it is written.** While a run goes, `agent.partial` (`{ conversation, requestId, text }`)
 carries the text so far of the response the model is writing, read from pi-durable's live state, at
-most once a second per conversation, and never after the run's end: what a channel's preview (a
+most once per `partialEveryMs` per conversation (config, default 1000: once a second; `0` at each of
+pi-durable's commits of the partial answer), and never after the run's end: what a channel's preview (a
 "Thinking…" placeholder edited as it grows) reads. A notice: one lost costs nothing.
 
 ## Nothing admitted goes unanswered
@@ -106,7 +107,7 @@ pi-durable keeps every message it admitted and how it ended; `agent.submissions`
   from pi-durable:
 
 ```json
-"runtime-pi": { "keepSettledDays": 7, "abandonPendingAfterHours": 72 }
+"runtime-pi": { "keepSettledDays": 7, "abandonPendingAfterHours": 72, "partialEveryMs": 1000 }
 ```
 
 - a run that ended while its log was never written (a crash between the two) is logged and announced
@@ -358,6 +359,8 @@ model from `@pikit/pi-adapter/testing`, so it needs no API key. It covers:
 - the lifecycle conformance suite, the same ways;
 - a run that died mid-way resumed at start, with no new message, and its answer in `agent.submissions`;
   an answer in `answers` at the next start;
+- `partialEveryMs` reaching the runtime: `0` emits `agent.partial` at each commit of a streamed answer,
+  a long period one;
 - `resume.ts`: which messages are abandoned after `abandonPendingAfterHours`, and that a `pending()`
   that never answers does not hold `stop`;
 - `wakeups`: a run that died mid-way completed by the next App's wakeup; a long run driven over

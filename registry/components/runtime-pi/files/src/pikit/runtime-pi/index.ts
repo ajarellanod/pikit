@@ -115,6 +115,16 @@ const Config = Type.Object({
     default: 7,
     description: "Days a run's end is kept in agent.submissions' answers feed. At least 1, so answers that ended during a deploy are still delivered.",
   }),
+  /**
+   * How often, in ms, `agent.partial` (the answer as it is written) is emitted at most, per
+   * conversation: a preview's pace (channel-google-chat's placeholder), not a stream's. 0: at each of
+   * pi-durable's commits of the partial answer.
+   */
+  partialEveryMs: Type.Integer({
+    minimum: 0,
+    default: 1_000,
+    description: "Milliseconds between two agent.partial events of a conversation, at most one per period. 0: at each commit of the partial answer.",
+  }),
 });
 
 /**
@@ -417,6 +427,7 @@ export function createRuntimePi(options: RuntimePiOptions = {}) {
           const created = createDurableRuntime({
             db,
             keepSettledDays: config.keepSettledDays,
+            partialEveryMs: config.partialEveryMs,
             agent: definition,
             tool: (name) => tools.get(name),
             extension: (name) => extensions.get(name),

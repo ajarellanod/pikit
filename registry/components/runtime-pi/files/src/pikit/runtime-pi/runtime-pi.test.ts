@@ -114,6 +114,43 @@ test("an answer that ended while the channels were stopped is in agent.submissio
   }
 }, 30_000);
 
+test("partialEveryMs (config) reaches the runtime: 0 emits agent.partial at each commit of the answer being written, a long period at most one per period", async () => {
+  // About 400 characters, streamed 4 at a time, 200 chunks a second: half a second of writing, committed every 10 ms.
+  const prompt = Array.from({ length: 100 }, (_, index) => `w${index}`).join(" ");
+  const partials = async (partialEveryMs: number): Promise<string[]> => {
+    const file = databaseFile();
+    try {
+      const provider = scriptedProvider({ tokensPerSecond: 200 });
+      const agents = defineComponent({ name: "agents-test", setup: (pikit) => pikit.provideKeyed("agent.definition", "scripted", scriptedAgent(holdTool(async () => "released"))) });
+      const models = defineComponent({ name: "provider-test", setup: (pikit) => pikit.provideKeyed("model.provider", provider.id, provider) });
+      const texts: string[] = [];
+      const watch = defineComponent({ name: "partials-test", setup: (pikit) => pikit.on("agent.partial", (event) => void texts.push(event.text)) });
+      const seen = observer();
+      const runtime = createRuntimePi({ settings: { progress: { partialIntervalMs: 10 } } });
+      const app = await defineApp({
+        components: [sqliteStorage(file.path), agents, models, runtime, seen.component, watch],
+        config: { "runtime-pi": { partialEveryMs } },
+        logger: silentLogger,
+      }).create();
+      await app.start();
+      try {
+        const conversation = await seen.conversation("test:partial");
+        await seen.runtime().dispatch({ requestId: "r1", conversation, prompt }, app.context());
+        await until(() => seen.results.length > 0, "the answer");
+        expect(seen.results[0]?.kind === "completed" ? seen.results[0].text : undefined).toBe(`answer: ${prompt}`);
+        return texts;
+      } finally {
+        await app.stop();
+      }
+    } finally {
+      file.dispose();
+    }
+  };
+
+  expect((await partials(0)).length).toBeGreaterThanOrEqual(5);
+  expect(await partials(60_000)).toHaveLength(1);
+}, 30_000);
+
 test("what setup declares: component.json's provides / requires / optional come from it", async () => {
   const { storage, agents, provider } = testComponents();
   const app = await defineApp({ components: [storage, agents, provider, runtimePi], logger: silentLogger }).create();
