@@ -1,11 +1,13 @@
 // Owner: admission. Which conversation an event is, and where its answer goes (features/channel-google-chat.md "Conversations and routing").
 /**
  * - **The key** (`eventKey`): `conversationKey(instance, space, thread)` (instance.ts's format) for a
- *   thread, `conversationKey(instance, space)` for a whole chat. A message's (or a click's message's)
- *   thread is its conversation when the space has threads (`SpaceThreading`) and the `conversations`
- *   setting says `"thread"` for it (`ModeOf`); otherwise the whole chat. An add or a removal is its
- *   space's whole chat. A click with no message (inside a dialog) is the conversation its action's
- *   `key` parameter names (`KEY_PARAMETER`), when that is a key of this instance in the click's space.
+ *   thread, `conversationKey(instance, space)` for a whole chat. A message's thread is its
+ *   conversation when the space has threads (`SpaceThreading`) and the `conversations` setting says
+ *   `"thread"` for it (`ModeOf`); otherwise the whole chat. An add or a removal is its space's whole
+ *   chat. **Every click** is the conversation its action's `key` parameter names (`KEY_PARAMETER`:
+ *   every action of a card or a dialog carries the key it was drawn with), when that is a key of this
+ *   instance in the click's space; never the setting of now, so a card stays its conversation's when
+ *   the setting changes. click.ts then checks the key is its question's own.
  *   A payload this channel drops, or an event with no space, has no key (`undefined`).
  * - **Threads** (`createSpaceThreading`): the event's `space.spaceThreadingState`, else the state kept
  *   (in memory, then `storage.kv` under `space:<name>` where given: the Worker's half has no
@@ -32,7 +34,7 @@ export interface KeyDeps {
   mode: ModeOf;
 }
 
-/** The action parameter a dialog's buttons may carry: the conversation key of the question it answers (a click in a dialog has no message to read it from). */
+/** The action parameter every question's action carries: the conversation key the card was drawn in, how a click is keyed. */
 export const KEY_PARAMETER = "key";
 
 /** Where the threading state of a space is kept in `storage.kv`. */
@@ -55,13 +57,12 @@ export async function eventKey(event: AddOnEvent, deps: KeyDeps, ctx: AppContext
   const whole = conversationKey(deps.instance.instance, space.name);
   if (kind === "added" || kind === "removed") return whole;
 
-  const message = kind === "message" ? event.chat.messagePayload?.message : event.chat.buttonClickedPayload?.message;
-  if (kind === "click" && message === undefined) {
+  if (kind === "click") {
     const named = event.commonEventObject?.parameters?.[KEY_PARAMETER];
     const parts = named === undefined ? undefined : parseConversationKey(named);
     return parts !== undefined && parts.instance === deps.instance.instance && parts.space === space.name ? named : undefined;
   }
-  const thread = threadOf(message, space.name);
+  const thread = threadOf(event.chat.messagePayload?.message, space.name);
   if (thread === undefined) return whole;
   if ((await deps.mode(space.name, ctx)) !== "thread") return whole;
   if (!(await deps.threading.threaded(space, ctx))) return whole;

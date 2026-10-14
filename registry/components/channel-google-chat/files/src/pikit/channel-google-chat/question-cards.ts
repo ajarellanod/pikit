@@ -14,7 +14,9 @@
  *   - `text`: `textInput` MULTIPLE_LINE; `date`: `dateTimePicker` DATE_ONLY.
  *   A form sent back with a problem is drawn again (`retry`) with the problem on top and what was
  *   answered kept.
- * - `answeredCard`: the card once answered, its buttons gone, saying who answered what.
+ * - `answeredCard`: the card once answered, its buttons gone, saying who answered what. `drawnQuestion`
+ *   (the transport's drawer) draws a question whose claim exists as answered: a piece sent again never
+ *   brings an answered question's buttons back.
  *
  * **Every action carries the conversation's key** (`CLICK_PARAMETERS.key`, key.ts's `KEY_PARAMETER`):
  * a click inside a dialog carries no message, so the route keys a click by it.
@@ -28,6 +30,7 @@
 import type { QuestionAnswer, QuestionField, QuestionPart, QuestionValue } from "@pikit/contracts";
 import type { Card, CardButton, CardWidget, CardWithId } from "./event.ts";
 import { KEY_PARAMETER } from "./key.ts";
+import type { QuestionAnswered } from "./types.ts";
 
 /** The `action.parameters` keys of a question's buttons. */
 export const CLICK_PARAMETERS = {
@@ -162,4 +165,9 @@ export function answeredCard(question: QuestionPart, answer: QuestionAnswer, by:
   const widgets = described(question);
   for (const field of question.fields) widgets.push({ decoratedText: { topLabel: field.label, text: escapeCardText(answerShown(field, answer[field.name])), wrapText: true } });
   return { cardId: questionCardId(question), card: { header: header(question, `Answered by ${by}`), sections: [{ widgets }] } };
+}
+
+/** `question`'s card as the transport draws it (types.ts `QuestionDrawer`): answered already (its piece sent again), as answered; else with its buttons. */
+export function drawnQuestion(question: QuestionPart, endpoint: string, conversationKey: string, answered?: QuestionAnswered): CardWithId {
+  return answered === undefined ? questionCard(question, endpoint, conversationKey) : answeredCard(question, answered.answer, answered.name);
 }

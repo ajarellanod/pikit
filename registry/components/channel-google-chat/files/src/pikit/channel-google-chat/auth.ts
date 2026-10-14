@@ -7,8 +7,9 @@
  * there is one; exchanged at `token_uri` (`grant_type=urn:ietf:params:oauth:grant-type:jwt-bearer`,
  * form-encoded) for an access token kept in memory until a minute before it expires. Concurrent
  * callers share one exchange. A refusal rejects with a `ChatApiError` with the endpoint's status and
- * words (`invalid_grant`: the key is wrong or deleted, `permanent` by `deliveryErrorOf`); no answer
- * rejects with status 0. Neither the key, the assertion nor a token is ever in an error or a log. Nothing is fetched until a token is asked for (a start makes no request).
+ * words, `tokenRefused` (`invalid_grant`: the key is wrong, deleted or disabled; a private key that
+ * cannot be read too): `transient` by `deliveryErrorOf`, so the answers wait and go once the secret
+ * is fixed; no answer rejects with status 0. Neither the key, the assertion nor a token is ever in an error or a log. Nothing is fetched until a token is asked for (a start makes no request).
  */
 
 import type { Clock } from "@pikit/core";
@@ -41,7 +42,7 @@ export function createAccessTokens(serviceAccount: ServiceAccount, options: Acce
   const signingKey = (): Promise<CryptoKey> => {
     key ??= importPrivateKey(serviceAccount.private_key).catch((error: unknown) => {
       key = undefined;
-      throw new ChatApiError(400, "the service account's private_key is not a PKCS #8 RSA key", { cause: error });
+      throw new ChatApiError(400, "the service account's private_key is not a PKCS #8 RSA key", { tokenRefused: true, cause: error });
     });
     return key;
   };
@@ -79,6 +80,7 @@ export function createAccessTokens(serviceAccount: ServiceAccount, options: Acce
       const words = [code, typeof body.error_description === "string" ? body.error_description : undefined].filter((each) => each !== undefined).join(": ");
       throw new ChatApiError(response.ok ? 502 : response.status, `the token endpoint refused the service account's key${words === "" ? ` (HTTP ${response.status})` : `: ${words}`}`, {
         ...(code !== undefined && { code }),
+        tokenRefused: true,
         ...(response.status === 429 && { retryAfterMs: retryAfterMs(response.headers.get("retry-after"), options.clock.now()) ?? 1_000 }),
       });
     }

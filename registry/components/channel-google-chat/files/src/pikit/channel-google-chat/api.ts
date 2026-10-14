@@ -160,17 +160,21 @@ export function createChatApi(options: ChatApiOptions): ChatApi {
 
 /**
  * `error` (a `ChatApiError`, or anything) as a `DeliveryError`: 429 `rate_limited` (its
- * `retryAfterMs`); a network error, a timeout and 5xx `transient` (`maybeSent` kept); 400, 401, 403
- * and 404 `permanent` (a message refused, the service account's key refused, the app removed, the
- * space gone: retrying fails the same way; a token is renewed a minute before it expires, so a 401
- * is the key, not an old token); anything else `transient`. Its message is Google's words, never a
- * message's text.
+ * `retryAfterMs`); **the token endpoint's refusal** (`tokenRefused`: `invalid_grant`, a key that
+ * cannot be read) `transient`, its message saying the key is to fix: a misconfigured secret is the
+ * app's, not the answer's, so the answers wait (logged at every failure, as an error from the 3rd)
+ * and go once it is fixed (through `outbound-durable`, within its 24 hours); a network error, a
+ * timeout and 5xx `transient` (`maybeSent` kept); 400, 401, 403 and 404 from the Chat API
+ * `permanent` (a message refused; a token Google refused, which it gave a minute before at least, so
+ * not an old one; the app removed; the space gone: retrying fails the same way); anything else
+ * `transient`. Its message is Google's words, never a message's text or a key.
  */
 export function deliveryErrorOf(error: unknown): DeliveryError {
   if (error instanceof DeliveryError) return error;
   if (!(error instanceof ChatApiError)) return new DeliveryError("transient", error instanceof Error ? error.message : String(error), { cause: error });
   const options = { maybeSent: error.maybeSent, cause: error };
   if (error.status === 429) return new DeliveryError("rate_limited", error.message, { ...options, ...(error.retryAfterMs !== undefined && { retryAfterMs: error.retryAfterMs }) });
+  if (error.tokenRefused) return new DeliveryError("transient", `${error.message} (fix the service account's key in the secrets: the answers waiting go once it works)`, options);
   if ([400, 401, 403, 404].includes(error.status)) return new DeliveryError("permanent", error.message, options);
   return new DeliveryError("transient", error.message, options);
 }

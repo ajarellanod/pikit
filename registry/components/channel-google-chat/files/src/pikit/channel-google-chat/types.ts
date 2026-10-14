@@ -20,7 +20,7 @@
  */
 
 import type { AppContext, Clock } from "@pikit/core";
-import type { AgentResult, AgentRuntime, ConversationRef, ConversationRegistry, KeyValueStore, QuestionPart } from "@pikit/contracts";
+import type { AgentResult, AgentRuntime, ConversationRef, ConversationRegistry, KeyValueStore, QuestionAnswer, QuestionPart } from "@pikit/contracts";
 import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import type { AddOnEvent, AddOnResponse, CardWithId, ChatMessage, ChatSpace } from "./event.ts";
 import type { ConversationMode, Credentials, Instance } from "./instance.ts";
@@ -83,14 +83,17 @@ export class ChatApiError extends Error {
   readonly retryAfterMs: number | undefined;
   /** The request may have reached Google (a timeout or a connection cut after it left). */
   readonly maybeSent: boolean;
+  /** No access token: the token endpoint refused the service account's key (or the key is unreadable). The app's configuration, never the message: fixed, the same call works. */
+  readonly tokenRefused: boolean;
 
-  constructor(status: number, message: string, options: { code?: string; retryAfterMs?: number; maybeSent?: boolean; cause?: unknown } = {}) {
+  constructor(status: number, message: string, options: { code?: string; retryAfterMs?: number; maybeSent?: boolean; tokenRefused?: boolean; cause?: unknown } = {}) {
     super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = "ChatApiError";
     this.status = status;
     this.code = options.code;
     this.retryAfterMs = options.retryAfterMs;
     this.maybeSent = options.maybeSent ?? false;
+    this.tokenRefused = options.tokenRefused ?? false;
   }
 }
 
@@ -203,8 +206,21 @@ export interface QuestionRecord {
    * it was asked in. A click once the key's conversation is another (`/new`) admits nothing.
    */
   answerKey: string;
-  /** Once answered: who (`users/…`), when, and what was admitted. */
-  answered?: { by: string; at: number; text: string };
+  /** Once answered (`QuestionAnswered`). */
+  answered?: QuestionAnswered;
+}
+
+/** A question's answer as its claim keeps it: enough to draw its card answered again (transport.ts). */
+export interface QuestionAnswered {
+  /** Who (`users/…`). */
+  by: string;
+  /** Their name as the card shows it (the display name, else `by`). */
+  name: string;
+  at: number;
+  /** What was admitted (`answerText`). */
+  text: string;
+  /** The answer, by field. */
+  answer: QuestionAnswer;
 }
 
 export interface QuestionRecords {
@@ -212,14 +228,15 @@ export interface QuestionRecords {
   sent(record: Omit<QuestionRecord, "answered">): Promise<void>;
   get(questionId: string): Promise<QuestionRecord | undefined>;
   /** Marks it answered; `true` for the one call that did (each question is answered once). */
-  answer(questionId: string, answered: NonNullable<QuestionRecord["answered"]>): Promise<boolean>;
+  answer(questionId: string, answered: QuestionAnswered): Promise<boolean>;
 }
 
 /**
  * Draws a question as a card whose buttons call `endpoint` (the app's endpoint URL, the audience) back
- * (question-cards.ts), each carrying `conversationKey` (the piece's): how the route keys a click.
+ * (question-cards.ts), each carrying `conversationKey` (the piece's): how the route keys a click. One
+ * `answered` already (its piece sent again) is drawn as answered, with no buttons.
  */
-export type QuestionDrawer = (question: QuestionPart, endpoint: string, conversationKey: string) => CardWithId;
+export type QuestionDrawer = (question: QuestionPart, endpoint: string, conversationKey: string, answered?: QuestionAnswered) => CardWithId;
 
 /** What a click led to: the response Google shows, and whether an answer was admitted (`admitted`, `duplicate`) or not (`done`). */
 export interface ClickOutcome {

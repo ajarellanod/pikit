@@ -33,7 +33,7 @@
  * request to Google: on Cloudflare every object runs it.
  */
 
-import { type AppContext, defineComponent } from "@pikit/core";
+import { type AppContext, BACKGROUND_CONTEXT, defineComponent } from "@pikit/core";
 import { type AgentResult, type ChannelTransport, type DeliveryPolicy, isDashboardRequest, type JsonValue, startAnswerDelivery } from "@pikit/contracts";
 import { CALL_TIMEOUT_MS } from "./api.ts";
 import { createClickHandler, createQuestionRecords } from "./click.ts";
@@ -42,7 +42,7 @@ import { createEventHandler } from "./handler.ts";
 import { Config, createConversationSettings, type Instance, instanceOfKey, instancesOf, NAME } from "./instance.ts";
 import { createAnswerTargets } from "./key.ts";
 import { createPlaceholderMarks, createPlaceholders } from "./placeholder.ts";
-import { questionCard } from "./question-cards.ts";
+import { drawnQuestion } from "./question-cards.ts";
 import { replyText } from "./reply.ts";
 import { createJwks } from "./token.ts";
 import { createTransport } from "./transport.ts";
@@ -185,6 +185,12 @@ export default defineComponent({
         const targets = createAnswerTargets(store);
         const marks = createPlaceholderMarks(store);
         const questions = createQuestionRecords(store);
+        // A dashboard-led run's answer: the requests its run took, read from its settlement (transport.ts).
+        const background = ctx.derive(() => BACKGROUND_CONTEXT);
+        const requestsOf = async (conversationId: string, requestId: string): Promise<readonly string[] | undefined> => {
+          const status = await submissions.get().get({ conversationId }, requestId, background);
+          return status?.kind === "settled" ? status.run.requestIds : undefined;
+        };
         const apps = new Map<string, App>();
         const transports = new Map<string, ChannelTransport>();
         for (const instance of instances) {
@@ -218,7 +224,7 @@ export default defineComponent({
               clock: ctx.clock,
             }),
           });
-          transports.set(instance.instance, createTransport({ instance, credentials, api, targets, marks, questions, drawQuestion: questionCard }));
+          transports.set(instance.instance, createTransport({ instance, credentials, api, targets, marks, questions, drawQuestion: drawnQuestion, requestsOf }));
         }
 
         // Whatever ended while nothing ran (a restart, an eviction, a deploy) is delivered from now on.

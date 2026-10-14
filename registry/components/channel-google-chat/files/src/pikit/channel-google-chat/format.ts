@@ -237,12 +237,14 @@ function render(markdown: string): { text: string; cardsV2: CardWithId[] } {
 }
 
 const utf8Bytes = (text: string): number => new TextEncoder().encode(text).byteLength;
-const bytesOf = (markdown: string): number => utf8Bytes(JSON.stringify(render(markdown)));
+/** A message's size as Google measures it against `MESSAGE_BYTES`: its JSON (text and cards), in UTF-8 bytes. */
+export const messageBytes = (message: { text?: string; cardsV2?: readonly CardWithId[] }): number => utf8Bytes(JSON.stringify(message));
+const bytesOf = (markdown: string): number => messageBytes(render(markdown));
 
 /** A piece's markdown as a Chat message's `text` and `cardsV2` (above). Throws when its JSON passes `MESSAGE_BYTES`. */
 export function chatMessageOf(markdown: string): { text: string; cardsV2: CardWithId[] } {
   const message = render(markdown);
-  const bytes = utf8Bytes(JSON.stringify(message));
+  const bytes = messageBytes(message);
   if (bytes > MESSAGE_BYTES) throw new Error(`channel-google-chat: a message of ${bytes} bytes is more than Google takes (${MESSAGE_BYTES})`);
   return message;
 }

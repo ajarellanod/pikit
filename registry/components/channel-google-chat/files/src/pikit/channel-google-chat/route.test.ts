@@ -8,7 +8,8 @@
  *   handlers stand for the conversation's object.
  *
  * The key is key.ts's `eventKey`, as `routeOf` (worker.ts) makes it: each message's thread, the
- * `conversations` setting saying `thread` (the events say their space has threads).
+ * `conversations` setting saying `thread` (the events say their space has threads); a click's, the key
+ * its action names.
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -276,12 +277,12 @@ test("on a server: a handler that fails answers 500 (Google sends it again); one
   expect(String(cancelled)).toMatch(/within 100 ms/);
 });
 
-test("on a server: a click is answered with the handler's response, in time, from the clicked card's conversation; a failed one is 500", async () => {
+test("on a server: a click is answered with the handler's response, in time, from the conversation its action's key names; a failed one is 500", async () => {
   const { handler, post, bearer } = await onAServer();
   const card = { name: "spaces/AAA/messages/card1", thread: { name: "spaces/AAA/threads/T9" } };
   const response: AddOnResponse = { hostAppDataAction: { chatDataAction: { updateMessageAction: { message: { text: "Ada answered: yes" } } } } };
   handler.state.answer = async () => response;
-  const clicked = clickEvent({ space: ALLOWED, message: card, parameters: { question: "q1", value: "yes" } });
+  const clicked = clickEvent({ space: ALLOWED, message: card, parameters: { key: "googlechat:spaces/AAA:threads/T9", question: "q1", value: "yes" } });
   expect(await bodyOf(await post(clicked, await bearer()))).toEqual({ status: 200, type: expect.stringContaining("application/json"), body: response });
   expect(handler.clicks.map((each) => each.key)).toEqual(["googlechat:spaces/AAA:threads/T9"]);
   expect(handler.events).toEqual([]);
@@ -341,7 +342,7 @@ test("on Cloudflare: a message goes to its conversation's object with actor.mail
   expect(object.events).toEqual([{ key: "googlechat:spaces/AAA:threads/T1", message: JSON.parse(JSON.stringify(carried)) }]);
   expect(JSON.stringify(object.events)).not.toContain(token);
 
-  const clicked = clickEvent({ space: ALLOWED, message: { name: "spaces/AAA/messages/c1", thread: { name: "spaces/AAA/threads/T1" } }, parameters: { question: "q1" } });
+  const clicked = clickEvent({ space: ALLOWED, message: { name: "spaces/AAA/messages/c1", thread: { name: "spaces/AAA/threads/T1" } }, parameters: { key: "googlechat:spaces/AAA:threads/T1", question: "q1" } });
   expect(await bodyOf(await post(clicked))).toMatchObject({ status: 200, body: { action: { notification: { text: "answered by the object" } } } });
   expect(object.clicks.map((each) => each.key)).toEqual(["googlechat:spaces/AAA:threads/T1"]);
 

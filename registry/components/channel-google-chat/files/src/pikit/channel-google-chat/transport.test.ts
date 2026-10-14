@@ -19,12 +19,13 @@ import { createMemoryKeyValueStorage, createMemorySubmissions } from "@pikit/con
 import { CALL_TIMEOUT_MS, createChatApi, deliveryErrorOf } from "./api.ts";
 import { CHAT_SCOPE, createAccessTokens } from "./auth.ts";
 import { type FakeGoogleChat, googleError, startFakeGoogleChat, verifyJwt, createTestServiceAccount } from "./fake-google-chat.test-support.ts";
-import { chatMessageOf, chatTextOf, MESSAGE_BYTES, PIECE_CHARS, splitAnswer } from "./format.ts";
+import { chatMessageOf, chatTextOf, MESSAGE_BYTES, messageBytes, PIECE_CHARS, splitAnswer } from "./format.ts";
 import { messageNameOf, pieceIds } from "./ids.ts";
 import { instancesOf, parseConversationKey, readCredentials } from "./instance.ts";
+import { createAnswerTargets } from "./key.ts";
 import { createPlaceholderMarks, createPlaceholders } from "./placeholder.ts";
 import { createTransport, DRAWS } from "./transport.ts";
-import { type AnswerTargets, ChatApiError, type QuestionRecord, type QuestionRecords } from "./types.ts";
+import { type AnswerTargets, type ChatApi, ChatApiError, type QuestionAnswered, type QuestionRecord, type QuestionRecords } from "./types.ts";
 
 const fakes: FakeGoogleChat[] = [];
 afterEach(async () => {
@@ -48,7 +49,20 @@ async function contextOf(): Promise<AppContext> {
   return (await defineApp({ components: [], logger: silentLogger }).create()).context();
 }
 
-async function setup(options: { previewEveryMs?: number } = {}) {
+interface SetupOptions {
+  previewEveryMs?: number;
+  /** The questions answered already, by id (their claims). */
+  answered?: Map<string, QuestionAnswered>;
+  /** Where answers go, instead of reading the key alone. */
+  targets?: AnswerTargets;
+  /** The requests each run took, by `<conversation id>:<request id>`. */
+  runs?: Map<string, string[]>;
+  /** The placeholders' API, wrapping the real one (a preview that lands late). */
+  placeholderApi?: (api: ChatApi) => ChatApi;
+  reapplyAfterMs?: number;
+}
+
+async function setup(options: SetupOptions = {}) {
   const clock: ManualClock = createManualClock(Date.now());
   const google = await startFakeGoogleChat({ now: () => clock.now() });
   fakes.push(google);
@@ -59,16 +73,29 @@ async function setup(options: { previewEveryMs?: number } = {}) {
   const marks = createPlaceholderMarks(store);
   const memory = createMemorySubmissions();
   const recorded: Omit<QuestionRecord, "answered">[] = [];
-  const questions: QuestionRecords = { sent: async (record) => void recorded.push(record), get: async () => undefined, answer: async () => false };
-  const placeholders = createPlaceholders({ instance: INSTANCE, api, targets, marks, submissions: memory.submissions, thinkingText: "Thinking…", previewEveryMs: options.previewEveryMs ?? 3_000, clock });
+  const questions: QuestionRecords = {
+    sent: async (record) => void recorded.push(record),
+    get: async (id) => {
+      const answered = options.answered?.get(id);
+      return answered === undefined ? undefined : ({ answered } as QuestionRecord);
+    },
+    answer: async () => false,
+  };
+  const where = options.targets ?? targets;
+  const placeholders = createPlaceholders({ instance: INSTANCE, api: options.placeholderApi?.(api) ?? api, targets: where, marks, submissions: memory.submissions, thinkingText: "Thinking…", previewEveryMs: options.previewEveryMs ?? 3_000, clock });
   const transport = createTransport({
     instance: INSTANCE,
     credentials,
     api,
-    targets,
+    targets: where,
     marks,
     questions,
-    drawQuestion: (question, endpoint, conversationKey) => ({ cardId: `question-${question.id}`, card: { header: { title: question.title, subtitle: endpoint }, sections: [{ widgets: [{ textParagraph: { text: conversationKey } }] }] } }),
+    drawQuestion: (question, endpoint, conversationKey, answered) => ({
+      cardId: `question-${question.id}`,
+      card: { header: { title: question.title, subtitle: answered === undefined ? endpoint : `Answered by ${answered.name}` }, sections: [{ widgets: [{ textParagraph: { text: conversationKey } }] }] },
+    }),
+    requestsOf: async (conversationId, requestId) => options.runs?.get(`${conversationId}:${requestId}`),
+    ...(options.reapplyAfterMs !== undefined && { reapplyAfterMs: options.reapplyAfterMs }),
   });
   const ctx = await contextOf();
   const send = (index: number, text: string, extra: Partial<OutboundPiece> = {}, signal = new AbortController().signal) =>
@@ -125,7 +152,7 @@ test("auth: an RS256 assertion for chat.bot, exchanged once, kept until a minute
   expect(google.tokensIssued).toBe(2);
 });
 
-test("auth: a key Google does not know is refused, permanent, and its error quotes neither the key nor the assertion", async () => {
+test("auth: a key Google does not know is refused, transient (a secret to fix: the answers wait), and its error quotes neither the key nor the assertion", async () => {
   const { google, clock } = await setup();
   const stranger = await createTestServiceAccount(google.tokenUri);
   const [main] = instancesOf([]);
@@ -136,10 +163,13 @@ test("auth: a key Google does not know is refused, permanent, and its error quot
   expect(error).toMatchObject({ status: 400, code: "invalid_grant" });
   expect((error as Error).message).not.toContain("PRIVATE KEY");
   expect((error as Error).message).not.toContain(new URLSearchParams(String(google.callsTo({ path: "/token" })[0]?.body)).get("assertion"));
-  expect(deliveryErrorOf(error).kind).toBe("permanent");
+  expect(deliveryErrorOf(error)).toMatchObject({ kind: "transient", message: expect.stringContaining("fix the service account's key") });
+  expect(deliveryErrorOf(error).message).not.toContain("PRIVATE KEY");
 
   const broken = createAccessTokens({ ...credentials.serviceAccount, private_key: "-----BEGIN PRIVATE KEY-----\nnope\n-----END PRIVATE KEY-----" }, { clock, fetch: google.fetch });
-  expect(await failureOf(broken.token())).toMatchObject({ status: 400 });
+  const unreadable = await failureOf(broken.token());
+  expect(unreadable).toMatchObject({ status: 400, tokenRefused: true });
+  expect(deliveryErrorOf(unreadable).kind).toBe("transient");
   google.fail({ path: "/token" }, "network");
   const unreachable = createAccessTokens(credentials.serviceAccount, { clock, fetch: google.fetch });
   expect(await failureOf(unreachable.token())).toMatchObject({ status: 0 });
@@ -201,6 +231,9 @@ test("deliveryErrorOf: 429 rate_limited, network and 5xx transient (maybeSent ke
   expect(of(0)).toMatchObject({ kind: "transient", maybeSent: false });
   for (const status of [500, 502, 503]) expect(of(status).kind).toBe("transient");
   for (const status of [400, 401, 403, 404]) expect(of(status).kind).toBe("permanent");
+  // The token endpoint's refusal is the app's key, never the message: transient, whatever its status.
+  for (const status of [400, 401]) expect(of(status, { tokenRefused: true }).kind).toBe("transient");
+  expect(of(429, { tokenRefused: true, retryAfterMs: 1_000 }).kind).toBe("rate_limited");
   expect(of(409).kind).toBe("transient");
   expect(deliveryErrorOf(new Error("boom")).kind).toBe("transient");
   const given = new DeliveryError("permanent", "said");
@@ -400,6 +433,85 @@ test("transport: a piece of no text and a drawn question is the question's card,
   const sent = await transport.send({ key: `${answerKey(conversation, "r1")}#0`, conversationKey: conversation.key, possibleDuplicate: false, ...pieces[0]! }, new AbortController().signal);
   expect(google.messages.get(sent.platformMessageId)).toMatchObject({ text: "", cardsV2: [{ cardId: "question-conv-1:r1:t1", card: { header: { title: "Deploy?", subtitle: google.idTokens.audience }, sections: [{ widgets: [{ textParagraph: { text: conversation.key } }] }] } }] });
   expect(recorded).toEqual([{ question, message: sent.platformMessageId, conversationKey: conversation.key, answerKey: answerKey(conversation, "r1") }]);
+});
+
+test("transport: a question answered already, its piece sent again, is drawn answered: its buttons never come back", async () => {
+  const question = questionPart({ id: "conv-1:r1:t1", title: "Deploy?", fields: [{ name: "ok", label: "Deploy now?", kind: "confirm" }] });
+  const answered: QuestionAnswered = { by: "users/1001", name: "Ada Lovelace", at: 5, text: "yes", answer: { ok: true } };
+  const { google, send } = await setup({ answered: new Map([[question.id, answered]]) });
+  const sent = await send(0, "Here is my question.", { parts: [question], possibleDuplicate: true });
+  expect(google.messages.get(sent.platformMessageId)?.cardsV2?.[0]?.card.header).toEqual({ title: "Deploy?", subtitle: "Answered by Ada Lovelace" });
+});
+
+test("transport: Google's 32,000 bytes measured with the drawn cards: past them, the cards go as a message of their own right after the text, under ids of their own, and the question points at it", async () => {
+  const { google, send, recorded } = await setup();
+  const question = questionPart({ id: "conv-1:r1:t1", title: "Deploy?", fields: [{ name: "ok", label: "Deploy now?", kind: "confirm" }] });
+  // Text that fits alone (2 bytes a character), not with the question's card.
+  const text = "é".repeat(Math.floor((MESSAGE_BYTES - 100) / 2));
+  expect(messageBytes(chatMessageOf(text))).toBeLessThanOrEqual(MESSAGE_BYTES);
+  const sent = await send(1, text, { parts: [question] });
+  const partIds = await pieceIds(`${answerKey(conversation, "r1")}#1:parts`);
+  const partsName = messageNameOf("spaces/AAA", partIds.messageId);
+  expect(google.messages.get(sent.platformMessageId)).toMatchObject({ text, cardsV2: [], thread: { name: THREAD } });
+  expect(google.messages.get(partsName)).toMatchObject({ cardsV2: [expect.objectContaining({ cardId: `question-${question.id}` })], thread: { name: THREAD } });
+  expect(messageCalls(google, "POST").map((call) => call.query.requestId)).toEqual([(await pieceIds(`${answerKey(conversation, "r1")}#1`)).requestId, partIds.requestId]);
+  expect(recorded.map((record) => record.message)).toEqual([partsName]);
+  // Sent again: the same two messages.
+  google.forgetRequests();
+  expect(await send(1, text, { parts: [question], possibleDuplicate: true })).toEqual(sent);
+  expect(google.messages.size).toBe(2);
+  // Under the bytes, one message as before.
+  const small = await send(2, "short", { parts: [question] });
+  expect(google.messages.get(small.platformMessageId)?.cardsV2).toHaveLength(1);
+  expect(google.messages.size).toBe(3);
+});
+
+test("transport: a dashboard-led run of a whole chat goes to the thread of its first request that is not the dashboard's", async () => {
+  const store = createMemoryKeyValueStorage().namespace("channel-google-chat");
+  const answerTargets = createAnswerTargets(store);
+  const chat: ConversationRef = { key: "googlechat:spaces/AAA", agent: "assistant", conversationId: "conv-chat" };
+  // The user's message, queued behind the operator's, recorded its thread; the dashboard's recorded none.
+  await answerTargets.remember(answerKey(chat, "spaces/AAA/messages/m1"), THREAD);
+  const { google, transport } = await setup({ targets: answerTargets, runs: new Map([[answerKey(chat, "dashboard:op-1"), ["dashboard:op-1", "spaces/AAA/messages/m1"]]]) });
+  const sent = await transport.send({ key: `${answerKey(chat, "dashboard:op-1")}#0`, conversationKey: chat.key, text: "the answer", possibleDuplicate: false }, new AbortController().signal);
+  expect(google.messages.get(sent.platformMessageId)).toMatchObject({ text: "the answer", thread: { name: THREAD } });
+  expect(messageCalls(google, "POST")[0]?.query.messageReplyOption).toBe("REPLY_MESSAGE_OR_FAIL");
+});
+
+test("transport: a preview whose call timed out and lands after the answer is overwritten: piece #0 applied again after a while", async () => {
+  let land: (() => Promise<void>) | undefined;
+  // The preview's call times out here, and reaches Google later.
+  const placeholderApi = (api: ChatApi): ChatApi => ({
+    ...api,
+    updateMessage: async (name, message, fields) => {
+      land = async () => void (await api.updateMessage(name, message, fields));
+      throw new ChatApiError(0, "PATCH: no answer within 15000 ms", { maybeSent: true });
+    },
+  });
+  const { google, placeholders, ctx, clock, send } = await setup({ placeholderApi, reapplyAfterMs: 300 });
+  await placeholders.started({ conversation, requestId: "r1", resumed: false }, ctx);
+  await clock.advance(3_000);
+  await placeholders.partial({ conversation, requestId: "r1", text: "The answer so" }, ctx);
+  expect(land).toBeDefined();
+
+  const after = google.calls.length;
+  const sending = send(0, "final");
+  await google.waitForCall({ method: "PATCH" }, { after });
+  await land!();
+  const name = messageNameOf("spaces/AAA", (await pieceIds(`${answerKey(conversation, "r1")}#0`)).messageId);
+  expect(google.messages.get(name)?.text).toBe("The answer so");
+  await sending;
+  expect(google.messages.get(name)?.text).toBe("final");
+  expect(messageCalls(google, "PATCH")).toHaveLength(3);
+});
+
+test("transport: the placeholder handed back for piece #0 is edited when its cards differ, its text the same", async () => {
+  const { google, placeholders, ctx, send } = await setup();
+  await placeholders.started({ conversation, requestId: "r1", resumed: false }, ctx);
+  const question = questionPart({ id: "conv-1:r1:t1", title: "Deploy?", fields: [{ name: "ok", label: "Deploy now?", kind: "confirm" }] });
+  google.fail({ method: "PATCH" }, googleError(404, "NOT_FOUND", "Requested entity was not found."));
+  const sent = await send(0, "Thinking…", { parts: [question] });
+  expect(google.messages.get(sent.platformMessageId)?.cardsV2).toEqual([expect.objectContaining({ cardId: `question-${question.id}` })]);
 });
 
 test("transport: failures classified: 429 rate_limited with Retry-After, 5xx and the network transient, a cut send may have arrived, 403 and a removed space permanent, a stranger key permanent", async () => {

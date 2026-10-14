@@ -20,7 +20,9 @@
  * - **The preview gate** (`previewGateOf(marks)`, in memory, shared with the transport through the
  *   marks object both get): the transport closes an answer's gate before its piece `#0` and waits for
  *   the placeholder's call in flight (its creation, a preview), so no preview lands over the answer and
- *   piece `#0` never races the creation of the message it edits.
+ *   piece `#0` never races the creation of the message it edits. A preview whose call timed out
+ *   (`maybeSent`) is told to the gate (`timedOut`) before its call ends: it may land later, and the
+ *   transport then applies piece `#0` again after a while (transport.ts).
  *
  * Failures are logged and never thrown to the run (`started`, `partial`, `settled` resolve);
  * `sweep` rejects to be run again, once it tried every mark.
@@ -57,6 +59,10 @@ export interface PreviewGate {
   /** No more previews of `answerKey`; resolves once the call in flight, if any, ended. */
   close(answerKey: string): Promise<void>;
   closed(answerKey: string): boolean;
+  /** A preview of `answerKey` whose call timed out (`maybeSent`): it may still land, over the answer. */
+  timedOut(answerKey: string): void;
+  /** Whether a preview of `answerKey` timed out: the transport applies piece `#0` again after a while. */
+  uncertain(answerKey: string): boolean;
 }
 
 /** The answers closed that a gate remembers, the oldest forgotten first: enough for every run in flight. */
@@ -69,6 +75,13 @@ export function previewGateOf(marks: PlaceholderMarks): PreviewGate {
   if (gate !== undefined) return gate;
   const inFlight = new Map<string, Promise<void>>();
   const closed = new Set<string>();
+  const late = new Set<string>();
+  /** Adds `key` to `set`, the oldest forgotten past `CLOSED_KEPT`. */
+  const keep = (set: Set<string>, key: string) => {
+    set.delete(key);
+    set.add(key);
+    if (set.size > CLOSED_KEPT) set.delete(set.values().next().value as string);
+  };
   gate = {
     async run(answerKey, work) {
       if (closed.has(answerKey) || inFlight.has(answerKey)) return false;
@@ -78,12 +91,12 @@ export function previewGateOf(marks: PlaceholderMarks): PreviewGate {
       return true;
     },
     async close(answerKey) {
-      closed.delete(answerKey);
-      closed.add(answerKey);
-      if (closed.size > CLOSED_KEPT) closed.delete(closed.values().next().value as string);
+      keep(closed, answerKey);
       await inFlight.get(answerKey);
     },
     closed: (answerKey) => closed.has(answerKey),
+    timedOut: (answerKey) => keep(late, answerKey),
+    uncertain: (answerKey) => late.has(answerKey),
   };
   gates.set(marks, gate);
   return gate;
@@ -143,7 +156,13 @@ export function createPlaceholders(deps: PlaceholderDeps): Placeholders {
       try {
         await gate.run(key, async () => {
           placeholder.lastAt = clock.now();
-          await api.updateMessage(placeholder.message, { text: preview }, ["text"]);
+          try {
+            await api.updateMessage(placeholder.message, { text: preview }, ["text"]);
+          } catch (error) {
+            // Before the gate lets piece #0 go: it applies the answer again over a preview that lands late.
+            if (error instanceof ChatApiError && error.maybeSent) gate.timedOut(key);
+            throw error;
+          }
           placeholder.lastText = preview;
         });
       } catch (error) {

@@ -18,6 +18,7 @@ import { ATTACHMENT_LIMITS, base64Of, readAttachments, safeName, writeFiles } fr
 import type { AddOnEvent, ChatAttachment, ChatMessage } from "./event.ts";
 import { addedEvent, clickEvent, type FakeGoogleChat, messageEvent, removedEvent, signAssertion, startFakeGoogleChat } from "./fake-google-chat.test-support.ts";
 import { commandSeenKey, createEventHandler, REPLIES, replyIds, textOf } from "./handler.ts";
+import { pieceIds } from "./ids.ts";
 import { type ConversationMode, type Credentials, instancesOf } from "./instance.ts";
 import { createAnswerTargets, createSpaceThreading, eventKey, KEY_PARAMETER } from "./key.ts";
 import { QUOTE_CHARS, quoteOf } from "./quote.ts";
@@ -222,17 +223,21 @@ test("the key: a thread's in a threaded space, the whole chat's when the setting
   expect(google.calls.filter((call) => call.path.startsWith("/v1/"))).toEqual([]);
 });
 
-test("the key of a click: its card's message's thread; in a dialog (no message), the key its action names, only of this app and space", async () => {
+test("the key of a click: always the key its action names (with a message or in a dialog), only of this app and space; never the setting of now", async () => {
   const google = await fake();
   const api = await testApi(google);
-  const deps = { instance: main, threading: createSpaceThreading(api, undefined), mode: always("thread") };
+  const deps = (mode: ConversationMode) => ({ instance: main, threading: createSpaceThreading(api, undefined), mode: always(mode) });
   const card: ChatMessage = { name: "spaces/AAA/messages/c1", thread: { name: "spaces/AAA/threads/T9" } };
-  expect(await eventKey(clickEvent({ message: card }), deps, silentContext)).toBe("googlechat:spaces/AAA:threads/T9");
   const named = "googlechat:spaces/AAA:threads/T9";
-  expect(await eventKey(clickEvent({ parameters: { [KEY_PARAMETER]: named } }), deps, silentContext)).toBe(named);
-  expect(await eventKey(clickEvent({ parameters: { [KEY_PARAMETER]: "googlechat:spaces/ZZZ:threads/T9" } }), deps, silentContext)).toBeUndefined();
-  expect(await eventKey(clickEvent({ parameters: { [KEY_PARAMETER]: "googlechat:ops:spaces/AAA" } }), deps, silentContext)).toBeUndefined();
-  expect(await eventKey(clickEvent({}), deps, silentContext)).toBeUndefined();
+  // The card was drawn in a thread's conversation; the setting now says the chat is one: the card's key holds.
+  expect(await eventKey(clickEvent({ message: card, parameters: { [KEY_PARAMETER]: named } }), deps("chat"), silentContext)).toBe(named);
+  expect(await eventKey(clickEvent({ message: card, parameters: { [KEY_PARAMETER]: "googlechat:spaces/AAA" } }), deps("thread"), silentContext)).toBe("googlechat:spaces/AAA");
+  // A click with no key names no conversation, its message or not.
+  expect(await eventKey(clickEvent({ message: card }), deps("thread"), silentContext)).toBeUndefined();
+  expect(await eventKey(clickEvent({ parameters: { [KEY_PARAMETER]: named } }), deps("thread"), silentContext)).toBe(named);
+  expect(await eventKey(clickEvent({ message: card, parameters: { [KEY_PARAMETER]: "googlechat:spaces/ZZZ:threads/T9" } }), deps("thread"), silentContext)).toBeUndefined();
+  expect(await eventKey(clickEvent({ parameters: { [KEY_PARAMETER]: "googlechat:ops:spaces/AAA" } }), deps("thread"), silentContext)).toBeUndefined();
+  expect(await eventKey(clickEvent({}), deps("thread"), silentContext)).toBeUndefined();
 });
 
 test("threads: the event's state first; else spaces.get once, kept in storage.kv (another isolate reads it there); a space that cannot be read counts as threaded and is asked again", async () => {
@@ -395,9 +400,10 @@ test("guards: a message from a space not allowed, from a bot, or with nothing to
   await expect(s.handle("googlechat:spaces/OTHER", messageEvent(), silentContext)).rejects.toThrow(/not a conversation of googlechat in spaces\/AAA/);
 });
 
-test("the channel's own replies: the same seed, the same ids (a UUID and a client- id Google takes)", async () => {
+test("the channel's own replies: the same seed, the same ids (a UUID and a client- id Google takes), made as a piece's are (ids.ts)", async () => {
   const a = await replyIds("spaces/AAA/messages/m1:new");
   expect(a).toEqual(await replyIds("spaces/AAA/messages/m1:new"));
+  expect(a).toEqual(await pieceIds("channel-google-chat:reply:spaces/AAA/messages/m1:new"));
   expect(a.requestId).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
   expect(a.messageId).toMatch(/^client-[0-9a-f]{56}$/);
   expect((await replyIds("spaces/AAA/messages/m2:new")).messageId).not.toBe(a.messageId);
