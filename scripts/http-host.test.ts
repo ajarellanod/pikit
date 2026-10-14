@@ -3,7 +3,9 @@ import { expect, test } from "bun:test";
 import { defineApp, defineComponent, silentLogger } from "@pikit/core";
 import type { ConversationRef } from "@pikit/contracts";
 import channelHttp from "../registry/components/channel-http/files/src/pikit/channel-http/index.ts";
-import { createServerBun } from "../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
+import { MAX_IMAGE_BYTES as ADMIN_MAX_IMAGE_BYTES, MAX_IMAGES as ADMIN_MAX_IMAGES } from "../registry/components/admin-api/files/src/pikit/admin-api/api.ts";
+import { maxBodyOf } from "../registry/components/channel-web/files/src/pikit/channel-web/routes.ts";
+import { createServerBun, DEFAULT_MAX_REQUEST_BODY_BYTES } from "../registry/components/server-bun/files/src/pikit/server-bun/index.ts";
 
 const TOKEN = "http-host-test-token-0123456789";
 
@@ -58,3 +60,36 @@ test("server-bun serves channel-http's message endpoint, not just a healthy proc
     await app.stop();
   }
 }, 10_000);
+
+// A photo of 1.9 MB from the chat page was a 413 (the default was 1 MiB) though the composer allows 5 MB.
+test("server-bun's default body limit lets through the largest message the chat page and the dashboard may send", async () => {
+  const largest = maxBodyOf("server");
+  expect(largest).toBeLessThanOrEqual(DEFAULT_MAX_REQUEST_BODY_BYTES);
+  expect(ADMIN_MAX_IMAGES * Math.ceil(ADMIN_MAX_IMAGE_BYTES / 3) * 4).toBeLessThan(DEFAULT_MAX_REQUEST_BODY_BYTES);
+  let address: URL | undefined;
+  let received = 0;
+  const upload = defineComponent({
+    name: "http-host-upload",
+    setup(pikit) {
+      pikit.provideKeyed("http.route", "POST /upload", async (request: Request) => {
+        received = (await request.arrayBuffer()).byteLength;
+        return new Response("ok");
+      });
+    },
+  });
+  const app = await defineApp({
+    components: [upload, createServerBun({ onListening: (url) => { address = url; } })],
+    target: "server",
+    config: { "server-bun": { port: 0, hostname: "127.0.0.1" } },
+    logger: silentLogger,
+  }).create();
+  try {
+    await app.start();
+    if (address === undefined) throw new Error("server did not listen");
+    const response = await fetch(new URL("/upload", address), { method: "POST", body: new Uint8Array(largest), signal: AbortSignal.timeout(10_000) });
+    expect(response.status).toBe(200);
+    expect(received).toBe(largest);
+  } finally {
+    await app.stop();
+  }
+}, 20_000);

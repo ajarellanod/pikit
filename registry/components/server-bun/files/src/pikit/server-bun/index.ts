@@ -32,11 +32,18 @@ import { compareHttpRoutes, type HttpRouteKey, parseHttpRouteKey, withClientAddr
 import { Hono } from "hono";
 import Type from "typebox";
 
+/**
+ * The default of `maxRequestBodyBytes`: 32 MiB, above the largest message a composer may send (the
+ * dashboard's and the chat page's: 4 images of 5 MB in base64 and their text, about 27 MiB). Each
+ * route bounds its own body; this is the server's backstop.
+ */
+export const DEFAULT_MAX_REQUEST_BODY_BYTES = 32 * 1024 * 1024;
+
 const Config = Type.Object({
   port: Type.Integer({ minimum: 0, maximum: 65535, default: 3000 }),
   hostname: Type.String({ minLength: 1, default: "0.0.0.0" }),
   /** Larger request bodies are refused with 413 before any route sees them. */
-  maxRequestBodyBytes: Type.Integer({ minimum: 1, default: 1_048_576 }),
+  maxRequestBodyBytes: Type.Integer({ minimum: 1, default: DEFAULT_MAX_REQUEST_BODY_BYTES }),
   /**
    * Bun closes a connection that stays idle this long, even while its handler is still working
    * (after about twice this long). A channel that waits for the agent's answer needs it longer

@@ -47,7 +47,7 @@ route claims `/health` or `/ready`.
 "server-bun": {
   port: 3000,                  // default; 0 picks a free port
   hostname: "0.0.0.0",         // default
-  maxRequestBodyBytes: 1048576, // default
+  maxRequestBodyBytes: 33554432, // default (32 MiB): a composer's message, 4 images of 5 MB, fits
   idleTimeoutSeconds: 255,     // default, Bun's maximum
 }
 ```
