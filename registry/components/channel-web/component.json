@@ -86,6 +86,10 @@
   ],
   "view": "view",
   "settings": "settings",
+  "ui": {
+    "source": "chat",
+    "target": "src/chat"
+  },
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "better-auth": "1.7.7",
