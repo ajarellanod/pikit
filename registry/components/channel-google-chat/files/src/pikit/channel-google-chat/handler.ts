@@ -22,8 +22,8 @@
  *     workspace (attachments.ts `writeFiles`). A write that fails rejects: Google sends it again.
  *   - Outcomes: `admitted` and `duplicate` returned; `halted`, `denied` and `no_route` told briefly
  *     in the thread (logged), `done`.
- * - **An add** (`addedToSpacePayload`): a welcome in an allowed space, the stranger text (its id for
- *   the operator) in another; `done`.
+ * - **An add** (`addedToSpacePayload`): a welcome in an allowed space, the stranger text (route.ts
+ *   `strangerText`: its id for the operator) in another, which the route already told (a guard); `done`.
  * - **A removal** (`removedFromSpacePayload`): logged; `done` (answers still owed there fail
  *   `permanent` in the transport).
  *
@@ -41,9 +41,10 @@ import type { AppContext } from "@pikit/core";
 import { admitInbound, answerKey, type InboundMessage, type InboundOutcome } from "@pikit/contracts";
 import { readAttachments, writeFiles } from "./attachments.ts";
 import { type AddOnEvent, type ChatMessage, type ChatSpace, type ChatUser, eventKind, spaceOf } from "./event.ts";
-import { type Instance, NAME, parseConversationKey } from "./instance.ts";
+import { NAME, parseConversationKey } from "./instance.ts";
 import { createSpaceThreading, threadOf } from "./key.ts";
 import { quoteOf } from "./quote.ts";
+import { strangerText } from "./route.ts";
 import { type AdmissionDeps, ChatApiError, type EventHandler, type HandledEvent } from "./types.ts";
 
 /** How long, in ms, downloads and quotes may take before admission: under Google's 30 s with the route's hand-off. */
@@ -66,11 +67,6 @@ export function welcomeText(space: ChatSpace): string {
   return isDirect(space)
     ? "Hi! Send me a message and I'll answer. /new starts our conversation over."
     : "Hi! Mention me in a message and I'll answer in its thread. /new starts the conversation over.";
-}
-
-/** What a space that is not allowed is told: the app is not allowed there, and its id for the operator. */
-export function strangerText(instance: Instance, space: string): string {
-  return `I'm not allowed to answer in this chat yet. To allow it, the operator adds its id, ${space}, to ${instance.secrets.allowedSpaces}.`;
 }
 
 /** A DM with the app: no one else to tell apart. */

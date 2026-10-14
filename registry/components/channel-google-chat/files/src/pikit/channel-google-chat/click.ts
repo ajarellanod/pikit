@@ -28,8 +28,11 @@
  *   dialog closes (`endNavigation`) and the card is updated by `api.updateMessage` (a failure is
  *   logged: the answer is in). A question already answered answers the click with that, and admits
  *   nothing.
- * - Anyone the channel admits in the conversation may answer; a question stays open until answered.
- *   A reset does not delete the record: an answer after it goes to the key's conversation then.
+ * - Anyone the channel admits in the conversation may answer; a question stays open until answered
+ *   or its conversation is reset: a click once the key's conversation is not the one the question was
+ *   asked in (`QuestionRecord.answerKey` names it) is told so, and admits nothing.
+ * - Resolves with the response and what became of the answer (`admitted`, `duplicate`, or `done`):
+ *   index.ts wakes answer delivery after an `admitted` or `duplicate`, as after a message.
  *
  * Rejects only when a capability failed (the route answers 500).
  */
@@ -50,7 +53,7 @@ import {
 import { type AddOnEvent, type AddOnResponse, type CardWithId, type ChatMessage, type FormInput, spaceOf } from "./event.ts";
 import { parseConversationKey } from "./instance.ts";
 import { answeredCard, CLICK_PARAMETERS, type ClickStep, questionDialog } from "./question-cards.ts";
-import type { AdmissionDeps, ClickHandler, QuestionRecord, QuestionRecords } from "./types.ts";
+import type { AdmissionDeps, ClickHandler, ClickOutcome, HandledEvent, QuestionRecord, QuestionRecords } from "./types.ts";
 
 export interface ClickDeps extends AdmissionDeps {
   questions: QuestionRecords;
@@ -60,6 +63,7 @@ export interface ClickDeps extends AdmissionDeps {
 export const CLICK_NOTICES = {
   unknown: "This question is not known here any more, so it cannot be answered. Reply with your answer in a message.",
   answered: "This question was already answered.",
+  reset: "This question was asked in a conversation that was reset, so it cannot be answered. Ask again in a message.",
   stranger: "This app does not answer in this space.",
   refused: "Your answer could not be taken.",
 } as const;
@@ -77,7 +81,14 @@ export const answerMessageId = (cardMessage: string): string => `${cardMessage}:
 export function createClickHandler(deps: ClickDeps): ClickHandler {
   const endpoint = deps.credentials.audience;
 
-  return async (key, event, ctx) => {
+  return async (key, event, ctx): Promise<ClickOutcome> => {
+    const outcome: { handled: HandledEvent } = { handled: "done" };
+    const response = await respond(key, event, ctx, outcome);
+    return { response, handled: outcome.handled };
+  };
+
+  /** The click's response; `outcome.handled` says whether an answer was admitted (or was already). */
+  async function respond(key: string, event: AddOnEvent, ctx: AppContext, outcome: { handled: HandledEvent }): Promise<AddOnResponse> {
     const clicked = event.chat.buttonClickedPayload;
     const parameters = event.commonEventObject?.parameters ?? {};
     const dialog = clicked?.isDialogEvent === true || clicked?.dialogEventType !== undefined;
@@ -93,6 +104,12 @@ export function createClickHandler(deps: ClickDeps): ClickHandler {
     const record = id === undefined ? undefined : await deps.questions.get(id);
     if (id === undefined || record === undefined) return notice(CLICK_NOTICES.unknown, dialog);
     if (record.answered !== undefined) return notice(CLICK_NOTICES.answered, dialog);
+    // A reset closes the questions asked before it: the key's conversation is another one now.
+    const current = await deps.conversations.get(key, ctx);
+    if (current !== undefined && !record.answerKey.startsWith(`${current.conversationId}:`)) {
+      ctx.logger.info("channel-google-chat: a click on a question of a conversation that was reset; nothing admitted", { conversation: key, question: id });
+      return notice(CLICK_NOTICES.reset, dialog);
+    }
 
     const step = parameters[CLICK_PARAMETERS.step] as ClickStep | undefined;
     if (step === "open") return { action: { navigations: [{ pushCard: questionDialog(record.question, endpoint, key) }] } };
@@ -112,7 +129,7 @@ export function createClickHandler(deps: ClickDeps): ClickHandler {
     const thread = wholeChat ? await cardThread(deps, record, clicked?.message, event, ctx) : undefined;
     const text = answerText(record.question, answer);
     const remembering: Promise<void>[] = [];
-    const outcome = await admitInbound(
+    const admitted = await admitInbound(
       ctx,
       { id: answerMessageId(record.message), channel: deps.instance.instance, conversationId: space, actor: { id: user.name }, text },
       {
@@ -129,16 +146,18 @@ export function createClickHandler(deps: ClickDeps): ClickHandler {
       await each.catch((error: unknown) => ctx.logger.error("channel-google-chat: the thread of a question's answer could not be recorded", { conversation: key, question: id, error: String(error) }));
     }
 
-    switch (outcome.kind) {
+    switch (admitted.kind) {
       case "admitted":
+        outcome.handled = "admitted";
         break;
       case "duplicate":
+        outcome.handled = "duplicate";
         return notice(CLICK_NOTICES.answered, dialog);
       case "denied":
-        ctx.logger.info("channel-google-chat: an answer to a question was denied", { conversation: key, question: id, reason: outcome.reason });
-        return notice(outcome.reason === undefined ? CLICK_NOTICES.refused : `${CLICK_NOTICES.refused} ${outcome.reason}`, dialog);
+        ctx.logger.info("channel-google-chat: an answer to a question was denied", { conversation: key, question: id, reason: admitted.reason });
+        return notice(admitted.reason === undefined ? CLICK_NOTICES.refused : `${CLICK_NOTICES.refused} ${admitted.reason}`, dialog);
       default:
-        ctx.logger.warn("channel-google-chat: an answer to a question was not admitted", { conversation: key, question: id, outcome: outcome.kind });
+        ctx.logger.warn("channel-google-chat: an answer to a question was not admitted", { conversation: key, question: id, outcome: admitted.kind });
         return notice(CLICK_NOTICES.refused, dialog);
     }
 
@@ -157,7 +176,7 @@ export function createClickHandler(deps: ClickDeps): ClickHandler {
       .updateMessage(record.message, { cardsV2: withCard(clicked?.message?.cardsV2, card) }, ["cardsV2"], ctx.abortSignal)
       .catch((error: unknown) => ctx.logger.warn("channel-google-chat: a question's card could not be updated; its answer is in", { question: id, error: String(error) }));
     return { action: { navigations: [{ endNavigation: { action: "CLOSE_DIALOG" } }], notification: { text: "Answer sent." } } };
-  };
+  }
 }
 
 /** `cards` with `card` in place of the one with its id (the question's), or `card` alone when there are none. */

@@ -198,6 +198,11 @@ export interface QuestionRecord {
   /** The card's message (`spaces/AAA/messages/…`): what a click's response updates. */
   message: string;
   conversationKey: string;
+  /**
+   * The key of the answer that drew it (`answerKey`: `<conversation id>:<request id>`): the conversation
+   * it was asked in. A click once the key's conversation is another (`/new`) admits nothing.
+   */
+  answerKey: string;
   /** Once answered: who (`users/…`), when, and what was admitted. */
   answered?: { by: string; at: number; text: string };
 }
@@ -216,8 +221,14 @@ export interface QuestionRecords {
  */
 export type QuestionDrawer = (question: QuestionPart, endpoint: string, conversationKey: string) => CardWithId;
 
-/** Answers a click or a form of its conversation `key` (click.ts): the response Google shows. */
-export type ClickHandler = (key: string, event: AddOnEvent, ctx: AppContext) => Promise<AddOnResponse>;
+/** What a click led to: the response Google shows, and whether an answer was admitted (`admitted`, `duplicate`) or not (`done`). */
+export interface ClickOutcome {
+  response: AddOnResponse;
+  handled: HandledEvent;
+}
+
+/** Answers a click or a form of its conversation `key` (click.ts). index.ts wakes answer delivery after an answer admitted, as after a message. */
+export type ClickHandler = (key: string, event: AddOnEvent, ctx: AppContext) => Promise<ClickOutcome>;
 
 // ---------------------------------------------------------------------------------------------------
 // The placeholder (placeholder.ts)

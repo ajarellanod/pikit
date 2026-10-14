@@ -7,7 +7,8 @@
  * - click.ts against stand-ins for Google's API, the registry and the runtime (a runtime that answers
  *   `duplicate` for a request it has, as runtime-pi does), in an App with a router: an answer admitted
  *   once, its text `answerText`, the card updated; a second click, an unknown question, a stranger
- *   space, a refused answer, a cancelled dialog; the records answered once.
+ *   space, a refused answer, a cancelled dialog, a question of a conversation that was reset; the
+ *   records answered once.
  */
 
 import { expect, test } from "bun:test";
@@ -28,7 +29,7 @@ import type { AddOnEvent, AddOnResponse, Card, CardWidget, CardWithId, ChatMessa
 import { type ClickEventOptions, clickEvent, dateInput, PERSON, textInput } from "./fake-google-chat.test-support.ts";
 import { type Credentials, instancesOf } from "./instance.ts";
 import { answeredCard, CLICK_PARAMETERS, drawnAsButtons, questionCard, questionCardId, questionDialog, RADIO_OPTIONS } from "./question-cards.ts";
-import type { AnswerTargets, ChatApi, MessageField, QuestionRecords } from "./types.ts";
+import type { AnswerTargets, ChatApi, HandledEvent, MessageField, QuestionRecords } from "./types.ts";
 
 const ENDPOINT = "https://pikit.test/google-chat";
 const SPACE = "spaces/AAA";
@@ -36,6 +37,8 @@ const THREAD = `${SPACE}/threads/T1`;
 const CARD_MESSAGE = `${SPACE}/messages/client-abc`;
 const THREAD_KEY = `googlechat:${SPACE}:threads/T1`;
 const CHAT_KEY = `googlechat:${SPACE}`;
+/** The answer that drew the questions: asked in the conversation `s1` (the subject's first). */
+const ASKED_IN = "s1:spaces/AAA/messages/m1";
 const GRACE: typeof PERSON = { name: "users/1002", displayName: "Grace Hopper", type: "HUMAN" };
 
 const confirm = questionPart({ id: "c1:m1:call-1", title: "Deploy now?", description: "The build <passed> & is green.", fields: [{ kind: "confirm", name: "go", label: "Deploy", required: true }] });
@@ -246,7 +249,7 @@ async function subject(setup: Setup = {}) {
   const questions = createQuestionRecords(store);
   const [instance] = instancesOf([]);
   const credentials = { audience: ENDPOINT, allowedSpaces: new Set([SPACE]) } as unknown as Credentials;
-  const click = createClickHandler({
+  const handler = createClickHandler({
     instance: instance!,
     credentials,
     api,
@@ -260,7 +263,15 @@ async function subject(setup: Setup = {}) {
     questions,
   });
 
-  /** `question` drawn in the card message, as the transport records it; its message as Google has it. */
+  /** What each click led to (`ClickOutcome.handled`): index.ts wakes answer delivery after an answer admitted. */
+  const handled: HandledEvent[] = [];
+  const click = async (key: string, event: AddOnEvent, ctx: AppContext): Promise<AddOnResponse> => {
+    const outcome = await handler(key, event, ctx);
+    handled.push(outcome.handled);
+    return outcome.response;
+  };
+
+  /** `question` drawn in the card message, as the transport records it (asked in the conversation `s1`, the first); its message as Google has it. */
   const drawn = async (question: QuestionPart, conversationKey = THREAD_KEY): Promise<ChatMessage> => {
     const message: ChatMessage = {
       name: CARD_MESSAGE,
@@ -269,10 +280,10 @@ async function subject(setup: Setup = {}) {
       cardsV2: [{ cardId: "table-1", card: { sections: [{ widgets: [{ textParagraph: { text: "a table" } }] }] } }, questionCard(question, ENDPOINT, conversationKey)],
     };
     messages.set(CARD_MESSAGE, message);
-    await questions.sent({ question, message: CARD_MESSAGE, conversationKey });
+    await questions.sent({ question, message: CARD_MESSAGE, conversationKey, answerKey: ASKED_IN });
     return message;
   };
-  return { ctx, click, dispatched, remembered, updated, read, questions, store, drawn, conversations: pointers };
+  return { ctx, click, handled, dispatched, remembered, updated, read, questions, store, drawn, conversations: pointers };
 }
 
 const press = (question: QuestionPart, message: ChatMessage | undefined, field: string, value: string, user = PERSON): AddOnEvent =>
@@ -299,6 +310,24 @@ test("a button: the answer admitted once, its text answerText, from the clicker;
   const again = await s.click(THREAD_KEY, press(confirm, message, "go", "false", GRACE), s.ctx);
   expect(again).toEqual({ action: { notification: { text: CLICK_NOTICES.answered } } });
   expect(s.dispatched).toHaveLength(1);
+  // Delivery is woken after the answer admitted only.
+  expect(s.handled).toEqual(["admitted", "done"]);
+});
+
+test("a reset closes the questions asked before it: a click once the key's conversation is another is told so, and admits nothing", async () => {
+  const s = await subject();
+  const message = await s.drawn(confirm);
+  // `/new`: the key's conversation is not the one the question was asked in (s1) any more.
+  s.conversations.set(THREAD_KEY, { key: THREAD_KEY, agent: "assistant", conversationId: "s2" });
+  expect(await s.click(THREAD_KEY, press(confirm, message, "go", "true"), s.ctx)).toEqual({ action: { notification: { text: CLICK_NOTICES.reset } } });
+  expect(s.dispatched).toEqual([]);
+  expect((await s.questions.get(confirm.id))?.answered).toBeUndefined();
+  expect(s.handled).toEqual(["done"]);
+
+  // In the conversation it was asked in, it is answered.
+  s.conversations.set(THREAD_KEY, { key: THREAD_KEY, agent: "assistant", conversationId: "s1" });
+  expect(updatedCards(await s.click(THREAD_KEY, press(confirm, message, "go", "true"), s.ctx))).toBeDefined();
+  expect(s.dispatched.map((request) => request.conversation.conversationId)).toEqual(["s1"]);
 });
 
 test("two clicks at once (or one Google repeats): one answer admitted, the other told it is answered", async () => {
@@ -310,6 +339,7 @@ test("two clicks at once (or one Google repeats): one answer admitted, the other
   expect([one, two]).toContainEqual({ action: { notification: { text: CLICK_NOTICES.answered } } });
   // The runtime took one: the second was its duplicate.
   expect(s.dispatched.map((request) => request.requestId)).toEqual([answerMessageId(CARD_MESSAGE), answerMessageId(CARD_MESSAGE)]);
+  expect(s.handled.toSorted()).toEqual(["admitted", "duplicate"]);
   expect((await s.questions.get(select.id))?.answered?.text).toBe(s.dispatched[0]?.prompt);
 });
 
@@ -395,18 +425,18 @@ test("the records: answered once; sent again replaces nothing answered; an answe
   const store = createMemoryKeyValueStorage().namespace("channel-google-chat");
   const records: QuestionRecords = createQuestionRecords(store);
   expect(await records.get(confirm.id)).toBeUndefined();
-  await records.sent({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY });
-  expect(await records.get(confirm.id)).toEqual({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY });
+  await records.sent({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY, answerKey: ASKED_IN });
+  expect(await records.get(confirm.id)).toEqual({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY, answerKey: ASKED_IN });
   expect(await store.get(`question:${confirm.id}`)).toBeDefined();
 
   const answered = { by: PERSON.name, at: 5, text: "yes" };
   expect(await records.answer(confirm.id, answered)).toBe(true);
   expect(await records.answer(confirm.id, { ...answered, by: GRACE.name })).toBe(false);
-  await records.sent({ question: confirm, message: `${SPACE}/messages/other`, conversationKey: THREAD_KEY });
-  expect(await records.get(confirm.id)).toEqual({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY, answered });
+  await records.sent({ question: confirm, message: `${SPACE}/messages/other`, conversationKey: THREAD_KEY, answerKey: ASKED_IN });
+  expect(await records.get(confirm.id)).toEqual({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY, answerKey: ASKED_IN, answered });
 
   // A stop between the claim and the record's write: the claim still says it is answered.
-  await store.set(`question:${select.id}`, { question: select, message: CARD_MESSAGE, conversationKey: THREAD_KEY } as never);
+  await store.set(`question:${select.id}`, { question: select, message: CARD_MESSAGE, conversationKey: THREAD_KEY, answerKey: ASKED_IN } as never);
   await store.set(`question:${select.id}:answered`, answered as never);
   expect((await records.get(select.id))?.answered).toEqual(answered);
 });

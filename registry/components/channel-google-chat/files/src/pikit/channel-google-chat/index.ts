@@ -21,7 +21,8 @@
  *   questions: question-cards.ts, click.ts.
  * - Answers are delivered by `startAnswerDelivery` (`@pikit/contracts`) from `agent.submissions`'
  *   feed, with each instance's transport (`draws: ["question"]`), `route`, `replyText` and `DELIVERY`;
- *   with `outbound.queue`, enqueued. It is woken when a message is admitted and when a run ends.
+ *   with `outbound.queue`, enqueued. It is woken when a message or a question's answer is admitted,
+ *   and when a run ends.
  * - The placeholder follows the runs of its conversations (never a dashboard request): `agent.started`
  *   creates it, `agent.partial` writes the answer into it, `agent.settled` / `agent.failed` delete what
  *   has nothing to send. A wakeup at start (`channel-google-chat.sweep`) deletes a crash's leftovers.
@@ -33,7 +34,7 @@
  */
 
 import { type AppContext, defineComponent } from "@pikit/core";
-import { type AgentResult, type ChannelTransport, type DeliveryPolicy, isDashboardRequest, type JsonValue, type RunSettlement, startAnswerDelivery } from "@pikit/contracts";
+import { type AgentResult, type ChannelTransport, type DeliveryPolicy, isDashboardRequest, type JsonValue, startAnswerDelivery } from "@pikit/contracts";
 import { CALL_TIMEOUT_MS } from "./api.ts";
 import { createClickHandler, createQuestionRecords } from "./click.ts";
 import { type AddOnEvent, type AddOnResponse, readEvent } from "./event.ts";
@@ -42,6 +43,7 @@ import { Config, createConversationSettings, type Instance, instanceOfKey, insta
 import { createAnswerTargets } from "./key.ts";
 import { createPlaceholderMarks, createPlaceholders } from "./placeholder.ts";
 import { questionCard } from "./question-cards.ts";
+import { replyText } from "./reply.ts";
 import { createJwks } from "./token.ts";
 import { createTransport } from "./transport.ts";
 import { CLICK_TYPE, type ClickHandler, EVENT_TYPE, type EventHandler, type EventSink, type Placeholders } from "./types.ts";
@@ -49,6 +51,7 @@ import { connect, mailboxSink, type Route, routeOf, serve } from "./worker.ts";
 
 export { Config, NAME, WorkerConfig } from "./instance.ts";
 export { CLICK_TYPE, EVENT_TYPE } from "./types.ts";
+export { replyText } from "./reply.ts";
 export { worker, WORKER_NAME } from "./worker.ts";
 
 /** Its `storage.kv` namespace: `NAME`, written here so `registry validate` reads it. */
@@ -124,11 +127,14 @@ export default defineComponent({
       if (now === undefined || app === undefined) throw new Error(`channel-google-chat: an event for "${key}" arrived, which is no conversation of a Chat app this channel runs (${instances.map((each) => each.instance).join(", ")})`);
       if ((await app.handle(key, event, ctx)) !== "done") await wake(now, key, ctx);
     };
-    /** A click of the conversation `key`: the response Google shows. */
+    /** A click of the conversation `key`: the response Google shows; delivery woken after an answer admitted, as after a message. */
     const clickOf = async (key: string, event: AddOnEvent, ctx: AppContext): Promise<AddOnResponse> => {
+      const now = running;
       const app = appOf(key);
-      if (app === undefined) throw new Error(`channel-google-chat: a click for "${key}" arrived, which is no conversation of a Chat app this channel runs`);
-      return app.click(key, event, ctx);
+      if (now === undefined || app === undefined) throw new Error(`channel-google-chat: a click for "${key}" arrived, which is no conversation of a Chat app this channel runs`);
+      const { response, handled } = await app.click(key, event, ctx);
+      if (handled !== "done") await wake(now, key, ctx);
+      return response;
     };
     const inProcess: EventSink = { event: receive, click: clickOf };
     /** What the mailbox carried, read back as an event. */
@@ -257,15 +263,3 @@ export default defineComponent({
     };
   },
 });
-
-/**
- * What a chat is told about a run: its answer, or that it failed. Nothing for an aborted or empty one
- * (its parts still go: a question). A message the runtime abandoned is never answered: the user is
- * asked to send it again. A failed run's words replace its placeholder.
- */
-export function replyText(answer: Pick<RunSettlement, "kind" | "text" | "error">): string | undefined {
-  if (answer.kind === "failed" && answer.error?.code === "abandoned") return "Sorry, we could not answer your message. Please send it again.";
-  if (answer.kind === "failed") return `Sorry, something went wrong while answering (${answer.error?.code ?? "error"}). Try again in a moment.`;
-  if (answer.kind === "completed" && (answer.text ?? "").trim() !== "") return answer.text;
-  return undefined;
-}

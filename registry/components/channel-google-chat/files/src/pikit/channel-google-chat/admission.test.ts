@@ -17,10 +17,11 @@ import type { ExecutionEnv, WorkspaceProvider } from "@pikit/pi-adapter";
 import { ATTACHMENT_LIMITS, base64Of, readAttachments, safeName, writeFiles } from "./attachments.ts";
 import type { AddOnEvent, ChatAttachment, ChatMessage } from "./event.ts";
 import { addedEvent, clickEvent, type FakeGoogleChat, messageEvent, removedEvent, signAssertion, startFakeGoogleChat } from "./fake-google-chat.test-support.ts";
-import { commandSeenKey, createEventHandler, REPLIES, replyIds, strangerText, textOf } from "./handler.ts";
+import { commandSeenKey, createEventHandler, REPLIES, replyIds, textOf } from "./handler.ts";
 import { type ConversationMode, type Credentials, instancesOf } from "./instance.ts";
 import { createAnswerTargets, createSpaceThreading, eventKey, KEY_PARAMETER } from "./key.ts";
 import { QUOTE_CHARS, quoteOf } from "./quote.ts";
+import { strangerText } from "./route.ts";
 import { type AdmissionDeps, type ChatApi, ChatApiError, type ModeOf } from "./types.ts";
 
 const fakes: FakeGoogleChat[] = [];

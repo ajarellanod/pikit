@@ -68,7 +68,7 @@ async function setup(options: { previewEveryMs?: number } = {}) {
     targets,
     marks,
     questions,
-    drawQuestion: (question, endpoint) => ({ cardId: `question-${question.id}`, card: { header: { title: question.title, subtitle: endpoint } } }),
+    drawQuestion: (question, endpoint, conversationKey) => ({ cardId: `question-${question.id}`, card: { header: { title: question.title, subtitle: endpoint }, sections: [{ widgets: [{ textParagraph: { text: conversationKey } }] }] } }),
   });
   const ctx = await contextOf();
   const send = (index: number, text: string, extra: Partial<OutboundPiece> = {}, signal = new AbortController().signal) =>
@@ -398,8 +398,8 @@ test("transport: a piece of no text and a drawn question is the question's card,
   const pieces = messagePieces(transport, { text: "", parts: [question] });
   expect(pieces).toEqual([{ text: "", parts: [question] }]);
   const sent = await transport.send({ key: `${answerKey(conversation, "r1")}#0`, conversationKey: conversation.key, possibleDuplicate: false, ...pieces[0]! }, new AbortController().signal);
-  expect(google.messages.get(sent.platformMessageId)).toMatchObject({ text: "", cardsV2: [{ cardId: "question-conv-1:r1:t1", card: { header: { title: "Deploy?", subtitle: google.idTokens.audience } } }] });
-  expect(recorded).toEqual([{ question, message: sent.platformMessageId, conversationKey: conversation.key }]);
+  expect(google.messages.get(sent.platformMessageId)).toMatchObject({ text: "", cardsV2: [{ cardId: "question-conv-1:r1:t1", card: { header: { title: "Deploy?", subtitle: google.idTokens.audience }, sections: [{ widgets: [{ textParagraph: { text: conversation.key } }] }] } }] });
+  expect(recorded).toEqual([{ question, message: sent.platformMessageId, conversationKey: conversation.key, answerKey: answerKey(conversation, "r1") }]);
 });
 
 test("transport: failures classified: 429 rate_limited with Retry-After, 5xx and the network transient, a cut send may have arrived, 403 and a removed space permanent, a stranger key permanent", async () => {

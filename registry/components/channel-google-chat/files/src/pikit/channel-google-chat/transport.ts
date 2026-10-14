@@ -5,7 +5,7 @@
  * - `send(piece)`: where it goes is `targets.of(piece.conversationKey, answerKey)` (ids.ts `pieceOf`);
  *   `undefined` is `permanent`. Its ids (ids.ts `pieceIds(piece.key)`); its message `chatMessageOf
  *   (piece.text)` plus, on the last piece, each `question` part drawn by `drawQuestion(part,
- *   credentials.audience)` as a card.
+ *   credentials.audience, piece.conversationKey)` as a card.
  *   - **Piece `#0`** edits the placeholder (`api.updateMessage(messageNameOf(space, messageId), …,
  *     ["text", "cardsV2"])`: a repeat is harmless); when there is none (`NOT_FOUND`: the channel was
  *     down when the run started) it creates the message under the same ids. Its placeholder mark is
@@ -18,7 +18,8 @@
  *   - Before piece `#0`, the answer's preview gate is closed (placeholder.ts `previewGateOf`): no
  *     preview is written over the answer, and a placeholder's creation in flight ends first.
  *   - A piece of empty text carries drawn parts only: its message is their cards.
- *   - A drawn question's message is recorded (`questions.sent`) under the question's id.
+ *   - A drawn question's message is recorded (`questions.sent`) under the question's id, with the
+ *     key of the answer that drew it (it names the conversation asked in: a reset closes it).
  *   - Failures: `deliveryErrorOf` (api.ts): 429 `rate_limited`, network and 5xx `transient`
  *     (`maybeSent` after a timeout), 400/401/403/404 `permanent`; a piece whose message is too large
  *     (`chatMessageOf`) `permanent`. Resolves with `{ platformMessageId: message.name }`.
@@ -68,7 +69,7 @@ export function createTransport(deps: TransportDeps): ChannelTransport {
           throw new DeliveryError("permanent", error instanceof Error ? error.message : String(error));
         }
         const questions = (piece.parts ?? []).filter((part): part is QuestionPart => part.type === "question");
-        const message: ChatMessage = { text: content.text, cardsV2: [...content.cardsV2, ...questions.map((question) => deps.drawQuestion(question, deps.credentials.audience))] };
+        const message: ChatMessage = { text: content.text, cardsV2: [...content.cardsV2, ...questions.map((question) => deps.drawQuestion(question, deps.credentials.audience, piece.conversationKey))] };
 
         /** Created under the piece's ids; a late repeat (Google forgot the `requestId`, the `messageId` exists) read back. */
         const create = async (): Promise<ChatMessage> => {
@@ -98,7 +99,7 @@ export function createTransport(deps: TransportDeps): ChannelTransport {
           sent = await create();
         }
         const platformMessageId = sent.name ?? name;
-        for (const question of questions) await deps.questions.sent({ question, message: platformMessageId, conversationKey: piece.conversationKey });
+        for (const question of questions) await deps.questions.sent({ question, message: platformMessageId, conversationKey: piece.conversationKey, answerKey });
         // The placeholder is the answer now; a mark left (this failed) is dropped by the next sweep.
         if (index === 0) await deps.marks.remove(answerKey).catch(() => {});
         return { platformMessageId };

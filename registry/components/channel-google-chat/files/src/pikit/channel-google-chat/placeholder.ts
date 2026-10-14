@@ -10,9 +10,9 @@
  * - **`partial`**: edits the placeholder with the answer so far (`chatTextOf`, its first `PIECE_CHARS`
  *   characters), at most once every `previewEveryMs` per answer (0: never), throttled in memory; a
  *   preview lost costs nothing, and none is sent after the run settled.
- * - **`settled`**: a run with nothing to send (aborted, or completed with no text and no parts) deletes
- *   its placeholder and its mark; any other is replaced by answer delivery's piece `#0` (a failed run's
- *   with the channel's failure text, index.ts `replyText`).
+ * - **`settled`**: a run with nothing to send (reply.ts `nothingToSend`: aborted, or completed with no
+ *   text and no parts) deletes its placeholder and its mark; any other is replaced by answer delivery's
+ *   piece `#0` (a failed run's with the channel's failure text, reply.ts `replyText`).
  * - **`sweep`** (a wakeup at start): every mark of this instance whose request is settled
  *   (`submissions.get`) with nothing left to send is deleted with its message; one settled with
  *   something to send is dropped (delivery replaces its message), as is one whose request is unknown;
@@ -30,10 +30,11 @@
  */
 
 import type { Clock } from "@pikit/core";
-import { type AgentResult, type AgentSubmissions, answerKey, type JsonValue, type KeyValueStore } from "@pikit/contracts";
+import { type AgentSubmissions, answerKey, type JsonValue, type KeyValueStore } from "@pikit/contracts";
 import { chatTextOf, PIECE_CHARS } from "./format.ts";
 import { messageNameOf, pieceIds, pieceKeyOf } from "./ids.ts";
 import { type Instance, parseConversationKey } from "./instance.ts";
+import { nothingToSend } from "./reply.ts";
 import { type AnswerTargets, type ChatApi, ChatApiError, type PlaceholderMark, type PlaceholderMarks, type Placeholders } from "./types.ts";
 
 export interface PlaceholderDeps {
@@ -86,12 +87,6 @@ export function previewGateOf(marks: PlaceholderMarks): PreviewGate {
   };
   gates.set(marks, gate);
   return gate;
-}
-
-/** Whether a run's end leaves nothing to send (index.ts `replyText` says nothing, and it has no parts): an aborted run, an empty answer. */
-export function nothingToSend(run: Pick<AgentResult, "kind" | "text" | "parts">): boolean {
-  if (run.kind === "aborted") return true;
-  return run.kind === "completed" && (run.text ?? "").trim() === "" && (run.parts ?? []).length === 0;
 }
 
 const isNotFound = (error: unknown): boolean => error instanceof ChatApiError && error.status === 404;

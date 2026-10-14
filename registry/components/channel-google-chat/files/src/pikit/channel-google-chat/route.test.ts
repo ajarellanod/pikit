@@ -7,7 +7,8 @@
  * - **On Cloudflare's shape**: the sink is `mailboxSink` over `createMemoryMailbox`, whose inbox
  *   handlers stand for the conversation's object.
  *
- * The key is made by a stand-in for key.ts (each message's thread), which admission owns.
+ * The key is key.ts's `eventKey`, as `routeOf` (worker.ts) makes it: each message's thread, the
+ * `conversations` setting saying `thread` (the events say their space has threads).
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -16,10 +17,11 @@ import type { ActorMailbox, JsonValue } from "@pikit/contracts";
 import { createMemoryMailbox } from "@pikit/contracts/testing";
 import type { AddOnEvent, AddOnResponse } from "./event.ts";
 import { addedEvent, clickEvent, eventRequest, type FakeGoogleChat, messageEvent, removedEvent, startFakeGoogleChat } from "./fake-google-chat.test-support.ts";
-import { conversationKey, instancesOf, readCredentials } from "./instance.ts";
+import { instancesOf, readCredentials } from "./instance.ts";
+import { createSpaceThreading, eventKey } from "./key.ts";
 import { createRoute, strangerText } from "./route.ts";
 import { createIdTokenVerifier, createJwks } from "./token.ts";
-import { CLICK_TYPE, EVENT_TYPE, type EventSink, type KeyOf } from "./types.ts";
+import { type ChatApi, CLICK_TYPE, EVENT_TYPE, type EventSink, type KeyOf } from "./types.ts";
 import { mailboxSink, type Route, serve } from "./worker.ts";
 
 const fakes: FakeGoogleChat[] = [];
@@ -33,13 +35,10 @@ const [INSTANCE] = instancesOf([]);
 const instance = INSTANCE!;
 const ALLOWED = "spaces/AAA";
 
-/** A stand-in for key.ts's `eventKey`: a message's (or a clicked card's) thread, else the whole chat. */
-const threadKey: KeyOf = async (event) => {
-  const space = event.chat.space?.name;
-  if (space === undefined) return undefined;
-  const thread = event.chat.messagePayload?.message.thread?.name ?? event.chat.buttonClickedPayload?.message?.thread?.name;
-  return conversationKey(instance.instance, space, thread);
-};
+/** Google's API, which the key never needs here: every event says whether its space has threads. */
+const noApi = new Proxy({} as ChatApi, { get: () => () => Promise.reject(new Error("the key asked Google")) });
+/** key.ts's `eventKey`, as `routeOf` makes it: a message's (or a clicked card's) thread, the setting saying `thread`. */
+const threadKey: KeyOf = (event, ctx) => eventKey(event, { instance, threading: createSpaceThreading(noApi, undefined), mode: async () => "thread" }, ctx);
 
 interface Line {
   level: keyof Logger;

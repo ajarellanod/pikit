@@ -16,8 +16,8 @@
  *   answered kept.
  * - `answeredCard`: the card once answered, its buttons gone, saying who answered what.
  *
- * **Every action carries the conversation's key** (`CLICK_PARAMETERS.key`, `key`): a click inside a
- * dialog carries no message, so the route keys a click by it (key.ts's `KEY_PARAMETER`, the same name).
+ * **Every action carries the conversation's key** (`CLICK_PARAMETERS.key`, key.ts's `KEY_PARAMETER`):
+ * a click inside a dialog carries no message, so the route keys a click by it.
  *
  * Each widget's name is its field's name: click.ts reads the parameters back (`CLICK_PARAMETERS`) and
  * the form (`formInputs`, by field name). A card's id (`questionCardId`) is the question's, so the
@@ -27,14 +27,12 @@
 
 import type { QuestionAnswer, QuestionField, QuestionPart, QuestionValue } from "@pikit/contracts";
 import type { Card, CardButton, CardWidget, CardWithId } from "./event.ts";
+import { KEY_PARAMETER } from "./key.ts";
 
 /** The `action.parameters` keys of a question's buttons. */
 export const CLICK_PARAMETERS = {
-  /**
-   * The key of the conversation the card was sent in: how the route keys a click (a dialog's has no
-   * message). key.ts's `KEY_PARAMETER`: the same name, kept equal at integration.
-   */
-  key: "key",
+  /** The key of the conversation the card was sent in: how the route keys a click (a dialog's has no message). */
+  key: KEY_PARAMETER,
   /** The question's id. */
   question: "question",
   /** What the click asks: `answer` (a button's value), `open` (the dialog), `submit` (the dialog's form). */
