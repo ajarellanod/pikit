@@ -6,6 +6,11 @@
 `askUser`, and the contract changes they bring (images in, parts out, the answer
 while it is written). Keys and idempotency were decided in the former SPEC §5.
 
+**Status:** built (`registry/components/channel-google-chat`, `registry/components/tool-ask-user`)
+and tested against a fake Google: on a server first, the conformance suites on both targets' shapes,
+and in workerd. Not done until checked live with a real app ("Checked live", below); then this note
+moves to `completed/`.
+
 **Needed by:** nothing required. It is the next channel.
 
 ## What it gives
@@ -23,7 +28,7 @@ a contract, added here with its first producer and its first consumer.
 
 | Capability | Here | Contract change |
 |---|---|---|
-| Webhook verified by Google's ID token | the channel's own authentication (`inbound.ts`: not a shared contract) | none |
+| Webhook verified by Google's ID token | the channel's own authentication (`token.ts`, `route.ts`: not a shared contract) | none |
 | Every answer in the message's thread; a thread as the conversation, or the whole chat | the key the channel builds, its `conversations` setting ([threads](threads.md)) | none |
 | An agent per space | `InboundMessage.conversationId` is the space: one `router-rules` rule | none |
 | "Thinking…" placeholder, written as the model writes, edited into the answer | the channel, on `agent.started` and `agent.partial` | **`agent.partial`** |
@@ -240,13 +245,23 @@ app cannot read is named as unread.
 - This transport draws it (`draws: ["question"]`): one `confirm` or `select` field as a card with
   buttons; anything else as a card whose button opens a dialog with the form. The card's message is
   recorded in `storage.kv` under the question's id.
+- Every action of a card or a dialog carries the conversation's key (the action parameter `key`,
+  key.ts's `KEY_PARAMETER`), besides the question's id: a click inside a dialog carries no message, so
+  the route keys it by that parameter (a key of this app in the click's space only).
 - A click or a submitted form is admitted as a message whose text says it in words ("Answer to
   …: …", the question's id and each field's value) for the model: that text is the whole answer, as
-  one typed back to a folded question is. The card is updated to say who answered what (the click's response). A
-  question already answered, or unknown, answers the click with that, and admits nothing.
+  one typed back to a folded question is. Its id is one per question (the card's message and
+  `:answer`), so concurrent and repeated clicks are the runtime's `duplicate`; the record is marked
+  answered once the message is durable. The card is updated to say who answered what (the click's
+  response; for a form, by `spaces.messages.patch` as the dialog closes). A question already
+  answered, or unknown, answers the click with that, and admits nothing. A click that admits an
+  answer wakes answer delivery, as a message does.
 - Anyone the channel admits in that conversation may answer, as anyone there may talk to the agent;
   the answer carries their `actor`. Several questions may be open in a conversation; each is
-  answered once. A question stays open until answered or the conversation is reset.
+  answered once. A question stays open until answered or the conversation is reset: its record keeps
+  the key of the answer that drew it (`<conversation id>:<request id>`), and a click once the key's
+  conversation is another one (`/new`) is told the question was asked in a conversation that was
+  reset, and admits nothing.
 
 ## The contract changes
 
@@ -280,7 +295,40 @@ rules of `AGENTS.md`).
   run's end. A notice: one lost costs nothing. Producer:
   runtime-pi; consumer: this channel ([streaming replies](streaming-replies.md)).
 
-## How it is built: work for parallel agents
+## Bounds
+
+Values in the component's source, the same on both targets:
+
+| What | Bound |
+|---|---|
+| Files per message | 10 (`ATTACHMENT_LIMITS`) |
+| Bytes per file / per message | 10 MB / 25 MB |
+| Images per message, in all | 1 MB (Cloudflare's bound on `AgentRequest.images`) |
+| Text of text files per message | 50,000 characters |
+| A quoted message | 2,000 characters (`QUOTE_CHARS`) |
+| Downloads and quotes before admission | 20 s (`DOWNLOAD_DEADLINE_MS`) |
+| The route's hand-off | 25 s (`HAND_OFF_MS`, under Google's 30) |
+| A call to Google | 15 s (`CALL_TIMEOUT_MS`) |
+| A piece | 4096 characters, 32,000 bytes as a message |
+| Pieces per run's answer | 20 (`DELIVERY.piecesPerRun`: a Durable Object's subrequests) |
+| Retries | after 1 s, 5 s, 30 s, then every minute, or Google's `Retry-After` |
+| The ID token's clock skew; Google's keys fetched again for an unknown `kid` | a minute; at most once a minute |
+| Stranger spaces told, per process or isolate | once each, 1,000 remembered |
+
+## Decisions taken while building
+
+- **One stranger text**, in route.ts: the route tells a stranger space in its response
+  (`createMessageAction`), once per space while the process or isolate lives; the handler's add of a
+  stranger space is a guard that says the same.
+- **One rule for "nothing to send"** (`reply.ts`): `replyText` says what a chat is told about a run, and
+  `nothingToSend` is answer delivery's own decision (no text and no completed run's parts), which the
+  placeholder reads to delete itself.
+- **A stop past its deadline** cuts an answer's send: its piece stays `sending`, and the next App sends
+  it again under the same ids (outbound-durable, or the runtime's record without it).
+- **The Worker's half has no `storage.kv`**: whether a space has threads is kept in memory per isolate
+  there, and in `storage.kv` in the object.
+
+## How it was built: work for parallel agents
 
 One branch, one worktree per agent where they write in parallel. The contracts come first, since
 every other part builds on their types; then the rest in parallel; then one review of the whole.
@@ -306,6 +354,12 @@ every other part builds on their types; then the rest in parallel; then one revi
    review of the whole change against this note.
 
 ## Tests
+
+Built as listed: `server.test.ts` (the server lane, beside `files/`), `conformance.test.ts` (the
+channel and lifecycle suites on a server's App and on Cloudflare's two halves, the Worker's App handing
+over to the objects' through a mailbox in memory), the module tests, and
+`tests/workerd/test/google-chat.workerd.ts`. Each case named below has one.
+
 - **The server lane, first:** an App composed as `pikit add` composes it on a server (the default
   export only, `server-bun` serving real HTTP, `storage-sqlite`, `wakeups-timers`, `outbound-durable`,
   `workspace-local`, no `actor.*`): a signed request in, admitted, answered by the fake API, a card

@@ -28,7 +28,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `agent.observe` | single | runtime-pi | admin-api | `createAgentObserveConformance` |
 | `agent.definition` | keyed | the project | admin-api?, agents-live?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
-| `agent.tool` | keyed | tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
+| `agent.tool` | keyed | tool-ask-user, tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
@@ -108,7 +108,7 @@ interface AgentRuntime {
   the model is writing, for a preview (a placeholder a channel edits). runtime-pi re-emits it from
   pi-durable's live state (`pi.live`'s `generation.message`), at most once per `partialEveryMs` (1 s) per
   conversation, and never after the run's end. A notice: one lost costs nothing; the answer is the
-  run's result.
+  run's result. channel-google-chat writes it into its "Thinking…" placeholder.
 
 Provider: runtime-pi (on pi-durable, through `@pikit/pi-adapter`'s `createDurableRuntime`), the only
 one for good: Pi is the only agent runtime (SPEC §3.3), as for every runtime contract below.
@@ -266,8 +266,9 @@ is gone for good: removed, a live agent deleted) is not thrown: the key moves to
 the agent routed now and the message goes there, or, when routing names the gone agent, it is
 `denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text, images? }` (a
 field is added, optional, with the component that reads it); its `id` becomes the request id, and its
-`images` (`AgentImage`, bounded by whoever builds the message) the request's `images`, as an
-`inbound.normalize` stage leaves them (it may drop them). See [pipelines.md](pipelines.md).
+`images` (`AgentImage`, bounded by whoever builds the message: channel-google-chat's are a message's
+photos, 1 MB in all) the request's `images`, as an `inbound.normalize` stage leaves them (it may drop
+them). See [pipelines.md](pipelines.md).
 
 Authentication is not here: each channel proves its senders its own way.
 
@@ -346,7 +347,8 @@ below). `MessagePart` is
 kinds in its `draws`; every other part is folded into the text as its fallback, after the text, a
 paragraph each, before the split, and the drawn ones go with the last piece. `messagePieces(transport,
 { text, parts })` is the one place that does it (answer delivery's direct path and outbound-durable call
-it); a channel that answers in its response folds with `foldParts` (channel-http). What a platform draws
+it); a channel that answers in its response folds with `foldParts` (channel-http). channel-google-chat's
+transport draws `question` (`draws: ["question"]`); every other transport sends its fallback. What a platform draws
 from markdown (tables, images) is its transport's, not a part. Tests: `parts.test.ts`, the
 `outbound.queue` suite, and the channel suite (a part no channel draws reaches its sender as its
 fallback, also in an answer of the part alone).
@@ -363,7 +365,10 @@ fields, their options and says to reply in text), `answerProblem` (an answer che
 question) and `answerText` (the answer said in words, `Answer to "<title>" (question <id>):` and each field's value, the text of
 the message that brings it back). No field of `InboundMessage` carries an answer: what the model reads
 is its text, the same whether a button was clicked or the fallback answered in a message. How it is
-drawn and who may answer are the channel's. Tests: `question.test.ts`.
+drawn and who may answer are the channel's: channel-google-chat draws one `confirm` or `select` field
+as buttons and anything else as a dialog's form, and takes the first answer of anyone it admits in the
+question's conversation, once, and none once that conversation was reset. Producer: tool-ask-user
+(`askUser`). Tests: `question.test.ts`, tool-ask-user's and channel-google-chat's.
 
 ### `startAnswerDelivery` ([delivery.ts](../packages/contracts/src/delivery.ts))
 

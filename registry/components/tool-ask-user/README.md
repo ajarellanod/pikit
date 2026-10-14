@@ -45,7 +45,18 @@ long as the person takes.
   sends nothing itself.
 
 Who may answer and how often is the channel's: Google Chat takes the first answer from anyone it
-admits in that conversation, once.
+admits in that conversation, once, and none once the conversation was reset (`/new`): a question
+belongs to the conversation it was asked in. Several questions may be open in a conversation; each
+is answered once.
+
+## Use it with
+
+- **A channel that draws questions** for buttons and forms: `channel-google-chat`. With any other
+  channel (Telegram, HTTP, the dashboard) the question is its fallback text, and the person answers
+  in a reply, which the model reads as any message.
+- **An agent that names it** (`tools: ["askUser"]`), told in its instructions when to ask rather than
+  guess. Since the run ends at the question, ask last: what the model writes after the call is never
+  said.
 
 ## Tests
 
