@@ -77,9 +77,17 @@
       ]
     }
   },
+  "commands": {
+    "channel-web": {
+      "file": "command.ts",
+      "description": "The web chat's users: channel-web users | invite <email> [--name <name>] | reset | ban | unban | remove <user id or email>"
+    }
+  },
   "generated": [
     "chat-files.ts"
   ],
+  "view": "view",
+  "settings": "settings",
   "dependencies": {
     "@pikit/contracts": "0.0.0",
     "better-auth": "1.7.7",

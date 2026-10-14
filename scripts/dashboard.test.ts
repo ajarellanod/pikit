@@ -55,6 +55,12 @@ test("admin-proposals' view keeps the proposals contract's shapes and its api.ts
   for (const [name, declaration] of copy) expect([name, declaration]).toEqual([name, sources.get(name) ?? "missing"]);
 });
 
+test("channel-web's view keeps the component's admin-api.ts, byte for byte", () => {
+  const component = join(REPO, "registry/components/channel-web");
+
+  expect(readFileSync(join(component, "view/admin-api.ts"), "utf8")).toBe(readFileSync(join(component, "files/src/pikit/channel-web/admin-api.ts"), "utf8"));
+});
+
 test("its npm packages are pinned to exact versions, so every project builds the same dashboard", () => {
   const manifest = JSON.parse(read("package.json")) as Record<string, Record<string, string> | undefined>;
   const ranges = Object.entries({ ...manifest.dependencies, ...manifest.devDependencies }).filter(([, version]) => !/^\d+\.\d+\.\d+$/.test(version));

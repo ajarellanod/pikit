@@ -94,6 +94,18 @@
       "description": "agents-live's section of the Settings dialog: Agents as data: an operator creates, edits and removes agents (name, description, prompt, model, tools, extensions) in the dashboard's Settings, provided as agent.directory; with router-rules, routed to live. Its settings come with the component (pikit add agents-live), stored by settings-store."
     },
     {
+      "name": "channel-web-settings",
+      "type": "registry:file",
+      "title": "channel-web-settings",
+      "description": "channel-web's section of the Settings dialog: A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object. Its settings come with the component (pikit add channel-web), stored by settings-store."
+    },
+    {
+      "name": "channel-web",
+      "type": "registry:file",
+      "title": "channel-web",
+      "description": "channel-web's view: A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object. Its admin API routes come with the component (pikit add channel-web)."
+    },
+    {
       "name": "health-registry",
       "type": "registry:file",
       "title": "health-registry",

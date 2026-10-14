@@ -18,7 +18,9 @@ dashboard (`/admin/`) stays as it is: nothing of it in the users' page.
   "forgot password", magic links, invitations by email), `admin.auth` (without it, the operator's
   routes answer `404`), `actor.inbox` / `actor.mailbox` (Cloudflare).
 - **Targets:** `server` and `durable`, from one code (below).
-- **Installs to:** `src/pikit/channel-web/`.
+- **Installs to:** `src/pikit/channel-web/`; with a UI, its view and Settings section to
+  `src/dashboard/src/views/channel-web/` and `src/dashboard/src/settings/channel-web/`. Adds the command
+  `pikit channel-web`.
 - **npm dependencies:** `better-auth` (1.7.7, `better-auth/minimal`, no Kysely), `typebox`.
 
 ## Environment
@@ -52,8 +54,42 @@ OIDC platform alike).
 }
 ```
 
-`signUp` is also a setting when `settings` is installed (the dashboard's Settings): the operator
-changes it live, read at each sign-up; the config's value is its default.
+`signUp` is also a setting when `settings` is installed (the dashboard's Settings, Web chat): the
+operator changes it live, read at each sign-up; the config's value is its default.
+
+## What the operator does
+
+The operator's routes (`/admin/api/channel-web/*`, `admin-api.ts`) answer only with an `admin.auth`
+installed (`admin-auth-token`). Three ways in, the same routes behind each:
+
+- **The dashboard's Web users view** (`view/`, installed to `src/dashboard/src/views/channel-web/`
+  when the project has a UI; shown while `admin.auth` is provided): every user (name, email, how they
+  sign in, created, last seen, state: active, invited, banned), a search and filters, and the actions:
+  Invite (an email, a name if you like), a password-reset link (an invited user who never came: a new
+  invitation instead), Ban / Unban, Remove (behind a confirmation). It uses only the primitives the
+  base dashboard ships. `view/admin-api.ts` is an identical copy of the component's (a test checks).
+- **Settings, Web chat** (`settings/`, while `settings` is provided): who may make an account
+  (`signUp.mode`: invited only, an allow list, anyone) and the allow list (`ana@example.com`, or
+  `@example.com` for a whole domain). It stores only what differs from the config's `signUp`.
+- **`pikit channel-web`** (the component's command, `command.ts`), from the project's directory:
+
+  ```sh
+  pikit channel-web users                           # id, email, name, sign-in methods, created, last seen, state
+  pikit channel-web invite ana@example.com --name Ana
+  pikit channel-web reset ana@example.com           # a user's id or email
+  pikit channel-web ban ana@example.com             # unban, likewise
+  pikit channel-web remove ana@example.com          # asks first; --yes without a terminal
+  ```
+
+  It signs in with `PIKIT_ADMIN_TOKEN` (the environment, or `.env`) and talks to `--url <origin>`,
+  else `PIKIT_PUBLIC_URL`, else this machine's App (`pikit dev`: `http://127.0.0.1:8787` with
+  deployment-cloudflare, else server-bun's port, 3000 by default). Behind `pikit expose`, the public
+  URL serves only the paths it exposes: pass `--url http://127.0.0.1:3000` to reach the App itself.
+
+**A link is shown once.** An invitation or a reset link is in the dialog (or the command's output)
+that made it, with whether it was emailed too (`email.send`) and until when it works
+(`inviteTtlHours`); never in the list, a log or the API again. Anyone with it can set the password:
+send it over a channel you trust. Without `email.send`, sending it is yours.
 
 ## What it guarantees
 
@@ -141,5 +177,12 @@ Content-Security-Policy: same origin only, images also `data:`, `blob:` and `htt
 - `accounts-wiring.test.ts`: the real accounts (better-auth) through the routes, on a server and
   forwarded to the accounts actor on Cloudflare (the cookie cache first); chat and admin sessions never
   open each other's routes. `accounts/*.test.ts` test the accounts themselves.
+- `command.test.ts`: `pikit channel-web` against a fake of the operator's routes (`Bun.serve`): the
+  list page by page, invite (the link printed once, emailed or not), reset, ban and unban by id or
+  email, remove asked first (`--yes` without a terminal), the App's origin, and each failure said
+  (no token, a wrong one, no App, no routes, bad arguments).
+- The view and the Settings section compile and bundle with the dashboard (`bun
+  scripts/dashboard-build.ts` in the kit).
 
-Not covered yet: the workerd lane (real Durable Objects), the page.
+Not covered yet: the workerd lane (real Durable Objects), the page, the view and the Settings
+section in a browser.

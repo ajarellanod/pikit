@@ -87,10 +87,11 @@ async function failure(response: Response): Promise<ApiFailure> {
   return new ApiFailure(response.status, body);
 }
 
-/** `GET` (or `init`'s method) of `path` under /admin/api, as JSON. */
+/** `GET` (or `init`'s method) of `path` under /admin/api, as JSON; `undefined` for a `204` (a `DELETE`'s). */
 export async function api<T>(path: string, init: RequestInit = {}): Promise<T> {
   const response = await fetch(`${API}${path}`, { ...init, headers: headers(init.headers) });
   if (!response.ok) throw await failure(response);
+  if (response.status === 204) return undefined as T;
   return (await response.json()) as T;
 }
 
