@@ -6,7 +6,7 @@
 
 import { test } from "bun:test";
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import { compareHttpRoutes, type HttpRoute, type HttpRouteKey, matchesHttpRoute, parseHttpRouteKey } from "../http.ts";
+import { compareHttpRoutes, type HttpRoute, type HttpRouteKey, matchesHttpRoute, parseHttpRouteKey, withClientAddress } from "../http.ts";
 import { createHttpRouteConformance } from "./http.ts";
 
 interface Route extends HttpRouteKey {
@@ -43,7 +43,8 @@ function memoryServer() {
             if (route === undefined) return new Response("not found", { status: 404 });
             const signal = AbortSignal.any([request.signal, stopping.signal]);
             try {
-              return await route.handler(request, base.derive(() => withAbortSignal(signal, BACKGROUND_CONTEXT)));
+              // No socket: no client address to tell, and the client's copy is dropped.
+              return await route.handler(withClientAddress(request, undefined), base.derive(() => withAbortSignal(signal, BACKGROUND_CONTEXT)));
             } catch {
               return new Response("internal error", { status: 500 });
             }

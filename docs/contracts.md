@@ -446,11 +446,15 @@ component gets the host in its start context, as from the entrypoint), is in
 
 One fetch handler `(request, ctx) => Response` per key `"METHOD /path"`. Segments are literal or
 `:param`; a last `*` makes a prefix (`GET /admin/*`). The most specific key wins: literal, then with
-parameters, then the longest prefix. A server guarantees: the request as sent, the response unchanged,
+parameters, then the longest prefix. A server guarantees: the request as sent but one header,
+`x-pikit-client-address` (`CLIENT_ADDRESS_HEADER`), which is the server's: the client's address as the
+server saw it (server-bun: the socket's peer; the Worker: `cf-connecting-ip`), absent when it cannot
+tell, a client's copy always dropped (`withClientAddress`, applied by every server); the response unchanged,
 a context per request (cancelled when the client goes or the server stops), a thrown handler as a
 `500` that reveals nothing, `404` for no match, and refuses to start on a key it cannot serve. Its own
 routes (`/health`) come first. `parseHttpRouteKey`, `matchesHttpRoute` and `compareHttpRoutes` are
-the shared grammar.
+the shared grammar. Behind a proxy the address is the proxy's: a route that trusts a proxy's header
+says so in its own config (channel-web's `trustedProxyHeaders`).
 
 Servers (users): server-bun on a server, deployment-cloudflare's Worker host on Cloudflare. Routes:
 channel-http (`POST /v1/messages`, `GET /v1/conversations/:id/messages/:messageId`, `POST

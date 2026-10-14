@@ -34,7 +34,9 @@ handler that is waiting (a channel waiting for the agent's answer) answers at on
 does not have to wait for it. Past the stop deadline, the remaining connections are closed.
 
 A route that throws becomes a `500 {"error":"internal"}`, and the log says why. A request no route
-matches is a `404`. A body larger than `maxRequestBodyBytes` is refused with `413`.
+matches is a `404`. A body larger than `maxRequestBodyBytes` is refused with `413`. A route sees the
+client's address as `x-pikit-client-address` (the socket's peer, `server.requestIP`), never a copy the
+client sent; behind a proxy it is the proxy's address (a route that trusts a proxy's header says so).
 
 It refuses to start when its port is taken, when a route key is not `"METHOD /path"`, or when a
 route claims `/health` or `/ready`.

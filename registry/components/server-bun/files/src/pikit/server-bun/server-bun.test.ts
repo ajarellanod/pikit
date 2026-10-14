@@ -211,3 +211,19 @@ test("a body larger than maxRequestBodyBytes is refused before the route", async
   expect(reached).toBe(false);
   await app.stop();
 });
+
+test("a route sees the socket's peer as x-pikit-client-address, never a header the client wrote", async () => {
+  const server = listening();
+  const app = await defineApp({
+    components: [routes({ "GET /who": (request) => Response.json({ address: request.headers.get("x-pikit-client-address"), forwarded: request.headers.get("x-forwarded-for") }) }), server.component],
+    config: LOCAL,
+    logger: silentLogger,
+  }).create();
+  await app.start();
+
+  const response = await server.fetch("/who", { headers: { "x-pikit-client-address": "203.0.113.9", "x-forwarded-for": "198.51.100.1" } });
+
+  // The client's x-forwarded-for reaches the route as it came: only a route that trusts a proxy reads it.
+  expect(await response.json()).toEqual({ address: "127.0.0.1", forwarded: "198.51.100.1" });
+  await app.stop();
+});

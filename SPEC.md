@@ -459,15 +459,17 @@ The admin API reads the composition through `APP_DESCRIPTION` (K13), the runtime
 cost, a transcript, a live event stream, usage; runtime-pi provides it from pi-durable's records), and
 asks `admin.auth` (`packages/contracts/src/admin.ts`; `admin-auth-token`, a bearer token from
 `secrets`, on both targets) before every answer. Its routes and the UI's files are prefix routes
-(`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves. The
+(`GET /admin/*`, `packages/contracts/src/http.ts`), which every server of `http.route` serves; every
+such server hands a route the client's address it saw itself (`x-pikit-client-address`: a socket's
+peer, Cloudflare's `cf-connecting-ip`), never a copy the client wrote. The
 list of conversations, on every host, comes from admin-api's conversation index, paged newest
 activity first (`agent.observe` lists in creation order, and on Cloudflare sees one object's
 conversations: `features/cloudflare-conversation-index.md`).
 
 `agent.observe` is read by a reader its consumer authorized for that conversation: an operator
 (`admin.auth`), or a channel's user for their own conversation (channel-web's live view, which
-projects only what that user may see: the answer's text and the tools' names while their message
-waits). The operator's dashboard stays operators only; channel-web's page (`/chat/`) is the users'.
+projects only what that user may see: the answer's text and the tools' names during a run known
+to take their message). The operator's dashboard stays operators only; channel-web's page (`/chat/`) is the users'.
 
 ## 6. The agent knows and improves itself
 

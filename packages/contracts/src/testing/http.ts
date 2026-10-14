@@ -9,7 +9,7 @@
  */
 
 import { type App, type AppContext, BACKGROUND_CONTEXT, type ComponentDefinition, defineApp, defineComponent, silentLogger, withAbortSignal } from "@pikit/core";
-import type { HttpRoute } from "../http.ts";
+import { CLIENT_ADDRESS_HEADER, type HttpRoute } from "../http.ts";
 import { checker, expecter } from "./assert.ts";
 import type { ConformanceCase } from "@pikit/core/testing";
 
@@ -187,6 +187,17 @@ export function createHttpRouteConformance(
           { method: "POST", path: "/conformance/echo", query: "a b", authorization: "Bearer conformance", body: '{"text":"ñandú ✓"}' },
           "what the handler saw",
         );
+      },
+    })),
+
+    routeCase("the client address header is the server's: a copy the client sent never reaches the handler", () => ({
+      routes: { "GET /conformance/address": (request) => Response.json({ address: request.headers.get(CLIENT_ADDRESS_HEADER) }) },
+      async run({ fetch }) {
+        const forged = "203.0.113.250";
+        const response = await fetch("/conformance/address", { headers: { [CLIENT_ADDRESS_HEADER]: forged } });
+        const { address } = (await response.json()) as { address: string | null };
+
+        check(address !== forged, `the handler to see the server's ${CLIENT_ADDRESS_HEADER} (or none), not the client's ${forged}`);
       },
     })),
 

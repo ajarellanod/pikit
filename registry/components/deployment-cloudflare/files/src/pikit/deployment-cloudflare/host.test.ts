@@ -399,3 +399,14 @@ test("GET /health says which half did not start, never why", async () => {
   const unbound = await createWorkerHost(undefined, { logger: silentLogger }).fetch(new Request("https://w.example/health"), {});
   expect(((await unbound.json()) as { error: string }).error).toContain("no CONVERSATION binding");
 });
+
+test("a route sees cf-connecting-ip as x-pikit-client-address, never the client's own copy of it; none without it", async () => {
+  const routes = defineComponent({
+    name: "routes",
+    setup: (pikit) => pikit.provideKeyed("http.route", "GET /who", (request) => Response.json({ address: request.headers.get("x-pikit-client-address") })),
+  });
+  const worker = createWorkerHost(defineApp({ components: [routes] }), { logger: silentLogger });
+  const seen = async (headers: Record<string, string>) => ((await (await worker.fetch(new Request("https://w.example/who", { headers }), {})).json()) as { address: string | null }).address;
+  expect(await seen({ "cf-connecting-ip": "198.51.100.7", "x-pikit-client-address": "203.0.113.9" })).toBe("198.51.100.7");
+  expect(await seen({ "x-pikit-client-address": "203.0.113.9" })).toBeNull();
+});

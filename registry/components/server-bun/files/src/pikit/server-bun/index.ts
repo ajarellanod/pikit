@@ -16,6 +16,10 @@
  * (`compareHttpRoutes`), since Hono serves a request with the first route registered that matches,
  * and a prefix key (`GET /admin/*`) is Hono's own wildcard, which matches `/admin` too.
  *
+ * Every request reaches the routes with `x-pikit-client-address` set to the socket's peer address
+ * (`server.requestIP`), any copy the client sent dropped (`withClientAddress`, the `http.route`
+ * contract): behind a proxy that is the proxy's address.
+ *
  * Each request gets a context of its own, never `start`'s: its cancellation fires when the client
  * goes away or the server stops. Stopping cancels every request in flight, so a handler that waits
  * (a channel waiting for the agent's answer) answers at once, and the stop does not wait for it.
@@ -24,7 +28,7 @@
  */
 
 import { type AppContext, BACKGROUND_CONTEXT, defineComponent, withAbortSignal } from "@pikit/core";
-import { compareHttpRoutes, type HttpRouteKey, parseHttpRouteKey } from "@pikit/contracts";
+import { compareHttpRoutes, type HttpRouteKey, parseHttpRouteKey, withClientAddress } from "@pikit/contracts";
 import { Hono } from "hono";
 import Type from "typebox";
 
@@ -115,7 +119,8 @@ export function createServerBun(options: ServerBunOptions = {}) {
             hostname: config.hostname,
             maxRequestBodySize: config.maxRequestBodyBytes,
             idleTimeout: config.idleTimeoutSeconds,
-            fetch: app.fetch,
+            // The client's address is the socket's, never a header the client wrote.
+            fetch: (request, bun) => app.fetch(withClientAddress(request, bun.requestIP(request)?.address)),
           });
           stopping = shutdown;
           const host = config.hostname === "0.0.0.0" ? "127.0.0.1" : config.hostname === "::" ? "[::1]" : config.hostname;

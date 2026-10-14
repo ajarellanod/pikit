@@ -267,7 +267,7 @@ export const CAPABILITIES: Catalogue = {
     mode: "keyed",
     definedIn: "@pikit/contracts",
     stability: "experimental",
-    summary: 'One HTTP endpoint per "METHOD /path", as a fetch handler; one server component serves them all.',
+    summary: 'One HTTP endpoint per "METHOD /path", as a fetch handler; one server component serves them all, the client address its own (x-pikit-client-address).',
   },
   "model.provider": {
     mode: "keyed",

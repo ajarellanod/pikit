@@ -43,7 +43,7 @@ import {
   withAbortSignal,
   withContextValue,
 } from "@pikit/core";
-import { type ActorCallOutcome, type ActorStreamOutcome, compareHttpRoutes, type HttpRoute, type HttpRouteKey, type JsonValue, matchesHttpRoute, parseHttpRouteKey } from "@pikit/contracts";
+import { type ActorCallOutcome, type ActorStreamOutcome, compareHttpRoutes, type HttpRoute, type HttpRouteKey, type JsonValue, matchesHttpRoute, parseHttpRouteKey, withClientAddress } from "@pikit/contracts";
 import { WORKERS_HOST, type WorkersHost } from "@pikit/contracts/cloudflare";
 
 /**
@@ -364,7 +364,10 @@ export interface WorkerServer {
  * prefix, the longest first; @pikit/contracts' `parseHttpRouteKey`): a request no route matches is a
  * 404, and a route that throws is a 500 that does not reveal why. `GET /health` is answered before it
  * (`createWorkerHost`), so no prefix (`GET /*`) shadows it. Each request has a context of its own,
- * cancelled when the client goes away or the App stops. It passes the `http.route` suite.
+ * cancelled when the client goes away or the App stops. The client's address a route sees
+ * (`x-pikit-client-address`) is `cf-connecting-ip`, which Cloudflare sets on every request it
+ * forwards (a client's own copy never reaches the Worker), any copy of the reserved header dropped
+ * (`withClientAddress`). It passes the `http.route` suite.
  */
 export function createWorkerServer(logger: Logger = consoleLogger): WorkerServer {
   type Entry = HttpRouteKey & { route: HttpRoute; key: string };
@@ -402,8 +405,9 @@ export function createWorkerServer(logger: Logger = consoleLogger): WorkerServer
       const entry = serving.table.find((e) => matchesHttpRoute(e, request.method, new URL(request.url).pathname));
       if (entry === undefined) return Response.json({ error: "not_found" }, { status: 404 });
       const signal = AbortSignal.any([request.signal, serving.shutdown.signal]);
+      const addressed = withClientAddress(request, request.headers.get("cf-connecting-ip") ?? undefined);
       try {
-        return await entry.route(request, serving.base.derive(() => withAbortSignal(signal, BACKGROUND_CONTEXT)));
+        return await entry.route(addressed, serving.base.derive(() => withAbortSignal(signal, BACKGROUND_CONTEXT)));
       } catch (error) {
         logger.error("pikit: a route failed", { route: entry.key, error: String(error) });
         return Response.json({ error: "internal" }, { status: 500 });

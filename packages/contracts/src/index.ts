@@ -45,7 +45,7 @@ export { AGENT_STATE } from "./agent-state.ts";
 export { CONVERSATION } from "./conversation-context.ts";
 export type { ConversationRegistry, ConversationReset } from "./conversations.ts";
 export type { HttpRoute, HttpRouteKey } from "./http.ts";
-export { compareHttpRoutes, matchesHttpRoute, parseHttpRouteKey } from "./http.ts";
+export { CLIENT_ADDRESS_HEADER, compareHttpRoutes, matchesHttpRoute, parseHttpRouteKey, withClientAddress } from "./http.ts";
 export type { SecretStore } from "./secrets.ts";
 export { redactSecrets, SECRET_NAME_PATTERN, secretLikePaths } from "./secrets.ts";
 export type { AgentObserver, ObservedConversation, ObservedEvent, TranscriptEntry } from "./observe.ts";
