@@ -336,7 +336,9 @@ Suite: `createOutboundQueueConformance`, and the convergence suite.
 
 What an answer carries besides its markdown text, for a channel to draw its platform's way (a
 question as buttons). A kind of part is declared by the component that introduces it, by declaration
-merging on `AppMessageParts` (the core and the contracts declare none); `MessagePart` is
+merging on `AppMessageParts`; the core declares none. A kind shared by components that must not
+know each other is vocabulary, declared in the contracts: `question` ([question.ts](../packages/contracts/src/question.ts),
+below). `MessagePart` is
 `{ type, fallback }` and the kind's fields. Every part has a `fallback` text. A transport draws the
 kinds in its `draws`; every other part is folded into the text as its fallback, after the text, a
 paragraph each, before the split, and the drawn ones go with the last piece. `messagePieces(transport,
@@ -345,6 +347,20 @@ it); a channel that answers in its response folds with `foldParts` (channel-http
 from markdown (tables, images) is its transport's, not a part. Tests: `parts.test.ts`, the
 `outbound.queue` suite, and the channel suite (a part no channel draws reaches its sender as its
 fallback, also in an answer of the part alone).
+
+### The `question` part ([question.ts](../packages/contracts/src/question.ts))
+
+A question the agent asks the person it talks to: `{ type: "question", fallback, id, title,
+description?, fields }`, each field `{ kind, name, label, required?, options? }` of kind `confirm`,
+`select`, `multiselect` (with `options: { value, label }[]`), `text` or `date`. Declared in the
+contracts, not by a component: the tool that asks (`tool-ask-user`) and the channels that draw it
+must not know each other (features/approvals.md); the core declares no kind. Its protocol is here,
+once: `questionProblem` (the one check), `questionPart` (a question with its fallback, which lists the
+fields, their options and says to reply in text), `answerProblem` (an answer checked against its
+question) and `answerText` (the answer said in words, `Answer to "<title>" (question <id>):` and each field's value, the text of
+the message that brings it back). No field of `InboundMessage` carries an answer: what the model reads
+is its text, the same whether a button was clicked or the fallback answered in a message. How it is
+drawn and who may answer are the channel's. Tests: `question.test.ts`.
 
 ### `startAnswerDelivery` ([delivery.ts](../packages/contracts/src/delivery.ts))
 

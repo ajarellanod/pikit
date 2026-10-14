@@ -150,7 +150,7 @@ const MOVE = "[move to another conversation]";
 /** Words in a message's text that make the suite's runtime answer it with a part too, or with a part alone. */
 const WITH_PART = "[answer with a part]";
 const ONLY_PART = "[answer with a part alone]";
-/** The fallback of the suite's part, a kind no channel draws (the contracts declare none). */
+/** The fallback of the suite's part, a kind no channel draws (not one the contracts declare). */
 const PART_FALLBACK = "conformance: a part's fallback";
 const PART = { type: "conformance-part", fallback: PART_FALLBACK } as unknown as MessagePart;
 

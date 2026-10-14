@@ -1,8 +1,8 @@
 /**
  * Parts from a tool to the user: `withParts` on a tool's result, collected by the runtime into
  * `AgentResult.parts`, kept in `agent.submissions`' `answers`, and delivered by `startAnswerDelivery`
- * (folded into the text where the transport does not draw them). The kind is the test's own: the
- * contracts declare none, a component declares its own (`AppMessageParts`).
+ * (folded into the text where the transport does not draw them). The kind is the test's own, as a
+ * component declares its own (`AppMessageParts`).
  */
 
 import { afterEach, expect, test } from "bun:test";
@@ -74,8 +74,8 @@ async function until(condition: () => boolean, what: string): Promise<void> {
 }
 
 test("withParts: the parts in the result's details, next to its own; a part without a kind or a fallback, or details that are no object, refused", () => {
-  expect(withParts({ details: { lines: 3 } }, [CARD]).details).toEqual({ lines: 3, [PARTS_DETAIL]: [CARD] });
-  expect(withParts({}, [CARD]).details).toEqual({ [PARTS_DETAIL]: [CARD] });
+  expect<unknown>(withParts({ details: { lines: 3 } }, [CARD]).details).toEqual({ lines: 3, [PARTS_DETAIL]: [CARD] });
+  expect<unknown>(withParts({}, [CARD]).details).toEqual({ [PARTS_DETAIL]: [CARD] });
   // As JSON keeps it: an undefined field goes.
   expect(withParts({}, [part("test-card", "x", { note: undefined })]).details).toEqual({ [PARTS_DETAIL]: [{ type: "test-card", fallback: "x" }] });
   expect(() => withParts({}, [{ type: "test-card" } as unknown as MessagePart])).toThrow(/no fallback/);

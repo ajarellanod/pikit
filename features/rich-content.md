@@ -32,7 +32,8 @@ text where it cannot.
   model by `InboundMessage.images` (`AgentImage`), which `admitInbound` passes to
   `AgentRequest.images`; the parts' shape below (`parts.ts`: `messagePieces` folds them, in one place),
   `ChannelTransport.draws` and `AgentResult.parts` (a pi-durable tool returns `withParts(result,
-  parts)`), with a first kind, `question` (`tool-ask-user`). Google Chat writes other
+  parts)`), with a first kind, `question`, asked by `tool-ask-user` and declared in the contracts
+  (`question.ts`): shared vocabulary between who asks and who draws ([approvals](approvals.md)). Google Chat writes other
   files to the conversation's workspace for the agent's tools. `attachments` and `storage.blob`
   stay for files that must be kept.
 - What a platform draws from markdown (Google Chat's cards for tables and code, image cards for
@@ -80,7 +81,8 @@ interface InboundMessage { /* … */ replyTo?: { platformMessageId: string; valu
   part is folded into the text as its fallback before the text is split. A message never needs a
   channel that supports it, and no flag says which channels do (S3).
 - The core declares no part type. The component that needs one declares it; without that component
-  the type does not exist.
+  the type does not exist. (Built: the contracts are not the core, and a kind shared by components
+  that must not know each other is declared there, as `question` is.)
 - An answer to a drawn part (a button pressed, a quoted reply) arrives as an `InboundMessage` with
   `replyTo`. The receipt of the message it answers (above) says which run sent it.
 - What is not built yet (the first part kinds, attachments, media storage) is a feature:

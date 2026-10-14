@@ -3,13 +3,14 @@
  * question as buttons, a form). Not a field per platform feature, and not an opaque `blocks: unknown`
  * (features/rich-content.md):
  *
- * - **A kind of part is declared by the component that introduces it**, by declaration merging on
- *   `AppMessageParts`, as events are on `AppEvents`. The core and the contracts declare none: without
- *   that component the kind does not exist.
+ * - **A kind of part is declared by declaration merging on `AppMessageParts`**, as events are on
+ *   `AppEvents`, by the component that introduces it: without that component the kind does not exist.
+ *   The core (`@pikit/core`) declares none. A kind shared by components that must not know each other
+ *   is vocabulary, declared here: `question` (`question.ts`), asked by a tool and drawn by channels.
  *
  *     declare module "@pikit/contracts" {
  *       interface AppMessageParts {
- *         question: { id: string; title: string; fields: QuestionField[] };
+ *         card: { title: string; rows: string[] };
  *       }
  *     }
  *
@@ -29,7 +30,7 @@ import type { ChannelTransport } from "./outbound.ts";
 
 /**
  * The kinds of part, by `type`, each with its own fields (besides `type` and `fallback`): declared by
- * the component that introduces one.
+ * the component that introduces one, or here for shared vocabulary (`question`, `question.ts`).
  */
 // biome-ignore lint/suspicious/noEmptyInterface: extended by declaration merging
 export interface AppMessageParts {}
@@ -61,7 +62,7 @@ export function foldParts(content: MessageContent, draws: readonly string[] = []
   const drawn: MessagePart[] = [];
   const paragraphs = content.text.trim() === "" ? [] : [content.text];
   for (const part of content.parts ?? []) {
-    // Read as any kind: with no kind declared, `MessagePart` is `never`.
+    // Read as any kind: a part may be of a kind this program does not declare.
     const { type, fallback } = part as { type: string; fallback: string };
     if (draws.includes(type)) drawn.push(part);
     else if (fallback.trim() !== "") paragraphs.push(fallback);

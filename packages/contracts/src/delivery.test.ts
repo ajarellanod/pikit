@@ -22,7 +22,7 @@ function answer(chat: string, requestId: string, text = `to ${requestId}`): RunS
   return { conversation: { key: chat, agent: "assistant", conversationId: `s-${chat}` }, requestId, requestIds: [requestId], kind: "completed", text };
 }
 
-/** A part of a kind only the tests know (the contracts declare none). */
+/** A part of a kind only the tests know (not one the contracts declare). */
 const part = (type: string, fallback: string): MessagePart => ({ type, fallback }) as unknown as MessagePart;
 
 /** A platform whose sends the test scripts per conversation: `ok`, an error, or `hang` (it got the piece, and never answers). */

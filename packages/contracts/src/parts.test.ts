@@ -1,7 +1,7 @@
 /**
  * `foldParts` and `messagePieces`: the one place a message's parts become what its transport sends.
- * The contracts declare no kind of part, so the tests make theirs by hand (a kind a component would
- * declare on `AppMessageParts`).
+ * The tests make their kinds by hand (a kind a component would declare on `AppMessageParts`), not
+ * the contracts' own `question` (`question.test.ts`).
  */
 
 import { expect, test } from "bun:test";

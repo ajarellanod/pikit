@@ -233,7 +233,7 @@ app cannot read is named as unread.
   (`control.terminate`) with the question as a part of the run's answer (`AgentResult.parts`), and
   the answer comes back later as a new message. A run that waits days would hold a Durable Object
   awake for days, and pi-durable has no wait on an outside signal.
-- The question is a `question` part (`AppMessageParts`, declared by `tool-ask-user`), with an id
+- The question is a `question` part (`AppMessageParts`, declared in `@pikit/contracts`' `question.ts`), with an id
   (`<conversation id>:<request id>:<tool call id>`) and a `fallback` text that lists the fields and
   their options. A transport that does not draw it sends the fallback; the answer typed back is an
   ordinary message.
@@ -262,6 +262,11 @@ rules of `AGENTS.md`).
   `OutboundMessage.parts`, and `ChannelTransport.draws`. Delivery folds every part a transport does
   not draw into the text as its fallback before splitting; a drawn part goes with the message's
   last piece. Producer: `tool-ask-user`; consumer: this transport.
+- **The `question` part** (`question.ts` in `@pikit/contracts`): the question's shape, its one
+  check (`questionProblem`), its fallback (`questionPart`), and its answer checked and said in words
+  (`answerProblem`, `answerText`). Declared in the contracts, not by `tool-ask-user`: who asks and
+  who draws must not know each other ([approvals](approvals.md)); the core still declares no kind.
+  Producer: `tool-ask-user`; consumers: this transport and its clicks.
 - **`AgentResult.parts`** (and `RunSettlement`'s): the parts the run's tools gave, in order.
   runtime-pi collects what a tool returns as parts; an answer with parts and no text is still delivered.
 - **`InboundMessage.replyTo` is not added.** Its only reader would be the model, which reads the
