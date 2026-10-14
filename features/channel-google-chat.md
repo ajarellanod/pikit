@@ -25,7 +25,7 @@ component's own.
 | Replies in the message's thread; a thread or the whole space as the conversation | the key the channel builds, a value per space in its config ([threads](threads.md)) | none |
 | An agent per space | `InboundMessage.conversationId` is the space: one `router-rules` rule | none |
 | "Thinking…" message edited into the answer | sent on `agent.started`, edited by the transport's first piece (below) | none |
-| Markdown to Google Chat text, tables and code as cards, pieces under 32,000 bytes | the transport's `split` and `send` | none |
+| Markdown to Google Chat text, tables and code as cards, 4096-character pieces | the transport's `split` and `send` | none |
 | Markdown images sent as image cards | the transport's `send` | none |
 | Retries, error classification | `DeliveryError` (`transient`, `rate_limited`, `permanent`) | none |
 | Create with `requestId` (a repeat returns the first message) | `ChannelTransport.idempotent`, a UUID from the piece's key | none |
@@ -134,9 +134,10 @@ the conversation, as in channel-telegram.
 **Answers.**
 - `startAnswerDelivery` in `start`, with the channel's transport, `route`, `text` and `policy`
   ([answer delivery](completed/outbound-delivery.md)).
-- `split` cuts on a paragraph or line, never inside a table or a code block, so that a piece's
-  message as JSON (its text and cards) stays under 32,000 bytes, Google's limit for a message; the
-  bound is a value below it. Google documents no limit of characters for `text`.
+- `split` cuts at 4096 characters (a value) on a paragraph or line, never inside a table or a code
+  block. Google documents no limit of characters for `text`, only 32,000 bytes for a message as a
+  whole (its text and cards); 4096 characters is a size that has worked in practice, and a piece
+  whose message as JSON would pass 32,000 bytes is cut further.
   `send` turns each piece's markdown into Google Chat's text format, tables and code blocks into
   `cardsV2`, and markdown images with a public URL into image cards.
 - The transport is `idempotent`: each create carries a `requestId` derived from the piece's key, a
