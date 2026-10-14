@@ -210,8 +210,11 @@ export interface QuestionRecords {
   answer(questionId: string, answered: NonNullable<QuestionRecord["answered"]>): Promise<boolean>;
 }
 
-/** Draws a question as a card whose buttons call `endpoint` (the app's endpoint URL, the audience) back (question-cards.ts). */
-export type QuestionDrawer = (question: QuestionPart, endpoint: string) => CardWithId;
+/**
+ * Draws a question as a card whose buttons call `endpoint` (the app's endpoint URL, the audience) back
+ * (question-cards.ts), each carrying `conversationKey` (the piece's): how the route keys a click.
+ */
+export type QuestionDrawer = (question: QuestionPart, endpoint: string, conversationKey: string) => CardWithId;
 
 /** Answers a click or a form of its conversation `key` (click.ts): the response Google shows. */
 export type ClickHandler = (key: string, event: AddOnEvent, ctx: AppContext) => Promise<AddOnResponse>;

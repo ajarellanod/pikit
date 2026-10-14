@@ -63,20 +63,20 @@ const params = (list: { key: string; value: string }[] | undefined) => Object.fr
 // ---------------------------------------------------------------------------------------------------
 // question-cards.ts
 
-test("one confirm field: a card with Yes and No, each calling the endpoint with the question, the field and its value; the text escaped", () => {
+test("one confirm field: a card with Yes and No, each calling the endpoint with the conversation's key, the question, the field and its value; the text escaped", () => {
   expect(drawnAsButtons(confirm)).toBe(true);
-  const { cardId, card } = questionCard(confirm, ENDPOINT);
+  const { cardId, card } = questionCard(confirm, ENDPOINT, THREAD_KEY);
   expect(cardId).toBe(questionCardId(confirm));
   expect(card.header).toEqual({ title: "Deploy now?" });
   expect(widgets(card)[0]).toEqual({ textParagraph: { text: "The build &lt;passed&gt; &amp; is green." } });
   expect(buttonsOf(card).map((button) => [button.text, button.onClick.action?.function, params(button.onClick.action?.parameters)])).toEqual([
-    ["Yes", ENDPOINT, { question: confirm.id, step: "answer", field: "go", value: "true" }],
-    ["No", ENDPOINT, { question: confirm.id, step: "answer", field: "go", value: "false" }],
+    ["Yes", ENDPOINT, { key: THREAD_KEY, question: confirm.id, step: "answer", field: "go", value: "true" }],
+    ["No", ENDPOINT, { key: THREAD_KEY, question: confirm.id, step: "answer", field: "go", value: "false" }],
   ]);
 });
 
 test("one select field: a button per option, its label shown and its value carried", () => {
-  const { card } = questionCard(select, ENDPOINT);
+  const { card } = questionCard(select, ENDPOINT, THREAD_KEY);
   expect(buttonsOf(card).map((button) => [button.text, params(button.onClick.action?.parameters)[CLICK_PARAMETERS.value]])).toEqual([
     ["Production", "prod"],
     ["Staging", "staging"],
@@ -87,15 +87,23 @@ test("one select field: a button per option, its label shown and its value carri
 test("anything else: one button that opens the dialog, the fields listed", () => {
   expect(drawnAsButtons(form)).toBe(false);
   expect(drawnAsButtons({ fields: [{ kind: "text", name: "a", label: "A" }] })).toBe(false);
-  const { card } = questionCard(form, ENDPOINT);
+  const { card } = questionCard(form, ENDPOINT, CHAT_KEY);
   const [button, ...more] = buttonsOf(card);
   expect(more).toEqual([]);
-  expect(button?.onClick.action).toEqual({ function: ENDPOINT, interaction: "OPEN_DIALOG", parameters: [{ key: "question", value: form.id }, { key: "step", value: "open" }] });
+  expect(button?.onClick.action).toEqual({
+    function: ENDPOINT,
+    interaction: "OPEN_DIALOG",
+    parameters: [
+      { key: "key", value: CHAT_KEY },
+      { key: "question", value: form.id },
+      { key: "step", value: "open" },
+    ],
+  });
   expect(widgets(card)[0]?.textParagraph?.text).toContain("• Notes<br>• Regions (optional)");
 });
 
 test("the dialog: an input per field by its kind, named after it, and a button that sends the form", () => {
-  const dialog = questionDialog(form, ENDPOINT);
+  const dialog = questionDialog(form, ENDPOINT, CHAT_KEY);
   const inputs = widgets(dialog).filter((widget) => widget.buttonList === undefined);
   expect(inputs).toEqual([
     { textInput: { name: "notes", label: "Notes", type: "MULTIPLE_LINE" } },
@@ -125,14 +133,23 @@ test("the dialog: an input per field by its kind, named after it, and a button t
     expect.objectContaining({ selectionInput: expect.objectContaining({ name: "size", type: "DROPDOWN" }) }) as never,
   ]);
   const [send] = buttonsOf(dialog);
-  expect(params(send?.onClick.action?.parameters)).toEqual({ question: form.id, step: "submit" });
+  expect(params(send?.onClick.action?.parameters)).toEqual({ key: CHAT_KEY, question: form.id, step: "submit" });
   const many = questionPart({ id: "q", title: "T", fields: [{ kind: "multiselect", name: "m", label: "M", options: Array.from({ length: RADIO_OPTIONS + 1 }, (_, i) => ({ value: `v${i}`, label: `V${i}` })) }] });
-  expect(widgets(questionDialog(many, ENDPOINT))[0]?.selectionInput?.type).toBe("MULTI_SELECT");
-  expect(widgets(questionDialog(select, ENDPOINT))[0]?.selectionInput?.type).toBe("RADIO_BUTTON");
+  expect(widgets(questionDialog(many, ENDPOINT, CHAT_KEY))[0]?.selectionInput?.type).toBe("MULTI_SELECT");
+  expect(widgets(questionDialog(select, ENDPOINT, CHAT_KEY))[0]?.selectionInput?.type).toBe("RADIO_BUTTON");
+});
+
+test("every action carries the conversation's key (the route keys a click by it: a dialog's has no message)", () => {
+  const cards = [questionCard(confirm, ENDPOINT, THREAD_KEY).card, questionCard(select, ENDPOINT, THREAD_KEY).card, questionCard(form, ENDPOINT, THREAD_KEY).card];
+  const dialogs = [questionDialog(form, ENDPOINT, THREAD_KEY), questionDialog(form, ENDPOINT, THREAD_KEY, { problem: "x", answer: {} })];
+  const actions = [...cards, ...dialogs].flatMap(buttonsOf).map((button) => button.onClick.action);
+  expect(actions).toHaveLength(2 + 2 + 1 + 2);
+  for (const action of actions) expect(params(action?.parameters)[CLICK_PARAMETERS.key]).toBe(THREAD_KEY);
+  expect(CLICK_PARAMETERS.key).toBe("key");
 });
 
 test("the dialog drawn again: the problem on top, what was answered kept", () => {
-  const dialog = questionDialog(form, ENDPOINT, { problem: "Your answer is <wrong>.", answer: { notes: "ship it", regions: ["us"], day: "2026-03-01", notify: false } });
+  const dialog = questionDialog(form, ENDPOINT, CHAT_KEY, { problem: "Your answer is <wrong>.", answer: { notes: "ship it", regions: ["us"], day: "2026-03-01", notify: false } });
   const [problem, notes, regions, day, notify] = widgets(dialog);
   expect(problem?.textParagraph?.text).toContain("Your answer is &lt;wrong&gt;.");
   expect(notes?.textInput?.value).toBe("ship it");
@@ -249,7 +266,7 @@ async function subject(setup: Setup = {}) {
       name: CARD_MESSAGE,
       text: "Here is my question.",
       thread: { name: THREAD },
-      cardsV2: [{ cardId: "table-1", card: { sections: [{ widgets: [{ textParagraph: { text: "a table" } }] }] } }, questionCard(question, ENDPOINT)],
+      cardsV2: [{ cardId: "table-1", card: { sections: [{ widgets: [{ textParagraph: { text: "a table" } }] }] } }, questionCard(question, ENDPOINT, conversationKey)],
     };
     messages.set(CARD_MESSAGE, message);
     await questions.sent({ question, message: CARD_MESSAGE, conversationKey });
@@ -309,14 +326,14 @@ test("a form: the dialog opens; sent with a problem it is drawn again with it; s
   const s = await subject();
   const message = await s.drawn(form, CHAT_KEY);
   const open = await s.click(CHAT_KEY, clickEvent({ message, parameters: { question: form.id, step: "open" }, dialogEventType: "REQUEST_DIALOG" }), s.ctx);
-  expect(open).toEqual({ action: { navigations: [{ pushCard: questionDialog(form, ENDPOINT) }] } });
+  expect(open).toEqual({ action: { navigations: [{ pushCard: questionDialog(form, ENDPOINT, CHAT_KEY) }] } });
 
   const submit = (formInputs: NonNullable<ClickEventOptions["formInputs"]>) =>
     s.click(CHAT_KEY, clickEvent({ message, parameters: { question: form.id, step: "submit" }, formInputs, dialogEventType: "SUBMIT_DIALOG" }), s.ctx);
   const missing = await submit({ notes: textInput("ship it"), regions: textInput("us") });
   expect(missing).toEqual({
     action: {
-      navigations: [{ updateCard: questionDialog(form, ENDPOINT, { problem: 'Your answer does not answer "Day", which is required.', answer: { notes: "ship it", regions: ["us"] } }) }],
+      navigations: [{ updateCard: questionDialog(form, ENDPOINT, CHAT_KEY, { problem: 'Your answer does not answer "Day", which is required.', answer: { notes: "ship it", regions: ["us"] } }) }],
       notification: { text: 'Your answer does not answer "Day", which is required.' },
     },
   });

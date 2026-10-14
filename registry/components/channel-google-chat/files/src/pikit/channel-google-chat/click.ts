@@ -95,7 +95,7 @@ export function createClickHandler(deps: ClickDeps): ClickHandler {
     if (record.answered !== undefined) return notice(CLICK_NOTICES.answered, dialog);
 
     const step = parameters[CLICK_PARAMETERS.step] as ClickStep | undefined;
-    if (step === "open") return { action: { navigations: [{ pushCard: questionDialog(record.question, endpoint) }] } };
+    if (step === "open") return { action: { navigations: [{ pushCard: questionDialog(record.question, endpoint, key) }] } };
     if (step !== "answer" && step !== "submit") return notice(CLICK_NOTICES.unknown, dialog);
 
     const fromForm = step === "submit";
@@ -104,7 +104,7 @@ export function createClickHandler(deps: ClickDeps): ClickHandler {
     if (problem !== undefined) {
       const words = `Your answer ${problem}.`;
       if (!fromForm) return notice(words, dialog);
-      return { action: { navigations: [{ updateCard: questionDialog(record.question, endpoint, { problem: words, answer }) }], notification: { text: words } } };
+      return { action: { navigations: [{ updateCard: questionDialog(record.question, endpoint, key, { problem: words, answer }) }], notification: { text: words } } };
     }
 
     // The thread the answer goes to, for a whole chat's conversation: the card's.

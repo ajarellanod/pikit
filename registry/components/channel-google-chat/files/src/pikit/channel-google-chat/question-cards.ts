@@ -2,11 +2,11 @@
 /**
  * - **One `confirm` or `select` field**: a card (its title, description and label) with a button per
  *   answer (Yes / No, or each option), each calling the app back (`action.function` = `endpoint`, the
- *   app's endpoint URL) with the parameters `CLICK_PARAMETERS` names: the question's id, the step
- *   (`answer`), the field, the value.
+ *   app's endpoint URL) with the parameters `CLICK_PARAMETERS` names: the conversation's key, the
+ *   question's id, the step (`answer`), the field, the value.
  * - **Anything else**: a card with one button that opens a dialog (`interaction: OPEN_DIALOG`, step
  *   `open`); the click asks for the dialog (`questionDialog`), a form of the fields and a button that
- *   sends it (step `submit`, the question's id):
+ *   sends it (step `submit`, the conversation's key and the question's id):
  *   - `confirm`: `selectionInput` RADIO_BUTTON, Yes (`true`) / No (`false`): an explicit answer, so a
  *     required one can be left unanswered and told (a SWITCH is always one or the other);
  *   - `select`: RADIO_BUTTON, DROPDOWN past `RADIO_OPTIONS` options;
@@ -15,6 +15,9 @@
  *   A form sent back with a problem is drawn again (`retry`) with the problem on top and what was
  *   answered kept.
  * - `answeredCard`: the card once answered, its buttons gone, saying who answered what.
+ *
+ * **Every action carries the conversation's key** (`CLICK_PARAMETERS.key`, `key`): a click inside a
+ * dialog carries no message, so the route keys a click by it (key.ts's `KEY_PARAMETER`, the same name).
  *
  * Each widget's name is its field's name: click.ts reads the parameters back (`CLICK_PARAMETERS`) and
  * the form (`formInputs`, by field name). A card's id (`questionCardId`) is the question's, so the
@@ -27,6 +30,11 @@ import type { Card, CardButton, CardWidget, CardWithId } from "./event.ts";
 
 /** The `action.parameters` keys of a question's buttons. */
 export const CLICK_PARAMETERS = {
+  /**
+   * The key of the conversation the card was sent in: how the route keys a click (a dialog's has no
+   * message). key.ts's `KEY_PARAMETER`: the same name, kept equal at integration.
+   */
+  key: "key",
   /** The question's id. */
   question: "question",
   /** What the click asks: `answer` (a button's value), `open` (the dialog), `submit` (the dialog's form). */
@@ -59,8 +67,11 @@ export function drawnAsButtons(question: Pick<QuestionPart, "fields">): boolean 
 /** `text` as a card's formatted text shows it: as it is. */
 export const escapeCardText = (text: string): string => text.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;");
 
-const parameters = (question: QuestionPart, step: ClickStep, more: Record<string, string> = {}) =>
-  Object.entries({ [CLICK_PARAMETERS.question]: question.id, [CLICK_PARAMETERS.step]: step, ...more }).map(([key, value]) => ({ key, value }));
+const parameters = (question: QuestionPart, conversationKey: string, step: ClickStep, more: Record<string, string> = {}) =>
+  Object.entries({ [CLICK_PARAMETERS.key]: conversationKey, [CLICK_PARAMETERS.question]: question.id, [CLICK_PARAMETERS.step]: step, ...more }).map(([key, value]) => ({
+    key,
+    value,
+  }));
 
 const header = (question: QuestionPart, subtitle?: string): NonNullable<Card["header"]> => ({ title: question.title, ...(subtitle !== undefined && { subtitle }) });
 
@@ -73,21 +84,21 @@ const described = (question: QuestionPart): CardWidget[] =>
 /** A field's label as a form shows it: "(optional)" after an optional one, as the fallback says it. */
 const labelOf = (field: QuestionField): string => (field.required === true ? field.label : `${field.label} (optional)`);
 
-/** `question` as its message's card (above), its buttons calling `endpoint`. */
-export function questionCard(question: QuestionPart, endpoint: string): CardWithId {
+/** `question` as its message's card (above), sent in the conversation `conversationKey`, its buttons calling `endpoint`. */
+export function questionCard(question: QuestionPart, endpoint: string, conversationKey: string): CardWithId {
   const widgets = described(question);
   const field = question.fields[0];
   if (drawnAsButtons(question) && field !== undefined && (field.kind === "confirm" || field.kind === "select")) {
     const answers = field.kind === "confirm" ? [{ label: "Yes", value: YES }, { label: "No", value: NO }] : field.options;
     const buttons: CardButton[] = answers.map((answer) => ({
       text: answer.label,
-      onClick: { action: { function: endpoint, parameters: parameters(question, "answer", { [CLICK_PARAMETERS.field]: field.name, [CLICK_PARAMETERS.value]: answer.value }) } },
+      onClick: { action: { function: endpoint, parameters: parameters(question, conversationKey, "answer", { [CLICK_PARAMETERS.field]: field.name, [CLICK_PARAMETERS.value]: answer.value }) } },
     }));
     widgets.push(paragraph(`<b>${escapeCardText(field.label)}</b>`), { buttonList: { buttons } });
   } else {
     widgets.push(
       paragraph(question.fields.map((each) => `• ${escapeCardText(labelOf(each))}`).join("<br>")),
-      { buttonList: { buttons: [{ text: "Answer", onClick: { action: { function: endpoint, interaction: "OPEN_DIALOG", parameters: parameters(question, "open") } } }] } },
+      { buttonList: { buttons: [{ text: "Answer", onClick: { action: { function: endpoint, interaction: "OPEN_DIALOG", parameters: parameters(question, conversationKey, "open") } } }] } },
     );
   }
   return { cardId: questionCardId(question), card: { header: header(question), sections: [{ widgets }] } };
@@ -99,12 +110,12 @@ export interface DialogRetry {
   answer: QuestionAnswer;
 }
 
-/** The dialog of `question`'s form, its submit button calling `endpoint`; `retry`: drawn again with a problem on top, the answers kept. */
-export function questionDialog(question: QuestionPart, endpoint: string, retry?: DialogRetry): Card {
+/** The dialog of `question`'s form in the conversation `conversationKey`, its submit button calling `endpoint`; `retry`: drawn again with a problem on top, the answers kept. */
+export function questionDialog(question: QuestionPart, endpoint: string, conversationKey: string, retry?: DialogRetry): Card {
   const widgets = described(question);
   if (retry !== undefined) widgets.push(paragraph(`<font color="#d93025">${escapeCardText(retry.problem)}</font>`));
   for (const field of question.fields) widgets.push(inputOf(field, retry?.answer[field.name]));
-  widgets.push({ buttonList: { buttons: [{ text: "Send", type: "FILLED", onClick: { action: { function: endpoint, parameters: parameters(question, "submit") } } }] } });
+  widgets.push({ buttonList: { buttons: [{ text: "Send", type: "FILLED", onClick: { action: { function: endpoint, parameters: parameters(question, conversationKey, "submit") } } }] } });
   return { header: header(question), sections: [{ widgets }] };
 }
 
