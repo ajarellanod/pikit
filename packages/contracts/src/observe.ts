@@ -1,5 +1,6 @@
 /**
- * `agent.observe`: what an operator sees of the agent runtime, read-only (the dashboard, SPEC §5).
+ * `agent.observe`: what the agent runtime holds, read-only, for a reader its consumer authorized for
+ * that conversation (the dashboard's operator, SPEC §5; a channel's user for their own conversation).
  * The runtime provides it (runtime-pi, from pi-durable's records), so it is the truth of what the
  * runtime holds, never a copy kept on the side.
  *
@@ -17,9 +18,14 @@
  *   `watch` starts with one, so a view is always rebuilt from a snapshot, never from a count of events.
  * - **`usage`** is one conversation's spend, every model call and tool summed.
  *
- * What is seen here is an authenticated operator's (`admin.auth`): a transcript holds what people
- * wrote. Logs never carry it. Nothing here changes anything: actions (abort, reset) go through the
- * contracts that own them (`agent.runtime`, `conversations.registry`).
+ * **Who reads it is the consumer's to authorize, per conversation**: an operator through
+ * `admin.auth` (admin-api: every conversation), or a user of a channel for their own conversation
+ * only (channel-web: the key built from the session's user). A consumer that shows it to someone who
+ * is not an operator projects what that person may see (channel-web's live view: the answer's text
+ * and the tools' names while their message waits; never thinking, tool arguments or results, system
+ * prompts or an operator's messages). A transcript holds what people wrote: logs never carry it.
+ * Nothing here changes anything: actions (abort, reset) go through the contracts that own them
+ * (`agent.runtime`, `conversations.registry`).
  *
  * Where it runs: in the App that runs the runtime. On a server that is the one App and every
  * conversation; on Cloudflare it is each conversation's Durable Object, which sees only its own

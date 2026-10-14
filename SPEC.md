@@ -464,6 +464,11 @@ list of conversations, on every host, comes from admin-api's conversation index,
 activity first (`agent.observe` lists in creation order, and on Cloudflare sees one object's
 conversations: `features/cloudflare-conversation-index.md`).
 
+`agent.observe` is read by a reader its consumer authorized for that conversation: an operator
+(`admin.auth`), or a channel's user for their own conversation (channel-web's live view, which
+projects only what that user may see: the answer's text and the tools' names while their message
+waits). The operator's dashboard stays operators only; channel-web's page (`/chat/`) is the users'.
+
 ## 6. The agent knows and improves itself
 
 Pi can already improve itself: its prompt tells it where its own docs are, it writes an extension,

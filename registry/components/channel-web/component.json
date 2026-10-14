@@ -1,0 +1,112 @@
+{
+  "$schema": "../../schema/component.schema.json",
+  "name": "channel-web",
+  "version": "0.0.0",
+  "title": "Web chat: your users talk to the assistant from a page of their own (/chat/), with accounts",
+  "description": "A chat page for people who are not operators: they sign in (email and password, a link by email, Google, GitHub or any OIDC platform), see and continue only their own conversations, watch the answer as it is written, attach images and stop a run. The operator invites, bans and removes them. On Cloudflare the Worker serves it, each conversation in its Durable Object, the accounts in one object.",
+  "targets": [
+    "server",
+    "durable"
+  ],
+  "requires": {
+    "pikit": "0.0.0",
+    "contracts": "0.0.0",
+    "capabilities": [
+      "secrets",
+      "conversations.registry",
+      "agent.runtime",
+      "agent.observe",
+      "agent.submissions",
+      "storage.kv",
+      "storage.sql",
+      "actor.mailbox"
+    ]
+  },
+  "optional": {
+    "capabilities": [
+      "wakeups",
+      "outbound.queue",
+      "actor.inbox",
+      "settings",
+      "email.send",
+      "admin.auth"
+    ]
+  },
+  "provides": [
+    "http.route"
+  ],
+  "apps": {
+    "worker": "worker"
+  },
+  "halves": {
+    "default": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "secrets",
+        "conversations.registry",
+        "agent.runtime",
+        "agent.observe",
+        "agent.submissions",
+        "storage.kv",
+        "storage.sql"
+      ],
+      "optional": [
+        "wakeups",
+        "outbound.queue",
+        "actor.inbox",
+        "actor.mailbox",
+        "settings",
+        "email.send",
+        "admin.auth"
+      ]
+    },
+    "worker": {
+      "provides": [
+        "http.route"
+      ],
+      "requires": [
+        "secrets",
+        "actor.mailbox"
+      ],
+      "optional": [
+        "admin.auth",
+        "settings",
+        "email.send"
+      ]
+    }
+  },
+  "generated": [
+    "chat-files.ts"
+  ],
+  "dependencies": {
+    "@pikit/contracts": "0.0.0",
+    "better-auth": "1.7.7",
+    "typebox": "1.3.27"
+  },
+  "devDependencies": {
+    "@better-auth/test-utils": "1.7.7",
+    "@pikit/pi-adapter": "0.0.0"
+  },
+  "files": [
+    {
+      "source": "files/src",
+      "target": "src"
+    }
+  ],
+  "environment": [
+    {
+      "name": "CHANNEL_WEB_AUTH_SECRET",
+      "secret": true,
+      "required": true,
+      "description": "What the users' sessions are signed with: at least 32 random characters (`openssl rand -base64 48`). Never the admin token. Changing it signs every user out."
+    },
+    {
+      "name": "PIKIT_PUBLIC_URL",
+      "secret": false,
+      "required": false,
+      "description": "The App's public origin (https://chat.example.com), when a proxy hides it: OAuth redirect URIs and the links of invitations and resets are made under it. Absent, each request's origin."
+    }
+  ]
+}

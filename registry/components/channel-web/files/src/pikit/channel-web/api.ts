@@ -53,7 +53,7 @@ export type ChatSignInMethod =
   | { kind: "magic-link" }
   /** A built-in provider of better-auth (`/chat/api/auth/sign-in/social`, `{ provider: id }`). */
   | { kind: "social"; id: string; name: string }
-  /** Another OAuth2/OIDC platform (`/chat/api/auth/sign-in/oauth2`, `{ providerId: id }`). */
+  /** Another OAuth2/OIDC platform: signed in the same way (`/chat/api/auth/sign-in/social`, `{ provider: id }`). */
   | { kind: "oidc"; id: string; name: string };
 
 /** What the page needs before anyone signed in. */

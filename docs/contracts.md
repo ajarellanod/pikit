@@ -22,31 +22,31 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 
 | Capability | Mode | Provided by | Used by (`?` = optional) | Suite |
 |---|---|---|---|---|
-| `agent.runtime` | single | runtime-pi | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createAgentRuntimeConformance` |
+| `agent.runtime` | single | runtime-pi | admin-api, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createAgentRuntimeConformance` |
 | `agent.conversations` | single | runtime-pi | conversations-file, conversations-kv | none of its own |
-| `agent.submissions` | single | runtime-pi | channel-telegram, channel-telegram-webhook, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
-| `agent.observe` | single | runtime-pi | admin-api | `createAgentObserveConformance` |
+| `agent.submissions` | single | runtime-pi | channel-telegram, channel-telegram-webhook, channel-web, channel-http? | `createSubmissionsConformance`, `createFeedConformance` |
+| `agent.observe` | single | runtime-pi | admin-api, channel-web | `createAgentObserveConformance` |
 | `agent.definition` | keyed | the project | admin-api?, agents-live?, extension-pikit-self?, router-basic?, router-rules?, runtime-pi?, tool-delegate? | none (`defineAgent` validates) |
 | `agent.directory` | single | agents-live | admin-api?, router-rules?, runtime-pi? | `createAgentDirectoryConformance` |
 | `agent.tool` | keyed | tool-bash, tool-delegate, tool-edit, tool-fetch, tool-mcp, tool-read, tool-websearch-brave, tool-write | agents-live?, runtime-pi? | none |
 | `agent.skill` | keyed | the project | agents-live?, runtime-pi? | none (`defineSkill` validates; runtime-pi checks each key is its skill's name) |
 | `agent.extension` | keyed | extension-house-rules, extension-pikit-self | agents-live?, runtime-pi? | none |
 | `agent.command` | keyed | admin-api, runtime-pi | admin-api? | `createAgentCommandConformance` |
-| `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-http, channel-telegram, channel-telegram-webhook | `createConversationRegistryConformance` |
-| `outbound.queue` | single | outbound-durable | admin-api?, channel-telegram?, channel-telegram-webhook? | `createOutboundQueueConformance` |
-| `storage.sql` | single | storage-do, storage-sqlite | admin-api, repo-github-app, outbound-durable, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
-| `storage.kv` | single | storage-kv-sql | channel-telegram, channel-telegram-webhook, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
-| `actor.mailbox` | single | mailbox-local, actors-do | admin-api, channel-telegram-webhook, repo-github-app, settings-store | `createMailboxConformance` |
-| `actor.inbox` | single | mailbox-local, actors-do | channel-telegram-webhook, repo-github-app, admin-api?, settings-store? | `createMailboxConformance` |
-| `wakeups` | single | actors-do, wakeups-timers | channel-telegram-webhook, outbound-durable, runtime-pi? | `createWakeupsConformance` |
-| `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, repo-github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
-| `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, repo-github-app?, health-registry?, settings-store? | `createAdminAuthConformance` |
-| `secrets` | single | secrets-workers, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, email-resend, email-ses, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
-| `settings` | single | settings-store | agents-live, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
+| `conversations.registry` | single | conversations-file, conversations-kv | admin-api, channel-http, channel-telegram, channel-telegram-webhook, channel-web | `createConversationRegistryConformance` |
+| `outbound.queue` | single | outbound-durable | admin-api?, channel-telegram-webhook?, channel-telegram?, channel-web? | `createOutboundQueueConformance` |
+| `storage.sql` | single | storage-do, storage-sqlite | admin-api, channel-web, outbound-durable, repo-github-app, runtime-pi, settings-store, storage-kv-sql | `createSqlDatabaseConformance` |
+| `storage.kv` | single | storage-kv-sql | channel-telegram, channel-telegram-webhook, channel-web, conversations-kv, health-registry?, tool-mcp? | `createKeyValueConformance` |
+| `actor.mailbox` | single | mailbox-local, actors-do | admin-api, channel-telegram-webhook, channel-web, repo-github-app, settings-store | `createMailboxConformance` |
+| `actor.inbox` | single | mailbox-local, actors-do | channel-telegram-webhook, repo-github-app, admin-api?, channel-web?, settings-store? | `createMailboxConformance` |
+| `wakeups` | single | actors-do, wakeups-timers | channel-telegram-webhook, outbound-durable, channel-web?, runtime-pi? | `createWakeupsConformance` |
+| `http.route` | keyed | admin-api, admin-proposals, channel-http, channel-telegram-webhook, channel-web, repo-github-app, health-registry, settings-store | server-bun? | `createHttpRouteConformance` (run by servers) |
+| `admin.auth` | single | admin-auth-token | admin-api, admin-proposals?, channel-web?, health-registry?, repo-github-app?, settings-store? | `createAdminAuthConformance` |
+| `secrets` | single | secrets-workers, secrets-env | admin-auth-token, channel-http, channel-telegram, channel-telegram-webhook, channel-web, email-resend, email-ses, repo-github-app, repo-github-token, tool-websearch-brave, provider-failover?, runtime-pi?, tool-mcp? | `createSecretStoreConformance` |
+| `settings` | single | settings-store | agents-live, channel-web?, repo-github-token?, router-basic?, router-rules?, runtime-pi? | `createSettingsConformance` |
 | `repo.github` | single | repo-github-app, repo-github-token | proposals-github | `createGitHubConformance` |
 | `proposals` | single | proposals-github, proposals-local | admin-proposals, execution-do?, extension-pikit-self? | `createProposalsConformance` |
 | `health` | single | health-registry | channel-telegram?, provider-failover?, server-bun? | `createHealthConformance` |
-| `email.send` | single | email-resend, email-ses | none | `createEmailSenderConformance` |
+| `email.send` | single | email-resend, email-ses | channel-web? | `createEmailSenderConformance` |
 | `model.complete` | single | runtime-pi | admin-api? | `createModelCompleteConformance` |
 | `model.provider` | keyed | provider-anthropic, provider-failover, provider-faux, provider-openai, provider-openai-compatible, provider-openrouter | agents-live?, provider-failover?, runtime-pi? | none |
 | `model.credentials` | single | credentials-file | provider-failover?, runtime-pi? | `createCredentialStoreConformance` (`@pikit/pi-adapter/testing/neutral`) |
@@ -55,7 +55,7 @@ for (const c of createChannelConformance(() => myFixture())) test(`${c.group}: $
 | `workspace` | single | workspace-local | runtime-pi?, tool-bash?, tool-edit?, tool-read?, tool-write? | `createWorkspaceConformance` (`@pikit/pi-adapter/testing/neutral`) |
 
 Two more suites check behaviour rather than one capability: `createChannelConformance` (what every
-channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook)
+channel does with a message and its answer: channel-http, channel-telegram, channel-telegram-webhook, channel-web)
 and `createConvergenceConformance` (kill the process after each commit, restart, check it converges:
 outbound-durable, and answer delivery over storage-kv-sql in this repository). `@pikit/core/testing`
 has `createLifecycleConformance`, which almost every component runs.
@@ -471,7 +471,11 @@ cookies). Suite: `createAdminAuthConformance`.
 
 ### `agent.observe` ([observe.ts](../packages/contracts/src/observe.ts))
 
-Read-only, for operators: `conversations(page)`, `conversation(id)`, `transcript(id, page)` (newest
+Read-only, for a reader the consumer authorized for that conversation: an operator (`admin.auth`,
+admin-api), or a channel's user for their own conversation (channel-web, by its key); a consumer
+that shows it to someone who is not an operator projects what that person may see (channel-web's
+live view: the answer's text and the tools' names, nothing else). `conversations(page)`,
+`conversation(id)`, `transcript(id, page)` (newest
 first), `watch(id)` (an async iterable: a `snapshot`, then changes; a consumer that falls behind gets a
 new snapshot), `usage(id)`. It runs in the App that runs the runtime: on Cloudflare it sees only that
 object's conversations. Pages are `Page<T>` (`{ items, next? }`) asked for with a `PageRequest`
