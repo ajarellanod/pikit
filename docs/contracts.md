@@ -252,8 +252,10 @@ stage decided). It throws when a stage changed the message's `id`, `channel` or 
 when a capability fails. A dispatch rejected with `AgentUnavailableError` (the conversation's agent
 is gone for good: removed, a live agent deleted) is not thrown: the key moves to a new conversation of
 the agent routed now and the message goes there, or, when routing names the gone agent, it is
-`denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text }` (a field is
-added, optional, with the component that reads it); its `id` becomes the request id. See [pipelines.md](pipelines.md).
+`denied`. The `InboundMessage` is `{ id, channel, conversationId, actor: { id }, text, images? }` (a
+field is added, optional, with the component that reads it); its `id` becomes the request id, its
+actor the request's sender, its `images` (channel-web's attachments, bounded by the channel) the
+request's `images`. A normalize stage keeps the images unless it means to change them. See [pipelines.md](pipelines.md).
 
 Authentication is not here: each channel proves its senders its own way.
 

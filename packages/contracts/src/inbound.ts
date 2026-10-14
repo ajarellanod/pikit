@@ -21,7 +21,7 @@
  */
 
 import { type AppContext, Halt } from "@pikit/core";
-import type { Admission, AgentRuntime, ConversationRef } from "./agent.ts";
+import type { Admission, AgentImage, AgentRuntime, ConversationRef } from "./agent.ts";
 import type { ConversationRegistry } from "./conversations.ts";
 import { DASHBOARD_REQUEST_PREFIX, isDashboardRequest } from "./delivery.ts";
 
@@ -44,6 +44,13 @@ export interface InboundMessage {
    */
   actor: { id: string };
   text: string;
+  /**
+   * Images the message carries, in order (channel-web's attachments): `admitInbound` dispatches them as
+   * the request's `images`. The channel bounds their number and size (`AgentRequest.images`). A stage of
+   * `inbound.normalize` keeps them as it found them unless it means to change them (a policy that strips
+   * images): a stage that rewrites the message spreads it (`{ ...message, text }`). Absent: text only.
+   */
+  images?: readonly AgentImage[];
 }
 
 /** Which agent answers a message, and whether it may. */
@@ -121,7 +128,7 @@ export interface AdmitOptions {
 
 /**
  * The inbound path after authentication: `inbound.normalize`, `route.resolve`, the
- * conversation, `dispatch` (with the message's actor as its sender, as a stage left it). Resolves once the message is durable (the ack point) or stopped; throws
+ * conversation, `dispatch` (with the message's actor as its sender and its images, as a stage left them). Resolves once the message is durable (the ack point) or stopped; throws
  * when the message's id is the dashboard's (`DASHBOARD_REQUEST_PREFIX`: a channel that takes ids from
  * its clients refuses those first), when a stage breaks the path's rules (it changed which message or
  * conversation this is), or when a capability fails, as the channel's own code would.
@@ -159,7 +166,8 @@ export async function admitInbound(ctx: AppContext, message: InboundMessage, opt
   const dispatch = async (conversation: ConversationRef) => {
     options.beforeDispatch?.(conversation);
     const sender = { channel: normalized.channel, id: normalized.actor.id };
-    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text, sender }, ctx);
+    const images = normalized.images ?? [];
+    return options.runtime.dispatch({ requestId: normalized.id, conversation, prompt: normalized.text, ...(images.length > 0 && { images }), sender }, ctx);
   };
   const gone = (error: AgentUnavailableError): InboundOutcome => {
     ctx.logger.warn("admitInbound: the message's agent is no agent now, and routing names it: denied", { key: options.key, agent: error.agent });

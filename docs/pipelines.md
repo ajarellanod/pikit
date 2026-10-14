@@ -38,10 +38,10 @@ Three, found by every `pikit.pipeline(` and `ctx.run(` in the kernel, contracts 
 | | |
 |---|---|
 | Declared in | [packages/contracts/src/inbound.ts](../packages/contracts/src/inbound.ts) |
-| Value | `InboundMessage` (`{ id, channel, conversationId, actor, text }`; a field is added, optional, with the component that reads it) |
+| Value | `InboundMessage` (`{ id, channel, conversationId, actor, text, images? }`; a field is added, optional, with the component that reads it) |
 | Run by | `admitInbound`, first, for every message of every channel |
 | Stages in the registry | none |
-| Rules | a stage may rewrite the text or enrich the message, never `id`, `channel` or `conversationId` (`admitInbound` throws) |
+| Rules | a stage may rewrite the text or enrich the message, never `id`, `channel` or `conversationId` (`admitInbound` throws); it keeps `images` (spread the message) unless it means to change them |
 | Halt | `admitInbound` returns `{ kind: "halted", pipeline: "inbound.normalize" }`: channel-http answers `422`, the Telegram channels "I can't take that message." |
 
 It is the place for a project's policy stage (a filter, a rewrite).

@@ -98,6 +98,22 @@ test("admitInbound: the sender is the actor a normalize stage leaves (it may res
   expect(e.dispatched[0]?.sender).toEqual({ channel: "test", id: "person:someone" });
 });
 
+test("admitInbound: a message's images are dispatched as the request's, in order, through a stage that rewrites its text; a stage may strip them; none, no images field", async () => {
+  const images = [
+    { mimeType: "image/png", data: "iVBORw0KGgo=" },
+    { mimeType: "image/jpeg", data: "/9j/4AAQ" },
+  ];
+  const e = ends();
+  const rewrites = await appWith((pikit) => pikit.pipeline("inbound.normalize", (m) => ({ ...m, text: m.text.toUpperCase() })));
+  await admitInbound(rewrites, { ...message, images }, { ...e, key: "test:c1" });
+  expect(e.dispatched[0]).toMatchObject({ prompt: "HELLO", images });
+
+  const strips = await appWith((pikit) => pikit.pipeline("inbound.normalize", ({ images: _dropped, ...m }) => m));
+  await admitInbound(strips, { ...message, id: "m2", images }, { ...e, key: "test:c1" });
+  await admitInbound(rewrites, { ...message, id: "m3", images: [] }, { ...e, key: "test:c1" });
+  expect(e.dispatched.slice(1).map((request) => "images" in request)).toEqual([false, false]);
+});
+
 test("admitInbound: a redelivered message is a duplicate, and runs once", async () => {
   const e = ends();
   const ctx = await appWith(() => {});
