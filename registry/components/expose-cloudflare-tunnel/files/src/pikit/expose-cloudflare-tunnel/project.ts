@@ -35,16 +35,20 @@ export function readHostname(get: (name: string) => string | undefined): { hostn
   return { hostname, problems: [] };
 }
 
+/** The public paths, from `PIKIT_EXPOSE_PATHS` (separated by commas); or what is wrong with them. */
+export function readPaths(text: string | undefined): { paths: string[]; problems: string[] } {
+  const paths = (text ?? "").split(",").map((path) => path.trim()).filter((path) => path !== "");
+  if (paths.length === 0) return { paths, problems: ["PIKIT_EXPOSE_PATHS is not set: the paths the internet may reach, separated by commas (/googlechat); `pikit configure` sets it"] };
+  return { paths, problems: paths.filter((path) => !PUBLIC_PATH.test(path)).map((path) => `PIKIT_EXPOSE_PATHS: "${path}" is not a path (/googlechat) or a prefix (/hooks/*)`) };
+}
+
 /** The hostname and the paths, from `CLOUDFLARE_TUNNEL_HOSTNAME` and `PIKIT_EXPOSE_PATHS`; or what is wrong with them. */
 export function readSettings(get: (name: string) => string | undefined): { settings?: Settings; problems: string[] } {
   const { hostname, problems } = readHostname(get);
-  const listed = (get("PIKIT_EXPOSE_PATHS") ?? "").split(",").map((path) => path.trim()).filter((path) => path !== "");
-  if (listed.length === 0) problems.push("PIKIT_EXPOSE_PATHS is not set: the paths the internet may reach, separated by commas (/googlechat); `pikit configure` sets it");
-  for (const path of listed) {
-    if (!PUBLIC_PATH.test(path)) problems.push(`PIKIT_EXPOSE_PATHS: "${path}" is not a path (/googlechat) or a prefix (/hooks/*)`);
-  }
+  const listed = readPaths(get("PIKIT_EXPOSE_PATHS"));
+  problems.push(...listed.problems);
   if (problems.length > 0 || hostname === undefined) return { problems };
-  return { settings: { hostname, paths: [...new Set([ALWAYS_PUBLIC, ...listed])] }, problems };
+  return { settings: { hostname, paths: [...new Set([ALWAYS_PUBLIC, ...listed.paths])] }, problems };
 }
 
 /** A path as the Go regular expression of an ingress rule, anchored: `/a` only `/a`; `/a/*` `/a` and under it. */

@@ -231,7 +231,7 @@ test("doctor: a token in .env is a problem, a malformed value too; no tunnel yet
     expect(found.problems).toEqual([
       "CLOUDFLARE_API_TOKEN is in .env, which the app's container gets: take it out, and give it to `pikit expose` from the shell or when asked",
     ]);
-    expect(found.notes).toEqual(["no tunnel yet (.env.cloudflared): `pikit expose` creates it; `pikit up` cannot start cloudflared before"]);
+    expect(found.notes).toEqual(["no tunnel yet (.env.cloudflared): `pikit configure` or `pikit expose` creates it; `pikit up` cannot start cloudflared before"]);
     writeFileSync(join(p.cwd, ".env"), "CLOUDFLARE_TUNNEL_HOSTNAME=bot\n");
     writeFileSync(join(p.cwd, ".env.cloudflared"), "TUNNEL_TOKEN=t\n");
     // Not set is pikit doctor's own problem (`required`); a malformed one is this hook's.

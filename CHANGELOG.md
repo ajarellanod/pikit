@@ -207,6 +207,9 @@ there.
   `pikit expose` makes a remotely managed Cloudflare Tunnel, its routes (only the listed paths and
   `/health`; anything else is Cloudflare's 404) and its DNS record on your domain, and `pikit up` runs
   `cloudflared` beside the app; `status`, `quick` (a temporary tunnel for `pikit dev`) and `delete`.
+  Its step of `pikit configure` asks the hostname and the paths (proposing the installed channels'
+  `http.route` paths, never the dashboard's) and offers to create the tunnel at once, so `pikit add`
+  then `pikit configure` leave it ready for `pikit up`.
   The Cloudflare API token is never stored (`.env` reaches the app), the tunnel's token is for the
   `cloudflared` service only, and a DNS record it did not make stops it.
 

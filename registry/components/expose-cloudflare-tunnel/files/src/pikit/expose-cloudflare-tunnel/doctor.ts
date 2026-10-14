@@ -24,6 +24,6 @@ export async function doctor(io: DoctorIO): Promise<{ problems: string[]; notes:
   if (dotEnv(cwd).CLOUDFLARE_API_TOKEN !== undefined) {
     problems.push("CLOUDFLARE_API_TOKEN is in .env, which the app's container gets: take it out, and give it to `pikit expose` from the shell or when asked");
   }
-  const notes = hasTunnelToken(cwd) ? [] : [`no tunnel yet (${TUNNEL_TOKEN_FILE}): \`pikit expose\` creates it; \`pikit up\` cannot start cloudflared before`];
+  const notes = hasTunnelToken(cwd) ? [] : [`no tunnel yet (${TUNNEL_TOKEN_FILE}): \`pikit configure\` or \`pikit expose\` creates it; \`pikit up\` cannot start cloudflared before`];
   return { problems, notes };
 }

@@ -67,16 +67,17 @@ export async function command(io: CommandIO): Promise<string[]> {
 }
 
 /**
- * The API token: the shell's `CLOUDFLARE_API_TOKEN`, or asked without echo at a terminal. Never from
- * `.env` (refused before: `tokenInDotEnv`), never stored.
+ * The API token: the shell's `CLOUDFLARE_API_TOKEN`, or asked without echo at a terminal (`ask`, this
+ * file's own prompt by default; `pikit configure`'s step passes the CLI's). Never from `.env` (refused
+ * before: `tokenInDotEnv`), never stored.
  */
-async function apiTokenFromShell(cwd: string): Promise<string | undefined> {
+export async function apiTokenFromShell(cwd: string, ask: ((question: string) => Promise<string>) | undefined = interactive() ? askSecret : undefined): Promise<string | undefined> {
   // The CLI puts `.env` under the environment it gives the command: refused there before this is asked.
   if (dotEnv(cwd).CLOUDFLARE_API_TOKEN !== undefined) return undefined;
   const fromShell = process.env.CLOUDFLARE_API_TOKEN?.trim();
   if (fromShell) return fromShell;
-  if (!interactive()) return undefined;
-  const typed = await askSecret(`Cloudflare API token (${TOKEN_PERMISSIONS}; not stored): `);
+  if (ask === undefined) return undefined;
+  const typed = (await ask(`Cloudflare API token (${TOKEN_PERMISSIONS}; used now, never stored): `)).trim();
   return typed === "" ? undefined : typed;
 }
 

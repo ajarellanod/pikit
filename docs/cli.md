@@ -172,7 +172,9 @@ Not the CLI's: the command of the installed `expose-*` component, which gives a 
 HTTPS URL ([features/completed/expose.md](../features/completed/expose.md)). `expose-cloudflare-tunnel`'s: `pikit expose`
 (the tunnel, its routes and its DNS record; writes `PIKIT_PUBLIC_URL`), `pikit expose status`,
 `pikit expose quick [port]` (a temporary tunnel while `pikit dev` runs) and `pikit expose delete`.
-Without one installed, `expose` is an unknown command.
+Its step of `pikit configure` asks the hostname and the paths and offers to create the tunnel at once
+(the Cloudflare API token asked without echo, never stored). Without one installed, `expose` is an
+unknown command.
 
 ## pikit registry
 

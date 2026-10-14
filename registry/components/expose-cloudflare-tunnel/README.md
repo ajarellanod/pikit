@@ -6,13 +6,13 @@ this machine. The design note is [features/completed/expose.md](https://github.c
 
 - **Provides:** no capability. It is not an app component (nothing of it runs in the app, so it is not
   in `pikit.config.ts`): it adds the command `pikit expose`, a `cloudflared` service beside the app, and
-  a step of `pikit doctor`.
+  a step of `pikit configure` and of `pikit doctor`.
 - **Requires:** `deployment-docker` (its `up` runs the service), a domain on your Cloudflare account,
   and a Cloudflare API token when you create, change or delete the tunnel.
 - **Target:** `server`. On Cloudflare (`durable`) the Worker is public already.
 - **Installs to:** `src/pikit/expose-cloudflare-tunnel/`.
 - **npm dependencies:** none.
-- **Environment** (`pikit configure` asks for both; neither is a secret):
+- **Environment** (its step of `pikit configure` asks for both and checks them; neither is a secret):
   - `CLOUDFLARE_TUNNEL_HOSTNAME` (required): the public hostname, on a zone of your account
     (`bot.example.com`).
   - `PIKIT_EXPOSE_PATHS` (required): the paths the internet may reach, separated by commas. A path is
@@ -26,14 +26,19 @@ this machine. The design note is [features/completed/expose.md](https://github.c
 1. In Cloudflare, *My Profile > API Tokens > Create Token > Custom token*, with **Account > Cloudflare
    Tunnel > Edit** and **Zone > DNS > Edit**, the zone limited to your bot's domain. An expiry is a
    good idea: you need it only to create, change or delete the tunnel.
-2. `pikit add expose-cloudflare-tunnel`, then `pikit configure` (the hostname and the paths).
-3. `pikit expose`. It asks for the token without echo, or reads it from the shell
+2. `pikit add expose-cloudflare-tunnel`, then `pikit configure`: it asks for the hostname and the
+   paths, checking each answer, and proposes the paths of your installed channels (their `http.route`
+   keys; `/hooks/:id` becomes `/hooks/*`; never the dashboard's): Enter takes them. Paths kept from
+   before that leave a channel out are said. Then "Create the Cloudflare Tunnel for
+   https://<hostname> now?". On yes it asks for the token without echo (or takes the shell's `CLOUDFLARE_API_TOKEN`), does what
+   `pikit expose` does, and forgets the token. Later, `pikit expose` alone does the same (after changing
+   the paths, to repair drift, without a terminal); it too asks for the token, or reads it from the shell
    (`CLOUDFLARE_API_TOKEN=… pikit expose`, `op run -- pikit expose`), and prints the URL.
-4. `pikit up`: the app and `cloudflared` beside it. `pikit expose status` checks it from outside.
+3. `pikit up`: the app and `cloudflared` beside it. `pikit expose status` checks it from outside.
 
 ```
 $ pikit expose
-Cloudflare API token (…; not stored): ****************
+Cloudflare API token (…; used now, never stored): ****************
 created the tunnel pikit-bot.example.com
 routes: /health, /googlechat to the app; anything else answers 404
 DNS: bot.example.com to the tunnel
@@ -94,5 +99,10 @@ record moved to a new tunnel, a refused token, a hostname on no zone, no token, 
 refused before anything is asked, no token in what it says or in `.env`, the paths' patterns and the
 values' checks, each answer of `status`, `delete` (asked, declined, without a terminal, connections
 first, other records kept), `quick` (the URL, the port, `cloudflared` missing), the subcommands, and
-the `doctor` step. `deployment-docker`'s tests cover the compose file in its commands and the
+the `doctor` step. `configure.test.ts` runs the step of `pikit configure` with a scripted person: the
+values asked and checked, the tunnel made on a yes with the token typed once and never in `.env`,
+kept values and a made tunnel updated only when asked, a no reaching nothing, a refused token, nothing
+asked without a terminal, and the proposed paths (the channels' routes from `pikit.config.ts` described,
+a parameter as a prefix, never the dashboard's, Enter taking them, a channel left out said).
+`deployment-docker`'s tests cover the compose file in its commands and the
 `afterDeploy` hooks.
