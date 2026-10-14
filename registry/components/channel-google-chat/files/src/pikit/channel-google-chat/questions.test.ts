@@ -1,0 +1,395 @@
+// Owner: questions. Cards, dialogs, clicks and answers (question-cards.ts, click.ts).
+/**
+ * channel-google-chat's questions. They are copied with the component and keep running in your project.
+ *
+ * - question-cards.ts: one `confirm` or `select` field as buttons, anything else as a button that opens
+ *   a dialog with the form, and the card once answered.
+ * - click.ts against stand-ins for Google's API, the registry and the runtime (a runtime that answers
+ *   `duplicate` for a request it has, as runtime-pi does), in an App with a router: an answer admitted
+ *   once, its text `answerText`, the card updated; a second click, an unknown question, a stranger
+ *   space, a refused answer, a cancelled dialog; the records answered once.
+ */
+
+import { expect, test } from "bun:test";
+import { type AppContext, defineApp, defineComponent, silentLogger } from "@pikit/core";
+import {
+  type AgentRequest,
+  type AgentRuntime,
+  answerKey,
+  answerText,
+  type ConversationRef,
+  type ConversationRegistry,
+  type QuestionPart,
+  questionPart,
+} from "@pikit/contracts";
+import { createMemoryKeyValueStorage } from "@pikit/contracts/testing";
+import { answerMessageId, CLICK_NOTICES, createClickHandler, createQuestionRecords } from "./click.ts";
+import type { AddOnEvent, AddOnResponse, Card, CardWidget, CardWithId, ChatMessage } from "./event.ts";
+import { type ClickEventOptions, clickEvent, dateInput, PERSON, textInput } from "./fake-google-chat.test-support.ts";
+import { type Credentials, instancesOf } from "./instance.ts";
+import { answeredCard, CLICK_PARAMETERS, drawnAsButtons, questionCard, questionCardId, questionDialog, RADIO_OPTIONS } from "./question-cards.ts";
+import type { AnswerTargets, ChatApi, MessageField, QuestionRecords } from "./types.ts";
+
+const ENDPOINT = "https://pikit.test/google-chat";
+const SPACE = "spaces/AAA";
+const THREAD = `${SPACE}/threads/T1`;
+const CARD_MESSAGE = `${SPACE}/messages/client-abc`;
+const THREAD_KEY = `googlechat:${SPACE}:threads/T1`;
+const CHAT_KEY = `googlechat:${SPACE}`;
+const GRACE: typeof PERSON = { name: "users/1002", displayName: "Grace Hopper", type: "HUMAN" };
+
+const confirm = questionPart({ id: "c1:m1:call-1", title: "Deploy now?", description: "The build <passed> & is green.", fields: [{ kind: "confirm", name: "go", label: "Deploy", required: true }] });
+const select = questionPart({
+  id: "c1:m1:call-2",
+  title: "Which environment?",
+  fields: [{ kind: "select", name: "env", label: "Environment", required: true, options: [{ value: "prod", label: "Production" }, { value: "staging", label: "Staging" }] }],
+});
+const form = questionPart({
+  id: "c1:m1:call-3",
+  title: "Plan the release",
+  fields: [
+    { kind: "text", name: "notes", label: "Notes", required: true },
+    { kind: "multiselect", name: "regions", label: "Regions", options: [{ value: "eu", label: "Europe" }, { value: "us", label: "Americas" }] },
+    { kind: "date", name: "day", label: "Day", required: true },
+    { kind: "confirm", name: "notify", label: "Notify customers" },
+    { kind: "select", name: "size", label: "Size", options: Array.from({ length: RADIO_OPTIONS + 1 }, (_, i) => ({ value: `s${i}`, label: `Size ${i}` })) },
+  ],
+});
+
+const widgets = (card: Card): CardWidget[] => card.sections?.flatMap((section) => section.widgets) ?? [];
+const buttonsOf = (card: Card) => widgets(card).flatMap((widget) => widget.buttonList?.buttons ?? []);
+const params = (list: { key: string; value: string }[] | undefined) => Object.fromEntries((list ?? []).map((each) => [each.key, each.value]));
+
+// ---------------------------------------------------------------------------------------------------
+// question-cards.ts
+
+test("one confirm field: a card with Yes and No, each calling the endpoint with the question, the field and its value; the text escaped", () => {
+  expect(drawnAsButtons(confirm)).toBe(true);
+  const { cardId, card } = questionCard(confirm, ENDPOINT);
+  expect(cardId).toBe(questionCardId(confirm));
+  expect(card.header).toEqual({ title: "Deploy now?" });
+  expect(widgets(card)[0]).toEqual({ textParagraph: { text: "The build &lt;passed&gt; &amp; is green." } });
+  expect(buttonsOf(card).map((button) => [button.text, button.onClick.action?.function, params(button.onClick.action?.parameters)])).toEqual([
+    ["Yes", ENDPOINT, { question: confirm.id, step: "answer", field: "go", value: "true" }],
+    ["No", ENDPOINT, { question: confirm.id, step: "answer", field: "go", value: "false" }],
+  ]);
+});
+
+test("one select field: a button per option, its label shown and its value carried", () => {
+  const { card } = questionCard(select, ENDPOINT);
+  expect(buttonsOf(card).map((button) => [button.text, params(button.onClick.action?.parameters)[CLICK_PARAMETERS.value]])).toEqual([
+    ["Production", "prod"],
+    ["Staging", "staging"],
+  ]);
+  expect(buttonsOf(card).every((button) => button.onClick.action?.interaction === undefined)).toBe(true);
+});
+
+test("anything else: one button that opens the dialog, the fields listed", () => {
+  expect(drawnAsButtons(form)).toBe(false);
+  expect(drawnAsButtons({ fields: [{ kind: "text", name: "a", label: "A" }] })).toBe(false);
+  const { card } = questionCard(form, ENDPOINT);
+  const [button, ...more] = buttonsOf(card);
+  expect(more).toEqual([]);
+  expect(button?.onClick.action).toEqual({ function: ENDPOINT, interaction: "OPEN_DIALOG", parameters: [{ key: "question", value: form.id }, { key: "step", value: "open" }] });
+  expect(widgets(card)[0]?.textParagraph?.text).toContain("• Notes<br>• Regions (optional)");
+});
+
+test("the dialog: an input per field by its kind, named after it, and a button that sends the form", () => {
+  const dialog = questionDialog(form, ENDPOINT);
+  const inputs = widgets(dialog).filter((widget) => widget.buttonList === undefined);
+  expect(inputs).toEqual([
+    { textInput: { name: "notes", label: "Notes", type: "MULTIPLE_LINE" } },
+    {
+      selectionInput: {
+        name: "regions",
+        label: "Regions (optional)",
+        type: "CHECK_BOX",
+        items: [
+          { text: "Europe", value: "eu", selected: false },
+          { text: "Americas", value: "us", selected: false },
+        ],
+      },
+    },
+    { dateTimePicker: { name: "day", label: "Day", type: "DATE_ONLY" } },
+    {
+      selectionInput: {
+        name: "notify",
+        label: "Notify customers (optional)",
+        type: "RADIO_BUTTON",
+        items: [
+          { text: "Yes", value: "true", selected: false },
+          { text: "No", value: "false", selected: false },
+        ],
+      },
+    },
+    expect.objectContaining({ selectionInput: expect.objectContaining({ name: "size", type: "DROPDOWN" }) }) as never,
+  ]);
+  const [send] = buttonsOf(dialog);
+  expect(params(send?.onClick.action?.parameters)).toEqual({ question: form.id, step: "submit" });
+  const many = questionPart({ id: "q", title: "T", fields: [{ kind: "multiselect", name: "m", label: "M", options: Array.from({ length: RADIO_OPTIONS + 1 }, (_, i) => ({ value: `v${i}`, label: `V${i}` })) }] });
+  expect(widgets(questionDialog(many, ENDPOINT))[0]?.selectionInput?.type).toBe("MULTI_SELECT");
+  expect(widgets(questionDialog(select, ENDPOINT))[0]?.selectionInput?.type).toBe("RADIO_BUTTON");
+});
+
+test("the dialog drawn again: the problem on top, what was answered kept", () => {
+  const dialog = questionDialog(form, ENDPOINT, { problem: "Your answer is <wrong>.", answer: { notes: "ship it", regions: ["us"], day: "2026-03-01", notify: false } });
+  const [problem, notes, regions, day, notify] = widgets(dialog);
+  expect(problem?.textParagraph?.text).toContain("Your answer is &lt;wrong&gt;.");
+  expect(notes?.textInput?.value).toBe("ship it");
+  expect(regions?.selectionInput?.items.map((item) => item.selected)).toEqual([false, true]);
+  expect(day?.dateTimePicker?.valueMsEpoch).toBe(String(Date.parse("2026-03-01T00:00:00Z")));
+  expect(notify?.selectionInput?.items.map((item) => item.selected)).toEqual([false, true]);
+});
+
+test("the answered card: no buttons, who answered, each field's answer as a person reads it", () => {
+  const { cardId, card } = answeredCard(form, { notes: "a & b", regions: ["eu", "us"], day: "2026-03-01", notify: true }, "Ada Lovelace");
+  expect(cardId).toBe(questionCardId(form));
+  expect(card.header).toEqual({ title: "Plan the release", subtitle: "Answered by Ada Lovelace" });
+  expect(buttonsOf(card)).toEqual([]);
+  expect(widgets(card).map((widget) => [widget.decoratedText?.topLabel, widget.decoratedText?.text])).toEqual([
+    ["Notes", "a &amp; b"],
+    ["Regions", "Europe, Americas"],
+    ["Day", "2026-03-01"],
+    ["Notify customers", "Yes"],
+    ["Size", "No answer"],
+  ]);
+});
+
+// ---------------------------------------------------------------------------------------------------
+// click.ts
+
+interface Setup {
+  router?: "allow" | "deny";
+  /** The runtime's dispatch throws this many times first (a capability failing). */
+  failures?: number;
+}
+
+async function subject(setup: Setup = {}) {
+  const app = await defineApp({
+    components: [
+      defineComponent({
+        name: "router-test",
+        setup: (pikit) =>
+          pikit.pipeline("route.resolve", (value) =>
+            value.decision !== undefined ? value : { ...value, decision: { agent: "assistant", access: setup.router ?? "allow", ...(setup.router === "deny" && { reason: "Not today." }) } },
+          ),
+      }),
+    ],
+    logger: silentLogger,
+  }).create();
+  const ctx = app.context() as AppContext;
+
+  let sessions = 0;
+  const pointers = new Map<string, ConversationRef>();
+  const conversations = {
+    resolve: async (key: string, agent: string) => pointers.get(key) ?? (pointers.set(key, { key, agent, conversationId: `s${++sessions}` }), pointers.get(key)!),
+    get: async (key: string) => pointers.get(key),
+    reset: async () => undefined,
+  } as unknown as ConversationRegistry;
+
+  let failures = setup.failures ?? 0;
+  const seen = new Set<string>();
+  const dispatched: AgentRequest[] = [];
+  const runtime = {
+    async dispatch(request: AgentRequest) {
+      if (failures-- > 0) throw new Error("storage down");
+      dispatched.push(request);
+      if (seen.has(request.requestId)) return { kind: "duplicate", requestId: request.requestId };
+      seen.add(request.requestId);
+      return { kind: "started", requestId: request.requestId };
+    },
+  } as unknown as AgentRuntime;
+
+  const remembered: [string, string | undefined][] = [];
+  const targets: AnswerTargets = { remember: async (key, thread) => void remembered.push([key, thread]), of: async () => undefined };
+  const updated: { name: string; message: ChatMessage; fields: readonly MessageField[] }[] = [];
+  const read: string[] = [];
+  const messages = new Map<string, ChatMessage>();
+  const unexpected = async (): Promise<never> => {
+    throw new Error("not expected in these tests");
+  };
+  const api: ChatApi = {
+    createMessage: unexpected,
+    deleteMessage: unexpected,
+    getSpace: unexpected,
+    downloadMedia: unexpected,
+    async updateMessage(name, message, fields) {
+      updated.push({ name, message, fields });
+      return { ...messages.get(name), ...message };
+    },
+    async getMessage(name) {
+      read.push(name);
+      const found = messages.get(name);
+      if (found === undefined) throw new Error("not found");
+      return found;
+    },
+  };
+
+  const store = createMemoryKeyValueStorage().namespace("channel-google-chat");
+  const questions = createQuestionRecords(store);
+  const [instance] = instancesOf([]);
+  const credentials = { audience: ENDPOINT, allowedSpaces: new Set([SPACE]) } as unknown as Credentials;
+  const click = createClickHandler({
+    instance: instance!,
+    credentials,
+    api,
+    targets,
+    conversations,
+    runtime,
+    store,
+    workspace: undefined,
+    execution: undefined,
+    clock: { now: () => 1_000 } as AppContext["clock"],
+    questions,
+  });
+
+  /** `question` drawn in the card message, as the transport records it; its message as Google has it. */
+  const drawn = async (question: QuestionPart, conversationKey = THREAD_KEY): Promise<ChatMessage> => {
+    const message: ChatMessage = {
+      name: CARD_MESSAGE,
+      text: "Here is my question.",
+      thread: { name: THREAD },
+      cardsV2: [{ cardId: "table-1", card: { sections: [{ widgets: [{ textParagraph: { text: "a table" } }] }] } }, questionCard(question, ENDPOINT)],
+    };
+    messages.set(CARD_MESSAGE, message);
+    await questions.sent({ question, message: CARD_MESSAGE, conversationKey });
+    return message;
+  };
+  return { ctx, click, dispatched, remembered, updated, read, questions, store, drawn, conversations: pointers };
+}
+
+const press = (question: QuestionPart, message: ChatMessage | undefined, field: string, value: string, user = PERSON): AddOnEvent =>
+  clickEvent({ ...(message !== undefined && { message }), user, invokedFunction: ENDPOINT, parameters: { question: question.id, step: "answer", field, value } });
+
+const updatedCards = (response: AddOnResponse): CardWithId[] | undefined => response.hostAppDataAction?.chatDataAction.updateMessageAction?.message.cardsV2;
+
+test("a button: the answer admitted once, its text answerText, from the clicker; the card says who answered what, the message's text and other cards kept", async () => {
+  const s = await subject();
+  const message = await s.drawn(confirm);
+  const response = await s.click(THREAD_KEY, press(confirm, message, "go", "true"), s.ctx);
+
+  expect(s.dispatched).toEqual([
+    { requestId: answerMessageId(CARD_MESSAGE), conversation: s.conversations.get(THREAD_KEY)!, prompt: answerText(confirm, { go: true }), sender: { channel: "googlechat", id: PERSON.name } },
+  ]);
+  expect(s.dispatched[0]?.prompt).toBe('Answer to "Deploy now?" (question c1:m1:call-1):\n- Deploy: yes');
+  expect(response.hostAppDataAction?.chatDataAction.updateMessageAction?.message.text).toBe("Here is my question.");
+  expect(updatedCards(response)).toEqual([message.cardsV2![0]!, answeredCard(confirm, { go: true }, "Ada Lovelace")]);
+  expect(await s.questions.get(confirm.id)).toMatchObject({ answered: { by: PERSON.name, at: 1_000, text: answerText(confirm, { go: true }) } });
+  // A thread's conversation says its thread: nothing to record.
+  expect(s.remembered).toEqual([]);
+
+  // Anyone after that is told, and nothing more is admitted.
+  const again = await s.click(THREAD_KEY, press(confirm, message, "go", "false", GRACE), s.ctx);
+  expect(again).toEqual({ action: { notification: { text: CLICK_NOTICES.answered } } });
+  expect(s.dispatched).toHaveLength(1);
+});
+
+test("two clicks at once (or one Google repeats): one answer admitted, the other told it is answered", async () => {
+  const s = await subject();
+  const message = await s.drawn(select);
+  const [one, two] = await Promise.all([s.click(THREAD_KEY, press(select, message, "env", "prod"), s.ctx), s.click(THREAD_KEY, press(select, message, "env", "staging", GRACE), s.ctx)]);
+  const updatedOnes = [one, two].filter((response) => updatedCards(response!) !== undefined);
+  expect(updatedOnes).toHaveLength(1);
+  expect([one, two]).toContainEqual({ action: { notification: { text: CLICK_NOTICES.answered } } });
+  // The runtime took one: the second was its duplicate.
+  expect(s.dispatched.map((request) => request.requestId)).toEqual([answerMessageId(CARD_MESSAGE), answerMessageId(CARD_MESSAGE)]);
+  expect((await s.questions.get(select.id))?.answered?.text).toBe(s.dispatched[0]?.prompt);
+});
+
+test("a button whose value is not one of the options is told why, and nothing is admitted", async () => {
+  const s = await subject();
+  const message = await s.drawn(select);
+  const response = await s.click(THREAD_KEY, press(select, message, "env", "moon"), s.ctx);
+  expect(response.action?.notification?.text).toBe('Your answer answers "Environment" with a value that is not one of its options.');
+  expect(s.dispatched).toEqual([]);
+  expect((await s.questions.get(select.id))?.answered).toBeUndefined();
+});
+
+test("a form: the dialog opens; sent with a problem it is drawn again with it; sent right it closes, the answer admitted and the card updated", async () => {
+  const s = await subject();
+  const message = await s.drawn(form, CHAT_KEY);
+  const open = await s.click(CHAT_KEY, clickEvent({ message, parameters: { question: form.id, step: "open" }, dialogEventType: "REQUEST_DIALOG" }), s.ctx);
+  expect(open).toEqual({ action: { navigations: [{ pushCard: questionDialog(form, ENDPOINT) }] } });
+
+  const submit = (formInputs: NonNullable<ClickEventOptions["formInputs"]>) =>
+    s.click(CHAT_KEY, clickEvent({ message, parameters: { question: form.id, step: "submit" }, formInputs, dialogEventType: "SUBMIT_DIALOG" }), s.ctx);
+  const missing = await submit({ notes: textInput("ship it"), regions: textInput("us") });
+  expect(missing).toEqual({
+    action: {
+      navigations: [{ updateCard: questionDialog(form, ENDPOINT, { problem: 'Your answer does not answer "Day", which is required.', answer: { notes: "ship it", regions: ["us"] } }) }],
+      notification: { text: 'Your answer does not answer "Day", which is required.' },
+    },
+  });
+  expect(s.dispatched).toEqual([]);
+
+  const answer = { notes: "ship it", regions: ["eu", "us"], day: "2026-03-01", notify: false, size: "s5" };
+  const sent = await submit({ notes: textInput("ship it"), regions: textInput("eu", "us"), day: dateInput("2026-03-01"), notify: textInput("false"), size: textInput("s5") });
+  expect(sent).toEqual({ action: { navigations: [{ endNavigation: { action: "CLOSE_DIALOG" } }], notification: { text: "Answer sent." } } });
+  expect(s.dispatched.map((request) => request.prompt)).toEqual([answerText(form, answer)]);
+  expect(s.updated).toEqual([{ name: CARD_MESSAGE, message: { cardsV2: [message.cardsV2![0]!, answeredCard(form, answer, "Ada Lovelace")] }, fields: ["cardsV2"] }]);
+  // A whole chat's answer goes to the card's thread.
+  expect(s.remembered).toEqual([[answerKey(s.conversations.get(CHAT_KEY)!, answerMessageId(CARD_MESSAGE)), THREAD]]);
+
+  // The dialog opened again on an answered question closes, saying so.
+  const late = await s.click(CHAT_KEY, clickEvent({ message, parameters: { question: form.id, step: "open" }, dialogEventType: "REQUEST_DIALOG" }), s.ctx);
+  expect(late).toEqual({ action: { navigations: [{ endNavigation: { action: "CLOSE_DIALOG" } }], notification: { text: CLICK_NOTICES.answered } } });
+});
+
+test("a whole chat's answer: the card's thread read from Google when the click does not carry its message; none in a chat without threads", async () => {
+  const s = await subject();
+  await s.drawn(confirm, CHAT_KEY);
+  await s.click(CHAT_KEY, press(confirm, undefined, "go", "true"), s.ctx);
+  expect(s.read).toEqual([CARD_MESSAGE]);
+  expect(s.remembered.map(([, thread]) => thread)).toEqual([THREAD]);
+
+  const flat = await subject();
+  await flat.drawn(confirm, CHAT_KEY);
+  await flat.click(CHAT_KEY, clickEvent({ threading: "UNTHREADED_MESSAGES", parameters: { question: confirm.id, step: "answer", field: "go", value: "false" } }), flat.ctx);
+  expect(flat.remembered.map(([, thread]) => thread)).toEqual([undefined]);
+});
+
+test("an unknown question, a click from a space not allowed, and a cancelled dialog admit nothing", async () => {
+  const s = await subject();
+  expect(await s.click(THREAD_KEY, press(confirm, undefined, "go", "true"), s.ctx)).toEqual({ action: { notification: { text: CLICK_NOTICES.unknown } } });
+  expect(await s.click(THREAD_KEY, clickEvent({ parameters: {} }), s.ctx)).toEqual({ action: { notification: { text: CLICK_NOTICES.unknown } } });
+  await s.drawn(confirm);
+  expect(await s.click("googlechat:spaces/ZZZ:threads/T1", press(confirm, undefined, "go", "true"), s.ctx)).toEqual({ action: { notification: { text: CLICK_NOTICES.stranger } } });
+  expect(await s.click(THREAD_KEY, clickEvent({ dialogEventType: "CANCEL_DIALOG" }), s.ctx)).toEqual({ action: { navigations: [{ endNavigation: { action: "CLOSE_DIALOG" } }] } });
+  expect(s.dispatched).toEqual([]);
+});
+
+test("an answer the router denies is told why and leaves the question open", async () => {
+  const s = await subject({ router: "deny" });
+  const message = await s.drawn(confirm);
+  expect(await s.click(THREAD_KEY, press(confirm, message, "go", "true"), s.ctx)).toEqual({ action: { notification: { text: `${CLICK_NOTICES.refused} Not today.` } } });
+  expect((await s.questions.get(confirm.id))?.answered).toBeUndefined();
+});
+
+test("a capability failing rejects the click (Google shows an error) and leaves the question open: the next click is admitted", async () => {
+  const s = await subject({ failures: 1 });
+  const message = await s.drawn(confirm);
+  await expect(s.click(THREAD_KEY, press(confirm, message, "go", "true"), s.ctx)).rejects.toThrow("storage down");
+  expect((await s.questions.get(confirm.id))?.answered).toBeUndefined();
+  expect(updatedCards(await s.click(THREAD_KEY, press(confirm, message, "go", "true"), s.ctx))).toBeDefined();
+  expect(s.dispatched).toHaveLength(1);
+});
+
+test("the records: answered once; sent again replaces nothing answered; an answer claimed before its record was written is read back", async () => {
+  const store = createMemoryKeyValueStorage().namespace("channel-google-chat");
+  const records: QuestionRecords = createQuestionRecords(store);
+  expect(await records.get(confirm.id)).toBeUndefined();
+  await records.sent({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY });
+  expect(await records.get(confirm.id)).toEqual({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY });
+  expect(await store.get(`question:${confirm.id}`)).toBeDefined();
+
+  const answered = { by: PERSON.name, at: 5, text: "yes" };
+  expect(await records.answer(confirm.id, answered)).toBe(true);
+  expect(await records.answer(confirm.id, { ...answered, by: GRACE.name })).toBe(false);
+  await records.sent({ question: confirm, message: `${SPACE}/messages/other`, conversationKey: THREAD_KEY });
+  expect(await records.get(confirm.id)).toEqual({ question: confirm, message: CARD_MESSAGE, conversationKey: THREAD_KEY, answered });
+
+  // A stop between the claim and the record's write: the claim still says it is answered.
+  await store.set(`question:${select.id}`, { question: select, message: CARD_MESSAGE, conversationKey: THREAD_KEY } as never);
+  await store.set(`question:${select.id}:answered`, answered as never);
+  expect((await records.get(select.id))?.answered).toEqual(answered);
+});
